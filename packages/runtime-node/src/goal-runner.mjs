@@ -1639,6 +1639,11 @@ export function createGoalRunner({
     if (session) session.cancelled = true;
     const plan = goalPlanStore.getPlan(planId);
     if (!plan) return null;
+    if (plan.delegationOrigin && !['superseded', 'paused'].includes(plan.delegationOrigin.phase)) {
+      goalPlanStore.revisePlan(planId, { delegationOrigin: { ...plan.delegationOrigin, phase: 'paused',
+        pausedFromPhase: plan.delegationOrigin.phase, pausedRunnerIntent: plan.runner?.intent || 'execute' } },
+        { reason: 'delegated runner paused', changedBy: 'goal-runner' });
+    }
     if (!TERMINAL_PLAN_STATUSES.has(plan.status)) goalPlanStore.setPlanStatus(planId, 'paused');
     goalPlanStore.setRunnerState(planId, {
       enabled: true,

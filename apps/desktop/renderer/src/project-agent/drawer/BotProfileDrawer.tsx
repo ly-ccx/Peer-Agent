@@ -247,6 +247,12 @@ export function BotProfileDrawer({
           sessions={sessions}
           history={history}
           goals={goals}
+          onResume={async (sessionId) => {
+            const result = await clientApi.projectAgentResumeSession({ workspaceId, sessionId, requestId: crypto.randomUUID() });
+            if (!result.ok) throw new Error(result.code || 'resume failed');
+            const listed = await clientApi.projectAgentListSessions({ workspaceId });
+            setSessions((listed.sessions || []).map(readDrawerSession).filter((item): item is DrawerSession => item !== null));
+          }}
           selectedId={memory.sessionId}
           i18n={i18n}
           onSelect={(sessionId) => onMemory({ ...memory, open: true, tab: 'tasks', sessionId })}

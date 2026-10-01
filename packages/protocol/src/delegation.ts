@@ -11,6 +11,7 @@ import {
 } from './task-overview.ts';
 
 export type WorkSessionStatus =
+  | 'paused'
   | 'queued'
   | 'starting'
   | 'running'
@@ -22,7 +23,7 @@ export type WorkSessionStatus =
   | 'cancelled'
   | 'superseded';
 
-export const WORK_SESSION_STATUSES = ['queued', 'starting', 'running', 'waiting_user', 'verifying',
+export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running', 'waiting_user', 'verifying',
   'result_ready', 'accepted', 'failed', 'cancelled', 'superseded'] as const satisfies readonly WorkSessionStatus[];
 
 export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
@@ -37,6 +38,9 @@ export interface DelegationOrigin {
   readonly isolation?: 'auto' | 'none' | 'worktree';
   readonly isolationBlock?: 'disk_space' | 'isolation_failed' | null;
   readonly isolationRetainedAt?: string;
+  readonly supersededBy?: string;
+  readonly supersededAt?: string;
+  readonly lastResumeAnchorMessageId?: string;
   readonly handoffAuthorizedAt?: string;
   readonly handoffDeferredAt?: string;
   readonly modelSelection: ModelSelectionSnapshot;
@@ -59,7 +63,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly acceptance?: 'auto' | 'confirm';
   readonly accepted?: boolean;
   readonly verifying?: boolean;
-  readonly phase?: 'starting' | 'verifying';
+  readonly phase?: 'starting' | 'verifying' | 'paused';
 }
 
 export interface WorkSession extends SessionQueueFacts {
@@ -318,7 +322,6 @@ function delegationStatus(
   meta: WorkSessionConversationMeta,
   projected: TaskOverviewItem,
 ): WorkSessionStatus {
-  if (meta.supersededBy) return 'superseded';
   if (snapshot.status === 'failed') return 'failed';
   if (snapshot.status === 'cancelled') return 'cancelled';
   if (snapshot.status === 'completed') {
@@ -326,6 +329,8 @@ function delegationStatus(
     if (meta.acceptance === 'confirm' && meta.accepted !== true) return 'result_ready';
     return 'accepted';
   }
+  if (meta.supersededBy) return 'superseded';
+  if (meta.phase === 'paused') return 'paused';
   // 复核进行中盖过「需要你」。草稿、待批准、等回答的计划在独立复核时都显示 verifying。
   if (meta.verifying || meta.phase === 'verifying') return 'verifying';
   if (projected.actionRight === 'needs_you') return 'waiting_user';

@@ -76,6 +76,7 @@ test('宿主按提交顺序写入对话，并在推进游标之后通知', () =>
     assert.deepEqual(messages.map((message) => message.content), ['第1句', '第2句', '第3句']);
     assert.deepEqual(messages.map((message) => message.id), ids.map((id) => inputMessageId(id)));
     assert.equal(messages[0].role, 'user');
+    assert.equal(messages[0].kind, 'user_input');
     assert.deepEqual(result.consumed.map((item) => item.inputId), ids);
     assert.equal(queue.cursor('ws-1'), ids[2]);
     assert.deepEqual(committed, [{ inputIds: ids, cursor: ids[2] }]);

@@ -193,3 +193,13 @@ test('回复上的记忆 id 来自宿主结果，模型参数里的 id 不进入
   assert.deepEqual(fallback.messages[1].meta.memoryUsed, ['mem-turn']);
   assert.deepEqual(fallback.messages[1].meta.memoryLearned, ['mem-nested']);
 });
+
+
+test('current input anchors cannot be inherited from context on wake or later user turns', () => {
+  const context = { inputAnchors: [{ messageId: 'old', text: 'urgent' }], sources: ['memory'] };
+  const wake = planAgentTurn({ kind: 'wake', context });
+  assert.deepEqual(wake.turnProfile.context, { sources: ['memory'] });
+  const user = planAgentTurn({ kind: 'user', context, userInputs: [{ inputId: 'new', text: 'ordinary' }] });
+  assert.deepEqual(user.turnProfile.context.inputAnchors, [{ messageId: 'input-new', text: 'ordinary' }]);
+  assert.equal(context.inputAnchors[0].messageId, 'old');
+});

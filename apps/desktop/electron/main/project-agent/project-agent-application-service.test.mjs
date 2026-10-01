@@ -23,6 +23,7 @@ const METHODS = [
   ['listSessions', { workspaceId: 'ws-1' }],
   ['getSession', { sessionId: 'sess-1' }],
   ['cancelSession', { sessionId: 'sess-1' }],
+  ['resumeSession', { sessionId: 'sess-1', workspaceId: 'ws-1', requestId: 'request' }],
   ['listApprovals', { workspaceId: 'ws-1' }],
   ['decideApproval', { workspaceId: 'ws-1', approvalId: 'ap-1', decision: 'approve' }],
   ['markRead', { workspaceId: 'ws-1' }],
@@ -680,4 +681,56 @@ test('同一语料指纹下连续搜索不再重读', () => {
   stamp = 'v2';
   assert.equal(service.search({ query: '咖啡' }).hits.length, 1);
   assert.equal(reads, 2);
+});
+
+test('restoration click creates one durable user anchor and refuses cross-project or offline actions', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-03-restore-'));
+  try {
+    const store = createConversationStore({ storeDir: root });
+    const parent = store.createConversation({ title: 'project', role: 'project_agent', workspaceId: 'ws-1' });
+    const calls = []; let online = true; let archived = false;
+    const service = createProjectAgentApplicationService({ enabled: () => true, conversationStore: store,
+      agentOnline: () => online, profileStore: { read: () => ({ status: archived ? 'archived' : 'active', agentConversationId: parent.id }) },
+      sessions: { get: () => ({ sessionId: 's1', workspaceId: 'ws-1', title: 'old', status: 'superseded', origin: { parentConversationId: parent.id } }),
+        resume: (input, context) => { calls.push([input, context]); return { sessionId: 's1', status: 'queued' }; } } });
+    const payload = { sessionId: 's1', workspaceId: 'ws-1', requestId: 'request-1' };
+    assert.equal((await service.resumeSession({ ...payload, workspaceId: 'other' })).code, 'OUT_OF_SCOPE');
+    archived = true; assert.equal((await service.resumeSession(payload)).code, 'OUT_OF_SCOPE'); archived = false;
+    online = false; assert.equal((await service.resumeSession(payload)).code, 'AGENT_OFFLINE');
+    assert.equal(store.getPersistedConversationHistory(parent.id).messages.length, 0);
+    online = true;
+    assert.equal((await service.resumeSession(payload)).ok, true);
+    assert.equal((await service.resumeSession(payload)).ok, true);
+    const messages = store.getPersistedConversationHistory(parent.id).messages;
+    assert.equal(messages.length, 1); assert.equal(messages[0].kind, 'user_input'); assert.equal(messages[0].role, 'user');
+    assert.equal(calls[0][0].anchorMessageId, messages[0].id);
+    assert.equal(calls[0][1].parentConversationId, parent.id);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('an approval cannot accidentally restart a superseded task', async () => {
+  let approved = 0; let resumed = 0;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    approvals: { list: () => [{ approvalId: 'plan:s1', sessionId: 's1', state: 'open' }], append: () => { approved++; } },
+    sessions: { get: () => ({ status: 'superseded' }), resumeFromApproval: () => { resumed++; } } });
+  assert.equal((await service.decideApproval({ workspaceId: 'ws-1', approvalId: 'plan:s1', decision: 'approve' })).code, 'SESSION_PAUSED');
+  assert.equal(approved, 0); assert.equal(resumed, 0);
+});
+
+
+test('paused approvals can be denied without restarting the task', async () => {
+  for (const state of ['open', 'stale']) for (const status of ['paused', 'superseded']) {
+    const saved = [], settled = [], cancelled = []; let restarts = 0;
+    const permission = { approvalId: 'permission-1', capabilityId: 'local.fs.write', sessionId: 's1', state };
+    const plan = { approvalId: 'plan:s1', sessionId: 's1', state };
+    const service = createProjectAgentApplicationService({ enabled: () => true,
+      approvals: { list: () => [permission, plan], append: item => { saved.push(item); return item; } },
+      settleLive: (_approval, decision) => settled.push(decision),
+      sessions: { get: () => ({ status }), resumeFromApproval: () => { restarts++; },
+        cancel: input => { cancelled.push(input); return { sessionId: 's1', status: 'cancelled' }; } } });
+    assert.equal((await service.decideApproval({ approvalId: permission.approvalId, decision: 'deny' })).approval?.state, 'denied');
+    assert.equal((await service.decideApproval({ approvalId: plan.approvalId, decision: 'reject' })).approval?.state, 'denied');
+    assert.equal(saved.length, 2); assert.equal(cancelled.length, 1); assert.equal(restarts, 0);
+    assert.equal(settled.length, state === 'open' ? 1 : 0);
+  }
 });

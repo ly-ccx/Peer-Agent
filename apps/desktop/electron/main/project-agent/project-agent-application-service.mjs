@@ -312,6 +312,31 @@ export function createProjectAgentApplicationService({
     return { ok: true, session };
   }
 
+  async function resumeSession(payload = {}) {
+    if (!open()) return disabled();
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : '';
+    const session = await sessions.get({ sessionId: payload.sessionId });
+    const profile = profileStore?.read(workspaceId);
+    if (!session || !profile || profile.status !== 'active' || session.workspaceId !== workspaceId || session.origin?.parentConversationId !== profile.agentConversationId) return { ok: false, code: 'OUT_OF_SCOPE' };
+    if (agentOnline(workspaceId) !== true) return { ok: false, code: 'AGENT_OFFLINE' };
+    if (typeof payload.requestId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(payload.requestId)) return { ok: false, code: 'INVALID_INPUT' };
+    const anchorMessageId = `resume:${session.sessionId}:${payload.requestId}`;
+    if (session.origin?.lastResumeAnchorMessageId === anchorMessageId) return { ok: true, session };
+    if (!['paused', 'superseded'].includes(session.status)) return { ok: false, code: 'NOT_PAUSED' };
+    const history = conversationStore?.getPersistedConversationHistory(profile.agentConversationId);
+    if (!history?.messages?.some(message => message.id === anchorMessageId)) {
+      const stored = conversationStore?.appendMessage(profile.agentConversationId, {
+        id: anchorMessageId, role: 'user', kind: 'user_input', content: `恢复任务「${session.title}」`,
+      });
+      if (!stored) return { ok: false, code: 'ANCHOR_STORE_FAILED' };
+    }
+    const result = await sessions.resume({ sessionId: session.sessionId, anchorMessageId },
+      { workspaceId, parentConversationId: profile.agentConversationId });
+    if (!result || result.error) return { ok: false, code: result?.error || 'RESUME_FAILED' };
+    queueChanged(workspaceId);
+    return { ok: true, session: result };
+  }
+
   function listApprovals(payload = {}) {
     if (!open()) return disabled();
     return { ok: true, approvals: approvals.list(payload) };
@@ -329,6 +354,9 @@ export function createProjectAgentApplicationService({
     if (current.state === 'approved' || current.state === 'denied' || current.state === 'expired') {
       return { ok: true, approval: current };
     }
+    const currentSession = current.sessionId && typeof sessions?.get === 'function'
+      ? await sessions.get({ sessionId: current.sessionId }) : null;
+    if (decision === 'approved' && currentSession && ['paused', 'superseded'].includes(currentSession.status)) return { ok: false, code: 'SESSION_PAUSED' };
     const duration = decision !== 'approved'
       ? 'denied'
       : payload.duration === 'task'
@@ -583,6 +611,7 @@ export function createProjectAgentApplicationService({
     listSessions,
     getSession,
     cancelSession,
+    resumeSession,
     listApprovals,
     decideApproval,
     markRead,

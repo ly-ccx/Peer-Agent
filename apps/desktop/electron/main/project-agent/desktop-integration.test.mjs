@@ -56,7 +56,7 @@ async function tool(env, name, args, ordinal = 1) {
   return executeProjectedModelTool({ name, args, workspacePath: env.project,
     toolContext: { mode: 'project_agent', turnRole: 'project_agent', workspaceId: env.bot.workspaceId,
       conversationId: env.bot.profile.agentConversationId, turnId: env.turnId || `test-${crypto.randomUUID()}`, toolCallOrdinal: ordinal,
-      messages: env.history(), readFiles: new Map() }, registry, runtimeProjection: projection, goalPlanStore: env.plans,
+      currentInputAnchors: env.currentInputAnchors || [], messages: env.history(), readFiles: new Map() }, registry, runtimeProjection: projection, goalPlanStore: env.plans,
     toolCallId: crypto.randomUUID(), requestPermission: async () => { throw new Error('agent must not ask for approval'); },
   });
 }
@@ -344,7 +344,9 @@ test('production registration shares executor scheduling with supervisor and rea
     assert.equal(env.executor.executionScheduler.stats().limit,1);
     settings.projectAgent.concurrency=3;
     assert.equal(env.api.supervisor.executionScheduler.stats().limit,3);
-    await env.submit('sched-anchor','读取并行');
+    await env.submit('sched-anchor','紧急，请优先处理第三个读取任务');
+    env.currentInputAnchors = env.calls.at(-1).turnProfile.context.inputAnchors.map(anchor => anchor.messageId);
+    assert.equal(env.history().find(message => message.id === 'input-sched-anchor').kind, 'user_input');
     const ids=[];
     for(let n=0;n<3;n++) {
       const result=JSON.parse((await tool(env,'spawn_session',{anchorMessageIds:['input-sched-anchor'],title:`读取任务${n}`,brief:`读取不同文件${n}`,

@@ -1,3 +1,4 @@
+import { hasCurrentUserUrgency } from './user-priority.mjs';
 import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +10,7 @@ import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
 import { boundedImageAttachments } from './input-queue.mjs';
 import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
+import { createSessionContinuity } from './session-continuity.mjs';
 import { createSessionHandoff } from './session-handoff.mjs';
 import { digestApprovalArgs } from './approval-store.mjs';
 import { spawnIdentity, identityFromPlan } from './spawn-identity.mjs';
@@ -87,6 +89,8 @@ export function createSessionSupervisor({
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
   const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, conversationStore, promote, now });
+  const continuity = createSessionContinuity({ goalPlanStore, conversationStore, goalRunner, executionScheduler,
+    findBySession, canManageWorkspace, abortStream, emit, now });
   let tail = Promise.resolve();
   let depth = 0;
   function exclusive(task) {
@@ -208,6 +212,8 @@ export function createSessionSupervisor({
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(origin.verifying === true ? { verifying: true, phase: 'verifying' } : {}),
       origin,
+      ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
+      ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
       ...(origin.phase === 'queued'
         ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, delegatedPlans())) : {}),
     });
@@ -350,6 +356,7 @@ export function createSessionSupervisor({
     if (input?.priority != null && !['high', 'normal', 'low'].includes(input.priority)) {
       return { error: 'invalid_input', message: 'priority must be high, normal, or low' };
     }
+    if (input?.priority === 'high' && !hasCurrentUserUrgency({ conversationStore, ...context, anchorMessageIds })) return { error: 'urgency_required' };
     if (input?.isolation != null && !['auto', 'none', 'worktree'].includes(input.isolation)) {
       return { error: 'invalid_input', message: 'isolation must be auto, none, or worktree' };
     }
@@ -367,6 +374,10 @@ export function createSessionSupervisor({
     const previous = supersedes ? findBySession(supersedes) : null;
     if (supersedes && !previous) {
       return { error: 'session_not_found', message: 'superseded session was not found' };
+    }
+    if (previous) {
+      const checked = continuity.replacement(supersedes, { workspaceId, parentConversationId });
+      if (!checked.ok) return checked;
     }
     const replacingOpen = Boolean(previous && !TERMINAL.has(previous.status));
     const replacingHolder = Boolean(replacingOpen && occupiesRunningSlot(previous));
@@ -465,8 +476,8 @@ export function createSessionSupervisor({
       if (!hold && isolationPlanner && canManageWorkspace(workspaceId) === true) await isolationPlanner.prepare(plan, delegatedPlans());
       if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
       if (replacingOpen) {
-        const cancelled = await cancelLocked({ sessionId: supersedes, reason: 'superseded by a new session', promote: false });
-        if (!cancelled) throw new Error('superseded session was not found');
+        const suspended = await continuity.suspend(supersedes, sessionId, { workspaceId, parentConversationId });
+        if (!suspended.ok) throw new Error(suspended.error);
         releasedHolder = replacingHolder;
       }
       if (replacingHolder && !hold) {
@@ -496,7 +507,11 @@ export function createSessionSupervisor({
     } catch (error) {
       const reason = error?.code || error?.message || 'spawn failed';
       if (releasedHolder && planId && spawnedSessionId) {
-        return { sessionId: spawnedSessionId, status: 'running', error: 'spawn_failed', message: reason };
+        goalPlanStore.setPlanStatus(planId, 'failed');
+        goalPlanStore.setRunnerState(planId, { status: 'failed', lastError: reason });
+        if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
+        await promote();
+        return { sessionId: spawnedSessionId, status: 'failed', error: 'spawn_failed', message: reason };
       }
       if (planId) {
         const failedPlan = goalPlanStore.getPlan(planId);
@@ -588,6 +603,7 @@ export function createSessionSupervisor({
       planId: plan.planId,
       workspaceId: plan.delegationOrigin.workspaceId,
       reason,
+      ...(reason === 'supersession_expired' ? { surfacing: 'silent', payload: { reason, surfacing: 'silent' } } : {}),
     });
     if (input?.promote !== false) await promote();
     const next = goalPlanStore.getPlan(plan.planId);
@@ -768,6 +784,7 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input?.sessionId));
     const body = text(input?.text);
     if (!plan || !body) return null;
+    if (['paused', 'superseded'].includes(plan.delegationOrigin.phase)) return { error: 'session_not_running', message: 'Resume the paused session before sending instructions.' };
     if (input?.intent === 'amend' && TERMINAL.has(plan.status)) {
       return {
         error: 'session_not_running',
@@ -876,6 +893,7 @@ export function createSessionSupervisor({
     if (!planId) return { ok: false, reason: 'missing_plan' };
     const current = goalPlanStore.getPlan(planId) || plan;
     if (!current) return { ok: false, reason: 'missing_plan' };
+    if (['paused', 'superseded'].includes(current.delegationOrigin?.phase)) return { ok: false, reason: 'session_not_paused_by_approval', planId };
     if (current.delegationOrigin?.phase === 'awaiting_approval') {
       goalPlanStore.revisePlan(planId, {
         status: 'paused', delegationOrigin: { ...current.delegationOrigin, phase: 'queued' },
@@ -929,6 +947,10 @@ export function createSessionSupervisor({
   async function reconcilePersistedQueues() {
     for (const plan of delegatedPlans()) {
       if (canManageWorkspace(plan.delegationOrigin.workspaceId) !== true) continue;
+      if (continuity.expired(plan)) {
+        await cancelLocked({ sessionId: plan.delegationOrigin.sessionId, reason: 'supersession_expired', promote: false });
+        continue;
+      }
       if (isolationPlanner && (TERMINAL.has(plan.status)
         || plan.status === 'interrupted' && plan.runner?.status === 'failed')) await isolationPlanner.cleanup(plan);
       if (plan.status === 'completed' && plan.resultAcceptance?.acceptedAt && plan.delegationOrigin.handoffAuthorizedAt
@@ -946,6 +968,22 @@ export function createSessionSupervisor({
     reconcile() { return exclusive(() => reconcilePersistedQueues()); },
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
+    },
+    resume(input, context = {}) {
+      return exclusive(async () => {
+        const result = await continuity.resume(input, context);
+        if (!result.ok) return result;
+        if (!result.replayed) await promote();
+        return { ...project(goalPlanStore.getPlan(result.plan.planId)), ...(result.replayed ? { replayed: true } : {}) };
+      });
+    },
+    reprioritize(input, context = {}) {
+      return exclusive(async () => {
+        const result = continuity.reprioritize(input, context);
+        if (!result.ok) return result;
+        await promote();
+        return project(goalPlanStore.getPlan(result.plan.planId));
+      });
     },
     list,
     /** Complete project facts for the host; model-facing list() remains bounded. */

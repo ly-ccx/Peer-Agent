@@ -662,3 +662,55 @@ test('spawn preserves structured Goal criteria and rejects incomplete or forged 
   }
   assert.equal(seen.length, 1);
 });
+
+test('resume and reprioritize keep Provider grants/evidence, anchor checks and quoted scope', async () => {
+  const seen = [];
+  const provider = createDelegationProvider({ supervisor: {
+    get: () => ({ sessionId: 's1', workspaceId: 'ws-1' }),
+    resume: (input, context) => { seen.push([input, context]); return { sessionId: input.sessionId, status: 'queued' }; },
+    reprioritize: (input, context) => { seen.push([input, context]); return { sessionId: input.sessionId, status: 'queued' }; },
+  } });
+  const result = await provider.executeCapability(call('local.delegation.resume_session', { sessionId: 's1', anchorMessageId: 'u1' }), agentContext({ workspaceId: 'ws-1' }));
+  assert.equal(result.grant.granted, true); assert.equal(outputOf(result).sessionId, 's1');
+  assert.equal(seen[0][1].parentConversationId, 'conv-1');
+  const invalid = await provider.executeCapability(call('local.delegation.resume_session', { sessionId: 's1', anchorMessageId: 'a1' }), agentContext());
+  assert.equal(outputOf(invalid).error, 'anchor_not_user_input'); assert.equal(seen.length, 1);
+  const wrong = await provider.executeCapability(call('local.delegation.reprioritize_session', { sessionId: 's1', priority: 'high' }), agentContext({ workspaceId: 'ws-2' }));
+  assert.equal(outputOf(wrong).error, 'out_of_scope'); assert.equal(seen.length, 1);
+});
+
+test('quoted corrections cannot resume, reprioritize or replace an unrelated task', async () => {
+  let mutations = 0;
+  const provider = createDelegationProvider({ supervisor: {
+    get: () => ({ workspaceId: 'ws-1' }),
+    spawn: () => { mutations++; }, resume: () => { mutations++; }, reprioritize: () => { mutations++; },
+  } });
+  const context = agentContext({ workspaceId: 'ws-1', messages: [
+    { id: 'reply', role: 'assistant', kind: 'agent_reply', sources: ['quoted'] },
+    { ...USER, quoteRefs: ['reply'] },
+  ] });
+  for (const [name, input] of [
+    ['resume_session', { sessionId: 'other', anchorMessageId: 'u1' }],
+    ['reprioritize_session', { sessionId: 'other', priority: 'high' }],
+    ['spawn_session', spawnInput({ supersedes: 'other' })],
+  ]) {
+    const result = await provider.executeCapability(call(`local.delegation.${name}`, input), context);
+    assert.equal(outputOf(result).error, 'out_of_scope'); assert.equal(result.grant.granted, false);
+  }
+  assert.equal(mutations, 0);
+});
+
+
+test('priority forwarding uses host turn anchors, not model arguments', async () => {
+  const seen = [];
+  const provider = createDelegationProvider({ supervisor: {
+    get: () => ({ sessionId: 's1', workspaceId: 'ws-1' }),
+    reprioritize: (input, context) => { seen.push([input, context]); return { sessionId: input.sessionId, status: 'queued' }; },
+  } });
+  const result = await provider.executeCapability(call('local.delegation.reprioritize_session', {
+    sessionId: 's1', priority: 'high', anchorMessageId: 'u1', currentInputAnchors: ['forged'],
+  }), { toolContext: agentContext({ workspaceId: 'ws-1', currentInputAnchors: ['u1'] }) });
+  assert.equal(result.result.status, 'success');
+  assert.equal(seen[0][0].anchorMessageId, 'u1');
+  assert.deepEqual(seen[0][1].currentInputAnchors, ['u1']);
+});

@@ -25,6 +25,7 @@ export function planAgentTurn({
   const inputAnchors = inputs.filter(input => typeof input.inputId === 'string').map(input => ({
     messageId: inputMessageId(input.inputId), text: typeof input.text === 'string' ? input.text.slice(0, 400) : '',
   }));
+  const { inputAnchors: _previousAnchors, ...currentContext } = context || {};
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   return {
     kind: wake ? 'wake' : 'user',
@@ -33,8 +34,8 @@ export function planAgentTurn({
       role: 'project_agent',
       ...(workspace ? { workspaceId: workspace } : {}),
       context: facts.length > 0 || roster != null || inputAnchors.length > 0
-        ? { ...(context || {}), ...(facts.length ? { events: facts.map((event) => ({ ...event })) } : {}), ...(roster != null ? { roster } : {}), ...(inputAnchors.length ? { inputAnchors } : {}) }
-        : (context ?? null),
+        ? { ...currentContext, ...(facts.length ? { events: facts.map((event) => ({ ...event })) } : {}), ...(roster != null ? { roster } : {}), ...(inputAnchors.length ? { inputAnchors } : {}) }
+        : (context == null ? null : currentContext),
     },
     modelProviderId: modelProviderId ?? null,
     limits: { ...(wake ? WAKE_TURN_LIMITS : USER_TURN_LIMITS) },

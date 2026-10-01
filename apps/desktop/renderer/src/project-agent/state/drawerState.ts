@@ -10,7 +10,7 @@ export const DRAWER_PUSH_MIN_WIDTH = 960;
 
 export type DrawerTab = 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings';
 export type DrawerLayout = 'push' | 'cover';
-export type TaskGroup = 'needsYou' | 'running' | 'queued' | 'done';
+export type TaskGroup = 'needsYou' | 'running' | 'queued' | 'paused' | 'done';
 
 export interface DrawerMemory {
   readonly open: boolean;
@@ -37,6 +37,7 @@ export interface DrawerSession {
   readonly progress: string;
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
   readonly queueReason?: string;
+  readonly supersededBy?: string;
 }
 
 export interface DrawerMemoryItem {
@@ -143,6 +144,7 @@ export function taskGroup(status: string): TaskGroup {
   if (NEEDS_YOU.has(status)) return 'needsYou';
   if (RUNNING.has(status)) return 'running';
   if (QUEUED.has(status)) return 'queued';
+  if (status === 'paused' || status === 'superseded') return 'paused';
   return 'done';
 }
 
@@ -151,6 +153,7 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
     needsYou: [],
     running: [],
     queued: [],
+    paused: [],
     done: [],
   };
   for (const session of sessions) groups[taskGroup(session.status)].push(session);
@@ -192,6 +195,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
     queueReason: readString(record.queueReason),
+    supersededBy: readString(record.supersededBy),
     queuedBehind: Array.isArray(record.queuedBehind) ? record.queuedBehind.flatMap(item => {
       if (!item || typeof item !== 'object') return [];
       const row = item as Record<string, unknown>;

@@ -451,7 +451,7 @@ export function registerDesktopProjectAgent({
     goalPlanStore,
     goalRunner,
     executionScheduler,
-    canManageWorkspace: holdsLease,
+    canManageWorkspace: (workspaceId) => enabled() && holdsLease(workspaceId),
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
@@ -464,7 +464,7 @@ export function registerDesktopProjectAgent({
       ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
       ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
     } }),
-    emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || ''}` }]),
+    emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.supersededBy || event.reason || ''}` }]),
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
   const uninstallDelegation = installDelegation({ supervisor, storeDir: runtimeRoot });

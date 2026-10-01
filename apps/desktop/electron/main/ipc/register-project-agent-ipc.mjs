@@ -21,6 +21,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     listSessions: assertFunction(projectAgent?.listSessions, 'projectAgent.listSessions'),
     getSession: assertFunction(projectAgent?.getSession, 'projectAgent.getSession'),
     cancelSession: assertFunction(projectAgent?.cancelSession, 'projectAgent.cancelSession'),
+    resumeSession: assertFunction(projectAgent?.resumeSession, 'projectAgent.resumeSession'),
     listApprovals: assertFunction(projectAgent?.listApprovals, 'projectAgent.listApprovals'),
     decideApproval: assertFunction(projectAgent?.decideApproval, 'projectAgent.decideApproval'),
     markRead: assertFunction(projectAgent?.markRead, 'projectAgent.markRead'),
@@ -47,6 +48,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:list-sessions', (_event, payload) => ports.listSessions(payload));
       ipc.handle('project-agent:get-session', (_event, payload) => ports.getSession(payload));
       ipc.handle('project-agent:cancel-session', (_event, payload) => ports.cancelSession(payload));
+      ipc.handle('project-agent:resume-session', (_event, payload) => ports.resumeSession(payload));
       ipc.handle('project-agent:list-approvals', (_event, payload) => ports.listApprovals(payload));
       ipc.handle('project-agent:decide-approval', (_event, payload) => ports.decideApproval(payload));
       ipc.handle('project-agent:mark-read', (_event, payload) => ports.markRead(payload));
