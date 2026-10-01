@@ -161,6 +161,24 @@ function contextOf(env, extra = {}) {
   };
 }
 
+test('current-call task batch reads each plan once and retains project scope, legacy order and external changes', async () => {
+  const env = await harness();
+  try {
+    const a = await env.supervisor.spawn(spawnInput({ title: 'first', readOnly: true }), contextOf(env));
+    const b = await env.supervisor.spawn(spawnInput({ title: 'second', readOnly: true }), contextOf(env));
+    const plan = env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: b.sessionId }).planId);
+    env.goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...plan.delegationOrigin, workspaceId: 'ws-2' } });
+    const expected = new Map(['ws-1', 'ws-2', 'empty'].map(id => [id, env.supervisor.list({ workspaceId: id })]));
+    const original = env.goalPlanStore.getPlan; let reads = 0;
+    env.goalPlanStore.getPlan = (...args) => { reads++; return original(...args); };
+    const batch = env.supervisor.listByWorkspaceIds(['ws-1', 'ws-2', 'empty']);
+    assert.deepEqual(batch, expected); assert.equal(reads, 2);
+    assert.equal(batch.get('ws-1')[0].sessionId, a.sessionId); assert.equal(batch.get('ws-2')[0].sessionId, b.sessionId);
+    env.goalPlanStore.revisePlan(plan.planId, { title: 'external update' });
+    assert.equal(env.supervisor.listByWorkspaceIds(['ws-2']).get('ws-2')[0].title, 'external update');
+  } finally { await env.cleanup(); }
+});
+
 test('automatic task identity survives rewording and restart without merging different intents', async () => {
   const env = await harness();
   try {
