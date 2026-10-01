@@ -49,6 +49,7 @@ export interface CreateTuiRuntimeOptions {
   readonly providers?: readonly TuiCapabilityProvider[];
   readonly oneTimeApprovals?: { match(input: object): boolean };
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
+  readonly sessionApprovals?: Set<string>;
 }
 
 export interface TuiRuntime {
@@ -78,6 +79,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     providers: options.providers,
     oneTimeApprovals: options.oneTimeApprovals,
     goalPlanStore: options.goalPlanStore,
+    sessionApprovals: options.sessionApprovals,
   });
   if (options.toolAllowlist) {
     host = restrictTuiHostTools(host, options.toolAllowlist);

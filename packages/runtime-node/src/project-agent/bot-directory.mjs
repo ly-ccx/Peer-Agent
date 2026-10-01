@@ -229,7 +229,7 @@ export function createBotDirectory({
     };
   }
 
-  function readConversation(workspaceId, { limit = 50, before = null, kinds = null } = {}) {
+  function readConversation(workspaceId, { limit = 50, before = null, kinds = null, latest = false } = {}) {
     const profile = profiles.read(workspaceId);
     if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
     const allowed = Array.isArray(kinds) ? new Set(kinds.filter((kind) => typeof kind === 'string')) : null;
@@ -240,10 +240,13 @@ export function createBotDirectory({
     });
     const size = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 50;
     let start = 0;
+    let end = filtered.length;
     if (typeof before === 'string' && before) {
       const index = filtered.findIndex((message) => message?.id === before);
-      start = index >= 0 ? index + 1 : 0;
+      if (latest) end = index >= 0 ? index : filtered.length;
+      else start = index >= 0 ? index + 1 : 0;
     }
+    if (latest) start = Math.max(0, end - size);
     const cards = readCards(workspaceId) || [];
     const byCard = new Map(cards.map((card) => [card.cardId, card]));
     const bySession = new Map();
@@ -256,12 +259,13 @@ export function createBotDirectory({
         return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status }] : [];
       });
     };
-    const page = filtered.slice(start, start + size).map((message) => ({ ...message,
+    const page = filtered.slice(start, latest ? end : start + size).map((message) => ({ ...message,
       ...(message.kind === 'agent_reply' && (message.sources?.length || message.meta?.sessionStates)
         ? { meta: { ...message.meta, sessionStates: currentStates(message) } } : {}),
       ...(message.cards ? { cards: message.cards.map((card) => byCard.get(card.cardId) || card) } : {}),
     }));
-    const nextCursor = start + size < filtered.length ? (page[page.length - 1]?.id ?? null) : null;
+    const nextCursor = latest ? (start > 0 ? page[0]?.id ?? null : null)
+      : (start + size < filtered.length ? page[page.length - 1]?.id ?? null : null);
     if (!before) {
       const present = new Set(filtered.flatMap((message) => (message.cards || []).map((card) => card.cardId)));
       for (const card of cards) if (!present.has(card.cardId) && card.resolvedState !== 'resolved') {

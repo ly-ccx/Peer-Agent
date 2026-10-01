@@ -14,8 +14,9 @@ export function createTuiProjectClient(options: {
 }) {
   const { host, dataHome } = options;
   let stamp = '', snapshot: ProjectSnapshot | null = null;
+  let pageBefore: string | null = null;
   function fingerprint() {
-    const parts = [host.workspaceId(), String(host.holdsLease(host.workspaceId()))];
+    const parts = [host.workspaceId(), String(host.holdsLease(host.workspaceId())), pageBefore ?? ''];
     const inspect = (file: string, depth: number) => {
       try {
         const info = statSync(file);
@@ -31,16 +32,17 @@ export function createTuiProjectClient(options: {
     }
     return parts.join('|');
   }
-  function poll(force = false) {
+  function poll(force = false): ProjectSnapshot {
     const next = fingerprint();
     if (!force && next === stamp && snapshot) return snapshot;
     stamp = next;
     const workspaceId = host.workspaceId();
-    const conversation = workspaceId ? host.directory.readConversation(workspaceId, { limit: 50 }) : null;
+    const conversation = workspaceId ? host.directory.readConversation(workspaceId, { limit: 50, latest: true, before: pageBefore } as never) : null;
     snapshot = {
       workspaceId, isHost: host.holdsLease(workspaceId), bots: host.directory.list(),
       messages: conversation?.ok && 'messages' in conversation ? conversation.messages : [],
       nextCursor: conversation?.ok && 'nextCursor' in conversation ? conversation.nextCursor : null,
+      familiarizeOffer: conversation?.ok && 'familiarizeOffer' in conversation ? conversation.familiarizeOffer ?? null : null,
       sessions: workspaceId ? host.directory.listSessions(workspaceId) : [],
       approvals: workspaceId ? host.approvals.list({ workspaceId }).filter(row => ['open', 'stale'].includes(row.state)) : [],
     };
@@ -51,6 +53,9 @@ export function createTuiProjectClient(options: {
   timer?.unref();
   return {
     poll,
+    latest() { pageBefore = null; return poll(true); },
+    earlier() { if (snapshot?.nextCursor) pageBefore = snapshot.nextCursor; return poll(true); },
+    async select(workspaceId: string) { pageBefore = null; await host.selectWorkspace(workspaceId); return poll(true); },
     submit(text: string, input: { inputId?: string; answerTo?: string } = {}) {
       const workspaceId = host.workspaceId();
       if (!workspaceId || !text.trim()) throw new Error('project_input_required');
@@ -60,9 +65,9 @@ export function createTuiProjectClient(options: {
       poll(true);
       return receipt;
     },
-    async decide(approvalId: string, decision: 'approve' | 'deny') {
+    async decide(approvalId: string, decision: 'approve' | 'deny', duration: 'once'|'task' = 'once') {
       if (!host.holdsLease(host.workspaceId())) return { ok: false, error: 'desktop_approval_required' };
-      const result = await host.decideApproval(approvalId, decision);
+      const result = await host.decideApproval(approvalId, decision, duration);
       poll(true);
       return result;
     },
@@ -76,6 +81,7 @@ export interface ProjectSnapshot {
   bots: any[];
   messages: any[];
   nextCursor: string | null;
+  familiarizeOffer: { text: string } | null;
   sessions: any[];
   approvals: any[];
 }

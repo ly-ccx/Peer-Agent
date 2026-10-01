@@ -24,7 +24,10 @@ import { handleCliVersionArgs } from './cli-version.ts';
 import { createCliUpdateController } from './cli-update.ts';
 import { createTuiLocalAccessStore } from './tui-local-access-store.ts';
 const { createTuiRuntime } = await import('./tui-runtime.ts');
-import { createTuiShutdown } from './tui-shutdown.ts';
+import { createAsyncTuiShutdown } from './tui-shutdown.ts';
+import type { createTuiProjectHost } from './project-agent/tui-project-host.ts';
+import type { createTuiProjectClient } from './project-agent/tui-project-client.ts';
+import { projectEntry } from './project-agent/commands.ts';
 import { flushTuiPerfSync } from './tui-perf.ts';
 import { formatTerminalTitle } from './terminal-title.ts';
 
@@ -34,6 +37,7 @@ if (handleCliVersionArgs(argv)) {
 }
 
 const command = parsePeerArgv(argv);
+if (command.kind === 'version') process.exit(0);
 if (command.kind === 'help') {
   console.log(formatPeerHelp(command.topic));
   process.exit(0);
@@ -51,40 +55,48 @@ if (shouldRefuseInteractiveTui(process.stdout.isTTY)) {
 }
 
 const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
-const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
+const userDataPath = process.env.PEER_AGENT_HOME ?? process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
 const localAccessStore = createTuiLocalAccessStore({ userDataPath });
-const runtime = createTuiRuntime({
-  workspaceRoot,
-  userDataPath,
-  accessLevel: localAccessStore.getAccessLevel(),
-  persistAccessLevel: (accessLevel) => localAccessStore.setAccessLevel(accessLevel),
-});
+let runtime: ReturnType<typeof createTuiRuntime> | null = null;
+let projectHost: ReturnType<typeof createTuiProjectHost> | null = null;
+let projectClient: ReturnType<typeof createTuiProjectClient> | null = null;
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
 renderer.setTerminalTitle(formatTerminalTitle(workspaceRoot));
 const cliUpdate = createCliUpdateController();
 const root = createRoot(renderer);
-const shutdown = createTuiShutdown({
+const shutdown = createAsyncTuiShutdown({
   unmount: () => root.unmount(),
   destroyRenderer: () => renderer.destroy(),
+  dispose: async () => { projectClient?.close(); await projectHost?.close(); await runtime?.dispose(); },
+  onError: () => console.error('Peer could not finish stopping local execution.'),
   exitProcess: (code) => {
-    void runtime.dispose();
     flushTuiPerfSync();
     process.exit(code);
   },
 });
 
-root.render(
-  <App
-    host={runtime.host}
-    model={runtime.model}
-    modelLabel={runtime.modelConfig.modelLabel}
-    modelSelection={runtime.modelSelection}
-    languageStore={runtime.languageStore}
-    themeStore={runtime.themeStore}
-    cliUpdate={cliUpdate}
-    getSessionFastMode={() => runtime.getSessionFastMode()}
-    setSessionFastMode={(value) => runtime.setSessionFastMode(value)}
-    onQuit={shutdown}
-  />,
-);
-queueMicrotask(() => void cliUpdate.check());
+async function openClassic() {
+  projectClient?.close(); await projectHost?.close(); projectHost = null; projectClient = null;
+  const classic = createTuiRuntime({ workspaceRoot, userDataPath, accessLevel: localAccessStore.getAccessLevel(),
+    persistAccessLevel: accessLevel => localAccessStore.setAccessLevel(accessLevel) });
+  runtime = classic;
+  root.render(<App host={classic.host} model={classic.model} modelLabel={classic.modelConfig.modelLabel}
+    modelSelection={classic.modelSelection} languageStore={classic.languageStore} themeStore={classic.themeStore} cliUpdate={cliUpdate}
+    getSessionFastMode={() => classic.getSessionFastMode()} setSessionFastMode={value => classic.setSessionFastMode(value)}
+    onQuit={() => { void shutdown(); }} />);
+  queueMicrotask(() => void cliUpdate.check());
+}
+if (command.classic) await openClassic();
+else {
+  const { createTuiProjectHost } = await import('./project-agent/tui-project-host.ts');
+  const { createTuiProjectClient } = await import('./project-agent/tui-project-client.ts');
+  const { ProjectApp } = await import('./project-agent/ProjectApp.tsx');
+  const { createTuiLanguageStore } = await import('./tui-language.ts');
+  const { createTuiThemeStore } = await import('./tui-theme.ts');
+  projectHost = createTuiProjectHost({dataHome:userDataPath,workspacePath:workspaceRoot});
+  projectClient = createTuiProjectClient({dataHome:userDataPath,host:projectHost});
+  const route = projectEntry(command, projectHost.profiles.read(projectHost.workspaceId())?.status === 'active');
+  root.render(<ProjectApp host={projectHost} client={projectClient} initialView={route as 'bind'|'bots'|'conversation'}
+    workspacePath={workspaceRoot} locale={createTuiLanguageStore({userDataPath}).getLocale()}
+    themeStore={createTuiThemeStore({userDataPath})} onClassic={openClassic} onQuit={() => { void shutdown(); }} />);
+}

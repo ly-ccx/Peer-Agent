@@ -113,6 +113,7 @@ export interface CreateTuiHostOptions {
   readonly providers?: readonly TuiCapabilityProvider[];
   readonly oneTimeApprovals?: { match(input: object): boolean };
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
+  readonly sessionApprovals?: Set<string>;
 }
 
 function isNodeShellRiskLevel(value: unknown): value is keyof typeof NODE_SHELL_RISK_ORDER {
@@ -155,7 +156,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   });
   const approvalListeners = new Set<(approval: PendingApproval | null) => void>();
   const executionContext = new AsyncLocalStorage<TuiExecutionContext>();
-  const sessionApprovals = new Set<string>();
+  const sessionApprovals = resolvedOptions.sessionApprovals ?? new Set<string>();
   const approvalQueue: PendingApproval[] = [];
   let activeApproval: PendingApproval | null = null;
   let accessLevel = normalizeLocalAccessLevel(resolvedOptions.accessLevel);
@@ -204,7 +205,9 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       sessionId: context.project.sessionId, workspaceId: context.project.workspaceId,
     })) return Promise.resolve({ granted: true, reason: 'approved_once_after_resume' });
     const approvalKey = context
-      ? sessionApprovalKey(context.sessionId, prompt)
+      ? sessionApprovalKey(context.project
+        ? JSON.stringify([context.project.workspaceId, context.project.sessionId || context.project.planId || context.turnId, context.project.planId])
+        : context.sessionId, prompt)
       : null;
     if (approvalKey && sessionApprovals.has(approvalKey)) {
       return Promise.resolve({
@@ -568,7 +571,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       return () => {
         approvalListeners.delete(listener);
         if (approvalListeners.size > 0) return;
-        sessionApprovals.clear();
+        if (!resolvedOptions.sessionApprovals) sessionApprovals.clear();
         while (activeApproval) activeApproval.resolve('deny');
       };
     },

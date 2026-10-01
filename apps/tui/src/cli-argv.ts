@@ -22,7 +22,7 @@ export interface PeerExecOptions {
 export type PeerCliCommand =
   | { readonly kind: 'version' }
   | { readonly kind: 'help'; readonly topic: 'root' | 'exec' }
-  | { readonly kind: 'tui' }
+  | { readonly kind: 'tui'; readonly classic?: boolean; readonly bots?: boolean }
   | { readonly kind: 'exec'; readonly options: PeerExecOptions }
   | { readonly kind: 'error'; readonly message: string; readonly exitCode: typeof CLI_EXIT.usage };
 
@@ -221,6 +221,8 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
 
   const [head, ...rest] = argv;
   if (head === undefined) return { kind: 'tui' };
+  if (head === '--classic' && rest.length === 0) return { kind: 'tui', classic: true };
+  if (head === 'bots' && rest.length === 0) return { kind: 'tui', bots: true };
   if (isHelpFlag(head) && rest.length === 0) return { kind: 'help', topic: 'root' };
   if (head === 'exec') return parseExecArgs(rest);
   if (isHelpFlag(head)) return { kind: 'help', topic: 'root' };
@@ -263,7 +265,9 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
     version,
     '',
     'Usage:',
-    '  peer                 Start the interactive TUI',
+    '  peer                 Open this project bot (or ask to bind it)',
+    '  peer bots            Browse your bots',
+    '  peer --classic       Start the classic interactive TUI',
     '  peer --version       Print version',
     '  peer --help          Show this help',
     '  peer exec [options] [prompt]',
