@@ -15,7 +15,7 @@ export type WatchEventSource =
 export type ObjectiveWatch = (
   | { readonly watchId: string; readonly kind: 'schedule'; readonly schedule: AutomationSchedule; readonly probe: ObjectiveProbe }
   | { readonly watchId: string; readonly kind: 'event'; readonly source: WatchEventSource; readonly probe?: ObjectiveProbe }
-) & { readonly lastScheduledAt?: string; readonly nextRunAt?: string; readonly unavailableReason?: string };
+) & { readonly notificationPolicy?: 'changes' | 'failure_only'; readonly lastScheduledAt?: string; readonly nextRunAt?: string; readonly unavailableReason?: string };
 export interface ObjectiveSignal {
   readonly signalId: string;
   readonly watchId: string;

@@ -1,3 +1,4 @@
+import { evaluateObjectiveProbeCall,objectiveProbeDenial } from '../chat-runtime/objective-probe-gate.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import {
@@ -936,6 +937,8 @@ export function createLocalFileProvider({ workspaceRoot } = {}) {
     if (!name) return null;
     const args = readArgs(call);
     const cwd = context.workspaceRoot || workspaceRoot || process.cwd();
+    const probeGate=evaluateObjectiveProbeCall({policy:context.toolContext?.permissionPolicy,call,workspacePath:cwd});
+    if(!probeGate.allowed)return objectiveProbeDenial(call,probeGate.reason,context.locale).execution;
     const fileResult = await runFileTool({
       name,
       args,

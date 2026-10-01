@@ -1,3 +1,4 @@
+import { evaluateObjectiveProbeCall,objectiveProbeDenial } from './objective-probe-gate.mjs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -193,6 +194,8 @@ export async function executeProjectedModelTool({
     return { success: false, error: projection.error };
   }
 
+  const probeGate=evaluateObjectiveProbeCall({policy:toolContext?.permissionPolicy,call:projection.call,workspacePath});
+  if(!probeGate.allowed)return {...objectiveProbeDenial(projection.call,probeGate.reason,locale),projectionCapability:projection.capability};
   const requestedCwd = resolveSafeWorkspaceRoot(workspacePath);
   const mode = toolContext?.mode ?? 'chat';
   const conversationId = toolContext?.conversationId ?? null;

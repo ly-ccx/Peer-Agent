@@ -714,3 +714,13 @@ test('priority forwarding uses host turn anchors, not model arguments', async ()
   assert.equal(seen[0][0].anchorMessageId, 'u1');
   assert.deepEqual(seen[0][1].currentInputAnchors, ['u1']);
 });
+
+test('objective-only wake cannot bypass confirmation by omitting objectiveId or by using historical anchors',async()=>{
+ let mutations=0;const provider=createDelegationProvider({supervisor:{spawn:()=>{mutations++;return {sessionId:'s'};},message:()=>{mutations++;return {sessionId:'s'};}}});
+ const view=agentContext({workspaceId:'ws',objectiveWakeIds:['objective-actual'],currentInputAnchors:[]});
+ for(const input of [spawnInput(),spawnInput({objectiveId:'objective-actual'})]){
+  const result=await provider.executeCapability(call('local.delegation.spawn_session',input),{toolContext:view});assert.equal(outputOf(result).error,'objective_user_confirmation_required');assert.equal(result.grant.granted,false);
+ }
+ assert.equal(mutations,0);
+ const human=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),{toolContext:{...view,currentInputAnchors:['u1']}});assert.equal(human.result.status,'success');assert.equal(mutations,1);
+});

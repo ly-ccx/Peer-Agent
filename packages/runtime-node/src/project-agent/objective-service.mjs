@@ -31,7 +31,7 @@ function authorizesBudget(content,current,next){
 }
 
 /** Owns user provenance, objective scope, transitions and factual achievement; no model execution. */
-export function createObjectiveService({store,readConversation,resolveConversationId,canManageWorkspace=()=>true,readSession=()=>null,resolveEvidence=()=>null,onChanged=null}={}) {
+export function createObjectiveService({store,readConversation,resolveConversationId,canManageWorkspace=()=>true,readSession=()=>null,resolveEvidence=()=>null,decorateView=(_ws,item)=>item,onChanged=null}={}) {
   if(!store)throw TypeError('ObjectiveService requires store');
   function scope(view,write=false){return typeof view?.workspaceId==='string'&&(!write||canManageWorkspace(view.workspaceId)===true)&&resolveConversationId(view.workspaceId)===view.conversationId;}
   function currentUser(input,view){
@@ -40,6 +40,11 @@ export function createObjectiveService({store,readConversation,resolveConversati
   }
   function owned(input,view){return scope(view)?store.get(view.workspaceId,input.objectiveId):null;}
   function changed(result,workspaceId){if(result.ok&&typeof onChanged==='function')onChanged(workspaceId);return result;}
+  function notificationWatches(watches,origin,current=''){
+    const onlyFailure=/(?:CI|构建|测试|build|test).{0,15}(?:失败|挂了|fail).{0,8}(?:才|只)|(?:only|just).{0,20}(?:CI|build|test).{0,15}fail/i.test(cleanUserText(origin));
+    const allChanges=!/不要|别|不能|\bnot\b|don['’]?t/i.test(cleanUserText(current))&&/(?:所有|任何|全部).{0,8}变化.{0,8}(?:告诉|通知)|notify.{0,20}all.{0,8}changes/i.test(cleanUserText(current));
+    return onlyFailure&&!allChanges?(watches || []).map(watch=>({...watch,notificationPolicy:'failure_only'})):watches;
+  }
   function create(input,view={}){
     const anchor=currentUser(input,view);if(!anchor)return fail('CURRENT_USER_REQUIRED');
     const createdBy=input.createdBy || 'user_request',autonomy=input.autonomy || 'propose';
@@ -49,12 +54,12 @@ export function createObjectiveService({store,readConversation,resolveConversati
     if(createdBy==='agent_proposal'&&autonomy==='act')return fail('AUTONOMY_NOT_AUTHORIZED');
     if(Array.isArray(input.milestones)&&input.milestones.some(m=>m.sessionIds?.length||m.status==='done'))return fail('SESSION_OUT_OF_SCOPE');
     const requestId=createHash('sha256').update(`${view.conversationId}\0${anchor.id}\0${input.title}\0${input.outcome}`).digest('hex');
-    const result=store.create({...input,workspaceId:view.workspaceId,projectAgentConversationId:view.conversationId,originMessageId:anchor.id,createdBy,autonomy,
+    const result=store.create({...input,...(input.watches?{watches:notificationWatches(input.watches,anchor.content)}:{}),workspaceId:view.workspaceId,projectAgentConversationId:view.conversationId,originMessageId:anchor.id,createdBy,autonomy,
       status:createdBy==='agent_proposal'?'paused':'active',pendingConfirmation:createdBy==='agent_proposal'}, {requestId});
     return changed(result,view.workspaceId);
   }
-  function get(input,view){const item=owned(input,view);return item?{ok:true,item,observations:store.observations(view.workspaceId,item.objectiveId).slice(-30)}:fail('NOT_FOUND');}
-  function list(_input,view){return scope(view)?{ok:true,items:store.list(view.workspaceId).map(item=>({...item,lastObservation:store.observations(view.workspaceId,item.objectiveId).at(-1)||null}))}:fail('NOT_FOUND');}
+  function get(input,view){const item=owned(input,view);return item?{ok:true,item:decorateView(view.workspaceId,item),observations:store.observations(view.workspaceId,item.objectiveId).slice(-30)}:fail('NOT_FOUND');}
+  function list(_input,view){return scope(view)?{ok:true,items:store.list(view.workspaceId).map(item=>decorateView(view.workspaceId,{...item,lastObservation:store.observations(view.workspaceId,item.objectiveId).at(-1)||null}))}:fail('NOT_FOUND');}
   function mutationOptions(input,view){return {expectedVersion:input.expectedVersion??null,requestId:view.commandId||null,fingerprint:view.commandFingerprint||null};}
   function update(input,view){
     if(!scope(view,true))return fail('NOT_HOST');
@@ -66,6 +71,7 @@ export function createObjectiveService({store,readConversation,resolveConversati
       if(raisesAutonomy&&!userAuthorizesObjectiveAutonomy(anchor.content,input.autonomy))return fail('AUTONOMY_NOT_AUTHORIZED');
       if(expandsBudget&&!authorizesBudget(anchor.content,current.budget,input.budget))return fail('BUDGET_NOT_AUTHORIZED');}
     const patch={};for(const key of ['title','outcome','watches','milestones','successSignals','autonomy','budget','deadline'])if(input[key]!==undefined)patch[key]=input[key];
+    if(patch.watches){const origin=(readConversation(view.conversationId)||[]).find(m=>m.id===current.originMessageId&&isCanonicalUserInput(m));patch.watches=notificationWatches(patch.watches,origin?.content,currentUser(input,view)?.content);}
     const checked=validateObjectiveDefinition({...current,...patch});if(!checked.ok)return checked;
     if(patch.milestones?.some(m=>m.sessionIds?.some(id=>{const session=readSession(id);return !session||session.workspaceId!==view.workspaceId||session.origin?.objectiveId!==current.objectiveId;})))return fail('SESSION_OUT_OF_SCOPE');
     if(patch.milestones?.some(m=>m.status==='done'&&(!m.sessionIds.length||m.sessionIds.some(id=>readSession(id)?.status!=='accepted'))))return fail('MILESTONE_UNPROVEN');

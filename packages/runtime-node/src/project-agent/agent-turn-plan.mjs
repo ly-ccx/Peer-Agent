@@ -307,7 +307,7 @@ function hostEvidenceRefs(rounds) {
 function attachEvidence(message, evidenceRefs) {
   if (evidenceRefs.length === 0) return message;
   const meta = message.meta && typeof message.meta === 'object' ? message.meta : {};
-  return { ...message, meta: { ...meta, evidenceRefs } };
+  return { ...message, meta: { ...meta, evidenceRefs: [...new Set([...(Array.isArray(meta.evidenceRefs)?meta.evidenceRefs:[]),...evidenceRefs])].slice(0,32) } };
 }
 
 function collectEvidenceRefs(value, refs, depth) {

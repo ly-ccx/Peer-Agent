@@ -1,3 +1,4 @@
+import { evaluateObjectiveProbeCall } from './objective-probe-gate.mjs';
 import { randomUUID } from 'node:crypto';
 import { digestApprovalArgs } from '@peer-agent/runtime-node';
 
@@ -322,6 +323,7 @@ function createPolicyDenial({ toolCallId, reason }) {
 }
 
 function automationCapabilityDecision(policy, call) {
+  if(policy?.kind==='objective_probe'){const gate=evaluateObjectiveProbeCall({policy,call});return gate.allowed?createAutoAccessGrant({toolCallId:call.toolCallId,scope:call.capabilityId,reason:'objective_probe_observe'}):createPolicyDenial({toolCallId:call.toolCallId,reason:gate.reason});}
   if (policy?.kind !== 'automation') return null;
   if (policy.blockedCapabilityIds?.includes(call.capabilityId)) {
     return createPolicyDenial({ toolCallId: call.toolCallId, reason: 'automation_capability_blocked' });
@@ -646,6 +648,7 @@ export function createChatPermissionGate({
   }) {
     return ({ call, classification, ruleDecision }) => new Promise((resolvePermission) => {
       const permissionCall = buildShellPermissionCall({ call, classification, ruleDecision, toolCallId });
+      if(permissionPolicy?.kind==='objective_probe'){resolvePermission(createPolicyDenial({toolCallId:permissionCall.toolCallId,reason:'objective_probe_read_only'}));return;}
       if (permissionPolicy?.kind === 'automation') {
         if (compareShellRisk(classification?.riskLevel, 'L4_privileged') >= 0) {
           resolvePermission(createPolicyDenial({

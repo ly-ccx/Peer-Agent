@@ -489,6 +489,7 @@ export async function executeModelToolCall({
     automationProposalService,
     ensureBrowserReady,
   });
+  if(result.execution&&typeof toolContext.onToolExecution==='function')toolContext.onToolExecution(result.execution);
   if (signal?.aborted) {
     const endedAtMs = Date.now();
     webContents.send('chat:stream:tool-result', {

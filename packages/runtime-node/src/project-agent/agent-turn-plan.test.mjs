@@ -7,6 +7,15 @@ import {
   planAgentTurn,
 } from './agent-turn-plan.mjs';
 
+test('persisted objective reply retains its host observation refs alongside later task evidence',()=>{
+ const observation='objective-probe:ws:actual';
+ const finished=finishAgentTurn({turnId:'watch-turn',plan:planAgentTurn({kind:'wake'}),rounds:[{toolCalls:[
+  {name:'get_session',result:{ok:true,evidenceRef:'tool-result://actual-task'}},
+  {name:'post_reply',input:{text:'Observation',evidenceRefs:['forged']},result:{ok:true,message:{id:'reply',kind:'agent_reply',content:'Observation',meta:{evidenceRefs:[observation]}}}}
+ ]}]});
+ assert.deepEqual(finished.messages[1].meta.evidenceRefs,[observation,'tool-result://actual-task']);
+});
+
 test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', () => {
   const event = { eventId: 'evt-1', seq: 1, kind: 'session_verified' };
   const user = planAgentTurn({

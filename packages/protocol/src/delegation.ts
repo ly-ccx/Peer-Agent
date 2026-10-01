@@ -113,7 +113,11 @@ export type JsonValue =
 export interface DelegationEvent {
   readonly eventId: string;
   readonly kind: DelegationEventKind;
-  readonly sessionId: string;
+  readonly sessionId?: string;
+  readonly workspaceId?: string;
+  readonly objectiveId?: string;
+  readonly watchId?: string;
+  readonly executionKey?: string;
   readonly at: string;
   readonly payload: JsonValue;
 }

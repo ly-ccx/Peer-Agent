@@ -23,7 +23,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
     runTurn(input = {}) {
       if (!input.sink || typeof input.sink.send !== 'function') throw new Error('AgentTurnExecutor requires a sink with send()');
       const profile = input.turnProfile;
-      const priority = input.plan?.kind === 'user' ? 'high' : profile?.role === 'memory_curator' ? 'low' : undefined;
+      const priority = input.plan?.kind === 'user' ? 'high' : ['memory_curator','objective_probe'].includes(profile?.role) ? 'low' : undefined;
       return executionScheduler.withTurn({ planId: profile?.planId, priority, signal: input.signal }, signal => runTurn({ ...input, signal }));
     },
   };

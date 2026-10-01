@@ -102,6 +102,9 @@ export function createDelegationProvider({
     }
 
     const input = validated.value;
+    if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['spawn_session','resume_session','message_session','reprioritize_session','cancel_session','verify_session','set_proactivity'].includes(item.name)){
+      return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
+    }
     if (['message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
       const scope = resolveAnchorScope({
         messages: view.messages,
@@ -376,6 +379,8 @@ function executionView(context) {
     conversationId: text(context?.conversationId) || text(nested.conversationId),
     memoryIds: idList(context?.turnMemoryIds ?? nested.turnMemoryIds),
     currentInputAnchors: idList(context?.currentInputAnchors ?? nested.currentInputAnchors),
+    objectiveWakeIds: idList(context?.objectiveWakeIds ?? nested.objectiveWakeIds),
+    objectiveWakeEvents: Array.isArray(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) ? structuredClone(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) : [],
     turnToolCalls: Array.isArray(context?.turnToolCalls)
       ? context.turnToolCalls.slice()
       : (Array.isArray(nested.turnToolCalls) ? nested.turnToolCalls.slice() : []),
