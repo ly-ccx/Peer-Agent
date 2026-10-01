@@ -103,6 +103,22 @@ test('200-bot search reads classic conversation and Goal catalogs once per proje
   } finally { env.dispose(); }
 });
 
+test('search stamps a fresh catalog and observes another store writer between queries', () => {
+  const env = harness();
+  try {
+    const query = { query: 'externalwriterneedle' };
+    assert.equal(env.invoke('search', query).hits.length, 0);
+    const external = createConversationStore({ storeDir: path.join(env.home, 'conversations') });
+    external.appendMessage(env.bot.profile.agentConversationId, {
+      id: 'external-writer-message', role: 'user', kind: 'user_input',
+      content: 'externalwriterneedle newly persisted outside the host', createdAt: new Date().toISOString(),
+    });
+    const hits = env.invoke('search', query).hits;
+    assert.ok(hits.some(hit => hit.kind === 'message' && hit.messageId === 'external-writer-message'));
+    assert.equal(env.calls.length, 0, 'search must not start cognition');
+  } finally { env.dispose(); }
+});
+
 async function tool(env, name, args, ordinal = 1) {
   const { registry, projection } = createRuntimeToolProjection({ projectionOptions: { mode: 'project_agent' } });
   return executeProjectedModelTool({ name, args, workspacePath: env.project,

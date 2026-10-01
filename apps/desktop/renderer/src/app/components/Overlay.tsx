@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useFocusScope } from '../hooks/useFocusScope';
 import { positionAnchoredOverlay } from './anchoredOverlay';
 import { createPortal } from 'react-dom';
 import { isTopmostOverlay, OVERLAY_SELECTOR } from './overlayStack';
@@ -54,6 +55,7 @@ export function Overlay({
   const [closing, setClosing] = useState(false);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  useFocusScope(panelRef, !anchor, { trap: true, ownsScope: () => isTopmostOverlay(overlayRef.current, Array.from(document.querySelectorAll(OVERLAY_SELECTOR))) });
   const [placement, setPlacement] = useState<CSSProperties>({ visibility: 'hidden' });
 
   useLayoutEffect(() => {
@@ -153,7 +155,7 @@ export function Overlay({
         ref={panelRef}
         id={id}
         style={anchor ? placement : undefined}
-        tabIndex={anchor ? -1 : undefined}
+        tabIndex={-1}
         role="dialog"
         aria-modal={anchor ? undefined : true}
         aria-label={ariaLabel}

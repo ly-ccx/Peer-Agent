@@ -1,3 +1,4 @@
+import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -45,7 +46,7 @@ const timingSeams = [
   ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; globalThis.rcBotShellRecord(\'list\',{  count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
   ['function search(payload = {}) {', 'function search(payload = {}) { const rcStart = performance.now(); let rcStampMs = 0, rcIndexMs = 0;'],
   ['let hits = [];', 'const rcProjectionMs = performance.now() - rcStart; let hits = [];'],
-  ["const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null;", "const rcStampStart = performance.now(); const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null; rcStampMs = performance.now() - rcStampStart; const rcIndexStart = performance.now();"],
+  ["const token = typeof corpusStamp === 'function' ? String(corpusStamp(snapshot?.catalog) ?? '') : null;", "const rcStampStart = performance.now(); const token = typeof corpusStamp === 'function' ? String(corpusStamp(snapshot?.catalog) ?? '') : null; rcStampMs = performance.now() - rcStampStart; const rcIndexStart = performance.now();"],
   ["hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : '');", "hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : ''); rcIndexMs = performance.now() - rcIndexStart;"],
   ['return { ok: true, items, hits };', 'globalThis.rcBotShellRecord(\'search\',{  projectionMs: rcProjectionMs, stampMs: rcStampMs, indexMs: rcIndexMs, totalMs: performance.now() - rcStart }); return { ok: true, items, hits };'],
 ];
@@ -201,7 +202,8 @@ try {
     const window = BrowserWindow.getAllWindows().find(window => new URL(window.webContents.getURL()).searchParams.get('window') === 'quick-chat');
     window.show(); window.webContents.send('quick-chat:shown');
   });
-  await quick.getByLabel('选择机器人', { exact: true }).selectOption({ label: 'project-000' });
+  await quick.getByRole('button', { name: '选择机器人', exact: true }).click();
+  await quick.getByRole('option', { name: 'project-000', exact: true }).click();
   await quick.getByLabel('快速会话内容', { exact: true }).fill('RC_QUICK_INPUT');
   await quick.getByRole('button', { name: '发送', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
@@ -215,7 +217,8 @@ try {
   await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   await tracePaging('initial older page');
   for (const older of [9850, 9800, 9750, 9700]) {
-    await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; node.scrollTop = 0; });
+    await page.locator('.bot-thread').hover();
+    await page.mouse.wheel(0, -30000);
     await tracePaging(`request ${older + 30}`);
     await page.locator(`#bot-msg-rc-message-${older + 30}`).waitFor();
     await page.locator('.bot-thread[aria-busy="false"]').waitFor();
@@ -253,6 +256,7 @@ try {
   await page.locator('.bot-shell').waitFor();
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
+  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
   report.ok = true;

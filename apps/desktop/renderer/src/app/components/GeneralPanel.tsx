@@ -3,6 +3,8 @@ import type { LocaleCode } from '@peer-agent/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { projectAgentShellOf, publishProjectAgentShell, type ProjectAgentShell } from '../../project-agent/onboarding/botShell';
+import { Switch } from '../../ui/boolean-controls/Switch';
+import { BotTimeField } from './BotTimeField';
 import { Dropdown } from './Dropdown';
 
 const LOCALE_LABELS: Record<LocaleCode, string> = {
@@ -268,41 +270,22 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
             <h3>{i18n.t('settings.bots.quietHours')}</h3>
             <p>{i18n.t('settings.bots.quietHours.description')}</p>
           </div>
-          <label className="general-bots-hours">
-            <input
-              type="checkbox"
-              checked={quietEnabled}
-              disabled={isSaving}
-              onChange={(event) => { void saveBots({ quietEnabled: event.target.checked }); }}
-            />
-            <input
-              type="time"
-              value={quietStart}
-              disabled={isSaving}
-              aria-label={i18n.t('settings.bots.quietHours')}
-              onChange={(event) => { void saveBots({ quietStart: event.target.value }); }}
-            />
-            <input
-              type="time"
-              value={quietEnd}
-              disabled={isSaving}
-              aria-label={i18n.t('settings.bots.quietHours')}
-              onChange={(event) => { void saveBots({ quietEnd: event.target.value }); }}
-            />
-          </label>
+          <div className="general-bots-hours">
+            <Switch checked={quietEnabled} disabled={isSaving} aria-label={i18n.t('settings.bots.quietHours')}
+              onCheckedChange={value => { void saveBots({ quietEnabled: value }); }} />
+            <BotTimeField value={quietStart} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietStart')}
+              onChange={value => { void saveBots({ quietStart: value }); }} />
+            <BotTimeField value={quietEnd} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietEnd')}
+              onChange={value => { void saveBots({ quietEnd: value }); }} />
+          </div>
         </div>
         <div className="general-setting-row">
           <div className="general-setting-copy">
             <h3>{i18n.t('settings.bots.digestTime')}</h3>
             <p>{i18n.t('settings.bots.digestTime.description')}</p>
           </div>
-          <input
-            type="time"
-            value={digestTime}
-            disabled={isSaving}
-            aria-label={i18n.t('settings.bots.digestTime')}
-            onChange={(event) => { void saveBots({ digestTime: event.target.value }); }}
-          />
+          <BotTimeField value={digestTime} disabled={isSaving} i18n={i18n} label={i18n.t('settings.bots.digestTime')}
+            onChange={value => { void saveBots({ digestTime: value }); }} />
         </div>
       </section>
     </div>

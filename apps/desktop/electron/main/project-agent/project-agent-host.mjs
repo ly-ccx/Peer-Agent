@@ -262,6 +262,7 @@ export function registerDesktopProjectAgent({
     readMessagesBatch: typeof conversationStore.getPersistedConversationHistories === 'function'
       ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
+    readSessionsBatch: ids => supervisor.listByWorkspaceIds(ids),
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
     readApprovalsBatch: ids => approvalStore.listByWorkspaceIds(ids),
@@ -532,11 +533,13 @@ export function registerDesktopProjectAgent({
       }
       return { bots, messages, tasks, memories };
     },
-    corpusStamp() {
+    corpusStamp(catalog) {
       const parts = [];
-      const ids = typeof directory.workspaceIds === 'function' ? directory.workspaceIds() : [];
-      for (const workspaceId of ids) {
-        const conversationId = directory.conversationId(workspaceId);
+      const sources = Array.isArray(catalog)
+        ? catalog.map(item => ({ workspaceId: item.workspaceId, conversationId: item.profile?.agentConversationId }))
+        : (typeof directory.workspaceIds === 'function' ? directory.workspaceIds() : [])
+          .map(workspaceId => ({ workspaceId, conversationId: directory.conversationId(workspaceId) }));
+      for (const { workspaceId, conversationId } of sources) {
         if (conversationId) parts.push(fileStamp(path.join(dataHome, 'conversations', `${conversationId}.jsonl`)));
         parts.push(fileStamp(path.join(dataHome, 'projects', workspaceId, 'profile.json')));
         if (typeof memoryStore.projectFile === 'function') parts.push(fileStamp(memoryStore.projectFile(workspaceId)));

@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { Switch } from '../../ui/boolean-controls';
+import { memoryPage } from '../state/memoryPage';
 import {
-  filterMemoryRecords,
   readMemoryItems,
   readMemoryRecords,
   readMemorySwitches,
@@ -57,6 +57,7 @@ export function MemoryTab({
   const [kind, setKind] = useState('');
   const [trust, setTrust] = useState('');
   const [status, setStatus] = useState('');
+  const [pageState, setPageState] = useState({ scope: '', index: 0 });
   const [editingId, setEditingId] = useState('');
   const [draft, setDraft] = useState('');
 
@@ -84,7 +85,10 @@ export function MemoryTab({
     };
   }, [onItems, workspaceId]);
 
-  const visible = filterMemoryRecords(items, { kind, trust, status });
+  const pageScope = JSON.stringify([workspaceId, kind, trust, status]);
+  useEffect(() => { setPageState({ scope: pageScope, index: 0 }); }, [pageScope]);
+  const page = memoryPage(items, { kind, trust, status }, pageState.scope === pageScope ? pageState.index : 0);
+  const visible = page.items;
 
   function updateSwitch(patch: Partial<MemorySwitches>) {
     void clientApi.projectMemorySetSwitches({ workspaceId, ...patch }).then(() => reload());
@@ -255,6 +259,15 @@ export function MemoryTab({
                 </li>
               ))}
             </ul>
+            {page.total > 0 ? <div className="bot-memory-pages" role="group" aria-label={i18n.t('projectAgent.drawer.memory.saved')}>
+              <button type="button" disabled={page.page === 0} onClick={() => setPageState({ scope: pageScope, index: page.page - 1 })}>
+                {i18n.t('projectAgent.drawer.memory.previous')}
+              </button>
+              <span role="status">{i18n.t('projectAgent.drawer.memory.page', { start: page.start, end: page.end, total: page.total })}</span>
+              <button type="button" disabled={page.page + 1 >= page.pages} onClick={() => setPageState({ scope: pageScope, index: page.page + 1 })}>
+                {i18n.t('projectAgent.drawer.memory.next')}
+              </button>
+            </div> : null}
             <div className="bot-memory-export-actions">
               <button type="button" onClick={() => { void clientApi.projectMemoryExport({ workspaceId, format: 'json' }); }}>
                 {i18n.t('projectAgent.drawer.memory.exportJson')}

@@ -26,9 +26,7 @@ export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight
       tabIndex={-1}
       onMouseEnter={() => onHighlight(item.workspaceId)}
       onClick={() => onOpen(item.workspaceId)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') onOpen(item.workspaceId);
-      }}
+
     >
       <BotAvatar avatar={item.profile.avatar} label={name} workspaceId={item.workspaceId} mood={botAvatarMood(item.state)} />
       <span className="bot-row-copy">
