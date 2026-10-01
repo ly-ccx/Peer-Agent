@@ -5,6 +5,23 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
+import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
+
+test('free-space gate reads the configured worktree destination, including before that directory exists', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-destination-volume-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const destination = path.join(root, 'not-created', 'worktrees');
+  const seen = [];
+  const runGit = async args => ({ stdout: args[0] === 'rev-parse' ? 'true' : '' });
+  const worktreeAdapter = createAutomationWorktreeAdapter({ rootDir: destination, artifactDir: path.join(root, 'artifacts') });
+  const adapter = createGoalWorktreeAdapter({ worktreeAdapter, runGit,
+    readFreeBytes: async location => { seen.push(location); return 0; } });
+  const facts = await adapter.inspectIsolationFacts({ targetWorkspacePath: root });
+  assert.equal(facts.freeBytes, 0);
+  assert.deepEqual(seen, [destination]);
+  const actual = createGoalWorktreeAdapter({ worktreeAdapter, runGit });
+  assert.ok((await actual.inspectIsolationFacts({ targetWorkspacePath: root })).freeBytes >= 0);
+});
 
 test('missing directories and broken Git metadata are not silently reclassified as non-Git workspaces', async t => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b4-git-inspection-'));

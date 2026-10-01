@@ -251,5 +251,5 @@ export function createAutomationWorktreeAdapter({
     return changes ? { ...changes, retained: false } : null;
   }
 
-  return Object.freeze({ inspectWorkspace, prepare, collect, cleanup, retainOrCleanup });
+  return Object.freeze({ getRootDir: () => rootDir, inspectWorkspace, prepare, collect, cleanup, retainOrCleanup });
 }

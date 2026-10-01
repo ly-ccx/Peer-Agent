@@ -111,6 +111,20 @@ async function worktreeStillPresent(worktreePath) {
   }
 }
 
+async function freeBytesAtDestination(destination) {
+  let location = path.resolve(destination);
+  for (;;) {
+    try {
+      const disk = await statfs(location);
+      return Number(disk.bavail) * Number(disk.bsize);
+    } catch (error) {
+      const parent = path.dirname(location);
+      if (error?.code !== 'ENOENT' || parent === location) throw error;
+      location = parent;
+    }
+  }
+}
+
 function toAdapterRun(plan) {
   const binding = plan.deliveryBinding || {};
   const workspacePath = trimPath(binding.targetWorkspacePath) || trimPath(plan.targetWorkspacePath);
@@ -152,14 +166,17 @@ export function resolveGoalSitePath(plan) {
  * Existing task branches are attached in place; automation-style branches stay a fallback.
  */
 export function createGoalWorktreeAdapter({
-  worktreeAdapter = createAutomationWorktreeAdapter({
-    rootDir: path.join(pathOf('goalPlans'), 'worktrees'),
-    artifactDir: path.join(pathOf('goalPlans'), 'artifacts'),
-  }),
+  worktreeAdapter = null,
   goalPlanStore = null,
   runGit = defaultRunGit,
-  rootDir = path.join(pathOf('goalPlans'), 'worktrees'),
+  rootDir = worktreeAdapter?.getRootDir?.() || path.join(pathOf('goalPlans'), 'worktrees'),
+  readFreeBytes = freeBytesAtDestination,
 } = {}) {
+  worktreeAdapter ??= createAutomationWorktreeAdapter({ rootDir,
+    artifactDir: path.join(pathOf('goalPlans'), 'artifacts') });
+  if (worktreeAdapter.getRootDir && path.resolve(worktreeAdapter.getRootDir()) !== path.resolve(rootDir)) {
+    throw new Error('Goal and Automation worktree execution roots must match');
+  }
   const retainLocks = new Map();
 
   async function inspectIsolationFacts(plan) {
@@ -176,7 +193,7 @@ export function createGoalWorktreeAdapter({
       if (await worktreeStillPresent(root)) return { ok: false };
       return isMissingGitWorktreeError(error) ? { git: false } : { ok: false };
     }
-    const disk = await statfs(root);
+    const freeBytes = await readFreeBytes(rootDir);
     const binding = plan.deliveryBinding || {};
     let existingWorktree = false;
     if (binding.executionIsolation === 'worktree' && binding.worktreePath && binding.taskBranch) {
@@ -191,7 +208,7 @@ export function createGoalWorktreeAdapter({
           && Boolean(targetCommon) && targetCommon === actualCommon && actualBranch === binding.taskBranch;
       } catch { /* Missing, foreign, or detached checkouts never prove isolation. */ }
     }
-    return { git: true, dirty, freeBytes: Number(disk.bavail) * Number(disk.bsize),
+    return { git: true, dirty, freeBytes,
       existingWorktree };
   }
 
