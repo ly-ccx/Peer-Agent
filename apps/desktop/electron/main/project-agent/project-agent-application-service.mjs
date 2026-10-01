@@ -259,6 +259,8 @@ export function createProjectAgentApplicationService({
       }
       queueConversation(payload.workspaceId);
       queueChanged(payload.workspaceId);
+      if (handoff?.error) return { ok: false, code: 'HANDOFF_FAILED', input,
+        message: '未能清理任务工作区，改动仍已保留，请重试。' };
       let delivery = 'queued';
       if (!handoff?.handled && answerTo && agentOnline(payload.workspaceId) !== true && typeof sessions?.deliverAnswer === 'function') {
         const sessionId = sessionIdFromAnswer(answerTo);

@@ -110,6 +110,20 @@ test('automatic merge is explicit, saved through host policy, and invalid patche
   assert.equal((await service.updateProfile({ workspaceId: 'ws-1', autoHandoffOnPolicyAccept: false })).profile.autoHandoffOnPolicyAccept, false);
 });
 
+test('failed handoff cleanup stays actionable and does not acknowledge a successful card decision', async () => {
+  const inputs = [];
+  let relays = 0;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    inputQueue: { submitInput: input => { inputs.push(input); return input; } },
+    sessions: { handleHandoffAnswer: async () => ({ handled: true, error: 'cleanup_failed' }),
+      deliverAnswer: () => { relays++; } } });
+  const result = await service.submitInput({ workspaceId: 'w', text: '放弃这次改动', answerTo: 'card:question:s:handoff_conflict-current' });
+  assert.equal(result.ok, false); assert.equal(result.code, 'HANDOFF_FAILED');
+  assert.equal(inputs.length, 1); assert.equal(result.input, inputs[0]);
+  assert.equal(relays, 0);
+  assert.match(result.message, /保留/);
+});
+
 test('头像展示只读取已保存图片，由主进程编码为 data URL', () => {
   const calls = [];
   const service = createProjectAgentApplicationService({
