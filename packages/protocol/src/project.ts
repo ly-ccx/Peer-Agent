@@ -6,6 +6,36 @@
 import type { ProjectModelPolicy } from './model-routing.ts';
 import type { PendingApprovalState, WorkSessionStatus } from './delegation.ts';
 
+export interface DiagnosticText { readonly length: number; readonly sha256: string }
+export interface ProjectAgentDiagnosticTiming {
+  readonly startedAt: string; readonly finishedAt: string; readonly durationMs: number;
+  readonly outcome: 'done' | 'error' | 'preempted';
+}
+export interface ProjectDiagnostics {
+  readonly schemaVersion: 1; readonly generatedAt: string | null; readonly errors: readonly string[];
+  readonly scheduler: {
+    readonly stats: { readonly active: number | null; readonly waiting: number | null; readonly limit: number | null };
+    readonly queue: readonly { readonly workspace: DiagnosticText | null; readonly plan: DiagnosticText | null; readonly priority: string; readonly enqueuedAt: string | null }[];
+    readonly projects: readonly { readonly workspace: DiagnosticText | null; readonly slots: { readonly read: number | null; readonly write: number | null; readonly isolated: number | null };
+      readonly queue: readonly { readonly session: DiagnosticText | null; readonly priority: string; readonly enqueuedAt: string | null; readonly reason: string | null }[] }[];
+  } | null;
+  readonly bots: readonly {
+    readonly identity: DiagnosticText | null; readonly workspace: '.'; readonly errors: readonly string[];
+    readonly lease: { readonly holder: DiagnosticText | null; readonly surface: string; readonly pid: number | null; readonly acquiredAt: string | null; readonly heartbeatAt: string | null } | null;
+    readonly input: { readonly depth: number | null; readonly executionDepth: number | null; readonly cursor: DiagnosticText | null; readonly executedCursor: DiagnosticText | null } | null;
+    readonly inbox: { readonly cursor: number | null; readonly events: readonly { readonly identity: DiagnosticText | null; readonly seq: number | null; readonly at: string | null; readonly kind: string }[] } | null;
+    readonly approvals: readonly { readonly identity: DiagnosticText | null; readonly state: 'open' | 'stale'; readonly capability: DiagnosticText | null; readonly summary: DiagnosticText | null; readonly at: string | null }[];
+    readonly objectives: readonly { readonly identity: DiagnosticText | null; readonly status: string; readonly autonomy: string;
+      readonly watches: readonly { readonly identity: DiagnosticText | null; readonly kind: string; readonly source: string; readonly paths: readonly string[];
+        readonly lastObservationAt: string | null; readonly nextRunAt: string | null; readonly pending: boolean; readonly unavailable: boolean }[] }[];
+    readonly turns: readonly { readonly identity: DiagnosticText | null; readonly startedAt: string | null; readonly finishedAt: string | null; readonly durationMs: number | null; readonly outcome: string }[];
+  }[];
+}
+export type ProjectDiagnosticsRequest = { readonly action: 'read' | 'export' };
+export type ProjectDiagnosticsResult =
+  | { readonly ok: true; readonly report: ProjectDiagnostics; readonly saved?: boolean; readonly cancelled?: boolean }
+  | { readonly ok: false; readonly code: 'INVALID_INPUT' | 'DIAGNOSTICS_UNAVAILABLE' | 'DIAGNOSTICS_SAVE_FAILED' };
+
 export interface ProjectRegistryEntry {
   readonly workspaceId: string;
   readonly path: string;

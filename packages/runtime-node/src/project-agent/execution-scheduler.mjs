@@ -216,5 +216,19 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
       }
     },
     stats() { return { active, waiting: waiting.length, limit: normalizeConcurrency(getConcurrency()) }; },
+    diagnosticSnapshot() {
+      const plans = [...plansById.values()].filter(plan => plan.delegationOrigin);
+      const projects = [...new Set(plans.map(plan => plan.delegationOrigin.workspaceId))].map(workspaceId => {
+        const local = plans.filter(plan => plan.delegationOrigin.workspaceId === workspaceId);
+        const metadata = new Map((queues.get(workspaceId) || []).map(row => [row.sessionId, row]));
+        return { workspaceId, slots: Object.fromEntries(['read', 'write', 'isolated'].map(kind => [kind, local.filter(plan => occupying(plan) && slot(plan) === kind).length])),
+          queue: local.filter(plan => plan.delegationOrigin.phase === 'queued' && !TERMINAL.has(plan.status)).map(plan => ({
+            sessionId: plan.delegationOrigin.sessionId, priority: plan.delegationOrigin.priority || 'normal',
+            enqueuedAt: metadata.get(plan.delegationOrigin.sessionId)?.enqueuedAt ?? null, reason: inspect(plan).reason,
+          })) };
+      });
+      return { stats: { active, waiting: waiting.length, limit: normalizeConcurrency(getConcurrency()) },
+        queue: waiting.map(job => ({ workspaceId: job.workspaceId, planId: job.planId, priority: job.priority, at: job.at })), projects };
+    },
   };
 }

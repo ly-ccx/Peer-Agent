@@ -47,12 +47,26 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
   const bot = api.listItems()[0];
   const invoke = (channel, payload = {}) => handlers.get(`project-agent:${channel}`)({}, { workspaceId: bot.workspaceId, ...payload });
   return { executor, home, project, api, bot, plans, conversations, calls, routes, starts, events, invoke, settingsReads: () => settingsReads,
+    diagnostics: action => handlers.get('project-agent:diagnostics')({}, { action }),
     history: () => conversations.getPersistedConversationHistory(bot.profile.agentConversationId).messages,
     async submit(inputId = crypto.randomUUID(), text = 'hello') {
       api.host.inputQueue.submitInput({ workspaceId: bot.workspaceId, inputId, text, surface: 'desktop' });
       await api.host.sync([bot.workspaceId]);
     }, dispose: () => api.dispose() };
 }
+
+test('desktop diagnostic assembly reads actual input and turn stores without running cognition or accepting renderer paths', async () => {
+  const env=harness();
+  try {
+    const first=await env.diagnostics('read');assert.equal(first.ok,true);assert.equal(first.report.bots.length,1);assert.equal(first.report.bots[0].input.depth,0);
+    const callCount=env.calls.length;assert.equal((await env.diagnostics('read')).ok,true);assert.equal(env.calls.length,callCount);
+    await env.submit('diagnostic-input');
+    const after=await env.diagnostics('read');assert.equal(after.ok,true);assert.equal(after.report.bots[0].input.depth,0);
+    assert.deepEqual(after.report.errors,[]);assert.deepEqual(after.report.bots[0].errors,[]);
+    assert.equal(after.report.bots[0].turns.at(-1).outcome,'done');assert.ok(after.report.bots[0].turns.at(-1).durationMs>=0);
+    const text=JSON.stringify(after.report);assert.equal(text.includes(env.home),false);assert.equal(text.includes('hello'),false);
+  } finally { env.dispose(); }
+});
 
 test('targeted wake checks global eligibility once while retaining 200 lease-owning bots', async () => {
   const settings = { projectAgent: { shell: 'bots' } };

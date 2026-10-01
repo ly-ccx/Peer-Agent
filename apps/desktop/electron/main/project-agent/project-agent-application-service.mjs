@@ -86,6 +86,7 @@ export function createProjectAgentApplicationService({
   listModels = () => [],
   retryTurn = null,
   requestTakeover = null,
+  diagnostics = null,
 } = {}) {
   let corpusToken = null;
   const retrying = new Map();
@@ -617,6 +618,7 @@ export function createProjectAgentApplicationService({
   }
 
   return {
+    diagnostics: (...args) => typeof diagnostics === 'function' ? diagnostics(...args) : { ok: false, code: 'DIAGNOSTICS_UNAVAILABLE' },
     takeoverHost,
     list,
     get,

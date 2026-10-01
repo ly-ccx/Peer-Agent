@@ -101,13 +101,14 @@ export function createInputQueue({
     }
   }
 
-  function readInputs(workspaceId) {
+  function readInputs(workspaceId, strict = false) {
     const file = queueFile(workspaceId);
     if (!existsSync(file)) return [];
     let text = '';
     try {
       text = readFileSync(file, 'utf8');
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       return [];
     }
     const inputs = [];
@@ -116,10 +117,12 @@ export function createInputQueue({
       if (!line.trim()) continue;
       try {
         const input = normalizeStored(JSON.parse(line), workspaceId);
-        if (!input || seen.has(input.inputId)) continue;
+        if (!input) { if (strict) throw new Error('CORRUPT_INPUT_QUEUE'); continue; }
+        if (seen.has(input.inputId)) continue;
         seen.add(input.inputId);
         inputs.push(input);
-      } catch {
+      } catch (error) {
+        if (strict) throw error;
         // 坏行跳过，不挡住后面的输入。
       }
     }
@@ -256,7 +259,21 @@ export function createInputQueue({
     return { consumed: outcome.consumed, skipped: outcome.skipped };
   }
 
-  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor };
+  function diagnosticSnapshot(workspaceId) {
+    const id = workspaceIdOf(workspaceId);
+    if (!id) throw new Error('INVALID_WORKSPACE');
+    const inputs = readInputs(id, true), state = readCursorState(id);
+    if (!state || typeof state !== 'object' || Array.isArray(state)
+      || ['inputId','executedInputId'].some(key => state[key] !== undefined && !INPUT_ID.test(state[key]))
+      || state.completedInputIds !== undefined && (!Array.isArray(state.completedInputIds) || state.completedInputIds.some(value => typeof value !== 'string' || !INPUT_ID.test(value)))) throw new Error('CORRUPT_INPUT_CURSOR');
+    const delivered = inputs.findIndex(input => input.inputId === state.inputId);
+    const executed = inputs.findIndex(input => input.inputId === state.executedInputId);
+    const completed = new Set(Array.isArray(state.completedInputIds) ? state.completedInputIds : []);
+    return { depth: inputs.length - delivered - 1,
+      executionDepth: inputs.slice(executed + 1, delivered + 1).filter(input => !completed.has(input.inputId)).length,
+      cursor: state.inputId ?? null, executedCursor: state.executedInputId ?? null };
+  }
+  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot };
 }
 
 function normalizeSubmission(input, workspaceId, createdAt) {

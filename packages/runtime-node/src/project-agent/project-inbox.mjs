@@ -233,6 +233,34 @@ export function createProjectInbox({
     takeBatch,
     commitBatch,
     cursor: readCursor,
+    diagnosticSnapshot(workspaceId) {
+      if (typeof workspaceId !== 'string' || !WORKSPACE_DIR.test(workspaceId)) throw new Error('INVALID_WORKSPACE');
+      let cursor = 0;
+      try {
+        const raw = JSON.parse(readFileSync(cursorFile(workspaceId), 'utf8'));
+        if (!Number.isSafeInteger(raw?.seq) || raw.seq < 0) throw new Error('CORRUPT_INBOX_CURSOR');
+        cursor = raw.seq;
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      const events = [];
+      const add = text => { for (const line of text.split('\n')) if (line.trim()) {
+        const row = JSON.parse(line);
+        if (typeof row?.eventId !== 'string' || !Number.isSafeInteger(row.seq) || row.seq < 1) throw new Error('CORRUPT_INBOX');
+        events.push(row);
+      } };
+      try { add(readFileSync(inboxFile(workspaceId), 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (events.length < 200) {
+        let archives = [];
+        try { archives = readdirSync(dirFor(workspaceId)).filter(name => /^inbox-\d{4}-\d{2}-\d{2}(?:-\d+)?\.jsonl\.gz$/.test(name))
+          .sort((a, b) => b.slice(6, 16).localeCompare(a.slice(6, 16))
+            || Number(b.match(/^inbox-\d{4}-\d{2}-\d{2}-(\d+)\.jsonl/)?.[1] ?? 0) - Number(a.match(/^inbox-\d{4}-\d{2}-\d{2}-(\d+)\.jsonl/)?.[1] ?? 0)); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+        for (const name of archives) {
+          add(gunzipSync(readFileSync(path.join(dirFor(workspaceId), name))).toString('utf8'));
+          if (events.length >= 200) break;
+        }
+      }
+      return { cursor, events: events.sort((a,b) => a.seq - b.seq).slice(-200) };
+    },
   };
 }
 

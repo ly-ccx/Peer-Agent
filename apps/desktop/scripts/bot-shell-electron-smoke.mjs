@@ -1,4 +1,5 @@
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
+import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -58,10 +59,12 @@ writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
 writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
 const entry = path.join(root, 'entry.mjs');
-writeFileSync(entry, `import {app} from 'electron';
+const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
+writeFileSync(entry, `import {app,dialog} from 'electron';
 import {writeFileSync,renameSync} from 'node:fs';
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 app.setPath('userData',${JSON.stringify(path.join(root, 'chromium'))});
+${process.argv.includes('--diagnostics') ? `dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(diagnosticsFile)}});` : ''}
 const observations={reads:[],list:[],search:[],turns:[]};
 globalThis.rcBotShellRecord=(key,value)=>{
   observations[key].push(value);
@@ -245,6 +248,7 @@ try {
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report });
+  if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
   report.ok = true;
