@@ -2159,7 +2159,7 @@ function registerDesktopIpcHost() {
       dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
       hostLeases, holdsLease: (workspaceId) => hostLeases.holds(workspaceId), acquireLease: (id) => hostLeases.acquire(id), releaseLease: (id) => hostLeases.release(id),
-      getSettings: () => settingsStore.getAll(), mergeSettings: (patch) => settingsStore.merge(patch),
+      getSettings: () => settingsStore.getAll(), readRuntimePolicy: () => settingsStore.getRuntimePolicy(), mergeSettings: (patch) => settingsStore.merge(patch),
       dialog, BrowserWindow, shell, listModels: () => llmConfigStore.listProviders(),
       readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
       onReady: (api) => { projectAgentDirectory = api; },

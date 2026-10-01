@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadMigratedSettings } from '@peer-agent/runtime-node';
+import { loadMigratedSettings, normalizeProjectAgentSettings, SETTINGS_MIGRATIONS } from '@peer-agent/runtime-node';
 import { pathOf } from './data-store.mjs';
 
 /**
@@ -29,6 +29,22 @@ export function createSettingsStore({ settingsFile = pathOf('settings') } = {}) 
     return readAll();
   }
 
+  // Runtime gates need fresh policy, not a repeated full workspace identity repair.
+  // This projection cannot supply workspace/remote scope or permission truth.
+  function getRuntimePolicy() {
+    let settings;
+    try { settings = JSON.parse(readFileSync(settingsFile, 'utf8')); } catch { return {}; }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return {};
+    const current = SETTINGS_MIGRATIONS.reduce((max, migration) => Math.max(max, migration.version), 0);
+    if (!Number.isSafeInteger(settings.schemaVersion) || settings.schemaVersion < current) settings = readAll();
+    const agent = normalizeProjectAgentSettings(settings.projectAgent), memory = settings.memory;
+    return {
+      projectAgent: Object.fromEntries(['shell', 'concurrency', 'proactivity', 'quietHours', 'digestTime']
+        .map(key => [key, agent[key]])),
+      memory: { enabled: memory?.enabled !== false, learnPreferences: memory?.learnPreferences !== false },
+    };
+  }
+
   /** 浅合并写入（只覆盖传入的顶层 key），返回合并后的完整设置。 */
   function merge(partial) {
     if (!partial || typeof partial !== 'object' || Array.isArray(partial)) {
@@ -39,5 +55,5 @@ export function createSettingsStore({ settingsFile = pathOf('settings') } = {}) 
     return next;
   }
 
-  return { getAll, merge };
+  return { getAll, getRuntimePolicy, merge };
 }
