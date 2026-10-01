@@ -1756,3 +1756,7 @@ test('objective automatic dispatch persists one GoalPlan per fact across paraphr
   const approved=await env.supervisor.spawn(spawnInput({title:'Injected',brief:'Not approved'}),contextOf(env,{currentInputAnchors:['approval'],objectiveProposalAnswer:true}));assert.ok(approved.sessionId);assert.equal(env.supervisor.get({sessionId:approved.sessionId}).title,'修复登录');assert.equal(actions.usage('ws-1',item.objectiveId),3);
  }finally{await env.cleanup();}
 });
+
+test('objective policy read failure cannot automatically accept a verified and reported task',async()=>{
+ const env=await harness({resolveAcceptancePolicy:()=>{throw Error('authority read failed');},readSessionFacts:()=>({hostAuthority:{independentVerifier:'passed'}})});try{const opened=await completedSession(env),plan=env.goalPlanStore.getPlan(opened.planId);env.goalPlanStore.revisePlan(opened.planId,{delegationOrigin:{...plan.delegationOrigin,objectiveId:'actual-objective'}},{reason:'objective fixture',changedBy:'test'});env.conversationStore.appendMessage(env.parent.id,{id:'reported',role:'assistant',kind:'agent_reply',content:'Verified result',sources:[opened.sessionId]});const settled=await env.supervisor.settle(opened.sessionId);assert.equal(settled.accepted,false);assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance,undefined);}finally{await env.cleanup();}
+});

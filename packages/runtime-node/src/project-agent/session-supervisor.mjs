@@ -656,11 +656,12 @@ export function createSessionSupervisor({
   }
 
   function policyFor(workspaceId, plan) {
-    if (typeof resolveAcceptancePolicy !== 'function') return 'auto';
+    const fallback=plan?.delegationOrigin?.objectiveId?'confirm':'auto';
+    if (typeof resolveAcceptancePolicy !== 'function') return fallback;
     try {
       return resolveAcceptancePolicy(workspaceId, plan) === 'confirm' ? 'confirm' : 'auto';
     } catch {
-      return 'auto';
+      return fallback;
     }
   }
 

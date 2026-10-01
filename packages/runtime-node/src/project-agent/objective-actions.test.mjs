@@ -79,3 +79,11 @@ test('a task_event watch without an optional probe creates actual SDK Evidence a
   const allowed=w.service().prepareSpawn(task(),w.context([{kind:'objective_signal',eventId:'event-task',workspaceId:'ws',objectiveId,watchId:'task',executionKey}]));assert.equal(allowed.ok,true);assert.ok(allowed.objectiveActionId);
  }finally{w.cleanup();}
 });
+
+test('failure circuit uses the actual projected spawnedAt order and recovers after a newer success',()=>{
+ const w=world();try{for(const row of [{sessionId:'old',status:'accepted',spawnedAt:'2026-09-01T00:00:00Z'},...['a','b','c'].map((id,n)=>({sessionId:id,status:'failed',spawnedAt:`2026-10-01T0${n}:00:00Z`}))])w.sessions.set(row.sessionId,{...row,workspaceId:'ws',origin:{objectiveId:w.item.objectiveId}});
+  assert.equal(w.service().prepareSpawn(task(),w.context([w.event(1)])).error,'objective_proposal_required');w.sessions.set('new',{sessionId:'new',status:'accepted',spawnedAt:'2026-10-01T09:00:00Z',workspaceId:'ws',origin:{objectiveId:w.item.objectiveId}});assert.equal(w.service().prepareSpawn(task(),w.context([w.event(2)])).ok,true);
+ }finally{w.cleanup();}
+});
+test('unreadable objective authority always resolves acceptance to confirm',()=>{const w=world();try{writeFileSync(path.join(w.root,'projects/ws/objectives/objectives.json'),'{broken');assert.equal(w.service().acceptancePolicy('ws',w.item.objectiveId),'confirm');}finally{w.cleanup();}});
+test('expired proposals do not occupy pending cards or prevent new proposals at the capacity limit',()=>{const w=world('propose');try{for(let n=0;n<128;n++)assert.equal(w.actions.prepare(w.item,task({objectiveId:w.item.objectiveId}),[`old-${n}`]).ok,true);w.clock('2026-10-09T12:00:00Z');assert.equal(w.actions.pending('ws').length,0);assert.equal(w.actions.prepare(w.item,task({objectiveId:w.item.objectiveId}),['fresh']).ok,true);}finally{w.cleanup();}});

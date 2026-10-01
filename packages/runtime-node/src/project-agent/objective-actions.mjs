@@ -17,7 +17,7 @@ export function createObjectiveActions({rootDir=null,now=()=>new Date()}={}){
   const ws=objective.workspaceId,state=read(ws),actionId=`action-${hash([ws,objective.objectiveId,eventIds.slice().sort()])}`;
   let item=state.items.find(item=>item.actionId===actionId);
   if(item){if(item.version!==objective.version&&item.state!=='spawned')return {error:'objective_proposal_stale'};return {ok:true,item:structuredClone(item),replayed:true};}
-  if(state.items.filter(item=>item.state==='proposed').length>=128)return {error:'objective_proposal_capacity'};
+  if(state.items.filter(item=>item.state==='proposed'&&Date.parse(stamp())-Date.parse(item.createdAt)<=7*86_400_000).length>=128)return {error:'objective_proposal_capacity'};
   const auto=objective.autonomy==='act'&&!forceProposal&&usage(ws,objective.objectiveId)<Math.min(3,objective.budget.maxAutoSessionsPerDay);
   item={actionId,workspaceId:ws,objectiveId:objective.objectiveId,version:objective.version,eventIds:eventIds.slice().sort(),input:structuredClone(input),createdAt:stamp(),mode:auto?'auto':'proposal',state:auto?'reserved':'proposed',...(auto?{reservedAt:stamp()}:{})};
   state.items.push(item);save(ws,state);return {ok:true,item:structuredClone(item)};
