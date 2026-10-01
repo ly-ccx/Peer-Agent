@@ -85,6 +85,7 @@ export function createProjectAgentApplicationService({
   searchIndex = createConversationSearchIndex(),
   listModels = () => [],
   retryTurn = null,
+  requestTakeover = null,
 } = {}) {
   let corpusToken = null;
   const retrying = new Map();
@@ -600,7 +601,20 @@ export function createProjectAgentApplicationService({
     return presentEvidence({ ...body, evidenceRef });
   }
 
+  async function takeoverHost(payload = {}) {
+    if (!open()) return disabled();
+    if (typeof payload.workspaceId !== 'string' || !payload.workspaceId.trim()) return { ok: false, code: 'INVALID_INPUT' };
+    const got = directory?.get?.(payload.workspaceId);
+    if (!got?.ok) return { ok: false, code: 'NOT_FOUND' };
+    if (typeof requestTakeover !== 'function') return { ok: false, code: 'HOST_UNAVAILABLE' };
+    const result = await requestTakeover(payload.workspaceId);
+    if (result?.reason === 'invalid') return { ok: false, code: 'INVALID_INPUT' };
+    queueChanged(payload.workspaceId);
+    return { ok: true, requested: result?.requested === true, ...(result?.reason === 'self' ? { alreadyHost: true } : {}) };
+  }
+
   return {
+    takeoverHost,
     list,
     get,
     readAvatar,

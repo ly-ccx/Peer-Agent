@@ -8,9 +8,9 @@ test('new-task worktree preference is stored on the conversation and applied via
   const [main, service, helper, adapter, goalRunnerHost] = await Promise.all([
     readSource('./main.mjs'),
     readSource('./llm-chat-service.mjs'),
-    readSource('./goal-preferred-worktree.mjs'),
-    readSource('./goal-worktree-adapter.mjs'),
-    readSource('./agent-host/goal-runner-host.mjs'),
+    readSource('../../../../packages/runtime-node/src/project-agent/goal-preferred-worktree.mjs'),
+    readSource('../../../../packages/runtime-node/src/project-agent/goal-worktree-adapter.mjs'),
+    readSource('../../../../packages/runtime-node/src/project-agent/goal-runner-host.mjs'),
   ]);
 
   assert.match(main, /handleChatStartTask\([\s\S]*preferredExecutionIsolation = 'none'[\s\S]*createConversation\(\{[\s\S]*preferredExecutionIsolation/);

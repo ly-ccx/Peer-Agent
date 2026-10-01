@@ -102,6 +102,8 @@ export interface NodeRuntimeResultFactory {
 }
 
 export interface CreateNodeRuntimeHostAdapterOptions {
+  /** Recheck local authority after asynchronous Hooks/approval, before dispatch. */
+  readonly executionGate?: (request: RuntimeSdkExecuteRequest, context: NodeRuntimeExecutionContext) => string | null;
   readonly workspaceRoot?: string;
   readonly providerExecutor: NodeRuntimeProviderExecutor;
   readonly sessionProvider: {

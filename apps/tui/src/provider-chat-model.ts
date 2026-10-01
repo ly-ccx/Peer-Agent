@@ -21,7 +21,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
-import { encodeProviderToolResult } from '@peer-agent/runtime-node';
+import { encodeProviderToolResult, evaluateWorkSessionWrite } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -275,6 +275,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
+  const toolsForTurn = (mode: TuiRuntimeMode, input: ChatModelInput) => toolDefinitionsForMode(mode).filter(tool =>
+    evaluateWorkSessionWrite({ delegationOrigin: { readOnly: (input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly === true } }, tool).allowed);
   const systemMessagesFor = (context: ProviderSystemPromptContext): readonly ModelMessage[] => {
     const content = options.getSystemPrompt?.(context) ?? options.systemPrompt;
     return content ? [{ role: 'system', content }] : [];
@@ -365,20 +367,20 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const modelMessages: ModelMessage[] = [
         ...systemMessages,
         ...historyWithoutSystem,
-        { role: 'user', content: userContent },
+        ...(input.input.omitCurrentUser ? [] : [{ role: 'user' as const, content: userContent }]),
       ];
-      const pinnedTools = toolDefinitionsForMode(mode).map(toModelTool);
+      const pinnedTools = toolsForTurn(mode, input.input).map(toModelTool);
       return {
         messages: [
           ...input.input.history,
-          {
+          ...(input.input.omitCurrentUser ? [] : [{
             id: 'input',
             role: 'user',
             content: input.input.content,
             ...(input.input.images && input.input.images.length > 0
               ? { images: input.input.images }
               : {}),
-          } as ChatMessage,
+          } as ChatMessage]),
         ],
         modelMessages,
         toolExecutions: [],
@@ -400,7 +402,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     },
     async runTurn(state, context) {
       const mode = normalizeTuiRuntimeMode(context.run.mode);
-      const projectedToolDefinitions = toolDefinitionsForMode(mode);
+      const projectedToolDefinitions = toolsForTurn(mode, context.run.input);
       const toolsByName = new Map(projectedToolDefinitions.map((tool) => [tool.name, tool]));
       const pinnedPrefix = state.pinnedProviderPrefix?.mode === mode
         ? state.pinnedProviderPrefix

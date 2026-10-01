@@ -7,6 +7,16 @@ import {
 } from './conversation-history-projector.ts';
 
 describe('projectConversationHistory', () => {
+  it('serializes structured persisted tool output without losing fields on restore', () => {
+    const output = { ok: true, sessionId: 'restored-session', evidenceRefs: ['tool-result://read'] };
+    const projected = projectConversationHistory([{ id: 'assistant', role: 'assistant', content: '', segments: [
+      { type: 'tool-call', tool: 'get_session', toolCallId: 'read', args: {}, result: output },
+    ] }]);
+    const tool = projected.messages.find(message => message.role === 'tool');
+    assert.ok(tool);
+    assert.deepEqual(JSON.parse(String(tool.content)), output);
+    assert.equal(tool.toolCallId, 'read');
+  });
   it('uses the last compaction boundary and returns its continuity summary', () => {
     const result = projectConversationHistory([
       { id: 'old-user', role: 'user', content: 'old question' },

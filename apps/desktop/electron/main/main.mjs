@@ -2158,7 +2158,7 @@ function registerDesktopIpcHost() {
       enabled: () => true,
       dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
-      holdsLease: (workspaceId) => hostLeases.holds(workspaceId), acquireLease: (id) => hostLeases.acquire(id), releaseLease: (id) => hostLeases.release(id),
+      hostLeases, holdsLease: (workspaceId) => hostLeases.holds(workspaceId), acquireLease: (id) => hostLeases.acquire(id), releaseLease: (id) => hostLeases.release(id),
       getSettings: () => settingsStore.getAll(), mergeSettings: (patch) => settingsStore.merge(patch),
       dialog, BrowserWindow, shell, listModels: () => llmConfigStore.listProviders(),
       readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
@@ -3421,7 +3421,7 @@ function flushPendingRuntimeEvents() {
 }
 
 async function startRecoveryAndAppearance() {
-  applyStartupApprovalRecovery({ approvalStore: createApprovalStore(), goalPlanStore });
+  applyStartupApprovalRecovery({ approvalStore: createApprovalStore(), goalPlanStore, canRecover: row => !goalPlanStore.getPlan(row.planId)?.delegationOrigin || hostLeases.holds(row.workspaceId) });
   try {
     if (goalRunner && typeof goalRunner.recoverContextCheckpoints === 'function') {
       const recovery = goalRunner.recoverContextCheckpoints({ includeDelegated: false });
@@ -3542,7 +3542,7 @@ function startLocalRuntime() {
     name: 'local-tool-host-events',
     dispose: async () => {
       try {
-        hostLeases.close();
+        await hostLeases.closeAfterDraining();
         await remoteAccess?.stop().catch(() => {});
         remoteAccess = null;
         await Promise.all([

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const mainSource = readFileSync(new URL('./main.mjs', import.meta.url), 'utf8');
-const goalRunnerHostSource = readFileSync(new URL('./agent-host/goal-runner-host.mjs', import.meta.url), 'utf8');
+const goalRunnerHostSource = readFileSync(new URL('../../../../packages/runtime-node/src/project-agent/goal-runner-host.mjs', import.meta.url), 'utf8');
 const rendererSource = readFileSync(
   new URL('../../renderer/src/chat/components/ChatSurface.tsx', import.meta.url),
   'utf8',

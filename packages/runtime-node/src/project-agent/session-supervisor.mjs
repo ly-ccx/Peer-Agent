@@ -1,3 +1,4 @@
+import { isHostHandoffPause } from './session-host-handoff.mjs';
 import { hasCurrentUserUrgency } from './user-priority.mjs';
 import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
@@ -35,6 +36,12 @@ const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const WRITE_CAPABILITIES = new Set(['local.file.write', 'local.file.edit', 'local.shell.exec']);
 const WRITE_KINDS = new Set(['file-write', 'shell']);
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'bash']);
+const READ_ONLY_CAPABILITIES = new Set([
+  'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate',
+  'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
+  'local.goal.record_evidence', 'local.interaction.request_user_input',
+  'local.goal.explore',
+]);
 const ROLE_SLOTS = [
   ['session_worker', 'worker'],
   ['explorer', 'explorer'],
@@ -52,7 +59,10 @@ export function evaluateWorkSessionWrite(plan, action = {}) {
   const writing = WRITE_CAPABILITIES.has(capabilityId)
     || WRITE_KINDS.has(permissionKind)
     || WRITE_TOOLS.has(toolName);
-  if (!writing) return { allowed: true };
+  // Bookkeeping of task facts and loading Skill text do not execute project mutations.
+  const reading = READ_ONLY_CAPABILITIES.has(capabilityId) || capabilityId.startsWith('local.skill.')
+    || (capabilityId.startsWith('local.mcp.') && ['L0_inert', 'L1_local_read'].includes(action.riskLevel));
+  if (!writing && reading) return { allowed: true };
   return { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
 }
 
@@ -1002,6 +1012,14 @@ export function createSessionSupervisor({
       return exclusive(async () => {
         if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
+          if (isHostHandoffPause(plan)) {
+            const { pausedFromPhase, pausedRunnerIntent, ...origin } = plan.delegationOrigin;
+            goalPlanStore.revisePlan(plan.planId, {delegationOrigin:{...origin, phase:pausedFromPhase}},
+              {reason:'host handoff recovered', changedBy:'session-supervisor'});
+            if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId,
+              {awaitIdle:false, intent:pausedRunnerIntent || 'execute'});
+            continue;
+          }
           if (plan.delegationOrigin.phase !== 'running' || !['executing', 'interrupted'].includes(plan.status)
             || plan.runner?.status === 'waiting_user' || ['blocked', 'paused', 'budget_exhausted', 'failed', 'completed'].includes(plan.runner?.status)) continue;
           if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId, { awaitIdle: false });

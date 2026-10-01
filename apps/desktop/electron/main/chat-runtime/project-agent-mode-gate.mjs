@@ -1,4 +1,4 @@
-import { createFailedClientToolResult, evaluateProjectAgentTurn } from '@peer-agent/runtime-node';
+import { createFailedClientToolResult, createPermissionGrant, evaluateProjectAgentTurn } from '@peer-agent/runtime-node';
 
 /**
  * 桌面执行闸。判定只来自 mode-policy。
@@ -40,7 +40,7 @@ export function buildProjectAgentModeDenial({
       message,
     }),
     projectAgentDenied: true,
-    execution: { call, result },
+    execution: { call, grant: createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }), result },
   };
 }
 
@@ -75,6 +75,7 @@ export function attachProjectAgentDenialEvidence(denial, { call, locale = 'zh-CN
     ...denial,
     execution: {
       call,
+      grant: createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }),
       result: createFailedClientToolResult({
         call,
         locale,

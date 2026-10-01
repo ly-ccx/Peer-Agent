@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { getDataHome } from '../data-store.mjs';
+import { evaluateWorkSessionWrite } from '@peer-agent/runtime-node';
 import {
   buildGoalModeDenial,
   evaluateGoalModeGate,
@@ -194,6 +195,20 @@ export async function executeProjectedModelTool({
     return { success: false, error: projection.error };
   }
 
+  const workSessionGate = () => {
+    const planId = toolContext?.turnProfile?.planId ?? toolContext?.planId;
+    const plan = planId ? goalPlanStore?.getPlan?.(planId) : null;
+    const gate = evaluateWorkSessionWrite(plan, {
+      capabilityId: projection.call.capabilityId, toolName: name,
+      permissionKind: projection.tool?.permissionPolicy?.kind, riskLevel: projection.capability?.riskLevel,
+    });
+    return gate.allowed ? null : gate.error;
+  };
+  const workSessionDenial = workSessionGate();
+  if (workSessionDenial) return attachProjectAgentDenialEvidence({ success: false, error: workSessionDenial,
+    output: JSON.stringify({ ok: false, error: workSessionDenial }), projectionCapability: projection.capability,
+  }, { call: projection.call, locale, reason: workSessionDenial });
+
   const probeGate=evaluateObjectiveProbeCall({policy:toolContext?.permissionPolicy,call:projection.call,workspacePath});
   if(!probeGate.allowed)return {...objectiveProbeDenial(projection.call,probeGate.reason,locale),projectionCapability:projection.capability};
   const requestedCwd = resolveSafeWorkspaceRoot(workspacePath);
@@ -333,6 +348,7 @@ export async function executeProjectedModelTool({
     })
     : null;
   const host = createLocalToolHost({
+    executionGate: workSessionGate,
     workspaceRoot: cwd,
     userDataPath,
     sessionStore: createSessionStore(locale),

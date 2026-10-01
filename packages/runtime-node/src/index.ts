@@ -100,6 +100,7 @@ export {
   ModelProviderHttpError,
 } from './openai-compatible-provider.ts';
 export { createNodeRuntimeHostAdapter } from './host-adapter.ts';
+export { createProviderRuntimeClock, createNodeResultFactory, appendNodeHookEvidence } from './provider-utils.ts';
 export { createNodeProviderBundle } from './provider-bundle.ts';
 export {
   createNodeSearchAggregateProvider,
@@ -567,3 +568,39 @@ export { createWatchProbeRuntime } from './project-agent/watch-probe-provider.mj
 export { mapObjectiveObservationEvent } from './project-agent/event-mapper.mjs';
 
 export {createObjectiveActions,objectiveActionCardId} from './project-agent/objective-actions.mjs';
+
+export { createDesktopReplyComposer } from './project-agent/reply-composer-port.mjs';
+
+export { createSessionVerification } from './project-agent/session-verification.mjs';
+
+export { createDesktopProjectFacts } from './project-agent/project-facts.mjs';
+
+export { createProjectLifecycleEffects } from './project-agent/project-lifecycle-effects.mjs';
+
+export { runObjectiveProbeTurn } from './project-agent/objective-probe-turn.mjs';
+
+export { createDesktopObjectiveWatchHost } from './project-agent/objective-watch-host.mjs';
+
+export { curatorModelProviderId, runMemoryCuratorTurn } from './project-agent/memory-curator-turn.mjs';
+export { createProjectAgentHost } from './project-agent/runtime-host.mjs';
+export { createCollectingSink, createCallbackSink } from './project-agent/turn-sinks.mjs';
+export { conversationPrefersWorktree, preparePlanExecutionWorkspace } from './project-agent/goal-preferred-worktree.mjs';
+export { inspectSourceCheckout, commitSourceCheckout, stashSourceCheckout, resolveHandoffConflicts, previewHandoffMerge, cleanupHandoffPreview, triageTaskLine, createGoalDeliveryHandoff } from './project-agent/goal-delivery-handoff.mjs';
+export { createGoalRunnerAssistantPlaceholder, buildGoalRunnerStreamStartedPayload, mapGoalTurnOutcome } from './project-agent/goal-runner-message-persistence.mjs';
+export { resolveGoalSitePath, createGoalWorktreeAdapter } from './project-agent/goal-worktree-adapter.mjs';
+export { createAutomationWorktreeAdapter } from './project-agent/automation-worktree-adapter.mjs';
+export { isDelegatedWorkSession, resolveDelegatedWorkTurn, resolveWorkSessionProfile, WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES } from './project-agent/work-session-profile.mjs';
+export { finalVerifierText, decodeVerifierReport, runVerifierWithReport } from './project-agent/verifier-report.mjs';
+export { verifierEvidenceSnapshots } from './project-agent/verifier-evidence.mjs';
+export { createGoalTaskBranchAdapter, slugifyTaskBranchName, planNeedsTaskBranch } from './project-agent/goal-task-branch.mjs';
+export { createProjectGoalRunnerHost, buildGoalRunnerMessage } from './project-agent/goal-runner-host.mjs';
+export { createOneTimeApprovalBook } from './project-agent/one-time-approval.mjs';
+
+export { projectToolDescription } from './project-agent/tool-prompts.generated.mjs';
+export { presentEvidence, evidenceRefAllowed, evidenceBodyFromRecord } from './project-agent/evidence-presenter.mjs';
+export { instructionLinesFromText, readProjectInstructionLines } from './project-agent/project-instruction-lines.mjs';
+
+export { fileEvidencePreview } from './project-agent/file-evidence-preview.mjs';
+export { truncatePreview, redactShellOutput, outputRedactions } from './project-agent/output-redaction.mjs';
+export { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl } from './model-channel-wire.mjs';
+export { shouldPauseForHostHandoff, isHostHandoffPause } from './project-agent/session-host-handoff.mjs';

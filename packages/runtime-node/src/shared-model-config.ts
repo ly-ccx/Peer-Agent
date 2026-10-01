@@ -23,6 +23,10 @@ export type SharedModelAuthMethod =
   | 'qoder_local_auth';
 
 export interface StoredModelProvider {
+  readonly wireOverride?: string;
+  readonly supportsTools?: boolean;
+  readonly supportsVision?: boolean;
+  readonly supportsStructured?: boolean;
   readonly id?: string;
   readonly groupId?: string;
   readonly name?: string;
@@ -68,6 +72,10 @@ export interface SharedModelCredentialStore {
 }
 
 export interface SharedModelMetadata {
+  readonly wireOverride?: string;
+  readonly supportsTools?: boolean;
+  readonly supportsVision?: boolean;
+  readonly supportsStructured?: boolean;
   readonly source: 'desktop-default';
   readonly providerId: string;
   /** Desktop channel id when present (openai / anthropic / anthropic-compatible / qoder / ...). */
@@ -429,6 +437,10 @@ function metadataFromSelected(
   return {
     source: 'desktop-default',
     providerId: selected.provider?.trim() || 'openai',
+    ...(selected.wireOverride ? { wireOverride: selected.wireOverride } : {}),
+    supportsTools: selected.supportsTools !== false,
+    supportsVision: selected.supportsVision === true,
+    supportsStructured: selected.supportsStructured !== false,
     ...(channelId ? { channelId } : {}),
     credentialId: credentialIdOf(selected),
     ...(entryId ? { entryId } : {}),

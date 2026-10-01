@@ -337,10 +337,12 @@ function buildRuntimeTools({
   providerType,
   mode,
   excludeCapabilityPrefixes = null,
+  readOnlyWorkSession = false,
 }) {
   // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
   // project_agent 回合把投影上的 accessLevel 标成 restricted_local。共享 permission-gate 不在这里改。
   const projectionOptions = {
+    readOnlyWorkSession,
     mode,
     ...(mode === 'project_agent' ? { accessLevel: 'restricted_local' } : {}),
     ...(Array.isArray(excludeCapabilityPrefixes) && excludeCapabilityPrefixes.length
@@ -1646,6 +1648,7 @@ export function createLlmChatService({
       // 执行层判定准入。见 Goal 模式运行时闸门设计。
       toolContext.mode = runtimeMode;
       toolContext.turnRole = profile?.role ?? null;
+      toolContext.planId = profile?.planId ?? null;
       toolContext.currentInputAnchors = projectAgentTurn && Array.isArray(profile?.context?.inputAnchors)
         ? profile.context.inputAnchors.map(anchor => anchor.messageId).filter(id => typeof id === 'string') : [];
       toolContext.turnId = streamId;
@@ -1909,6 +1912,7 @@ export function createLlmChatService({
           providerType: resolvedChannel.legacyProvider,
           mode: runtimeMode,
           excludeCapabilityPrefixes: profile?.excludeCapabilityPrefixes,
+          readOnlyWorkSession: goalPlanStore?.getPlan?.(profile?.planId)?.delegationOrigin?.readOnly === true,
         });
 
         try {

@@ -25,6 +25,7 @@
 import {
   createGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  delegatedPlanRunsWithLease,
 } from '@peer-agent/runtime-node';
 
 import type { ChatController } from './chat-controller.ts';
@@ -89,6 +90,7 @@ export function createTuiSharedGoalRunner(options: {
   readonly getConversationId: () => string | undefined;
   /** 是否订阅 store onChange 并自动 kick（仅真实运行时开启；测试可注入禁用）。 */
   readonly autoStart?: boolean;
+  readonly holdsLease?: (workspaceId: string) => boolean;
   readonly logger?: Pick<Console, 'warn' | 'error'>;
 }): TuiSharedGoalRunner {
   const { bridge, chat, getConversationId } = options;
@@ -116,13 +118,10 @@ export function createTuiSharedGoalRunner(options: {
       && runtimeConversationId.length > 0
       && ownerConversationId === runtimeConversationId;
   };
-  // beta.2 里任务计划只由持有该项目租约的宿主推进。TUI 要到 B5-01 才获取租约。
-  const isTaskPlan = (plan: { delegationOrigin?: unknown } | null | undefined): boolean => (
-    Boolean(plan?.delegationOrigin && typeof plan.delegationOrigin === 'object')
-  );
-  const canRunPlan = (
-    plan: { conversationId?: unknown; delegationOrigin?: unknown } | null | undefined,
-  ): boolean => !isTaskPlan(plan) && ownsPlan(plan);
+  const canRunPlan = (plan: any): boolean => {
+    const delegated = delegatedPlanRunsWithLease(plan, options.holdsLease);
+    return delegated == null ? ownsPlan(plan) : delegated && ownsPlan(plan);
+  };
 
   const runtime: TuiGoalTurnRuntime = {
     whenIdle,

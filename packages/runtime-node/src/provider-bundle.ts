@@ -176,6 +176,12 @@ export function createNodeProviderBundle(
       if (!projection.tools.some((tool) => tool.capabilityId === request.call.capabilityId)) {
         return createProjectionDeniedExecution(request.call);
       }
+      const gateReason = context.signal instanceof AbortSignal && context.signal.aborted
+        ? 'cancelled' : options.executionGate?.(request.call);
+      if (gateReason) return { result: createNodeToolResult({
+        clock, call: request.call, status: gateReason === 'cancelled' ? 'cancelled' : 'denied',
+        summary: gateReason, error: {code:gateReason,message:gateReason,recoverable:false},
+      }) };
       try {
         const result = await registry.execute({
           capabilityId: request.call.capabilityId,

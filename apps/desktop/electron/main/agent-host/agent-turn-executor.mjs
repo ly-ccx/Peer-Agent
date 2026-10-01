@@ -10,8 +10,14 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
   if (typeof llmChatService?.sendMessage !== 'function') {
     throw new Error('AgentTurnExecutor requires llmChatService.sendMessage');
   }
+  const active = new Map();
   return {
     executionScheduler,
+    async stop(workspaceId) {
+      const turns = [...active.values()].filter(turn => !workspaceId || turn.workspaceId === workspaceId);
+      for (const turn of turns) turn.controller.abort();
+      await Promise.allSettled(turns.map(turn => turn.done));
+    },
     resolveGoalRole(input) {
       return llmChatService.resolveGoalRole?.(input) ?? { ok: false, missing: '没有可用的模型' };
     },
@@ -24,7 +30,14 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       if (!input.sink || typeof input.sink.send !== 'function') throw new Error('AgentTurnExecutor requires a sink with send()');
       const profile = input.turnProfile;
       const priority = input.plan?.kind === 'user' ? 'high' : ['memory_curator','objective_probe'].includes(profile?.role) ? 'low' : undefined;
-      return executionScheduler.withTurn({ planId: profile?.planId, priority, signal: input.signal }, signal => runTurn({ ...input, signal }));
+      const controller = new AbortController(), id = randomUUID();
+      const abort = () => controller.abort(input.signal?.reason);
+      input.signal?.addEventListener('abort', abort, { once: true });
+      if (input.signal?.aborted) abort();
+      const done = executionScheduler.withTurn({ planId: profile?.planId, priority, signal: controller.signal }, signal => runTurn({ ...input, signal }))
+        .finally(() => { input.signal?.removeEventListener('abort', abort); active.delete(id); });
+      active.set(id, { workspaceId: profile?.workspaceId || input.workspaceId, controller, done });
+      return done;
     },
   };
 

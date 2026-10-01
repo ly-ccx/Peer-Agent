@@ -28,6 +28,7 @@ const CHANNELS = [
   'project-agent:confirm-result',
   'project-agent:accept-readme',
   'project-agent:retry',
+  'project-agent:takeover-host',
 ];
 
 function harness() {
@@ -60,6 +61,7 @@ function harness() {
       startFamiliarize: port('start-familiarize'),
       confirmResult: port('confirm-result'),
       acceptReadme: port('accept-readme'),
+      takeoverHost: port('takeover-host'),
       retry: port('retry'),
     },
   });

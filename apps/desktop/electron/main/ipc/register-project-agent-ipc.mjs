@@ -31,6 +31,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     startFamiliarize: assertFunction(projectAgent?.startFamiliarize, 'projectAgent.startFamiliarize'),
     confirmResult: assertFunction(projectAgent?.confirmResult, 'projectAgent.confirmResult'),
     acceptReadme: assertFunction(projectAgent?.acceptReadme, 'projectAgent.acceptReadme'),
+    takeoverHost: assertFunction(projectAgent?.takeoverHost, 'projectAgent.takeoverHost'),
     retry: assertFunction(projectAgent?.retry, 'projectAgent.retry'),
   };
 
@@ -59,6 +60,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:confirm-result', (_event, payload) => ports.confirmResult(payload));
       ipc.handle('project-agent:accept-readme', (_event, payload) => ports.acceptReadme(payload));
       ipc.handle('project-agent:retry', (_event, payload) => ports.retry(payload));
+      ipc.handle('project-agent:takeover-host', (_event, payload) => ports.takeoverHost(payload));
     }),
   ]);
 }

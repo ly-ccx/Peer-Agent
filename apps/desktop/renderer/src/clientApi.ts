@@ -138,6 +138,7 @@ const unavailableApi: ClientApi = {
   projectAgentStartFamiliarize: unavailableMethod('projectAgentStartFamiliarize'),
   projectAgentConfirmResult: unavailableMethod('projectAgentConfirmResult'),
   projectAgentAcceptReadme: unavailableMethod('projectAgentAcceptReadme'),
+  projectAgentTakeoverHost: unavailableMethod('projectAgentTakeoverHost'),
   projectAgentRetry: unavailableMethod('projectAgentRetry'),
   projectObjectivesList: unavailableMethod('projectObjectivesList'),
   projectObjectivesUpdate: unavailableMethod('projectObjectivesUpdate'),

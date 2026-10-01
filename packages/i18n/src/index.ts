@@ -50,6 +50,12 @@ export type TranslationKey =
   | 'developer.saveFailed'
   | 'developer.probeFailed'
   | 'developer.ipcUnavailable'
+  | 'projectAgent.host.title'
+  | 'projectAgent.host.hint'
+  | 'projectAgent.host.action'
+  | 'projectAgent.host.requested'
+  | 'projectAgent.host.ready'
+  | 'projectAgent.host.failed'
   | 'developer.projectAgent.nav'
   | 'developer.projectAgent.title'
   | 'developer.projectAgent.description'
@@ -1232,6 +1238,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.saveFailed': '开发者配置保存失败',
     'developer.probeFailed': '云端合约探测失败',
     'developer.ipcUnavailable': '开发者模式主进程通道未注册。请完全退出并重启客户端，确保 Electron main 已更新后再重试。',
+    'projectAgent.host.title': "执行宿主",
+    'projectAgent.host.hint': "桌面和终端共享同一机器人。接管会先停止旧宿主，再由桌面继续任务。",
+    'projectAgent.host.action': "在桌面接管",
+    'projectAgent.host.requested': "已请求接管，旧宿主停止后会继续任务。",
+    'projectAgent.host.ready': "桌面已可承载这个机器人。",
+    'projectAgent.host.failed': "接管失败，请检查机器人和宿主状态。",
     'developer.projectAgent.nav': '开发者',
     'developer.projectAgent.title': '开发者',
     'developer.projectAgent.description': '界面在设置 → 通用里切换。这里不再读取旧的项目代理开关，原来的值会留着。',
@@ -2212,6 +2224,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.saveFailed': 'Failed to save developer settings',
     'developer.probeFailed': 'Cloud contract probe failed',
     'developer.ipcUnavailable': 'Developer mode IPC is not registered in the main process. Fully quit and restart the desktop client so the updated Electron main process is running.',
+    'projectAgent.host.title': "Execution host",
+    'projectAgent.host.hint': "Desktop and terminal share this bot. Takeover stops the old host before desktop continues its tasks.",
+    'projectAgent.host.action': "Take over on desktop",
+    'projectAgent.host.requested': "Takeover requested. Tasks continue after the old host stops.",
+    'projectAgent.host.ready': "Desktop can now host this bot.",
+    'projectAgent.host.failed': "Takeover failed. Check the bot and its host.",
     'developer.projectAgent.nav': 'Developer',
     'developer.projectAgent.title': 'Developer',
     'developer.projectAgent.description': 'Choose the interface in Settings → General. The old project-agent switch is no longer read, and its stored value stays.',

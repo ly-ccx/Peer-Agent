@@ -1,3 +1,4 @@
+import { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
 
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
@@ -1174,45 +1175,7 @@ export function normalizeChannelId(channelId) {
  * - GLM / Kimi / DeepSeek / Grok / MiMo / HY3 family -> openai-chat (`/v1/chat/completions`)
  * - Unknown models default to openai-chat (safer OpenAI-compatible path)
  */
-export function resolveOpenCodeGoWire(model) {
-  const id = String(model || '').trim().toLowerCase();
-  if (!id) return 'openai-chat';
-
-  // Official docs: only GPT Luna uses the Responses endpoint on Go.
-  if (id.includes('luna') || /^gpt-[\w.-]*luna\b/.test(id)) {
-    return 'openai-responses';
-  }
-
-  // Anthropic Messages endpoint on Go.
-  if (
-    id.includes('claude')
-    || id.includes('anthropic')
-    || id.includes('minimax')
-    || id.startsWith('qwen')
-    || id.includes('qwen3')
-  ) {
-    return 'anthropic-messages';
-  }
-
-  // Chat Completions endpoint: glm / kimi / deepseek / grok / mimo / hy3, etc.
-  return 'openai-chat';
-}
-
-/**
- * Pick the correct OpenCode Go base URL for the selected wire.
- * Accepts either /zen/go or /zen/go/v1 from saved configs and normalizes.
- */
-export function resolveOpenCodeGoBaseUrl(wire, configuredBaseUrl) {
-  const raw = String(configuredBaseUrl || '').trim().replace(/\/+$/, '');
-  if (wire === 'anthropic-messages') {
-    if (!raw) return OPENCODE_GO_ANTHROPIC_BASE_URL;
-    if (/\/zen\/go\/v1$/i.test(raw)) return raw.replace(/\/v1$/i, '');
-    return raw;
-  }
-  if (!raw) return OPENCODE_GO_OPENAI_BASE_URL;
-  if (/\/zen\/go$/i.test(raw)) return `${raw}/v1`;
-  return raw;
-}
+export { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl };
 
 const OPENCODE_GO_CAPABILITIES_BY_WIRE = {
   'openai-responses': {

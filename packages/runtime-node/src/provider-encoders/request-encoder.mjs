@@ -90,6 +90,12 @@ function anthropicModelUsesEffortConfig(model) {
   return ANTHROPIC_EFFORT_NATIVE_PATTERNS.some((re) => re.test(id));
 }
 
+export function stripOpenAIMessageName(message) {
+  if (!message || typeof message !== 'object' || message.name === undefined) return message;
+  const { name: _messageName, ...rest } = message;
+  return rest;
+}
+
 export function encodeOpenAIChatRequest({
   model,
   messages,
@@ -105,14 +111,9 @@ export function encodeOpenAIChatRequest({
   // "name is not supported by this endpoint"）。恢复历史里的 tool 消息会携带
   // name，统一在 chat-completions 编码边界剥离；工具身份由 tool_call_id 配对
   // 承载。Gemini wire 依赖消息级 name 转换 native tool_name，不受影响。
-  const stripMessageLevelName = (message) => {
-    if (!message || typeof message !== 'object' || message.name === undefined) return message;
-    const { name: _messageName, ...rest } = message;
-    return rest;
-  };
   const body = {
     model,
-    messages: normalizeOpenAIMessages(messages).map(stripMessageLevelName),
+    messages: normalizeOpenAIMessages(messages).map(stripOpenAIMessageName),
     stream: true,
     stream_options: { include_usage: true },
     tools,

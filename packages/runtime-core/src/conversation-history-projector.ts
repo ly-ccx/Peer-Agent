@@ -374,7 +374,7 @@ function assistantMessages(message: AnyRecord): CanonicalHistoryMessage[] {
     });
     projected.push({
       role: 'tool',
-      content: typeof segment.result === 'string' ? segment.result : String(segment.result ?? ''),
+      content: typeof segment.result === 'string' ? segment.result : segment.result == null ? '' : safeJson(segment.result),
       toolCallId: id,
       name,
     });
