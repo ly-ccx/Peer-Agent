@@ -576,6 +576,19 @@ test('failed startup retains an isolated Plan when rollback cleanup fails', asyn
   } finally { await env.cleanup(); }
 });
 
+test('cancellation waits for the active turn to settle before removing its execution site', async () => {
+  const calls = [];
+  const env = await harness({ goalRunner: { start: async () => {}, pause: () => calls.push('abort'),
+    waitForIdle: async () => { await Promise.resolve(); calls.push('settled'); } },
+    isolationPlanner: { prepare: async plan => ({ ok: true, plan }), cleanup: async plan => { calls.push('cleanup'); return plan; } } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    await env.supervisor.cancel({ sessionId: opened.sessionId });
+    assert.deepEqual(calls, ['abort', 'settled', 'cleanup']);
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).status, 'cancelled');
+  } finally { await env.cleanup(); }
+});
+
 function hostPassPatch() {
   return {
     tasks: [{ taskId: 'leaf', status: 'completed', evidenceRefs: ['ev-1'] }],

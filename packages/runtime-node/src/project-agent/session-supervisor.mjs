@@ -578,6 +578,8 @@ export function createSessionSupervisor({
         reason,
       });
     }
+    // A tool may still be settling after abort; keep its execution site until the pump is idle.
+    if (typeof goalRunner?.waitForIdle === 'function') await goalRunner.waitForIdle(plan.planId);
     goalPlanStore.setPlanStatus(plan.planId, 'cancelled');
     if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(plan.planId));
     emit({
