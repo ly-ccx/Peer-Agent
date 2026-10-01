@@ -12,6 +12,7 @@ test('verified task watch uses the owned independent verdict before acceptance a
  const runtime=createWatchProbeRuntime({resolveObjective:()=>objective,canObserve:()=>true,resolveWorkspacePath:()=>'/tmp',readSessions:()=>rows});
  const read=async()=>JSON.parse((await runtime.execute({workspaceId:'ws',objectiveId:'o',watchId:'w',executionKey:'verification'})).result.outputPreview.observation.value);
  assert.deepEqual(await read(),[{sessionId:'own',status:'result_ready'}]);rows[0].verdict.independentVerifier='missing';assert.deepEqual(await read(),[]);
+ objective.watches[0].source.filter='ended';assert.deepEqual(await read(),[{sessionId:'own',status:'result_ready'}]);
 });
 
 test('owned watch executes through Projection SDK Grant and Evidence, while lease and pause denial execute no probe',async()=>{
