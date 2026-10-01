@@ -1,4 +1,5 @@
 import { remoteWebResponse } from './web-surface.mjs';
+import { remoteProjectHttp } from './remote-project-http.mjs';
 
 const SESSION = '__Host-peer_session';
 const LOGIN = '__Host-peer_login';
@@ -57,7 +58,7 @@ export function createAccountHttp({ origin, login, sessions, devices, now = Date
     TASK_DENIED: 403, IDENTITY_UNBOUND: 403, EXPORT_DENIED: 403,
     OUTCOME_UNKNOWN: 504,
   };
-  return async function handle(request, { deviceConnections, deviceTasks } = {}) {
+  return async function handle(request, { deviceConnections, deviceTasks, deviceProjects } = {}) {
     const url = new URL(request.url);
     if (url.origin !== origin || (request.headers.has('host') && request.headers.get('host') !== base.host)) {
       return reply(400, { error: 'INVALID_HOST' });
@@ -68,6 +69,12 @@ export function createAccountHttp({ origin, login, sessions, devices, now = Date
       if (request.method === 'GET') {
         const surface = remoteWebResponse(url.pathname, { formActionOrigins });
         if (surface) return surface;
+      }
+      if(url.pathname==='/api/projects'||url.pathname.startsWith('/api/projects/')) {
+        const token=cookie(request.headers,SESSION),principal=sessions.authenticate(token);
+        const result=await remoteProjectHttp(request,{principal,
+          devices,router:deviceProjects,reply,readJsonBody,isAuthenticated:()=>sessions.authenticate(token)?.ownerId===principal?.ownerId});
+        return result??reply(404,{error:'NOT_FOUND'});
       }
       if (url.pathname === '/auth/login' && request.method === 'POST') {
         const start = await login.begin();

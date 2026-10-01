@@ -20,7 +20,7 @@ function fixture(t,options={}) {
   }
   return {socket,sent,client,receive,online};
 }
-const request=text=>({type:'remote.project.request',protocolVersion:1,request:{protocolVersion:1,type:'project.submit',requestId:'request',ownerId:'owner',deviceId:'device',
+const request=text=>({type:'remote.project.request',protocolVersion:1,correlationId:'relay-1',request:{protocolVersion:1,type:'project.submit',requestId:'request',ownerId:'owner',deviceId:'device',
   bindingVersion:1,connectionEpoch:2,delegationVersion:1,expiresAt:20_000,operation:'project.input.submit',workspaceId:'workspace',text}});
 
 test('4000 Chinese characters reach only the project adapter and large Unicode pages remain intact',async t=>{
@@ -29,6 +29,7 @@ test('4000 Chinese characters reach only the project adapter and large Unicode p
     return {status:'ok',result:{messages:Array.from({length:50},()=>({content:'😀'.repeat(4000)}))}};}});
   await f.online();await f.receive(request('中'.repeat(4000)));
   const answer=f.sent.at(-1);assert.equal(answer.type,'remote.project.result');assert.equal(answer.status,'ok');
+  assert.equal(answer.correlationId,'relay-1');
   assert.equal(answer.result.messages.length,50);assert.equal(Array.from(answer.result.messages[49].content).length,4000);
   assert.ok(Buffer.byteLength(JSON.stringify(answer))>4096);assert.ok(Buffer.byteLength(JSON.stringify(answer))<REMOTE_PROJECT_LIMITS.resultBytes);
   assert.equal(projects,1);assert.equal(tasks,0);
@@ -37,7 +38,7 @@ test('4000 Chinese characters reach only the project adapter and large Unicode p
 test('project result over the configured budget is refused without truncation',async t=>{
   const f=fixture(t,{onProjectAccess:async()=>({status:'ok',result:{blob:'x'.repeat(REMOTE_PROJECT_LIMITS.resultBytes)}})});
   await f.online();await f.receive(request('hello'));
-  assert.deepEqual(f.sent.at(-1),{type:'remote.project.result',protocolVersion:1,requestId:'request',status:'failed',code:'RESULT_TOO_LARGE'});
+  assert.deepEqual(f.sent.at(-1),{type:'remote.project.result',protocolVersion:1,requestId:'request',correlationId:'relay-1',status:'failed',code:'RESULT_TOO_LARGE'});
 });
 
 test('legacy and pre-auth frames retain 4KiB admission and do not reach project handlers',async t=>{

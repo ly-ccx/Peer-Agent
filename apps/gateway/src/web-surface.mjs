@@ -1,3 +1,4 @@
+import {projectPage,projectStyles,projectScript} from './project-web-surface.mjs';
 const page = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Peer · 远程设备</title>
 <link rel="stylesheet" href="/assets/remote.css"></head>
@@ -7,6 +8,7 @@ const page = `<!doctype html>
 <p class="lede">登录后查看你绑定的电脑。本地使用 Peer 无需登录。</p>
 </div></div>
 <div class="actions">
+<a href="/bots" class="nav-link">我的机器人</a>
 <form id="login" action="/auth/login" method="post" hidden><button type="submit" class="btn-primary">登录 Peer</button></form>
 <button id="refresh" type="button" class="btn-quiet">刷新设备</button>
 <button id="logout" type="button" class="btn-quiet" hidden>退出当前登录</button>
@@ -26,7 +28,7 @@ const page = `<!doctype html>
 <div class="field"><label for="task-id">任务 ID</label><input id="task-id" required maxlength="128" autocomplete="off"></div>
 <div class="actions"><button id="task-submit" type="submit" class="btn-primary">读取状态</button></div>
 <p id="task-result" class="task-result" role="status"></p></form>
-<p class="footnote">在线仅代表连接可用；读取结果由本机判定。当前版本不开放任何写入操作。</p>
+<p class="footnote">在线仅代表连接可用；任务读取由本机判定。机器人消息与查看权限请在电脑的远程设置中开启。</p>
 </div><script src="/assets/remote.js" defer></script></body></html>`;
 
 /**
@@ -501,6 +503,9 @@ load();`;
 /** Static same-origin surface; no embedded identity, secrets or task data. */
 export function remoteWebResponse(path, { formActionOrigins = [] } = {}) {
   const content = path === '/' || path === '/devices' ? page
+    : path==='/bots'?projectPage
+    : path==='/assets/projects.js'?projectScript
+    : path==='/assets/projects.css'?projectStyles
     : path === '/assets/remote.js' ? script
     : path === '/assets/remote.css' ? styles
     : null;
@@ -511,8 +516,8 @@ export function remoteWebResponse(path, { formActionOrigins = [] } = {}) {
   // different origin — so `'self'` alone silently cancels that hop and the page
   // stays on the login form. Callers pass the issuer origin (login.issuer).
   const formAction = ["'self'", ...formActionOrigins.filter((value) => typeof value === 'string' && value !== '')].join(' ');
-  const type = path === '/assets/remote.js' ? 'text/javascript; charset=utf-8'
-    : path === '/assets/remote.css' ? 'text/css; charset=utf-8'
+  const type = path === '/assets/remote.js'||path==='/assets/projects.js' ? 'text/javascript; charset=utf-8'
+    : path === '/assets/remote.css'||path==='/assets/projects.css' ? 'text/css; charset=utf-8'
     : 'text/html; charset=utf-8';
   return new Response(content, { headers: {
     'content-type': type,

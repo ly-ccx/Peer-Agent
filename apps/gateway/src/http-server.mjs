@@ -21,13 +21,14 @@ export function createGatewayHttpServer({ origin, handle, deviceStore, maxBodyBy
         || !incoming.url?.startsWith('/') || incoming.url.startsWith('//')) return fail(400);
     const url = new URL(incoming.url, origin);
     if (url.origin !== origin) return fail(400);
+    const bodyLimit=incoming.method==='POST'&&/^\/api\/projects\/[^/]+\/input$/.test(url.pathname)?32*1024:maxBodyBytes;
     const length = incoming.headers['content-length'];
-    if (length !== undefined && (!/^\d+$/.test(length) || Number(length) > maxBodyBytes)) return fail(413);
+    if (length !== undefined && (!/^\d+$/.test(length) || Number(length) > bodyLimit)) return fail(413);
     try {
       const chunks = []; let size = 0;
       for await (const chunk of incoming) {
         size += chunk.length;
-        if (size > maxBodyBytes) { fail(413); return; }
+        if (size > bodyLimit) { fail(413); return; }
         chunks.push(chunk);
       }
       const method = incoming.method ?? 'GET';
@@ -41,7 +42,7 @@ export function createGatewayHttpServer({ origin, handle, deviceStore, maxBodyBy
       }
       const response = await handle(new Request(url, { method, headers,
         ...(size ? { body: Buffer.concat(chunks) } : {}) }), { deviceConnections: deviceTransport?.connections,
-          deviceTasks: deviceTransport?.router });
+          deviceTasks: deviceTransport?.router,deviceProjects:deviceTransport?.projectRouter });
       outgoing.statusCode = response.status;
       for (const [name, value] of response.headers) if (name !== 'set-cookie') outgoing.setHeader(name, value);
       const cookies = response.headers.getSetCookie();
@@ -54,7 +55,7 @@ export function createGatewayHttpServer({ origin, handle, deviceStore, maxBodyBy
   const deviceTransport = deviceStore ? attachDeviceWebSocket(server, { origin, store: deviceStore }) : null;
   server.requestTimeout = 10_000;
   server.headersTimeout = 5_000;
-  server.timeout = 15_000;
+  server.timeout = 30_000;
   server.on('timeout', socket => socket.destroy());
   server.keepAliveTimeout = 5_000;
   return {
