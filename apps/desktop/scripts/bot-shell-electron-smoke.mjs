@@ -36,10 +36,22 @@ const applicationService = path.join(isolation.launch.desktopDir, 'electron/main
 const serviceText = readFileSync(applicationService, 'utf8');
 const readSeam = 'return directory.readConversation(payload.workspaceId, payload);';
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
-writeFileSync(applicationService, serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
+let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
   (globalThis.rcBotShellReads ??= []).push({ before: payload.before ?? null, nextCursor: result.nextCursor,
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });
-  return result;`));
+  return result;`);
+const timingSeams = [
+  ['function search(payload = {}) {', 'function search(payload = {}) { const rcStart = performance.now(); let rcStampMs = 0, rcIndexMs = 0;'],
+  ['let hits = [];', 'const rcProjectionMs = performance.now() - rcStart; let hits = [];'],
+  ["const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null;", "const rcStampStart = performance.now(); const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null; rcStampMs = performance.now() - rcStampStart; const rcIndexStart = performance.now();"],
+  ["hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : '');", "hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : ''); rcIndexMs = performance.now() - rcIndexStart;"],
+  ['return { ok: true, items, hits };', '(globalThis.rcSearchTimings ??= []).push({ projectionMs: rcProjectionMs, stampMs: rcStampMs, indexMs: rcIndexMs, totalMs: performance.now() - rcStart }); return { ok: true, items, hits };'],
+];
+for (const [before, after] of timingSeams) {
+  assert.equal(observedService.split(before).length, 2, 'exact search observation seam required');
+  observedService = observedService.replace(before, after);
+}
+writeFileSync(applicationService, observedService);
 const entry = path.join(root, 'entry.mjs');
 writeFileSync(entry, `import {app} from 'electron';
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
@@ -111,6 +123,7 @@ try {
     report.searchSamples.push(await page.evaluate(() => globalThis.rcSearchMeasurement));
   }
   report.metrics = { visibleSearch: metric('search', report.searchSamples) };
+  report.searchTimings = await app.evaluate(() => globalThis.rcSearchTimings ?? []);
   assert.equal(report.metrics.visibleSearch.pass, true, 'input to visible full-corpus result p50 must stay below 150ms');
   await page.locator('.bot-search').fill('');
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
