@@ -10,13 +10,14 @@ import { createConversationStore } from '../../../conversation-store/src/index.m
 import { createMemoryStore } from '../memory/memory-store.mjs';
 import { createProjectRegistry } from '../project-registry.mjs';
 import { createBotLifecycle } from './bot-lifecycle.mjs';
+import { createBotProfileStore } from './bot-profile-store.mjs';
 import { evaluateWorkSessionWrite } from './session-supervisor.mjs';
 
 function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-12-life-'));
 }
 
-function harness(root, { enabled = () => true, spawn = null, removeWorkspace = null, moveToTrash = null, stopWorkspace = null, gitRun = null } = {}) {
+function harness(root, { enabled = () => true, spawn = null, removeWorkspace = null, moveToTrash = null, stopWorkspace = null, resumeWorkspace = null, profileStore = null, gitRun = null } = {}) {
   const folder = path.join(root, 'demo-project');
   mkdirSync(folder, { recursive: true });
   const registry = createProjectRegistry({ filePath: path.join(root, 'projects', 'registry.json') });
@@ -33,6 +34,8 @@ function harness(root, { enabled = () => true, spawn = null, removeWorkspace = n
     removeWorkspace,
     moveToTrash,
     stopWorkspace,
+    resumeWorkspace,
+    profileStore,
     gitRun,
     now: () => new Date('2026-09-27T00:00:00.000Z'),
   });
@@ -63,6 +66,38 @@ test('懒创建档案和代理对话，第二次返回同一个对话', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('failed deletion cleanup is archived and retry continues only its unfinished steps', async () => {
+  const root = tempRoot('delete-retry'); let trash = 0, remove = 0, stops = 0;
+  const { entry, life } = harness(root, { stopWorkspace: async () => { stops++; return { ok: true }; },
+    moveToTrash: async () => { trash++; return { ok: true }; },
+    removeWorkspace: async () => { remove++; return remove === 1 ? { ok: false, code: 'REMOVE_FAILED' } : { ok: true }; } });
+  try {
+    life.ensureBot(entry.workspaceId, { managed: true });
+    const first = await life.deleteBot(entry.workspaceId, { confirmManaged: true });
+    assert.equal(first.ok, false); assert.equal(first.archived, true); assert.equal(first.cleanupPending, true);
+    assert.equal(life.readProfile(entry.workspaceId).status, 'archived');
+    assert.equal(life.readProfile(entry.workspaceId).deletionCleanup.trashPending, false);
+    assert.equal((await life.deleteBot(entry.workspaceId, { confirmManaged: true })).ok, true);
+    assert.equal(stops, 1); assert.equal(trash, 1); assert.equal(remove, 2);
+    assert.equal(life.readProfile(entry.workspaceId).deletionCleanup, null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('failed archive persistence restores the active bot before any destructive cleanup', async () => {
+  const root = tempRoot('delete-archive-fail'), order = [];
+  const store = createBotProfileStore({ rootDir: root });
+  const { entry, life } = harness(root, { profileStore: { ...store, save: value => value.status === 'archived' ? { ok: false, code: 'DISK_FULL' } : store.save(value) },
+    stopWorkspace: async () => { order.push('stop'); return { ok: true }; },
+    resumeWorkspace: async () => { order.push('resume'); return { ok: true }; },
+    moveToTrash: () => { order.push('trash'); }, removeWorkspace: () => { order.push('remove'); } });
+  try {
+    life.ensureBot(entry.workspaceId, { managed: true });
+    const result = await life.deleteBot(entry.workspaceId, { confirmManaged: true });
+    assert.equal(result.code, 'DISK_FULL'); assert.deepEqual(order, ['stop', 'resume']);
+    assert.equal(life.readProfile(entry.workspaceId).status, 'active');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('开关关闭时不创建档案，也不创建对话', () => {

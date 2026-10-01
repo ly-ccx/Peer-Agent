@@ -36,6 +36,8 @@ export interface BotProfile {
   readonly acceptancePolicy?: 'auto' | 'confirm';
   /** Policy acceptance keeps a separate merge confirmation unless explicitly enabled. */
   readonly autoHandoffOnPolicyAccept?: boolean;
+  /** Archived deletion intent, retained until each cleanup step is persisted. */
+  readonly deletionCleanup?: { readonly folder: string; readonly trashPending: boolean; readonly removePending: boolean } | null;
   readonly modelPolicy?: ProjectModelPolicy | null;
   readonly updatedAt?: string;
 }

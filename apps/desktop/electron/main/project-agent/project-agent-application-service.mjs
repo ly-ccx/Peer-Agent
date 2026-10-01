@@ -232,7 +232,7 @@ export function createProjectAgentApplicationService({
     const result = await lifecycle.deleteBot(payload.workspaceId, {
       confirmManaged: payload.confirmManaged === true,
     });
-    if (result?.ok) queueChanged(payload.workspaceId);
+    if (result?.ok || result?.archived) queueChanged(payload.workspaceId);
     return result;
   }
 

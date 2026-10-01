@@ -419,6 +419,7 @@ export function createProjectAgentHost({
     sync,
     dispose,
     stop(workspaceId) { stoppedWorkspaces.add(workspaceId); drop(workspaceId); },
+    restart(workspaceId) { stoppedWorkspaces.delete(workspaceId); return sync([workspaceId]); },
     isReady: recovery.isReady,
     recovery,
     runnerFor: (workspaceId) => runners.get(workspaceId) ?? null,
@@ -605,6 +606,7 @@ export function registerDesktopProjectAgent({
     },
     removeWorkspace: (folder) => workspace.removeWorkspace(folder),
     moveToTrash: (folder) => shell.trashItem(folder),
+    resumeWorkspace: workspaceId => host.restart(workspaceId),
     stopWorkspace: async workspaceId => {
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
       host.stop(workspaceId);

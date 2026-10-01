@@ -3,7 +3,7 @@
  * 受管目录的创建与废纸篓在桌面宿主。这里只在确认后调用注入的移除和废纸篓。
  */
 import { randomUUID } from 'node:crypto';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { resolveWorkspaceHead } from '../goal-delivery-binding.mjs';
@@ -30,10 +30,12 @@ export function createBotLifecycle({
   removeWorkspace = null,
   moveToTrash = null,
   stopWorkspace = null,
+  resumeWorkspace = null,
+  profileStore = null,
   gitRun = null,
   readdir = readdirSync,
 } = {}) {
-  const profiles = createBotProfileStore({ rootDir, now });
+  const profiles = profileStore || createBotProfileStore({ rootDir, now });
   const pending = new Map();
 
   function workspacePath(workspaceId) {
@@ -304,39 +306,59 @@ export function createBotLifecycle({
 
   async function deleteBot(workspaceId, options = {}) {
     if (!isBotWorkspaceId(workspaceId)) return fail('INVALID_WORKSPACE');
-    const profile = profiles.read(workspaceId);
+    let profile = profiles.read(workspaceId);
     if (!profile) return fail('NOT_FOUND');
-    if (profile.status === 'archived') return { ok: true, profile, reused: true };
+    if (profile.status === 'archived' && !profile.deletionCleanup) return { ok: true, profile, reused: true };
     if (profile.managed === true && options.confirmManaged !== true) return fail('CONFIRM_REQUIRED');
-    const folder = workspacePath(workspaceId);
+    const folder = profile.deletionCleanup?.folder || workspacePath(workspaceId);
     if (profile.managed === true && (typeof moveToTrash !== 'function' || !folder)) return fail(!folder ? 'NOT_FOUND' : 'TRASH_UNAVAILABLE');
-    if (typeof stopWorkspace === 'function') {
-      try { const stopped = await stopWorkspace(workspaceId); if (stopped?.ok === false) return stopped; }
-      catch (error) { return { ok: false, code: 'STOP_FAILED', message: error?.message || String(error) }; }
+    async function restoreAdmission(result) {
+      try { await resumeWorkspace?.(workspaceId); return result; }
+      catch (error) { return { ...result, recoveryError: error?.message || String(error) }; }
     }
-    let trashed = null;
-    if (profile.managed === true) {
-      if (typeof moveToTrash !== 'function') return fail('TRASH_UNAVAILABLE');
-      if (!folder) return fail('NOT_FOUND');
-      let result;
-      try { result = await moveToTrash(folder); } catch (error) { return { ok: false, code: 'TRASH_FAILED', message: error?.message || String(error) }; }
-      if (result && result.ok === false) return result;
-      trashed = folder;
+    if (profile.status !== 'archived') {
+      if (typeof stopWorkspace === 'function') {
+        try { const stopped = await stopWorkspace(workspaceId); if (stopped?.ok === false) return restoreAdmission(stopped); }
+        catch (error) { return restoreAdmission({ ok: false, code: 'STOP_FAILED', message: error?.message || String(error) }); }
+      }
+      try {
+        const saved = profiles.save({ ...profile, status: 'archived', deletionCleanup: {
+          folder: folder || '', trashPending: profile.managed === true, removePending: Boolean(folder && removeWorkspace),
+        } });
+        if (!saved.ok) return restoreAdmission(saved);
+        profile = saved.profile;
+      } catch (error) { return restoreAdmission({ ok: false, code: 'ARCHIVE_FAILED', message: error?.message || String(error) }); }
     }
-    if (typeof removeWorkspace === 'function' && folder) {
-      let removed;
-      try { removed = await removeWorkspace(folder); } catch (error) { return { ok: false, code: 'REMOVE_FAILED', message: error?.message || String(error) }; }
-      if (removed && removed.ok === false) return removed;
+    function partial(result) { return { ...result, ok: false, archived: true, cleanupPending: true, profile }; }
+    function checkpoint(patch) {
+      const saved = profiles.save({ ...profile, deletionCleanup: { ...profile.deletionCleanup, ...patch } });
+      if (!saved.ok) return saved;
+      profile = saved.profile; return { ok: true };
     }
-    const saved = profiles.save({ ...profile, status: 'archived' });
-    if (!saved.ok) return saved;
-    return { ok: true, profile: saved.profile, removedPath: folder || null, trashed };
+    try {
+      if (profile.deletionCleanup?.trashPending) {
+        if (existsSync(folder)) {
+          const result = await moveToTrash(folder);
+          if (result?.ok === false) return partial(result);
+        }
+        const saved = checkpoint({ trashPending: false }); if (!saved.ok) return partial(saved);
+      }
+      if (profile.deletionCleanup?.removePending) {
+        const result = await removeWorkspace(folder);
+        if (result?.ok === false) return partial(result);
+        const saved = checkpoint({ removePending: false }); if (!saved.ok) return partial(saved);
+      }
+      const saved = profiles.save({ ...profile, deletionCleanup: null });
+      if (!saved.ok) return partial(saved);
+      return { ok: true, profile: saved.profile, removedPath: folder || null, trashed: profile.managed ? folder : null };
+    } catch (error) { return partial({ code: profile.deletionCleanup?.trashPending ? 'TRASH_FAILED' : 'REMOVE_FAILED', message: error?.message || String(error) }); }
   }
 
   function restoreBot(workspaceId) {
     if (!isBotWorkspaceId(workspaceId)) return fail('INVALID_WORKSPACE');
     const profile = profiles.read(workspaceId);
     if (!profile) return fail('NOT_FOUND');
+    if (profile.deletionCleanup) return fail('DELETE_CLEANUP_PENDING');
     if (profile.status !== 'archived') return { ok: true, profile, restored: false };
     const saved = profiles.save({ ...profile, status: 'active' });
     if (!saved.ok) return saved;
