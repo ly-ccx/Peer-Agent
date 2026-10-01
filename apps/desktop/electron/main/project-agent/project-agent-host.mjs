@@ -363,6 +363,7 @@ export function registerDesktopProjectAgent({
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
     activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
     listWorkspaceIds: () => directory.workspaceIds(),
+    readOwnedWorkspaceIds: ids => runtimeEnabled() ? ids.filter(id => holdsLease(id) === true) : [],
     resolveConversationId,
     hasMessage,
     appendMessage,

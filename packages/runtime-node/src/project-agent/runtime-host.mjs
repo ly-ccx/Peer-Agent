@@ -13,6 +13,7 @@ export function createProjectAgentHost({
   rootDir = null,
   holdsLease = () => false,
   listWorkspaceIds = () => [],
+  readOwnedWorkspaceIds = null,
   resolveConversationId = () => '',
   hasMessage = () => false,
   appendMessage = () => {},
@@ -185,7 +186,10 @@ export function createProjectAgentHost({
     // A targeted wake is not a replacement for the complete project inventory.
     const inventory = Array.isArray(workspaceIds) ? listWorkspaceIds() : wanted;
     const registeredIds = new Set(inventory.filter(workspaceId => typeof workspaceId === 'string' && !stoppedWorkspaces.has(workspaceId) && resolveConversationId(workspaceId)));
-    for (const workspaceId of runners.keys()) if (!registeredIds.has(workspaceId) || !holdsLease(workspaceId)) drop(workspaceId);
+    // One fresh cleanup snapshot avoids repeatedly loading global eligibility.
+    // Execution/recovery still use holdsLease at their original authority gates.
+    const ownedIds = typeof readOwnedWorkspaceIds === 'function' ? new Set(readOwnedWorkspaceIds([...registeredIds])) : null;
+    for (const workspaceId of runners.keys()) if (!registeredIds.has(workspaceId) || (ownedIds ? !ownedIds.has(workspaceId) : !holdsLease(workspaceId))) drop(workspaceId);
     const outcomes = await Promise.all(wanted.map(async workspaceId => {
       if (!holdsLease(workspaceId) && typeof acquireLease !== 'function') return { workspaceId, skipped: 'not-host' };
       const recovered = await recovery.recover(workspaceId);
