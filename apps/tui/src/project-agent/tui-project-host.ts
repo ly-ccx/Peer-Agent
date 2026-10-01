@@ -195,13 +195,13 @@ export function createTuiProjectHost(options: {
     workspaceId:()=>selectedId, holdsLease:holds, tick,
     async selectWorkspace(id: string) {if(id===selectedId)return;admissionClosed=true;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;admissionClosed=false;await host.restart(id);changed();},
     async takeover() {if(!selectedId)return {requested:false};const request=leases.requestTakeover(selectedId);if(request.reason==='free')leases.acquire(selectedId);await tick();return request;},
-    async decideApproval(approvalId: string, decision: 'approve'|'deny') {
+    async decideApproval(approvalId: string, decision: 'approve'|'deny', duration: 'once'|'task' = 'once') {
       if(!holds(selectedId))return {ok:false,error:'desktop_approval_required'};
       const record=approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId);
       if(!record)return {ok:false,error:'not_found'};
       const planApproval=record.capabilityId==='goal.plan' || record.approvalId.startsWith('plan:');
       const live=[...liveApprovals.values()].find(row=>row.toolCallId===approvalId);
-      if(record.state==='open'&&live){live.resolve(decision==='approve'?'allow-once':'deny');return {ok:true};}
+      if(record.state==='open'&&live){live.resolve(decision==='approve'?duration==='task'?'allow-session':'allow-once':'deny');return {ok:true};}
       if(!['open','stale'].includes(record.state))return {ok:true,replayed:true};
       if(decision==='approve'){
         const session=record.sessionId ? supervisor.get({sessionId:record.sessionId}) : null;

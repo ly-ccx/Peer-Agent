@@ -141,3 +141,10 @@ describe('shouldRefuseInteractiveTui', () => {
     expect(shouldRefuseInteractiveTui(true)).toBe(false);
   });
 });
+
+test('bots and classic are explicit interactive entry routes',()=>{
+  expect(parsePeerArgv(['bots'])).toEqual({kind:'tui',bots:true});
+  expect(parsePeerArgv(['--classic'])).toEqual({kind:'tui',classic:true});
+  expect(formatPeerHelp('root')).toContain('peer bots');
+  expect(formatPeerHelp('root')).toContain('peer --classic');
+});

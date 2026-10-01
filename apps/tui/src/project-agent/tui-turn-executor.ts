@@ -57,6 +57,7 @@ export function createTuiTurnExecutor(options: {
 }) {
   const executionScheduler = options.scheduler ?? createExecutionScheduler();
   const active = new Map<string, { workspaceId: string; controller: AbortController; done: Promise<any> }>();
+  const sessionApprovals = new Set<string>();
   const runtimeFactory = options.createRuntime ?? createTuiRuntime;
   function resolveGoalRole(input: any) {
     const settings = options.getSettings();
@@ -75,7 +76,7 @@ export function createTuiTurnExecutor(options: {
     const mode = (input.mode ?? (profile.role === 'project_agent' ? 'project_agent' : 'chat')) as TuiRuntimeMode;
     const streamId = input.streamId || randomUUID();
     const runtime: TuiRuntime = runtimeFactory({ workspaceRoot: workspacePath, userDataPath: options.dataHome,
-      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore });
+      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals });
     const selectedId = input.modelProviderId || profile.modelSelection?.modelProviderId;
     if (selectedId) {
       const selected = resolvePersistedModelSelection(runtime.modelSelection, {
@@ -194,6 +195,7 @@ export function createTuiTurnExecutor(options: {
       const turns = [...active.values()].filter(turn => !workspaceId || turn.workspaceId === workspaceId);
       turns.forEach(turn => turn.controller.abort());
       await Promise.allSettled(turns.map(turn => turn.done));
+      sessionApprovals.clear();
     },
   };
 }

@@ -234,3 +234,15 @@ test('一个等待中的经典目标让需要你加一，不增加进行中', ()
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('latest conversation pages include new replies while default forward paging stays compatible',()=>{
+  const root=tempRoot();try{
+    const {directory,conversationStore,conversationId,entry}=harness(root),workspaceId=entry.workspaceId;
+    for(let n=0;n<120;n++)conversationStore.appendMessage(conversationId,{id:`later-${n}`,role:'assistant',kind:'agent_reply',content:`reply ${n}`});
+    const latest=directory.readConversation(workspaceId,{latest:true,limit:50});
+    assert.equal(latest.messages.at(-1).id,'later-119');assert.equal(latest.messages[0].id,'later-70');
+    const earlier=directory.readConversation(workspaceId,{latest:true,limit:50,before:latest.nextCursor});
+    assert.equal(earlier.messages[0].id,'later-20');assert.equal(earlier.messages.at(-1).id,'later-69');
+    assert.equal(directory.readConversation(workspaceId,{limit:2}).messages[0].id,'user-1');
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
