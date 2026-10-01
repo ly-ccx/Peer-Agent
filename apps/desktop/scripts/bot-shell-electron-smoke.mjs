@@ -110,6 +110,7 @@ try {
   await page.locator('.bot-shell').waitFor();
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
+  report.avatarAnimation = await page.evaluate(() => ({ avatars: document.querySelectorAll('.bot-avatar').length, activeAvatars: document.querySelectorAll('[data-avatar-animated="true"]').length, animations: document.getAnimations().length }));
   report.checks.push('200 real bot rows; no idle model turns');
   report.listInitialMs = readObserved('list').find(sample => sample.count === fixture.scale.bots)?.durationMs;
   const listSamples = [];
