@@ -167,3 +167,43 @@ test('cancellation during inline review reaches the reviewer and does not reacqu
   })));
   await assert.rejects(parent,/review aborted/);assert.deepEqual(s.stats(),{active:0,waiting:0,limit:1});
 });
+
+test('recovery readiness gates queue admission and delegated rounds until the project is ready', async () => {
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'b4-recovery-scheduler-')); let ready = false; let calls = 0;
+  const scheduler = createExecutionScheduler({ rootDir }); scheduler.configure({ isWorkspaceReady: () => ready });
+  const queued = plan('queued');
+  try {
+    scheduler.reconcile([queued], { workspaceId: 'w' });
+    assert.deepEqual(scheduler.select([queued]).start, []);
+    assert.equal((await scheduler.withTurn({ planId: queued.planId }, () => { calls++; })).error, 'recovery_pending');
+    assert.equal(calls, 0); ready = true;
+    assert.deepEqual(scheduler.select([queued]).start.map(item => item.planId), ['queued']);
+    await scheduler.withTurn({ planId: queued.planId }, () => { calls++; }); assert.equal(calls, 1);
+  } finally { rmSync(rootDir, { recursive: true, force: true }); }
+});
+
+test('plan cancellation aborts Explorer and Verifier rounds and waits for both tools to settle', async () => {
+  const scheduler = createExecutionScheduler(); const release = []; const started = [];
+  const turns = ['explorer', 'verifier'].map(role => scheduler.withTurn({ planId: 'p' }, async signal => {
+    started.push(role);
+    await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    await new Promise(resolve => release.push(resolve));
+  }));
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(started.length, 2);
+  scheduler.cancelPlan('p'); let idle = false;
+  const waited = scheduler.waitForPlanIdle('p').then(() => { idle = true; });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(idle, false);
+  release.splice(0).forEach(resolve => resolve()); await Promise.all([...turns, waited]);
+  assert.equal(idle, true); assert.equal(scheduler.stats().active, 0);
+});
+
+test('a delegated round waiting for a global slot rechecks project ownership before execution', async () => {
+  let ready = true, release, calls = 0;
+  const scheduler = createExecutionScheduler({ getConcurrency: () => 1 });
+  scheduler.configure({ isWorkspaceReady: () => ready }); scheduler.reconcile([plan('p')]);
+  const occupying = scheduler.withTurn({}, () => new Promise(resolve => { release = resolve; }));
+  await new Promise(resolve => setImmediate(resolve));
+  const queued = scheduler.withTurn({ planId: 'p' }, () => { calls++; });
+  ready = false; release(); await occupying;
+  assert.equal((await queued).error, 'recovery_pending'); assert.equal(calls, 0); assert.equal(scheduler.stats().active, 0);
+});

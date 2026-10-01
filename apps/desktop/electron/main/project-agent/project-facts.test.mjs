@@ -48,3 +48,22 @@ test('failed dependency facts produce a stable decision card without a fabricate
     status='cancelled';assert.equal(facts.cards('w').length,0);
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+
+test('later actual turns retire stale unavailable actions while assistant claims cannot resolve them', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-stale-error-card-'));
+  const messages = [{ id: 'a', role: 'assistant', kind: 'system_card', card: 'agent_unavailable', turnId: 't1', content: '代理暂时不可用：离线' }];
+  try {
+    const facts = createDesktopProjectFacts({ runtimeRoot: root,
+      supervisor: { sessionsForProject: () => [], acceptance: () => null }, approvalStore: { list: () => [] },
+      profileStore: { read: () => ({ agentConversationId: 'parent' }) },
+      conversationStore: { getPersistedConversationHistory: () => ({ messages }) } });
+    messages.push({ role: 'assistant', content: '已经恢复了' });
+    assert.equal(facts.cards('w')[0].resolvedState, 'open');
+    messages.push({ id: 't2', role: 'assistant', kind: 'agent_turn' },
+      { id: 'b', role: 'assistant', kind: 'system_card', card: 'agent_unavailable', turnId: 't2', content: '代理暂时不可用：仍离线' });
+    const cards = facts.cards('w');
+    assert.equal(cards.find(card => card.refs.turnId === 't1').resolvedState, 'resolved');
+    assert.deepEqual(cards.find(card => card.refs.turnId === 't1').actions, []);
+    assert.equal(cards.find(card => card.refs.turnId === 't2').resolvedState, 'open');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

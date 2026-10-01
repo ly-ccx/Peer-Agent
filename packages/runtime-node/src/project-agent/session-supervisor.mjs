@@ -76,6 +76,7 @@ export function createSessionSupervisor({
   routing = null,
   projectPolicy = null,
   abortStream = null,
+  deferRecovery = false,
   emitEvent = null,
   resolveAcceptancePolicy = null,
   readSessionFacts = null,
@@ -532,7 +533,7 @@ export function createSessionSupervisor({
 
   async function promote(spawningPlanId = null) {
     if (isolationPlanner) {
-      const virtual = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true);
+      const virtual = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId));
       for (const plan of virtual) {
         if (plan.delegationOrigin.phase !== 'queued' || TERMINAL.has(plan.status) || plan.runner?.status === 'waiting_user') continue;
         const prepared = await isolationPlanner.prepare(plan, virtual);
@@ -543,7 +544,7 @@ export function createSessionSupervisor({
         }
       }
     }
-    const plans = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true);
+    const plans = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId));
     const { start, blocked } = executionScheduler.select(plans);
     for (const plan of blocked) {
       goalPlanStore.revisePlan(plan.planId, {
@@ -582,6 +583,12 @@ export function createSessionSupervisor({
   async function cancelLocked(input) {
     const plan = findBySession(text(input?.sessionId));
     if (!plan) return null;
+    if (!canManageWorkspace(plan.delegationOrigin.workspaceId)) return { error: 'lease_unavailable' };
+    if (plan.status === 'completed' || plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
+    if (plan.status === 'cancelled') {
+      if (isolationPlanner) await isolationPlanner.cleanup(plan);
+      return project(plan);
+    }
     const reason = text(input?.reason) || 'cancelled';
     executionScheduler.cancelPlan(plan.planId);
     if (typeof goalRunner?.pause === 'function') goalRunner.pause(plan.planId, reason);
@@ -595,6 +602,7 @@ export function createSessionSupervisor({
     }
     // A tool may still be settling after abort; keep its execution site until the pump is idle.
     if (typeof goalRunner?.waitForIdle === 'function') await goalRunner.waitForIdle(plan.planId);
+    await executionScheduler.waitForPlanIdle(plan.planId);
     goalPlanStore.setPlanStatus(plan.planId, 'cancelled');
     if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(plan.planId));
     emit({
@@ -946,7 +954,7 @@ export function createSessionSupervisor({
 
   async function reconcilePersistedQueues() {
     for (const plan of delegatedPlans()) {
-      if (canManageWorkspace(plan.delegationOrigin.workspaceId) !== true) continue;
+      if (canManageWorkspace(plan.delegationOrigin.workspaceId) !== true || !executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)) continue;
       if (continuity.expired(plan)) {
         await cancelLocked({ sessionId: plan.delegationOrigin.sessionId, reason: 'supersession_expired', promote: false });
         continue;
@@ -961,10 +969,37 @@ export function createSessionSupervisor({
     await promote();
   }
 
-  const reconciled = exclusive(() => reconcilePersistedQueues());
+  const reconciled = deferRecovery ? Promise.resolve() : exclusive(() => reconcilePersistedQueues());
 
   return {
     executionScheduler,
+    recoverQueue(workspaceId) {
+      return exclusive(() => {
+        if (!canManageWorkspace(workspaceId)) throw new Error('lease_unavailable');
+        return executionScheduler.reconcile(delegatedPlans(), { workspaceId });
+      });
+    },
+    resumeRecovered(workspaceId) {
+      return exclusive(async () => {
+        if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
+        for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
+          if (plan.delegationOrigin.phase !== 'running' || !['executing', 'interrupted'].includes(plan.status)
+            || plan.runner?.status === 'waiting_user' || ['blocked', 'paused', 'budget_exhausted', 'failed', 'completed'].includes(plan.runner?.status)) continue;
+          if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId, { awaitIdle: false });
+        }
+        await reconcilePersistedQueues();
+      });
+    },
+    cancelWorkspace(workspaceId) {
+      return exclusive(async () => {
+        if (!canManageWorkspace(workspaceId)) return { ok: false, error: 'lease_unavailable' };
+        for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
+          if (['completed', 'failed'].includes(plan.status) || plan.resultAcceptance?.acceptedAt) continue;
+          await cancelLocked({ sessionId: plan.delegationOrigin.sessionId, reason: 'bot_deleted', promote: false });
+        }
+        return { ok: true };
+      });
+    },
     reconcile() { return exclusive(() => reconcilePersistedQueues()); },
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));

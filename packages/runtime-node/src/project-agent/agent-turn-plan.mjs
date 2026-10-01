@@ -126,7 +126,7 @@ function wakeReminder(events, roster) {
   };
 }
 
-function unavailableCard(turnId, reason, workspaceId) {
+export function unavailableCard(turnId, reason, workspaceId) {
   const why = typeof reason === 'string' && reason.trim() ? reason.trim() : '未知原因';
   return {
     id: `${turnId}-card`,

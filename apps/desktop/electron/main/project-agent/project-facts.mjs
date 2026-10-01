@@ -60,6 +60,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     });
     const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => ({
       turnId: message.turnId, reason: message.content?.replace(/^代理暂时不可用：/, ''),
+      superseded: messages.slice(messages.indexOf(message) + 1).some(later => later.role === 'assistant' && later.kind === 'agent_turn'),
     }));
     return projection.project(workspaceId, { approvals: approvalStore.list({ workspaceId }),
       confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable,

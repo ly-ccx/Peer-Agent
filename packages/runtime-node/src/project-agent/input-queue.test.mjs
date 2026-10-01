@@ -173,3 +173,20 @@ test('截图缩略图随输入进入对话消息', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('delivered input remains executable after restart until a real reply or explicit completion', () => {
+  const root = tempRoot(); const box = harness(root);
+  try {
+    box.queue.submitInput({ workspaceId: 'ws-1', inputId: 'first', surface: 'desktop', text: 'first' });
+    box.queue.submitInput({ workspaceId: 'ws-1', inputId: 'second', surface: 'desktop', text: 'second' });
+    box.queue.consume('ws-1');
+    assert.deepEqual(box.queue.pendingExecution('ws-1').map(input => input.inputId), ['first', 'second']);
+    box.queue.completeExecution('ws-1', ['second']);
+    assert.deepEqual(box.queue.pendingExecution('ws-1').map(input => input.inputId), ['first']);
+    assert.deepEqual(box.queue.pendingExecution('ws-1', { repliedTo: ['input-first'] }), []);
+    assert.equal(box.queue.cursor('ws-1'), 'second');
+    box.queue.submitInput({ workspaceId: 'ws-1', inputId: 'third', surface: 'desktop', text: 'third' });
+    box.queue.consume('ws-1');
+    assert.deepEqual(box.queue.pendingExecution('ws-1').map(input => input.inputId), ['third']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -72,11 +72,19 @@ export function createInputQueue({
     while (true) {
       try {
         mkdirSync(lockDir);
+        writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid }));
         break;
       } catch (error) {
         if (error?.code !== 'EEXIST') throw error;
         try {
-          if (Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
+          let dead = false;
+          try {
+            const owner = JSON.parse(readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
+            if (Number.isInteger(owner.pid) && owner.pid > 0) {
+              try { process.kill(owner.pid, 0); } catch (error) { dead = error?.code === 'ESRCH'; }
+            }
+          } catch { /* A new owner may still be publishing its PID. */ }
+          if (dead || Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
             rmSync(lockDir, { recursive: true, force: true });
             continue;
           }
@@ -118,24 +126,57 @@ export function createInputQueue({
     return inputs;
   }
 
+  function readCursorState(workspaceId) {
+    try { return JSON.parse(readFileSync(cursorFile(workspaceId), 'utf8')); }
+    catch (error) { if (error?.code !== 'ENOENT') throw error; return {}; }
+  }
+
   function readCursor(workspaceId) {
-    const file = cursorFile(workspaceId);
-    if (!existsSync(file)) return null;
-    try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8'));
-      const inputId = typeof parsed?.inputId === 'string' ? parsed.inputId.trim() : '';
-      return inputId || null;
-    } catch {
-      return null;
-    }
+    const inputId = readCursorState(workspaceId)?.inputId;
+    return typeof inputId === 'string' && inputId.trim() ? inputId.trim() : null;
+  }
+
+  function writeCursorState(workspaceId, state) {
+    const file = cursorFile(workspaceId), tmp = `${file}.${process.pid}.tmp`;
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(tmp, `${JSON.stringify(state)}\n`); renameSync(tmp, file);
   }
 
   function writeCursor(workspaceId, inputId) {
-    const file = cursorFile(workspaceId);
-    const tmp = `${file}.${process.pid}.tmp`;
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(tmp, `${JSON.stringify({ inputId, consumedAt: stamp() })}\n`);
-    renameSync(tmp, file);
+    writeCursorState(workspaceId, { ...readCursorState(workspaceId), inputId, consumedAt: stamp() });
+  }
+
+  function executionState(workspaceId, completed = [], repliedTo = []) {
+    const state = readCursorState(workspaceId);
+    const inputs = readInputs(workspaceId);
+    const delivered = inputs.findIndex(input => input.inputId === state.inputId);
+    if (delivered < 0) return [];
+    const through = inputs.findIndex(input => input.inputId === state.executedInputId);
+    const acknowledged = new Set(Array.isArray(state.completedInputIds) ? state.completedInputIds : []);
+    const replies = new Set(repliedTo);
+    for (const input of inputs.slice(0, delivered + 1)) {
+      if (completed.includes(input.inputId) || replies.has(inputMessageId(input.inputId))) acknowledged.add(input.inputId);
+    }
+    let index = through;
+    while (index < delivered && acknowledged.has(inputs[index + 1].inputId)) acknowledged.delete(inputs[++index].inputId);
+    const pending = inputs.slice(index + 1, delivered + 1).filter(input => !acknowledged.has(input.inputId));
+    const next = { ...state, ...(index >= 0 ? { executedInputId: inputs[index].inputId } : {}),
+      completedInputIds: [...acknowledged] };
+    if (JSON.stringify(next) !== JSON.stringify(state)) writeCursorState(workspaceId, next);
+    return pending;
+  }
+
+  function pendingExecution(workspaceId, { repliedTo = [] } = {}) {
+    const id = workspaceIdOf(workspaceId);
+    if (!id || typeof holdsLease === 'function' && holdsLease(id) !== true) return [];
+    return withLock(id, () => executionState(id, [], Array.isArray(repliedTo) ? repliedTo : []));
+  }
+
+  function completeExecution(workspaceId, inputIds) {
+    const id = workspaceIdOf(workspaceId);
+    if (!id || typeof holdsLease === 'function' && holdsLease(id) !== true) return { ok: false, error: 'not_host' };
+    withLock(id, () => executionState(id, Array.isArray(inputIds) ? inputIds : []));
+    return { ok: true };
   }
 
   function submitInput(input) {
@@ -215,7 +256,7 @@ export function createInputQueue({
     return { consumed: outcome.consumed, skipped: outcome.skipped };
   }
 
-  return { submitInput, consume, cursor: readCursor };
+  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor };
 }
 
 function normalizeSubmission(input, workspaceId, createdAt) {

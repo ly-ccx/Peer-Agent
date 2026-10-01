@@ -228,3 +228,14 @@ test('任务计划只在持有租约时推进，普通计划不看租约', () =>
   assert.equal(delegatedPlanRunsWithLease(task, (id) => id === 'ws-1'), true);
   assert.equal(delegatedPlanRunsWithLease({ delegationOrigin: { surface: 'desktop' } }, () => true), false);
 });
+
+test('archived bots stop being eligible for automatic lease acquisition', () => {
+  const root = tempRoot(), projects = path.join(root, 'projects'); const file = path.join(projects, 'ws-archive', 'profile.json');
+  try {
+    mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, JSON.stringify({ status: 'active' }));
+    const clock = clockedSchedule(); const holder = service(root, clock, { projectAgentEnabled: () => true, botWorkspaceIds: () => listBotWorkspaceIds(projects) });
+    holder.pulse(); assert.equal(holder.holds('ws-archive'), true);
+    writeFileSync(file, JSON.stringify({ status: 'archived' })); holder.pulse();
+    assert.equal(holder.holds('ws-archive'), false); assert.deepEqual(listBotWorkspaceIds(projects), []); holder.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

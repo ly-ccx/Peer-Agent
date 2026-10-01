@@ -51,7 +51,7 @@ export function listBotWorkspaceIds(projectsDir = null) {
     if (!entry.isDirectory() || !WORKSPACE_DIR.test(entry.name)) continue;
     const profile = path.join(dir, entry.name, 'profile.json');
     try {
-      if (statSync(profile).isFile()) ids.push(entry.name);
+      if (statSync(profile).isFile() && JSON.parse(readFileSync(profile, 'utf8'))?.status !== 'archived') ids.push(entry.name);
     } catch {
       // 没有档案就不是机器人。
     }

@@ -1007,7 +1007,7 @@ const webUiCapture = createWebUiCapture({
 const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
 const hostLeases = createHostLease({
   surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
-  projectAgentEnabled: () => true, botWorkspaceIds: listBotWorkspaceIds,
+  projectAgentEnabled: () => settingsStore.getAll()?.projectAgent?.shell !== 'classic', botWorkspaceIds: listBotWorkspaceIds,
 });
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
@@ -2158,7 +2158,7 @@ function registerDesktopIpcHost() {
       enabled: () => true,
       dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
-      holdsLease: (workspaceId) => hostLeases.holds(workspaceId),
+      holdsLease: (workspaceId) => hostLeases.holds(workspaceId), acquireLease: (id) => hostLeases.acquire(id), releaseLease: (id) => hostLeases.release(id),
       getSettings: () => settingsStore.getAll(), mergeSettings: (patch) => settingsStore.merge(patch),
       dialog, BrowserWindow, shell, listModels: () => llmConfigStore.listProviders(),
       readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
@@ -3424,7 +3424,7 @@ async function startRecoveryAndAppearance() {
   applyStartupApprovalRecovery({ approvalStore: createApprovalStore(), goalPlanStore });
   try {
     if (goalRunner && typeof goalRunner.recoverContextCheckpoints === 'function') {
-      const recovery = goalRunner.recoverContextCheckpoints();
+      const recovery = goalRunner.recoverContextCheckpoints({ includeDelegated: false });
       if (recovery?.recovered?.length) {
         console.info(
           `[main] recovered ${recovery.recovered.length}/${recovery.scanned} goal checkpoint(s) after startup`,

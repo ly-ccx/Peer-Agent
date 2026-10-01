@@ -34,6 +34,7 @@ function rank(priority, enqueuedAt, at) {
 /** Queue order is durable; Plans own task/acceptance truth, round leases are process-local. */
 export function createExecutionScheduler({ rootDir = null, getConcurrency = () => 4, now = () => new Date().toISOString() } = {}) {
   const turnContext = new AsyncLocalStorage();
+  let isWorkspaceReady = () => true;
   const turnsByPlan = new Map();
   const queues = new Map();
   let plansById = new Map();
@@ -64,11 +65,15 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     writeFileSync(temporary, body, 'utf8');
     renameSync(temporary, target);
   }
-  function reconcile(plans) {
-    plansById = new Map(plans.map(plan => [plan.planId, plan]));
+  function reconcile(plans, { workspaceId: onlyWorkspace } = {}) {
+    if (onlyWorkspace) {
+      for (const [id, plan] of plansById) if (plan.delegationOrigin?.workspaceId === onlyWorkspace) plansById.delete(id);
+      for (const plan of plans) if (plan.delegationOrigin?.workspaceId === onlyWorkspace) plansById.set(plan.planId, plan);
+    } else plansById = new Map(plans.map(plan => [plan.planId, plan]));
     const admittedAt = at();
     const workspaces = new Set([...queues.keys(), ...plans.map(plan => plan.delegationOrigin?.workspaceId).filter(Boolean)]);
     for (const workspaceId of workspaces) {
+      if (onlyWorkspace ? workspaceId !== onlyWorkspace : isWorkspaceReady(workspaceId) !== true) continue;
       const pending = plans.filter(plan => plan.delegationOrigin?.workspaceId === workspaceId
         && plan.delegationOrigin.phase === 'queued' && plan.runner?.status !== 'waiting_user' && !TERMINAL.has(plan.status));
       const ids = new Set(pending.map(plan => plan.delegationOrigin.sessionId));
@@ -107,7 +112,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     reconcile(plans);
     const metadata = new Map([...queues.values()].flat().map(item => [item.sessionId, item]));
     const currentTime = Date.parse(at());
-    const candidates = plans.filter(plan => metadata.has(plan.delegationOrigin?.sessionId))
+    const candidates = plans.filter(plan => isWorkspaceReady(plan.delegationOrigin?.workspaceId) === true && metadata.has(plan.delegationOrigin?.sessionId))
       .sort((a, b) => {
         const aa = metadata.get(a.delegationOrigin.sessionId), bb = metadata.get(b.delegationOrigin.sessionId);
         return rank(b.delegationOrigin.priority, bb.enqueuedAt, currentTime) - rank(a.delegationOrigin.priority, aa.enqueuedAt, currentTime)
@@ -159,15 +164,22 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     configure(options = {}) {
       if (options.rootDir && options.rootDir !== rootDir) { rootDir = options.rootDir; queues.clear(); }
       if (typeof options.getConcurrency === 'function') getConcurrency = options.getConcurrency;
+      if (typeof options.isWorkspaceReady === 'function') isWorkspaceReady = options.isWorkspaceReady;
       drain();
     },
-    reconcile, inspect, select,
-    canRunPlan(plan) { return !plan?.delegationOrigin || plan.delegationOrigin.phase === 'running' && inspect(plan).allowed; },
+    reconcile, inspect, select, isWorkspaceReady: workspaceId => isWorkspaceReady(workspaceId) === true,
+    canRunPlan(plan) { return !plan?.delegationOrigin || isWorkspaceReady(plan.delegationOrigin.workspaceId) === true && plan.delegationOrigin.phase === 'running' && inspect(plan).allowed; },
+    async waitForPlanIdle(planId) {
+      while (turnsByPlan.get(planId)?.size) await Promise.allSettled([...turnsByPlan.get(planId)].map(controller => controller.settled));
+    },
     cancelPlan(planId) {
       for (const controller of turnsByPlan.get(planId) || []) controller.abort();
     },
     async withTurn(input, run) {
+      const plan = plansById.get(input.planId);
+      if (plan?.delegationOrigin && !isWorkspaceReady(plan.delegationOrigin.workspaceId)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'recovery_pending' };
       const controller = new AbortController();
+      let settle; controller.settled = new Promise(resolve => { settle = resolve; });
       const relayAbort = () => controller.abort();
       input.signal?.addEventListener('abort', relayAbort, { once: true });
       if (input.signal?.aborted) controller.abort();
@@ -180,11 +192,13 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
         if (!release) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' };
         context = { input: owned, release, active: true };
         if (controller.signal.aborted) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' };
+        if (plan?.delegationOrigin && !isWorkspaceReady(plan.delegationOrigin.workspaceId)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'recovery_pending' };
         return await turnContext.run(context, () => run(controller.signal));
       } finally {
         if (context?.active) { context.active = false; context.release(); }
         input.signal?.removeEventListener('abort', relayAbort);
         group.delete(controller);
+        settle();
         if (!group.size) turnsByPlan.delete(input.planId);
       }
     },
