@@ -86,6 +86,7 @@ export function MemoryTab({
   }, [onItems, workspaceId]);
 
   const pageScope = JSON.stringify([workspaceId, kind, trust, status]);
+  useEffect(() => { setPageState({ scope: pageScope, index: 0 }); }, [pageScope]);
   const page = memoryPage(items, { kind, trust, status }, pageState.scope === pageScope ? pageState.index : 0);
   const visible = page.items;
 
