@@ -64,6 +64,12 @@ The profile holds project history, memory, objectives and settings. Keyboard nav
 
 Stable publication follows comprehensive owner testing and seven days of daily use. Remote input is text only; approvals stay on the computer. Remote device identity currently requires macOS Keychain. Uploaded avatar images remain static.
 
+![Project bots and conversation](docs/screenshots/project-bots-rc.png)
+
+![Bot profile and avatar colors](docs/screenshots/bot-profile-rc.png)
+
+Source UI screenshots use three synthetic projects and an illustrative conversation. They show the interface; release validation is recorded separately.
+
 ---
 
 ## ✨ Why Peer Agent

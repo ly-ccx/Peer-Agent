@@ -64,6 +64,12 @@
 
 正式发布等待负责人全面测试与七天日用。远程只能发文本，批准在电脑处理；远程设备身份目前需要 macOS 钥匙串。上传的自定义头像图片是静态图片。
 
+![机器人列表与对话](docs/screenshots/project-bots-rc.png)
+
+![机器人档案与头像颜色](docs/screenshots/bot-profile-rc.png)
+
+截图来自真实源码界面，使用三个虚构项目和示意对话。发布验证结果单独记录。
+
 ---
 
 ## ✨ 为什么选 Peer Agent
