@@ -45,6 +45,12 @@ const META_VERIFICATION_EN = ['screenshot', 'visual verification', 'visual repai
 const NEGATIVE_HINTS_ZH = ['单测', '单元测试', '测试用例', '回归测试', '后端', '数据库', '迁移脚本', '命令行'];
 const NEGATIVE_HINTS_EN = ['unit test', 'regression test', 'cli', 'backend', 'database schema', 'migration script'];
 
+// 签收 / 合回指的是操作任务卡片，不是交付物。只排除这个窄语句，
+// 保留其余实际界面、样式、组件线索；已经武装的视觉门不会在这里撤销。
+function deliveryText(value) {
+  return value.replace(/(?:在|通过)(?:应用)?(?:界面|任务卡片)(?:中|上)?(?:逐个|分别)?(?:确认(?:结果)?|签收(?:任务|结果)?|合回(?:改动)?|批准(?:权限|任务)?)/g, '');
+}
+
 function collectMatches(haystack, tokens, mode) {
   const matched = [];
   for (const token of tokens) {
@@ -84,7 +90,7 @@ export function classifyUiDeliveryIntake(input = {}) {
         : [item?.description, item?.command, item?.path].filter(Boolean).join(' ')))
       : []),
   ].filter((value) => typeof value === 'string');
-  const haystack = parts.join('\n').toLowerCase();
+  const haystack = parts.map(deliveryText).join('\n').toLowerCase();
 
   const surface = [...collectMatches(haystack, UI_SURFACE_ZH, 'zh'), ...collectMatches(haystack, UI_SURFACE_EN, 'en')];
   const renderer = [

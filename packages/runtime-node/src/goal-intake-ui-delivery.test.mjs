@@ -141,3 +141,26 @@ test('intake-ui/store-无回调宿主时完全no-op', () => {
     cleanup();
   }
 });
+
+test('intake-ui/task confirmation and merge instructions are not a UI deliverable', () => {
+  const input = {
+    title: 'A：a.txt 写成 after-a',
+    goal: '任务 A：仅把 a.txt 写成 after-a。只允许修改 a.txt，不要动其他文件，不要自动合回，用户会在界面上确认并合回。',
+    successCriteria: [{ kind: 'file-contains', description: 'a.txt contains after-a', path: 'a.txt', expect: 'after-a' }],
+  };
+  assert.equal(classifyUiDeliveryIntake(input).required, false);
+  const armed = [];
+  const { store, cleanup } = withTempStore({ onUiDeliveryRequired: plan => armed.push(plan.planId) });
+  try {
+    store.createGoalContract({ ...input, conversationId: 'conv-text' });
+    assert.equal(armed.length, 0);
+  } finally { cleanup(); }
+});
+
+test('intake-ui/confirmation instructions do not erase the real UI output', () => {
+  assert.equal(classifyUiDeliveryIntake({
+    goal: '修复设置界面的按钮间距，用户会在界面上确认并合回。',
+    successCriteria: [{ kind: 'file-contains', path: 'settings.css', description: 'spacing', expect: '8px' }],
+  }).required, true);
+  assert.equal(classifyUiDeliveryIntake({ goal: '在界面上确认按钮的颜色显示正确' }).required, true);
+});
