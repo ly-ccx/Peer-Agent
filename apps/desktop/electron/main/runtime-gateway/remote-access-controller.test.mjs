@@ -32,9 +32,38 @@ function sessionFactory(log) {
 
 const valid = { enabled: true, gatewayOrigin: 'https://peer.example', workspaceId: 'ws-1' };
 
+test('legacy single workspace is read-only; new project delegation starts closed',()=>{
+  const legacy=normalizeRemoteSettings(valid);
+  assert.deepEqual(legacy.projectGrants,[{workspaceId:'ws-1',allowProjectRead:true,allowProjectMessage:false}]);
+  assert.deepEqual(legacy.workspaceIds,['ws-1']);
+  const fresh=normalizeRemoteSettings(valid,normalizeRemoteSettings({}));
+  assert.deepEqual(fresh.projectGrants,[]);
+  assert.deepEqual(normalizeRemoteSettings({enabled:true,gatewayOrigin:'https://peer.example',projectGrants:[]}).workspaceIds,[]);
+});
+
+test('each project capability is explicit and message requires read',()=>{
+  const good={workspaceId:'a',allowProjectRead:true,allowProjectMessage:true};
+  for(const projectGrants of [[{...good,allowProjectRead:false}],[{...good,workspaceId:'/private'}],[good,good],[{...good,approve:true}],{},Array.from({length:201},(_,i)=>({...good,workspaceId:`w-${i}`}))]) {
+    assert.throws(()=>normalizeRemoteSettings({projectGrants}),/INVALID_PROJECT_GRANTS/);
+  }
+  const next=normalizeRemoteSettings({projectGrants:[{workspaceId:'b',allowProjectRead:false,allowProjectMessage:false},good]});
+  assert.deepEqual(next.workspaceIds,['a']);assert.equal(next.projectGrants[1].allowProjectRead,false);
+});
+
+test('grant changes persist a monotonically increasing version before reconnect',async()=>{
+  const log=[],store=memorySettings({remoteAccess:valid});
+  const controller=createRemoteAccessController({settingsStore:store,deviceName:'mac',createSession:sessionFactory(log)});
+  await controller.apply();const before=controller.status().settings.delegationVersion;
+  const grants=[{workspaceId:'ws-1',allowProjectRead:true,allowProjectMessage:true}];
+  await controller.update({projectGrants:grants});
+  assert.equal(store.raw().remoteAccess.delegationVersion,before+1);assert.equal(log.length,2);assert.equal(log[0].stopped,true);
+  await controller.update({projectGrants:grants});assert.equal(controller.status().settings.delegationVersion,before+1);assert.equal(log.length,2);
+  await assert.rejects(controller.update({delegationVersion:1}),/INVALID_DELEGATION_VERSION/);
+});
+
 test('规范化：默认值全关且为空', () => {
   assert.deepEqual(normalizeRemoteSettings(undefined), {
-    enabled: false, gatewayOrigin: '', workspaceId: '',
+    enabled: false, gatewayOrigin: '', workspaceId: '', projectGrants: [], workspaceIds: [], delegationVersion: 1,
   });
 });
 
@@ -83,7 +112,7 @@ test('开启后建立连接并暴露状态（不含密钥）', async () => {
   // pairing 是待认领的挑战（用户必须能拿到才能绑定），两者都不含长期密钥材料。
   assert.deepEqual(
     Object.keys(status).sort(),
-    ['active', 'connectionEpoch', 'deviceId', 'lastFailure', 'online', 'pairing', 'settings'],
+    ['active', 'connectionEpoch', 'deviceId', 'lastAccess', 'lastFailure', 'online', 'pairing', 'settings'],
   );
 });
 
@@ -194,7 +223,7 @@ test('status 在校验失败时也不抛错', () => {
   });
   const status = controller.status();
   assert.equal(status.active, false);
-  assert.deepEqual(status.settings, { enabled: false, gatewayOrigin: '', workspaceId: '' });
+  assert.deepEqual(status.settings, { enabled: false, gatewayOrigin: '', workspaceId: '', projectGrants: [], workspaceIds: [], delegationVersion: 1 });
 });
 
 test('开启远程但没填 workspaceId 时用当前项目 id', async () => {

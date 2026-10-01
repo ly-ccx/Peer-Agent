@@ -99,3 +99,121 @@ export function admitRemoteRead(value: unknown, context: RemoteReadContext): Rem
   if (r.expiresAt <= context.now || r.expiresAt - context.now > 30_000) return deny('REQUEST_EXPIRED');
   return parsed;
 }
+
+export const REMOTE_PROJECT_LIMITS = Object.freeze({
+  projects: 200, messages: 50, text: 4000,
+  requestBytes: 32 * 1024, delegationBytes: 128 * 1024, resultBytes: 2 * 1024 * 1024,
+});
+
+export interface RemoteProjectGrant {
+  readonly workspaceId: string;
+  readonly allowProjectRead: boolean;
+  readonly allowProjectMessage: boolean;
+}
+
+interface RemoteProjectRequestBase {
+  readonly protocolVersion: typeof REMOTE_PROTOCOL_VERSION;
+  readonly type: 'project.submit';
+  readonly requestId: string;
+  readonly ownerId: string;
+  readonly deviceId: string;
+  readonly bindingVersion: number;
+  readonly connectionEpoch: number;
+  readonly delegationVersion: number;
+  readonly expiresAt: number;
+}
+
+export type RemoteProjectRequest = RemoteProjectRequestBase & (
+  | { readonly operation: 'project.list' }
+  | { readonly operation: 'project.conversation.read'; readonly workspaceId: string;
+      readonly limit: number; readonly before: string | null }
+  | { readonly operation: 'project.session.read'; readonly workspaceId: string; readonly sessionId: string }
+  | { readonly operation: 'project.input.submit'; readonly workspaceId: string; readonly text: string }
+);
+
+export interface RemoteProjectContext extends Omit<RemoteReadContext, 'delegation' | 'task'> {
+  readonly delegation: {
+    readonly version: number;
+    readonly expiresAt: number;
+    readonly revoked: boolean;
+    readonly workspaceIds: readonly string[];
+    readonly allowProjectRead: boolean;
+    readonly allowProjectMessage: boolean;
+    readonly projectGrants: readonly RemoteProjectGrant[];
+  };
+  readonly project: { readonly workspaceId: string; readonly status: string } | null;
+  readonly session: { readonly workspaceId: string; readonly sessionId: string } | null;
+}
+
+export type RemoteProjectRejection = RemoteReadRejection | 'PROJECT_DENIED' | 'MESSAGE_DENIED' | 'INPUT_TOO_LONG';
+export type RemoteProjectAdmission =
+  | { readonly ok: true; readonly request: RemoteProjectRequest }
+  | { readonly ok: false; readonly code: RemoteProjectRejection };
+
+const projectBaseFields = [
+  'protocolVersion', 'type', 'requestId', 'ownerId', 'deviceId',
+  'bindingVersion', 'connectionEpoch', 'delegationVersion', 'expiresAt', 'operation',
+];
+const projectFields: Record<string, readonly string[]> = {
+  'project.list': [],
+  'project.conversation.read': ['workspaceId', 'limit', 'before'],
+  'project.session.read': ['workspaceId', 'sessionId'],
+  'project.input.submit': ['workspaceId', 'text'],
+};
+
+/** Each operation has one exact shape; input acceptance is never a tool grant. */
+export function parseRemoteProjectRequest(value: unknown): RemoteProjectAdmission {
+  const deny = (code: RemoteProjectRejection): RemoteProjectAdmission => ({ ok: false, code });
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return deny('INVALID_REQUEST');
+  const r = value as Record<string, unknown>;
+  if (r.protocolVersion !== REMOTE_PROTOCOL_VERSION) return deny('PROTOCOL_UNSUPPORTED');
+  const extra = typeof r.operation === 'string' && Object.hasOwn(projectFields, r.operation)
+    ? projectFields[r.operation] : undefined;
+  if (!extra || r.type !== 'project.submit') return deny('INVALID_REQUEST');
+  const allowed = new Set([...projectBaseFields, ...extra]);
+  if (Object.keys(r).length !== allowed.size || Object.keys(r).some(key => !allowed.has(key))
+      || !['requestId', 'ownerId', 'deviceId'].every(key => identifier(r[key]))
+      || !['bindingVersion', 'connectionEpoch', 'delegationVersion', 'expiresAt'].every(key => integer(r[key]))
+      || (r.operation !== 'project.list' && !identifier(r.workspaceId))) return deny('INVALID_REQUEST');
+  if (r.operation === 'project.conversation.read'
+      && (!integer(r.limit) || r.limit > REMOTE_PROJECT_LIMITS.messages
+        || !(r.before === null || typeof r.before === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(r.before)))) {
+    return deny('INVALID_REQUEST');
+  }
+  if (r.operation === 'project.session.read' && !identifier(r.sessionId)) return deny('INVALID_REQUEST');
+  if (r.operation === 'project.input.submit') {
+    if (typeof r.text !== 'string' || !r.text.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(r.text)) {
+      return deny('INVALID_REQUEST');
+    }
+    if (Array.from(r.text).length > REMOTE_PROJECT_LIMITS.text) return deny('INPUT_TOO_LONG');
+  }
+  return { ok: true, request: { ...r } as unknown as RemoteProjectRequest };
+}
+
+/** The local context remains authoritative, including each bot's capability bits. */
+export function admitRemoteProject(value: unknown, context: RemoteProjectContext): RemoteProjectAdmission {
+  const parsed = parseRemoteProjectRequest(value);
+  if (!parsed.ok) return parsed;
+  const r = parsed.request, d = context.delegation;
+  const deny = (code: RemoteProjectRejection): RemoteProjectAdmission => ({ ok: false, code });
+  if (context.bindingRevoked || r.ownerId !== context.ownerId || r.deviceId !== context.deviceId
+      || r.bindingVersion !== context.bindingVersion) return deny('IDENTITY_UNBOUND');
+  if (!Number.isFinite(context.now) || !Number.isFinite(d.expiresAt) || d.revoked
+      || d.expiresAt <= context.now || r.delegationVersion !== d.version) return deny('DELEGATION_EXPIRED');
+  if (!d.allowProjectRead) return deny('PROJECT_DENIED');
+  if (r.operation !== 'project.list') {
+    if (!d.workspaceIds.includes(r.workspaceId)) return deny('WORKSPACE_DENIED');
+    const grant = d.projectGrants.find(item => item.workspaceId === r.workspaceId);
+    if (!grant?.allowProjectRead || !context.project || context.project.workspaceId !== r.workspaceId
+        || context.project.status !== 'active') return deny('PROJECT_DENIED');
+    if (r.operation === 'project.input.submit' && (!d.allowProjectMessage || !grant.allowProjectMessage)) {
+      return deny('MESSAGE_DENIED');
+    }
+    if (r.operation === 'project.session.read' && (!context.session
+        || context.session.workspaceId !== r.workspaceId || context.session.sessionId !== r.sessionId)) return deny('TASK_DENIED');
+  }
+  if (!context.online) return deny('DEVICE_OFFLINE');
+  if (r.connectionEpoch !== context.connectionEpoch) return deny('STALE_CONNECTION');
+  if (r.expiresAt <= context.now || r.expiresAt - context.now > 30_000) return deny('REQUEST_EXPIRED');
+  return parsed;
+}

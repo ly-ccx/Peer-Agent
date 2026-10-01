@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { createHash, randomUUID } from 'node:crypto';
-import { parseRemoteReadRequest } from '@peer-agent/protocol';
+import { parseRemoteReadRequest, parseRemoteProjectRequest } from '@peer-agent/protocol';
 
 // Lazy loading keeps node:sqlite out of unrelated runtime-node startup paths.
 const require = createRequire(import.meta.url);
@@ -24,6 +24,11 @@ export function createRemoteReceiptStore(path) {
     state TEXT NOT NULL CHECK(state IN ('accepted','started','succeeded','failed')),
     evidence_ref TEXT, created_at INTEGER NOT NULL,
     PRIMARY KEY(owner_id, device_id, request_id)
+  );
+  CREATE TABLE IF NOT EXISTS remote_project_inputs (
+    owner_id TEXT NOT NULL, device_id TEXT NOT NULL, request_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL, result_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY(owner_id, device_id, request_id)
   ); PRAGMA user_version = 1;`);
   const find = db.prepare('SELECT * FROM remote_receipts WHERE owner_id=? AND device_id=? AND request_id=?');
   const key = r => [r.ownerId, r.deviceId, r.requestId];
@@ -42,7 +47,43 @@ export function createRemoteReceiptStore(path) {
       r.bindingVersion, r.delegationVersion, r.operation, r.taskId];
     return createHash('sha256').update(JSON.stringify(body)).digest('hex');
   }
+  function checkedProject(value) {
+    const parsed = parseRemoteProjectRequest(value);
+    if (!parsed.ok) throw new Error(parsed.code);
+    if (parsed.request.operation !== 'project.input.submit') throw new Error('INVALID_REQUEST');
+    return parsed.request;
+  }
+  const projectHash = r => createHash('sha256').update(JSON.stringify([
+    r.protocolVersion, r.type, r.ownerId, r.deviceId, r.workspaceId, r.operation, r.text.trim(),
+  ])).digest('hex');
+  const projectRow = r => db.prepare('SELECT payload_hash,result_json FROM remote_project_inputs WHERE owner_id=? AND device_id=? AND request_id=?').get(...key(r));
+  function projectResult(r, row) {
+    if (!row) return null;
+    if (row.payload_hash !== projectHash(r)) throw new Error('REQUEST_CONFLICT');
+    return JSON.parse(row.result_json);
+  }
   return {
+    /** Input acknowledgment only, separate from the Evidence-backed tool ledger. */
+    lookupProject(value) {
+      const r = checkedProject(value);
+      return projectResult(r, projectRow(r));
+    },
+    rememberProject(value, result, now) {
+      const r = checkedProject(value);
+      if (!Number.isSafeInteger(now) || now < 0 || !result || result.status !== 'received'
+          || typeof result.inputId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(result.inputId)
+          || typeof result.createdAt !== 'string' || !Number.isFinite(Date.parse(result.createdAt))
+          || Object.keys(result).sort().join(',') !== 'createdAt,inputId,status') throw new Error('INVALID_RECEIPT');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const prior = projectResult(r, projectRow(r));
+        if (prior) { db.exec('COMMIT'); return prior; }
+        db.prepare('INSERT INTO remote_project_inputs VALUES(?,?,?,?,?,?)')
+          .run(...key(r), projectHash(r), JSON.stringify(result), now);
+        db.exec('COMMIT');
+        return { ...result };
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+    },
     lookup(value) {
       const r = checked(value);
       const row = find.get(...key(r));

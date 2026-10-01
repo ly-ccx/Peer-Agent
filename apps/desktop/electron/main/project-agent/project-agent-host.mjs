@@ -553,6 +553,8 @@ export function registerDesktopProjectAgent({
   });
   if (typeof onReady === 'function') {
     onReady({
+      projectAccess: {directory,inputQueue,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
+        wake:workspaceId=>{void host.sync([workspaceId]).catch(()=>{});}},
       listItems: () => directory.list(),
       submitInput: (input) => {
         try {

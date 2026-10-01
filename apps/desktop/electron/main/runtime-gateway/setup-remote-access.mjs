@@ -1,6 +1,6 @@
 /**
  * Desktop-side remote access assembly: local binding store, outbound connector,
- * and the read-only task reader that answers remote reads from local truth.
+ * task execution reader and project UI adapter, each with device-side admission.
  *
  * Boundaries (ADR 75 / M1):
  *   - Nothing here executes a remote wish. A remote read only reaches the local
@@ -19,9 +19,8 @@
  *     entry is deleted and refused rather than silently replaced, so a broken
  *     keychain cannot quietly orphan an existing binding.
  *
- * Known limitations, stated plainly:
- *   - The delegation (allowed workspaces, read/export flags, expiry) is local
- *     configuration with no settings UI yet; it defaults to a single workspace.
+ * Delegation lifetime:
+ *   - Project read/message grants come from local settings, per workspace.
  *   - A delegation is published once per connection. An app left running past its
  *     expiry fails closed (remote reads are refused) until the next reconnect.
  */
@@ -35,8 +34,19 @@ import {
 } from '@peer-agent/runtime-node';
 import { createRemoteGoalReader } from './remote-goal-read.mjs';
 import { createRemoteIdentityStore } from './remote-identity-keychain.mjs';
+import {mkdirSync,readFileSync,renameSync,writeFileSync} from 'node:fs';
+import path from 'node:path';
+import {createRemoteReceiptStore} from '@peer-agent/runtime-node';
+import {createRemoteProjectAccess} from './remote-project-access.mjs';
+import {normalizeRemoteSettings} from './remote-access-controller.mjs';
 
 const DELEGATION_MS = 24 * 60 * 60 * 1000;
+const PROJECT_OPERATIONS=new Set(['project.list','project.conversation.read','project.session.read','project.input.submit']);
+function accessSummary(value) {
+  if(!value||!Number.isSafeInteger(value.at)||value.at<0||!PROJECT_OPERATIONS.has(value.operation)
+      || value.workspaceId!==undefined&&!isRemoteWorkspaceId(value.workspaceId))return null;
+  return {at:value.at,operation:value.operation,...(value.workspaceId!==undefined?{workspaceId:value.workspaceId}:{})};
+}
 
 /** 委托名单：稳定 id，再加上注册表里的旧远程别名。两者都准入。 */
 function resolveAcceptedWorkspaceIds(workspaceId, { registryFile, remoteAliases } = {}) {
@@ -119,11 +129,13 @@ export function setupRemoteAccess({
   identityStore = createRemoteIdentityStore(),
   registryFile,
   remoteAliases,
+  projectGrants = [], delegationVersion = 1,
+  getProjectAccess = () => null, getRemoteSettings = null,
 } = {}) {
   for (const [name, value] of Object.entries({
     userDataPath, gatewayOrigin, deviceName, workspaceId,
   })) {
-    if (typeof value !== 'string' || !value.trim()) throw new Error(`MISSING_${name.toUpperCase()}`);
+    if (typeof value !== 'string' || !value.trim() && name !== 'workspaceId') throw new Error(`MISSING_${name.toUpperCase()}`);
   }
   if (!goalPlanStore || !sessionStore || !buildProjection || !host) throw new Error('MISSING_DEPENDENCY');
 
@@ -144,13 +156,25 @@ export function setupRemoteAccess({
   // page to finish binding, and it expires, so it is cleared as soon as the
   // connection moves on or stops.
   let pairing = null;
+  let connectionGeneration = 0;
+  let delegationExpiresAt = Date.now() + DELEGATION_MS;
+  let projectReceipts = null;
+  const initialPolicy = normalizeRemoteSettings({enabled:true,gatewayOrigin,workspaceId,projectGrants,delegationVersion});
+  const currentPolicy = () => typeof getRemoteSettings === 'function'
+    ? normalizeRemoteSettings(getRemoteSettings() ?? {}) : initialPolicy;
+  const accessFile = path.join(userDataPath,'project-runtime','remote-access.json');
+  let lastAccess = null;
+  try {lastAccess=accessSummary(JSON.parse(readFileSync(accessFile,'utf8')));}catch{}
 
   const delegationOf = () => ({
-    version: 1,
-    workspaceIds: acceptedWorkspaceIds,
+    version: initialPolicy.delegationVersion,
+    workspaceIds: [...new Set([...acceptedWorkspaceIds,...initialPolicy.workspaceIds])],
     allowTaskRead: true,
     allowResultExport: true,
-    expiresAt: Date.now() + DELEGATION_MS,
+    expiresAt: delegationExpiresAt,
+    allowProjectRead: initialPolicy.projectGrants.some(row=>row.allowProjectRead),
+    allowProjectMessage: initialPolicy.projectGrants.some(row=>row.allowProjectMessage),
+    projectGrants: initialPolicy.projectGrants,
   });
 
   /** Remote task id -> local plan. Ownership is decided here, from local state.
@@ -169,8 +193,9 @@ export function setupRemoteAccess({
       if (!plan) continue;
       // A plan id is also addressable as a task id: the M1 read target is "the
       // task", and a plan root is the task a caller is most likely to know.
-      if (plan.planId === taskId) return { planId: plan.planId, taskId };
-      if (walk(plan.subtasks)) return { planId: plan.planId, taskId };
+      const localWorkspaceId=plan.delegationOrigin?.workspaceId || workspaceId;
+      if (plan.planId === taskId) return { planId: plan.planId, taskId, workspaceId:localWorkspaceId };
+      if (walk(plan.subtasks)) return { planId: plan.planId, taskId, workspaceId:localWorkspaceId };
     }
     return null;
   }
@@ -182,7 +207,10 @@ export function setupRemoteAccess({
     resolveLocal: async (request) => {
       const binding = bindingStore.load();
       const delegation = delegationOf();
-      const local = binding ? findLocalTask(request.taskId) : null;
+      const policy = currentPolicy();
+      const found = binding ? findLocalTask(request.taskId) : null;
+      const local = found && (found.workspaceId===request.workspaceId
+        || found.workspaceId===workspaceId && acceptedWorkspaceIds.includes(request.workspaceId)) ? found : null;
       // Denial vocabulary belongs to the protocol, so instead of throwing here
       // (the reader collapses exceptions into LOCAL_STATE_UNAVAILABLE) we hand
       // back a context that fails the specific check admitRemoteRead performs.
@@ -204,12 +232,12 @@ export function setupRemoteAccess({
           bindingVersion: identity.bindingVersion,
           connectionEpoch,
           online,
-          bindingRevoked: !binding,
+          bindingRevoked: !binding || binding.disabled || !policy.enabled || policy.gatewayOrigin!==gatewayOrigin,
           delegation: {
-            version: delegation.version,
+            version: policy.delegationVersion,
             expiresAt: delegation.expiresAt,
-            revoked: false,
-            workspaceIds: delegation.workspaceIds,
+            revoked: policy.workspaceId!==workspaceId,
+            workspaceIds: acceptedWorkspaceIds,
             allowTaskRead: delegation.allowTaskRead,
             allowResultExport: delegation.allowResultExport,
           },
@@ -222,6 +250,39 @@ export function setupRemoteAccess({
       };
     },
   });
+
+  const projectReader = createRemoteProjectAccess({
+    receipts: {
+      lookupProject: value => projectLedger().lookupProject(value),
+      rememberProject: (value,result,now) => projectLedger().rememberProject(value,result,now),
+    },
+    resolveLocal(request) {
+      const binding=bindingStore.load(),policy=currentPolicy(),ports=getProjectAccess();
+      const project='workspaceId' in request?ports?.directory.get(request.workspaceId):null;
+      const session=request.operation==='project.session.read'?ports?.getSession(request.sessionId):null;
+      const paths=request.operation==='project.list'?(ports?.directory.workspaceIds?.()??[]).map(id=>ports.directory.get(id)?.path):[project?.path];
+      return {projectAccess:ports,sessionFacts:session,privatePaths:[userDataPath,...paths].filter(Boolean),admission:{
+        now:Date.now(),ownerId:binding?.ownerId??'',deviceId:binding?.deviceId??'',bindingVersion:binding?.bindingVersion??0,
+        connectionEpoch,online,bindingRevoked:!binding||binding.disabled||!policy.enabled||policy.gatewayOrigin!==gatewayOrigin,
+        delegation:{version:policy.delegationVersion,expiresAt:delegationExpiresAt,revoked:false,workspaceIds:policy.workspaceIds,
+          allowProjectRead:policy.projectGrants.some(row=>row.allowProjectRead),allowProjectMessage:policy.projectGrants.some(row=>row.allowProjectMessage),projectGrants:policy.projectGrants},
+        project:project?.ok?{workspaceId:project.profile.workspaceId,status:project.profile.status}:null,
+        session:session?{workspaceId:session.workspaceId,sessionId:session.sessionId}:null,
+      }};
+    },
+    onAccess(value) {
+      lastAccess=accessSummary(value);mkdirSync(path.dirname(accessFile),{recursive:true});
+      const temporary=`${accessFile}.${process.pid}.tmp`;writeFileSync(temporary,JSON.stringify(lastAccess));renameSync(temporary,accessFile);
+    },
+  });
+  function projectLedger() {
+    if(!projectReceipts){const root=path.join(userDataPath,'project-runtime');mkdirSync(root,{recursive:true});projectReceipts=createRemoteReceiptStore(path.join(root,'remote-receipts.sqlite'));}
+    return projectReceipts;
+  }
+  async function onProjectAccess(request) {
+    const outcome=await projectReader(request);
+    return outcome.ok?{status:'ok',result:outcome.result}:{status:'rejected',code:outcome.code};
+  }
 
   /** Frame one answer. The result is a bounded read-only projection, not a dump:
    * an oversized answer is refused by the connection's frame budget rather than
@@ -253,11 +314,14 @@ export function setupRemoteAccess({
      * Reads the keychain lazily, so a machine that never connects never touches it. */
     async start() {
       if (connector) return;
+      const generation=++connectionGeneration;
       const binding = bindingStore.load();
       if (binding?.disabled) throw new Error('REMOTE_DISABLED');
       // Resolve the persistent identity before dialing: the handshake signs with
       // it, and it must be the same key the Gateway already knows for this device.
       if (!identity) identity = await createKeychainIdentity(identityStore);
+      if(generation!==connectionGeneration)return;
+      delegationExpiresAt=Date.now()+DELEGATION_MS;
       connector = connectorFactory({
         origin: gatewayOrigin,
         store: { load: () => bindingStore.load(), save: value => bindingStore.save(value) },
@@ -267,7 +331,9 @@ export function setupRemoteAccess({
         deviceId: binding?.deviceId,
         delegation: delegationOf(),
         onTaskRead,
+        onProjectAccess,
         onState(event) {
+          if(generation!==connectionGeneration)return;
           if (event?.status === 'online') {
             // The epoch belongs to this connection; capture it for the reader.
             connectionEpoch = event.connectionEpoch;
@@ -296,6 +362,7 @@ export function setupRemoteAccess({
       // The supervisor resolves when it gives up. Without this the surface had no
       // way to learn that dialing stopped, so it showed "connecting…" forever.
       connector.closed.then(({ reason, detail }) => {
+        if(generation!==connectionGeneration)return;
         online = false;
         // The connection is gone, so any challenge it carried is dead too.
         pairing = null;
@@ -304,6 +371,7 @@ export function setupRemoteAccess({
       });
     },
     stop() {
+      connectionGeneration++;
       connector?.stop();
       connector = null;
       online = false;
@@ -314,6 +382,7 @@ export function setupRemoteAccess({
       // Likewise a stopped connection holds no live challenge; showing a stale one
       // would invite the user to claim something the server no longer honours.
       pairing = null;
+      projectReceipts?.close();projectReceipts=null;
     },
     /** Local state for the settings surface; no secrets. */
     status() {
@@ -326,6 +395,7 @@ export function setupRemoteAccess({
         connectionEpoch,
         lastFailure,
         pairing,
+        lastAccess,
       };
     },
     bindingStore,

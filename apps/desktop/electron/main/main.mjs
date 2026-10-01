@@ -3500,7 +3500,7 @@ function startLocalRuntime() {
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
-  // 远程只读接入（ADR 75）。连接只由 remoteAccessController 按设置启停；环境变量只在首次写入设置。
+  // 连接由 remoteAccessController 按本机设置启停。
   try {
     const current = settingsStore.getAll()?.remoteAccess;
     const seeded = current && typeof current === 'object' && typeof current.gatewayOrigin === 'string'
@@ -3519,15 +3519,11 @@ function startLocalRuntime() {
     remoteAccess = createRemoteAccessController({
       settingsStore,
       deviceName: os.hostname(),
-      createSession: ({ gatewayOrigin, workspaceId }) => setupRemoteAccess({
-        userDataPath,
-        gatewayOrigin,
-        deviceName: os.hostname(),
-        workspaceId,
-        goalPlanStore,
-        sessionStore,
-        buildProjection: buildRuntimeProjection,
-        host: localToolHost,
+      createSession: config => setupRemoteAccess({
+        ...config,userDataPath,deviceName:os.hostname(),goalPlanStore,sessionStore,
+        buildProjection:buildRuntimeProjection,host:localToolHost,
+        getProjectAccess:()=>projectAgentDirectory.projectAccess,
+        getRemoteSettings:()=>settingsStore.getAll()?.remoteAccess,
       }),
     });
     // 启动时按已保存的意图恢复连接；未配置或已关闭则什么都不做。

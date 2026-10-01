@@ -551,6 +551,7 @@ export {
 // of startRemoteDeviceConnector.
 export { startRemoteDeviceConnector } from './remote-device-connector.mjs';
 export { createRemoteBindingStore } from './remote-binding-store.mjs';
+export { createRemoteReceiptStore } from './remote-receipt-store.mjs';
 
 export { createExecutionScheduler, normalizeConcurrency } from './project-agent/execution-scheduler.mjs';
 export { createIsolationPlanner, decideIsolation, MIN_WORKTREE_FREE_BYTES, FAILED_WORKTREE_RETENTION_MS } from './project-agent/isolation-planner.mjs';

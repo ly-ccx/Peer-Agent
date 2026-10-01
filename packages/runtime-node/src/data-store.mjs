@@ -37,6 +37,7 @@ function resolveDataHome() {
 export const DATA_STORE_ENTRIES = {
   auth:              { rel: 'auth',                    kind: 'dir',  scope: 'device'   },
   deviceIdentity:    { rel: 'device-identity.json',    kind: 'file', scope: 'device'   },
+  remoteBinding:     { rel: 'remote-binding.sqlite',  kind: 'file', scope: 'device'   },
   skills:            { rel: 'skills',                  kind: 'dir',  scope: 'portable' },
   mcpRegistry:       { rel: 'mcp-registry.json',       kind: 'file', scope: 'portable' },
   mcpCredentials:    { rel: 'mcp-credentials.json',    kind: 'file', scope: 'device'   },
