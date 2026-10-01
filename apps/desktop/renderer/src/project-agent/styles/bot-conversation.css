@@ -16,6 +16,11 @@
   padding: 18px 22px 8px;
 }
 
+/* Virtual spacers and message rows must retain their scroll geometry. */
+.bot-thread > * {
+  flex-shrink: 0;
+}
+
 .bot-thread-older {
   align-self: center;
   padding: 6px 12px;

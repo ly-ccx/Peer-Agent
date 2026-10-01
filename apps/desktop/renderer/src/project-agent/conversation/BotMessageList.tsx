@@ -95,13 +95,20 @@ export function BotMessageList({
     previousRowsRef.current = rows;
   }, [rows]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!highlightedId) return;
     const index = rows.findIndex((row) => row.type === 'message' && row.message.id === highlightedId);
-    if (index >= 0) setAnchor(index);
+    if (index >= 0) {
+      pinnedRef.current = false;
+      setAnchor(index);
+    }
+  }, [highlightedId, rows]);
+
+  useEffect(() => {
+    if (!highlightedId) return;
     const node = document.getElementById(`bot-msg-${highlightedId}`);
     node?.scrollIntoView({ block: 'center' });
-  }, [highlightedId, rows]);
+  }, [highlightedId, windowed.start, rows]);
 
   useEffect(() => {
     const node = scrollerRef.current;
@@ -119,12 +126,9 @@ export function BotMessageList({
       onScroll={(event) => {
         const node = event.currentTarget;
         pinnedRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
-        if (rows.length > 200) {
-          // Match the spacer estimate and keep ten rows above the viewport.
-          // Selecting only one earlier slice leaves a blank spacer at scrollTop=0.
-          setAnchor(pinnedRef.current ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1,
-            Math.floor(node.scrollTop / 72) + Math.floor(windowSize / 2) - 10)));
-        }
+        // Track reading position before and after crossing the virtualization threshold.
+        setAnchor(pinnedRef.current ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1,
+          Math.floor(node.scrollTop / 72) + Math.floor(windowSize / 2) - 10)));
         if (node.scrollTop < 48 && hasOlder && !olderError) {
           void loadOlder();
         }

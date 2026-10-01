@@ -16,6 +16,10 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const fixture = seedBotShellHome({ home });
+const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
+const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+seededMessages.at(-1).replyTo = ['rc-message-9500'];
+writeFileSync(fixtureConversation, seededMessages.map(row => JSON.stringify(row)).join('\n') + '\n');
 const settings = JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8'));
 settings.memory = { enabled: false };
 const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
@@ -141,6 +145,16 @@ try {
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
+  await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+  await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
+  await until(() => page.locator('#bot-msg-rc-message-9500').evaluate(node => {
+    const row = node.getBoundingClientRect(), thread = node.closest('.bot-thread').getBoundingClientRect();
+    return row.top >= thread.top && row.bottom <= thread.bottom;
+  }), Boolean);
+  await tracePaging('quoted old message located inside viewport');
+  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
+  report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
