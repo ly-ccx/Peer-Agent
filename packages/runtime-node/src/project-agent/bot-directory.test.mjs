@@ -184,6 +184,25 @@ test('approval batch is current and scoped; details and unavailable adapters ret
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('task batch refreshes list facts while details and failed batches retain the single port', () => {
+  const root = tempRoot();
+  let batches = 0, singles = 0, status = 'waiting_user', unavailable = false;
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => [], listConfirmations: () => [], listApprovals: () => [],
+      listSessions: () => { singles++; return [{ title: 'single task', status: 'waiting_user' }]; },
+      readSessionsBatch: ids => { batches++; if (unavailable) throw Error('unavailable');
+        return new Map(ids.map(id => [id, [{ title: 'fresh batch task', status }]])); },
+    });
+    assert.equal(directory.query('fresh batch task').items.length, 1);
+    assert.equal(directory.list()[0].state.needsYou, 1);
+    status = 'completed'; assert.equal(directory.list()[0].state.needsYou, 0);
+    assert.equal(batches, 3); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 1);
+    unavailable = true; assert.equal(directory.list()[0].state.needsYou, 1);
+    assert.equal(singles, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('读游标之后未读清零，对话按 kind 分页', () => {
   const root = tempRoot();
   try {
