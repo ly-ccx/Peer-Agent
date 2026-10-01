@@ -62,3 +62,10 @@ test('provider rejects forged wake before dispatch and never replays a cached re
  }finally{w.cleanup();}
 });
 test('corrupt device state fails closed rather than resetting quota',()=>{const w=world();try{w.service().prepareSpawn(task(),w.context([w.event()]));writeFileSync(path.join(w.root,'ws/objectives/actions-state.json'),'{broken');assert.throws(()=>w.actions.usage('ws',w.item.objectiveId));}finally{w.cleanup();}});
+
+
+test('objective wake allows independent verification only for its actual owned task',async()=>{
+ let verified=0;const provider=createDelegationProvider({supervisor:{get:()=>({workspaceId:'ws',origin:{objectiveId:'o'}})},verification:{async run(){verified++;return {ok:true,facts:{}};},record(){}}});
+ const context={mode:'project_agent',role:'project_agent',workspaceId:'ws',conversationId:'c',turnId:'t',objectiveWakeIds:['other'],currentInputAnchors:[],messages:[]};
+ const result=await provider.executeCapability({call:{toolCallId:'t',capabilityId:'local.delegation.verify_session',arguments:{sessionId:'s'}}},context);assert.match(result.result.outputPreview.legacyResult.output,/objective_verification_out_of_scope/);assert.equal(verified,0);const allowed=await provider.executeCapability({call:{toolCallId:'v',capabilityId:'local.delegation.verify_session',arguments:{sessionId:'s'}}},{...context,objectiveWakeIds:['o']});assert.equal(allowed.result.status,'success');assert.equal(verified,1);
+});

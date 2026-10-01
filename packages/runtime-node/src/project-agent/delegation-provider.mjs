@@ -103,9 +103,10 @@ export function createDelegationProvider({
 
     let input = validated.value;
     if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
-    if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['resume_session','message_session','reprioritize_session','cancel_session','verify_session','set_proactivity'].includes(item.name)){
+    if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['resume_session','message_session','reprioritize_session','cancel_session','set_proactivity'].includes(item.name)){
       return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     }
+    if(item.name==='verify_session'&&view.objectiveWakeIds.length&&!view.currentInputAnchors.length){const session=await supervisor?.get?.({sessionId:input.sessionId});if(!session||session.workspaceId!==view.workspaceId||!view.objectiveWakeIds.includes(session.origin?.objectiveId))return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_verification_out_of_scope'}});}
     if (['message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
       const scope = resolveAnchorScope({
         messages: view.messages,

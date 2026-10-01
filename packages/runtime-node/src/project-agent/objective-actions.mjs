@@ -27,5 +27,5 @@ export function createObjectiveActions({rootDir=null,now=()=>new Date()}={}){
  }
  function link(ws,id,sessionId){const state=read(ws),item=state.items.find(row=>row.actionId===id);if(!item)return false;if(item.sessionId&&item.sessionId!==sessionId)throw Error('OBJECTIVE_ACTION_SESSION_MISMATCH');item.state='spawned';item.sessionId=sessionId;save(ws,state);return true;}
  const list=ws=>structuredClone(read(ws).items);
- return {prepare,approve,link,usage,list,pending:ws=>list(ws).filter(item=>item.state==='proposed'),get:(ws,id)=>list(ws).find(item=>item.actionId===id)||null};
+ return {prepare,approve,link,usage,list,pending:ws=>list(ws).filter(item=>item.state==='proposed'&&Date.parse(stamp())-Date.parse(item.createdAt)<=7*86_400_000),get:(ws,id)=>list(ws).find(item=>item.actionId===id)||null};
 }
