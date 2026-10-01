@@ -109,6 +109,8 @@ try {
   report.windowReadyMs = Date.now() - Date.parse(report.startedAt);
   page.setDefaultTimeout(15000); page.on('pageerror', error => report.pageErrors.push(error.message));
   await page.locator('.bot-shell').waitFor();
+  await page.bringToFront();
+  report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
   report.avatarAnimation = await page.evaluate(() => ({ avatars: document.querySelectorAll('.bot-avatar').length, activeAvatars: document.querySelectorAll('[data-avatar-animated="true"]').length, animations: document.getAnimations().length }));
@@ -174,6 +176,7 @@ try {
         timer = setTimeout(() => { cleanup(); reject(Error('Visible received marker missing: ' + JSON.stringify(states))); }, 5000);
       });
     }, text);
+    (report.inputWindowStates ??= []).push(await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus(), composer: document.querySelectorAll('.bot-composer textarea').length })));
     await page.locator('.bot-composer textarea').press('Enter');
     const sample = await page.evaluate(() => globalThis.rcReceiptMeasurement);
     report.receiptSamples.push(sample.elapsed);
@@ -249,6 +252,8 @@ try {
   report.error = error.stack; process.exitCode = 1;
   if (page && app) await tracePaging('failure').catch(() => {});
   if (page) await page.screenshot({ path: path.join(root, 'failure.png') }).catch(() => {});
+  const failureOutput = process.argv.indexOf('--output');
+  if (page && failureOutput >= 0) await page.screenshot({ path: path.join(path.dirname(process.argv[failureOutput + 1]), 'bot-shell-failure.png') }).catch(() => {});
 } finally {
   if (handle) report.ownedStop = await owned.stop({ handleId: handle, reason: 'owned' });
   report.finishedAt = new Date().toISOString();
