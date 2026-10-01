@@ -79,8 +79,20 @@ const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse',
   synthetic: true, scale: fixture.scale, platform: process.platform, startedAt: new Date().toISOString(),
   checks: [], pageErrors: [], receiptSamples: [], scope: 'Real source Electron main/preload/renderer and durable input; scripted cognition only; not installed or real-model timing' };
 let app, handle, page; const logs = [];
+// Node inspector can collect its read-only evaluate promise during a main GC.
+// Retry only the observation; production actions and timing samples are retained.
+const readMain = async (fn) => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { return await app.evaluate(fn); }
+    catch (error) {
+      if (!String(error.message).includes('Resulting promise was garbage collected') || attempt === 2) throw error;
+      (report.observationRetries ??= []).push('INSPECTOR_PROMISE_COLLECTED');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+};
 const tracePaging = async (phase) => {
-  (report.paging ??= []).push({ phase, reads: (await app.evaluate(() => globalThis.rcBotShellReads ?? [])).slice(-20),
+  (report.paging ??= []).push({ phase, reads: (await readMain(() => globalThis.rcBotShellReads ?? [])).slice(-20),
     view: await page.locator('.bot-thread').evaluate(node => ({ top: node.scrollTop, height: node.scrollHeight,
       viewport: node.clientHeight, busy: node.getAttribute('aria-busy'), ids: [...node.querySelectorAll('[id^="bot-msg-"]')].map(row => row.id) })) });
 };
@@ -98,13 +110,13 @@ try {
   page.setDefaultTimeout(15000); page.on('pageerror', error => report.pageErrors.push(error.message));
   await page.locator('.bot-shell').waitFor();
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
-  assert.equal((await app.evaluate(() => globalThis.rcBotShellTurns)).length, 0, 'idle bots must not open model turns');
+  assert.equal((await readMain(() => globalThis.rcBotShellTurns)).length, 0, 'idle bots must not open model turns');
   report.checks.push('200 real bot rows; no idle model turns');
-  report.listInitialMs = (await app.evaluate(() => globalThis.rcListTimings ?? [])).find(sample => sample.count === fixture.scale.bots)?.durationMs;
+  report.listInitialMs = (await readMain(() => globalThis.rcListTimings ?? [])).find(sample => sample.count === fixture.scale.bots)?.durationMs;
   const listSamples = [];
   for (let i = 0; i < 5; i++) {
     assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
-    listSamples.push((await app.evaluate(() => globalThis.rcListTimings)).at(-1).durationMs);
+    listSamples.push(await readMain(() => globalThis.rcListTimings.at(-1).durationMs));
   }
   report.metrics = { productionList: metric('list', listSamples) };
   assert.equal(report.metrics.productionList.pass, true, 'real desktop list projection p50 must stay below 100ms');
@@ -133,7 +145,7 @@ try {
     report.searchSamples.push(await page.evaluate(() => globalThis.rcSearchMeasurement));
   }
   report.metrics.visibleSearch = metric('search', report.searchSamples);
-  report.searchTimings = await app.evaluate(() => globalThis.rcSearchTimings ?? []);
+  report.searchTimings = await readMain(() => globalThis.rcSearchTimings ?? []);
   assert.equal(report.metrics.visibleSearch.pass, true, 'input to visible full-corpus result p50 must stay below 150ms');
   await page.locator('.bot-search').fill('');
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
