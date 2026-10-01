@@ -56,7 +56,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     required: ['sessionId', 'anchorMessageId'], additionalProperties: false,
   }),
   spec('reprioritize_session', 'local.delegation.reprioritize_session', {
-    type: 'object', properties: { sessionId: { type: 'string' }, priority: { type: 'string', enum: ['high', 'normal', 'low'] } },
+    type: 'object', properties: { sessionId: { type: 'string' }, priority: { type: 'string', enum: ['high', 'normal', 'low'] }, anchorMessageId: { type: 'string' } },
     required: ['sessionId', 'priority'], additionalProperties: false,
   }),
   spec('list_sessions', 'local.delegation.list_sessions', {
@@ -171,7 +171,7 @@ export function validateDelegationInput(name, raw) {
   if (name === 'reprioritize_session') {
     const sessionId = text(input.sessionId, 200);
     return sessionId && ['high', 'normal', 'low'].includes(input.priority)
-      ? { ok: true, value: { sessionId, priority: input.priority } } : invalid('sessionId and valid priority are required.');
+      ? { ok: true, value: { sessionId, priority: input.priority, ...(text(input.anchorMessageId, 200) ? { anchorMessageId: text(input.anchorMessageId, 200) } : {}) } } : invalid('sessionId and valid priority are required.');
   }
   if (name === 'list_sessions') return validateList(input);
   if (name === 'get_session') return validateGet(input);

@@ -1,3 +1,5 @@
+import { hasCurrentUserUrgency } from './user-priority.mjs';
+
 const ENDED = new Set(['completed', 'failed', 'cancelled']);
 const SUSPENDED = new Set(['paused', 'superseded']);
 export const SUPERSESSION_RETENTION_MS = 7 * 24 * 60 * 60_000;
@@ -90,6 +92,7 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
     const checked = check(plan, context);
     if (!checked.ok) return checked;
     if (!['high', 'normal', 'low'].includes(input.priority)) return error('invalid_priority');
+    if (input.priority === 'high' && !hasCurrentUserUrgency({ conversationStore, ...context, anchorMessageIds: [input.anchorMessageId] })) return error('urgency_required');
     return { ok: true, plan: saveOrigin(plan, { priority: input.priority }, 'session priority changed') };
   }
   function expired(plan) {

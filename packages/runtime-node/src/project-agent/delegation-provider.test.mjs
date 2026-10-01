@@ -699,3 +699,18 @@ test('quoted corrections cannot resume, reprioritize or replace an unrelated tas
   }
   assert.equal(mutations, 0);
 });
+
+
+test('priority forwarding uses host turn anchors, not model arguments', async () => {
+  const seen = [];
+  const provider = createDelegationProvider({ supervisor: {
+    get: () => ({ sessionId: 's1', workspaceId: 'ws-1' }),
+    reprioritize: (input, context) => { seen.push([input, context]); return { sessionId: input.sessionId, status: 'queued' }; },
+  } });
+  const result = await provider.executeCapability(call('local.delegation.reprioritize_session', {
+    sessionId: 's1', priority: 'high', anchorMessageId: 'u1', currentInputAnchors: ['forged'],
+  }), { toolContext: agentContext({ workspaceId: 'ws-1', currentInputAnchors: ['u1'] }) });
+  assert.equal(result.result.status, 'success');
+  assert.equal(seen[0][0].anchorMessageId, 'u1');
+  assert.deepEqual(seen[0][1].currentInputAnchors, ['u1']);
+});

@@ -1,3 +1,4 @@
+import { hasCurrentUserUrgency } from './user-priority.mjs';
 import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
@@ -355,6 +356,7 @@ export function createSessionSupervisor({
     if (input?.priority != null && !['high', 'normal', 'low'].includes(input.priority)) {
       return { error: 'invalid_input', message: 'priority must be high, normal, or low' };
     }
+    if (input?.priority === 'high' && !hasCurrentUserUrgency({ conversationStore, ...context, anchorMessageIds })) return { error: 'urgency_required' };
     if (input?.isolation != null && !['auto', 'none', 'worktree'].includes(input.isolation)) {
       return { error: 'invalid_input', message: 'isolation must be auto, none, or worktree' };
     }

@@ -356,7 +356,7 @@ export function createProjectAgentApplicationService({
     }
     const currentSession = current.sessionId && typeof sessions?.get === 'function'
       ? await sessions.get({ sessionId: current.sessionId }) : null;
-    if (currentSession && ['paused', 'superseded'].includes(currentSession.status)) return { ok: false, code: 'SESSION_PAUSED' };
+    if (decision === 'approved' && currentSession && ['paused', 'superseded'].includes(currentSession.status)) return { ok: false, code: 'SESSION_PAUSED' };
     const duration = decision !== 'approved'
       ? 'denied'
       : payload.duration === 'task'

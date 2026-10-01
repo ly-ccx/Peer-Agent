@@ -1645,6 +1645,8 @@ export function createLlmChatService({
       // 执行层判定准入。见 Goal 模式运行时闸门设计。
       toolContext.mode = runtimeMode;
       toolContext.turnRole = profile?.role ?? null;
+      toolContext.currentInputAnchors = projectAgentTurn && Array.isArray(profile?.context?.inputAnchors)
+        ? profile.context.inputAnchors.map(anchor => anchor.messageId).filter(id => typeof id === 'string') : [];
       toolContext.turnId = streamId;
       toolContext.toolCallOrdinal = 0;
       toolContext.workspaceId = typeof profile?.workspaceId === 'string' && profile.workspaceId.trim()

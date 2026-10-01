@@ -367,6 +367,7 @@ function executionView(context) {
     workspacePath: text(context?.workspacePath) || text(nested.workspacePath) || '',
     conversationId: text(context?.conversationId) || text(nested.conversationId),
     memoryIds: idList(context?.turnMemoryIds ?? nested.turnMemoryIds),
+    currentInputAnchors: idList(context?.currentInputAnchors ?? nested.currentInputAnchors),
     turnToolCalls: Array.isArray(context?.turnToolCalls)
       ? context.turnToolCalls.slice()
       : (Array.isArray(nested.turnToolCalls) ? nested.turnToolCalls.slice() : []),
@@ -485,6 +486,7 @@ function spawnContext(view) {
     parentConversationId: text(view?.conversationId) || '',
     workspaceId: text(view?.workspaceId) || '',
     workspacePath: text(view?.workspacePath) || '',
+    currentInputAnchors: view.currentInputAnchors,
     ...historyCarry(view?.messages),
   };
 }

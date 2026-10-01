@@ -1478,7 +1478,8 @@ test('stored priority controls promotion after supervisor restart', async () => 
   try {
     const first=await env.supervisor.spawn(spawnInput({title:'first',brief:'first'}),contextOf(env));
     const low=await env.supervisor.spawn(spawnInput({title:'low',brief:'low',priority:'low'}),contextOf(env));
-    const high=await env.supervisor.spawn(spawnInput({title:'high',brief:'high',priority:'high'}),contextOf(env));
+    env.conversationStore.appendMessage(env.parent.id, { id: 'urgent-high', role: 'user', kind: 'user_input', content: '紧急，请优先处理' });
+    const high=await env.supervisor.spawn(spawnInput({title:'high',brief:'high',priority:'high',anchorMessageIds:['urgent-high']}),contextOf(env, { currentInputAnchors: ['urgent-high'] }));
     const reloaded=createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()});
     assert.equal(reloaded.getPlan(planIdOf(env,high.sessionId)).delegationOrigin.priority,'high');
     const restarted=createSessionSupervisor({conversationStore:env.conversationStore,goalPlanStore:reloaded,
@@ -1595,7 +1596,8 @@ test('reprioritizing queued work is durable and does not bypass the write slot',
   try {
     await env.supervisor.spawn(spawnInput({ title: 'holder' }), contextOf(env));
     const low = await env.supervisor.spawn(spawnInput({ title: 'low', brief: 'queued', priority: 'low' }), contextOf(env));
-    const changed = await env.supervisor.reprioritize({ sessionId: low.sessionId, priority: 'high' }, contextOf(env));
+    env.conversationStore.appendMessage(env.parent.id, { id: 'urgent-high', role: 'user', kind: 'user_input', content: '紧急，请优先处理' });
+    const changed = await env.supervisor.reprioritize({ sessionId: low.sessionId, priority: 'high', anchorMessageId: 'urgent-high' }, contextOf(env, { currentInputAnchors: ['urgent-high'] }));
     assert.equal(changed.status, 'queued');
     assert.equal(env.goalPlanStore.getPlan(changed.planId).delegationOrigin.priority, 'high');
     const restarted = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() });
@@ -1649,4 +1651,36 @@ test('supersession closes the persisted admission gate before waiting for an in-
     assert.equal(starts, 1); assert.equal(cleanups, 0);
     release(); assert.equal((await replacing).error, undefined); assert.equal(starts, 2);
   } finally { release(); await env.cleanup(); }
+});
+
+
+test('high priority requires a current positive user urgency anchor for promotion and creation', async () => {
+  const env = await harness();
+  try {
+    await env.supervisor.spawn(spawnInput({ title: 'holder' }), contextOf(env));
+    const queued = await env.supervisor.spawn(spawnInput({ title: 'queued', brief: 'queued' }), contextOf(env));
+    const inputs = [
+      ['urgent', '这个任务紧急，请优先处理', true],
+      ['ordinary', '看一下这个任务', false],
+      ['negative', '不着急，不用优先处理', false],
+      ['quoted', '文档里写着“紧急”，帮我检查', false],
+      ['english', 'Please prioritize this task, it is urgent.', true],
+      ['negated-en', 'Not urgent, no rush. Keep high priority out.', false],
+    ];
+    for (const [id, content, allowed] of inputs) {
+      env.conversationStore.appendMessage(env.parent.id, { id, role: 'user', kind: 'user_input', content });
+      const context = contextOf(env, { currentInputAnchors: [id] });
+      const result = await env.supervisor.reprioritize({ sessionId: queued.sessionId, priority: 'high', anchorMessageId: id }, context);
+      assert.equal(Boolean(result.error), !allowed, id);
+      if (allowed) await env.supervisor.reprioritize({ sessionId: queued.sessionId, priority: 'normal' }, context);
+    }
+    for (const context of [contextOf(env), contextOf(env, { currentInputAnchors: ['ordinary'] })]) {
+      const before = env.conversationStore.listChildren(env.parent.id).length;
+      assert.equal((await env.supervisor.reprioritize({ sessionId: queued.sessionId, priority: 'high', anchorMessageId: 'urgent' }, context)).error, 'urgency_required');
+      assert.equal((await env.supervisor.spawn(spawnInput({ title: 'bypass', brief: 'bypass', priority: 'high', anchorMessageIds: ['urgent'] }), context)).error, 'urgency_required');
+      assert.equal(env.conversationStore.listChildren(env.parent.id).length, before);
+    }
+    assert.equal((await env.supervisor.reprioritize({ sessionId: queued.sessionId, priority: 'high' }, contextOf(env, { currentInputAnchors: ['urgent'] }))).error, 'urgency_required');
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).delegationOrigin.priority, 'normal');
+  } finally { await env.cleanup(); }
 });

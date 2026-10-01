@@ -716,3 +716,21 @@ test('an approval cannot accidentally restart a superseded task', async () => {
   assert.equal((await service.decideApproval({ workspaceId: 'ws-1', approvalId: 'plan:s1', decision: 'approve' })).code, 'SESSION_PAUSED');
   assert.equal(approved, 0); assert.equal(resumed, 0);
 });
+
+
+test('paused approvals can be denied without restarting the task', async () => {
+  for (const state of ['open', 'stale']) for (const status of ['paused', 'superseded']) {
+    const saved = [], settled = [], cancelled = []; let restarts = 0;
+    const permission = { approvalId: 'permission-1', capabilityId: 'local.fs.write', sessionId: 's1', state };
+    const plan = { approvalId: 'plan:s1', sessionId: 's1', state };
+    const service = createProjectAgentApplicationService({ enabled: () => true,
+      approvals: { list: () => [permission, plan], append: item => { saved.push(item); return item; } },
+      settleLive: (_approval, decision) => settled.push(decision),
+      sessions: { get: () => ({ status }), resumeFromApproval: () => { restarts++; },
+        cancel: input => { cancelled.push(input); return { sessionId: 's1', status: 'cancelled' }; } } });
+    assert.equal((await service.decideApproval({ approvalId: permission.approvalId, decision: 'deny' })).approval?.state, 'denied');
+    assert.equal((await service.decideApproval({ approvalId: plan.approvalId, decision: 'reject' })).approval?.state, 'denied');
+    assert.equal(saved.length, 2); assert.equal(cancelled.length, 1); assert.equal(restarts, 0);
+    assert.equal(settled.length, state === 'open' ? 1 : 0);
+  }
+});
