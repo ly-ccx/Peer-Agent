@@ -709,7 +709,7 @@ test('search reuses the full query catalog while retaining nonmatching bot messa
     directory: {
       query: () => { projections++; return { items: [], catalog }; },
       search: throwing('duplicate directory projection'),
-    }, corpusStamp: () => stamp,
+    }, corpusStamp: (snapshot) => { assert.equal(snapshot, catalog); return stamp; },
     readSearchCorpus: (snapshot) => {
       assert.equal(snapshot, catalog); reads++;
       return { bots: snapshot, messages: [{ workspaceId: 'ws-2',
