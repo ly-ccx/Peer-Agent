@@ -251,13 +251,16 @@ export function createProjectAgentApplicationService({
         createdAt: payload.createdAt,
         ...(answerTo ? { answerTo } : {}),
       });
+      const handoff = answerTo && typeof sessions?.handleHandoffAnswer === 'function'
+        ? await sessions.handleHandoffAnswer({ sessionId: sessionIdFromAnswer(answerTo), workspaceId: payload.workspaceId,
+          answerTo, text: input.text }) : null;
       if (typeof wake === 'function') {
         try { wake(payload.workspaceId); } catch { /* 唤醒失败不回滚已经入队的输入 */ }
       }
       queueConversation(payload.workspaceId);
       queueChanged(payload.workspaceId);
       let delivery = 'queued';
-      if (answerTo && agentOnline(payload.workspaceId) !== true && typeof sessions?.deliverAnswer === 'function') {
+      if (!handoff?.handled && answerTo && agentOnline(payload.workspaceId) !== true && typeof sessions?.deliverAnswer === 'function') {
         const sessionId = sessionIdFromAnswer(answerTo);
         if (sessionId) {
           try {

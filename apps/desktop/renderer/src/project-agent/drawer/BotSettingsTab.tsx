@@ -3,6 +3,7 @@ import { BOT_AVATAR_COLORS, type BotProfile, type ModelRoutingMenuOption } from 
 import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
+import { Switch } from '../../ui/boolean-controls/Switch';
 import { BotPolicyFields } from './BotPolicyFields';
 import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 
@@ -106,7 +107,7 @@ export function BotSettingsTab({
     }
   }
 
-  async function savePolicy(patch: Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy'>) {
+  async function savePolicy(patch: Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy' | 'autoHandoffOnPolicyAccept'>) {
     if (busy) return;
     setBusy(true); setError('');
     try {
@@ -239,6 +240,12 @@ export function BotSettingsTab({
       </div>
       <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
         onChange={patch => { void savePolicy(patch); }} />
+      <div className="bot-settings-field">
+        <label htmlFor="bot-auto-handoff">{i18n.t('projectAgent.drawer.settings.autoHandoff')}</label>
+        <Switch id="bot-auto-handoff" checked={profile.autoHandoffOnPolicyAccept === true} disabled={busy}
+          onCheckedChange={value => { void savePolicy({ autoHandoffOnPolicyAccept: value }); }} />
+        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
+      </div>
       {error ? <p className="bot-drawer-note">{error}</p> : null}
       <button type="button" disabled={busy} onClick={() => { void remove(); }}>
         {confirmDelete

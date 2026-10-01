@@ -46,7 +46,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
       priority: { type: 'string', enum: ['high', 'normal', 'low'] },
       dependsOn: { type: 'array', items: { type: 'string' } },
       supersedes: { type: 'string' },
-      isolation: { type: 'string' },
+      isolation: { type: 'string', enum: ['auto', 'none', 'worktree'] },
     },
     required: ['anchorMessageIds', 'title', 'brief', 'successCriteria', 'kind', 'readOnly'],
     additionalProperties: false,
@@ -243,7 +243,7 @@ function validateSpawn(input) {
   }
   if (input.isolation !== undefined) {
     const isolation = text(input.isolation, 40);
-    if (!isolation) return invalid('isolation must be a short string.');
+    if (!['auto', 'none', 'worktree'].includes(isolation)) return invalid('isolation must be auto, none, or worktree.');
     value.isolation = isolation;
   }
   if (input.supersedes !== undefined) {

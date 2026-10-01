@@ -4,6 +4,10 @@ const TIERS = new Set(['strong', 'fast', 'economy', 'vision']);
 /** Validate the whole patch before any profile write; a project only narrows configured models. */
 export function profilePolicyPatch(payload, models = []) {
   const patch = {};
+  if (payload.autoHandoffOnPolicyAccept !== undefined) {
+    if (typeof payload.autoHandoffOnPolicyAccept !== 'boolean') return { ok: false, code: 'INVALID_HANDOFF_POLICY' };
+    patch.autoHandoffOnPolicyAccept = payload.autoHandoffOnPolicyAccept;
+  }
   if (payload.planApproval !== undefined) {
     if (!['never', 'writes', 'always'].includes(payload.planApproval)) return { ok: false, code: 'INVALID_PLAN_APPROVAL' };
     patch.planApproval = payload.planApproval;

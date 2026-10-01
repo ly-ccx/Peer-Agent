@@ -159,6 +159,8 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
 
 export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
   if (session.queueReason === 'dependency_missing') return i18n.t('projectAgent.drawer.dependencyMissing');
+  if (session.queueReason === 'disk_space') return i18n.t('projectAgent.drawer.diskSpace');
+  if (session.queueReason === 'isolation_failed') return i18n.t('projectAgent.drawer.isolationFailed');
   return session.queuedBehind?.length
     ? i18n.t(session.queueReason === 'dependency_failed'
       ? 'projectAgent.drawer.dependencyFailed' : 'projectAgent.drawer.queuedBehind',

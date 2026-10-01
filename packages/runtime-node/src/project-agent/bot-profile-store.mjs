@@ -178,6 +178,7 @@ export function createBotProfileStore({
       managed: managed === true,
       agentConversationId: agentConversationId.trim(),
       proactivity: 'inherit',
+      autoHandoffOnPolicyAccept: false,
       modelPolicy: null,
       status: 'active',
       readmeOffer: null,

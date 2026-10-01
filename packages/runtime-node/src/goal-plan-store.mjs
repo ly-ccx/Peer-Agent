@@ -1792,6 +1792,14 @@ function normalizeDelegationOrigin(value) {
   if (value.verifying === true) origin.verifying = true;
   if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;
   if (['high', 'normal', 'low'].includes(value.priority)) origin.priority = value.priority;
+  if (['auto', 'none', 'worktree'].includes(value.isolation)) origin.isolation = value.isolation;
+  if (['disk_space', 'isolation_failed'].includes(value.isolationBlock)) origin.isolationBlock = value.isolationBlock;
+  const isolationRetainedAt = toIsoOrNull(value.isolationRetainedAt);
+  if (isolationRetainedAt) origin.isolationRetainedAt = isolationRetainedAt;
+  for (const key of ['handoffAuthorizedAt', 'handoffDeferredAt']) {
+    const at = toIsoOrNull(value[key]);
+    if (at) origin[key] = at;
+  }
   if (Array.isArray(value.dependsOn)) {
     const dependsOn = value.dependsOn
       .filter((item) => typeof item === 'string' && item.trim())

@@ -62,7 +62,8 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       turnId: message.turnId, reason: message.content?.replace(/^代理暂时不可用：/, ''),
     }));
     return projection.project(workspaceId, { approvals: approvalStore.list({ workspaceId }),
-      confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable });
+      confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable,
+      handoffs: rows.flatMap(row => { const facts = supervisor.deliveryFacts?.(row.sessionId); return facts ? [facts] : []; }) });
   }
   return { delivery, cards, resolve: (workspaceId, cardId) => projection.resolve(workspaceId, cardId, { resolution: 'retried' }) };
 }

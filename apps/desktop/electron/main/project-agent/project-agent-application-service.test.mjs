@@ -98,6 +98,18 @@ test('头像选色通过宿主保存并返回最新档案', async () => {
   assert.deepEqual(calls, [['ws-1', '#61b68c']]);
 });
 
+test('automatic merge is explicit, saved through host policy, and invalid patches are atomic', async () => {
+  let profile = { workspaceId: 'ws-1', status: 'active', displayName: 'Bot' };
+  let saves = 0;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    profileStore: { read: () => profile, save: next => { saves++; profile = next; return { ok: true }; } } });
+  assert.equal((await service.updateProfile({ workspaceId: 'ws-1', displayName: 'Changed', autoHandoffOnPolicyAccept: 'true' })).ok, false);
+  assert.equal(saves, 0); assert.equal(profile.displayName, 'Bot');
+  const result = await service.updateProfile({ workspaceId: 'ws-1', autoHandoffOnPolicyAccept: true });
+  assert.equal(result.ok, true); assert.equal(result.profile.autoHandoffOnPolicyAccept, true);
+  assert.equal((await service.updateProfile({ workspaceId: 'ws-1', autoHandoffOnPolicyAccept: false })).profile.autoHandoffOnPolicyAccept, false);
+});
+
 test('头像展示只读取已保存图片，由主进程编码为 data URL', () => {
   const calls = [];
   const service = createProjectAgentApplicationService({

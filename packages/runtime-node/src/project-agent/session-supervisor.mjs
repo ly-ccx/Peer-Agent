@@ -9,6 +9,7 @@ import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
 import { boundedImageAttachments } from './input-queue.mjs';
 import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
+import { createSessionHandoff } from './session-handoff.mjs';
 import { digestApprovalArgs } from './approval-store.mjs';
 import { spawnIdentity, identityFromPlan } from './spawn-identity.mjs';
 
@@ -65,6 +66,8 @@ export function createSessionSupervisor({
   goalPlanStore,
   goalRunner = null,
   executionScheduler = goalRunner?.executionScheduler ?? null,
+  isolationPlanner = goalRunner?.isolationPlanner ?? null,
+  canManageWorkspace = () => true,
   catalog = [],
   resolveModel = null,
   memoryStore = null,
@@ -83,6 +86,7 @@ export function createSessionSupervisor({
   }
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
+  const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, conversationStore, promote, now });
   let tail = Promise.resolve();
   let depth = 0;
   function exclusive(task) {
@@ -327,6 +331,7 @@ export function createSessionSupervisor({
       readOnly: input?.readOnly,
       successCriteria: input?.successCriteria,
       dependsOn: input?.dependsOn,
+      isolation: input?.isolation || 'auto',
       ...(supersedes ? { supersedes } : {}),
     });
     const replay = findByKey(key, parentConversationId, input);
@@ -344,6 +349,9 @@ export function createSessionSupervisor({
     }
     if (input?.priority != null && !['high', 'normal', 'low'].includes(input.priority)) {
       return { error: 'invalid_input', message: 'priority must be high, normal, or low' };
+    }
+    if (input?.isolation != null && !['auto', 'none', 'worktree'].includes(input.isolation)) {
+      return { error: 'invalid_input', message: 'isolation must be auto, none, or worktree' };
     }
     const frozen = freezeModels(input || {}, workspaceId);
     if (!frozen.ok) return { error: 'model_unavailable', missing: frozen.missing };
@@ -444,6 +452,7 @@ export function createSessionSupervisor({
           parentConversationId,
           readOnly: input.readOnly === true,
           priority: input.priority || 'normal',
+          isolation: input.isolation || 'auto',
           phase,
           idempotencyKey: key,
           ...(text(context?.parentSessionId) ? { parentSessionId: text(context.parentSessionId) } : {}),
@@ -453,6 +462,7 @@ export function createSessionSupervisor({
       planId = plan?.planId || null;
       spawnedSessionId = sessionId;
       if (!plan?.delegationOrigin?.sessionId) throw new Error('delegationOrigin was not stored');
+      if (!hold && isolationPlanner && canManageWorkspace(workspaceId) === true) await isolationPlanner.prepare(plan, delegatedPlans());
       if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
       if (replacingOpen) {
         const cancelled = await cancelLocked({ sessionId: supersedes, reason: 'superseded by a new session', promote: false });
@@ -479,6 +489,8 @@ export function createSessionSupervisor({
       return {
         sessionId,
         status: reportedPhase,
+        ...(executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason
+          ? { queueReason: executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason } : {}),
         ...(queuedBehind > 0 ? { queuedBehind } : {}),
       };
     } catch (error) {
@@ -487,6 +499,15 @@ export function createSessionSupervisor({
         return { sessionId: spawnedSessionId, status: 'running', error: 'spawn_failed', message: reason };
       }
       if (planId) {
+        const failedPlan = goalPlanStore.getPlan(planId);
+        if (isolationPlanner && failedPlan?.deliveryBinding?.worktreePath) {
+          const cleaned = await isolationPlanner.cleanup({ ...failedPlan, status: 'cancelled' });
+          if (cleaned?.deliveryBinding?.worktreePath) {
+            goalPlanStore.setPlanStatus(planId, 'failed');
+            await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
+            return { sessionId: spawnedSessionId, status: 'failed', error: 'spawn_failed', message: reason };
+          }
+        }
         try { goalPlanStore.deletePlan(planId); } catch { /* 计划已不在 */ }
       }
       if (child?.id) abandon(child.id, reason);
@@ -495,7 +516,19 @@ export function createSessionSupervisor({
   }
 
   async function promote(spawningPlanId = null) {
-    const plans = delegatedPlans();
+    if (isolationPlanner) {
+      const virtual = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true);
+      for (const plan of virtual) {
+        if (plan.delegationOrigin.phase !== 'queued' || TERMINAL.has(plan.status) || plan.runner?.status === 'waiting_user') continue;
+        const prepared = await isolationPlanner.prepare(plan, virtual);
+        const index = virtual.findIndex(item => item.planId === plan.planId);
+        virtual[index] = prepared.plan;
+        if (prepared.ok && executionScheduler.inspect(prepared.plan, virtual).allowed) {
+          virtual[index] = { ...prepared.plan, delegationOrigin: { ...prepared.plan.delegationOrigin, phase: 'running' } };
+        }
+      }
+    }
+    const plans = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true);
     const { start, blocked } = executionScheduler.select(plans);
     for (const plan of blocked) {
       goalPlanStore.revisePlan(plan.planId, {
@@ -546,6 +579,7 @@ export function createSessionSupervisor({
       });
     }
     goalPlanStore.setPlanStatus(plan.planId, 'cancelled');
+    if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(plan.planId));
     emit({
       kind: 'cancelled',
       sessionId: plan.delegationOrigin.sessionId,
@@ -667,6 +701,8 @@ export function createSessionSupervisor({
         acceptedBy,
         verdictRef,
       },
+      ...(acceptedBy === 'policy' && hostFacts(plan).autoHandoffOnPolicyAccept === true
+        ? { delegationOrigin: { ...plan.delegationOrigin, handoffAuthorizedAt: now() } } : {}),
     }, { reason: acceptedBy === 'policy' ? 'policy acceptance' : 'user acceptance', changedBy: 'session-supervisor' });
   }
 
@@ -689,6 +725,7 @@ export function createSessionSupervisor({
     if (decision.acceptedBy !== 'policy') return { ok: true, accepted: false, ...decision };
     try {
       const saved = writeAcceptance(plan, 'policy', decision.verdictRef);
+      await handoff.afterAcceptance(saved);
       await promote();
       return {
         ok: true,
@@ -712,6 +749,7 @@ export function createSessionSupervisor({
     if (decision.acceptedBy !== 'user') return { ok: false, error: 'not_confirmable', ...decision };
     try {
       const saved = writeAcceptance(plan, 'user', decision.verdictRef);
+      await handoff.afterAcceptance(saved);
       await promote();
       return {
         ok: true,
@@ -863,6 +901,7 @@ export function createSessionSupervisor({
     if (!origin?.sessionId || !origin.workspaceId) return { ok: false, reason: 'not_delegated' };
     if (occupiesRunningSlot(plan)) return { ok: false, reason: 'still_running' };
     if (origin.phase !== 'running' || !settled(plan)) return { ok: false, reason: 'not_slot_holder' };
+    if (isolationPlanner) await isolationPlanner.cleanup(plan);
     await promote();
     return { ok: true, planId };
   }
@@ -887,6 +926,12 @@ export function createSessionSupervisor({
 
   async function reconcilePersistedQueues() {
     for (const plan of delegatedPlans()) {
+      if (canManageWorkspace(plan.delegationOrigin.workspaceId) !== true) continue;
+      if (isolationPlanner && (TERMINAL.has(plan.status)
+        || plan.status === 'interrupted' && plan.runner?.status === 'failed')) await isolationPlanner.cleanup(plan);
+      if (plan.status === 'completed' && plan.resultAcceptance?.acceptedAt && plan.delegationOrigin.handoffAuthorizedAt
+        && plan.deliveryHandoff?.status !== 'delivered' && plan.deliveryHandoff?.status !== 'stopped'
+        && typeof goalRunner?.handoffDelegatedPlan === 'function') await handoff.afterAcceptance(plan);
       if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) await settleLocked(plan.delegationOrigin.sessionId);
     }
     await promote();
@@ -896,6 +941,7 @@ export function createSessionSupervisor({
 
   return {
     executionScheduler,
+    reconcile() { return exclusive(() => reconcilePersistedQueues()); },
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
     },
@@ -906,6 +952,8 @@ export function createSessionSupervisor({
       return workspace ? delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspace).map(project) : [];
     },
     get,
+    deliveryFacts: handoff.facts,
+    handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
     cancel(input) {
       return exclusive(() => cancelLocked(input || {}));
     },

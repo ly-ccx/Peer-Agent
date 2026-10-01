@@ -1501,6 +1501,10 @@ export function createGoalRunner({
         try {
           await prepareIsolation(plan);
         } catch (error) {
+          if (plan.delegationOrigin) {
+            goalPlanStore.setRunnerState(planId, { status: 'blocked', blockedReason: '执行 worktree 不可用，请重试隔离。' });
+            throw error;
+          }
           logger?.warn?.('[goal-runner] prepareIsolation failed; writing to bound workspace:', error?.message || error);
         }
       }
@@ -1577,6 +1581,10 @@ export function createGoalRunner({
       try {
         await prepareIsolation(plan);
       } catch (error) {
+        if (plan.delegationOrigin) {
+          goalPlanStore.setRunnerState(planId, { status: 'blocked', blockedReason: '执行 worktree 不可用，请重试隔离。' });
+          throw error;
+        }
         logger?.warn?.('[goal-runner] prepareIsolation failed; writing to bound workspace:', error?.message || error);
       }
     }

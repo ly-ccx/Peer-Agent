@@ -165,3 +165,14 @@ test('queue reasons use host blockers and tolerate malformed older responses', (
   assert.deepEqual(session?.queuedBehind,[{sessionId:'a',title:'写入任务'}]);assert.equal(session?.queueReason,'write_slot');
   assert.deepEqual(readDrawerSession({sessionId:'old'})?.queuedBehind,[]);
 });
+
+test('isolation failures and disk waits have readable labels even without a blocking session', () => {
+  const i18n = createI18n('zh-CN');
+  for (const reason of ['disk_space', 'isolation_failed']) {
+    const session = readDrawerSession({ sessionId: 's', status: 'queued', queueReason: reason });
+    assert.ok(session);
+    const label = formatDrawerSessionStatus(session, i18n);
+    assert.match(label, reason === 'disk_space' ? /磁盘/ : /隔离/);
+    assert.doesNotMatch(label, /disk_space|isolation_failed/);
+  }
+});

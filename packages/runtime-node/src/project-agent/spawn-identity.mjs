@@ -22,6 +22,7 @@ export function spawnIdentity(parentConversationId, input) {
       .map(key => [key, item[key]]))).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
     dependsOn: [...new Set(input.dependsOn || [])].sort(),
     supersedes: input.supersedes || '',
+    isolation: input.isolation || 'auto',
   } : { parentConversationId, ...input };
   return createHash('sha256').update(JSON.stringify(material)).digest('hex');
 }
@@ -37,8 +38,8 @@ export function identityFromPlan(plan, parentConversationId, request) {
   };
   // Old plans did not persist kind or all anchors separately. The original
   // request hash must prove those values before deriving a new identity.
-  if (request.supersedes) return '';
+  if (request.supersedes || (request.isolation || 'auto') !== (origin.isolation || 'auto')) return '';
   const oldKey = createHash('sha256').update(JSON.stringify({ parentConversationId, ...original })).digest('hex');
   if (oldKey !== origin.idempotencyKey) return '';
-  return spawnIdentity(parentConversationId, { ...original, dependsOn: origin.dependsOn });
+  return spawnIdentity(parentConversationId, { ...original, dependsOn: origin.dependsOn, isolation: origin.isolation || 'auto' });
 }

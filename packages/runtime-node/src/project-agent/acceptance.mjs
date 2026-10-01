@@ -11,6 +11,19 @@ import {
 } from '@peer-agent/protocol';
 
 import { computeVerificationVerdict } from './verification-verdict.mjs';
+import { createHash } from 'node:crypto';
+
+export function isHandoffConflict(handoff) {
+  return handoff?.status === 'stopped'
+    && !['acceptance_required', 'handoff_confirmation_required'].includes(handoff.stoppedReason);
+}
+
+export function handoffQuestionId(handoff, acceptedAt) {
+  const conflict = isHandoffConflict(handoff);
+  return `handoff${conflict ? '_conflict' : ''}-${createHash('sha256').update(JSON.stringify([
+    acceptedAt, ...(conflict ? [handoff.updatedAt, handoff.commitSha, handoff.stoppedReason] : []),
+  ])).digest('hex').slice(0, 16)}`;
+}
 
 export const CHANGED_FILE_CONFIRM_LIMIT = 20;
 
