@@ -116,9 +116,11 @@ try {
   await page.bringToFront();
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = 0; });
   await page.locator('#bot-msg-rc-message-9900').waitFor();
+  await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   for (const older of [9850, 9800, 9750, 9700]) {
     await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; node.scrollTop = 0; });
     await page.locator(`#bot-msg-rc-message-${older + 30}`).waitFor();
+    await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   }
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();

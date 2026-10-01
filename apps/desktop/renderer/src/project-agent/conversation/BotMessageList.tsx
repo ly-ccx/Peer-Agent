@@ -115,6 +115,7 @@ export function BotMessageList({
       ref={scrollerRef}
       role="log"
       aria-live="polite"
+      aria-busy={loadingOlder}
       onScroll={(event) => {
         const node = event.currentTarget;
         pinnedRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
