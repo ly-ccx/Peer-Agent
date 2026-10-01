@@ -40,6 +40,29 @@ test('priority, FIFO and bounded one-level aging survive restart', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('approval starts queue aging at admission and preserves that timestamp after restart', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-admission-'));
+  let at = '2026-10-01T00:10:00.000Z';
+  try {
+    const writer = plan('writer', { phase: 'running', readOnly: false });
+    const waiting = plan('waiting', { readOnly: false, createdAt: at });
+    const approval = plan('approval', { phase: 'awaiting_approval', readOnly: false });
+    const scheduler = createExecutionScheduler({ rootDir: root, now: () => at });
+    assert.deepEqual(scheduler.select([writer, waiting, approval]).start, []);
+    at = '2026-10-01T00:31:00.000Z';
+    const approved = { ...approval, delegationOrigin: { ...approval.delegationOrigin, phase: 'queued' } };
+    assert.deepEqual(scheduler.select([approved, waiting]).start.map(p => p.planId), ['waiting']);
+    const saved = JSON.parse(readFileSync(path.join(root, 'w', 'scheduler.json'), 'utf8'));
+    assert.equal(saved.items.find(item => item.sessionId === 'approval').enqueuedAt, at);
+    at = '2026-10-01T00:59:00.000Z';
+    const restored = createExecutionScheduler({ rootDir: root, now: () => at });
+    const high = plan('high', { priority: 'high', readOnly: false, createdAt: at });
+    assert.deepEqual(restored.select([approved, high]).start.map(p => p.planId), ['high']);
+    at = '2026-10-01T01:01:00.000Z';
+    assert.deepEqual(restored.select([approved, high]).start.map(p => p.planId), ['approval']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('dependencies require persisted acceptance, failed dependencies wait for the user', () => {
   const s = createExecutionScheduler();
   const dep = plan('dep', { status: 'completed' });
@@ -97,11 +120,13 @@ test('corrupt queue order is rebuilt from Plans; live counts and leases are neve
   const root = mkdtempSync(path.join(os.tmpdir(), 'b4-corrupt-'));
   try {
     mkdirSync(path.join(root, 'w')); writeFileSync(path.join(root, 'w', 'scheduler.json'), '{broken');
-    const s = createExecutionScheduler({ rootDir: root });
+    const admittedAt = '2026-10-01T00:45:00.000Z';
+    const s = createExecutionScheduler({ rootDir: root, now: () => admittedAt });
     const plans = [plan('late', {createdAt:'2026-10-01T00:01:00Z'}), plan('early')];
     assert.deepEqual(s.select(plans).start.map(p => p.planId), ['early', 'late']);
     const saved = JSON.parse(readFileSync(path.join(root, 'w', 'scheduler.json'), 'utf8'));
     assert.deepEqual(Object.keys(saved).sort(), ['items','version']);
+    assert.ok(saved.items.every(item => item.enqueuedAt === admittedAt));
     assert.deepEqual(s.stats(), { active:0, waiting:0, limit:4 });
     assert.equal(s.inspect(plan('writer', {readOnly:false}), [plan('other', {workspaceId:'other',phase:'running',readOnly:false})]).allowed, true);
   } finally { rmSync(root, {recursive:true,force:true}); }

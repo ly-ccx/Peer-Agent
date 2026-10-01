@@ -66,6 +66,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
   }
   function reconcile(plans) {
     plansById = new Map(plans.map(plan => [plan.planId, plan]));
+    const admittedAt = at();
     const workspaces = new Set([...queues.keys(), ...plans.map(plan => plan.delegationOrigin?.workspaceId).filter(Boolean)]);
     for (const workspaceId of workspaces) {
       const pending = plans.filter(plan => plan.delegationOrigin?.workspaceId === workspaceId
@@ -78,7 +79,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
       for (const plan of [...pending].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
         const sessionId = plan.delegationOrigin.sessionId;
         if (known.has(sessionId)) continue;
-        items.push({ sessionId, order: order++, enqueuedAt: Number.isFinite(Date.parse(plan.createdAt)) ? plan.createdAt : at() });
+        items.push({ sessionId, order: order++, enqueuedAt: admittedAt });
         known.add(sessionId);
       }
       queues.set(workspaceId, items);

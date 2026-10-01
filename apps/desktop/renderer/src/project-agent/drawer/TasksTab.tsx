@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import type { HistoryConversation } from '../HistorySheet';
-import { formatDrawerStamp, groupDrawerSessions, type DrawerSession, type TaskGroup } from '../state/drawerState';
+import { formatDrawerSessionStatus, formatDrawerStamp, groupDrawerSessions, type DrawerSession, type TaskGroup } from '../state/drawerState';
 
 const GROUP_KEY = {
   needsYou: 'projectAgent.drawer.group.needsYou',
@@ -74,11 +74,7 @@ export function TasksTab({
                   >
                     <span className="bot-task-row-copy">
                       <span className="bot-task-row-title" title={session.title}>{session.title}</span>
-                      <span className="bot-task-row-meta">{session.queuedBehind?.length
-                        ? i18n.t(session.queueReason === 'dependency_failed' || session.queueReason === 'dependency_missing'
-                          ? 'projectAgent.drawer.dependencyFailed' : 'projectAgent.drawer.queuedBehind',
-                          { tasks: session.queuedBehind.map(item => item.title).join(', ') })
-                        : session.statusLabel || session.status}</span>
+                      <span className="bot-task-row-meta">{formatDrawerSessionStatus(session, i18n)}</span>
                     </span>
                     <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                   </button>
