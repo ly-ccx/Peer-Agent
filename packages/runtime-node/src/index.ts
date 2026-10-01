@@ -595,6 +595,7 @@ export { finalVerifierText, decodeVerifierReport, runVerifierWithReport } from '
 export { verifierEvidenceSnapshots } from './project-agent/verifier-evidence.mjs';
 export { createGoalTaskBranchAdapter, slugifyTaskBranchName, planNeedsTaskBranch } from './project-agent/goal-task-branch.mjs';
 export { createProjectGoalRunnerHost, buildGoalRunnerMessage } from './project-agent/goal-runner-host.mjs';
+export { createProjectDiagnostics, diagnosticText } from './project-agent/diagnostics.mjs';
 export { createOneTimeApprovalBook } from './project-agent/one-time-approval.mjs';
 
 export { projectToolDescription } from './project-agent/tool-prompts.generated.mjs';

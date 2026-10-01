@@ -1,0 +1,8 @@
+.project-diagnostics__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.project-diagnostics__summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
+.project-diagnostics__summary div { min-width: 0; }
+.project-diagnostics__summary dt { color: var(--graphite-soft); font-size: .82rem; }
+.project-diagnostics__summary dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.project-diagnostics details { border-top: 1px solid var(--pa-border-subtle); padding-top: var(--space-3); }
+.project-diagnostics summary { cursor: pointer; }
+.project-diagnostics pre { max-height: 320px; overflow: auto; padding: var(--space-3); font-size: .82rem; background: var(--paper-base); border-radius: var(--radius-sm); }

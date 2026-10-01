@@ -31,6 +31,7 @@ import {
   createProjectRegistry,
   createSessionSupervisor,
   createExecutionScheduler,
+  createProjectDiagnostics,
   createCircuitBreaker,
   createProjectRecovery,
   resolveRoleRoute,
@@ -56,6 +57,7 @@ import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 import { installDelegation } from './delegation-port.mjs';
 import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
+import { createDiagnosticsExport } from './diagnostics-export.mjs';
 
 /** Current user inputs become the model messages, including bounded image thumbnails. */
 export function messagesFromUserInputs(plan) {
@@ -410,7 +412,28 @@ export function registerDesktopProjectAgent({
     await Promise.allSettled(sessions.map(session => goalRunner.waitForIdle?.(session.planId)));
   });
   objectiveWatches.start(()=>directory.workspaceIds());
+  const diagnosticsReader = createProjectDiagnostics({
+    readProjects: () => {
+      const active = new Set(directory.workspaceIds());
+      return registry.diagnosticSnapshot().filter(project => active.has(project.workspaceId));
+    },
+    readLease: workspaceId => hostLeases?.diagnosticSnapshot?.(workspaceId) ?? null,
+    readInput: inputQueue.diagnosticSnapshot,
+    readInbox: inbox.diagnosticSnapshot,
+    readApprovals: workspaceId => approvalStore.list({ workspaceId }),
+    readObjectives: objectiveStore.list,
+    readWatch: objectiveWatches.state.get,
+    readTurns: workspaceId => conversationStore.getPersistedConversationHistory(resolveConversationId(workspaceId))?.messages || [],
+    readScheduler: executionScheduler.diagnosticSnapshot,
+  });
+  const diagnostics = createDiagnosticsExport({ readReport: diagnosticsReader.read, chooseTarget: sender => {
+    const parent = sender ? BrowserWindow.fromWebContents(sender) : undefined;
+    const options = { title: 'Export diagnostics / 导出诊断',
+      defaultPath: 'peer-agent-diagnostics.json', filters: [{ name: 'JSON', extensions: ['json'] }] };
+    return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
+  } });
   const projectAgent = createProjectAgentApplicationService({
+    diagnostics: diagnostics.execute,
     enabled: runtimeEnabled,
     requestTakeover: workspaceId => {
       const result = hostLeases?.requestTakeover?.(workspaceId);

@@ -1111,6 +1111,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentConfirmResult: (params: { workspaceId: string; sessionId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentAcceptReadme: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentTakeoverHost: (params: import('@peer-agent/protocol').ProjectHostTakeoverRequest) => Promise<import('@peer-agent/protocol').ProjectHostTakeoverResult>;
+  readonly projectAgentDiagnostics: (params: import('@peer-agent/protocol').ProjectDiagnosticsRequest) => Promise<import('@peer-agent/protocol').ProjectDiagnosticsResult>;
   readonly projectAgentRetry: (params: { workspaceId: string; turnId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectObjectivesList: (params: ProjectObjectiveListRequest) => Promise<ProjectObjectiveListResult>;
   readonly projectObjectivesUpdate: (params: ProjectObjectiveUpdateRequest) => Promise<ProjectObjectiveItemResult>;

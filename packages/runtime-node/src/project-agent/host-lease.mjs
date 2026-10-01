@@ -431,6 +431,13 @@ export function createHostLease({
 
   return {
     acquire,
+    diagnosticSnapshot(workspaceId) {
+      const dirName = workspaceDir(workspaceId);
+      if (!dirName) throw new Error('INVALID_WORKSPACE');
+      const current = readLease(dirName);
+      if (!current && existsSync(leaseFile(dirName))) throw new Error('CORRUPT_LEASE');
+      return current;
+    },
     holds,
     /** The host must abort and await its active turns before ownership can change. */
     setYieldHandler(handler) {

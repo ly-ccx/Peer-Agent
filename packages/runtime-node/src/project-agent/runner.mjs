@@ -221,13 +221,17 @@ export function createProjectAgentRunner({
         preempted.push({ events: job.events, throughSeq: job.throughSeq });
         return 'preempted';
       }
+      const startedAt = stamp(), started = performance.now();
+      const diagnosticTiming = outcome => ({ startedAt, finishedAt: stamp(), durationMs: performance.now() - started, outcome });
       const outcome = await runRounds(job, signal);
       job.turnId = outcome.turnId;
       if (disposed || outcome.disposed) { circuitBreaker?.abandonTrial(); return 'disposed'; }
       if (outcome.preempted) {
         circuitBreaker?.abandonTrial();
         if (outcome.rounds.length > 0) {
-          remember(agentTurnMessage({ turnId: outcome.turnId, plan: outcome.plan, rounds: outcome.rounds }));
+          const message = agentTurnMessage({ turnId: outcome.turnId, plan: outcome.plan, rounds: outcome.rounds });
+          message.meta = { ...message.meta, diagnosticTiming: diagnosticTiming('preempted') };
+          remember(message);
         }
         preempted.push({ events: job.events, throughSeq: job.throughSeq });
         return 'preempted';
@@ -252,6 +256,7 @@ export function createProjectAgentRunner({
       if (!stampLearned(finished.messages, learned)) pendingLearned.unshift(...learned);
       if (disposed) return 'disposed';
       for (const message of finished.messages) {
+        if (message?.kind === 'agent_turn') message.meta = { ...message.meta, diagnosticTiming: diagnosticTiming(outcome.failed || finished.failed ? 'error' : 'done') };
         if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
           onDigest({
             message,

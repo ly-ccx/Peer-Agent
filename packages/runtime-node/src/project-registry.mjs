@@ -254,6 +254,16 @@ export function createProjectRegistry({
   }
 
   return {
+    diagnosticSnapshot() {
+      if (!filePath) return (memory ?? emptyDocument()).projects.map(copyEntry);
+      let raw;
+      try { raw = readFileSync(filePath, 'utf8'); }
+      catch (error) { if (error?.code === 'ENOENT') return []; throw new Error('REGISTRY_UNAVAILABLE'); }
+      let doc;
+      try { doc = validateDocument(JSON.parse(raw)); } catch { /* Fixed code, no path disclosure. */ }
+      if (!doc) throw new Error('CORRUPT_REGISTRY');
+      return doc.projects.map(copyEntry);
+    },
     ensureForPath(folderPath) {
       const folder = normalizePath(folderPath);
       if (!folder) return null;

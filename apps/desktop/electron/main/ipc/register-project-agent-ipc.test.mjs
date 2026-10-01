@@ -29,6 +29,7 @@ const CHANNELS = [
   'project-agent:accept-readme',
   'project-agent:retry',
   'project-agent:takeover-host',
+  'project-agent:diagnostics',
 ];
 
 function harness() {
@@ -63,6 +64,7 @@ function harness() {
       acceptReadme: port('accept-readme'),
       takeoverHost: port('takeover-host'),
       retry: port('retry'),
+      diagnostics: port('diagnostics'),
     },
   });
   const handlers = new Map();
@@ -97,6 +99,7 @@ test('每个通道把载荷交给应用服务，创建和改档案带上发送�
   assert.deepEqual(calls[0], ['list', { channel: 'project-agent:list' }]);
   assert.equal(calls.some((call) => call[0] === 'submit-input'), true);
   assert.equal(calls.some((call) => call[0] === 'decide-approval'), true);
+  assert.deepEqual(calls.at(-1), ['diagnostics', { channel: 'project-agent:diagnostics' }, sender]);
 });
 
 test('证据正文只经 read-evidence 通道从 main 读出', async () => {

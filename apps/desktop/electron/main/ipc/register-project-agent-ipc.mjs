@@ -33,6 +33,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     acceptReadme: assertFunction(projectAgent?.acceptReadme, 'projectAgent.acceptReadme'),
     takeoverHost: assertFunction(projectAgent?.takeoverHost, 'projectAgent.takeoverHost'),
     retry: assertFunction(projectAgent?.retry, 'projectAgent.retry'),
+    diagnostics: assertFunction(projectAgent?.diagnostics, 'projectAgent.diagnostics'),
   };
 
   return Object.freeze([
@@ -61,6 +62,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:accept-readme', (_event, payload) => ports.acceptReadme(payload));
       ipc.handle('project-agent:retry', (_event, payload) => ports.retry(payload));
       ipc.handle('project-agent:takeover-host', (_event, payload) => ports.takeoverHost(payload));
+      ipc.handle('project-agent:diagnostics', (event, payload) => ports.diagnostics(payload, event.sender));
     }),
   ]);
 }

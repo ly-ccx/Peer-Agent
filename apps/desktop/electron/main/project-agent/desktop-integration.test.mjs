@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -47,12 +47,41 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
   const bot = api.listItems()[0];
   const invoke = (channel, payload = {}) => handlers.get(`project-agent:${channel}`)({}, { workspaceId: bot.workspaceId, ...payload });
   return { executor, home, project, api, bot, plans, conversations, calls, routes, starts, events, invoke, settingsReads: () => settingsReads,
+    diagnostics: action => handlers.get('project-agent:diagnostics')({}, { action }),
     history: () => conversations.getPersistedConversationHistory(bot.profile.agentConversationId).messages,
     async submit(inputId = crypto.randomUUID(), text = 'hello') {
       api.host.inputQueue.submitInput({ workspaceId: bot.workspaceId, inputId, text, surface: 'desktop' });
       await api.host.sync([bot.workspaceId]);
     }, dispose: () => api.dispose() };
 }
+
+test('desktop diagnostic assembly reads actual input and turn stores without running cognition or accepting renderer paths', async () => {
+  const env=harness();
+  try {
+    const first=await env.diagnostics('read');assert.equal(first.ok,true);assert.equal(first.report.bots.length,1);assert.equal(first.report.bots[0].input.depth,0);
+    const callCount=env.calls.length;assert.equal((await env.diagnostics('read')).ok,true);assert.equal(env.calls.length,callCount);
+    await env.submit('diagnostic-input');
+    const after=await env.diagnostics('read');assert.equal(after.ok,true);assert.equal(after.report.bots[0].input.depth,0);
+    assert.deepEqual(after.report.errors,[]);assert.deepEqual(after.report.bots[0].errors,[]);
+    assert.equal(after.report.bots[0].turns.at(-1).outcome,'done');assert.ok(after.report.bots[0].turns.at(-1).durationMs>=0);
+    const text=JSON.stringify(after.report);assert.equal(text.includes(env.home),false);assert.equal(text.includes('hello'),false);
+  } finally { env.dispose(); }
+});
+
+test('diagnostic read leaves a corrupt actual project registry untouched', async () => {
+  const env = harness();
+  try {
+    const projects = path.join(env.home, 'projects'), file = path.join(projects, 'registry.json');
+    writeFileSync(file, '{broken');
+    const before = readdirSync(projects).sort(), count = env.calls.length;
+    const result = await env.diagnostics('read');
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.report.errors, ['PROJECTS_UNAVAILABLE']);
+    assert.equal(readFileSync(file, 'utf8'), '{broken');
+    assert.deepEqual(readdirSync(projects).sort(), before);
+    assert.equal(env.calls.length, count);
+  } finally { env.dispose(); }
+});
 
 test('200-bot maintenance uses a fresh runtime policy port and still revokes all runners on classic switch', async () => {
   const policy={projectAgent:{shell:'bots'},memory:{enabled:true}};

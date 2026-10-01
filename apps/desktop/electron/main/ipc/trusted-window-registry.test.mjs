@@ -49,10 +49,22 @@ test('Quick Chat may list bots and submit inputs, while administration and popov
         sender.mainFrame.url = 'https://app.local/index.html';
       } else assert.throws(() => registry.authorize({ entry, event: createEvent(sender) }), /not allowed for this window role/);
     }
-    for (const channel of ['settings:get', 'project-agent:update-profile', 'project-agent:delete', 'project-agent:decide-approval', 'project-agent:read-evidence']) {
+    for (const channel of ['settings:get', 'project-agent:update-profile', 'project-agent:delete', 'project-agent:decide-approval', 'project-agent:read-evidence', 'project-agent:diagnostics']) {
       assert.throws(() => registry.authorize({ entry: getDesktopIpcPolicy(channel), event: createEvent(sender) }), /not allowed for this window role/);
     }
   }
+});
+
+test('diagnostics admits only the registered main window top frame at the exact app location', () => {
+  const sender = createWebContents();
+  const registry = createTrustedWindowRegistry();
+  registry.registerWindow({ window: { webContents: sender }, role: 'main', allowedLocations: ['https://app.local/index.html'] });
+  const entry = getDesktopIpcPolicy('project-agent:diagnostics');
+  assert.deepEqual(registry.authorize({ entry, event: createEvent(sender) }), { role: 'main' });
+  assert.throws(() => registry.authorize({ entry, event: createEvent(createWebContents()) }), DesktopIpcAuthorizationError);
+  assert.throws(() => registry.authorize({ entry, event: createEvent(sender, { url: sender.mainFrame.url, parent: {} }) }), /trusted top frame/);
+  sender.mainFrame.url = 'https://evil.invalid/index.html';
+  assert.throws(() => registry.authorize({ entry, event: createEvent(sender) }), /untrusted location/);
 });
 
 test('trusted window registry authorizes only the registered role, top frame, and location', () => {
