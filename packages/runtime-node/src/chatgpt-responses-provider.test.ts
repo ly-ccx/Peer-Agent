@@ -2,11 +2,35 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createChatGptResponsesProvider } from './chatgpt-responses-provider.ts';
+import { DELEGATION_TOOL_SPECS } from './project-agent/tool-specs.mjs';
 
 const encoder = new TextEncoder();
 function response(lines: readonly string[]): Response {
   return new Response(new ReadableStream({ start(controller) { controller.enqueue(encoder.encode(`${lines.join('\n')}\n`)); controller.close(); } }), { status: 200 });
 }
+
+test('the actual Responses transport retains optional schemas and explicit strict policy', async () => {
+  const spawn = DELEGATION_TOOL_SPECS.find((tool: any) => tool.name === 'spawn_session');
+  const parameters = structuredClone(spawn.inputSchema);
+  const original = structuredClone(parameters);
+  let captured: any;
+  const provider = createChatGptResponsesProvider({
+    baseUrl: 'https://chatgpt.example/codex/', tokens: { access: 'fixture', accountId: 'fixture' },
+    fetch: async (_url, init) => {
+      captured = JSON.parse(String(init?.body));
+      return response(['data: {"type":"response.completed","response":{}}', 'data: [DONE]']);
+    },
+  });
+  await provider.stream({ model: 'test', messages: [], tools: [
+    { name: spawn.name, parameters },
+    { name: 'explicit_strict', parameters, strict: true },
+    { name: 'explicit_non_strict', parameters, strict: false },
+  ] });
+  assert.deepEqual(captured.tools.map((tool: any) => tool.strict), [false, true, false]);
+  for (const tool of captured.tools) assert.deepEqual(tool.parameters, original);
+  assert.equal(captured.tools[0].parameters.required.includes('objectiveId'), false);
+  assert.deepEqual(parameters, original);
+});
 
 test('ChatGPT Responses provider encodes requests, streams text, tools, and usage', async () => {
   const events: string[] = [];
