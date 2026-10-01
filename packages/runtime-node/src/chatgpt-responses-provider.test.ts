@@ -11,6 +11,7 @@ function response(lines: readonly string[]): Response {
 
 test('the actual Responses transport retains optional schemas and explicit strict policy', async () => {
   const spawn = DELEGATION_TOOL_SPECS.find((tool: any) => tool.name === 'spawn_session');
+  assert.ok(spawn);
   const parameters = structuredClone(spawn.inputSchema);
   const original = structuredClone(parameters);
   let captured: any;
