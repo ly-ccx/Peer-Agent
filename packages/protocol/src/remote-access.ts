@@ -217,3 +217,49 @@ export function admitRemoteProject(value: unknown, context: RemoteProjectContext
   if (r.expiresAt <= context.now || r.expiresAt - context.now > 30_000) return deny('REQUEST_EXPIRED');
   return parsed;
 }
+
+export interface RemoteDelegationProjection {
+  version: number;
+  workspaceIds: string[];
+  allowTaskRead: boolean;
+  allowResultExport: boolean;
+  expiresAt: number;
+  allowProjectRead?: boolean;
+  allowProjectMessage?: boolean;
+  projectGrants?: RemoteProjectGrant[];
+}
+
+/** Shared transport shape only; this projection is never device-side authority. */
+export function parseRemoteDelegationProjection(value: unknown, now = Date.now()): RemoteDelegationProjection | null {
+  if (!Number.isSafeInteger(now) || now < 0 || !value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  const legacy = ['version','workspaceIds','allowTaskRead','allowResultExport','expiresAt'];
+  const extended = Object.hasOwn(r,'projectGrants');
+  const fields = extended ? [...legacy,'allowProjectRead','allowProjectMessage','projectGrants'] : legacy;
+  if (Object.keys(r).length !== fields.length || Object.keys(r).some(key=>!fields.includes(key))
+      || !integer(r.version) || !integer(r.expiresAt) || r.expiresAt <= now
+      || !Array.isArray(r.workspaceIds) || !r.workspaceIds.every(identifier)
+      || r.workspaceIds.length > (extended ? REMOTE_PROJECT_LIMITS.projects+32 : 32)
+      || !extended && r.workspaceIds.length === 0
+      || typeof r.allowTaskRead !== 'boolean' || typeof r.allowResultExport !== 'boolean') return null;
+  const result: RemoteDelegationProjection = {version:r.version,workspaceIds:[...r.workspaceIds],
+    allowTaskRead:r.allowTaskRead,allowResultExport:r.allowResultExport,expiresAt:r.expiresAt};
+  if (extended) {
+    if (typeof r.allowProjectRead !== 'boolean' || typeof r.allowProjectMessage !== 'boolean'
+        || !Array.isArray(r.projectGrants) || r.projectGrants.length > REMOTE_PROJECT_LIMITS.projects) return null;
+    const seen = new Set<string>(), grants: RemoteProjectGrant[] = [];
+    for (const raw of r.projectGrants) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+          || Object.keys(raw).sort().join(',') !== 'allowProjectMessage,allowProjectRead,workspaceId'
+          || !identifier(raw.workspaceId) || seen.has(raw.workspaceId)
+          || typeof raw.allowProjectRead !== 'boolean' || typeof raw.allowProjectMessage !== 'boolean'
+          || raw.allowProjectMessage && !raw.allowProjectRead
+          || raw.allowProjectRead && !result.workspaceIds.includes(raw.workspaceId)) return null;
+      seen.add(raw.workspaceId);grants.push({...raw});
+    }
+    if (r.allowProjectRead !== grants.some(row=>row.allowProjectRead)
+        || r.allowProjectMessage !== grants.some(row=>row.allowProjectMessage)) return null;
+    result.allowProjectRead=r.allowProjectRead;result.allowProjectMessage=r.allowProjectMessage;result.projectGrants=grants;
+  }
+  return result;
+}
