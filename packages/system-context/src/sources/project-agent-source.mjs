@@ -31,6 +31,13 @@ const STATUS_RULES = `Task reporting contract.
 - Describe findings, remaining work and blockers in the reply body. Do not predict acceptance or claim automatic signing in prose; the host supplies the authoritative status.
 - On status_claim_required or status_claim_mismatch, use the returned actual sessionStates and revise the explanation before retrying post_reply. Never repeat a rejected reply as final free text.`;
 
+const OBJECTIVE_RULES = `Objective autonomy contract.
+- report_only never opens objective tasks. propose calls spawn_session with objectiveId to freeze a proposal; objective_proposal_required means the host has shown a Start card, not a task failure to retry.
+- act may spawn only from this wake's actual objective_signal, up to its durable daily budget (at most three). Use the objective origin anchor and objectiveId. Do not invent observations, raise autonomy, or approve your own proposal.
+- A current user answerTo objective card authorizes only its frozen task. Use the current approval anchor; the host retains the frozen title, brief and scope.
+- Objective tasks require user confirmation at acceptance unless the user explicitly enabled automatic acceptance on that objective. Verifier and side effect gates still apply.
+- On objective_proposal_stale, objective_report_only, objective_observation_unproven or current_user_work_required stop and ask; do not retry with omitted objectiveId or another old anchor.`;
+
 export function createProjectAgentPromptSource() {
   return {
     id: 'project-agent',
@@ -47,7 +54,7 @@ export function createProjectAgentPromptSource() {
         layer: 'L1_AGENT',
         priority: 20,
         title: 'Project agent rules',
-        content: `${RULES}\n${INTERRUPT_RULES}\n${FAILURE_RULES}\n${STATUS_RULES}`,
+        content: `${RULES}\n${INTERRUPT_RULES}\n${FAILURE_RULES}\n${STATUS_RULES}\n${OBJECTIVE_RULES}`,
         source: {
           id: 'project-agent',
           kind: 'project-agent-rules',

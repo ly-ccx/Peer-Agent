@@ -23,7 +23,7 @@ export function planAgentTurn({
   const inputs = wake ? [] : (Array.isArray(userInputs) ? userInputs.filter(Boolean) : []);
   const facts = Array.isArray(events) ? events.filter(Boolean) : [];
   const inputAnchors = inputs.filter(input => typeof input.inputId === 'string').map(input => ({
-    messageId: inputMessageId(input.inputId), text: typeof input.text === 'string' ? input.text.slice(0, 400) : '',
+    messageId: inputMessageId(input.inputId), ...(input.answerTo?{answerTo:input.answerTo}:{}), text: typeof input.text === 'string' ? input.text.slice(0, 400) : '',
   }));
   const { inputAnchors: _previousAnchors, ...currentContext } = context || {};
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';

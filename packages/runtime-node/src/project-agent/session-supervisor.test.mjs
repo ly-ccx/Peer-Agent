@@ -6,6 +6,8 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 
 import { createConversationStore } from '../../../conversation-store/src/index.mjs';
+import {createObjectiveService} from './objective-service.mjs';
+import {createObjectiveActions,objectiveActionCardId} from './objective-actions.mjs';
 import { createObjectiveStore } from './objective-store.mjs';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createGoalRunner } from '../goal-runner.mjs';
@@ -1735,4 +1737,26 @@ test('failed isolation and runner startup leave no deleted task linked to the du
    assert.equal(leftovers.length,0);
   }finally{await env.cleanup();}
  }
+});
+
+
+test('objective automatic dispatch persists one GoalPlan per fact across paraphrasing, restart, and real quota exhaustion',async()=>{
+ let service;const objectives={prepareSpawn:(...args)=>service.prepareSpawn(...args),linkSession:(...args)=>service.linkSession(...args)};const env=await harness({objectives});
+ try{const store=createObjectiveStore({rootDir:env.root}),actions=createObjectiveActions({rootDir:env.root});
+  const item=store.create({workspaceId:'ws-1',projectAgentConversationId:env.parent.id,originMessageId:'anchor-1',title:'CI',outcome:'Stable CI',autonomy:'act',createdBy:'user_request',watches:[{watchId:'w',kind:'event',source:{type:'git',ref:'HEAD',on:'new_commits'}}]}).item;
+  const evidence=new Map();const assembly=()=>createObjectiveService({store,actions:createObjectiveActions({rootDir:env.root}),resolveConversationId:()=>env.parent.id,readConversation:id=>env.conversationStore.getPersistedConversationHistory(id).messages,readSession:id=>env.supervisor.get({sessionId:id}),readSessions:()=>env.supervisor.sessionsForProject('ws-1'),resolveEvidence:ref=>evidence.get(ref)});service=assembly();
+  const event=n=>{const executionKey=`check-${n}`,ref=`ev-${n}`;store.appendObservation('ws-1',{objectiveId:item.objectiveId,watchId:'w',digest:`d${n}`,summary:'Changed',observedAt:new Date().toISOString(),severity:'notable',evidenceRefs:[ref]},{executionKey});evidence.set(ref,{workspaceId:'ws-1',objectiveId:item.objectiveId,watchId:'w',executionKey,execution:{result:{status:'success'}}});return {kind:'objective_signal',eventId:`e${n}`,workspaceId:'ws-1',objectiveId:item.objectiveId,watchId:'w',executionKey};};
+  const e=event(1),context=contextOf(env,{objectiveWakeEvents:[e],currentInputAnchors:[]});
+  const first=await env.supervisor.spawn(spawnInput(),context);assert.ok(first.sessionId);assert.equal(env.supervisor.get({sessionId:first.sessionId}).origin.priority,'low');
+  const persisted=createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()}).getPlan(planIdOf(env,first.sessionId));assert.match(persisted.delegationOrigin.objectiveActionId,/^action-/);
+  service=assembly();const replay=await env.supervisor.spawn(spawnInput({title:'Rephrased',brief:'Other wording'}),context);assert.equal(replay.sessionId,first.sessionId);assert.equal(replay.replayed,true);assert.equal(actions.usage('ws-1',item.objectiveId),1);
+  for(const n of [2,3])assert.ok((await env.supervisor.spawn(spawnInput({title:`Task ${n}`}),contextOf(env,{objectiveWakeEvents:[event(n)],currentInputAnchors:[]}))).sessionId);
+  const fourth=await env.supervisor.spawn(spawnInput(),contextOf(env,{objectiveWakeEvents:[event(4)],currentInputAnchors:[]}));assert.equal(fourth.error,'objective_proposal_required');assert.equal(env.supervisor.sessionsForProject('ws-1').length,3);
+  const cardId=objectiveActionCardId(fourth.actionId);env.conversationStore.appendMessage(env.parent.id,{id:'approval',role:'user',kind:'user_input',content:'开始',answerTo:cardId});
+  const approved=await env.supervisor.spawn(spawnInput({title:'Injected',brief:'Not approved'}),contextOf(env,{currentInputAnchors:['approval'],objectiveProposalAnswer:true}));assert.ok(approved.sessionId);assert.equal(env.supervisor.get({sessionId:approved.sessionId}).title,'修复登录');assert.equal(actions.usage('ws-1',item.objectiveId),3);
+ }finally{await env.cleanup();}
+});
+
+test('objective policy read failure cannot automatically accept a verified and reported task',async()=>{
+ const env=await harness({resolveAcceptancePolicy:()=>{throw Error('authority read failed');},readSessionFacts:()=>({hostAuthority:{independentVerifier:'passed'}})});try{const opened=await completedSession(env),plan=env.goalPlanStore.getPlan(opened.planId);env.goalPlanStore.revisePlan(opened.planId,{delegationOrigin:{...plan.delegationOrigin,objectiveId:'actual-objective'}},{reason:'objective fixture',changedBy:'test'});env.conversationStore.appendMessage(env.parent.id,{id:'reported',role:'assistant',kind:'agent_reply',content:'Verified result',sources:[opened.sessionId]});const settled=await env.supervisor.settle(opened.sessionId);assert.equal(settled.accepted,false);assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance,undefined);}finally{await env.cleanup();}
 });

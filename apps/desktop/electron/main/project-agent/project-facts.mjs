@@ -1,7 +1,7 @@
 import { createCardProjection, verdictRefFor } from '@peer-agent/runtime-node';
 
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
-export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null }) {
+export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[] }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
@@ -63,7 +63,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       superseded: messages.slice(messages.indexOf(message) + 1).some(later => later.role === 'assistant' && later.kind === 'agent_turn'),
     }));
     return projection.project(workspaceId, { approvals: approvalStore.list({ workspaceId }),
-      confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable,
+      objectiveProposals:objectiveProposals(workspaceId), confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable,
       memories: memoryStore?.list({ workspaceId }) || [],
       handoffs: rows.flatMap(row => { const facts = supervisor.deliveryFacts?.(row.sessionId); return facts ? [facts] : []; }) });
   }

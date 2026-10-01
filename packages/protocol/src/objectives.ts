@@ -49,6 +49,8 @@ export interface ProjectObjective {
   readonly status: ObjectiveStatus;
   readonly createdBy: 'user_request' | 'agent_proposal';
   readonly pendingConfirmation?: boolean;
+  readonly autoAccept?: boolean;
+  readonly autoAcceptApprovedBy?: string;
   readonly deadline?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -73,7 +75,7 @@ export interface ProjectObjectiveCommandRequest extends ProjectObjectiveListRequ
   readonly requestId: string;
 }
 export interface ProjectObjectiveUpdateRequest extends ProjectObjectiveCommandRequest {
-  readonly patch: Partial<Pick<ProjectObjective, 'title' | 'outcome' | 'watches' | 'milestones' | 'successSignals' | 'autonomy' | 'budget' | 'deadline'>>;
+  readonly patch: Partial<Pick<ProjectObjective, 'title' | 'outcome' | 'watches' | 'milestones' | 'successSignals' | 'autonomy' | 'budget' | 'deadline' | 'autoAccept'>>;
   readonly expectedVersion?: number;
 }
 export interface ProjectObjectiveView extends ProjectObjective {

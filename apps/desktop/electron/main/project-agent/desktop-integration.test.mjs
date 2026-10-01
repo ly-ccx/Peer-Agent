@@ -8,7 +8,7 @@ const root = mkdtempSync(path.join(os.tmpdir(), 'peer-beta-integration-'));
 const previousHome = process.env.PEER_AGENT_HOME;
 process.env.PEER_AGENT_HOME = root;
 const { createConversationStore } = await import('@peer-agent/conversation-store');
-const { createGoalPlanStore, createMemoryStore, resolveRoleRoute } = await import('@peer-agent/runtime-node');
+const { createGoalPlanStore, createMemoryStore,createObjectiveStore,mapObjectiveObservationEvent, resolveRoleRoute } = await import('@peer-agent/runtime-node');
 const { registerDesktopProjectAgent } = await import('./project-agent-host.mjs');
 const { projectTurnSystemContext } = await import('../llm-chat-service.mjs');
 const { createAgentTurnExecutor } = await import('../agent-host/agent-turn-executor.mjs');
@@ -56,7 +56,7 @@ async function tool(env, name, args, ordinal = 1) {
   return executeProjectedModelTool({ name, args, workspacePath: env.project,
     toolContext: { mode: 'project_agent', turnRole: 'project_agent', workspaceId: env.bot.workspaceId,
       conversationId: env.bot.profile.agentConversationId, turnId: env.turnId || `test-${crypto.randomUUID()}`, toolCallOrdinal: ordinal,
-      currentInputAnchors: env.currentInputAnchors || [], messages: env.history(), readFiles: new Map() }, registry, runtimeProjection: projection, goalPlanStore: env.plans,
+      currentInputAnchors: env.currentInputAnchors || [],objectiveWakeIds:env.objectiveWakeIds||[],objectiveWakeEvents:env.objectiveWakeEvents||[], messages: env.history(), readFiles: new Map() }, registry, runtimeProjection: projection, goalPlanStore: env.plans,
     toolCallId: crypto.randomUUID(), requestPermission: async () => { throw new Error('agent must not ask for approval'); },
   });
 }
@@ -442,7 +442,9 @@ test('objective tools and desktop commands share canonical authority, persist sc
     const before=env.history().length;
     assert.equal(env.api.objectives.update({...req,requestId:'forge',patch:{status:'achieved'}}).code,'INVALID_INPUT');
     assert.equal(env.history().length,before);
-    const spawned=await tool(env,'spawn_session',{title:'Check CI',brief:'read CI',kind:'research',readOnly:true,anchorMessageIds:[anchor],successCriteria:[{kind:'file-exists',description:'README exists',path:'README.md'}],objectiveId},2);
+    await env.submit('objective-work','开始只读检查 CI');
+    const workAnchor=env.history().find(message=>message.id==='input-objective-work').id;env.currentInputAnchors=[workAnchor];
+    const spawned=await tool(env,'spawn_session',{title:'Check CI',brief:'read CI',kind:'research',readOnly:true,anchorMessageIds:[workAnchor],successCriteria:[{kind:'file-exists',description:'README exists',path:'README.md'}],objectiveId},2);
     const work=JSON.parse(spawned.output);assert.equal(work.ok,true,spawned.output);
     const session=env.api.supervisor.get({sessionId:work.sessionId});assert.equal(session.origin.objectiveId,objectiveId);
     assert.ok(env.api.objectives.list(req).items[0].milestones.some(m=>m.sessionIds.includes(work.sessionId)));
@@ -484,5 +486,29 @@ test('production objective WatchRunner checks actual files through SDK and expos
   const events=env.api.host.inbox.takeBatch(env.bot.workspaceId).events;const signal=events.find(event=>event.kind==='objective_signal');assert.ok(signal);assert.equal(signal.objectiveId,item.objectiveId);assert.equal(signal.sessionId,undefined);
   assert.equal(env.api.objectives.pause({workspaceId:env.bot.workspaceId,objectiveId:item.objectiveId,requestId:'stop-watch'}).ok,true);
   await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);assert.equal(env.api.objectiveWatches.runner.activeCount(),0);
+ }finally{env.dispose();}
+});
+
+
+test('production file observation, proposal card approval, task quota and explicit acceptance use the same governed SDK path',async()=>{
+ const env=harness();try{
+  await env.submit('auto-monitor','持续盯着 README.md 的变化，发现问题直接修');const anchor='input-auto-monitor';env.currentInputAnchors=[anchor];
+  const created=await tool(env,'create_objective',{title:'Readme',outcome:'Keep README consistent',autonomy:'act',anchorMessageId:anchor,watches:[{watchId:'readme',kind:'event',source:{type:'files',paths:['README.md'],debounceMs:5000}}]});const item=JSON.parse(created.output).item;assert.ok(item,created.output);
+  await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);const signal=env.api.host.inbox.takeBatch(env.bot.workspaceId).events.find(event=>event.objectiveId===item.objectiveId);assert.ok(signal);
+  env.currentInputAnchors=[];env.objectiveWakeIds=[item.objectiveId];env.objectiveWakeEvents=[signal];
+  const input={title:'Read README',brief:'Check the observed file',kind:'research',readOnly:true,anchorMessageIds:[anchor],successCriteria:[{kind:'file-exists',description:'README exists',path:'README.md'}]};
+  const spawned=JSON.parse((await tool(env,'spawn_session',input)).output);assert.equal(spawned.ok,true,JSON.stringify(spawned));const session=env.api.supervisor.get({sessionId:spawned.sessionId});assert.equal(session.origin.objectiveId,item.objectiveId);assert.ok(session.origin.objectiveActionId);assert.equal(session.origin.priority,'low');
+  const view=env.api.objectives.list({workspaceId:env.bot.workspaceId}).items[0];assert.equal(view.usage.autoSessions,1);env.plans.setPlanStatus(session.planId,'completed');assert.equal(env.api.supervisor.acceptance(spawned.sessionId).mode,'confirm');
+  const req={workspaceId:env.bot.workspaceId,objectiveId:item.objectiveId};assert.equal(env.api.objectives.update({...req,requestId:'auto-accept',patch:{autoAccept:true}}).ok,true);assert.ok(env.history().find(row=>row.content.includes('允许这个目标自动签收任务')));
+  // Policy is allowed, but failed/unverified work still cannot be accepted.
+  assert.notEqual(env.api.supervisor.acceptance(spawned.sessionId).acceptedBy,'policy');
+  assert.equal(env.api.objectives.update({...req,requestId:'propose',patch:{autonomy:'propose'}}).ok,true);
+  // A different real observation is needed for a new proposal.
+  writeFileSync(path.join(env.project,'README.md'),'changed actual file');await new Promise(resolve=>setTimeout(resolve,5500));await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);
+  const observation=createObjectiveStore({rootDir:env.home}).observations(env.bot.workspaceId,item.objectiveId).at(-1);assert.notEqual(observation.executionKey,signal.executionKey);const next=mapObjectiveObservationEvent({workspaceId:env.bot.workspaceId,objectiveId:item.objectiveId,watchId:'readme',executionKey:observation.executionKey,observation});assert.ok(next);env.objectiveWakeEvents=[next];
+  const proposal=JSON.parse((await tool(env,'spawn_session',input,2)).output);assert.equal(proposal.error,'objective_proposal_required',JSON.stringify(proposal));
+  const cardId=proposal.cardId;env.api.host.inputQueue.submitInput({workspaceId:env.bot.workspaceId,inputId:'start-proposal',text:'开始',answerTo:cardId,surface:'desktop'});await env.api.host.sync([env.bot.workspaceId]);
+  env.currentInputAnchors=['input-start-proposal'];env.objectiveWakeEvents=[];env.objectiveWakeIds=[];
+  const approved=JSON.parse((await tool(env,'spawn_session',{...input,title:'Changed by model'},3)).output);assert.equal(approved.ok,true,JSON.stringify(approved));assert.equal(env.api.supervisor.get({sessionId:approved.sessionId}).title,'Read README');assert.equal(env.api.objectives.list(req).items[0].usage.autoSessions,1);
  }finally{env.dispose();}
 });

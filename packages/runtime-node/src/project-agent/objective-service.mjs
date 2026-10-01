@@ -1,3 +1,4 @@
+import {objectiveActionCardId} from './objective-actions.mjs';
 import { createHash } from 'node:crypto';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { validateObjectiveDefinition } from './objective-store.mjs';
@@ -31,7 +32,7 @@ function authorizesBudget(content,current,next){
 }
 
 /** Owns user provenance, objective scope, transitions and factual achievement; no model execution. */
-export function createObjectiveService({store,readConversation,resolveConversationId,canManageWorkspace=()=>true,readSession=()=>null,resolveEvidence=()=>null,decorateView=(_ws,item)=>item,onChanged=null}={}) {
+export function createObjectiveService({store,readConversation,resolveConversationId,canManageWorkspace=()=>true,readSession=()=>null,resolveEvidence=()=>null,decorateView=(_ws,item)=>item,actions=null,readSessions=()=>[],onChanged=null}={}) {
   if(!store)throw TypeError('ObjectiveService requires store');
   function scope(view,write=false){return typeof view?.workspaceId==='string'&&(!write||canManageWorkspace(view.workspaceId)===true)&&resolveConversationId(view.workspaceId)===view.conversationId;}
   function currentUser(input,view){
@@ -51,10 +52,11 @@ export function createObjectiveService({store,readConversation,resolveConversati
     if(createdBy==='user_request'&&!/(?:目标|持续|盯着|监控|每天|定期|一直|直到|发布前|发版前|稳定下来|(?:CI|构建|测试|test|build).{0,10}(?:挂了|失败|fail)|\bgoal\b|\bmonitor\b|\bwatch\b|\bkeep\b)/i.test(cleanUserText(anchor.content)))return fail('OBJECTIVE_NOT_REQUESTED');
     if(createdBy==='user_request'&&!userAuthorizesObjectiveAutonomy(anchor.content,autonomy))return fail('AUTONOMY_NOT_AUTHORIZED');
     if(input.budget&&!authorizesBudget(anchor.content,{maxAutoSessionsPerDay:3,maxProbeRunsPerDay:60},input.budget))return fail('BUDGET_NOT_AUTHORIZED');
+    if(input.autoAccept===true&&(createdBy!=='user_request'||!authorizesAutoAccept(anchor.content)))return fail('AUTO_ACCEPT_NOT_AUTHORIZED');
     if(createdBy==='agent_proposal'&&autonomy==='act')return fail('AUTONOMY_NOT_AUTHORIZED');
     if(Array.isArray(input.milestones)&&input.milestones.some(m=>m.sessionIds?.length||m.status==='done'))return fail('SESSION_OUT_OF_SCOPE');
     const requestId=createHash('sha256').update(`${view.conversationId}\0${anchor.id}\0${input.title}\0${input.outcome}`).digest('hex');
-    const result=store.create({...input,...(input.watches?{watches:notificationWatches(input.watches,anchor.content)}:{}),workspaceId:view.workspaceId,projectAgentConversationId:view.conversationId,originMessageId:anchor.id,createdBy,autonomy,
+    const result=store.create({...input,...(input.watches?{watches:notificationWatches(input.watches,anchor.content)}:{}),workspaceId:view.workspaceId,projectAgentConversationId:view.conversationId,originMessageId:anchor.id,createdBy,autonomy,...(input.autoAccept===true?{autoAcceptApprovedBy:anchor.id}:{}),
       status:createdBy==='agent_proposal'?'paused':'active',pendingConfirmation:createdBy==='agent_proposal'}, {requestId});
     return changed(result,view.workspaceId);
   }
@@ -64,13 +66,15 @@ export function createObjectiveService({store,readConversation,resolveConversati
   function update(input,view){
     if(!scope(view,true))return fail('NOT_HOST');
     const current=owned(input,view);if(!current)return fail('NOT_FOUND');
-    if(input.status!==undefined||input.confirmed!==undefined||input.autoAccept!==undefined||input.pendingConfirmation!==undefined)return fail('HOST_FIELDS_FORBIDDEN');
+    if(input.status!==undefined||input.confirmed!==undefined||input.autoAcceptApprovedBy!==undefined||input.pendingConfirmation!==undefined)return fail('HOST_FIELDS_FORBIDDEN');
     const raisesAutonomy=input.autonomy!==undefined&&LEVEL[input.autonomy]>LEVEL[current.autonomy];
     const expandsBudget=input.budget&&(input.budget.maxAutoSessionsPerDay>current.budget.maxAutoSessionsPerDay||input.budget.maxProbeRunsPerDay>current.budget.maxProbeRunsPerDay);
     if(raisesAutonomy||expandsBudget){const anchor=currentUser(input,view);if(!anchor)return fail('CURRENT_USER_REQUIRED');
       if(raisesAutonomy&&!userAuthorizesObjectiveAutonomy(anchor.content,input.autonomy))return fail('AUTONOMY_NOT_AUTHORIZED');
       if(expandsBudget&&!authorizesBudget(anchor.content,current.budget,input.budget))return fail('BUDGET_NOT_AUTHORIZED');}
-    const patch={};for(const key of ['title','outcome','watches','milestones','successSignals','autonomy','budget','deadline'])if(input[key]!==undefined)patch[key]=input[key];
+    if(input.autoAccept===true){const anchor=currentUser(input,view);if(!anchor)return fail('CURRENT_USER_REQUIRED');if(!authorizesAutoAccept(anchor.content))return fail('AUTO_ACCEPT_NOT_AUTHORIZED');}
+    const patch={};for(const key of ['autoAccept','title','outcome','watches','milestones','successSignals','autonomy','budget','deadline'])if(input[key]!==undefined)patch[key]=input[key];
+    if(input.autoAccept!==undefined)patch.autoAcceptApprovedBy=input.autoAccept?input.anchorMessageId:undefined;
     if(patch.watches){const origin=(readConversation(view.conversationId)||[]).find(m=>m.id===current.originMessageId&&isCanonicalUserInput(m));patch.watches=notificationWatches(patch.watches,origin?.content,currentUser(input,view)?.content);}
     const checked=validateObjectiveDefinition({...current,...patch});if(!checked.ok)return checked;
     if(patch.milestones?.some(m=>m.sessionIds?.some(id=>{const session=readSession(id);return !session||session.workspaceId!==view.workspaceId||session.origin?.objectiveId!==current.objectiveId;})))return fail('SESSION_OUT_OF_SCOPE');
@@ -101,16 +105,47 @@ export function createObjectiveService({store,readConversation,resolveConversati
     return changed(store.update(view.workspaceId,current.objectiveId,{status:input.status,
       ...(input.status==='achieved'?{milestones:current.milestones.map(m=>({...m,status:m.status==='dropped'?'dropped':'done'}))}:{})},mutationOptions(input,view)),view.workspaceId);
   }
-  function linkSession(workspaceId,objectiveId,sessionId,milestoneId){const session=readSession(sessionId);if(!session||session.workspaceId!==workspaceId||session.origin?.objectiveId!==objectiveId)return fail('SESSION_OUT_OF_SCOPE');return changed(store.linkSession(workspaceId,objectiveId,sessionId,milestoneId),workspaceId);}
-  function prepareSpawn(input,context) {
-    const current=store.get(context.workspaceId,input.objectiveId);
+  function linkSession(workspaceId,objectiveId,sessionId,milestoneId){const session=readSession(sessionId);if(!session||session.workspaceId!==workspaceId||session.origin?.objectiveId!==objectiveId)return fail('SESSION_OUT_OF_SCOPE');if(session.origin.objectiveActionId)actions?.link(workspaceId,session.origin.objectiveActionId,sessionId);return changed(store.linkSession(workspaceId,objectiveId,sessionId,milestoneId),workspaceId);}
+  function prepareSpawnInner(input,context) {
+    const view={...context,conversationId:context.parentConversationId};
+    const users=(context.currentInputAnchors||[]).map(anchorMessageId=>currentUser({anchorMessageId},view)).filter(Boolean);
+    const approval=users.find(user=>user.answerTo?.startsWith('card:question:objective:'));
+    const proposal=approval&&actions?.get(context.workspaceId,approval.answerTo.slice('card:question:objective:'.length));
+    const wakeIds=[...new Set((context.objectiveWakeEvents||[]).filter(event=>event.workspaceId===context.workspaceId&&event.kind==='objective_signal').map(event=>event.objectiveId))];
+    const objectiveId=proposal?.objectiveId||input.objectiveId||(!users.length&&wakeIds.length===1?wakeIds[0]:null);
+    if(!objectiveId)return {error:'objective_identity_required'};
+    if(proposal&&input.objectiveId&&input.objectiveId!==proposal.objectiveId)return {error:'objective_proposal_scope'};
+    const current=store.get(context.workspaceId,objectiveId);
     if(!current||current.projectAgentConversationId!==context.parentConversationId)return {error:'objective_not_found'};
-    if(!scope({workspaceId:context.workspaceId,conversationId:context.parentConversationId},true))return {error:'not_host'};
+    if(!scope(view,true))return {error:'not_host'};
     if(current.status!=='active'||current.pendingConfirmation)return {error:'objective_paused'};
     if(current.autonomy==='report_only')return {error:'objective_report_only'};
-    const view={...context,conversationId:context.parentConversationId};
-    if(!input.anchorMessageIds?.some(anchorMessageId=>currentUser({anchorMessageId},view)))return {error:'current_user_required'};
-    return {ok:true,objectiveId:current.objectiveId};
+    if(proposal){
+      const agreed=/^(?:开始|同意|允许|确认|start|approve|yes)[。.!！\s]*$/i.test(cleanUserText(approval.content));
+      const approved=actions.approve(context.workspaceId,proposal.actionId,current,approval.id,{decline:!agreed});
+      if(!agreed||!approved.ok)return {error:approved.error||'objective_proposal_declined'};
+      return {ok:true,input:{...approved.item.input,anchorMessageIds:[approval.id]},objectiveActionId:proposal.actionId};
+    }
+    if(users.length){if(!input.anchorMessageIds?.some(id=>users.some(user=>user.id===id&&/(?:处理|修复|开始|执行|开任务|直接修|\bstart\b|\bfix\b|\bimplement\b|\bdo\b)/i.test(cleanUserText(user.content))&&!/(?:不要|别|\bnot\b|don['’]?t|cannot|won['’]?t)/i.test(cleanUserText(user.content)))))return {error:'current_user_work_required'};return {ok:true,input:{...input,objectiveId}};}
+    if(!actions)return {error:'current_user_required'};
+    if(input.supersedes)return {error:'objective_user_confirmation_required'};
+    const events=(context.objectiveWakeEvents||[]).filter(event=>event.objectiveId===objectiveId&&event.workspaceId===context.workspaceId&&event.kind==='objective_signal'&&typeof event.eventId==='string'&&event.eventId.length<=200).filter(event=>{
+      const observation=store.observations(context.workspaceId,objectiveId).find(row=>row.executionKey===event.executionKey&&row.watchId===event.watchId&&row.changed===true);
+      return observation?.evidenceRefs.some(ref=>{const evidence=resolveEvidence(ref);return evidence?.workspaceId===context.workspaceId&&evidence.objectiveId===objectiveId&&evidence.watchId===event.watchId&&evidence.executionKey===event.executionKey&&evidence.execution?.result?.status==='success';});
+    });
+    if(!events.length)return {error:'objective_observation_unproven'};
+    const recent=readSessions(context.workspaceId).filter(row=>row.origin?.objectiveId===objectiveId).sort((a,b)=>Date.parse(b.spawnedAt||0)-Date.parse(a.spawnedAt||0)).slice(0,3);
+    const prepared=actions.prepare(current,{...input,objectiveId,anchorMessageIds:[current.originMessageId],priority:'low'},events.map(event=>event.eventId),{forceProposal:recent.length===3&&recent.every(row=>row.status==='failed')});
+    if(!prepared.ok)return prepared;
+    if(prepared.item.state==='proposed'){onChanged?.(context.workspaceId);return {error:'objective_proposal_required',actionId:prepared.item.actionId,cardId:objectiveActionCardId(prepared.item.actionId)};}
+    if(prepared.item.state==='spawned'&&!readSession(prepared.item.sessionId))return {error:'objective_action_session_missing'};
+    if(prepared.item.state==='declined')return {error:'objective_proposal_declined'};
+    return {ok:true,input:prepared.item.input,objectiveActionId:prepared.item.actionId};
   }
-  return {create,get,list,update,pause,resume,close,linkSession,prepareSpawn};
+  function prepareSpawn(input,context){try{return prepareSpawnInner(input,context);}catch{return {error:'objective_actions_unavailable'};}}
+  function consumeAnswers(workspaceId,anchorIds){const view={workspaceId,conversationId:resolveConversationId(workspaceId),currentInputAnchors:anchorIds};for(const anchorMessageId of anchorIds){const user=currentUser({anchorMessageId},view);if(!user?.answerTo?.startsWith('card:question:objective:'))continue;const proposal=actions?.get(workspaceId,user.answerTo.slice('card:question:objective:'.length)),item=proposal&&store.get(workspaceId,proposal.objectiveId);if(!item||item.status!=='active'||item.pendingConfirmation||item.autonomy==='report_only')continue;const agreed=/^(?:开始|同意|允许|确认|start|approve|yes)[。.!！\s]*$/i.test(cleanUserText(user.content));actions.approve(workspaceId,proposal.actionId,item,user.id,{decline:!agreed});onChanged?.(workspaceId);}}
+  function acceptancePolicyInner(workspaceId,objectiveId){const item=store.get(workspaceId,objectiveId),anchor=item?.autoAcceptApprovedBy&&(readConversation(item.projectAgentConversationId)||[]).find(row=>row.id===item.autoAcceptApprovedBy&&isCanonicalUserInput(row));return item?.status==='active'&&item?.autoAccept===true&&anchor&&authorizesAutoAccept(anchor.content)?'auto':'confirm';}
+  function acceptancePolicy(workspaceId,objectiveId){try{return acceptancePolicyInner(workspaceId,objectiveId);}catch{return 'confirm';}}
+  return {create,get,list,update,pause,resume,close,linkSession,prepareSpawn,acceptancePolicy,consumeAnswers};
 }
+function authorizesAutoAccept(text){const clean=cleanUserText(text);return !/(?:不要|别|不能|\bnot\b|don['’]?t|cannot|won['’]?t)/i.test(clean)&&/(?:允许|同意|可以|开启|启用).{0,12}自动签收|automatically accept|allow.{0,12}auto.{0,5}accept/i.test(clean);}

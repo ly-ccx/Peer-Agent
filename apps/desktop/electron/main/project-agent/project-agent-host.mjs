@@ -6,6 +6,7 @@ import { projectConversationHistory } from '@peer-agent/runtime-core';
 import {
   createApprovalStore,
   createObjectiveStore,
+  createObjectiveActions,
   createObjectiveService,
   createBotDirectory,
   createBotLifecycle,
@@ -498,6 +499,7 @@ export function registerDesktopProjectAgent({
     appendMessage,
   });
   const objectiveStore = createObjectiveStore({rootDir:dataHome});
+  const objectiveActions=createObjectiveActions({rootDir:runtimeRoot});
   let objectiveService;
   const supervisor = createSessionSupervisor({
     objectives: {prepareSpawn:(...args)=>objectiveService.prepareSpawn(...args),linkSession:(...args)=>objectiveService.linkSession(...args)},
@@ -514,7 +516,7 @@ export function registerDesktopProjectAgent({
       workerModelProviderId: input.workerModel?.modelProviderId,
       projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy,
     }),
-    resolveAcceptancePolicy: (workspaceId, plan) => plan?.delegationOrigin?.objectiveId ? 'confirm' : profileStore.read(workspaceId)?.acceptancePolicy,
+    resolveAcceptancePolicy: (workspaceId, plan) => plan?.delegationOrigin?.objectiveId ? objectiveService.acceptancePolicy(workspaceId,plan.delegationOrigin.objectiveId) : profileStore.read(workspaceId)?.acceptancePolicy,
     readSessionFacts: (plan) => ({ autoHandoffOnPolicyAccept: profileStore.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true, hostAuthority: {
       ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
       ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
@@ -522,7 +524,7 @@ export function registerDesktopProjectAgent({
     emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.supersededBy || event.reason || ''}` }]),
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
-  objectiveService = createObjectiveService({store:objectiveStore,canManageWorkspace:ownsProject,resolveConversationId,
+  objectiveService = createObjectiveService({store:objectiveStore,actions:objectiveActions,readSessions:workspaceId=>supervisor.sessionsForProject(workspaceId),canManageWorkspace:ownsProject,resolveConversationId,
     readConversation: id => conversationStore.getPersistedConversationHistory(id)?.messages || [],
     readSession: id => { const session=supervisor.get({sessionId:id,detail:'report'}); return session ? {...session,evidenceRefs:session.report?.evidenceRefs || []} : null; },
     resolveEvidence: ref => {
@@ -530,7 +532,7 @@ export function registerDesktopProjectAgent({
       const plan=record?.planId ? goalPlanStore.getPlan?.(record.planId) : null;
       return plan?.delegationOrigin ? {...record,workspaceId:plan.delegationOrigin.workspaceId,sessionId:plan.delegationOrigin.sessionId} : objectiveWatches?.resolveEvidence(ref) || null;
     },
-    decorateView:(...args)=>objectiveWatches?.decorateView(...args) || args[1],
+    decorateView:(workspaceId,item)=>{const view=objectiveWatches?.decorateView(workspaceId,item)||item;return {...view,usage:{...view.usage,autoSessions:objectiveActions.usage(workspaceId,item.objectiveId)}};},
     onChanged: workspaceId => { if(typeof broadcast==='function')broadcast('project-agent:changed',{workspaceIds:[workspaceId]});objectiveWatches?.changed(workspaceId); },
   });
   objectiveWatches=createDesktopObjectiveWatchHost({rootDir:runtimeRoot,store:objectiveStore,ownsProject,isReady:workspaceId=>host?.isReady(workspaceId)===true,
@@ -541,7 +543,7 @@ export function registerDesktopProjectAgent({
   });
   const uninstallDelegation = installDelegation({ supervisor, objectives:objectiveService, storeDir: runtimeRoot });
   const uninstallVerification = installSessionVerification(verification);
-  const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore });
+  const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
   const uninstallDelivery = installDeliveryFacts({
     read(view) {
       const settings = normalizeProjectAgentSettings(getSettings()?.projectAgent);
@@ -719,9 +721,10 @@ export function registerDesktopProjectAgent({
     appendMessage,
     inbox,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }),
+    resolveContext:({workspaceId})=>({objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
     reconcileSessions: () => supervisor.reconcile(),
-    ...createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
+    ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),
     executeTurn: (input) => {
       const history = conversationStore.getPersistedConversationHistory(input.conversationId)?.messages || [];

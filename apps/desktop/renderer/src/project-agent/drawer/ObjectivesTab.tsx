@@ -4,6 +4,7 @@ import type { ObjectiveAutonomy, ProjectObjectiveView, ProjectObjectiveUpdateReq
 import {objectiveWatchReasonKey} from './objectiveWatchStatus';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
+import {Switch} from '../../ui/boolean-controls/Switch';
 import { Dropdown } from '../../app/components/Dropdown';
 
 interface LegacyAutomation { readonly definition?: { readonly automationId?: string; readonly name?: string; readonly workspacePath?: string; }; }
@@ -64,8 +65,10 @@ export function ObjectivesTab({workspaceId,workspacePath,i18n,selectedId,onOpenS
         </dl>
         {item.lastObservation && <p className="bot-objective-observation">{item.lastObservation.summary}</p>}
         {item.watches.some(w=>w.unavailableReason) && <p role="status">{[...new Set(item.watches.filter(w=>w.unavailableReason).map(w=>i18n.t(objectiveWatchReasonKey(w.unavailableReason))))].join('; ')}</p>}
+        {item.usage && <p className="bot-objective-observation">{i18n.t('projectAgent.drawer.objective.autoUsage',{used:item.usage.autoSessions,limit:item.budget.maxAutoSessionsPerDay})}</p>}
         {item.usage && <p className="bot-objective-observation">{i18n.t('projectAgent.drawer.objective.usage',{used:item.usage.probes,limit:item.budget.maxProbeRunsPerDay})}</p>}
         <div className="bot-objective-controls">
+          <label><span>{i18n.t('projectAgent.drawer.objective.autoAccept')}</span><Switch checked={item.autoAccept===true} disabled={locked||closed} aria-label={i18n.t('projectAgent.drawer.objective.autoAccept')} onCheckedChange={value=>{void command(item,'update',{autoAccept:value});}}/></label>
           <label><span>{i18n.t('projectAgent.drawer.objective.autonomy')}</span><Dropdown value={item.autonomy} disabled={locked||closed} ariaLabel={i18n.t('projectAgent.drawer.objective.autonomy')}
             options={(['report_only','propose','act'] as const).map(value=>({value,label:t(value)}))} onChange={value=>{void command(item,'update',{autonomy:value as ObjectiveAutonomy});}}/></label>
           <label><span>{i18n.t('projectAgent.drawer.objective.budget')}</span><Dropdown value={String(item.budget.maxAutoSessionsPerDay)} disabled={locked||closed} ariaLabel={i18n.t('projectAgent.drawer.objective.budget')}
