@@ -63,7 +63,7 @@ export function useBotListShell() {
 
 export function useBotList() {
   const [catalog, setCatalog] = useState<readonly BotListItem[]>([]);
-  const [searchHits, setSearchHits] = useState<readonly BotListItem[] | null>(null);
+  const [searchHits, setSearchHits] = useState<{ query: string; items: readonly BotListItem[] } | null>(null);
   const [query, setQuery] = useState('');
   const [needsYouOnly, setNeedsYouOnly] = useState(false);
   const [openedId, setOpenedId] = useState<string | null>(null);
@@ -145,7 +145,7 @@ export function useBotList() {
     void clientApi.projectAgentSearch({ query: text }).then((result) => {
       if (cancelled) return;
       if (!result?.ok) return;
-      setSearchHits(mergeBotSearch(catalogRef.current, result.items ?? []));
+      setSearchHits({ query: text, items: mergeBotSearch(catalogRef.current, result.items ?? [], result.hits ?? []) });
     }).catch(() => {});
     return () => {
       cancelled = true;
@@ -154,7 +154,7 @@ export function useBotList() {
 
   const trimmedQuery = query.trim();
   const searched = trimmedQuery
-    ? (searchHits ?? filterBotList(catalog, { query: trimmedQuery }))
+    ? (searchHits?.query === trimmedQuery ? searchHits.items : filterBotList(catalog, { query: trimmedQuery }))
     : catalog;
   const visible = useMemo(
     () => visibleBotList(searched, { needsYouOnly }),

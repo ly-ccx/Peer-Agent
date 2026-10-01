@@ -86,6 +86,35 @@ try {
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal((await app.evaluate(() => globalThis.rcBotShellTurns)).length, 0, 'idle bots must not open model turns');
   report.checks.push('200 real bot rows; no idle model turns');
+  report.searchSamples = [];
+  for (let i = 0; i < 5; i++) {
+    await page.locator('.bot-search').fill('');
+    await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
+    await page.evaluate(() => {
+      globalThis.rcSearchMeasurement = new Promise((resolve, reject) => {
+        let started = null;
+        const input = document.querySelector('.bot-search');
+        const onInput = () => { started = performance.now(); };
+        const cleanup = () => { input.removeEventListener('input', onInput); observer.disconnect(); clearTimeout(timer); };
+        const observer = new MutationObserver(() => {
+          const rows = document.querySelectorAll('.bot-row');
+          if (started !== null && rows.length === 1 && rows[0].querySelector('.bot-row-name')?.textContent === 'project-000') {
+            const elapsed = performance.now() - started; cleanup(); resolve(elapsed);
+          }
+        });
+        input.addEventListener('input', onInput);
+        observer.observe(document.querySelector('.bot-list'), { subtree: true, childList: true, characterData: true });
+        const timer = setTimeout(() => { cleanup(); reject(Error('Visible full-corpus search result missing')); }, 5000);
+      });
+    });
+    await page.locator('.bot-search').fill('unique-needle');
+    report.searchSamples.push(await page.evaluate(() => globalThis.rcSearchMeasurement));
+  }
+  report.metrics = { visibleSearch: metric('search', report.searchSamples) };
+  assert.equal(report.metrics.visibleSearch.pass, true, 'input to visible full-corpus result p50 must stay below 150ms');
+  await page.locator('.bot-search').fill('');
+  await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
+  report.checks.push('five input-to-visible searches across the real message corpus under budget');
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
   await page.locator('.bot-composer textarea').waitFor();
   for (let i = 0; i < 5; i++) {
@@ -114,7 +143,7 @@ try {
     report.receiptSamples.push(sample.elapsed);
     await page.locator('.bot-thread').getByText('RC scripted reply: ' + text, { exact: true }).waitFor();
   }
-  report.metrics = { visibleReceived: metric('received', report.receiptSamples) };
+  report.metrics.visibleReceived = metric('received', report.receiptSamples);
   assert.equal(report.metrics.visibleReceived.pass, true, 'visible receipt p50 must stay below 300ms');
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_UI_RECEIPT_4', { exact: true }).waitFor();
   report.checks.push('five real UI sends, visible durable Received under budget, scripted replies');
