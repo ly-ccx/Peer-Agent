@@ -5,6 +5,7 @@ import {
   acknowledgeInput,
   applyOptimistic,
   conversationRows,
+  conversationWindowAnchor,
   mergeConversationPage,
   normalizeBotMessage,
   quoteRefsFor,
@@ -166,6 +167,18 @@ test('超过 200 行时只留锚点附近的窗口', () => {
   const late = windowConversationRows(rows, 240, 80);
   assert.equal(late.rows.at(-1), 249);
   assert.equal(late.rows.includes(10), false);
+});
+
+test('loading earlier pages retains the same reading anchor beyond the window threshold', () => {
+  const rows = conversationRows(Array.from({ length: 300 }, (_, i) => message({ id: `m-${i + 50}`, kind: 'user_input', createdAt: '2026-09-27T01:00:00.000Z' })));
+  const older = conversationRows(Array.from({ length: 50 }, (_, i) => message({ id: `m-${i}`, kind: 'user_input', createdAt: '2026-09-27T01:00:00.000Z' })));
+  const next = [...older, ...rows];
+  const anchor = conversationWindowAnchor(rows, next, 220);
+  assert.equal(anchor, 270);
+  const before = windowConversationRows(rows, 220);
+  const after = windowConversationRows(next, anchor);
+  assert.deepEqual(after.rows, before.rows);
+  assert.equal(conversationWindowAnchor(rows, [], 220), 0);
 });
 
 test('用户气泡带上从工具调用推导的处置标记，模型自填的处置不生效', () => {

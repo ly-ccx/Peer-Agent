@@ -1,8 +1,9 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   formatConversationStamp,
+  conversationWindowAnchor,
   repliedUserIds,
   windowConversationRows,
   type BotChatMessage,
@@ -54,10 +55,22 @@ export function BotMessageList({
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [anchor, setAnchor] = useState(Math.max(0, rows.length - 1));
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const previousRowsRef = useRef(rows);
   const messages = rows.flatMap((row) => (row.type === 'message' ? [row.message] : []));
   const anchors = new Map(messages.map((message) => [message.id, clip(message.content)]));
   const replied = repliedUserIds(messages);
-  const windowed = windowConversationRows(rows, anchor);
+  const windowSize = Math.max(80, Math.ceil(viewportHeight / 36) + 40);
+  const windowed = windowConversationRows(rows, anchor, windowSize);
+  useLayoutEffect(() => {
+    const node = scrollerRef.current;
+    if (!node) return;
+    const measure = () => setViewportHeight(node.clientHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const loadOlder = async () => {
     if (!onLoadOlder || loadingOlderRef.current) return;
     loadingOlderRef.current = true;
@@ -76,9 +89,11 @@ export function BotMessageList({
     }
   };
 
-  useEffect(() => {
-    if (pinnedRef.current) setAnchor(Math.max(0, rows.length - 1));
-  }, [rows.length]);
+  useLayoutEffect(() => {
+    const previous = previousRowsRef.current;
+    setAnchor(current => pinnedRef.current ? Math.max(0, rows.length - 1) : conversationWindowAnchor(previous, rows, current));
+    previousRowsRef.current = rows;
+  }, [rows]);
 
   useEffect(() => {
     if (!highlightedId) return;
@@ -103,9 +118,13 @@ export function BotMessageList({
       onScroll={(event) => {
         const node = event.currentTarget;
         pinnedRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
-        if (node.scrollTop < 48 && windowed.start > 0) {
-          setAnchor((current) => Math.max(0, current - 40));
-        } else if (node.scrollTop < 48 && hasOlder && !olderError) {
+        if (rows.length > 200) {
+          // Match the spacer estimate and keep ten rows above the viewport.
+          // Selecting only one earlier slice leaves a blank spacer at scrollTop=0.
+          setAnchor(pinnedRef.current ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1,
+            Math.floor(node.scrollTop / 72) + Math.floor(windowSize / 2) - 10)));
+        }
+        if (node.scrollTop < 48 && hasOlder && !olderError) {
           void loadOlder();
         }
       }}

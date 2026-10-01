@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createConversationPager } from './conversationPager.ts';
 
 test('10000-message conversation opens its tail, prepends older pages and keeps new replies', async () => {
-  const history = Array.from({ length: 10000 }, (_, n) => ({ id: `m-${n}`, role: 'user', content: String(n), createdAt: new Date(n * 1000).toISOString() }));
+  const history = Array.from({ length: 10000 }, (_, n) => ({ id: `m-${n}`, role: 'user', content: String(n), createdAt: new Date(0).toISOString() }));
   const requests: unknown[] = [];
   let snapshot: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0];
   const pager = createConversationPager({
@@ -49,4 +49,27 @@ test('failed older page preserves cursor for retry and stopping drops an in-flig
   assert.equal(publishCount, 1);
   await pager.refresh();
   assert.equal(calls, 3);
+});
+
+test('a burst larger than one page bridges every new message and retries a failed bridge atomically', async () => {
+  const history = Array.from({ length: 500 }, (_, n) => ({ id: `m-${n}`, role: 'user', content: String(n), createdAt: new Date(n * 1000).toISOString() }));
+  let fail = false;
+  let snapshot: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0];
+  const pager = createConversationPager({ read: async params => {
+    if (params.before && fail) { fail = false; return { ok: false }; }
+    const end = params.before ? history.findIndex(m => m.id === params.before) : history.length;
+    const start = Math.max(0, end - params.limit);
+    const messages: Record<string, unknown>[] = history.slice(start, end);
+    if (!params.before) messages.push({ id: 'projected-card', role: 'assistant', kind: 'system_card' });
+    return { ok: true, messages, nextCursor: start > 0 ? history[start]!.id : null };
+  }, publish: value => { snapshot = value; } });
+  await pager.refresh();
+  history.push(...Array.from({ length: 110 }, (_, i) => { const n = i + 500; return { id: `m-${n}`, role: 'user', content: String(n), createdAt: new Date(n * 1000).toISOString() }; }));
+  fail = true;
+  await assert.rejects(pager.refresh());
+  assert.equal(snapshot!.messages.filter(m => m.id !== 'projected-card').at(-1)!.id, 'm-499', 'failed bridge must not publish a partial gap');
+  await pager.refresh();
+  assert.deepEqual(snapshot!.messages.map(m => m.id), [...history.slice(450).map(m => m.id), 'projected-card']);
+  await pager.older();
+  assert.deepEqual(snapshot!.messages.map(m => m.id), [...history.slice(400).map(m => m.id), 'projected-card']);
 });

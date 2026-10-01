@@ -116,6 +116,12 @@ try {
   await page.bringToFront();
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = 0; });
   await page.locator('#bot-msg-rc-message-9900').waitFor();
+  for (const older of [9850, 9800, 9750, 9700]) {
+    await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; node.scrollTop = 0; });
+    await page.locator(`#bot-msg-rc-message-${older + 30}`).waitFor();
+  }
+  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();

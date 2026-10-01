@@ -427,6 +427,14 @@ export function windowConversationRows<T>(
   return { start, rows: rows.slice(start, start + span) };
 }
 
+/** Prepending history must preserve the identity of the current reading window. */
+export function conversationWindowAnchor(previous: readonly ConversationRow[], next: readonly ConversationRow[], index: number): number {
+  const idOf = (row: ConversationRow) => row.type === 'message' ? row.message.id : row.id;
+  const old = previous[index];
+  const found = old ? next.findIndex(row => idOf(row) === idOf(old)) : -1;
+  return found >= 0 ? found : Math.max(0, Math.min(index, next.length - 1));
+}
+
 export function formatConversationStamp(iso: string, now = Date.now()): { sameDay: boolean; clock: string; date: string } | null {
   const parsed = Date.parse(iso);
   if (!Number.isFinite(parsed)) return null;
