@@ -94,6 +94,17 @@ test('scheduler cancellation aborts a running provider and waits for the old str
   expect(stopped).toBe(true);expect(outcome.terminalStatus).toBe('aborted');
 });
 
+test('delegated TUI turns receive their current plan admission and keep readonly capability gates', async () => {
+  const env = harness({ async stream() { return { content: 'task facts checked', toolCalls: [] }; } });
+  await env.executor.runTurn({ ...env.input, mode: 'goal', turnProfile: { role: 'work_session', workspaceId: 'workspace',
+    context: { workSessionExecution: { phase: 'approved' } } }, plan: { delegationOrigin: { phase: 'running', readOnly: true } } });
+  const system = env.requests[0].messages.filter((row: any) => row.role === 'system').map((row: any) => row.content).join('\n');
+  expect(system).toContain('delegated task executor');
+  expect(system).toContain('phase=running');
+  expect(system).not.toContain('phase=approved');
+  expect(env.requests[0].tools.some((tool: any) => tool.name === 'write_file')).toBe(false);
+});
+
 test('a parallel readonly batch reserves tool budget before any provider starts', async()=>{
   const env=harness({async stream(){return {content:'',toolCalls:['one','two','three'].map(id=>({id,name:'read_file',arguments:JSON.stringify({path:'README.md'})}))};}});
   writeFileSync(path.join(env.home,'README.md'),'real file');

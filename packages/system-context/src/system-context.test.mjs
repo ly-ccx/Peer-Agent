@@ -36,6 +36,7 @@ const DEFAULT_SOURCE_IDS = [
   'project-roster',
   'project-memory',
   'work-session-origin',
+  'work-session',
   'runtime.continuity',
 ];
 
@@ -347,4 +348,3 @@ test('task acceptance stays dark unless the host pins the original brief', () =>
   assert.match(section.content, /flatten_rename/);
   assert.match(section.content, /serialize_by_alias/);
 });
-

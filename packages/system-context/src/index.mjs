@@ -51,6 +51,7 @@ export {
   PROJECT_MEMORY_BRIEF_LIMIT,
 } from './sources/project-memory-source.mjs';
 export { createWorkSessionOriginPromptSource } from './sources/work-session-origin-source.mjs';
+export { createWorkSessionPromptSource } from './sources/work-session-source.mjs';
 export { createProviderPromptSource } from './sources/provider-source.mjs';
 export { createRuntimeReminderPromptSource } from './sources/runtime-reminder-source.mjs';
 export { createCorePromptSource, renderSystemCorePrompt } from './sources/core-source.mjs';

@@ -157,6 +157,7 @@ export function memoryIdsFromAssembledContext(
 ): readonly string[];
 export const PROJECT_MEMORY_BRIEF_LIMIT: 6000;
 export function createWorkSessionOriginPromptSource(): PromptSource;
+export function createWorkSessionPromptSource(): PromptSource;
 export function createProviderPromptSource(): PromptSource;
 export function createRuntimePromptSource(): PromptSource;
 export function createRuntimeReminderPromptSource(): PromptSource;
