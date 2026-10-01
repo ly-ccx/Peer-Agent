@@ -100,11 +100,12 @@ export function ReplyBubble({
             {i18n.t('projectAgent.chat.process')}
           </button>
         ) : null}
-        {sourceIds.map((sessionId) => (
-          <button key={sessionId} type="button" onClick={() => onLocateSession(sessionId)}>
-            {i18n.t('projectAgent.chat.source')}
-          </button>
-        ))}
+        {sourceIds.map((sessionId) => {
+          const state = message.meta.sessionStates?.find(state => state.sessionId === sessionId);
+          return <button key={sessionId} type="button" onClick={() => onLocateSession(sessionId)}>
+            {state ? i18n.t(`projectAgent.chat.sessionState.${state.status}`) : i18n.t('projectAgent.chat.source')}
+          </button>;
+        })}
         {message.marks.map((mark) => {
           const key = mark.outcome && mark.outcome in VERDICT_KEYS
             ? VERDICT_KEYS[mark.outcome as keyof typeof VERDICT_KEYS]

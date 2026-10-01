@@ -148,6 +148,29 @@ test('host runs one goal turn, one explorer, and one verifier through a scripted
   }
 });
 
+test('verifier retries malformed output once through the same readonly executor', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verifier-format-'));
+  const previousHome = process.env.PEER_AGENT_HOME;
+  process.env.PEER_AGENT_HOME = root;
+  try {
+    const seen = [];
+    const { host, plan } = openRoutedHost({ root, providers: [routableProvider({ id: 'one', isDefault: true })],
+      modelId: 'one', seen, visualInputs: [], scripts: [
+        [{ type: 'delta', content: 'Done.' }, { type: 'terminal', channel: 'done' }],
+        [{ type: 'delta', content: VERIFIER_JSON }, { type: 'terminal', channel: 'done' }],
+      ] });
+    const report = await host.verifierRunner.runVerifier({ plan, verifierRunId: 'format-1' });
+    assert.equal(report.passed, true);
+    assert.equal(seen.length, 2);
+    assert.deepEqual(seen.map(item => item.role), ['verifier', 'verifier']);
+    assert.match(seen[1].content, /Done\./);
+  } finally {
+    if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
+    else process.env.PEER_AGENT_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function routableProvider(overrides) {
   return {
     enabled: true,

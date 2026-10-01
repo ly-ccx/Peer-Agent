@@ -7,6 +7,8 @@
 import type { TranslationKey } from '@peer-agent/i18n';
 import {
   dispositionEventsFromToolCalls,
+  WORK_SESSION_STATUSES,
+  type ReplySessionState,
   projectMessageDispositions,
   type DispositionEvent,
   type DispositionMessage,
@@ -40,6 +42,7 @@ export interface BotChatCard {
 }
 
 export interface BotChatMeta {
+  readonly sessionStates?: readonly ReplySessionState[];
   readonly replyTo?: readonly string[];
   readonly sources?: readonly string[];
   readonly memoryUsed?: readonly string[];
@@ -481,6 +484,13 @@ function readMeta(value: unknown): BotChatMeta {
   return {
     replyTo: readStringList(record.replyTo),
     sources: readStringList(record.sources),
+    sessionStates: Array.isArray(record.sessionStates) ? record.sessionStates.flatMap((item: unknown) => {
+      if (!item || typeof item !== 'object') return [];
+      const state = item as Record<string, unknown>;
+      const status = WORK_SESSION_STATUSES.find(status => status === state.status);
+      return status && typeof state.sessionId === 'string' && state.sessionId
+        ? [{sessionId: state.sessionId, status}] : [];
+    }) : [],
     memoryUsed: readStringList(record.memoryUsed),
     memoryLearned: readStringList(record.memoryLearned),
     evidenceRefs: readStringList(record.evidenceRefs),

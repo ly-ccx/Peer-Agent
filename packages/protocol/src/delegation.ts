@@ -22,6 +22,9 @@ export type WorkSessionStatus =
   | 'cancelled'
   | 'superseded';
 
+export const WORK_SESSION_STATUSES = ['queued', 'starting', 'running', 'waiting_user', 'verifying',
+  'result_ready', 'accepted', 'failed', 'cancelled', 'superseded'] as const satisfies readonly WorkSessionStatus[];
+
 export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
 
 export interface DelegationOrigin {
@@ -104,9 +107,16 @@ export interface AgentReplyMeta {
   readonly replyTo: readonly string[];
   readonly sources: readonly string[];
   readonly verdictRef?: string;
+  /** Host snapshot; accepted only when resultAcceptance has been persisted. */
+  readonly sessionStates?: readonly ReplySessionState[];
   readonly memoryUsed: readonly string[];
   readonly memoryLearned: readonly string[];
   readonly surfacing: 'interrupt' | 'message' | 'digest' | 'silent';
+}
+
+export interface ReplySessionState {
+  readonly sessionId: string;
+  readonly status: WorkSessionStatus;
 }
 
 export type MessageDisposition =

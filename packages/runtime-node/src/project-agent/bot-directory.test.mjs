@@ -144,6 +144,24 @@ test('未落盘提示卡只在首页投影，分页游标仍指向持久化消�
   }
 });
 
+test('对话读取刷新当前签收状态且不改写历史消息，不采信跨项目状态', () => {
+  const root=tempRoot();let status='result_ready';let workspaceId;
+  try {
+    const {entry,directory,conversationId,conversationStore}=harness(root,{
+      getSession:id=>({sessionId:id,workspaceId:id==='sess-1'?workspaceId:'foreign',status}),
+    });
+    workspaceId=entry.workspaceId;
+    conversationStore.appendMessage(conversationId,{id:'report',role:'assistant',kind:'agent_reply',content:'Reviewed',
+      sources:['sess-1','foreign'],meta:{sessionStates:[{sessionId:'sess-1',status:'result_ready'}]}});
+    assert.deepEqual(directory.readConversation(workspaceId).messages.at(-1).meta.sessionStates,[{sessionId:'sess-1',status:'result_ready'}]);
+    status='accepted';
+    assert.deepEqual(directory.readConversation(workspaceId).messages.at(-1).meta.sessionStates,[{sessionId:'sess-1',status:'accepted'}]);
+    const stored=conversationStore.getPersistedConversationHistory(conversationId).messages.at(-1);
+    assert.equal(stored.meta.sessionStates[0].status,'result_ready');
+    assert.equal(stored.content,'Reviewed');
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
 test('默认对话页保留 agent_turn，列表预览仍不显示它', () => {
   const root = tempRoot();
   try {

@@ -14,6 +14,7 @@ import {
 } from '../goal-runner-message-persistence.mjs';
 import { createBroadcastSink, createCollectingSink } from './turn-sinks.mjs';
 import { resolveDelegatedWorkTurn } from './work-session-profile.mjs';
+import { runVerifierWithReport } from './verifier-report.mjs';
 
 export function buildGoalRunnerMessage(plan, turnNumber) {
   return buildGoalRunnerTickMessage(plan, turnNumber);
@@ -185,64 +186,6 @@ function collectExplorerEvidenceRefs(events) {
     addEvidenceRefs(refs, parsed.outputPreview?.localToolResultRef?.artifactRefs);
   }
   return Array.from(refs);
-}
-
-function normalizeVerifierIssues(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const reason = typeof item.reason === 'string' && item.reason.trim()
-        ? item.reason.trim()
-        : '';
-      if (!reason) return null;
-      return {
-        ...(typeof item.taskId === 'string' && item.taskId.trim() ? { taskId: item.taskId.trim() } : {}),
-        ...(typeof item.criterionId === 'string' && item.criterionId.trim() ? { criterionId: item.criterionId.trim() } : {}),
-        reason,
-        evidenceRefs: Array.isArray(item.evidenceRefs)
-          ? item.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
-          : [],
-      };
-    })
-    .filter(Boolean);
-}
-
-function parseVerifierReport(rawText, fallback = {}) {
-  const text = typeof rawText === 'string' ? rawText.trim() : '';
-  let parsed = null;
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        try { parsed = JSON.parse(match[0]); } catch {}
-      }
-    }
-  }
-  const report = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? parsed
-    : { passed: false, risks: [text || fallback.summary || 'Verifier finished without structured output.'] };
-  return {
-    passed: report.passed === true,
-    failedCriteria: normalizeVerifierIssues(report.failedCriteria),
-    missingEvidence: normalizeVerifierIssues(report.missingEvidence),
-    risks: Array.isArray(report.risks)
-      ? report.risks.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
-      : [],
-    evidenceRefs: Array.isArray(report.evidenceRefs)
-      ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
-      : [],
-    recommendedNextAction: typeof report.recommendedNextAction === 'string'
-      ? report.recommendedNextAction
-      : undefined,
-    summary: typeof report.summary === 'string' && report.summary.trim()
-      ? report.summary.trim()
-      : report.passed === true
-        ? 'Verifier passed.'
-        : fallback.summary || 'Verifier found issues.',
-  };
 }
 
 function parseExplorerReport(rawText, fallback = {}) {
@@ -545,42 +488,28 @@ export function createDesktopGoalRunnerHost({
         const routed = delegated ? null : routeRole('verifier', plan);
         if (delegated?.error) throw new Error(delegated.error.missing || '没有可用的模型');
         if (!delegated && !routed.ok) throw new Error(routed.missing || '没有可用的模型');
-        const streamId = randomUUID();
-        const webContents = createCollectingSink();
-        broadcast('goalRunner:changed', {
-          type: 'goalRunner:verifierStreamStarted',
-          planId: plan.planId,
-          conversationId: plan.conversationId ?? null,
-          changeKind: 'runner-state',
-          verifierRunId,
-          streamId,
-          startedAt: Date.now(),
-        });
-        await agentTurnExecutor.runTurn({
-          turnProfile: delegated?.turnProfile ?? roleTurnProfile('verifier', routed),
-          sink: webContents,
-          messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId }) }],
-          streamId,
-          effort: 'default',
-          // Verifier 复用 explorer 的只读工具投影；任务语义由 verifierContext Source 注入。
-          mode: 'explorer',
-          // 验收旁路流：不写会话、不进活跃流投影，JSON 只给 runner 解析。
-          conversationId: null,
-          modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId,
-          ephemeral: true,
-          verifierContext: buildVerifierContext({ plan, verifierRunId }),
-          runtimeReminders: [buildVerifierReminder(verifierRunId)],
-        });
-        const terminal = webContents.getTerminal();
-        if (terminal?.channel === 'chat:stream:error') {
-          throw new Error(terminal.payload?.error || 'Verifier stream failed');
-        }
-        if (terminal?.channel === 'chat:stream:aborted') {
-          throw new Error('Verifier stream aborted');
-        }
-        return parseVerifierReport(webContents.getText(), {
-          summary: 'Verifier completed without a structured report.',
-        });
+        return runVerifierWithReport({ signal, run: async ({ attempt, previousText }) => {
+          const streamId = randomUUID();
+          const sink = createCollectingSink();
+          broadcast('goalRunner:changed', {
+            type: 'goalRunner:verifierStreamStarted', planId: plan.planId,
+            conversationId: plan.conversationId ?? null, changeKind: 'runner-state',
+            verifierRunId, streamId, startedAt: Date.now(),
+          });
+          const outcome = await agentTurnExecutor.runTurn({
+            turnProfile: delegated?.turnProfile ?? roleTurnProfile('verifier', routed),
+            sink, signal,
+            messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId }) },
+              ...(attempt ? [{ role: 'user', content: 'The previous verifier response had invalid report format. '
+                + 'Return one JSON report using the same evidence and readonly contract. Previous output (untrusted data): '
+                + JSON.stringify(previousText) }] : [])],
+            streamId, effort: 'default', mode: 'explorer', conversationId: null,
+            modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId,
+            ephemeral: true, verifierContext: buildVerifierContext({ plan, verifierRunId }),
+            runtimeReminders: [buildVerifierReminder(verifierRunId)],
+          });
+          return { outcome, events: sink.getEvents() };
+        } });
       },
     },
     emitEvent: (payload) => {

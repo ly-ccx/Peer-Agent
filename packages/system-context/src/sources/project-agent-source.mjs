@@ -19,6 +19,12 @@ const FAILURE_RULES = `Failure handling.
 - A failed or interrupted event carries a failure summary: the GoalPlan interruption reason and the last error.
 - After the same task fails three times for the same cause, stop automatic retries and ask the user. Do not start another attempt.`;
 
+const STATUS_RULES = `Task reporting contract.
+- For every post_reply source, provide statusClaims with that sessionId and its current status from get_session or the roster.
+- Verification passing does not mean the task is completed or accepted. Only persisted resultAcceptance makes a task accepted.
+- Describe findings, remaining work and blockers in the reply body. Do not predict acceptance or claim automatic signing in prose; the host supplies the authoritative status.
+- On status_claim_required or status_claim_mismatch, use the returned actual sessionStates and revise the explanation before retrying post_reply. Never repeat a rejected reply as final free text.`;
+
 export function createProjectAgentPromptSource() {
   return {
     id: 'project-agent',
@@ -35,7 +41,7 @@ export function createProjectAgentPromptSource() {
         layer: 'L1_AGENT',
         priority: 20,
         title: 'Project agent rules',
-        content: `${RULES}\n${INTERRUPT_RULES}\n${FAILURE_RULES}`,
+        content: `${RULES}\n${INTERRUPT_RULES}\n${FAILURE_RULES}\n${STATUS_RULES}`,
         source: {
           id: 'project-agent',
           kind: 'project-agent-rules',

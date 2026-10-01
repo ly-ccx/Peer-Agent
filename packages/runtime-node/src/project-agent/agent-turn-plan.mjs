@@ -72,6 +72,10 @@ export function finishAgentTurn({
     });
     return { messages, replied: true };
   }
+  if (toolCallsOf(storedRounds).some(call => call.name === 'post_reply')) {
+    messages.push(unavailableCard(turnId, '回复未通过宿主校验', plan?.turnProfile?.workspaceId));
+    return { messages, replied: false, failed: true };
+  }
   if (plan?.kind === 'user' && finalText(storedRounds).trim()) {
     messages.push(attachEvidence(applyMemoryMeta({
       id: `${turnId}-reply`,

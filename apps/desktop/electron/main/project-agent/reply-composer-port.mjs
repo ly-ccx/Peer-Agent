@@ -18,6 +18,8 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         replyTo,
         proactive,
         sources: input?.sources,
+        statusClaims: input?.statusClaims,
+        sessionStates: Array.isArray(delivery.sessionStates) ? delivery.sessionStates : [],
         question: input?.question,
         ...(typeof view?.turnId === 'string' && view.turnId ? { turnId: view.turnId } : {}),
         userMessages: Array.isArray(view?.messages) ? view.messages : [],
@@ -33,7 +35,8 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
           foreground: false,
         },
       });
-      if (!composed.ok) return { error: composed.error, message: composed.message };
+      if (!composed.ok) return { error: composed.error, message: composed.message,
+        ...(composed.sessionStates ? { sessionStates: composed.sessionStates } : {}) };
       return {
         messageId: composed.message.id,
         message: composed.message,

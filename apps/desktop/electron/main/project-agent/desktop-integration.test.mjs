@@ -96,7 +96,7 @@ test('the default LocalToolHost dispatches through supervisor, Grant and Evidenc
     assert.equal(plan.delegationOrigin.readOnly, true);
     assert.equal(plan.delegationOrigin.modelSelection.worker.modelProviderId, provider.id);
     assert.equal(plan.delegationOrigin.modelSelection.visualVerifier, undefined);
-    const posted = await tool(env, 'post_reply', { text: 'Started', replyTo: ['input-anchor'], sources: [output.sessionId] }, 2);
+    const posted = await tool(env, 'post_reply', { text: 'Started', replyTo: ['input-anchor'], sources: [output.sessionId], statusClaims: [{sessionId:output.sessionId,status:env.api.supervisor.get({sessionId:output.sessionId}).status}] }, 2);
     assert.equal(posted.success, true, JSON.stringify(posted));
     assert.equal(JSON.parse(posted.output).message.content, 'Started');
     const forged = await tool(env, 'post_reply', { text: 'Fake', replyTo: ['input-anchor'], sources: ['other-project'] }, 3);
@@ -191,18 +191,18 @@ test('error retries reuse parked inputs, repeated clicks are idempotent, and rec
   } finally { env.dispose(); resumed?.dispose(); }
 });
 
-for (const policy of ['auto', 'confirm']) test(`desktop reporting persists replies before ${policy} acceptance`, async () => {
+for (const policy of ['auto', 'confirm', 'write-failed']) test(`desktop reporting persists replies before ${policy} acceptance`, async () => {
   let env; let report = false; let sessionId;
   env = harness({ send: async input => {
     if (!report) return { terminalStatus: 'done', text: 'hello' };
-    const args = { text: 'Verified result', replyTo: ['input-report'], sources: [sessionId] };
+    const args = { text: 'Verified result', replyTo: ['input-report'], sources: [sessionId], statusClaims: [{sessionId,status:env.api.supervisor.get({sessionId}).status}] };
     const result = await tool({ ...env, turnId: input.streamId }, 'post_reply', args);
     input.webContents.send('chat:stream:tool-call', { toolCallId: 'reply', tool: 'post_reply', args: { ...args, text: 'unvalidated text' } });
     input.webContents.send('chat:stream:tool-result', { toolCallId: 'reply', result: result.output });
     return { terminalStatus: 'done', toolCallCount: 1 };
   } });
   try {
-    await env.invoke('update-profile', { acceptancePolicy: policy });
+    await env.invoke('update-profile', { acceptancePolicy: policy === 'write-failed' ? 'auto' : policy });
     await env.submit('anchor', 'read files');
     const opened = await env.invoke('start-familiarize');
     assert.equal(opened.ok, true);
@@ -217,27 +217,63 @@ for (const policy of ['auto', 'confirm']) test(`desktop reporting persists repli
     env.plans.recordEvidenceRefs({ planId, evidenceRefs: ['ev-pass'] });
     env.plans.setPlanStatus(planId, 'completed');
     assert.equal(env.plans.getPlan(planId).resultAcceptance, undefined);
+    if (policy === 'write-failed') {
+      const revise = env.plans.revisePlan;
+      env.plans.revisePlan = (id, patch, options) => {
+        if (patch.resultAcceptance) throw Object.assign(new Error('Acceptance persistence rejected'), {code:'close_gate'});
+        return revise(id, patch, options);
+      };
+    }
     report = true;
     await env.submit('report', 'report result');
     const reply = env.history().find(message => message.content === 'Verified result');
     assert.ok(reply); assert.equal(env.history().some(message => message.content === 'unvalidated text'), false);
     assert.equal(reply.marks[0].outcome, 'passed');
+    assert.deepEqual(reply.meta.sessionStates, [{sessionId,status:policy === 'auto' ? 'accepted' : 'result_ready'}]);
     const learned = createMemoryStore({ rootDir: env.home }).list({ workspaceId: env.bot.workspaceId }).find(item => item.text === 'Verified result');
     assert.equal(learned?.trust, 'verified');
     assert.deepEqual(learned.sourceRefs, ['ev-pass']);
     assert.ok(reply.meta.memoryLearned.includes(learned.id));
     assert.equal((await env.invoke('get')).profile.familiarize.memoryRecorded, true);
     if (policy === 'auto') assert.equal(env.plans.getPlan(planId).resultAcceptance?.acceptedBy, 'policy');
+    else if (policy === 'write-failed') assert.equal(env.plans.getPlan(planId).resultAcceptance, undefined);
     else {
       assert.equal(env.plans.getPlan(planId).resultAcceptance, undefined);
       const cards = (await env.invoke('read-conversation')).messages.flatMap(message => message.cards || []);
       assert.ok(cards.some(card => card.kind === 'confirm_result' && card.resolvedState === 'open'));
       const result = await env.invoke('confirm-result', { sessionId }); assert.equal(result.ok, true);
       assert.equal(env.plans.getPlan(planId).resultAcceptance.acceptedBy, 'user');
+      const currentReply=(await env.invoke('read-conversation')).messages.find(message=>message.id===reply.id);
+      assert.deepEqual(currentReply.meta.sessionStates,[{sessionId,status:'accepted'}]);
       assert.equal((await env.invoke('confirm-result', { sessionId })).alreadyAccepted, true);
       assert.equal((await env.invoke('read-conversation')).messages.flatMap(message => message.cards || []).some(card => card.kind === 'confirm_result' && card.resolvedState === 'open'), false);
     }
   } finally { env.dispose(); }
+});
+
+test('host rejects acceptance claims on blocked tasks and returns authoritative status through Grant/Evidence', async () => {
+  const env = harness();
+  try {
+    await env.submit('anchor', 'read files');
+    const opened=await env.invoke('start-familiarize');
+    const sessionId=opened.profile.familiarize.sessionId;
+    const planId=env.api.supervisor.get({sessionId}).planId;
+    env.plans.revisePlan(planId,{hostVerification:{independentVerifier:'passed'},
+      runner:{status:'blocked',blockedReason:'Verifier report format invalid'}},
+      {reason:'reproduce blocked verification',changedBy:'test'});
+    const actual=env.api.supervisor.get({sessionId}).status;
+    assert.notEqual(actual,'accepted');
+    const reply=await tool(env,'post_reply',{text:'Already accepted',replyTo:['input-anchor'],sources:[sessionId],
+      statusClaims:[{sessionId,status:'accepted'}]});
+    assert.equal(reply.success,false);
+    const output=JSON.parse(reply.output);
+    assert.equal(output.error,'status_claim_mismatch');
+    assert.deepEqual(output.sessionStates,[{sessionId,status:actual}]);
+    assert.equal(env.plans.getPlan(planId).resultAcceptance,undefined);
+    assert.equal(env.history().some(message=>message.content==='Already accepted'),false);
+    assert.equal(reply.execution.result.status,'failed');
+    assert.ok(reply.execution.result.evidence.evidenceId);
+  } finally {env.dispose();}
 });
 
 test('reply source ownership includes sessions beyond the model list page', async () => {
@@ -253,7 +289,7 @@ test('reply source ownership includes sessions beyond the model list page', asyn
     assert.equal(env.api.supervisor.list({ workspaceId: env.bot.workspaceId }).length, 50);
     assert.equal(env.api.supervisor.sessionsForProject(env.bot.workspaceId).length, 51);
     assert.equal(env.api.supervisor.sessionsForProject('foreign').length, 0);
-    const reply = await tool(env, 'post_reply', { text: 'Last task', sources: [latest.sessionId], replyTo: ['input-anchor'] });
+    const reply = await tool(env, 'post_reply', { text: 'Last task', sources: [latest.sessionId], statusClaims: [{sessionId:latest.sessionId,status:env.api.supervisor.get({sessionId:latest.sessionId}).status}], replyTo: ['input-anchor'] });
     assert.equal(reply.success, true, JSON.stringify(reply));
   } finally { env.dispose(); }
 });

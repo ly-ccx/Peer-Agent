@@ -468,6 +468,7 @@ async function callPort(fn, input, unavailable, context) {
       output: {
         ok: false,
         error: result.error,
+        ...(Array.isArray(result.sessionStates) ? { sessionStates: result.sessionStates } : {}),
         ...(result.missing ? { missing: result.missing, message: result.missing } : {}),
         ...(result.message ? { message: result.message } : {}),
       },

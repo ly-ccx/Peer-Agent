@@ -24,11 +24,18 @@ export function createAgentTurnExecutor({ llmChatService } = {}) {
       }
       const projectAgent = turnProfile?.role === 'project_agent' || sendMessageArgs.mode === 'project_agent';
       if (!projectAgent) {
-        return llmChatService.sendMessage({
+        if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted' });
+        const streamId = sendMessageArgs.streamId || randomUUID();
+        const abort = () => llmChatService.abort?.(streamId);
+        signal?.addEventListener('abort', abort, { once: true });
+        return Promise.resolve().then(() => signal?.aborted
+          ? { ok: false, terminalStatus: 'aborted' }
+          : llmChatService.sendMessage({
           ...sendMessageArgs,
+          streamId,
           webContents: sink,
           turnProfile,
-        });
+        })).finally(() => signal?.removeEventListener('abort', abort));
       }
       if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' });
       const collected = collectTurn(sink);

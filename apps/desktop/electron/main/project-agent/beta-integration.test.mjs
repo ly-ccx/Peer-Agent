@@ -18,6 +18,14 @@ test('rejected post_reply cannot publish forged source refs',()=>{
   assert.equal(finished.messages.some(m=>m.sources?.includes('foreign-task')),false);
 });
 
+test('rejected status claim cannot escape through final prose fallback',()=>{
+  const finished=finishAgentTurn({turnId:'t',plan:planAgentTurn({kind:'user',userInputs:[{inputId:'i'}]}),rounds:[{
+    text:'已经自动签收',toolCalls:[{name:'post_reply',input:{text:'已经自动签收'},result:{ok:false,error:'status_claim_mismatch'}}],
+  }]});
+  assert.equal(finished.messages.some(message=>message.kind==='agent_reply'),false);
+  assert.equal(finished.failed,true);
+});
+
 test('service terminal errors stay errors, not successful empty replies',async()=>{
   const executor=createAgentTurnExecutor({llmChatService:{sendMessage:async()=>({terminalStatus:'error',toolCallCount:0})}});
   const messages=[];const r=runner(messages,input=>executor.runTurn(input));

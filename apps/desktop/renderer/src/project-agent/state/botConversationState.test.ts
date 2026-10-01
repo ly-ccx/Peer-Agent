@@ -32,6 +32,13 @@ function message(partial: Partial<BotChatMessage> & Pick<BotChatMessage, 'id' | 
   };
 }
 
+test('签收状态只读取宿主快照，不从回复正文推断', () => {
+  const projected=normalizeBotMessage({id:'reply',role:'assistant',kind:'agent_reply',content:'已经签收',
+    meta:{sessionStates:[{sessionId:'s1',status:'waiting_user'},{sessionId:'s2',status:'invented'}]}});
+  assert.deepEqual(projected?.meta.sessionStates,[{sessionId:'s1',status:'waiting_user'}]);
+  assert.deepEqual(normalizeBotMessage({id:'old',role:'assistant',kind:'agent_reply',content:'已经签收'})?.meta.sessionStates ?? [],[]);
+});
+
 test('按 kind 过滤，agent_turn 不显示，没有 kind 的用户消息仍显示', () => {
   const visible = visibleBotMessages([
     message({ id: 'u1', kind: 'user_input', createdAt: '2026-09-27T01:00:00.000Z', content: '你好' }),

@@ -8,6 +8,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     const rows = sessions(workspaceId);
     return {
       sessionIds: rows.map((row) => row.sessionId),
+      sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status })),
       verdicts: rows.flatMap((row) => {
         const decision = supervisor.acceptance(row.sessionId);
         return decision ? [{ sessionId: row.sessionId, ...decision.verdict,

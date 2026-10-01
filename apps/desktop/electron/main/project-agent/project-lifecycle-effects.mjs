@@ -7,6 +7,7 @@ export function createProjectLifecycleEffects({ profileStore, lifecycle, supervi
       if (input) lifecycle.acceptResponsibility(workspaceId, { text: input.text, anchorMessageId: `input-${input.inputId}` });
     },
     onReplied: async (workspaceId, message) => {
+      let replyMeta = message.meta;
       const familiar = profileStore.read(workspaceId)?.familiarize;
       if (familiar?.sessionId && !familiar.memoryRecorded && message.sources?.includes(familiar.sessionId)) {
         const decision = supervisor.acceptance(familiar.sessionId);
@@ -15,14 +16,24 @@ export function createProjectLifecycleEffects({ profileStore, lifecycle, supervi
           if (written.ok) {
             const profile = profileStore.read(workspaceId);
             profileStore.save({ ...profile, familiarize: { ...profile.familiarize, memoryRecorded: true } });
+            replyMeta = { ...replyMeta, memoryLearned: [...(replyMeta?.memoryLearned || []), ...written.items.map(item => item.id)] };
             conversationStore.updateMessageById?.(message.conversationId || resolveConversationId(workspaceId), message.id, {
-              meta: { ...message.meta, memoryLearned: [...(message.meta?.memoryLearned || []), ...written.items.map(item => item.id)] },
+              meta: replyMeta,
             });
           }
         }
       }
       for (const sessionId of message.sources || []) {
         if (supervisor.get({ sessionId })?.workspaceId === workspaceId) await supervisor.settle(sessionId);
+      }
+      if (message.sources?.length) {
+        const sessionStates = message.sources.flatMap(sessionId => {
+          const session = supervisor.get({ sessionId });
+          return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status }] : [];
+        });
+        conversationStore.updateMessageById?.(message.conversationId || resolveConversationId(workspaceId), message.id, {
+          meta: { ...replyMeta, sessionStates },
+        });
       }
       broadcast?.('project-agent:conversation-changed', { workspaceIds: [workspaceId] });
     },
