@@ -24,9 +24,12 @@ const report = { schemaVersion: 1, synthetic: false, installed: false, startedAt
   sourceDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: source, encoding: 'utf8' }).trim()),
   samples: [], pageErrors: [], scope: 'Source production Electron, project host, live configured fast model and real post_reply tool; submission to committed turn and anchored reply' };
 const owned = createOwnedProcessRegistry(); let handle;
+let cancelled = false;
+const cancel = () => { cancelled = true; };
+process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
 const until = async (read, predicate, timeout = 150000) => {
   const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 25)); }
+  while (Date.now() < deadline) { if (cancelled) throw Error('CANCELLED'); const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 25)); }
   throw Error('Live model acceptance timed out');
 };
 try {
@@ -38,8 +41,10 @@ try {
   report.model = model.model; report.provider = channel.provider;
   writeFileSync(path.join(home, 'llm-providers.json'), JSON.stringify({ version: config.version, channels: [channel], models: [{ ...model, isDefault: true }] }), { mode: 0o600 });
   for (const file of ['credentials.vault.json', 'device-identity.json']) if (existsSync(path.join(original, file))) cpSync(path.join(original, file), path.join(home, file));
+  const projects = Array.from({ length: 5 }, (_, i) => { const directory = path.join(project, String(i)); mkdirSync(directory); return { path: directory, name: `RC live performance ${i}` }; });
+  report.scope += '; five independent bots, one turn per bot, so a parked failure cannot block another sample';
   const settings = { schemaVersion: 3, locale: 'zh-CN', memory: { enabled: false }, localAccessLevel: 'restricted_local',
-    workspaces: [{ path: project, name: 'RC live performance' }], projectAgent: { shell: 'bots', managedRoot: path.join(root, 'managed'), shellIntroDismissed: true },
+    workspaces: projects, projectAgent: { shell: 'bots', managedRoot: path.join(root, 'managed'), shellIntroDismissed: true },
     modelRouting: { tiers: Object.fromEntries(['strong', 'fast', 'economy', 'vision'].map(key => [key, { primary: model.id, fallbacks: [] }])) } };
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
   const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
@@ -52,13 +57,13 @@ try {
   handle = owned.register({ process: app.process(), close: () => app.close() });
   const page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean, 60000);
   page.on('pageerror', error => report.pageErrors.push(error.message));
-  const listed = await until(() => page.evaluate(() => window.peerAgent.projectAgentList()), value => value.items?.length === 1, 30000);
-  const bot = listed.items[0];
-  const rows = () => {
+  const listed = await until(() => page.evaluate(() => window.peerAgent.projectAgentList()), value => value.items?.length === 5, 30000);
+  const rows = bot => {
     const file = path.join(home, 'conversations', bot.profile.agentConversationId + '.jsonl');
     return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   };
   for (let i = 0; i < 5; i++) {
+    const bot = listed.items[i];
     const inputId = `rc-live-${i}`, marker = `RC_LIVE_REPLY_${i}`;
     const startedAt = new Date().toISOString();
     const start = performance.now();
@@ -67,8 +72,12 @@ try {
       const receipt = await page.evaluate(params => window.peerAgent.projectAgentSubmitInput(params), { workspaceId: bot.workspaceId, inputId,
         text: `这是一轮简单连通测试。只调用 post_reply 回复 ${marker}。不读文件、不启动任务、不调用其他工具。`, surface: 'desktop' });
       assert.equal(receipt.ok, true);
-      const reply = await until(rows, value => {
-        if (value.some(row => row.card === 'agent_unavailable' && row.createdAt >= startedAt)) throw Error('Provider unavailable');
+      const reply = await until(() => rows(bot), value => {
+        const failure = value.find(row => row.card === 'agent_unavailable' && row.createdAt >= startedAt);
+        if (failure) {
+          const reason = String(failure.content || '');
+          throw Error(reason.includes('empty_model_response') ? 'EMPTY_MODEL_RESPONSE' : 'PROVIDER_UNAVAILABLE');
+        }
         return value.some(row => row.kind === 'agent_reply' && row.replyTo?.includes('input-' + inputId) && value.some(turn => turn.id === row.turnId));
       });
       const message = reply.find(row => row.kind === 'agent_reply' && row.replyTo?.includes('input-' + inputId));
@@ -76,8 +85,10 @@ try {
       assert.ok(turn?.rounds?.some(round => round.toolCalls?.some(call => call.name === 'post_reply')), 'Live turn must actually call post_reply');
       assert.ok(message.content.includes(marker));
       sample = { model: model.model, inputId, turnId: message.turnId, outcome: 'done', durationMs: performance.now() - start };
-    } catch {
-      sample = { model: model.model, inputId, outcome: 'failed', durationMs: performance.now() - start, code: 'LIVE_TURN_FAILED' };
+    } catch (error) {
+      const code = ['CANCELLED', 'EMPTY_MODEL_RESPONSE', 'PROVIDER_UNAVAILABLE'].includes(error.message) ? error.message
+        : error.message === 'Live model acceptance timed out' ? 'LIVE_TURN_TIMEOUT' : 'LIVE_TURN_FAILED';
+      sample = { model: model.model, inputId, outcome: 'failed', durationMs: performance.now() - start, code };
     }
     report.samples.push(sample); console.log(JSON.stringify(sample));
   }
@@ -86,6 +97,7 @@ try {
 } catch {
   report.ok = false; report.error = 'Live benchmark setup or host failed';
 } finally {
+  process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
   if (handle) report.ownedStop = await owned.stop({ handleId: handle, reason: 'owned' });
   for (const file of ['credentials.vault.json', 'credentials.vault.lock', 'device-identity.json', 'llm-providers.json']) rmSync(path.join(home, file), { force: true });
   report.credentialCopiesRemoved = true; report.finishedAt = new Date().toISOString();
