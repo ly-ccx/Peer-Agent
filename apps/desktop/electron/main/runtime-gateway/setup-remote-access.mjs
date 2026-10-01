@@ -43,9 +43,13 @@ import {normalizeRemoteSettings} from './remote-access-controller.mjs';
 const DELEGATION_MS = 24 * 60 * 60 * 1000;
 const PROJECT_OPERATIONS=new Set(['project.list','project.conversation.read','project.session.read','project.input.submit']);
 function accessSummary(value) {
-  if(!value||!Number.isSafeInteger(value.at)||value.at<0||!PROJECT_OPERATIONS.has(value.operation)
+  if(!value||!Number.isSafeInteger(value.at)||value.at<0||value.at>8_640_000_000_000_000||!PROJECT_OPERATIONS.has(value.operation)
       || value.workspaceId!==undefined&&!isRemoteWorkspaceId(value.workspaceId))return null;
   return {at:value.at,operation:value.operation,...(value.workspaceId!==undefined?{workspaceId:value.workspaceId}:{})};
+}
+/** Device-scoped, bounded activity metadata; no connection or keychain access. */
+export function readRemoteAccessSummary(userDataPath) {
+  try{return accessSummary(JSON.parse(readFileSync(path.join(userDataPath,'project-runtime','remote-access.json'),'utf8')));}catch{return null;}
 }
 
 /** 委托名单：稳定 id，再加上注册表里的旧远程别名。两者都准入。 */
@@ -163,8 +167,7 @@ export function setupRemoteAccess({
   const currentPolicy = () => typeof getRemoteSettings === 'function'
     ? normalizeRemoteSettings(getRemoteSettings() ?? {}) : initialPolicy;
   const accessFile = path.join(userDataPath,'project-runtime','remote-access.json');
-  let lastAccess = null;
-  try {lastAccess=accessSummary(JSON.parse(readFileSync(accessFile,'utf8')));}catch{}
+  let lastAccess = readRemoteAccessSummary(userDataPath);
 
   const delegationOf = () => ({
     version: initialPolicy.delegationVersion,

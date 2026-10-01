@@ -215,7 +215,7 @@ export function SettingsPage({
         ) : section === 'usage' ? (
           <UsageStatsPanel i18n={i18n} />
         ) : section === 'remote' ? (
-          <RemoteAccessPanel />
+          <RemoteAccessPanel i18n={i18n} />
         ) : (
           <AppearancePanel i18n={i18n} />
         )}

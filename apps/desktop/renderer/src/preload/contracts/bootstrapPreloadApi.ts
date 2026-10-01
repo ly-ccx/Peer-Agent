@@ -97,11 +97,7 @@ import type {
  */
 
 // ADR 75 M1 — remote access IPC types
-export type RemoteAccessSettings = {
-  enabled: boolean;
-  gatewayOrigin: string;
-  workspaceId: string;
-};
+export type RemoteAccessSettings = import('@peer-agent/protocol').RemoteAccessSettings;
 export type RemoteAccessFailure = {
   /** Supervisor category: transport_failure, local_failure, network_unavailable, … */
   reason: string;
@@ -129,14 +125,11 @@ export type RemoteAccessIpcResult = {
     lastFailure?: RemoteAccessFailure | null;
     /** Set while the server waits for this device to be claimed. */
     pairing?: RemoteAccessPairing | null;
+    lastAccess?: import('@peer-agent/protocol').RemoteAccessSummary | null;
   };
   error?: string;
 };
-export type RemoteAccessPatch = {
-  enabled?: boolean;
-  gatewayOrigin?: string;
-  workspaceId?: string;
-};
+export type RemoteAccessPatch = import('@peer-agent/protocol').RemoteAccessPatch;
 export type BrowserSessionImportPreflightCheck = {
   readonly id: string;
   readonly status: 'ok' | 'missing' | 'blocked' | 'warn' | 'unsupported' | 'info';

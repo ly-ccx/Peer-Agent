@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProjectRegistry } from '@peer-agent/runtime-node';
-import { setupRemoteAccess } from './setup-remote-access.mjs';
+import { setupRemoteAccess, readRemoteAccessSummary } from './setup-remote-access.mjs';
 
 /** Each case gets a real (empty) data dir so the binding SQLite can open. */
 const freshDir = () => mkdtempSync(join(tmpdir(), 'peer-remote-'));
@@ -519,4 +519,19 @@ test('稳定 id 和远程别名都能通过准入', async () => {
   assert.equal(denied.status, 'rejected');
   assert.equal(denied.code, 'WORKSPACE_DENIED');
   assert.equal(host.calls(), 2);
+});
+
+
+test('cold activity summary reads only safe metadata, without connecting or keychain access', () => {
+  const root = freshDir(), directory = join(root, 'project-runtime'), file = join(directory, 'remote-access.json');
+  try {
+    assert.equal(readRemoteAccessSummary(root), null); mkdirSync(directory);
+    const safe = { at: 123, operation: 'project.conversation.read', workspaceId: 'ws-1' };
+    writeFileSync(file, JSON.stringify({ ...safe, text: 'PRIVATE', token: 'SECRET', path: '/private' }));
+    assert.deepEqual(readRemoteAccessSummary(root), safe);
+    for (const value of [{ ...safe, at: -1 }, { ...safe, at: Number.MAX_SAFE_INTEGER }, { ...safe, operation: 'execute' }, { ...safe, workspaceId: '/private' }]) {
+      writeFileSync(file, JSON.stringify(value)); assert.equal(readRemoteAccessSummary(root), null);
+    }
+    writeFileSync(file, '{broken'); assert.equal(readRemoteAccessSummary(root), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

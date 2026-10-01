@@ -36,7 +36,7 @@ test('完全未知的分类退化为 reason 本身，不显示空字符串', () 
 });
 
 test('等待认领时状态行显示「等待认领」，不误报为连接中', () => {
-  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '' }, active: true, online: false, deviceId: null, connectionEpoch: 0 };
+  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '', projectGrants: [], workspaceIds: [], delegationVersion: 1 }, active: true, online: false, deviceId: null, connectionEpoch: 0 };
   assert.equal(
     connectionSummary({ ...base, pairing: { challengeId: 'c', pairingKey: 'k', deviceId: 'd', expiresAt: Date.now() + 1000 } }),
     '等待认领',
@@ -44,17 +44,17 @@ test('等待认领时状态行显示「等待认领」，不误报为连接中',
 });
 
 test('连接失败时状态行显示「连接失败」，不显示「正在连接…」', () => {
-  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '' }, active: true, online: false, deviceId: null, connectionEpoch: 0 };
+  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '', projectGrants: [], workspaceIds: [], delegationVersion: 1 }, active: true, online: false, deviceId: null, connectionEpoch: 0 };
   assert.equal(connectionSummary({ ...base, lastFailure: { reason: 'timeout' } }), '连接失败');
 });
 
 test('在线时状态行显示已连接并带设备号', () => {
-  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '' }, active: true, online: true, deviceId: 'dev-1', connectionEpoch: 3 };
+  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '', projectGrants: [], workspaceIds: [], delegationVersion: 1 }, active: true, online: true, deviceId: 'dev-1', connectionEpoch: 3 };
   assert.equal(connectionSummary(base), '已连接 (dev-1)');
 });
 
 test('既无失败也未连接时，按是否活动区分连接中与未连接', () => {
-  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '' }, online: false, deviceId: null, connectionEpoch: 0 };
+  const base = { settings: { enabled: true, gatewayOrigin: '', workspaceId: '', projectGrants: [], workspaceIds: [], delegationVersion: 1 }, online: false, deviceId: null, connectionEpoch: 0 };
   assert.equal(connectionSummary({ ...base, active: true }), '正在连接…');
   assert.equal(connectionSummary({ ...base, active: false }), '未连接');
 });
