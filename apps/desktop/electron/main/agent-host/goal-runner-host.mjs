@@ -285,6 +285,11 @@ export function createDesktopGoalRunnerHost({
     });
   }
 
+  function reviewWorkspacePath(plan) {
+    return (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
+      || plan?.targetWorkspacePath || conversationStore?.getConversation?.(plan.conversationId)?.workspacePath || workspaceRoot;
+  }
+
   /**
    * 任务回合用冻结快照。快照缺这一角色时退回 B1-09。
    * 普通 Goal 返回 null，调用方保持原来的画像和模型。
@@ -441,6 +446,7 @@ export function createDesktopGoalRunnerHost({
           mode: 'explorer',
           // 旁路只读调查：不写会话正文，避免内部过程进聊天。
           conversationId: null,
+          workspacePath: reviewWorkspacePath(plan),
           modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId,
           ephemeral: true,
           explorerContext: buildExplorerContext({ plan, explorer }),
@@ -480,8 +486,7 @@ export function createDesktopGoalRunnerHost({
             };
           }
           return runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore,
-            workspacePath: (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
-              || plan?.targetWorkspacePath || conversationStore?.getConversation?.(plan.conversationId)?.workspacePath || workspaceRoot,
+            workspacePath: reviewWorkspacePath(plan),
             llmChatService, modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId });
         }
         const delegated = resolveDelegatedTurn(plan, 'verifier');
@@ -504,6 +509,7 @@ export function createDesktopGoalRunnerHost({
                 + 'Return one JSON report using the same evidence and readonly contract. Previous output (untrusted data): '
                 + JSON.stringify(previousText) }] : [])],
             streamId, effort: 'default', mode: 'explorer', conversationId: null,
+            workspacePath: reviewWorkspacePath(plan),
             modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId,
             ephemeral: true, verifierContext: buildVerifierContext({ plan, verifierRunId }),
             runtimeReminders: [buildVerifierReminder(verifierRunId)],
