@@ -547,3 +547,35 @@ test('actual SDK reports survive restart and suppress repeated wake delivery whi
     assert.equal(current.history().filter(m=>m.content==='Verified project').length,2);
   }finally{env.dispose();if(current!==env)current.dispose();}
 });
+
+test('production LocalToolHost exposes resume and priority after a real supersession', async () => {
+  const env = harness();
+  const args = { title: 'Original', brief: 'Read the original context', kind: 'research', readOnly: true, successCriteria: ['Read'] };
+  try {
+    await env.submit('continuity-start', 'Start original');
+    const original = JSON.parse((await tool({ ...env, currentInputAnchors: ['input-continuity-start'] }, 'spawn_session', {
+      ...args, anchorMessageIds: ['input-continuity-start'],
+    })).output);
+    const before = env.plans.getPlan(original.planId || env.api.supervisor.get({ sessionId: original.sessionId }).planId);
+    await env.submit('continuity-replace', 'Replace original');
+    const replacement = JSON.parse((await tool({ ...env, currentInputAnchors: ['input-continuity-replace'] }, 'spawn_session', {
+      ...args, title: 'Replacement', anchorMessageIds: ['input-continuity-replace'], supersedes: original.sessionId,
+    })).output);
+    assert.equal(env.api.supervisor.get({ sessionId: original.sessionId }).status, 'superseded');
+    await env.submit('continuity-resume', 'Resume original');
+    const ctx = { ...env, currentInputAnchors: ['input-continuity-resume'] };
+    const resumed = await tool(ctx, 'resume_session', { sessionId: original.sessionId, anchorMessageId: 'input-continuity-resume' });
+    assert.equal(resumed.success, true, resumed.output);
+    assert.equal(resumed.execution.grant.granted, true);
+    assert.equal(resumed.execution.result.status, 'success');
+    assert.equal(env.api.supervisor.get({ sessionId: replacement.sessionId }).status, 'superseded');
+    const restored = env.plans.getPlan(before.planId);
+    assert.equal(restored.conversationId, before.conversationId);
+    assert.equal(restored.goal, before.goal);
+    assert.deepEqual(restored.successCriteria, before.successCriteria);
+    const changed = await tool(ctx, 'reprioritize_session', { sessionId: original.sessionId, priority: 'low', anchorMessageId: 'input-continuity-resume' });
+    assert.equal(changed.success, true, changed.output);
+    assert.equal(changed.execution.grant.granted, true);
+    assert.equal(env.plans.getPlan(before.planId).delegationOrigin.priority, 'low');
+  } finally { env.dispose(); }
+});
