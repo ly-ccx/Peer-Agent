@@ -426,8 +426,10 @@ export function createProjectAgentApplicationService({
     }
     const marked = directory.markRead(payload.workspaceId);
     if (marked?.ok) {
-      queueChanged(payload.workspaceId);
+      if (marked.changed !== false) queueChanged(payload.workspaceId);
       if (typeof onViewing === 'function') onViewing(payload.workspaceId);
+      const { changed, ...result } = marked;
+      return result;
     }
     return marked;
   }

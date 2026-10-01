@@ -198,6 +198,21 @@ test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', as
   assert.deepEqual(events[0].payload.workspaceIds, ['ws-1', 'ws-2']);
 });
 
+test('unchanged read receipt retains viewing presence without broadcasting another refresh', () => {
+  const scheduled = [], viewing = [];
+  let changed = true;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    directory: { markRead: () => ({ ok: true, at: 'now', messageId: 'last', changed }) },
+    schedule: fn => { scheduled.push(fn); return 1; }, onViewing: id => viewing.push(id) });
+  assert.deepEqual(service.markRead({ workspaceId: 'ws-1' }), { ok: true, at: 'now', messageId: 'last' });
+  assert.equal(scheduled.length, 1);
+  scheduled.shift()();
+  changed = false;
+  assert.deepEqual(service.markRead({ workspaceId: 'ws-1' }), { ok: true, at: 'now', messageId: 'last' });
+  assert.equal(scheduled.length, 0);
+  assert.deepEqual(viewing, ['ws-1', 'ws-1']);
+});
+
 test('提交输入入队并单独通知对话变化', async () => {
   const events = [];
   const queued = [];

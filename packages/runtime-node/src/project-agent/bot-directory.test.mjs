@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -80,6 +80,32 @@ function harness(root, directoryOptions = {}) {
   });
   return { entry, directory, conversationId, conversationStore };
 }
+
+test('unchanged read receipt does not rewrite its cursor; same-time new message still advances its identity', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationStore, conversationId } = harness(root);
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    const file = path.join(root, 'project-runtime', entry.workspaceId, 'read-cursor.json');
+    const before = statSync(file, { bigint: true });
+    assert.equal(directory.markRead(entry.workspaceId).changed, false);
+    assert.equal(statSync(file, { bigint: true }).ino, before.ino, 'no atomic rewrite for an unchanged receipt');
+    conversationStore.appendMessage(conversationId, { id: 'same-time-new', role: 'assistant', kind: 'agent_reply', content: 'new', createdAt: '2026-09-27T03:00:00.000Z' });
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).messageId, 'same-time-new');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('an empty conversation retains its read receipt across clock changes', () => {
+  const root = tempRoot();
+  let time = '2026-09-27T07:00:00.000Z';
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => [], now: () => new Date(time) });
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    time = '2026-09-27T08:00:00.000Z';
+    assert.deepEqual(directory.markRead(entry.workspaceId), { ok: true, at: '2026-09-27T07:00:00.000Z', messageId: null, changed: false });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('列表项截断最后一条可见消息，并计入批准、提问、确认和进行中', () => {
   const root = tempRoot();

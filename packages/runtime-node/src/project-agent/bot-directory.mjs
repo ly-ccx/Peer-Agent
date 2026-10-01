@@ -136,7 +136,7 @@ export function createBotDirectory({
     if (!existsSync(file)) return null;
     try {
       const parsed = JSON.parse(readFileSync(file, 'utf8'));
-      return typeof parsed?.at === 'string' && parsed.at ? parsed.at : null;
+      return typeof parsed?.at === 'string' && parsed.at ? parsed : null;
     } catch {
       return null;
     }
@@ -185,7 +185,7 @@ export function createBotDirectory({
         lastMessage: last,
         sessions: mappedSessions,
         approvals: Array.isArray(approvals) ? approvals : [],
-        readCursor: readCursor(profile.workspaceId),
+        readCursor: readCursor(profile.workspaceId)?.at ?? null,
       }),
       titles: sessions
         .map((session) => (typeof session?.title === 'string' ? session.title : ''))
@@ -288,17 +288,22 @@ export function createBotDirectory({
     if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
     const visible = messagesOf(profile).filter(isVisibleBotMessage);
     const last = visible.length ? visible[visible.length - 1] : null;
-    const at = last ? (messageAt(last) || stamp()) : stamp();
+    const current = readCursor(workspaceId);
+    const messageId = typeof last?.id === 'string' ? last.id : null;
+    const at = (last && messageAt(last)) || (current?.messageId === messageId ? current.at : stamp());
+    if (current?.at === at && current.messageId === messageId) {
+      return { ok: true, at, messageId, changed: false };
+    }
     const dir = runtimeDir(workspaceId);
     mkdirSync(dir, { recursive: true });
     const file = cursorFile(workspaceId);
     const temporary = path.join(dir, `read-cursor.${randomUUID()}.tmp`);
     writeFileSync(temporary, `${JSON.stringify({
       at,
-      messageId: typeof last?.id === 'string' ? last.id : null,
+      messageId,
     })}\n`, 'utf8');
     renameSync(temporary, file);
-    return { ok: true, at, messageId: typeof last?.id === 'string' ? last.id : null };
+    return { ok: true, at, messageId, changed: true };
   }
 
   function query(value) {
