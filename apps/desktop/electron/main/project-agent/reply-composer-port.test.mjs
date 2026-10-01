@@ -77,3 +77,17 @@ test('记忆 id 来自宿主视图，模型参数里的 id 被忽略', () => {
   assert.deepEqual(reply.meta.memoryUsed, ['mem-used']);
   assert.deepEqual(reply.meta.memoryLearned, ['mem-new']);
 });
+
+test('objective wake cannot borrow a historical user anchor or forge notification urgency', () => {
+  const event = {origin:'objective_signal',kind:'observation',severity:'info',novelty:true};
+  const port=createDesktopReplyComposer({readDelivery:()=>({proactivity:'standard',objectiveEvent:event,objectiveAnchorIds:['u-objective'],objectiveEvidenceRefs:['objective-probe:ws:actual']})});
+  const wake={...view,messages:[...view.messages,{id:'u-objective',kind:'user_input',role:'user'}],currentInputAnchors:[],objectiveWakeIds:['obj']};
+  assert.equal(port.postReply({text:'Observed',replyTo:['u1']},wake).error,'current_user_required');
+  const reply=port.postReply({text:'Observed',proactive:true,surfacing:{event:{severity:'urgent'}}},wake);
+  assert.equal(reply.surfacing,'digest');
+  assert.deepEqual(reply.meta.evidenceRefs,['objective-probe:ws:actual']);
+  assert.equal(port.postReply({text:'Objective reference',replyTo:['u-objective']},wake).surfacing,'digest');
+  event.kind='objective_risk';event.severity='urgent';event.deadlineImminent=true;
+  assert.equal(port.postReply({text:'Risk',proactive:true},wake).surfacing,'interrupt');
+  assert.equal(port.postReply({text:'User reply',replyTo:['u1']},{...wake,currentInputAnchors:['u1']}).error,undefined);
+});

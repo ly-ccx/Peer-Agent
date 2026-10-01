@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ObjectiveAutonomy, ProjectObjectiveView, ProjectObjectiveUpdateRequest } from '@peer-agent/protocol';
+import {objectiveWatchReasonKey} from './objectiveWatchStatus';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { Dropdown } from '../../app/components/Dropdown';
@@ -62,7 +63,8 @@ export function ObjectivesTab({workspaceId,workspacePath,i18n,selectedId,onOpenS
           <div><dt>{i18n.t('projectAgent.drawer.objective.next')}</dt><dd>{next?new Date(next).toLocaleString(i18n.locale):item.watches.some(w=>w.kind==='event')?i18n.t('projectAgent.drawer.objective.event'):i18n.t('projectAgent.drawer.objective.unchecked')}</dd></div>
         </dl>
         {item.lastObservation && <p className="bot-objective-observation">{item.lastObservation.summary}</p>}
-        {item.watches.some(w=>w.unavailableReason) && <p role="status">{item.watches.filter(w=>w.unavailableReason).map(w=>w.unavailableReason).join('; ')}</p>}
+        {item.watches.some(w=>w.unavailableReason) && <p role="status">{[...new Set(item.watches.filter(w=>w.unavailableReason).map(w=>i18n.t(objectiveWatchReasonKey(w.unavailableReason))))].join('; ')}</p>}
+        {item.usage && <p className="bot-objective-observation">{i18n.t('projectAgent.drawer.objective.usage',{used:item.usage.probes,limit:item.budget.maxProbeRunsPerDay})}</p>}
         <div className="bot-objective-controls">
           <label><span>{i18n.t('projectAgent.drawer.objective.autonomy')}</span><Dropdown value={item.autonomy} disabled={locked||closed} ariaLabel={i18n.t('projectAgent.drawer.objective.autonomy')}
             options={(['report_only','propose','act'] as const).map(value=>({value,label:t(value)}))} onChange={value=>{void command(item,'update',{autonomy:value as ObjectiveAutonomy});}}/></label>

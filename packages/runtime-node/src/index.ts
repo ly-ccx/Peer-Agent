@@ -559,3 +559,8 @@ export { createProjectRecovery, RECOVERY_PHASES } from './project-agent/recovery
 export { createObjectiveStore, validateObjectiveDefinition } from './project-agent/objective-store.mjs';
 export { createObjectiveService } from './project-agent/objective-service.mjs';
 export { OBJECTIVE_TOOL_SPECS, validateObjectiveToolInput } from './project-agent/objective-tool-specs.mjs';
+
+export { createWatchState } from './project-agent/watch-state.mjs';
+export { createWatchRunner } from './project-agent/watch-runner.mjs';
+export { createWatchProbeRuntime } from './project-agent/watch-probe-provider.mjs';
+export { mapObjectiveObservationEvent } from './project-agent/event-mapper.mjs';

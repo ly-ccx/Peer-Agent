@@ -92,3 +92,14 @@ test('budget increases require their own explicit current user consent and canno
   assert.equal(w.service.update({objectiveId:made.objectiveId,anchorMessageId:'budget-ok',budget:{maxAutoSessionsPerDay:1,maxProbeRunsPerDay:20}},view).ok,true);
  }finally{w.cleanup();}
 });
+
+test('CI failure-only user intent survives model watch creation and unrelated edits; only affirmative all-changes intent expands notifications',()=>{
+ const w=world();try{
+  w.messages[0].content='CI 挂了才告诉我';const watches=[{watchId:'ci',kind:'schedule',schedule:{kind:'hourly',timezone:'UTC',everyHours:1},probe:{type:'deterministic',check:'command',spec:{command:'gh_run_list'}},notificationPolicy:'changes'}];
+  const made=w.service.create(input({watches}),w.view).item;assert.equal(made.watches[0].notificationPolicy,'failure_only');
+  w.messages.push({id:'no',role:'user',kind:'user_input',content:'Do not notify all changes'});
+  assert.equal(w.service.update({objectiveId:made.objectiveId,anchorMessageId:'no',watches},{...w.view,currentInputAnchors:['no']}).item.watches[0].notificationPolicy,'failure_only');
+  w.messages.push({id:'all',role:'user',kind:'user_input',content:'notify all changes'});
+  assert.equal(w.service.update({objectiveId:made.objectiveId,anchorMessageId:'all',watches},{...w.view,currentInputAnchors:['all']}).item.watches[0].notificationPolicy,'changes');
+ }finally{w.cleanup();}
+});

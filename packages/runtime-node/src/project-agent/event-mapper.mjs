@@ -195,3 +195,11 @@ function iso(now) {
   if (typeof value === 'string' && value.trim()) return value.trim();
   return new Date().toISOString();
 }
+
+/** Objective facts use their own identity; they never pretend to be a task or user message. */
+export function mapObjectiveObservationEvent({workspaceId,objectiveId,watchId,executionKey,observation,deadline}={}){
+ if(!observation?.changed)return null;
+ const deadlineImminent=typeof deadline==='string'&&Date.parse(deadline)-Date.parse(observation.observedAt)<=24*60*60*1000;
+ return {eventId:`objective:${createHash('sha256').update(executionKey).digest('hex')}`,kind:'objective_signal',workspaceId,objectiveId,watchId,executionKey,at:observation.observedAt,
+  payload:{observation,evidenceRefs:observation.evidenceRefs,origin:'objective_signal',severity:observation.severity,deadlineImminent}};
+}

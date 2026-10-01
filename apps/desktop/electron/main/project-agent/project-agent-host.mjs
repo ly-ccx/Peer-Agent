@@ -1,3 +1,4 @@
+import {createDesktopObjectiveWatchHost} from './objective-watch-host.mjs';
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
 import { projectConversationHistory } from '@peer-agent/runtime-core';
@@ -110,6 +111,8 @@ export function createProjectAgentHost({
   reconcileSessions = null,
   restoreQueue = null,
   recoverTasks = null,
+  restoreWatches = null,
+  stopWatches = null,
   activateSessions = null,
   acquireLease = null,
   readMessages = null,
@@ -151,6 +154,7 @@ export function createProjectAgentHost({
 
   function drop(workspaceId) {
     recovery.drop(workspaceId);
+    if(typeof stopWatches==='function')void stopWatches(workspaceId);
     const runner = runners.get(workspaceId);
     if (!runner) return;
     runner.dispose();
@@ -227,7 +231,7 @@ export function createProjectAgentHost({
       inbox: workspaceId => inboxStore.takeBatch(workspaceId),
       queue: workspaceId => typeof restoreQueue === 'function' ? restoreQueue(workspaceId) : undefined,
       tasks: workspaceId => typeof recoverTasks === 'function' ? recoverTasks(workspaceId) : undefined,
-      watch: workspaceId => publishWatch(workspaceId),
+      watch: async workspaceId => {if(typeof restoreWatches==='function')await restoreWatches(workspaceId);return publishWatch(workspaceId);},
       digest: workspaceId => armDigest(runners.get(workspaceId), workspaceId),
     },
   });
@@ -462,6 +466,7 @@ export function registerDesktopProjectAgent({
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   let host = null;
+  let objectiveWatches=null;
   const runtimeEnabled = () => enabled() && getSettings()?.projectAgent?.shell !== 'classic';
   const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
@@ -469,7 +474,7 @@ export function registerDesktopProjectAgent({
   function readEvidenceBody(evidenceRef) {
     try {
       const record = goalPlanStore.findEvidenceIndexRecords?.([evidenceRef])?.[0];
-      if (!record) return null;
+      if (!record) return objectiveWatches?.readEvidenceBody(evidenceRef) || null;
       const body = evidenceBodyFromRecord(record, ref => readRegisteredArtifact(dataHome, ref, record));
       return body?.text ? body : null;
     } catch { return null; }
@@ -523,10 +528,14 @@ export function registerDesktopProjectAgent({
     resolveEvidence: ref => {
       const record=goalPlanStore.findEvidenceIndexRecords?.([ref])?.[0];
       const plan=record?.planId ? goalPlanStore.getPlan?.(record.planId) : null;
-      return plan?.delegationOrigin ? {...record,workspaceId:plan.delegationOrigin.workspaceId,sessionId:plan.delegationOrigin.sessionId} : null;
+      return plan?.delegationOrigin ? {...record,workspaceId:plan.delegationOrigin.workspaceId,sessionId:plan.delegationOrigin.sessionId} : objectiveWatches?.resolveEvidence(ref) || null;
     },
-    onChanged: workspaceId => { if(typeof broadcast==='function')broadcast('project-agent:changed',{workspaceIds:[workspaceId]}); },
+    decorateView:(...args)=>objectiveWatches?.decorateView(...args) || args[1],
+    onChanged: workspaceId => { if(typeof broadcast==='function')broadcast('project-agent:changed',{workspaceIds:[workspaceId]});objectiveWatches?.changed(workspaceId); },
   });
+  objectiveWatches=createDesktopObjectiveWatchHost({rootDir:runtimeRoot,store:objectiveStore,ownsProject,isReady:workspaceId=>host?.isReady(workspaceId)===true,
+    resolveWorkspacePath:workspaceId=>registry.get(workspaceId)?.path,readSessions:workspaceId=>supervisor.list({workspaceId}),agentTurnExecutor,projectPolicy:workspaceId=>profileStore.read(workspaceId)?.modelPolicy,inbox,
+    wake:workspaceId=>{void host?.sync([workspaceId]).catch(()=>{});},onChanged:workspaceId=>broadcast?.('project-agent:changed',{workspaceIds:[workspaceId]})});
   const objectives = createProjectObjectivesService({service:objectiveService,store:objectiveStore,profileStore,conversationStore,
     enabled:runtimeEnabled,holdsLease,onAppendedMessage,
   });
@@ -539,6 +548,7 @@ export function registerDesktopProjectAgent({
       const level = profileStore.read(view?.workspaceId)?.proactivity;
       return {
         ...projectFacts.delivery(view?.workspaceId),
+        ...objectiveWatches?.deliveryFacts(view),
         proactivity: settings.proactivity,
         ...(typeof level === 'string' && level !== 'inherit' ? { botLevel: level } : {}),
         quietHours: inQuietHours(new Date(), settings.quietHours),
@@ -642,6 +652,7 @@ export function registerDesktopProjectAgent({
     stopWorkspace: async workspaceId => {
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
       host.stop(workspaceId);
+      await objectiveWatches.stopWorkspace(workspaceId);
       const result = await supervisor.cancelWorkspace(workspaceId);
       if (!result.ok) return { ok: false, code: result.error || 'STOP_FAILED' };
       releaseLease?.(workspaceId);
@@ -700,6 +711,7 @@ export function registerDesktopProjectAgent({
     readMessages: conversationId => conversationStore.getPersistedConversationHistory(conversationId)?.messages || [],
     restoreQueue: workspaceId => supervisor.recoverQueue(workspaceId),
     recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
+    restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
     activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
     listWorkspaceIds: () => directory.workspaceIds(),
     resolveConversationId,
@@ -744,6 +756,7 @@ export function registerDesktopProjectAgent({
         : () => {}
     ),
   });
+  objectiveWatches.start(()=>directory.workspaceIds());
   const projectAgent = createProjectAgentApplicationService({
     enabled: runtimeEnabled,
     directory,
@@ -892,7 +905,8 @@ export function registerDesktopProjectAgent({
       host,
       supervisor,
       objectives,
-      dispose: () => { host.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
+      objectiveWatches,
+      dispose: () => { host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({

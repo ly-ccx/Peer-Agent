@@ -101,6 +101,7 @@ const TURN_ROLES = new Set([
   'project_agent',
   'work_session',
   'memory_curator',
+  'objective_probe',
 ]);
 
 function normalizeTurnProfile(value) {
@@ -1669,6 +1670,9 @@ export function createLlmChatService({
       // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
       // 仅本回合有效，回合结束后由下一次 sendMessage 覆盖（无 sink 时复位为 null）。
       toolContext.onToolCall = agentProgress?.onToolCall ?? null;
+      toolContext.onToolExecution = agentProgress?.onToolExecution ?? null;
+      toolContext.objectiveWakeIds = projectAgentTurn ? [...new Set((profile?.context?.events || []).filter(event=>event.kind==='objective_signal'&&event.workspaceId===profile.workspaceId).map(event=>event.objectiveId).filter(id=>typeof id==='string'))] : [];
+      toolContext.objectiveWakeEvents = projectAgentTurn ? (profile?.context?.events || []).filter(event=>event.kind==='objective_signal'&&event.workspaceId===profile.workspaceId).map(event=>structuredClone(event)) : [];
       // 引用范围只看本回合对话里的 quoteRefs。复用的 toolContext 按回合覆写。
       toolContext.messages = null;
       if (projectAgentTurn) {

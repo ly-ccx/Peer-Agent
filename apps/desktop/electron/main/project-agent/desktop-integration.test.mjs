@@ -470,3 +470,19 @@ test('classic mode and absent project lease refuse objective commands without ad
     }finally{env.dispose();}
   }
 });
+
+test('production objective WatchRunner checks actual files through SDK and exposes device Evidence and usage',async()=>{
+ const env=harness();
+ try{
+  await env.submit('watch-user','持续观察 README.md 的变化，只报告');const anchor=env.history().find(message=>message.kind==='user_input'&&message.content.includes('持续观察')).id;env.currentInputAnchors=[anchor];
+  const created=await tool(env,'create_objective',{title:'Readme',outcome:'Keep watching',autonomy:'report_only',anchorMessageId:anchor,watches:[{watchId:'readme',kind:'event',source:{type:'files',paths:['README.md'],debounceMs:5000}}]});
+  const item=JSON.parse(created.output).item;assert.ok(item);
+  await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);
+  const view=env.api.objectives.list({workspaceId:env.bot.workspaceId}).items.find(objective=>objective.objectiveId===item.objectiveId);
+  assert.equal(view.usage.probes,1);assert.ok(view.lastObservation.evidenceRefs[0].startsWith('objective-probe:'));
+  const evidence=env.api.objectiveWatches.resolveEvidence(view.lastObservation.evidenceRefs[0]);assert.equal(evidence.execution.grant.preset,'observe');assert.equal(evidence.execution.result.status,'success');
+  const events=env.api.host.inbox.takeBatch(env.bot.workspaceId).events;const signal=events.find(event=>event.kind==='objective_signal');assert.ok(signal);assert.equal(signal.objectiveId,item.objectiveId);assert.equal(signal.sessionId,undefined);
+  assert.equal(env.api.objectives.pause({workspaceId:env.bot.workspaceId,objectiveId:item.objectiveId,requestId:'stop-watch'}).ok,true);
+  await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);assert.equal(env.api.objectiveWatches.runner.activeCount(),0);
+ }finally{env.dispose();}
+});

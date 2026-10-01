@@ -255,6 +255,16 @@ export type TranslationKey =
   | 'projectAgent.drawer.objective.autonomy'
   | 'projectAgent.drawer.objective.budget'
   | 'projectAgent.drawer.objective.probes'
+  | 'projectAgent.drawer.objective.usage'
+  | 'projectAgent.drawer.objective.watch.unavailable'
+  | 'projectAgent.drawer.objective.watch.auth'
+  | 'projectAgent.drawer.objective.watch.cli'
+  | 'projectAgent.drawer.objective.watch.daily'
+  | 'projectAgent.drawer.objective.watch.hourly'
+  | 'projectAgent.drawer.objective.watch.scope'
+  | 'projectAgent.drawer.objective.watch.range'
+  | 'projectAgent.drawer.objective.watch.model'
+  | 'projectAgent.drawer.objective.watch.cancelled'
   | 'projectAgent.drawer.objective.last'
   | 'projectAgent.drawer.objective.next'
   | 'projectAgent.drawer.objective.unchecked'
@@ -1423,6 +1433,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.objective.autonomy': '自主档位',
     'projectAgent.drawer.objective.budget': '每日自动任务',
     'projectAgent.drawer.objective.probes': '每日检查预算',
+    'projectAgent.drawer.objective.usage': '今日检查 {used}/{limit}',
+    'projectAgent.drawer.objective.watch.unavailable': '暂时无法检查',
+    'projectAgent.drawer.objective.watch.auth': '登录 GitHub 后可检查 CI',
+    'projectAgent.drawer.objective.watch.cli': '需要 GitHub CLI 才能检查 CI',
+    'projectAgent.drawer.objective.watch.daily': '今日检查次数已达上限',
+    'projectAgent.drawer.objective.watch.hourly': '本小时检查次数已达上限',
+    'projectAgent.drawer.objective.watch.scope': '路径超出项目范围',
+    'projectAgent.drawer.objective.watch.range': '观察范围过大，请缩小路径范围',
+    'projectAgent.drawer.objective.watch.model': '未配置可用的观察模型',
+    'projectAgent.drawer.objective.watch.cancelled': '检查已停止',
     'projectAgent.drawer.objective.last': '最近检查',
     'projectAgent.drawer.objective.next': '下次检查',
     'projectAgent.drawer.objective.unchecked': '尚未检查',
@@ -2389,6 +2409,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.objective.autonomy': 'Autonomy',
     'projectAgent.drawer.objective.budget': 'Automatic tasks per day',
     'projectAgent.drawer.objective.probes': 'Checks per day',
+    'projectAgent.drawer.objective.usage': 'Checks today {used}/{limit}',
+    'projectAgent.drawer.objective.watch.unavailable': 'Check temporarily unavailable',
+    'projectAgent.drawer.objective.watch.auth': 'Sign in to GitHub to check CI',
+    'projectAgent.drawer.objective.watch.cli': 'GitHub CLI is required to check CI',
+    'projectAgent.drawer.objective.watch.daily': 'Daily check limit reached',
+    'projectAgent.drawer.objective.watch.hourly': 'Hourly check limit reached',
+    'projectAgent.drawer.objective.watch.scope': 'Path is outside this project',
+    'projectAgent.drawer.objective.watch.range': 'Watch range is too large; narrow the paths',
+    'projectAgent.drawer.objective.watch.model': 'No observation model is configured',
+    'projectAgent.drawer.objective.watch.cancelled': 'Check stopped',
     'projectAgent.drawer.objective.last': 'Last check',
     'projectAgent.drawer.objective.next': 'Next check',
     'projectAgent.drawer.objective.unchecked': 'Not checked yet',

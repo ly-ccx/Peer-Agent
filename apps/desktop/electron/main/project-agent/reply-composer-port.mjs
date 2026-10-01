@@ -9,11 +9,13 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
     postReply(input, view) {
       const delivery = typeof readDelivery === 'function' ? (readDelivery(view) || {}) : {};
       const replyTo = Array.isArray(input?.replyTo) ? input.replyTo : [];
+      const objectiveWake = view?.objectiveWakeIds?.length > 0 && !view?.currentInputAnchors?.length;
+      if (objectiveWake && replyTo.some(id=>!delivery.objectiveAnchorIds?.includes(id))) return {error:'current_user_required',message:'An objective wake may cite only the actual objective origin.'};
       const proactive = input?.proactive === true;
       const cited = new Set(Array.isArray(input?.sources) ? input.sources : []);
       const composed = composeReply({
         messageId: `reply:${view?.turnId || 'turn'}:${view?.toolCallOrdinal ?? 0}`,
-        kind: replyTo.length > 0 ? 'user' : 'wake',
+        kind: objectiveWake ? 'wake' : replyTo.length > 0 ? 'user' : 'wake',
         text: typeof input?.text === 'string' ? input.text : '',
         replyTo,
         proactive,
@@ -27,8 +29,10 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         projectSessionIds: Array.isArray(delivery.sessionIds) ? delivery.sessionIds.filter(id => cited.has(id)) : [],
         verdicts: Array.isArray(delivery.verdicts) ? delivery.verdicts.filter(verdict => cited.has(verdict.sessionId)) : [],
         memoryUsed: memoryIdsOf(view),
+        ...(objectiveWake ? {evidenceRefs: delivery.objectiveEvidenceRefs || []} : {}),
         toolCalls: Array.isArray(view?.turnToolCalls) ? view.turnToolCalls : [],
         surfacing: {
+          ...(objectiveWake ? {event:delivery.objectiveEvent || {origin:'objective_signal',kind:'observation',severity:'info',novelty:false}} : {}),
           proactivity: typeof delivery.proactivity === 'string' ? delivery.proactivity : 'standard',
           ...(typeof delivery.botLevel === 'string' ? { botLevel: delivery.botLevel } : {}),
           quietHours: delivery.quietHours === true,
