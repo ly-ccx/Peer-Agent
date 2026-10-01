@@ -1663,6 +1663,8 @@ test('high priority requires a current positive user urgency anchor for promotio
       ['urgent', '这个任务紧急，请优先处理', true],
       ['ordinary', '看一下这个任务', false],
       ['negative', '不着急，不用优先处理', false],
+      ['negative-priority', '不需要优先处理，按原顺序做', false],
+      ['negative-en-priority', 'Not high priority, do not prioritize this.', false],
       ['quoted', '文档里写着“紧急”，帮我检查', false],
       ['english', 'Please prioritize this task, it is urgent.', true],
       ['negated-en', 'Not urgent, no rush. Keep high priority out.', false],

@@ -12,7 +12,7 @@ export function hasCurrentUserUrgency({ conversationStore, parentConversationId,
 function directUrgency(content) {
   if (typeof content !== 'string') return false;
   const text = content.replace(/```[\s\S]*?```|`[^`]*`|^[ \t]*>.*$|“[^”]*”|「[^」]*」|"[^"\n]*"/gm, '');
-  if (/(?:不(?:着)?急|不紧急|无需加急|不用.{0,12}(?:加急|优先)|不要.{0,12}(?:加急|优先)|不.{0,4}高优先级|not\s+urgent|no\s+rush|(?:don['’]?t|do\s+not)\s+(?:prioriti[sz]e|expedite))/i.test(text)) return false;
+  if (/(?:不(?:着)?急|不紧急|(?:不(?:用|必|需要)?|无需|不要|别).{0,8}(?:加急|紧急|优先)|不.{0,4}高优先级|(?:not|isn['’]?t)\s+(?:urgent|high\s+priority)|no\s+rush|(?:don['’]?t|do\s+not)\s+(?:prioriti[sz]e|expedite))/i.test(text)) return false;
   return /(?:紧急|加急|优先处理|高优先级|\burgent\b|\bexpedite\b|\bprioriti[sz]e\b|\bhigh\s+priority\b)/i.test(text);
 }
 
