@@ -217,7 +217,8 @@ try {
   await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   await tracePaging('initial older page');
   for (const older of [9850, 9800, 9750, 9700]) {
-    await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; node.scrollTop = 0; });
+    await page.locator('.bot-thread').hover();
+    await page.mouse.wheel(0, -30000);
     await tracePaging(`request ${older + 30}`);
     await page.locator(`#bot-msg-rc-message-${older + 30}`).waitFor();
     await page.locator('.bot-thread[aria-busy="false"]').waitFor();
