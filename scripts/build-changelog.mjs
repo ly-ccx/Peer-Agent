@@ -125,13 +125,15 @@ async function buildEntries() {
   const entries = await Promise.all(files.map(async (filename) => {
     const metadata = parseVersion(filename);
     const markdown = await readFile(path.join(notesDir, filename), "utf8");
+    if (/^<!--\s*release-status:draft\s*-->\s*$/m.test(markdown)) return null;
     const zh = parseLocale(markdown, "zh-CN", "zh");
     const en = parseLocale(markdown, "en-US", "en");
     if (!zh.length || !en.length) throw new Error(`${filename} must contain non-empty zh-CN and en-US sections`);
     return { ...metadata, zh, en };
   }));
-  entries.sort(compareVersions);
-  return entries;
+  const published = entries.filter(Boolean);
+  published.sort(compareVersions);
+  return published;
 }
 
 function json(value) {

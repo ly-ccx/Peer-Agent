@@ -43,18 +43,32 @@ Many coding agents already run tools on your machine. That alone is no longer a 
 
 **Peer Agent is about what happens after local execution:** goals are accepted with boundaries, ambiguity is clarified instead of guessed, work is planned by complexity, and completion is proven with Evidence — under one permissioned capability chain across Desktop, TUI, and CLI.
 
-Three first-class shells share one unified core runtime:
+Desktop, TUI and CLI share the same core runtime:
 
 | Surface | What it is |
 | --- | --- |
-| **Desktop** | Task threads, composer, task information card (outputs, sources, active runs, environment), review cards, Workbench, tray |
+| **Desktop** | Project bots, conversation, scoped tasks, review cards, memory, objectives and a classic interface |
 | **TUI** | Full terminal agent (`peer`) with the same runtime |
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 >
-> beta channel **`0.1.0-beta.5`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under each bot's profile → Tasks → History.
+> beta channel **`0.1.0-rc.1`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under each bot's profile → Tasks → History.
+
+### The 0.1.0 candidate
+
+Bind a folder or create a managed bot, choose its avatar color, then give it a request. The bot handles read-only understanding and delegates writes to tasks with success criteria. Receipt, verification, acceptance and worktree integration remain visible as separate steps.
+
+The profile holds project history, memory, objectives and settings. Keyboard navigation, reduced motion, locale parity and diagnostics are part of the candidate checks. [Candidate release notes](release-notes/v0.1.0-rc.1.md) cover features, upgrade instructions and limits. Upgrade Desktop, CLI/TUI and Gateway together; older TUI versions do not understand the project lease.
+
+Stable publication follows comprehensive owner testing and seven days of daily use. Remote input is text only; approvals stay on the computer. Remote device identity currently requires macOS Keychain. Uploaded avatar images remain static.
+
+![Project bots and conversation](docs/screenshots/project-bots-rc.png)
+
+![Bot profile and avatar colors](docs/screenshots/bot-profile-rc.png)
+
+Source UI screenshots use three synthetic projects and an illustrative conversation. They show the interface; release validation is recorded separately.
 
 ---
 

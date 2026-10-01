@@ -43,12 +43,20 @@ test('changelog data keeps stable releases separate from the beta channel', asyn
   const manifest = await readJson('docs/changelog-data/manifest.json');
   assert.deepEqual(Object.keys(manifest.channels).sort(), ['beta', 'stable']);
   assert.equal(manifest.latest.stable, 'v0.0.18');
-  assert.equal(manifest.latest.beta, 'v0.1.0-beta.5');
+  assert.equal(manifest.latest.beta, 'v0.1.0-rc.1');
   assert.ok(manifest.channels.stable.every((entry) => entry.channel === 'stable'));
   assert.ok(manifest.channels.beta.every((entry) => entry.channel === 'beta'));
-  assert.equal(manifest.channels.beta[0].version, 'v0.1.0-beta.5');
+  assert.equal(manifest.channels.beta[0].version, 'v0.1.0-rc.1');
   assert.ok(manifest.channels.beta.some((entry) => entry.version === 'v0.1.0-beta.1'));
   assert.ok(manifest.channels.beta.some((entry) => entry.version === 'v0.0.5-beta.4'));
+});
+
+test('unpublished GA drafts cannot appear in release summaries or stable channel', async () => {
+  assert.match(await readText('release-notes/v0.1.0.md'), /^<!-- release-status:draft -->/);
+  const manifest = await readJson('docs/changelog-data/manifest.json');
+  assert.equal(manifest.latest.stable, 'v0.0.18');
+  assert.ok(!manifest.channels.stable.some(entry => entry.version === 'v0.1.0'));
+  assert.ok(!(await readdir(new URL('docs/changelog-data', root))).includes('v0.1.0.json'));
 });
 
 test('prerelease notes are published on the beta channel', async () => {
