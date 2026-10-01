@@ -361,6 +361,16 @@ it('其他角色不会把 turnProfile.context 送进系统上下文', () => {
   assert.deepEqual(projectTurnSystemContext(null), {});
 });
 
+it('task admission is read from the current plan and ignores injected snapshot claims', () => {
+  const plan = { goal: 'Write the delegated file', delegationOrigin: { phase: 'running', readOnly: false } };
+  const profile = { role: 'work_session', planId: 'plan', context: { workSessionExecution: { phase: 'approved' } } };
+  const options = { goalPlanStore: { getPlan: () => plan }, memoryEnabled: false };
+  assert.deepEqual(projectTurnSystemContext(profile, options).workSessionExecution, { phase: 'running' });
+  plan.delegationOrigin.phase = 'awaiting_approval';
+  assert.deepEqual(projectTurnSystemContext(profile, options).workSessionExecution, { phase: 'awaiting_approval' });
+  assert.deepEqual(projectTurnSystemContext(profile, { memoryEnabled: false }).workSessionExecution, { phase: undefined });
+});
+
 it('关闭记忆后项目代理和任务回合都不用记忆', () => {
   const item = {
     id: 'mem-1',
