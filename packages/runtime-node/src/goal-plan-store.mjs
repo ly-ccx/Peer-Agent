@@ -1717,7 +1717,7 @@ function normalizeRunnerState(runner, planId) {
 }
 
 const DELEGATION_SURFACES = new Set(['desktop', 'quick_chat', 'tui', 'remote']);
-const DELEGATION_PHASES = new Set(['running', 'queued', 'awaiting_approval']);
+const DELEGATION_PHASES = new Set(['running', 'queued', 'awaiting_approval', 'paused', 'superseded']);
 const MODEL_SELECTION_SOURCES = new Set([
   'this_request', 'task', 'objective', 'project', 'global', 'auto',
 ]);
@@ -1783,7 +1783,7 @@ function normalizeDelegationOrigin(value) {
   };
   for (const key of [
     'workspaceId', 'sessionId', 'parentSessionId', 'objectiveId',
-    'idempotencyKey', 'parentConversationId',
+    'idempotencyKey', 'parentConversationId', 'supersededBy', 'lastResumeAnchorMessageId',
   ]) {
     const text = normalizeOptionalString(value[key]);
     if (text) origin[key] = text;
@@ -1791,12 +1791,14 @@ function normalizeDelegationOrigin(value) {
   if (value.readOnly === true || value.readOnly === false) origin.readOnly = value.readOnly;
   if (value.verifying === true) origin.verifying = true;
   if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;
+  if (['running', 'queued', 'awaiting_approval'].includes(value.pausedFromPhase)) origin.pausedFromPhase = value.pausedFromPhase;
+  if (['execute', 'explore', 'verify', 'synthesize', 'block'].includes(value.pausedRunnerIntent)) origin.pausedRunnerIntent = value.pausedRunnerIntent;
   if (['high', 'normal', 'low'].includes(value.priority)) origin.priority = value.priority;
   if (['auto', 'none', 'worktree'].includes(value.isolation)) origin.isolation = value.isolation;
   if (['disk_space', 'isolation_failed'].includes(value.isolationBlock)) origin.isolationBlock = value.isolationBlock;
   const isolationRetainedAt = toIsoOrNull(value.isolationRetainedAt);
   if (isolationRetainedAt) origin.isolationRetainedAt = isolationRetainedAt;
-  for (const key of ['handoffAuthorizedAt', 'handoffDeferredAt']) {
+  for (const key of ['handoffAuthorizedAt', 'handoffDeferredAt', 'supersededAt']) {
     const at = toIsoOrNull(value[key]);
     if (at) origin[key] = at;
   }

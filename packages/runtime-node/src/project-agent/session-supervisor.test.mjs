@@ -57,6 +57,7 @@ async function harness({
   readPlanApproval = null,
   isolationPlanner = undefined,
   canManageWorkspace = undefined,
+  now = () => '2026-09-27T00:00:00.000Z',
 } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-'));
   const previous = process.env.PEER_AGENT_HOME;
@@ -112,7 +113,7 @@ async function harness({
     readPlanApproval,
     ...(isolationPlanner ? { isolationPlanner } : {}),
     ...(canManageWorkspace ? { canManageWorkspace } : {}),
-    now: () => '2026-09-27T00:00:00.000Z',
+    now,
   });
   return {
     root,
@@ -1316,7 +1317,7 @@ test('supersedes 停掉旧会话并开新会话，缺失的旧会话不会开新
     }), contextOf(env, { inputId: 'input-replace' }));
     assert.equal(replaced.error, undefined);
     assert.notEqual(replaced.sessionId, opened.sessionId);
-    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).status, 'cancelled');
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).status, 'superseded');
     const again = await env.supervisor.spawn(spawnInput({
       title: '换成短标题',
       brief: '用短标题重做登录',
@@ -1353,7 +1354,7 @@ test('supersedes 建成后才停旧会话，排队中的其他任务不会抢走
       supersedes: running.sessionId,
     }), contextOf(env, { inputId: 'input-fail' }));
     assert.equal(failed.error, 'spawn_failed');
-    assert.notEqual(env.supervisor.get({ sessionId: running.sessionId }).status, 'cancelled');
+    assert.notEqual(env.supervisor.get({ sessionId: running.sessionId }).status, 'superseded');
     assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: queued.sessionId }).planId).delegationOrigin.phase, 'queued');
 
     env.goalPlanStore.createGoalContract = original;
@@ -1364,7 +1365,7 @@ test('supersedes 建成后才停旧会话，排队中的其他任务不会抢走
     }), contextOf(env, { inputId: 'input-take' }));
     assert.equal(replaced.error, undefined);
     assert.equal(replaced.status, 'running');
-    assert.equal(env.supervisor.get({ sessionId: running.sessionId }).status, 'cancelled');
+    assert.equal(env.supervisor.get({ sessionId: running.sessionId }).status, 'superseded');
     assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: queued.sessionId }).planId).delegationOrigin.phase, 'queued');
     assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: replaced.sessionId }).planId).delegationOrigin.phase, 'running');
   } finally {
@@ -1507,4 +1508,145 @@ test('runner startup failure releases its reservation and does not strand the ot
     assert.equal(env.goalPlanStore.getPlan(starts[0]).status,'failed');
     for(const id of starts.slice(1)) assert.equal(env.goalPlanStore.getPlan(id).delegationOrigin.phase,'running');
   } finally {await env.cleanup();}
+});
+
+test('supersession is reversible, preserves task facts and never replays an old restore anchor', async () => {
+  const env = await harness();
+  try {
+    const a = await env.supervisor.spawn(spawnInput({ title: 'A' }), contextOf(env));
+    const aPlan = env.supervisor.get({ sessionId: a.sessionId }).planId;
+    const originalIntent = env.goalPlanStore.getPlan(aPlan).runner.intent;
+    env.goalPlanStore.revisePlan(aPlan, { evidenceRefs: ['artifact:a'], involvedFiles: ['keep.txt'] });
+    const b = await env.supervisor.spawn(spawnInput({ title: 'B', brief: 'replace A', supersedes: a.sessionId }), contextOf(env));
+    assert.equal(env.supervisor.get({ sessionId: a.sessionId }).supersededBy, b.sessionId);
+    assert.equal(env.goalPlanStore.getPlan(aPlan).status, 'paused');
+    const restored = await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+    assert.equal(restored.error, undefined);
+    assert.equal(env.supervisor.get({ sessionId: b.sessionId }).supersededBy, a.sessionId);
+    assert.equal(env.supervisor.get({ sessionId: a.sessionId }).supersededBy, undefined);
+    assert.deepEqual(env.goalPlanStore.getPlan(aPlan).evidenceRefs, ['artifact:a']);
+    assert.deepEqual(env.goalPlanStore.getPlan(aPlan).involvedFiles, ['keep.txt']);
+    assert.equal(env.goalPlanStore.getPlan(aPlan).runner.intent, originalIntent);
+    const c = await env.supervisor.spawn(spawnInput({ title: 'C', brief: 'replace A again', supersedes: a.sessionId }), contextOf(env));
+    assert.equal(c.error, undefined);
+    const replay = await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+    assert.equal(replay.replayed, true);
+    assert.equal(env.supervisor.get({ sessionId: a.sessionId }).supersededBy, c.sessionId);
+    assert.equal(env.supervisor.get({ sessionId: c.sessionId }).status === 'superseded', false);
+  } finally { await env.cleanup(); }
+});
+
+test('restore and replace enforce workspace, parent, user anchor and result-ready boundaries', async () => {
+  const env = await harness();
+  try {
+    const a = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    assert.equal((await env.supervisor.spawn(spawnInput({ supersedes: a.sessionId, title: 'other' }), contextOf(env, { workspaceId: 'other' }))).error, 'out_of_scope');
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 1);
+    await env.supervisor.spawn(spawnInput({ supersedes: a.sessionId, title: 'B', brief: 'replace' }), contextOf(env));
+    assert.equal((await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'missing' }, contextOf(env))).error, 'invalid_anchor');
+    assert.equal((await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env, { parentConversationId: 'other' }))).error, 'out_of_scope');
+    const planId = env.supervisor.get({ sessionId: a.sessionId }).planId;
+    env.goalPlanStore.setPlanStatus(planId, 'completed');
+    assert.equal((await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env))).error, 'session_not_running');
+    assert.equal((await env.supervisor.spawn(spawnInput({ supersedes: a.sessionId, title: 'C', brief: 'replace finished' }), contextOf(env))).error, 'session_not_running');
+    assert.equal(env.supervisor.get({ sessionId: a.sessionId }).status, 'result_ready');
+  } finally { await env.cleanup(); }
+});
+
+test('superseded tasks retain isolation for seven days then cancel silently and clean through existing ports', async () => {
+  let time = '2026-09-27T00:00:00.000Z';
+  const cleaned = [];
+  const env = await harness({ now: () => time,
+    isolationPlanner: { prepare: async plan => ({ ok: true, plan }), cleanup: async plan => { cleaned.push(plan.planId); return plan; } } });
+  try {
+    const a = await env.supervisor.spawn(spawnInput({ title: 'A' }), contextOf(env));
+    const planId = env.supervisor.get({ sessionId: a.sessionId }).planId;
+    env.goalPlanStore.revisePlan(planId, { deliveryBinding: { ...env.goalPlanStore.getPlan(planId).deliveryBinding,
+      executionIsolation: 'worktree', worktreePath: '/fixture/isolated-A' } });
+    await env.supervisor.spawn(spawnInput({ title: 'B', brief: 'replace', supersedes: a.sessionId }), contextOf(env));
+    assert.equal(cleaned.includes(planId), false);
+    assert.equal(env.goalPlanStore.getPlan(planId).deliveryBinding.worktreePath, '/fixture/isolated-A');
+    time = '2026-10-03T23:59:59.000Z'; await env.supervisor.reconcile();
+    assert.equal(cleaned.includes(planId), false);
+    time = '2026-10-04T00:00:00.000Z'; await env.supervisor.reconcile();
+    assert.equal(env.goalPlanStore.getPlan(planId).status, 'cancelled');
+    assert.equal(cleaned.includes(planId), true);
+    await env.supervisor.reconcile();
+    assert.equal(cleaned.filter(id => id === planId).length, 2);
+    assert.equal(env.events.find(event => event.sessionId === a.sessionId && event.reason === 'supersession_expired').surfacing, 'silent');
+  } finally { await env.cleanup(); }
+});
+
+test('restoring a superseded approval candidate keeps its approval gate closed', async () => {
+  const env = await harness({ readPlanApproval: () => 'always' });
+  try {
+    const a = await env.supervisor.spawn(spawnInput({ title: 'A' }), contextOf(env));
+    await env.supervisor.spawn(spawnInput({ title: 'B', brief: 'replace', supersedes: a.sessionId }), contextOf(env));
+    const approval = await env.supervisor.resumeFromApproval({ sessionId: a.sessionId });
+    assert.equal(approval.ok, false);
+    await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+    assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: a.sessionId }).planId).delegationOrigin.phase, 'awaiting_approval');
+    assert.equal(env.turns.length, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('reprioritizing queued work is durable and does not bypass the write slot', async () => {
+  const env = await harness();
+  try {
+    await env.supervisor.spawn(spawnInput({ title: 'holder' }), contextOf(env));
+    const low = await env.supervisor.spawn(spawnInput({ title: 'low', brief: 'queued', priority: 'low' }), contextOf(env));
+    const changed = await env.supervisor.reprioritize({ sessionId: low.sessionId, priority: 'high' }, contextOf(env));
+    assert.equal(changed.status, 'queued');
+    assert.equal(env.goalPlanStore.getPlan(changed.planId).delegationOrigin.priority, 'high');
+    const restarted = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() });
+    assert.equal(restarted.getPlan(changed.planId).delegationOrigin.priority, 'high');
+    assert.equal((await env.supervisor.reprioritize({ sessionId: low.sessionId, priority: 'top' }, contextOf(env))).error, 'invalid_priority');
+  } finally { await env.cleanup(); }
+});
+
+test('failed replacement releases its slot while the old task remains recoverable', async () => {
+  let starts = 0;
+  const env = await harness({ goalRunner: { start: async () => { starts++; if (starts === 2) throw new Error('replacement crashed'); }, pause() {}, waitForIdle: async () => {} } });
+  try {
+    const a = await env.supervisor.spawn(spawnInput({ title: 'A' }), contextOf(env));
+    const b = await env.supervisor.spawn(spawnInput({ title: 'B', brief: 'replace A', supersedes: a.sessionId }), contextOf(env));
+    assert.equal(b.status, 'failed');
+    assert.equal(env.supervisor.get({ sessionId: b.sessionId }).status, 'failed');
+    assert.equal(env.supervisor.get({ sessionId: a.sessionId }).status, 'superseded');
+    const restored = await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+    assert.equal(restored.error, undefined);
+    assert.equal(env.goalPlanStore.getPlan(restored.planId).delegationOrigin.phase, 'running');
+    assert.equal(starts, 3);
+  } finally { await env.cleanup(); }
+});
+
+test('manual delegated pause closes admission until an anchored restore', async () => {
+  const env = await harness();
+  try {
+    const a = await env.supervisor.spawn(spawnInput({ title: 'A' }), contextOf(env));
+    const planId = env.supervisor.get({ sessionId: a.sessionId }).planId;
+    env.goalRunner.pause(planId, 'user_pause'); await env.goalRunner.waitForIdle(planId);
+    assert.equal(env.supervisor.get({ sessionId: a.sessionId }).status, 'paused');
+    await env.supervisor.reconcile();
+    assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.phase, 'paused');
+    const resumed = await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+    assert.equal(resumed.error, undefined); assert.notEqual(resumed.status, 'paused');
+  } finally { await env.cleanup(); }
+});
+
+test('supersession closes the persisted admission gate before waiting for an in-flight tool', async () => {
+  let release; let began;
+  const settling = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { began = resolve; });
+  let starts = 0; let cleanups = 0;
+  const env = await harness({ goalRunner: { start: async () => { starts++; }, pause() {}, waitForIdle: () => { began(); return settling; } },
+    isolationPlanner: { prepare: async plan => ({ ok: true, plan }), cleanup: async plan => { cleanups++; return plan; } } });
+  try {
+    const a = await env.supervisor.spawn(spawnInput({ title: 'A' }), contextOf(env));
+    const replacing = env.supervisor.spawn(spawnInput({ title: 'B', brief: 'replace', supersedes: a.sessionId }), contextOf(env));
+    await started;
+    assert.equal(env.supervisor.get({ sessionId: a.sessionId }).status, 'superseded');
+    assert.equal(starts, 1); assert.equal(cleanups, 0);
+    release(); assert.equal((await replacing).error, undefined); assert.equal(starts, 2);
+  } finally { release(); await env.cleanup(); }
 });

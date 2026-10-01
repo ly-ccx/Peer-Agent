@@ -145,6 +145,7 @@ export type TranslationKey =
   | 'projectAgent.chat.today'
   | 'projectAgent.chat.earlierDay'
   | 'projectAgent.chat.replyTo'
+  | 'projectAgent.chat.sessionState.paused'
   | 'projectAgent.chat.sessionState.queued'
   | 'projectAgent.chat.sessionState.starting'
   | 'projectAgent.chat.sessionState.running'
@@ -217,6 +218,11 @@ export type TranslationKey =
   | 'projectAgent.drawer.group.running'
   | 'projectAgent.drawer.group.queued'
   | 'projectAgent.drawer.group.done'
+  | 'projectAgent.drawer.group.paused'
+  | 'projectAgent.drawer.supersededBy'
+  | 'projectAgent.drawer.resume'
+  | 'projectAgent.drawer.resumeFailed'
+  | 'projectAgent.drawer.replacement'
   | 'projectAgent.drawer.group.history'
   | 'projectAgent.drawer.group.classic'
   | 'projectAgent.drawer.historyEmpty'
@@ -1271,6 +1277,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.today': '今天 {time}',
     'projectAgent.chat.earlierDay': '{date} {time}',
     'projectAgent.chat.replyTo': '回复',
+    'projectAgent.chat.sessionState.paused': '已暂停',
     'projectAgent.chat.sessionState.queued': '排队中',
     'projectAgent.chat.sessionState.starting': '正在启动',
     'projectAgent.chat.sessionState.running': '进行中',
@@ -1343,6 +1350,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.running': '进行中',
     'projectAgent.drawer.group.queued': '排队',
     'projectAgent.drawer.group.done': '已完成',
+    'projectAgent.drawer.group.paused': '已暂停',
+    'projectAgent.drawer.supersededBy': '被「{task}」取代',
+    'projectAgent.drawer.resume': '恢复',
+    'projectAgent.drawer.resumeFailed': '恢复失败，请稍后重试。',
+    'projectAgent.drawer.replacement': '后续任务',
     'projectAgent.drawer.group.history': '历史对话',
     'projectAgent.drawer.group.classic': '经典任务',
     'projectAgent.drawer.historyEmpty': '没有可继续的历史对话',
@@ -2195,6 +2207,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.today': 'Today {time}',
     'projectAgent.chat.earlierDay': '{date} {time}',
     'projectAgent.chat.replyTo': 'Reply',
+    'projectAgent.chat.sessionState.paused': 'Paused',
     'projectAgent.chat.sessionState.queued': 'Queued',
     'projectAgent.chat.sessionState.starting': 'Starting',
     'projectAgent.chat.sessionState.running': 'Running',
@@ -2267,6 +2280,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.running': 'In progress',
     'projectAgent.drawer.group.queued': 'Queued',
     'projectAgent.drawer.group.done': 'Done',
+    'projectAgent.drawer.group.paused': 'Paused',
+    'projectAgent.drawer.supersededBy': 'Replaced by “{task}”',
+    'projectAgent.drawer.resume': 'Resume',
+    'projectAgent.drawer.resumeFailed': 'Could not resume. Please retry.',
+    'projectAgent.drawer.replacement': 'a later task',
     'projectAgent.drawer.group.history': 'History',
     'projectAgent.drawer.group.classic': 'Classic tasks',
     'projectAgent.drawer.historyEmpty': 'No history to continue',

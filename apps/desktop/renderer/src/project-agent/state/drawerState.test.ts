@@ -176,3 +176,10 @@ test('isolation failures and disk waits have readable labels even without a bloc
     assert.doesNotMatch(label, /disk_space|isolation_failed/);
   }
 });
+
+test('paused and superseded tasks stay separate from done and carry a replacement relation', () => {
+  const item = readDrawerSession({ sessionId: 'a', title: 'A', status: 'superseded', supersededBy: 'b' });
+  assert.equal(item?.supersededBy, 'b');
+  const groups = groupDrawerSessions([item!, session({ sessionId: 'p', status: 'paused' })]);
+  assert.equal(groups.paused.length, 2); assert.equal(groups.done.length, 0); assert.equal(groups.queued.length, 0);
+});

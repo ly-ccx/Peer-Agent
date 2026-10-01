@@ -887,3 +887,9 @@
   border-color: var(--za-accent);
   background: color-mix(in srgb, var(--za-accent) 12%, transparent);
 }
+
+.bot-task-with-action { display: flex; align-items: center; gap: 8px; }
+.bot-task-with-action > .bot-task-row { flex: 1; min-width: 0; }
+.bot-task-resume { display: inline-flex; align-items: center; gap: 4px; padding: 6px 9px; margin-right: 10px; border: 1px solid var(--chrome-hairline); border-radius: 8px; color: var(--ink-muted); font-size: 12px; background: transparent; }
+.bot-task-resume:hover { color: var(--ink-primary); background: var(--za-surface-2); }
+.bot-task-resume:disabled { opacity: .5; cursor: wait; }

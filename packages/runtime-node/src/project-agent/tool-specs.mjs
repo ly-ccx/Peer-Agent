@@ -51,6 +51,14 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     required: ['anchorMessageIds', 'title', 'brief', 'successCriteria', 'kind', 'readOnly'],
     additionalProperties: false,
   }),
+  spec('resume_session', 'local.delegation.resume_session', {
+    type: 'object', properties: { sessionId: { type: 'string' }, anchorMessageId: { type: 'string' } },
+    required: ['sessionId', 'anchorMessageId'], additionalProperties: false,
+  }),
+  spec('reprioritize_session', 'local.delegation.reprioritize_session', {
+    type: 'object', properties: { sessionId: { type: 'string' }, priority: { type: 'string', enum: ['high', 'normal', 'low'] } },
+    required: ['sessionId', 'priority'], additionalProperties: false,
+  }),
   spec('list_sessions', 'local.delegation.list_sessions', {
     type: 'object',
     properties: {
@@ -156,6 +164,15 @@ export function validateDelegationInput(name, raw) {
   if (!item) return invalid(`Unknown delegation tool: ${name}`);
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (name === 'spawn_session') return validateSpawn(input);
+  if (name === 'resume_session') {
+    const sessionId = text(input.sessionId, 200), anchorMessageId = text(input.anchorMessageId, 200);
+    return sessionId && anchorMessageId ? { ok: true, value: { sessionId, anchorMessageId } } : invalid('sessionId and anchorMessageId are required.');
+  }
+  if (name === 'reprioritize_session') {
+    const sessionId = text(input.sessionId, 200);
+    return sessionId && ['high', 'normal', 'low'].includes(input.priority)
+      ? { ok: true, value: { sessionId, priority: input.priority } } : invalid('sessionId and valid priority are required.');
+  }
   if (name === 'list_sessions') return validateList(input);
   if (name === 'get_session') return validateGet(input);
   if (name === 'cancel_session') return validateCancel(input);

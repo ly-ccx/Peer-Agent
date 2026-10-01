@@ -8,6 +8,7 @@ const GROUP_KEY = {
   needsYou: 'projectAgent.drawer.group.needsYou',
   running: 'projectAgent.drawer.group.running',
   queued: 'projectAgent.drawer.group.queued',
+  paused: 'projectAgent.drawer.group.paused',
   done: 'projectAgent.drawer.group.done',
 } as const;
 const PREVIEW_COUNT = 5;
@@ -29,6 +30,7 @@ export function TasksTab({
   onSelect,
   onOpenHistory,
   onOpenClassic,
+  onResume,
 }: {
   readonly sessions: readonly DrawerSession[];
   readonly history?: readonly HistoryConversation[];
@@ -37,11 +39,19 @@ export function TasksTab({
   readonly i18n: I18nRuntime;
   readonly onSelect: (sessionId: string) => void;
   readonly onOpenHistory?: (conversationId: string) => void;
+  readonly onResume?: (sessionId: string) => Promise<void>;
   readonly onOpenClassic?: (goal: ClassicGoalRow) => void;
 }) {
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [showAllClassic, setShowAllClassic] = useState(false);
   const groups = groupDrawerSessions(sessions);
+  const [resuming, setResuming] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState(false);
+  async function restore(sessionId: string) {
+    setResuming(sessionId); setResumeError(false);
+    try { await onResume?.(sessionId); } catch { setResumeError(true); }
+    finally { setResuming(null); }
+  }
   if (sessions.length === 0 && history.length === 0 && goals.length === 0) {
     return (
       <div className="bot-drawer-tab bot-tasks-tab">
@@ -57,6 +67,7 @@ export function TasksTab({
   }
   return (
     <div className="bot-drawer-tab bot-tasks-tab">
+      {resumeError && <p role="alert">{i18n.t('projectAgent.drawer.resumeFailed')}</p>}
       {(Object.keys(GROUP_KEY) as TaskGroup[]).map((group) => (
         groups[group].length === 0 ? null : (
           <section className="bot-tasks-section" key={group}>
@@ -66,7 +77,7 @@ export function TasksTab({
             </div>
             <ul className="bot-tasks-list">
               {groups[group].map((session) => (
-                <li key={session.sessionId}>
+                <li key={session.sessionId} className="bot-task-with-action">
                   <button
                     type="button"
                     className={session.sessionId === selectedId ? 'bot-task-row is-selected' : 'bot-task-row'}
@@ -74,10 +85,19 @@ export function TasksTab({
                   >
                     <span className="bot-task-row-copy">
                       <span className="bot-task-row-title" title={session.title}>{session.title}</span>
-                      <span className="bot-task-row-meta">{formatDrawerSessionStatus(session, i18n)}</span>
+                      <span className="bot-task-row-meta">{session.status === 'superseded' && session.supersededBy
+                        ? i18n.t('projectAgent.drawer.supersededBy', { task: sessions.find(item => item.sessionId === session.supersededBy)?.title || i18n.t('projectAgent.drawer.replacement') })
+                        : formatDrawerSessionStatus(session, i18n)}</span>
                     </span>
                     <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                   </button>
+                  {group === 'paused' && onResume && (
+                    <button type="button" className="bot-task-resume" disabled={resuming !== null}
+                      aria-label={`${i18n.t('projectAgent.drawer.resume')} ${session.title}`}
+                      onClick={() => { void restore(session.sessionId); }}>
+                      <PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.resume')}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

@@ -452,3 +452,9 @@ test('queue projection copies only host supplied blockers and leaves admission t
   blockers[0]!.title='mutated';assert.equal(session.queuedBehind?.[0]?.title,'Dependency');
   assert.equal(projectWorkSession(plan(),meta()).queuedBehind,undefined);
 });
+
+test('explicit pause is distinct from queued and terminal truth wins over supersession history', () => {
+  assert.equal(projectWorkSession(plan({ status: 'paused', runnerStatus: 'paused' }), meta({ phase: 'paused' })).status, 'paused');
+  assert.equal(projectWorkSession(plan({ status: 'cancelled' }), meta({ supersededBy: 'replacement' })).status, 'cancelled');
+  assert.equal(projectWorkSession(plan({ status: 'completed' }), meta({ supersededBy: 'replacement', acceptance: 'confirm' })).status, 'result_ready');
+});

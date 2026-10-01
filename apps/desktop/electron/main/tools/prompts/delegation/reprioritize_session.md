@@ -1,0 +1,1 @@
+Change an unfinished task priority to high, normal, or low. Use high only when the user explicitly says it is urgent. Respect quoted task scope. This does not bypass dependencies, approval, isolation, or slot limits.

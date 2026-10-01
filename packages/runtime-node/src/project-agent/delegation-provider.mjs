@@ -100,13 +100,13 @@ export function createDelegationProvider({
     }
 
     const input = validated.value;
-    if (item.name === 'message_session' || item.name === 'cancel_session' || item.name === 'verify_session') {
+    if (['message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
       const scope = resolveAnchorScope({
         messages: view.messages,
         quoteRefs: view.quoteRefs,
         replyTo: view.replyTo,
       });
-      if (scope.scoped && !scope.sessionIds.includes(input.sessionId)) {
+      if (scope.scoped && !scope.sessionIds.includes(input.sessionId || input.supersedes)) {
         return finish({
           call,
           capabilityId,
@@ -125,7 +125,7 @@ export function createDelegationProvider({
         });
       }
     }
-    if (item.name === 'set_proactivity') {
+    if (item.name === 'set_proactivity' || item.name === 'resume_session') {
       const anchorError = validateAnchors([input.anchorMessageId], view.messages);
       if (anchorError) {
         return finish({
@@ -236,6 +236,8 @@ export function createDelegationProvider({
       if (!rows.ok) return rows;
       return { ok: true, output: { ok: true, sessions: Array.isArray(rows.output) ? rows.output : [] } };
     }
+    if (name === 'resume_session') return sessionOrMissing(await callPort(supervisor?.resume, input, 'supervisor_unavailable', spawnContext(view)));
+    if (name === 'reprioritize_session') return sessionOrMissing(await callPort(supervisor?.reprioritize, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
     if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable'));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable'));

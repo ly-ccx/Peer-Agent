@@ -10,7 +10,9 @@ const INTERRUPT_RULES = `Interrupt handling.
   - answer: only post_reply
   - merge: message_session with intent amend
   - stop: cancel_session
-  - replace: spawn_session with supersedes, which stops the old session and starts a new one
+  - restore an old paused or superseded task: resume_session with the actual user input anchor; do not create a duplicate task
+  - change queued urgency: reprioritize_session; high requires explicit user urgency
+  - replace: spawn_session with supersedes, which pauses the old task and retains its work while starting a new one
   - parallel: spawn_session that starts now
   - queue: spawn_session that is queued`;
 
