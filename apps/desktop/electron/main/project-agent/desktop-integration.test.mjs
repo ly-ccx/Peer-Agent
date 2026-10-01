@@ -123,6 +123,24 @@ test('desktop registration routes real inputs and includes history, roster and w
   } finally { env.dispose(); }
 });
 
+test('remote assembly ports use the same durable input queue, directory and local session ownership', async () => {
+  const env=harness();
+  try {
+    const ports=env.api.projectAccess;
+    assert.equal(ports.inputQueue,env.api.host.inputQueue);
+    assert.equal(ports.directory.get(env.bot.workspaceId).profile.workspaceId,env.bot.workspaceId);
+    const input={workspaceId:env.bot.workspaceId,inputId:'remote-assembly',surface:'remote',text:'remote message'};
+    const first=ports.inputQueue.submitInput(input);
+    assert.deepEqual(ports.inputQueue.submitInput(input),first);
+    ports.wake(env.bot.workspaceId);await env.api.host.sync([env.bot.workspaceId]);
+    assert.equal(env.history().filter(row=>row.content==='remote message').length,1);
+    const opened=await env.invoke('start-familiarize');
+    assert.equal(ports.getSession(opened.profile.familiarize.sessionId).workspaceId,env.bot.workspaceId);
+    assert.equal(ports.getSession('foreign-missing'),null);
+    assert.equal(Object.hasOwn(ports,'execute'),false);
+  } finally {env.dispose();}
+});
+
 test('the default LocalToolHost dispatches through supervisor, Grant and Evidence; sources are project scoped', async () => {
   const env = harness();
   try {

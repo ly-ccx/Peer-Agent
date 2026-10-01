@@ -1,8 +1,8 @@
 import { createRemoteDeviceHandshake } from './remote-device-handshake.mjs';
 import { WebSocket } from 'ws';
+import { REMOTE_PROJECT_LIMITS } from '@peer-agent/protocol';
 
-/** Answers stay under the 4KiB frame limit both ends enforce. Anything larger is
- * refused rather than truncated: a truncated read result would be a lie. */
+/** Legacy task answers retain their frame budget; project pages have explicit bounds. */
 const RESULT_MAX_BYTES = 3072;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const exactKeys = (value, fields) => value && typeof value === 'object' && !Array.isArray(value)
@@ -15,7 +15,7 @@ const exactKeys = (value, fields) => value && typeof value === 'object' && !Arra
  * with; it is never authority, and every incoming request is re-checked locally.
  */
 export function connectRemoteDevice({ origin, store, sign, publicKey, name, deviceId,
-  delegation = null, onTaskRead = null,
+  delegation = null, onTaskRead = null, onProjectAccess = null,
   onState = () => {}, socketFactory = url => new WebSocket(url), now = Date.now }) {
   const url = new URL(origin);
   if (url.protocol !== 'https:' || url.origin !== origin) throw new Error('INVALID_ORIGIN');
@@ -23,7 +23,8 @@ export function connectRemoteDevice({ origin, store, sign, publicKey, name, devi
   if (binding?.disabled) throw new Error('REMOTE_DISABLED');
   if (binding && binding.origin !== origin) throw new Error('BINDING_CONFLICT');
   // Local configuration errors must surface before a socket exists.
-  if (delegation !== null && !delegationShape(delegation)) throw new Error('INVALID_DELEGATION');
+  if (delegation !== null && (!delegationShape(delegation)
+      || Buffer.byteLength(JSON.stringify(delegation)) > REMOTE_PROJECT_LIMITS.delegationBytes)) throw new Error('INVALID_DELEGATION');
   url.protocol = 'wss:'; url.pathname = '/api/device/ws';
   const socket = socketFactory(url.href);
   let stopped = false; let state = 'connecting'; let queued = 0;
@@ -43,35 +44,50 @@ export function connectRemoteDevice({ origin, store, sign, publicKey, name, devi
   const handshake = createRemoteDeviceHandshake({ origin, store, sign, publicKey, name, deviceId, now, send });
   /** Shape of the projection published for this connection; checked before send. */
   function delegationShape(value) {
-    return exactKeys(value, ['version', 'workspaceIds', 'allowTaskRead', 'allowResultExport', 'expiresAt'])
+    const legacyFields=['version', 'workspaceIds', 'allowTaskRead', 'allowResultExport', 'expiresAt'];
+    const projectFields=[...legacyFields,'allowProjectRead','allowProjectMessage','projectGrants'];
+    const extended=exactKeys(value,projectFields);
+    const projectValid=extended && typeof value.allowProjectRead==='boolean' && typeof value.allowProjectMessage==='boolean'
+      && Array.isArray(value.projectGrants) && value.projectGrants.length<=REMOTE_PROJECT_LIMITS.projects
+      && new Set(value.projectGrants.map(row=>row?.workspaceId)).size===value.projectGrants.length
+      && value.projectGrants.every(row=>exactKeys(row,['workspaceId','allowProjectRead','allowProjectMessage'])
+        && typeof row.workspaceId==='string' && IDENTIFIER.test(row.workspaceId)
+        && typeof row.allowProjectRead==='boolean' && typeof row.allowProjectMessage==='boolean'
+        && (!row.allowProjectMessage||row.allowProjectRead) && (!row.allowProjectRead||value.workspaceIds?.includes(row.workspaceId)))
+      && value.allowProjectRead===value.projectGrants.some(row=>row.allowProjectRead)
+      && value.allowProjectMessage===value.projectGrants.some(row=>row.allowProjectMessage);
+    return (exactKeys(value,legacyFields)||projectValid)
       && Number.isSafeInteger(value.version) && value.version > 0
-      && Array.isArray(value.workspaceIds) && value.workspaceIds.length > 0
-      && value.workspaceIds.length <= 32 && value.workspaceIds.every(entry => IDENTIFIER.test(entry))
+      && Array.isArray(value.workspaceIds) && (extended||value.workspaceIds.length > 0)
+      && value.workspaceIds.length <= (extended?REMOTE_PROJECT_LIMITS.projects+32:32)
+      && value.workspaceIds.every(entry => typeof entry==='string'&&IDENTIFIER.test(entry))
       && typeof value.allowTaskRead === 'boolean' && typeof value.allowResultExport === 'boolean'
       && Number.isSafeInteger(value.expiresAt) && value.expiresAt > now();
   }
   /** Frame one answer to a read request. Only the handler may grant anything:
    * this function checks shape, bounds the answer and never invents a result. */
-  async function answerTaskRequest(message) {
+  async function answerTaskRequest(message,project=false) {
     const requestId = message?.request?.requestId;
     if (!exactKeys(message, ['type', 'protocolVersion', 'request'])
         || !message.request || typeof message.request !== 'object' || Array.isArray(message.request)
         || typeof requestId !== 'string' || !IDENTIFIER.test(requestId)) throw new Error('INVALID_MESSAGE');
     let outcome;
     try {
-      outcome = typeof onTaskRead === 'function'
-        ? await onTaskRead(message.request)
+      const handler=project?onProjectAccess:onTaskRead;
+      outcome = typeof handler === 'function'
+        ? await handler(message.request)
         : { status: 'failed', code: 'CAPABILITY_DENIED' };
     } catch { outcome = { status: 'failed', code: 'LOCAL_STATE_UNAVAILABLE' }; }
     const code = typeof outcome?.code === 'string' && IDENTIFIER.test(outcome.code)
       ? outcome.code : 'LOCAL_STATE_UNAVAILABLE';
+    const type=project?'remote.project.result':'remote.task.result';
     const answer = outcome?.status === 'ok'
-      ? { type: 'remote.task.result', protocolVersion: 1, requestId, status: 'ok', result: outcome.result ?? null }
-      : { type: 'remote.task.result', protocolVersion: 1, requestId,
+      ? { type, protocolVersion: 1, requestId, status: 'ok', result: outcome.result ?? null }
+      : { type, protocolVersion: 1, requestId,
           status: outcome?.status === 'rejected' ? 'rejected' : 'failed', code };
     try {
-      if (Buffer.byteLength(JSON.stringify(answer)) > RESULT_MAX_BYTES) {
-        send({ type: 'remote.task.result', protocolVersion: 1, requestId, status: 'failed', code: 'RESULT_TOO_LARGE' });
+      if (Buffer.byteLength(JSON.stringify(answer)) > (project?REMOTE_PROJECT_LIMITS.resultBytes:RESULT_MAX_BYTES)) {
+        send({ type, protocolVersion: 1, requestId, status: 'failed', code: 'RESULT_TOO_LARGE' });
         return;
       }
       send(answer);
@@ -94,12 +110,13 @@ export function connectRemoteDevice({ origin, store, sign, publicKey, name, devi
   });
   socket.addEventListener('message', event => {
     if (stopped) return;
-    if (typeof event.data !== 'string' || Buffer.byteLength(event.data) > 4096 || ++queued > 16) {
+    if (typeof event.data !== 'string' || Buffer.byteLength(event.data) > REMOTE_PROJECT_LIMITS.requestBytes || ++queued > 16) {
       stop('invalid_frame'); return;
     }
     chain = chain.then(async () => {
       if (stopped) return;
       const message = JSON.parse(event.data);
+      if(Buffer.byteLength(event.data)>4096 && !(state==='online' && message?.type==='remote.project.request')) throw new Error('INVALID_MESSAGE');
       if (state === 'online') {
         if (exactKeys(message, ['type']) && message.type === 'remote.heartbeat') {
           deadline = now() + 60_000;
@@ -110,6 +127,10 @@ export function connectRemoteDevice({ origin, store, sign, publicKey, name, devi
         // handler delays this chain but never stops the lease from refreshing.
         if (message?.type === 'remote.task.request' && message.protocolVersion === 1) {
           await answerTaskRequest(message);
+          return;
+        }
+        if (message?.type === 'remote.project.request' && message.protocolVersion === 1) {
+          await answerTaskRequest(message,true);
           return;
         }
         throw new Error('INVALID_MESSAGE');

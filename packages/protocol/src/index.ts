@@ -8,6 +8,8 @@ export type { UiDeliveryIdentity, UiDeliveryRequirement, UiDeliveryObservation, 
 
 export { REMOTE_PROTOCOL_VERSION, parseRemoteReadRequest, admitRemoteRead } from './remote-access.ts';
 export type { RemoteReadRequest, RemoteReadContext, RemoteReadRejection, RemoteReadAdmission } from './remote-access.ts';
+export { REMOTE_PROJECT_LIMITS, parseRemoteProjectRequest, admitRemoteProject } from './remote-access.ts';
+export type { RemoteProjectGrant, RemoteProjectRequest, RemoteProjectContext, RemoteProjectRejection, RemoteProjectAdmission } from './remote-access.ts';
 
 export type LocalAccessLevel =
   | 'ask_before_local'

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProjectRegistry } from '@peer-agent/runtime-node';
@@ -97,6 +97,76 @@ const readRequest = ({ bindingVersion, epoch, taskId = 'task-99', workspaceId = 
   ownerId, deviceId, workspaceId,
   bindingVersion, connectionEpoch: epoch, delegationVersion: 1,
   expiresAt: Date.now() + 10_000, operation: 'task.read', taskId,
+});
+
+const projectRequest = (operation, extras = {}) => ({
+  protocolVersion: 1, type: 'project.submit', requestId: 'input-1', ownerId: 'owner-1', deviceId: 'device-1',
+  bindingVersion: 3, connectionEpoch: 7, delegationVersion: 1, expiresAt: Date.now()+10_000, operation, ...extras,
+});
+
+test('project wiring defaults closed and live settings revoke a still-online connection', async () => {
+  let policy={enabled:true,gatewayOrigin:'https://peer.example',workspaceId:'ws-1',delegationVersion:1,projectGrants:[]};
+  let writes=0;
+  const ports={directory:{get:workspaceId=>({ok:true,profile:{workspaceId,status:'active'},path:'/private/project'}),
+    list:async()=>[{workspaceId:'ws-1',profile:{workspaceId:'ws-1',displayName:'Bot',status:'active'},state:{}}]},
+    inputQueue:{submitInput:input=>{writes++;return {...input,text:input.text.trim(),createdAt:new Date().toISOString()};}},wake(){}};
+  const root=freshDir();
+  const {remote,options}=await withConnection({userDataPath:root,getRemoteSettings:()=>policy,getProjectAccess:()=>ports});
+  bind(remote,options);
+  assert.equal((await options.onProjectAccess(projectRequest('project.list'))).code,'PROJECT_DENIED');
+  policy={...policy,delegationVersion:2,projectGrants:[{workspaceId:'ws-1',allowProjectRead:true,allowProjectMessage:true}]};
+  assert.equal((await options.onProjectAccess(projectRequest('project.list'))).code,'DELEGATION_EXPIRED');
+  const allowed=await options.onProjectAccess(projectRequest('project.list',{delegationVersion:2}));
+  assert.equal(allowed.status,'ok');assert.equal(allowed.result.projects.length,1);
+  const input=projectRequest('project.input.submit',{delegationVersion:2,workspaceId:'ws-1',text:'hello'});
+  const receipt=await options.onProjectAccess(input);assert.equal(receipt.status,'ok');assert.equal(receipt.result.status,'received');
+  assert.deepEqual(await options.onProjectAccess(input),receipt);assert.equal(writes,1);
+  const summary=JSON.parse(readFileSync(join(root,'project-runtime','remote-access.json'),'utf8'));
+  assert.deepEqual(Object.keys(summary).sort(),['at','operation','workspaceId']);assert.equal(summary.operation,'project.input.submit');
+  policy={...policy,enabled:false};
+  assert.equal((await options.onProjectAccess(input)).code,'IDENTITY_UNBOUND');assert.equal(writes,1);
+  remote.stop();
+  const restarted=await withConnection({userDataPath:root,getRemoteSettings:()=>policy,getProjectAccess:()=>ports});
+  assert.deepEqual(restarted.remote.status().lastAccess,summary);restarted.remote.stop();
+});
+
+test('published delegation expires without sliding on each request', async () => {
+  const {remote,options}=await withConnection({projectGrants:[{workspaceId:'ws-1',allowProjectRead:true,allowProjectMessage:false}],
+    getProjectAccess:()=>({directory:{list:async()=>[],get:()=>null},inputQueue:{}})});
+  bind(remote,options);
+  const original=Date.now;
+  try {Date.now=()=>options.delegation.expiresAt+1;
+    assert.equal((await options.onProjectAccess(projectRequest('project.list'))).code,'DELEGATION_EXPIRED');
+    assert.equal((await options.onTaskRead(readRequest({bindingVersion:3,epoch:7}))).code,'DELEGATION_EXPIRED');
+  } finally {Date.now=original;remote.stop();}
+});
+
+test('legacy task reads check delegated plan workspace ownership', async () => {
+  const {remote,options,host}=await withConnection({goalPlanStore:{listPlans:()=>[
+    {planId:'plan-42',delegationOrigin:{workspaceId:'other-bot'},subtasks:[{taskId:'task-99'}]},
+  ]}});bind(remote,options);
+  assert.equal((await options.onTaskRead(readRequest({bindingVersion:3,epoch:7}))).code,'TASK_DENIED');
+  assert.equal(host.calls(),0);remote.stop();
+});
+
+test('stale connector callbacks cannot overwrite the replacement connection', async () => {
+  const connections=[];
+  const {remote}=await withConnection({connectorFactory(options){let closed;
+    const connector={closed:new Promise(resolve=>{closed=resolve;}),stop(){}};
+    connections.push({options,closed});return connector;}});
+  remote.stop();await remote.start();
+  bind(remote,connections[1].options);
+  connections[0].options.onState({status:'disconnected'});connections[0].closed({reason:'transport_failure'});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(remote.status().online,true);assert.equal(remote.status().lastFailure,null);
+  remote.stop();
+});
+
+test('stop while identity loads prevents a late connector from starting', async () => {
+  let release,dials=0;const identity=memoryIdentityStore();identity.loadSecret=()=>new Promise(resolve=>{release=resolve;});
+  const remote=setupRemoteAccess({userDataPath:freshDir(),gatewayOrigin:'https://peer.example',deviceName:'test',workspaceId:'ws-1',
+    goalPlanStore,sessionStore,buildProjection:projection,host:createHost(),identityStore:identity,
+    connectorFactory(){dials++;return stubConnector();}});
+  const starting=remote.start();remote.stop();release(null);await starting;assert.equal(dials,0);
 });
 
 test('未绑定时既不上线也不放行读取', async () => {
