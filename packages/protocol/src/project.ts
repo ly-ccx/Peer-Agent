@@ -3,6 +3,7 @@
  * needsYou changes the badge and the filter, not the order.
  */
 
+import type { ProjectModelPolicy } from './model-routing.ts';
 import type { PendingApprovalState, WorkSessionStatus } from './delegation.ts';
 
 export interface ProjectRegistryEntry {
@@ -31,6 +32,9 @@ export interface BotProfile {
   readonly proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted';
   /** Absent means this bot uses memory. */
   readonly memoryEnabled?: boolean;
+  readonly planApproval?: 'never' | 'writes' | 'always';
+  readonly acceptancePolicy?: 'auto' | 'confirm';
+  readonly modelPolicy?: ProjectModelPolicy | null;
   readonly updatedAt?: string;
 }
 

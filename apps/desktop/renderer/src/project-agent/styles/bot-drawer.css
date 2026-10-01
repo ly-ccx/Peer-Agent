@@ -876,3 +876,14 @@
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+
+.bot-policy-fields { display: grid; gap: 12px; }
+.bot-policy-fields h2 { margin: 8px 0 0; }
+.bot-policy-fields .bot-drawer-note { margin: 0; }
+.bot-policy-models { display: flex; flex-wrap: wrap; gap: 6px; }
+.bot-policy-models button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-policy-models button[aria-pressed='true'],
+.bot-policy-fields button[role='switch'][aria-checked='true'] {
+  border-color: var(--za-accent);
+  background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+}

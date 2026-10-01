@@ -366,6 +366,29 @@ describe('local goal provider', () => {
     );
   });
 
+  it('reads back declared criteria and indexed verification results without mutating the plan', async () => {
+    const plan = store.createPlan({
+      conversationId: 'conv-criteria', title: 'Check policy', goal: 'Read policy',
+      successCriteria: [{ id: 'policy', kind: 'file-contains', description: 'Check policy',
+        path: 'project.ts', expect: 'readonly acceptancePolicy', forgedApproval: true }],
+      tasks: [{ taskId: 'read', title: 'Read', status: 'pending', evidenceRefs: [] }],
+    });
+    registerEvidenceRefs(plan.planId, ['evidence:policy-read']);
+    store.recordCriterionResults(plan.planId, [{ criterionId: 'policy', passed: true,
+      evidenceRef: 'evidence:policy-read', detail: 'Substring found' }]);
+    const before = store.getPlan(plan.planId);
+    const execution = await provider.executeCapability({ call: {
+      toolCallId: 'local.goal.get_plan:criteria', capabilityId: 'local.goal.get_plan',
+      arguments: { planId: plan.planId }, occurredAt: new Date().toISOString(),
+    } }, { toolContext: { conversationId: 'conv-criteria' } });
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(execution.result.status, 'success');
+    assert.deepEqual(payload.plan.successCriteria, before.successCriteria);
+    assert.deepEqual(payload.plan.criterionResults, before.criterionResults);
+    assert.equal(payload.plan.successCriteria[0].forgedApproval, undefined);
+    assert.deepEqual(store.getPlan(plan.planId), before);
+  });
+
   it('lists active plans by conversation when planId is omitted', async () => {
     const created = await provider.executeCapability(
       {

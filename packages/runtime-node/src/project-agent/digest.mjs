@@ -120,6 +120,7 @@ export function createDigestQueue({ file = null } = {}) {
     list.push({
       id: typeof item?.id === 'string' && item.id.trim() ? item.id.trim() : `digest-item-${list.length + 1}`,
       text,
+      ...(item?.message?.kind === 'agent_reply' ? { message: item.message } : {}),
       ...(typeof item?.at === 'string' && item.at ? { at: item.at } : {}),
     });
     state.items[id] = list;
@@ -147,7 +148,8 @@ export function createDigestQueue({ file = null } = {}) {
       proactive: true,
       separatorLabel,
       content: items.map((item) => item.text).join('\n'),
-      meta: { surfacing: 'digest', digestDate: moment.date },
+      ...digestReferences(items),
+      meta: { ...digestReferences(items).meta, surfacing: 'digest', digestDate: moment.date },
     };
     return {
       fire: true,
@@ -179,6 +181,15 @@ export function createDigestQueue({ file = null } = {}) {
     acknowledge,
     pending: (workspaceId) => (Array.isArray(state.items[workspaceId]) ? state.items[workspaceId].length : 0),
   };
+}
+
+function digestReferences(items) {
+  const messages = items.map((item) => item.message).filter(Boolean);
+  if (!messages.length) return {};
+  const union = (key) => [...new Set(messages.flatMap((message) => message[key] || []))];
+  const metaUnion = (key) => [...new Set(messages.flatMap((message) => message.meta?.[key] || []))];
+  return { sources: union('sources'), replyTo: union('replyTo'), marks: messages.flatMap((message) => message.marks || []),
+    meta: { memoryUsed: metaUnion('memoryUsed'), memoryLearned: metaUnion('memoryLearned'), evidenceRefs: metaUnion('evidenceRefs') } };
 }
 
 function mustDeliver(event, needsYouFlag) {

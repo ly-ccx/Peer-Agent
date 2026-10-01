@@ -68,6 +68,7 @@ export function BotProfileDrawer({
   const [path, setPath] = useState('');
   const [sessions, setSessions] = useState<readonly DrawerSession[]>([]);
   const [memories, setMemories] = useState<readonly DrawerMemoryItem[]>([]);
+  const [modelOptions, setModelOptions] = useState<readonly import('@peer-agent/protocol').ModelRoutingMenuOption[]>([]);
   const [modelLabel, setModelLabel] = useState('');
   const [detail, setDetail] = useState<DrawerSession | null>(null);
   const [history, setHistory] = useState<readonly HistoryConversation[]>([]);
@@ -133,6 +134,7 @@ export function BotProfileDrawer({
         clientApi.modelRoutingPreview().catch(() => null),
       ]);
       if (cancelled) return;
+      setModelOptions(got?.modelOptions || []);
       setPath(got?.ok && typeof got.path === 'string' ? got.path : '');
       const nextSessions = (listed?.sessions ?? [])
         .map((item: unknown) => readDrawerSession(item))
@@ -277,6 +279,7 @@ export function BotProfileDrawer({
           workspaceId={workspaceId}
           profile={profile}
           modelLabel={modelLabel}
+          modelOptions={modelOptions}
           i18n={i18n}
           onProfile={onProfile}
           onDeleted={onDeleted}

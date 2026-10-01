@@ -6,6 +6,8 @@ let current = null;
 
 export function installProjectProactivity(port) {
   current = port && typeof port.set === 'function' ? port : null;
+  const installed = current;
+  return () => { if (current === installed) current = null; };
 }
 
 export function liveProjectProactivity() {

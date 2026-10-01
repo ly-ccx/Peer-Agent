@@ -6,6 +6,8 @@ let current = null;
 
 export function installDeliveryFacts(port) {
   current = port && typeof port.read === 'function' ? port : null;
+  const installed = current;
+  return () => { if (current === installed) current = null; };
 }
 
 export function liveDeliveryFacts() {

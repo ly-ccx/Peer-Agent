@@ -28,6 +28,9 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     listHistory: assertFunction(projectAgent?.listHistory, 'projectAgent.listHistory'),
     continueHistory: assertFunction(projectAgent?.continueHistory, 'projectAgent.continueHistory'),
     startFamiliarize: assertFunction(projectAgent?.startFamiliarize, 'projectAgent.startFamiliarize'),
+    confirmResult: assertFunction(projectAgent?.confirmResult, 'projectAgent.confirmResult'),
+    acceptReadme: assertFunction(projectAgent?.acceptReadme, 'projectAgent.acceptReadme'),
+    retry: assertFunction(projectAgent?.retry, 'projectAgent.retry'),
   };
 
   return Object.freeze([
@@ -51,6 +54,9 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:list-history', (_event, payload) => ports.listHistory(payload));
       ipc.handle('project-agent:continue-history', (_event, payload) => ports.continueHistory(payload));
       ipc.handle('project-agent:start-familiarize', (_event, payload) => ports.startFamiliarize(payload));
+      ipc.handle('project-agent:confirm-result', (_event, payload) => ports.confirmResult(payload));
+      ipc.handle('project-agent:accept-readme', (_event, payload) => ports.acceptReadme(payload));
+      ipc.handle('project-agent:retry', (_event, payload) => ports.retry(payload));
     }),
   ]);
 }

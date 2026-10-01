@@ -10,6 +10,7 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
       const delivery = typeof readDelivery === 'function' ? (readDelivery(view) || {}) : {};
       const replyTo = Array.isArray(input?.replyTo) ? input.replyTo : [];
       const proactive = input?.proactive === true;
+      const cited = new Set(Array.isArray(input?.sources) ? input.sources : []);
       const composed = composeReply({
         messageId: `reply:${view?.turnId || 'turn'}:${view?.toolCallOrdinal ?? 0}`,
         kind: replyTo.length > 0 ? 'user' : 'wake',
@@ -20,7 +21,8 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         question: input?.question,
         ...(typeof view?.turnId === 'string' && view.turnId ? { turnId: view.turnId } : {}),
         userMessages: Array.isArray(view?.messages) ? view.messages : [],
-        projectSessionIds: Array.isArray(delivery.sessionIds) ? delivery.sessionIds : [],
+        projectSessionIds: Array.isArray(delivery.sessionIds) ? delivery.sessionIds.filter(id => cited.has(id)) : [],
+        verdicts: Array.isArray(delivery.verdicts) ? delivery.verdicts.filter(verdict => cited.has(verdict.sessionId)) : [],
         memoryUsed: memoryIdsOf(view),
         toolCalls: Array.isArray(view?.turnToolCalls) ? view.turnToolCalls : [],
         surfacing: {
@@ -34,6 +36,7 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
       if (!composed.ok) return { error: composed.error, message: composed.message };
       return {
         messageId: composed.message.id,
+        message: composed.message,
         meta: composed.meta,
         surfacing: composed.meta.surfacing,
       };

@@ -1056,10 +1056,10 @@ export interface BootstrapPreloadApi {
   readonly mcpGetPrompt: (params: { mcpId?: string | number; serverId?: string | number; name: string; arguments?: Record<string, unknown> }) => Promise<unknown>;
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number }>;
   readonly projectAgentList: (params?: { query?: string; needsYouOnly?: boolean }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
-  readonly projectAgentGet: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; item?: import('@peer-agent/protocol').BotListItem; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentGet: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; item?: import('@peer-agent/protocol').BotListItem; path?: string; profile?: import('@peer-agent/protocol').BotProfile; modelOptions?: readonly import('@peer-agent/protocol').ModelRoutingMenuOption[] }>;
   readonly projectAgentReadAvatar: (params: { workspaceId: string }) => Promise<import('@peer-agent/protocol').BotAvatarReadResult>;
   readonly projectAgentCreate: (params: { kind: 'bind' } | { kind: 'managed'; name: string }) => Promise<{ ok: boolean; code?: string; workspaceId?: string; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
-  readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; regenerateAvatar?: boolean; avatarColor?: string; chooseAvatar?: boolean }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; regenerateAvatar?: boolean; avatarColor?: string; chooseAvatar?: boolean; planApproval?: 'never' | 'writes' | 'always'; acceptancePolicy?: 'auto' | 'confirm'; modelPolicy?: import('@peer-agent/protocol').ProjectModelPolicy | null }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentDelete: (params: { workspaceId: string; confirmManaged?: boolean }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentSubmitInput: (params: {
     workspaceId: string;
@@ -1109,6 +1109,9 @@ export interface BootstrapPreloadApi {
   }>;
   readonly projectAgentContinueHistory: (params: { workspaceId: string; conversationId: string; inputId?: string; text?: string; confirmMissing?: boolean }) => Promise<{ ok: boolean; code?: string; input?: { inputId: string; text: string; historyRef?: string; historySnapshotId?: string; historyConfirmed?: boolean }; snapshot?: { snapshotId: string } }>;
   readonly projectAgentStartFamiliarize: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentConfirmResult: (params: { workspaceId: string; sessionId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentAcceptReadme: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentRetry: (params: { workspaceId: string; turnId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectMemoryList: (params: ProjectMemoryListRequest) => Promise<ProjectMemoryListResult>;
   readonly projectMemoryPin: (params: ProjectMemoryPinRequest) => Promise<ProjectMemoryItemResult>;
   readonly projectMemoryForget: (params: ProjectMemoryForgetRequest) => Promise<ProjectMemoryItemResult>;

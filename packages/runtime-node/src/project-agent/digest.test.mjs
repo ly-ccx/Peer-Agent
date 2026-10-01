@@ -16,6 +16,23 @@ import {
 
 const PROTOCOL = { quiet: 'off', low: 'low', standard: 'normal', high: 'high' };
 
+test('digest retains validated task and evidence references across restart', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-digest-refs-'));
+  try {
+    const file = path.join(root, 'digest.json');
+    const queue = createDigestQueue({ file });
+    queue.hold('project', { text: 'Verified result', message: { kind: 'agent_reply', sources: ['s1'], replyTo: ['u1'],
+      marks: [{ sessionId: 's1', outcome: 'passed' }], meta: { memoryUsed: ['m1'], evidenceRefs: ['e1'] } } });
+    const restored = createDigestQueue({ file }).consider('project', new Date(2026, 8, 30, 10));
+    assert.equal(restored.fire, true);
+    assert.deepEqual(restored.message.sources, ['s1']);
+    assert.deepEqual(restored.message.replyTo, ['u1']);
+    assert.deepEqual(restored.message.marks, [{ sessionId: 's1', outcome: 'passed' }]);
+    assert.deepEqual(restored.message.meta.evidenceRefs, ['e1']);
+    assert.deepEqual(restored.message.meta.memoryUsed, ['m1']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 function delivery(event, proactivity, extra = {}) {
   return planDelivery({ event, proactivity, foreground: false, ...extra });
 }

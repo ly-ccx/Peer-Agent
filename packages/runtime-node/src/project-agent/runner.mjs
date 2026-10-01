@@ -1,4 +1,5 @@
-import { agentTurnMessage, finishAgentTurn, planAgentTurn } from './agent-turn-plan.mjs';
+import { randomUUID } from 'node:crypto';
+import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn } from './agent-turn-plan.mjs';
 
 /**
  * 与桌面 llm-chat-service 的同提供方重试退避一致（ADR 30）：
@@ -32,6 +33,7 @@ export function createProjectAgentRunner({
   onDigest = null,
   onDigestDelivered = null,
   onCurator = null,
+  onReplied = null,
 } = {}) {
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   const conversation = typeof conversationId === 'string' ? conversationId.trim() : '';
@@ -59,7 +61,6 @@ export function createProjectAgentRunner({
   let disposed = false;
   let turnKind = null;
   let abortController = null;
-  let turnSeq = 0;
   let statusValue = 'idle';
   let curatorFlight = null;
   let curatorTimer = null;
@@ -173,6 +174,9 @@ export function createProjectAgentRunner({
     try {
       if (job.kind === 'digest') {
         if (job.message) remember(job.message);
+        if (job.message && typeof onReplied === 'function') {
+          try { await onReplied(job.message); } catch { /* 已投递的小结不重复执行。 */ }
+        }
         if (job.message && typeof onDigestDelivered === 'function') {
           try { onDigestDelivered(job.message); } catch { /* 正文已写入；确认失败时下次还能再送 */ }
         }
@@ -205,6 +209,7 @@ export function createProjectAgentRunner({
       for (const message of finished.messages) {
         if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
           onDigest({
+            message,
             id: message.id,
             text: typeof message.content === 'string' ? message.content : '',
             at: stamp(),
@@ -212,8 +217,11 @@ export function createProjectAgentRunner({
           continue;
         }
         remember(message);
+        if (message?.kind === 'agent_reply' && typeof onReplied === 'function') {
+          try { await onReplied(message); } catch { /* 回复已落盘，签收失败留待后续重试，不重跑用户任务。 */ }
+        }
       }
-      if (outcome.failed) return 'error';
+      if (outcome.failed || finished.failed) return 'error';
       commit(job.throughSeq);
       if (job.kind === 'user' || job.kind === 'wake') scheduleCurator(job);
       return 'ok';
@@ -224,7 +232,7 @@ export function createProjectAgentRunner({
   }
 
   async function runRounds(job, signal) {
-    const turnId = `turn-${turnSeq += 1}`;
+    const turnId = `turn-${randomUUID()}`;
     const model = readModel();
     const plan = planAgentTurn({
       kind: job.kind,
@@ -235,6 +243,8 @@ export function createProjectAgentRunner({
       roster: readSlot(resolveRoster, job.kind),
       workspaceId: workspace,
     });
+    if (model.selection) plan.turnProfile.modelSelection = model.selection;
+    if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };
     }
@@ -252,6 +262,7 @@ export function createProjectAgentRunner({
         rounds,
         signal,
         toolCallsUsed,
+        turnId,
       });
       if (disposed || result.disposed) return { turnId, plan, rounds, disposed: true };
       if (result.preempted) {
@@ -272,7 +283,7 @@ export function createProjectAgentRunner({
     return { turnId, plan, rounds, failed: false, memoryIds };
   }
 
-  async function callRound({ job, plan, rounds, signal, toolCallsUsed }) {
+  async function callRound({ job, plan, rounds, signal, toolCallsUsed, turnId }) {
     let lastError = '提供方错误';
     for (let attempt = 0; attempt <= delays.length; attempt += 1) {
       if (disposed) return { disposed: true };
@@ -287,6 +298,7 @@ export function createProjectAgentRunner({
           conversationId: conversation,
           mode: plan.mode,
           turnProfile: plan.turnProfile,
+          streamId: turnId,
           plan,
           roundIndex: rounds.length,
           priorRounds: rounds,
@@ -312,14 +324,15 @@ export function createProjectAgentRunner({
       if (raw?.preempted === true || (job.kind === 'wake' && signal.aborted)) {
         return { preempted: true, round: roundFrom(raw) };
       }
-      const failure = raw?.ok === false || raw?.retryable === true;
+      const failure = raw?.ok === false || raw?.retryable === true
+        || ['error', 'aborted', 'interrupted'].includes(raw?.terminalStatus);
       if (!failure) {
         const toolCalls = Array.isArray(raw?.toolCalls) ? raw.toolCalls.map(normalizeTool) : [];
         const toolCallCount = Number.isInteger(raw?.toolCallCount) ? raw.toolCallCount : toolCalls.length;
         return {
           round: { text: typeof raw?.text === 'string' ? raw.text : '', toolCalls },
           toolCallCount,
-          hasPostReply: toolCalls.some((call) => call.name === 'post_reply'),
+          hasPostReply: toolCalls.some((call) => call.name === 'post_reply' && acceptedReplyResult(call.result)),
           continued: raw?.continued,
           memoryIds: memoryIdsOf(raw),
         };
@@ -360,7 +373,7 @@ export function createProjectAgentRunner({
     if (!modelProviderId) {
       return { ok: false, modelProviderId: null, reason: textOf(resolved.missing) || '没有可用的模型' };
     }
-    return { ok: true, modelProviderId, reason: '' };
+    return { ok: true, modelProviderId, selection: resolved.selection || null, candidateIds: resolved.candidateIds || [], reason: '' };
   }
 
   function readSlot(fn, kind) {

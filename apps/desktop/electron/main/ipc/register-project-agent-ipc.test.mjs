@@ -24,6 +24,9 @@ const CHANNELS = [
   'project-agent:list-history',
   'project-agent:continue-history',
   'project-agent:start-familiarize',
+  'project-agent:confirm-result',
+  'project-agent:accept-readme',
+  'project-agent:retry',
 ];
 
 function harness() {
@@ -53,6 +56,9 @@ function harness() {
       listHistory: port('list-history'),
       continueHistory: port('continue-history'),
       startFamiliarize: port('start-familiarize'),
+      confirmResult: port('confirm-result'),
+      acceptReadme: port('accept-readme'),
+      retry: port('retry'),
     },
   });
   const handlers = new Map();

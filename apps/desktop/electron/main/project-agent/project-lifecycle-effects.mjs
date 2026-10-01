@@ -1,0 +1,30 @@
+/** Persist project lifecycle facts and settle results only after a visible reply exists. */
+export function createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast }) {
+  return {
+    onInputsConsumed: (workspaceId, inputs) => {
+      if (profileStore.read(workspaceId)?.familiarize?.kind !== 'blank') return;
+      const input = inputs.find((item) => item.text?.trim() && !item.answerTo);
+      if (input) lifecycle.acceptResponsibility(workspaceId, { text: input.text, anchorMessageId: `input-${input.inputId}` });
+    },
+    onReplied: async (workspaceId, message) => {
+      const familiar = profileStore.read(workspaceId)?.familiarize;
+      if (familiar?.sessionId && !familiar.memoryRecorded && message.sources?.includes(familiar.sessionId)) {
+        const decision = supervisor.acceptance(familiar.sessionId);
+        if (decision?.verdict.outcome === 'passed' && decision.verdict.checks.every((check) => check.passed) && decision.verdict.evidenceRefs.length) {
+          const written = lifecycle.recordVerifiedFindings(workspaceId, [{ text: message.content, sourceRefs: decision.verdict.evidenceRefs }]);
+          if (written.ok) {
+            const profile = profileStore.read(workspaceId);
+            profileStore.save({ ...profile, familiarize: { ...profile.familiarize, memoryRecorded: true } });
+            conversationStore.updateMessageById?.(message.conversationId || resolveConversationId(workspaceId), message.id, {
+              meta: { ...message.meta, memoryLearned: [...(message.meta?.memoryLearned || []), ...written.items.map(item => item.id)] },
+            });
+          }
+        }
+      }
+      for (const sessionId of message.sources || []) {
+        if (supervisor.get({ sessionId })?.workspaceId === workspaceId) await supervisor.settle(sessionId);
+      }
+      broadcast?.('project-agent:conversation-changed', { workspaceIds: [workspaceId] });
+    },
+  };
+}

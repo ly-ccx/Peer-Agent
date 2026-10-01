@@ -322,6 +322,7 @@ export async function executeModelToolCall({
   ensureBrowserReady = null,
 }) {
   const args = safeParseJson(rawArguments);
+  const callOrdinal = toolContext?.turnRole === 'project_agent' ? (toolContext.toolCallOrdinal = (toolContext.toolCallOrdinal || 0) + 1) : null;
   // displayName 是后端 Runtime Projection 注入的固定展示文案（MCP 工具为
   // 「服务名: 工具名」），表达层用它渲染工具卡标题。这里按 name 从投影反查并随
   // tool-call 事件透传，避免渲染层只能显示裸 capability 名（如 mcp__server__tool）。
@@ -463,7 +464,7 @@ export async function executeModelToolCall({
     name,
     args,
     workspacePath,
-    toolContext,
+    toolContext: callOrdinal == null ? toolContext : { ...toolContext, toolCallOrdinal: callOrdinal },
     toolCallId,
     requestPermission: (request) => {
       if (request?.confirmation) return requestLocalCapabilityPermission(request);

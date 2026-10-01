@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { filterBotList, type BotListItem } from '@peer-agent/protocol';
+import { filterBotList, type BotListItem, type BotProfile } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { PROJECT_AGENT_SHELL_EVENT, projectAgentShellOf } from '../onboarding/botShell';
 import {
@@ -91,6 +91,10 @@ export function useBotList() {
     }
     replaceCatalog(result.items ?? []);
     setStatus('ready');
+  }, [replaceCatalog]);
+
+  const updateProfile = useCallback((profile: BotProfile) => {
+    replaceCatalog(catalogRef.current.map(item => item.workspaceId === profile.workspaceId ? { ...item, profile } : item));
   }, [replaceCatalog]);
 
   useEffect(() => {
@@ -226,6 +230,7 @@ export function useBotList() {
     creating,
     createBind,
     createManaged,
+    updateProfile,
     searching: query.trim().length > 0,
   };
 }

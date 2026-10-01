@@ -125,6 +125,25 @@ test('读游标之后未读清零，对话按 kind 分页', () => {
   }
 });
 
+test('未落盘提示卡只在首页投影，分页游标仍指向持久化消息', () => {
+  const root = tempRoot();
+  try {
+    const pendingCard = { cardId: 'projected-card', resolvedState: 'open' };
+    const { entry, directory } = harness(root, {
+      readCards: () => [pendingCard, { cardId: 'resolved-card', resolvedState: 'resolved' }],
+    });
+    const first = directory.readConversation(entry.workspaceId, { limit: 2 });
+    assert.deepEqual(first.messages.map((message) => message.id), ['user-1', 'card-1', 'projected-card']);
+    assert.deepEqual(first.messages[2].cards, [pendingCard]);
+    assert.equal(first.nextCursor, 'card-1');
+    const second = directory.readConversation(entry.workspaceId, { limit: 2, before: first.nextCursor });
+    assert.deepEqual(second.messages.map((message) => message.id), ['reply-1']);
+    assert.equal(second.nextCursor, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('默认对话页保留 agent_turn，列表预览仍不显示它', () => {
   const root = tempRoot();
   try {

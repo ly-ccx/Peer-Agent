@@ -2,7 +2,7 @@
  * 卡片只从宿主事实投影。同一事实得到同一 cardId。
  * 解决状态追加在 project-runtime/<workspaceId>/cards.jsonl，按 cardId 折叠，后写的覆盖先写的。
  * 宿主事实已经终态时，不必另写一条也能投影成已解决。
- * 确认结果的通道属于签收实现，这里只留下动作载荷，不登记 IPC。
+ * 动作载荷由应用服务执行；事实和持久化解决状态决定是否仍可操作。
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -241,7 +241,7 @@ function confirmCards(facts) {
       content: clip(confirmation.summary, '需要你确认结果'),
       factResolved: accepted,
       factState: accepted ? 'accepted' : '',
-      actions: accepted ? [] : [seamAction('confirm', 'b2-09', { sessionId, cardId, acceptedBy: 'user' })],
+      actions: accepted ? [] : [ipcAction('confirm', 'project-agent:confirm-result', { sessionId, cardId, acceptedBy: 'user' })],
       refs: refs({ sessionId }),
     }));
   }
@@ -258,7 +258,7 @@ function readmeCards(workspaceId, facts) {
     content: '要不要为这个项目写一份 README',
     factResolved: offer.accepted,
     factState: offer.accepted ? 'accepted' : '',
-    actions: offer.accepted ? [] : [seamAction('accept_readme', 'b2-12', { workspaceId, cardId })],
+    actions: offer.accepted ? [] : [ipcAction('accept_readme', 'project-agent:accept-readme', { workspaceId, cardId })],
     refs: refs({ workspaceId }),
   })];
 }
@@ -276,7 +276,7 @@ function unavailableCards(facts) {
       content: `代理暂时不可用：${reason}`,
       factResolved: false,
       factState: '',
-      actions: [seamAction('retry', 'runner.retry', { turnId, cardId })],
+      actions: [ipcAction('retry', 'project-agent:retry', { turnId, cardId })],
       refs: refs({ turnId }),
     }));
   }
@@ -335,8 +335,8 @@ function action(id, channel, payload) {
   return { id, channel, payload };
 }
 
-function seamAction(id, seam, payload) {
-  return { id, seam, payload };
+function ipcAction(id, channel, payload) {
+  return { id, channel, payload };
 }
 
 function refs(fields) {

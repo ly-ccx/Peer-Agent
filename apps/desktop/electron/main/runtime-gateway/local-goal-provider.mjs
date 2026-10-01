@@ -168,6 +168,21 @@ function summarizePlan(plan) {
     originWorkspacePath: plan.originWorkspacePath ?? null,
     targetWorkspacePath: plan.targetWorkspacePath ?? null,
     progress: plan.progress ?? null,
+    successCriteria: (Array.isArray(plan.successCriteria) ? plan.successCriteria : [])
+      .map(criterion => typeof criterion === 'string' ? criterion : Object.fromEntries(
+        ['id', 'kind', 'description', 'command', 'path', 'expect']
+          .filter(key => typeof criterion?.[key] === 'string')
+          .map(key => [key, criterion[key]]),
+      )),
+    criterionResults: (Array.isArray(plan.criterionResults) ? plan.criterionResults : [])
+      .filter(result => result && typeof result.criterionId === 'string')
+      .map(result => ({
+        criterionId: result.criterionId,
+        passed: result.passed === true,
+        ...Object.fromEntries(['evidenceRef', 'detail', 'checkedAt']
+          .filter(key => typeof result[key] === 'string')
+          .map(key => [key, result[key]])),
+      })),
     tasks: summarizeTasks(plan.tasks),
   };
 }

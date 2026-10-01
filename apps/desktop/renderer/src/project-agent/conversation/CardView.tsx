@@ -4,8 +4,7 @@ import { clientApi } from '../../clientApi';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
 
 /**
- * 卡片动作走批准、提交和开始熟悉这三条 IPC。
- * 还没有通道的签收、README 和重试缝只显示，不另开调用。
+ * 所有动作通过应用服务，由宿主校验状态与项目归属。
  */
 export function CardView({
   workspaceId,
@@ -40,6 +39,7 @@ function CardItem({
   readonly onDone?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const resolved = done || card.resolvedState === 'resolved';
   return (
@@ -53,7 +53,12 @@ function CardItem({
               type="button"
               disabled={busy}
               onClick={() => {
-                void runCardAction(workspaceId, action, setBusy, setDone, onDone);
+                if (busy) return;
+                setBusy(true); setError('');
+                void runCardAction(workspaceId, action).then(result => {
+                  if (!result?.ok) { setError(result?.code || i18n.t('projectAgent.chat.actionFailed')); return; }
+                  setDone(true); onDone?.();
+                }).catch(() => setError(i18n.t('projectAgent.chat.actionFailed'))).finally(() => setBusy(false));
               }}
             >
               {actionLabel(action, i18n)}
@@ -61,6 +66,7 @@ function CardItem({
           ))}
         </div>
       )}
+      {error ? <p role="alert" className="bot-drawer-note">{error}</p> : null}
     </section>
   );
 }
@@ -74,64 +80,33 @@ function actionLabel(action: BotChatCardAction, i18n: I18nRuntime): string {
   if (action.id === 'approve') return i18n.t('projectAgent.chat.approve');
   if (action.id === 'reject') return i18n.t('projectAgent.chat.reject');
   if (action.id === 'answer') return i18n.t('projectAgent.chat.answer');
+  if (action.id === 'confirm') return i18n.t('projectAgent.chat.confirmResult');
+  if (action.id === 'accept_readme') return i18n.t('projectAgent.chat.acceptReadme');
+  if (action.id === 'retry') return i18n.t('projectAgent.chat.retry');
   return action.id;
 }
 
-async function runCardAction(
-  workspaceId: string,
-  action: BotChatCardAction,
-  setBusy: (busy: boolean) => void,
-  setDone: (done: boolean) => void,
-  onDone?: () => void,
-) {
+async function runCardAction(workspaceId: string, action: BotChatCardAction): Promise<{ ok: boolean; code?: string }> {
+  const payload = action.payload || {};
   if (action.channel === 'project-agent:decide-approval') {
-    const approvalId = typeof action.payload?.approvalId === 'string' ? action.payload.approvalId : '';
-    const decision = action.payload?.decision;
-    const duration = action.payload?.duration;
-    if (!approvalId || (decision !== 'approve' && decision !== 'reject' && decision !== 'deny')) return;
-    setBusy(true);
-    try {
-      await clientApi.projectAgentDecideApproval({
-        workspaceId,
-        approvalId,
-        decision,
-        ...(duration === 'once' || duration === 'task' || duration === 'denied' ? { duration } : {}),
-      });
-      onDone?.();
-    } finally {
-      setBusy(false);
-    }
-    return;
+    const approvalId = typeof payload.approvalId === 'string' ? payload.approvalId : '';
+    const decision = payload.decision;
+    const duration = payload.duration;
+    if (!approvalId || (decision !== 'approve' && decision !== 'reject' && decision !== 'deny')) return { ok: false, code: 'INVALID_INPUT' };
+    return clientApi.projectAgentDecideApproval({ workspaceId, approvalId, decision,
+      ...(duration === 'once' || duration === 'task' || duration === 'denied' ? { duration } : {}) });
   }
   if (action.channel === 'project-agent:submit-input') {
-    const text = typeof action.payload?.text === 'string' ? action.payload.text.trim() : '';
-    const answerTo = typeof action.payload?.answerTo === 'string' ? action.payload.answerTo : '';
-    if (!text) return;
-    setBusy(true);
-    try {
-      await clientApi.projectAgentSubmitInput({
-        workspaceId,
-        inputId: crypto.randomUUID(),
-        text,
-        surface: 'desktop',
-        ...(answerTo ? { answerTo } : {}),
-      });
-      onDone?.();
-    } finally {
-      setBusy(false);
-    }
-    return;
+    const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+    const answerTo = typeof payload.answerTo === 'string' ? payload.answerTo : '';
+    if (!text) return { ok: false, code: 'INVALID_INPUT' };
+    return clientApi.projectAgentSubmitInput({ workspaceId, inputId: crypto.randomUUID(), text, surface: 'desktop', ...(answerTo ? { answerTo } : {}) });
   }
-  if (action.channel === 'project-agent:start-familiarize') {
-    setBusy(true);
-    try {
-      const result = await clientApi.projectAgentStartFamiliarize({ workspaceId });
-      if (result?.ok) {
-        setDone(true);
-        onDone?.();
-      }
-    } finally {
-      setBusy(false);
-    }
+  if (action.channel === 'project-agent:start-familiarize') return clientApi.projectAgentStartFamiliarize({ workspaceId });
+  if (action.channel === 'project-agent:confirm-result' && typeof payload.sessionId === 'string') {
+    return clientApi.projectAgentConfirmResult({ workspaceId, sessionId: payload.sessionId });
   }
+  if (action.channel === 'project-agent:accept-readme') return clientApi.projectAgentAcceptReadme({ workspaceId });
+  if (action.channel === 'project-agent:retry' && typeof payload.turnId === 'string') return clientApi.projectAgentRetry({ workspaceId, turnId: payload.turnId });
+  return { ok: false, code: 'INVALID_ACTION' };
 }

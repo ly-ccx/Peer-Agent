@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createProjectInbox } from '../../../../../packages/runtime-node/src/project-agent/project-inbox.mjs';
 import { createDigestQueue } from '../../../../../packages/runtime-node/src/project-agent/digest.mjs';
 import { createProjectAgentHost, messagesFromUserInputs } from './project-agent-host.mjs';
 
@@ -75,7 +76,9 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
     assert.equal(calls[0].kind, 'user');
     assert.equal(calls[0].workspaceId, 'ws-leased');
     assert.equal(calls[0].modelProviderId, 'text-default');
-    assert.deepEqual(calls[0].context, { sources: [] });
+    assert.deepEqual(calls[0].context.sources, []);
+    assert.equal(calls[0].context.inputAnchors[0].text, '你好');
+    assert.match(calls[0].context.inputAnchors[0].messageId, /^input-/);
     assert.equal(host.runnerFor('ws-client'), null);
     assert.equal(host.runnerFor('ws-leased')?.conversationId, 'conv-leased');
     assert.deepEqual(statuses.map((item) => item.status), ['thinking', 'waiting_provider', 'thinking', 'idle']);
@@ -248,4 +251,87 @@ test('用户回合把缩略图放进模型能看的消息', () => {
   assert.equal(messages[0].content[1].type, 'image_url');
   assert.equal(messages[0].content[1].image_url.url, 'data:image/png;base64,AA==');
   assert.equal(messagesFromUserInputs({ userInputs: [] }), null);
+});
+
+test('后台巡检在取得租约后恢复提前入队的输入，并且不重复消费', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'project-agent-queued-recovery-'));
+  const timers = [];
+  const messages = [];
+  const turns = [];
+  const consumedInputs = [];
+  let leased = false;
+  const host = createProjectAgentHost({
+    rootDir: root,
+    holdsLease: () => leased,
+    listWorkspaceIds: () => ['ws-recovery'],
+    resolveConversationId: () => 'conv-recovery',
+    hasMessage: (_, id) => messages.some(message => message.id === id),
+    appendMessage: (_, message) => messages.push(message),
+    onInputsConsumed: (_, inputs) => consumedInputs.push(...inputs),
+    readFacts: () => ({ sessions: [] }),
+    routing: { providers: [provider] },
+    schedule(fn, delay) {
+      const timer = { fn, delay, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearSchedule(timer) { timer.cleared = true; },
+    async executeTurn({ plan }) {
+      turns.push(plan);
+      return { text: '收到' };
+    },
+  });
+  try {
+    host.inputQueue.submitInput({ inputId: 'early-input', workspaceId: 'ws-recovery', surface: 'desktop', text: '提前提交' });
+    await host.sync();
+    await timers.at(-1).fn();
+    assert.equal(turns.length, 0);
+    assert.equal(host.inputQueue.cursor('ws-recovery'), null);
+    leased = true;
+    await timers.at(-1).fn();
+    assert.equal(turns.length, 1);
+    assert.equal(turns[0].userInputs[0].text, '提前提交');
+    assert.equal(consumedInputs.length, 1);
+    assert.equal(host.inputQueue.cursor('ws-recovery'), 'early-input');
+    await timers.at(-1).fn();
+    await host.sync();
+    assert.equal(turns.length, 1);
+    assert.equal(messages.filter(message => message.role === 'user').length, 1);
+    assert.equal(consumedInputs.length, 1);
+  } finally {
+    host.dispose();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('periodic lease recovery drains an existing inbox once without fresh watch events', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'inbox-recovery-host-'));
+  const timers = [];
+  const calls = [];
+  let hold = false;
+  const inbox = createProjectInbox({ rootDir: root, mergeWindowMs: 0 });
+  inbox.append('ws-leased', [{ eventId: 'persisted-verified', kind: 'session_verified',
+    sessionId: 'session-old', workspaceId: 'ws-leased', payload: { summary: 'Verified' } }]);
+  const host = createProjectAgentHost({
+    rootDir: root, inbox, holdsLease: () => hold,
+    listWorkspaceIds: () => ['ws-leased'], resolveConversationId: () => 'conv-leased',
+    hasMessage: () => false, appendMessage() {}, getWindows: () => [],
+    routing: { providers: [provider] }, readFacts: () => ({ sessions: [] }),
+    retryDelays: [0, 0, 0],
+    schedule(fn, delay) { const timer = { fn, delay }; timers.push(timer); return timer; },
+    clearSchedule(timer) { timer.cleared = true; },
+    async executeTurn({ plan }) { calls.push(plan.events); return { text: '' }; },
+  });
+  try {
+    await timers.find(timer => timer.delay === 0).fn();
+    assert.equal(calls.length, 0);
+    hold = true;
+    await timers.filter(timer => !timer.cleared).at(-1).fn();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0].eventId, 'persisted-verified');
+    assert.equal(inbox.takeBatch('ws-leased').events.length, 0);
+    await timers.filter(timer => !timer.cleared).at(-1).fn();
+    assert.equal(calls.length, 1);
+  } finally { host.dispose(); rmSync(root, { recursive: true, force: true }); }
 });

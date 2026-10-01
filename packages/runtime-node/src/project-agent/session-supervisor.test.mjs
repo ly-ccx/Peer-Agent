@@ -364,7 +364,7 @@ test('模型不可用时不建任何对象', { timeout: 20_000 }, async () => {
       routing: routing(),
       emitEvent: (event) => { env.events.push(event); },
     });
-    const code = await blind.spawn(spawnInput({ kind: 'code', title: '只读调研' }), contextOf(env));
+    const code = await blind.spawn(spawnInput({ kind: 'ui', title: '需要视觉模型' }), contextOf(env));
     assert.equal(code.error, 'model_unavailable');
     assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 0);
     assert.equal(env.goalPlanStore.listPlans().length, beforePlans);

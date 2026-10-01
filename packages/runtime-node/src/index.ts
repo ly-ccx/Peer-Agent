@@ -293,6 +293,7 @@ export {
   planDelivery,
   resolveBotLevel,
 } from './project-agent/digest.mjs';
+export { verdictRefFor } from './project-agent/acceptance.mjs';
 export { createCardProjection, projectCards } from './project-agent/card-projection.mjs';
 export {
   DELEGATION_CAPABILITY_IDS,

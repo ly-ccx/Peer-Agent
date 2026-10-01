@@ -20,7 +20,7 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.equal(user.mode, 'project_agent');
   assert.equal(user.turnProfile.role, 'project_agent');
   assert.equal(user.turnProfile.workspaceId, undefined);
-  assert.deepEqual(user.turnProfile.context, { sources: ['memory-1'] });
+  assert.deepEqual(user.turnProfile.context, { sources: ['memory-1'], events: [event], inputAnchors: [{ messageId: 'input-in1', text: '你好' }] });
   assert.equal(planAgentTurn({ kind: 'user', workspaceId: ' ws-1 ' }).turnProfile.workspaceId, 'ws-1');
   assert.equal(user.modelProviderId, 'model-pa');
   assert.deepEqual(user.limits, { maxRounds: 10, maxToolCalls: 20 });
@@ -45,8 +45,8 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.equal(wake.reminder.layer, 'L6_MODE_REMINDER');
   assert.equal(wake.reminder.kind, 'project-agent-wake');
   assert.match(wake.reminder.content, /not a new user message/);
-  assert.match(wake.reminder.content, /Roster:/);
-  assert.equal(wake.turnProfile.context, null);
+  assert.doesNotMatch(wake.reminder.content, /Roster:/);
+  assert.deepEqual(wake.turnProfile.context, { events: [{eventId:'evt-1',seq:1,kind:'session_verified'}], roster: {sessions:['sess-1']} });
 });
 
 test('没有 post_reply 的用户回合兜底挂到全部输入，唤醒沉默不写回复', () => {

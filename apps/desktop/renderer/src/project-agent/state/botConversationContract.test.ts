@@ -34,5 +34,8 @@ test('卡片动作只调用约定的 IPC', () => {
     'projectAgentDecideApproval',
     'projectAgentSubmitInput',
     'projectAgentStartFamiliarize',
+    'projectAgentConfirmResult',
+    'projectAgentAcceptReadme',
+    'projectAgentRetry',
   ]);
 });

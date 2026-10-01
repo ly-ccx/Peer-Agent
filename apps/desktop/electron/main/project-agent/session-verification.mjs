@@ -8,6 +8,8 @@ let current = null;
 
 export function installSessionVerification(port) {
   current = port && typeof port === 'object' ? port : null;
+  const installed = current;
+  return () => { if (current === installed) current = null; };
 }
 
 export function liveSessionVerification() {
@@ -108,7 +110,7 @@ export function createSessionVerification({
   }
 
   return {
-    async facts(sessionId) {
+    facts(sessionId) {
       const plan = findPlan(sessionId);
       if (!plan) return null;
       return factsFor(plan);
@@ -148,7 +150,7 @@ export function createSessionVerification({
       if (plan && typeof goalPlanStore?.revisePlan === 'function') {
         const stored = plan.hostVerification && typeof plan.hostVerification === 'object' ? plan.hostVerification : {};
         goalPlanStore.revisePlan(plan.planId, {
-          delegationOrigin: { ...plan.delegationOrigin, verifying: true },
+          delegationOrigin: { ...plan.delegationOrigin, verifying: false },
           hostVerification: {
             ...stored,
             independentVerifier: authorityFromDetail(detail, stored),
