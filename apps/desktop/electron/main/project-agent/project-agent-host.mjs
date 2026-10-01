@@ -262,6 +262,7 @@ export function registerDesktopProjectAgent({
     readMessagesBatch: typeof conversationStore.getPersistedConversationHistories === 'function'
       ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
+    readSessionsBatch: ids => supervisor.listByWorkspaceIds(ids),
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
     readApprovalsBatch: ids => approvalStore.listByWorkspaceIds(ids),
