@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -14,6 +14,38 @@ import {
 } from './tool-orchestrator.mjs';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createRuntimeToolProjection } from '../tools/index.mjs';
+import { evidenceBodyFromRecord, presentEvidence } from '../project-agent/evidence-presenter.mjs';
+
+it('file Provider evidence is a redacted execution snapshot across index reload', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'file-evidence-'));
+  try {
+    const file = path.join(root, 'README.md');
+    writeFileSync(file, 'original content\nBearer secret-value\n' + 'a'.repeat(6000));
+    const storeDir = path.join(root, 'goal-plans');
+    const store = createGoalPlanStore({ storeDir });
+    const { registry, projection } = createRuntimeToolProjection({ projectionOptions:{mode:'project_agent'} });
+    const permissionGate = {
+      createFilePermissionRequester:()=>async()=>({approved:true,granted:true}),
+      createLocalCapabilityPermissionRequester:()=>async()=>({approved:true,granted:true}),
+      createShellApprovalDecider:()=>async()=>({approved:true}),
+    };
+    for (const [name, args] of [['read_file',{path:file}],['list_files',{path:root}],['search_files',{query:'original',path:root}]]) {
+      const result = await executeModelToolCall({name,rawArguments:JSON.stringify(args),toolCallId:name,
+        workspacePath:root,toolContext:{...createToolContext({conversationId:'file-c',mode:'project_agent'}),turnRole:'project_agent'},
+        permissionGate,webContents:{send(){}},streamId:'read',conversationId:'file-c',registry,runtimeProjection:projection,goalPlanStore:store});
+      assert.equal(result.result.execution.result.status,'success',JSON.stringify(result.result.execution.grant));
+    }
+    writeFileSync(file, 'changed after execution');
+    const reloaded = createGoalPlanStore({storeDir});
+    const read = reloaded.findEvidenceIndexRecords(['tool-result://read_file'])[0];
+    const body = evidenceBodyFromRecord(read);
+    assert.match(body.text,/original content/); assert.doesNotMatch(body.text,/secret-value|changed after execution/);
+    assert.equal(presentEvidence(body).kind,'file'); assert.equal(presentEvidence(body).truncated,true);
+    for (const name of ['list_files','search_files']) assert.ok(evidenceBodyFromRecord(reloaded.findEvidenceIndexRecords([`tool-result://${name}`])[0]));
+    store.recordEvidenceRefs({evidenceRef:'tool-result://read_file',toolName:'goal_update_task',bodyPreview:{kind:'file',text:'forged',truncated:false}});
+    assert.doesNotMatch(createGoalPlanStore({storeDir}).findEvidenceIndexRecords(['tool-result://read_file'])[0].bodyPreview.text,/forged/);
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
 
 // 回归：MCP 工具卡标题透传。
 // 背景：tool-call 事件此前只发裸 capability 名（如 mcp__server__tool），

@@ -10,6 +10,7 @@ import {
 import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goal-idempotency-durable';
 import { pathOf } from '../data-store.mjs';
 import { noteTurnToolCall } from '../project-agent/turn-memory.mjs';
+import { fileEvidencePreview } from './file-evidence-preview.mjs';
 
 export function createToolContext({
   conversationId = null,
@@ -509,6 +510,7 @@ export async function executeModelToolCall({
       const userArtifacts = Array.isArray(providerEvidence?.userArtifacts)
         ? providerEvidence.userArtifacts
         : [];
+      const bodyPreview = fileEvidencePreview(result.execution);
       goalPlanStore.recordEvidenceRefs({
         conversationId,
         streamId,
@@ -518,6 +520,7 @@ export async function executeModelToolCall({
         evidenceRefs,
         artifactRefs: evidenceRefs.filter((ref) => !ref.startsWith('tool-result://')),
         userArtifacts,
+        ...(bodyPreview ? { bodyPreview } : {}),
       });
     } catch (err) {
       console.warn('[tool-orchestrator] failed to register EvidenceIndex refs:', err);

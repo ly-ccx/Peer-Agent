@@ -126,6 +126,8 @@ export function watchFactsFromPlan(plan) {
     ...(text(plan?.runner?.currentTaskId) ? { taskId: text(plan.runner.currentTaskId) } : {}),
     version: text(plan?.updatedAt) || text(plan?.planId) || sessionId,
     status: watchStatus(plan, needsUser.length > 0),
+    ...(plan.status === 'completed' ? { completedAt: text(plan.timing?.completedAt) || text(plan.updatedAt) } : {}),
+    ...(terminalVerifierRevision(plan) ? { resultRevision: terminalVerifierRevision(plan) } : {}),
     ...(startedAt ? { startedAt } : {}),
     ...(lastProgressAt ? { lastProgressAt } : {}),
     leaves,
@@ -153,10 +155,18 @@ export function delegationFactsForWorkspace(plans, workspaceId) {
   return { sessions };
 }
 
+function terminalVerifierRevision(plan) {
+  const runs = Array.isArray(plan?.runner?.verifierRuns) ? plan.runner.verifierRuns : [];
+  const latest = runs.at(-1);
+  if (!['passed', 'failed'].includes(latest?.status) || !text(latest?.completedAt)) return '';
+  return JSON.stringify([text(latest.verifierRunId), latest.status, latest.completedAt]);
+}
+
 function watchStatus(plan, waiting) {
   if (plan?.status === 'cancelled') return 'cancelled';
   if (plan?.status === 'failed') return 'failed';
   if (plan?.status === 'interrupted' && plan?.runner?.status === 'failed') return 'interrupted';
+  if (plan?.status === 'completed') return 'result_ready';
   if (waiting) return 'waiting_user';
   const phase = plan?.delegationOrigin?.phase;
   if (phase === 'running' && plan?.status !== 'completed') return 'running';

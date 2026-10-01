@@ -6,9 +6,16 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
     const rows = sessions(workspaceId);
+    const profile = profileStore.read(workspaceId);
+    const messages = conversationStore.getPersistedConversationHistory(profile?.agentConversationId)?.messages || [];
     return {
       sessionIds: rows.map((row) => row.sessionId),
       sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status })),
+      unreportedResults: rows.filter(row => row.status === 'result_ready'
+        && !messages.some(message => message.kind === 'agent_reply' && message.sources?.includes(row.sessionId)
+          && message.meta?.sessionStates?.some(state => state.sessionId === row.sessionId
+            && ['result_ready', 'accepted'].includes(state.status))))
+        .map(row => ({sessionId:row.sessionId,anchorMessageId:row.origin?.anchorMessageId})),
       verdicts: rows.flatMap((row) => {
         const decision = supervisor.acceptance(row.sessionId);
         return decision ? [{ sessionId: row.sessionId, ...decision.verdict,

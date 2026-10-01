@@ -7,6 +7,21 @@ const json = JSON.stringify(report);
 const delta = content => ({ channel: 'chat:stream:delta', payload: { content } });
 const done = { channel: 'chat:stream:done', payload: {} };
 
+test('a pass needs nonempty references from admitted snapshots or actual tool-result events', async () => {
+  assert.equal(decodeVerifierReport(JSON.stringify({ ...report, evidenceRefs: [] })), null);
+  let calls = 0;
+  const forged = await runVerifierWithReport({ allowedEvidenceRefs: ['real'], run: async () => {
+    calls++; return { events: [delta(json), done] };
+  } });
+  assert.equal(forged.passed, false); assert.equal(calls, 2);
+  const snapshot = await runVerifierWithReport({ allowedEvidenceRefs: ['ev-1'], run: async () => ({ events: [delta(json), done] }) });
+  assert.equal(snapshot.passed, true);
+  const tool = await runVerifierWithReport({ allowedEvidenceRefs: [], run: async () => ({ events: [
+    { channel: 'chat:stream:tool-result', payload: { evidenceRefs: ['ev-1'], result: '{}' } }, delta(json), done,
+  ] }) });
+  assert.equal(tool.passed, true);
+});
+
 test('accepts one complete report, JSON fences and prose without swallowing JSON string braces', () => {
   for (const text of [json, `\`\`\`json\n${json}\n\`\`\``, `Report:\n${JSON.stringify({...report,summary:'read {a} and "b"'})}\nEnd.`]) {
     assert.equal(decodeVerifierReport(text).passed, true);

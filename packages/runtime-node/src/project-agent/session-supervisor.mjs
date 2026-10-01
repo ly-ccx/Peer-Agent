@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 
 import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
@@ -8,6 +8,7 @@ import { boundedImageAttachments } from './input-queue.mjs';
 import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
 import { digestApprovalArgs } from './approval-store.mjs';
+import { spawnIdentity, identityFromPlan } from './spawn-identity.mjs';
 
 /**
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
@@ -129,8 +130,9 @@ export function createSessionSupervisor({
     return delegatedPlans().find((plan) => plan.delegationOrigin.sessionId === sessionId) ?? null;
   }
 
-  function findByKey(key) {
-    return delegatedPlans().find((plan) => plan.delegationOrigin.idempotencyKey === key) ?? null;
+  function findByKey(key, parentConversationId, input) {
+    return delegatedPlans().find((plan) => plan.delegationOrigin.idempotencyKey === key
+      || identityFromPlan(plan, parentConversationId, input) === key) ?? null;
   }
 
   function openPlans(workspaceId) {
@@ -326,16 +328,17 @@ export function createSessionSupervisor({
       return { error: 'invalid_input', message: 'spawn input is incomplete' };
     }
     const supersedes = text(input?.supersedes);
-    const key = spawnKey(parentConversationId, {
+    const key = spawnIdentity(parentConversationId, {
       anchorMessageIds,
       title,
       brief,
       kind: input?.kind,
       readOnly: input?.readOnly,
       successCriteria: input?.successCriteria,
+      dependsOn: input?.dependsOn,
       ...(supersedes ? { supersedes } : {}),
     });
-    const replay = findByKey(key);
+    const replay = findByKey(key, parentConversationId, input);
     if (replay) {
       return {
         sessionId: replay.delegationOrigin.sessionId,
@@ -635,7 +638,8 @@ export function createSessionSupervisor({
       manualCriteriaPending: extra.manualCriteriaPending === true,
       externalSideEffects: extra.externalSideEffects === true,
       outOfScopeWrite: extra.outOfScopeWrite === true,
-      verificationBelowFloor: extra.verificationBelowFloor === true,
+      verificationBelowFloor: extra.verificationBelowFloor === true
+        || !['passed', 'not_required'].includes(hostAuthority.independentVerifier),
       hostAuthority,
       evidenceIndex: indexedRefs(plan),
     };
@@ -992,10 +996,6 @@ function quotesFor(ids, messages) {
     const content = byId.get(id)?.content;
     return typeof content === 'string' ? content : '';
   });
-}
-
-function spawnKey(parentConversationId, input) {
-  return createHash('sha256').update(JSON.stringify({ parentConversationId, ...input })).digest('hex');
 }
 
 function surfaceOf(value) {

@@ -51,10 +51,13 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
       payload: { need: item.kind },
     }));
   }
-  if (verdictChanged(prior, session)) {
+  if (verdictChanged(prior, session) || (session.status === 'result_ready' && (prior?.status !== 'result_ready'
+      || (session.resultRevision && session.resultRevision !== prior?.resultRevision)))) {
     events.push(event(session, {
       kind: 'result_ready',
-      version: session.verdict?.version ?? session.version ?? 1,
+      version: session.verdict?.version ?? (session.resultRevision
+        ? JSON.stringify([session.completedAt ?? '', session.resultRevision])
+        : session.completedAt ?? session.version ?? 1),
       at,
       payload: {
         outcome: session.verdict?.outcome ?? null,

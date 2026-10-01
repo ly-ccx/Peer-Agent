@@ -1,5 +1,5 @@
 /** Persist project lifecycle facts and settle results only after a visible reply exists. */
-export function createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast }) {
+export function createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast, resolveEvidence }) {
   return {
     onInputsConsumed: (workspaceId, inputs) => {
       if (profileStore.read(workspaceId)?.familiarize?.kind !== 'blank') return;
@@ -11,8 +11,11 @@ export function createProjectLifecycleEffects({ profileStore, lifecycle, supervi
       const familiar = profileStore.read(workspaceId)?.familiarize;
       if (familiar?.sessionId && !familiar.memoryRecorded && message.sources?.includes(familiar.sessionId)) {
         const decision = supervisor.acceptance(familiar.sessionId);
-        if (decision?.verdict.outcome === 'passed' && decision.verdict.checks.every((check) => check.passed) && decision.verdict.evidenceRefs.length) {
-          const written = lifecycle.recordVerifiedFindings(workspaceId, [{ text: message.content, sourceRefs: decision.verdict.evidenceRefs }]);
+        const sourceRefs = typeof resolveEvidence === 'function'
+          ? (decision?.verdict.evidenceRefs || []).filter(ref => Boolean(resolveEvidence(ref))) : [];
+        if (decision?.verdict.outcome === 'passed' && decision.verdict.checks.every((check) => check.passed)
+          && sourceRefs.length) {
+          const written = lifecycle.recordVerifiedFindings(workspaceId, [{ text: message.content, sourceRefs }]);
           if (written.ok) {
             const profile = profileStore.read(workspaceId);
             profileStore.save({ ...profile, familiarize: { ...profile.familiarize, memoryRecorded: true } });

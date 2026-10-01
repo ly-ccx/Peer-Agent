@@ -61,6 +61,7 @@ export function decodeVerifierReport(text) {
     || (report.summary != null && typeof report.summary !== 'string')
     || (report.recommendedNextAction != null && typeof report.recommendedNextAction !== 'string')) return null;
   const strings = value => (value || []).map(item => item.trim()).filter(Boolean);
+  if (report.passed && strings(report.evidenceRefs).length === 0) return null;
   const issues = value => (value || []).map(item => ({
     ...(item.taskId ? { taskId: item.taskId } : {}),
     ...(item.criterionId ? { criterionId: item.criterionId } : {}),
@@ -75,7 +76,7 @@ export function decodeVerifierReport(text) {
   };
 }
 
-export async function runVerifierWithReport({ run, signal } = {}) {
+export async function runVerifierWithReport({ run, signal, allowedEvidenceRefs = null } = {}) {
   let previousText = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (signal?.aborted) throw new DOMException('Verifier aborted', 'AbortError');
@@ -87,10 +88,18 @@ export async function runVerifierWithReport({ run, signal } = {}) {
     }
     const text = finalVerifierText(events);
     const report = decodeVerifierReport(text);
-    if (report) return report;
     if (events.some(event => event?.channel === 'chat:stream:tool-result' && deniedResult(event.payload?.result))) {
       throw new Error('Verifier permission denied');
     }
+    const allowed = new Set(allowedEvidenceRefs || []);
+    for (const event of events) {
+      if (event?.channel !== 'chat:stream:tool-result') continue;
+      for (const ref of Array.isArray(event.payload?.evidenceRefs) ? event.payload.evidenceRefs : []) {
+        if (typeof ref === 'string' && ref.trim()) allowed.add(ref.trim());
+      }
+    }
+    if (report && (!report.passed || allowedEvidenceRefs === null
+      || report.evidenceRefs.every(ref => allowed.has(ref)))) return report;
     previousText = text.slice(0, MAX_REPAIR_TEXT);
   }
   return { ok: false, error: 'verifier_report_invalid', passed: false,

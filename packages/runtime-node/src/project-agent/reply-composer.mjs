@@ -94,6 +94,13 @@ export function composeReply(input = {}) {
   const actualStates = new Map((Array.isArray(input.sessionStates) ? input.sessionStates : [])
     .filter(item => item && typeof item.sessionId === 'string' && SESSION_STATUSES.has(item.status))
     .map(item => [item.sessionId, { sessionId: item.sessionId, status: item.status }]));
+  const missingSources = (Array.isArray(input.unreportedResults) ? input.unreportedResults : [])
+    .filter(item => anchors.includes(item?.anchorMessageId) && !sources.ids.includes(item.sessionId));
+  if (missingSources.length) {
+    return fail('result_source_required', 'Cite the completed tasks for this anchor before reporting their result.', {
+      sessionStates: missingSources.map(item => actualStates.get(item.sessionId)).filter(Boolean),
+    });
+  }
   const sessionStates = sources.ids.map(id => actualStates.get(id)).filter(Boolean);
   const claims = input.statusClaims;
   if (sources.ids.length || claims != null) {
@@ -106,6 +113,16 @@ export function composeReply(input = {}) {
     if (claims.some(item => actualStates.get(item.sessionId)?.status !== item.status)) {
       return fail('status_claim_mismatch', 'Task status differs from the persisted host state. Revise the explanation before posting.', { sessionStates });
     }
+  }
+
+  const missingVerification = (Array.isArray(input.verdicts) ? input.verdicts : [])
+    .filter(verdict => sources.ids.includes(verdict?.sessionId)
+      && actualStates.get(verdict.sessionId)?.status === 'result_ready'
+      && verdict.outcome === 'passed' && verdict.independentVerifier === 'missing');
+  if (missingVerification.length) {
+    return fail('verification_required', 'Run verify_session for the completed sources, then retry with their current status.', {
+      sessionStates: missingVerification.map(verdict => actualStates.get(verdict.sessionId)),
+    });
   }
 
   const verdicts = indexVerdicts(input.verdicts);

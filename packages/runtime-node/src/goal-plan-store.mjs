@@ -828,6 +828,14 @@ function normalizeEvidenceIndexRecord(value) {
       .filter(Boolean)
     : [];
   if (userArtifacts.length > 0) record.userArtifacts = userArtifacts;
+  if (value.bodyPreview?.kind === 'file' && typeof value.bodyPreview.text === 'string'
+    && ['local.file.read', 'local.file.list', 'local.file.search'].includes(record.capabilityId)
+    && ['read_file', 'list_files', 'search_files'].includes(record.toolName)) {
+    record.bodyPreview = {
+      kind: 'file', text: value.bodyPreview.text.slice(0, 4000),
+      truncated: value.bodyPreview.truncated === true || value.bodyPreview.text.length > 4000,
+    };
+  }
   return record;
 }
 
@@ -837,6 +845,9 @@ function mergeEvidenceIndexRecords(current, incoming) {
   if (!current) return incoming;
   if (!incoming) return current;
   const merged = { ...current };
+  if (incoming.bodyPreview && !current.bodyPreview && !EVIDENCE_WRAPPER_TOOL_NAMES.has(incoming.toolName)) {
+    merged.bodyPreview = incoming.bodyPreview;
+  }
   for (const field of ['planId', 'conversationId', 'streamId']) {
     if (incoming[field]) merged[field] = incoming[field];
   }
@@ -2459,6 +2470,7 @@ export function createGoalPlanStore({
     const artifactRefs = normalizeEvidenceRefList(entry.artifactRefs);
     const createdAt = normalizeOptionalString(entry.createdAt) || new Date().toISOString();
     const base = { createdAt };
+    if (entry.bodyPreview) base.bodyPreview = entry.bodyPreview;
     if (planId) base.planId = planId;
     if (conversationId) base.conversationId = conversationId;
     for (const field of ['streamId', 'toolCallId', 'capabilityId', 'toolName']) {

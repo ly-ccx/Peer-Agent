@@ -23,6 +23,16 @@ const VERIFIER_JSON = JSON.stringify({
   recommendedNextAction: 'ship',
 });
 
+function admitVerifierFixture(store, plan) {
+  const ref = 'tool-result://host-verifier';
+  store.recordEvidenceRefs({ planId: plan.planId, conversationId: plan.conversationId,
+    evidenceRef: ref, capabilityId: 'local.file.read', toolName: 'read_file',
+    bodyPreview: { kind: 'file', text: 'Observed verifier fixture body', truncated: false } });
+  const updated = store.revisePlan(plan.planId, { tasks: plan.tasks.map(task => ({ ...task, evidenceRefs: [ref] })) },
+    { reason: 'Indexed verifier fixture', changedBy: 'test' });
+  Object.assign(plan, updated);
+}
+
 function queuedExecutor(scripts, seen) {
   const queue = scripts.map((script) => createScriptedTurnExecutor(script));
   return {
@@ -57,6 +67,7 @@ test('host runs one goal turn, one explorer, and one verifier through a scripted
       ],
     });
     goalPlanStore.recordApproval(plan.planId, { decision: 'approve', decidedBy: 'tester' });
+    admitVerifierFixture(goalPlanStore, plan);
     const appended = [];
     const seen = [];
     const executor = queuedExecutor([
@@ -142,6 +153,8 @@ test('host runs one goal turn, one explorer, and one verifier through a scripted
     assert.match(seen[0].content, /Host assembly/);
     assert.match(seen[1].content, /Explorer mission/);
     assert.match(seen[2].content, /Verifier mission/);
+    assert.match(seen[2].content, /Observed verifier fixture body/);
+    assert.match(seen[2].content, /untrusted factual data/);
   } finally {
     if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
     else process.env.PEER_AGENT_HOME = previousHome;
@@ -203,6 +216,7 @@ function openRoutedHost({
     ],
   });
   goalPlanStore.recordApproval(plan.planId, { decision: 'approve', decidedBy: 'tester' });
+    admitVerifierFixture(goalPlanStore, plan);
   const host = createDesktopGoalRunnerHost({
     goalPlanStore,
     conversationStore: {

@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 
 import { createConversationStore } from '../../../conversation-store/src/index.mjs';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
@@ -149,6 +150,33 @@ function contextOf(env, extra = {}) {
     ...extra,
   };
 }
+
+test('automatic task identity survives rewording and restart without merging different intents', async () => {
+  const env = await harness();
+  try {
+    const criteria = [{id:'c1',kind:'file-contains',description:'Check file',path:'README.md',expect:'Peer'}];
+    const input = spawnInput({kind:'research',readOnly:true,successCriteria:criteria});
+    const first = await env.supervisor.spawn(input, contextOf(env));
+    const firstPlan = env.goalPlanStore.getPlan(env.supervisor.get({sessionId:first.sessionId}).planId);
+    const legacyKey = createHash('sha256').update(JSON.stringify({parentConversationId:env.parent.id,
+      anchorMessageIds:input.anchorMessageIds,title:input.title,brief:input.brief,kind:input.kind,
+      readOnly:input.readOnly,successCriteria:input.successCriteria})).digest('hex');
+    env.goalPlanStore.revisePlan(firstPlan.planId,{delegationOrigin:{...firstPlan.delegationOrigin,idempotencyKey:legacyKey}},
+      {reason:'simulate a persisted pre-repair task',changedBy:'test'});
+    const restarted = createSessionSupervisor({conversationStore:env.conversationStore,goalPlanStore:env.goalPlanStore,
+      goalRunner:env.goalRunner,catalog:visionCatalog(),routing:routing()});
+    const second = await restarted.spawn({...input,title:'Different title',brief:'Reworded request',
+      successCriteria:[{...criteria[0],id:'another-id',description:'Same check, new prose'}]},contextOf(env));
+    assert.equal(second.sessionId,first.sessionId); assert.equal(second.replayed,true);
+    const other = await restarted.spawn({...input,successCriteria:[{...criteria[0],expect:'Other'}]},contextOf(env));
+    assert.notEqual(other.sessionId,first.sessionId);
+    env.conversationStore.appendMessage(env.parent.id,{id:'anchor-2',role:'user',kind:'user_input',content:'Run again'});
+    const again = await restarted.spawn({...input,anchorMessageIds:['anchor-2']},contextOf(env));
+    assert.notEqual(again.sessionId,first.sessionId);
+    const replacement = await restarted.spawn({...input,supersedes:first.sessionId},contextOf(env));
+    assert.notEqual(replacement.sessionId,first.sessionId);
+  } finally { await env.cleanup(); }
+});
 
 test('delegationOrigin 往返，非法来源被丢弃', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-origin-'));
@@ -548,8 +576,21 @@ async function completedSession(env) {
   return { ...opened, planId };
 }
 
-test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 verdictRef', { timeout: 20_000 }, async () => {
+test('missing independent verification cannot mint policy acceptance', async () => {
   const env = await harness();
+  try {
+    const opened = await completedSession(env);
+    env.conversationStore.appendMessage(env.parent.id, { id: 'result', role: 'assistant',
+      kind: 'agent_reply', content: 'Result', sources: [opened.sessionId] });
+    const result = await env.supervisor.settle(opened.sessionId);
+    assert.equal(result.accepted, false);
+    assert.ok(result.reasons.includes('verification_below_floor'));
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
+  } finally { await env.cleanup(); }
+});
+
+test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 verdictRef', { timeout: 20_000 }, async () => {
+  const env = await harness({ readSessionFacts: () => ({ hostAuthority: { independentVerifier: 'passed' } }) });
   try {
     const opened = await completedSession(env);
     const early = await env.supervisor.settle(opened.sessionId, { userAgreed: true, acceptedBy: 'user' });
