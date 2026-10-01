@@ -127,7 +127,7 @@ test('the default LocalToolHost dispatches through supervisor, Grant and Evidenc
   const env = harness();
   try {
     await env.submit('anchor', 'read project');
-    const opened = await tool(env, 'spawn_session', { anchorMessageIds: ['input-anchor'], title: 'Read', brief: 'Read files', kind: 'research', readOnly: true, successCriteria: ['Read'] });
+    const opened = await tool({ ...env, currentInputAnchors: ['input-anchor'] }, 'spawn_session', { anchorMessageIds: ['input-anchor'], title: 'Read', brief: 'Read files', kind: 'research', readOnly: true, successCriteria: ['Read'] });
     assert.equal(opened.success, true, JSON.stringify(opened));
     assert.equal(opened.execution.grant.granted, true); assert.equal(opened.execution.result.status, 'success');
     const output = JSON.parse(opened.output);
@@ -366,6 +366,7 @@ test('production failed dependency projects a question and an answer does not st
   try {
     await env.submit('dep-anchor','处理依赖');
     const args={anchorMessageIds:['input-dep-anchor'],title:'前置任务',brief:'前置任务',kind:'research',readOnly:true,successCriteria:['读取内容']};
+    env.currentInputAnchors=args.anchorMessageIds;
     const dep=JSON.parse((await tool(env,'spawn_session',args)).output);
     const child=JSON.parse((await tool(env,'spawn_session',{...args,title:'后续任务',brief:'等待签收',dependsOn:[dep.sessionId]})).output);
     await env.api.supervisor.cancel({sessionId:dep.sessionId});
@@ -511,4 +512,70 @@ test('production file observation, proposal card approval, task quota and explic
   env.currentInputAnchors=['input-start-proposal'];env.objectiveWakeEvents=[];env.objectiveWakeIds=[];
   const approved=JSON.parse((await tool(env,'spawn_session',{...input,title:'Changed by model'},3)).output);assert.equal(approved.ok,true,JSON.stringify(approved));assert.equal(env.api.supervisor.get({sessionId:approved.sessionId}).title,'Read README');assert.equal(env.api.objectives.list(req).items[0].usage.autoSessions,1);
  }finally{env.dispose();}
+});
+
+
+test('actual SDK reports survive restart and suppress repeated wake delivery while allowing human followups', async () => {
+  let env, current, sessionId;
+  const send=async input=>{
+    if(!sessionId)return {terminalStatus:'done',text:'Ready'};
+    const args={text:'Verified project',replyTo:[`lifecycle-research-${current.bot.workspaceId}`],sources:[sessionId],statusClaims:[{sessionId,status:current.api.supervisor.get({sessionId}).status}]};
+    const result=await tool({...current,turnId:input.streamId,currentInputAnchors:input.turnProfile.context.inputAnchors?.map(a=>a.messageId)||[]},'post_reply',args);
+    assert.equal(result.execution.result.status,'success');
+    input.webContents.send('chat:stream:tool-call',{toolCallId:'report',tool:'post_reply',args});
+    input.webContents.send('chat:stream:tool-result',{toolCallId:'report',result:JSON.parse(result.output)});
+    return {terminalStatus:'done'};
+  };
+  env=harness({send,verify:async()=>({passed:true,evidenceRefs:['ev'],verifierModel:provider.id})});current=env;
+  try{
+    sessionId=(await env.invoke('start-familiarize')).profile.familiarize.sessionId;
+    const planId=env.api.supervisor.get({sessionId}).planId;
+    env.plans.revisePlan(planId,{tasks:[{taskId:'read',title:'Read',status:'completed',evidenceRefs:['ev']}]},{reason:'read',changedBy:'test'});
+    env.plans.recordManualConfirmation(planId,{decision:'approve',criterionIds:['c1','c2'],decidedBy:'user'});
+    env.plans.setPlanStatus(planId,'completed');
+    await tool(env,'verify_session',{sessionId});
+    const event={eventId:'wake-first',kind:'session_verified',sessionId,at:new Date().toISOString()};
+    env.api.host.inbox.append(env.bot.workspaceId,[event]);await env.api.host.sync([env.bot.workspaceId]);
+    assert.equal(env.history().filter(m=>m.content==='Verified project').length,1);
+    // Persisted snapshots are the deduplication source; no in-memory composer survives this restart.
+    env.dispose();current=harness({dataHome:env.home,folder:env.project,send});
+    await current.api.host.sync([current.bot.workspaceId]);
+    current.api.host.inbox.append(current.bot.workspaceId,[{...event,eventId:'wake-repeat'}]);await current.api.host.sync([current.bot.workspaceId]);
+    assert.equal(current.history().filter(m=>m.content==='Verified project').length,1);
+    assert.equal(current.history().some(m=>m.content?.includes('回复未通过宿主校验')),false);
+    await current.submit('followup','再告诉我结果');
+    assert.equal(current.history().filter(m=>m.content==='Verified project').length,2);
+  }finally{env.dispose();if(current!==env)current.dispose();}
+});
+
+test('production LocalToolHost exposes resume and priority after a real supersession', async () => {
+  const env = harness();
+  const args = { title: 'Original', brief: 'Read the original context', kind: 'research', readOnly: true, successCriteria: ['Read'] };
+  try {
+    await env.submit('continuity-start', 'Start original');
+    const original = JSON.parse((await tool({ ...env, currentInputAnchors: ['input-continuity-start'] }, 'spawn_session', {
+      ...args, anchorMessageIds: ['input-continuity-start'],
+    })).output);
+    const before = env.plans.getPlan(original.planId || env.api.supervisor.get({ sessionId: original.sessionId }).planId);
+    await env.submit('continuity-replace', 'Replace original');
+    const replacement = JSON.parse((await tool({ ...env, currentInputAnchors: ['input-continuity-replace'] }, 'spawn_session', {
+      ...args, title: 'Replacement', anchorMessageIds: ['input-continuity-replace'], supersedes: original.sessionId,
+    })).output);
+    assert.equal(env.api.supervisor.get({ sessionId: original.sessionId }).status, 'superseded');
+    await env.submit('continuity-resume', 'Resume original');
+    const ctx = { ...env, currentInputAnchors: ['input-continuity-resume'] };
+    const resumed = await tool(ctx, 'resume_session', { sessionId: original.sessionId, anchorMessageId: 'input-continuity-resume' });
+    assert.equal(resumed.success, true, resumed.output);
+    assert.equal(resumed.execution.grant.granted, true);
+    assert.equal(resumed.execution.result.status, 'success');
+    assert.equal(env.api.supervisor.get({ sessionId: replacement.sessionId }).status, 'superseded');
+    const restored = env.plans.getPlan(before.planId);
+    assert.equal(restored.conversationId, before.conversationId);
+    assert.equal(restored.goal, before.goal);
+    assert.deepEqual(restored.successCriteria, before.successCriteria);
+    const changed = await tool(ctx, 'reprioritize_session', { sessionId: original.sessionId, priority: 'low', anchorMessageId: 'input-continuity-resume' });
+    assert.equal(changed.success, true, changed.output);
+    assert.equal(changed.execution.grant.granted, true);
+    assert.equal(env.plans.getPlan(before.planId).delegationOrigin.priority, 'low');
+  } finally { env.dispose(); }
 });

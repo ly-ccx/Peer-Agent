@@ -1,4 +1,5 @@
 /** Persist project lifecycle facts and settle results only after a visible reply exists. */
+import { prepareReplyReport } from '@peer-agent/runtime-node';
 export function createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast, resolveEvidence, objectiveService=null }) {
   return {
     onInputsConsumed: (workspaceId, inputs) => {
@@ -35,8 +36,13 @@ export function createProjectLifecycleEffects({ profileStore, lifecycle, supervi
           const session = supervisor.get({ sessionId });
           return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status }] : [];
         });
+        const settled = { ...replyMeta, sessionStates };
+        if (Array.isArray(replyMeta?.reportFactKeys)) {
+          const report = prepareReplyReport({ workspaceId, message: { ...message, meta: settled } });
+          settled.reportFactKeys = [...new Set([...replyMeta.reportFactKeys, ...report.keys])];
+        }
         conversationStore.updateMessageById?.(message.conversationId || resolveConversationId(workspaceId), message.id, {
-          meta: { ...replyMeta, sessionStates },
+          meta: settled,
         });
       }
       broadcast?.('project-agent:conversation-changed', { workspaceIds: [workspaceId] });

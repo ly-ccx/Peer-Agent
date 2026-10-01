@@ -40,3 +40,11 @@ test('卡片动作只调用约定的 IPC', () => {
     'projectAgentRetry',
   ]);
 });
+
+
+test('conversation refresh includes latest host cards and queues changes during reads', () => {
+  const hook=source('project-agent/state/useBotConversation.ts');
+  assert.match(hook,/onProjectAgentChanged/);
+  assert.match(hook,/createConversationRefresh/);
+  assert.doesNotMatch(hook,/appendAfterTail/);
+});

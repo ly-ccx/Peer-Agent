@@ -74,6 +74,8 @@ export function finishAgentTurn({
     return { messages, replied: true };
   }
   if (toolCallsOf(storedRounds).some(call => call.name === 'post_reply')) {
+    const calls = toolCallsOf(storedRounds).filter(call => call.name === 'post_reply');
+    if (calls.every(call => successfulSuppression(call.result))) return { messages, replied: false };
     messages.push(unavailableCard(turnId, '回复未通过宿主校验', plan?.turnProfile?.workspaceId));
     return { messages, replied: false, failed: true };
   }
@@ -216,7 +218,14 @@ function surfacingOf(result) {
 }
 
 function postReplies(rounds) {
-  return toolCallsOf(rounds).filter((call) => call.name === 'post_reply' && acceptedReplyResult(call.result));
+  return toolCallsOf(rounds).filter((call) => call.name === 'post_reply' && acceptedReplyResult(call.result) && !successfulSuppression(call.result));
+}
+
+function successfulSuppression(result) {
+  if (!acceptedReplyResult(result)) return false;
+  if (typeof result === 'string') { try { return successfulSuppression(JSON.parse(result)); } catch { return false; } }
+  const nested = result?.output ?? result?.outputPreview?.legacyResult ?? result?.legacyResult;
+  return nested != null ? successfulSuppression(nested) : result?.suppressed === true;
 }
 
 export function acceptedReplyResult(result) {

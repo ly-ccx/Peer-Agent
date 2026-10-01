@@ -281,6 +281,7 @@ export {
   createProjectAgentRunner,
 } from './project-agent/runner.mjs';
 export { composeReply } from './project-agent/reply-composer.mjs';
+export { prepareReplyReport } from './project-agent/reply-report-facts.mjs';
 export {
   BOT_LEVELS,
   GLOBAL_LEVELS,

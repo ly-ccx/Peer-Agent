@@ -12,6 +12,7 @@ export type PeerIconName =
   | 'send'
   | 'terminal'
   | 'info'
+  | 'fileText'
   | 'stop';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
@@ -30,6 +31,7 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   ),
   terminal: <><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3m6 0h4" /></>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v.01" /></>,
+  fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8m-8 4h6" /></>,
   stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   chevronUp: <path d="m6 15 6-6 6 6" />,

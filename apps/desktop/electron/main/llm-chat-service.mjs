@@ -1673,6 +1673,9 @@ export function createLlmChatService({
       toolContext.onToolExecution = agentProgress?.onToolExecution ?? null;
       toolContext.objectiveWakeIds = projectAgentTurn ? [...new Set((profile?.context?.events || []).filter(event=>event.kind==='objective_signal'&&event.workspaceId===profile.workspaceId).map(event=>event.objectiveId).filter(id=>typeof id==='string'))] : [];
       toolContext.objectiveWakeEvents = projectAgentTurn ? (profile?.context?.events || []).filter(event=>event.kind==='objective_signal'&&event.workspaceId===profile.workspaceId).map(event=>structuredClone(event)) : [];
+      toolContext.sessionWakeIds = projectAgentTurn ? [...new Set((profile?.context?.events || [])
+        .filter(event => event.workspaceId === profile.workspaceId && ['result_ready', 'session_verified'].includes(event.kind))
+        .map(event => event.sessionId).filter(id => typeof id === 'string'))] : [];
       // 引用范围只看本回合对话里的 quoteRefs。复用的 toolContext 按回合覆写。
       toolContext.messages = null;
       if (projectAgentTurn) {

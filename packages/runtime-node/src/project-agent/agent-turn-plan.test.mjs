@@ -212,3 +212,16 @@ test('current input anchors cannot be inherited from context on wake or later us
   assert.deepEqual(user.turnProfile.context.inputAnchors, [{ messageId: 'input-new', text: 'ordinary' }]);
   assert.equal(context.inputAnchors[0].messageId, 'old');
 });
+
+
+test('a successful suppressed report ends quietly without a fabricated reply or unavailable card', () => {
+  const result=finishAgentTurn({turnId:'quiet',plan:planAgentTurn({kind:'wake'}),rounds:[{toolCalls:[{
+    name:'post_reply',input:{text:'Already reported'},result:{ok:true,output:{ok:true,suppressed:true,reason:'facts_already_reported'}}
+  }]}]});
+  assert.equal(result.failed,undefined);assert.equal(result.replied,false);
+  assert.deepEqual(result.messages.map(message=>message.kind),['agent_turn']);
+  const failed=finishAgentTurn({turnId:'bad',plan:planAgentTurn({kind:'wake'}),rounds:[{toolCalls:[{
+    name:'post_reply',result:{ok:false,suppressed:true,error:'denied'}
+  }]}]});
+  assert.equal(failed.failed,true);
+});
