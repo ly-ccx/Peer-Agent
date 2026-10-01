@@ -101,6 +101,7 @@ export function registerDesktopProjectAgent({
   releaseLease = null,
   hostLeases = null,
   getSettings,
+  readRuntimePolicy = getSettings,
   mergeSettings,
   dialog,
   BrowserWindow,
@@ -114,10 +115,10 @@ export function registerDesktopProjectAgent({
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   let host = null;
   let objectiveWatches=null;
-  const runtimeEnabled = () => enabled() && getSettings()?.projectAgent?.shell !== 'classic';
+  const runtimeEnabled = () => enabled() && readRuntimePolicy()?.projectAgent?.shell !== 'classic';
   const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
-  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => getSettings()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
+  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
   function readEvidenceBody(evidenceRef) {
     try {
       const record = goalPlanStore.findEvidenceIndexRecords?.([evidenceRef])?.[0];
@@ -192,7 +193,7 @@ export function registerDesktopProjectAgent({
   const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
   const uninstallDelivery = installDeliveryFacts({
     read(view) {
-      const settings = normalizeProjectAgentSettings(getSettings()?.projectAgent);
+      const settings = normalizeProjectAgentSettings(readRuntimePolicy()?.projectAgent);
       const level = profileStore.read(view?.workspaceId)?.proactivity;
       return {
         ...projectFacts.delivery(view?.workspaceId),
@@ -214,7 +215,7 @@ export function registerDesktopProjectAgent({
   });
   const uninstallMemory = installMemoryGate({
     enabled(workspaceId) {
-      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const settings = typeof readRuntimePolicy === 'function' ? readRuntimePolicy() : null;
       const profile = workspaceId ? profileStore.read(workspaceId) : null;
       return memoryUseEnabled({ settings, profile });
     },
@@ -222,9 +223,9 @@ export function registerDesktopProjectAgent({
   const memoryCurator = createMemoryCurator({
     store: memoryStore,
     episodes: createEpisodeLog({ rootDir: dataHome }),
-    learnPreferences: () => getSettings()?.memory?.learnPreferences !== false,
+    learnPreferences: () => readRuntimePolicy()?.memory?.learnPreferences !== false,
     memoryEnabled: (workspaceId) => {
-      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const settings = typeof readRuntimePolicy === 'function' ? readRuntimePolicy() : null;
       const profile = workspaceId ? profileStore.read(workspaceId) : null;
       return memoryUseEnabled({ settings, profile });
     },
@@ -377,13 +378,13 @@ export function registerDesktopProjectAgent({
     },
     onCurator: (info) => memoryCurator.consider(info),
     onMaintenance: info => {
-      if (ownsProject(info.workspaceId) && memoryUseEnabled({ settings: getSettings(), profile: profileStore.read(info.workspaceId) })) memoryMaintenance.runDue(info);
+      if (ownsProject(info.workspaceId) && memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(info.workspaceId) })) memoryMaintenance.runDue(info);
     },
     onStatus: (workspaceId) => {
       if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
     },
     inputQueue,
-    readSettings: getSettings,
+    readSettings: readRuntimePolicy,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
     readFacts: (workspaceId) => delegationFactsForWorkspace(
       (goalPlanStore.listPlans?.() || [])

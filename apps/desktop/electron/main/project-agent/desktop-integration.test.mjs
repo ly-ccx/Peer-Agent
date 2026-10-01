@@ -19,7 +19,7 @@ const provider = { id: 'configured', provider: 'openai', model: 'test-model', en
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
 after(() => { if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome; rmSync(root, { recursive: true, force: true }); });
 
-function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, holdsLease = () => true, projectCount = 1 } = {}) {
+function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, readRuntimePolicy = null, holdsLease = () => true, projectCount = 1 } = {}) {
   const home = dataHome || mkdtempSync(path.join(root, 'home-'));
   const project = folder || path.join(home, 'workspace');
   mkdirSync(project, { recursive: true });
@@ -39,7 +39,7 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
     conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
       ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
-    holdsLease, getSettings: () => { settingsReads++; return { ...settings, workspaces }; }, mergeSettings() {},
+    holdsLease, getSettings: () => { settingsReads++; return { ...settings, workspaces }; }, ...(readRuntimePolicy ? { readRuntimePolicy } : {}), mergeSettings() {},
     listModels: () => configured ? [provider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
   });
   const handlers = new Map();
@@ -53,6 +53,18 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
       await api.host.sync([bot.workspaceId]);
     }, dispose: () => api.dispose() };
 }
+
+test('200-bot maintenance uses a fresh runtime policy port and still revokes all runners on classic switch', async () => {
+  const policy={projectAgent:{shell:'bots'},memory:{enabled:true}};
+  const env=harness({projectCount:200,settings:{projectAgent:{shell:'bots'}},readRuntimePolicy:()=>policy});
+  try {
+    const before=env.settingsReads();await env.api.host.sync();
+    const ids=env.api.listItems().map(item=>item.workspaceId);assert.ok(ids.every(id=>env.api.host.runnerFor(id)));
+    assert.ok(env.settingsReads()-before<20,'maintenance must not request full identity migration per bot');
+    policy.projectAgent.shell='classic';await env.api.host.sync();assert.ok(ids.every(id=>!env.api.host.runnerFor(id)));
+    assert.equal(env.calls.length,0);
+  } finally {env.dispose();}
+});
 
 test('targeted wake checks global eligibility once while retaining 200 lease-owning bots', async () => {
   const settings = { projectAgent: { shell: 'bots' } };
