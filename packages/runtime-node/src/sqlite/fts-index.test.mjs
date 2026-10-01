@@ -66,3 +66,27 @@ test('a corrupt database file is quarantined and replaced', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('bulk rebuild retains the last duplicate value, empty-body removal, metadata and atomic rollback', () => {
+  const fixture = openFixture();
+  try {
+    fixture.index.upsert('old', 'old searchable sentinel', { old: true });
+    fixture.index.rebuild([
+      { id: 'same', body: 'obsolete phrase', meta: { version: 1 } },
+      { id: 'same', body: '最终检索结果', meta: { version: 2 } },
+      { id: 7, body: 'obsolete numeric duplicate', meta: {} },
+      { id: '7', body: '', meta: { empty: true } },
+    ]);
+    assert.equal(fixture.index.count(), 2);
+    assert.equal(fixture.index.search('obsolete').length, 0);
+    assert.equal(fixture.index.search('old searchable').length, 0);
+    assert.deepEqual(fixture.index.search('最终检索')[0].meta, { version: 2 });
+    assert.throws(() => fixture.index.rebuild([
+      { id: 'partial', body: 'partial replacement', meta: {} },
+      { id: 'bad', body: 'bad replacement', meta: { unserializable: 1n } },
+    ]));
+    assert.equal(fixture.index.count(), 2);
+    assert.equal(fixture.index.search('partial replacement').length, 0);
+    assert.equal(fixture.index.search('最终检索')[0].id, 'same');
+  } finally { fixture.db.close(); rmSync(fixture.dir, { recursive: true, force: true }); }
+});

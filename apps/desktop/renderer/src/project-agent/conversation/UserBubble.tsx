@@ -26,6 +26,8 @@ export function UserBubble({
   return (
     <article className={`bot-user${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`} data-kind="user_input">
       <div className="bot-user-marks">
+        {message.pending === 'received' || (!message.pending && message.inputId && !replied && message.dispositions.length === 0)
+          ? <span>{i18n.t('projectAgent.chat.received')}</span> : null}
         {message.pending === 'sending' ? <span>{i18n.t('projectAgent.chat.sending')}</span> : null}
         {message.pending === 'failed' && message.inputId ? (
           <>

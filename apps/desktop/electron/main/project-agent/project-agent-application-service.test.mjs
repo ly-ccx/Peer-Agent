@@ -46,6 +46,7 @@ test('开关关闭时每个通道都拒绝，并且不写文件', async () => {
       enabled: () => false,
       directory: {
         list: throwing('list'),
+        query: throwing('query'),
         get: throwing('get'),
         search: throwing('search'),
         readConversation: throwing('read'),
@@ -195,6 +196,21 @@ test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', as
   assert.equal(events.length, 1);
   assert.equal(events[0].channel, 'project-agent:changed');
   assert.deepEqual(events[0].payload.workspaceIds, ['ws-1', 'ws-2']);
+});
+
+test('unchanged read receipt retains viewing presence without broadcasting another refresh', () => {
+  const scheduled = [], viewing = [];
+  let changed = true;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    directory: { markRead: () => ({ ok: true, at: 'now', messageId: 'last', changed }) },
+    schedule: fn => { scheduled.push(fn); return 1; }, onViewing: id => viewing.push(id) });
+  assert.deepEqual(service.markRead({ workspaceId: 'ws-1' }), { ok: true, at: 'now', messageId: 'last' });
+  assert.equal(scheduled.length, 1);
+  scheduled.shift()();
+  changed = false;
+  assert.deepEqual(service.markRead({ workspaceId: 'ws-1' }), { ok: true, at: 'now', messageId: 'last' });
+  assert.equal(scheduled.length, 0);
+  assert.deepEqual(viewing, ['ws-1', 'ws-1']);
 });
 
 test('提交输入入队并单独通知对话变化', async () => {
@@ -681,6 +697,31 @@ test('同一语料指纹下连续搜索不再重读', () => {
   stamp = 'v2';
   assert.equal(service.search({ query: '咖啡' }).hits.length, 1);
   assert.equal(reads, 2);
+});
+
+test('search reuses the full query catalog while retaining nonmatching bot message hits', () => {
+  const catalog = [
+    { workspaceId: 'ws-1', profile: { displayName: 'Alpha' }, preview: '' },
+    { workspaceId: 'ws-2', profile: { displayName: 'Beta' }, preview: '' },
+  ];
+  let projections = 0, reads = 0, stamp = 'v1';
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    directory: {
+      query: () => { projections++; return { items: [], catalog }; },
+      search: throwing('duplicate directory projection'),
+    }, corpusStamp: () => stamp,
+    readSearchCorpus: (snapshot) => {
+      assert.equal(snapshot, catalog); reads++;
+      return { bots: snapshot, messages: [{ workspaceId: 'ws-2',
+        message: { id: 'message-beta', kind: 'user_input', role: 'user', content: 'needle in an unmatched bot' } }] };
+    },
+  });
+  assert.equal(service.search({ query: 'needle' }).hits[0].workspaceId, 'ws-2');
+  assert.equal(projections, 1); assert.equal(reads, 1);
+  service.search({ query: 'needle' });
+  assert.equal(projections, 2); assert.equal(reads, 1);
+  stamp = 'v2'; service.search({ query: 'needle' });
+  assert.equal(projections, 3); assert.equal(reads, 2, 'changed source facts must refresh the index');
 });
 
 test('restoration click creates one durable user anchor and refuses cross-project or offline actions', async () => {

@@ -1131,14 +1131,23 @@ export function createConversationStore(options = {}) {
    * Never use this read as an authorization check.
    */
   function getPersistedConversationHistory(id) {
-    const meta = readIndex().find((entry) => entry.id === id);
-    if (!meta) return null;
-    return readPersistedHistoryFiles({
-      historyFile: convFile(id),
-      sidecarFile: streamPatchFile(id),
-      conversationId: meta.id,
-      contentRevision: meta.contentRevision,
-    });
+    return getPersistedConversationHistories([id]).get(id) ?? null;
+  }
+
+  function getPersistedConversationHistories(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).filter(id => typeof id === 'string' && id));
+    const result = new Map();
+    if (!wanted.size) return result;
+    const metadata = new Map();
+    for (const meta of readIndex()) if (wanted.has(meta.id) && !metadata.has(meta.id)) metadata.set(meta.id, meta);
+    for (const id of wanted) {
+      const meta = metadata.get(id);
+      result.set(id, meta ? readPersistedHistoryFiles({
+        historyFile: convFile(id), sidecarFile: streamPatchFile(id),
+        conversationId: meta.id, contentRevision: meta.contentRevision,
+      }) : null);
+    }
+    return result;
   }
 
   /** Internal capture API: runtimeState must be resolved by the authorized host.
@@ -1823,6 +1832,7 @@ export function createConversationStore(options = {}) {
     createConversation: changed(createConversation, 'created'),
     getConversation,
     getPersistedConversationHistory,
+    getPersistedConversationHistories,
     resolveSelectionReference,
     createSelectionChild: changed(createSelectionChild, 'created'),
     createChildConversation: changed(createChildConversation, 'created'),

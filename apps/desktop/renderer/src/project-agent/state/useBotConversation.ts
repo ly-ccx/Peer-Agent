@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { createConversationRefresh } from './conversationRefresh.ts';
+import { createConversationPager } from './conversationPager.ts';
 import {
+  acknowledgeInput,
   applyOptimistic,
-  CONVERSATION_PAGE_SIZE,
   conversationRows,
-  mergeConversationPage,
-  normalizeBotMessage,
   optimisticInputMessageId,
   showAgentThinking,
   type BotChatMessage,
@@ -59,21 +58,15 @@ function familiarizeMessage(offer: FamiliarizeOffer, createdAt: string): BotChat
   };
 }
 
-function pageMessages(raw: readonly Record<string, unknown>[] | undefined): BotChatMessage[] {
-  const normalized: BotChatMessage[] = [];
-  for (const item of raw ?? []) {
-    const message = normalizeBotMessage(item);
-    if (message) normalized.push(message);
-  }
-  return normalized;
-}
-
 export function useBotConversation(workspaceId: string) {
   const [messages, setMessages] = useState<readonly BotChatMessage[]>([]);
   const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
   const [pending, setPending] = useState<readonly PendingBotInput[]>([]);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [awaitingSince, setAwaitingSince] = useState<string | null>(null);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [olderError, setOlderError] = useState(false);
+  const pagerRef = useRef<ReturnType<typeof createConversationPager> | null>(null);
   const generationRef = useRef(0);
 
   const dropEchoed = useCallback((next: readonly BotChatMessage[]) => {
@@ -82,36 +75,6 @@ export function useBotConversation(workspaceId: string) {
     ))));
   }, []);
 
-  const load = useCallback(async (id: string, ticket: number) => {
-    let before: string | null = null;
-    let all: BotChatMessage[] = [];
-    try {
-      for (let page = 0; page < 40; page += 1) {
-        const result = await clientApi.projectAgentReadConversation({
-          workspaceId: id,
-          limit: CONVERSATION_PAGE_SIZE,
-          ...(before ? { before } : {}),
-        });
-        if (generationRef.current !== ticket) return;
-        if (!result?.ok) {
-          setStatus('error');
-          return;
-        }
-        const raw = result.messages ?? [];
-        if (page === 0) setFamiliarizeOffer(readFamiliarizeOffer(result.familiarizeOffer));
-        all = mergeConversationPage(all, pageMessages(raw));
-        if (!result.nextCursor) break;
-        before = result.nextCursor;
-      }
-      if (generationRef.current !== ticket) return;
-      setMessages(all);
-      dropEchoed(all);
-      setStatus('ready');
-    } catch {
-      if (generationRef.current === ticket) setStatus('error');
-    }
-  }, [dropEchoed]);
-
   useEffect(() => {
     const ticket = generationRef.current + 1;
     generationRef.current = ticket;
@@ -119,9 +82,24 @@ export function useBotConversation(workspaceId: string) {
     setFamiliarizeOffer(null);
     setPending([]);
     setAwaitingSince(null);
+    setHasOlder(false);
+    setOlderError(false);
     setStatus('loading');
+    const pager = createConversationPager({
+      read: params => clientApi.projectAgentReadConversation({ workspaceId, ...params }),
+      publish: snapshot => {
+        if (generationRef.current !== ticket) return;
+        setMessages(snapshot.messages);
+        dropEchoed(snapshot.messages);
+        setHasOlder(snapshot.hasOlder);
+        if ('familiarizeOffer' in snapshot) setFamiliarizeOffer(readFamiliarizeOffer(snapshot.familiarizeOffer));
+        setStatus('ready');
+      },
+    });
+    pagerRef.current = pager;
     const refresh = createConversationRefresh(async () => {
-      await load(workspaceId, ticket);
+      try { await pager.refresh(); }
+      catch { if (generationRef.current === ticket) setStatus('error'); }
       if (generationRef.current === ticket) {
         void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
       }
@@ -136,11 +114,25 @@ export function useBotConversation(workspaceId: string) {
     void refresh.request();
     return () => {
       refresh.stop();
+      pager.stop();
+      if (pagerRef.current === pager) pagerRef.current = null;
       generationRef.current += 1;
       offMessages?.();
       offFacts?.();
     };
-  }, [load, workspaceId]);
+  }, [dropEchoed, workspaceId]);
+
+  const loadOlder = useCallback(async () => {
+    const pager = pagerRef.current;
+    setOlderError(false);
+    try { await pager?.older(); }
+    catch { if (pagerRef.current === pager) setOlderError(true); }
+  }, []);
+  const locateMessage = useCallback(async (id: string) => {
+    const pager = pagerRef.current;
+    try { await pager?.locate(id); }
+    catch { if (pagerRef.current === pager) setOlderError(true); }
+  }, []);
 
   useEffect(() => {
     if (!awaitingSince) return;
@@ -151,6 +143,7 @@ export function useBotConversation(workspaceId: string) {
   }, [awaitingSince, messages]);
 
   const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string) => {
+    const ticket = generationRef.current;
     setPending((current) => {
       const rest = current.filter((item) => item.inputId !== inputId);
       return [...rest, { inputId, text, quoteRefs, createdAt, state: 'sending' }];
@@ -163,14 +156,17 @@ export function useBotConversation(workspaceId: string) {
         surface: 'desktop',
         ...(quoteRefs.length > 0 ? { quoteRefs } : {}),
       });
+      if (generationRef.current !== ticket) return;
       if (!result?.ok) {
         setPending((current) => current.map((item) => (
           item.inputId === inputId ? { ...item, state: 'failed' } : item
         )));
         return;
       }
+      setPending(current => acknowledgeInput(current, inputId));
       setAwaitingSince(createdAt);
     } catch {
+      if (generationRef.current !== ticket) return;
       setPending((current) => current.map((item) => (
         item.inputId === inputId ? { ...item, state: 'failed' } : item
       )));
@@ -201,6 +197,10 @@ export function useBotConversation(workspaceId: string) {
     messages: shown,
     rows,
     thinking: showAgentThinking(pending, awaitingSince !== null),
+    hasOlder,
+    olderError,
+    loadOlder,
+    locateMessage,
     send,
     retry,
   };

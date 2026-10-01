@@ -19,11 +19,14 @@ const provider = { id: 'configured', provider: 'openai', model: 'test-model', en
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
 after(() => { if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome; rmSync(root, { recursive: true, force: true }); });
 
-function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, holdsLease = () => true } = {}) {
+function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, holdsLease = () => true, projectCount = 1 } = {}) {
   const home = dataHome || mkdtempSync(path.join(root, 'home-'));
   const project = folder || path.join(home, 'workspace');
   mkdirSync(project, { recursive: true });
   if (!blank) writeFileSync(path.join(project, 'README.md'), 'test project');
+  const workspaces = [{ path: project, name: 'test' }];
+  for (let i = 1; i < projectCount; i++) { const folder = path.join(home, `workspace-${i}`); mkdirSync(folder); workspaces.push({ path: folder, name: `test-${i}` }); }
+  let settingsReads = 0;
   const conversations = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const plans = createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') });
   const calls = []; const routes = []; const starts = []; const events = [];
@@ -36,20 +39,57 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
     conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
       ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
-    holdsLease, getSettings: () => ({ ...settings, workspaces: [{ path: project, name: 'test' }] }), mergeSettings() {},
+    holdsLease, getSettings: () => { settingsReads++; return { ...settings, workspaces }; }, mergeSettings() {},
     listModels: () => configured ? [provider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
   });
   const handlers = new Map();
   for (const registration of registrations) registration.register({ handle(channel, fn) { handlers.set(channel, fn); } });
   const bot = api.listItems()[0];
   const invoke = (channel, payload = {}) => handlers.get(`project-agent:${channel}`)({}, { workspaceId: bot.workspaceId, ...payload });
-  return { executor, home, project, api, bot, plans, conversations, calls, routes, starts, events, invoke,
+  return { executor, home, project, api, bot, plans, conversations, calls, routes, starts, events, invoke, settingsReads: () => settingsReads,
     history: () => conversations.getPersistedConversationHistory(bot.profile.agentConversationId).messages,
     async submit(inputId = crypto.randomUUID(), text = 'hello') {
       api.host.inputQueue.submitInput({ workspaceId: bot.workspaceId, inputId, text, surface: 'desktop' });
       await api.host.sync([bot.workspaceId]);
     }, dispose: () => api.dispose() };
 }
+
+test('targeted wake checks global eligibility once while retaining 200 lease-owning bots', async () => {
+  const settings = { projectAgent: { shell: 'bots' } };
+  const env = harness({ projectCount: 200, settings });
+  try {
+    await env.api.host.sync();
+    const ids = env.api.listItems().map(item => item.workspaceId);
+    assert.equal(ids.length, 200);
+    const before = env.settingsReads();
+    await env.api.host.sync([env.bot.workspaceId]);
+    assert.ok(env.settingsReads() - before < 20, 'one input must not reread settings for every idle bot');
+    assert.ok(ids.every(id => env.api.host.runnerFor(id)));
+    settings.projectAgent.shell = 'classic';
+    await env.api.host.sync([env.bot.workspaceId]);
+    assert.ok(ids.every(id => !env.api.host.runnerFor(id)), 'classic mode must revoke all local bot eligibility');
+  } finally { env.dispose(); }
+});
+
+test('200-bot search reads classic conversation and Goal catalogs once per projection', () => {
+  const env = harness({ projectCount: 200 });
+  let conversationReads = 0, planReads = 0, batchReads = 0, singleReads = 0;
+  const readConversations = env.conversations.listConversations;
+  const readPlans = env.plans.listPlans;
+  const readBatch = env.conversations.getPersistedConversationHistories;
+  const readSingle = env.conversations.getPersistedConversationHistory;
+  env.conversations.listConversations = (...args) => { conversationReads++; return readConversations(...args); };
+  env.plans.listPlans = (...args) => { planReads++; return readPlans(...args); };
+  env.conversations.getPersistedConversationHistories = (...args) => { batchReads++; return readBatch(...args); };
+  env.conversations.getPersistedConversationHistory = (...args) => { singleReads++; return readSingle(...args); };
+  try {
+    assert.equal(env.invoke('search', { query: 'test' }).ok, true);
+    assert.equal(conversationReads, 1, 'one canonical metadata read for the projection');
+    assert.ok(planReads <= 2, 'one projection read and at most one corpus rebuild read');
+    assert.equal(batchReads, 2, 'one directory read and one initial corpus read');
+    assert.equal(singleReads, 0, 'no repeated index read for each bot');
+  } finally { env.dispose(); }
+});
 
 async function tool(env, name, args, ordinal = 1) {
   const { registry, projection } = createRuntimeToolProjection({ projectionOptions: { mode: 'project_agent' } });

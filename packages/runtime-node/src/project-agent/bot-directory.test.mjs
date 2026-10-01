@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -81,6 +81,32 @@ function harness(root, directoryOptions = {}) {
   return { entry, directory, conversationId, conversationStore };
 }
 
+test('unchanged read receipt does not rewrite its cursor; same-time new message still advances its identity', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationStore, conversationId } = harness(root);
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    const file = path.join(root, 'project-runtime', entry.workspaceId, 'read-cursor.json');
+    const before = statSync(file, { bigint: true });
+    assert.equal(directory.markRead(entry.workspaceId).changed, false);
+    assert.equal(statSync(file, { bigint: true }).ino, before.ino, 'no atomic rewrite for an unchanged receipt');
+    conversationStore.appendMessage(conversationId, { id: 'same-time-new', role: 'assistant', kind: 'agent_reply', content: 'new', createdAt: '2026-09-27T03:00:00.000Z' });
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).messageId, 'same-time-new');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('an empty conversation retains its read receipt across clock changes', () => {
+  const root = tempRoot();
+  let time = '2026-09-27T07:00:00.000Z';
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => [], now: () => new Date(time) });
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    time = '2026-09-27T08:00:00.000Z';
+    assert.deepEqual(directory.markRead(entry.workspaceId), { ok: true, at: '2026-09-27T07:00:00.000Z', messageId: null, changed: false });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('列表项截断最后一条可见消息，并计入批准、提问、确认和进行中', () => {
   const root = tempRoot();
   try {
@@ -97,6 +123,65 @@ test('列表项截断最后一条可见消息，并计入批准、提问、确�
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('query returns a complete catalog and matched items from one current projection', () => {
+  const root = tempRoot();
+  let reads = 0;
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => { reads++; return []; } });
+    const result = directory.query('demo-project');
+    assert.equal(reads, 1, 'one history read per bot for the entire query snapshot');
+    assert.deepEqual(result.items, result.catalog);
+    assert.equal(result.catalog[0].workspaceId, entry.workspaceId);
+    const missing = directory.query('no matching bot');
+    assert.deepEqual(missing.items, []);
+    assert.equal(missing.catalog.length, 1, 'message/memory corpus still needs unmatched bots');
+    assert.equal(reads, 2, 'a new query obtains current facts rather than retaining a stale snapshot');
+    assert.deepEqual(directory.search('demo-project'), directory.query('demo-project').items);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('list/query use a current message batch, while details and unavailable adapters use single reads', () => {
+  const root = tempRoot();
+  let singles = 0, batches = 0, unavailable = false;
+  const message = content => ({ id: content, role: 'assistant', kind: 'agent_reply', content, createdAt: '2026-09-27T09:00:00.000Z' });
+  try {
+    const { entry, directory } = harness(root, {
+      readMessages: () => { singles++; return [message('single current')]; },
+      readMessagesBatch: ids => { batches++; if (unavailable) throw Error('unavailable'); return new Map(ids.map(id => [id, [message('batch current')]])); },
+    });
+    assert.equal(directory.query('batch current').items[0].preview, 'batch current');
+    assert.equal(batches, 1); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.preview, 'single current');
+    assert.equal(singles, 1);
+    unavailable = true;
+    assert.equal(directory.list()[0].preview, 'single current');
+    assert.equal(singles, 2); assert.equal(batches, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('approval batch is current and scoped; details and unavailable adapters retain live single reads', () => {
+  const root = tempRoot();
+  let singles = 0, batches = 0, state = 'open', unavailable = false;
+  try {
+    const { entry, directory } = harness(root, {
+      listConfirmations: () => [], readMessages: () => [],
+      listApprovals: () => { singles++; return [{ approvalId: 'single', state: 'open' }]; },
+      readApprovalsBatch: ids => {
+        batches++; if (unavailable) throw Error('unavailable');
+        return new Map(ids.map(id => [id, [{ approvalId: id, state }]]));
+      },
+    });
+    assert.equal(directory.list()[0].state.needsYou, 1);
+    state = 'approved';
+    assert.equal(directory.list()[0].state.needsYou, 0);
+    assert.equal(batches, 2); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 1);
+    unavailable = true;
+    assert.equal(directory.query('').catalog[0].state.needsYou, 1);
+    assert.equal(singles, 2); assert.equal(batches, 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('读游标之后未读清零，对话按 kind 分页', () => {

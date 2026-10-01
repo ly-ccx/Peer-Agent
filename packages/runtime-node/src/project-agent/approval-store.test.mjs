@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,6 +32,32 @@ function openRecord(overrides = {}) {
     ...overrides,
   };
 }
+
+test('workspace batch scans the approval catalog once and retains fresh folded states and scopes', () => {
+  const root = tempRoot('batch');
+  const original = fs.readdirSync;
+  try {
+    const store = createApprovalStore({ rootDir: root });
+    const ids = Array.from({ length: 200 }, (_, i) => `workspace-${i}`);
+    for (const id of ids) fs.mkdirSync(path.join(root, id));
+    store.append(openRecord({ approvalId: 'a', workspaceId: ids[0] }));
+    store.append(openRecord({ approvalId: 'b', workspaceId: ids[1] }));
+    store.append(openRecord({ approvalId: 'global' }));
+    let scans = 0;
+    fs.readdirSync = (dir, ...args) => { if (String(dir) === root) scans++; return original(dir, ...args); };
+    syncBuiltinESMExports();
+    const batch = store.listByWorkspaceIds(ids);
+    assert.equal(scans, 1);
+    assert.deepEqual(store.listByWorkspaceIds([]), new Map()); assert.equal(scans, 1);
+    fs.readdirSync = original; syncBuiltinESMExports();
+    assert.deepEqual(batch.get(ids[0]), store.list({ workspaceId: ids[0] }));
+    assert.deepEqual(batch.get(ids[1]), store.list({ workspaceId: ids[1] }));
+    assert.deepEqual(batch.get(ids[199]), []);
+    assert.equal([...batch.values()].flat().some(row => row.approvalId === 'global'), false);
+    store.append(openRecord({ approvalId: 'a', workspaceId: ids[0], state: 'approved', decidedBy: 'local_ui' }));
+    assert.equal(store.listByWorkspaceIds([ids[0]]).get(ids[0])[0].state, 'approved');
+  } finally { fs.readdirSync = original; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test('append folds to the latest state and ignores a repeated write', () => {
   const root = tempRoot('fold');
