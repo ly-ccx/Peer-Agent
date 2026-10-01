@@ -218,3 +218,13 @@ test('非法 workspace 不写文件', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('one stable memory conflict card exposes sources and scoped choices and disappears when resolved', () => {
+  const memories=[{id:'m1',status:'conflicted',conflictId:'g',text:'use A',sourceRefs:['ev1']},{id:'m2',status:'conflicted',conflictId:'g',text:'use B',sourceRefs:['ev2']}];
+  const first=projectCards('ws-1',{memories}); assert.equal(first.length,1); assert.equal(first[0].kind,'memory_conflict');
+  assert.match(first[0].content,/ev1/);assert.match(first[0].content,/ev2/);
+  assert.deepEqual(first[0].actions.map(a=>a.payload.id),['m1','m2']);
+  assert.ok(first[0].actions.every(a=>a.channel==='project-memory:restore'&&a.payload.resolveConflict));
+  assert.deepEqual(projectCards('ws-1',{memories}),first);
+  assert.deepEqual(projectCards('ws-1',{memories:memories.map((m,i)=>({...m,status:i?'forgotten':'active'}))}),[]);
+});

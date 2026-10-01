@@ -439,6 +439,9 @@ export const MEMORY_TOOL_SPECS = Object.freeze([
       kind: { type: 'string', enum: [...MEMORY_KINDS] },
       anchorMessageId: { type: 'string' },
       pinned: { type: 'boolean' },
+      expiresAt: { type: 'string' },
+      topicKey: { type: 'string', maxLength: 120 },
+      topicValue: { type: 'string', maxLength: 200 },
     },
     required: ['text', 'kind'],
     additionalProperties: false,
@@ -474,8 +477,8 @@ export function validateMemoryInput(name, raw) {
   return validateMemoryForget(input);
 }
 
-function rejectRuntimeFields(input) {
-  for (const key of ['trust', 'status', 'sourceRefs', 'scope', 'workspaceId']) {
+function rejectRuntimeFields(input, allowSearchScope = false) {
+  for (const key of ['trust', 'status', 'sourceRefs', ...(allowSearchScope ? [] : ['scope']), 'workspaceId', 'fileAnchors', 'needsReverify', 'conflictId', 'conflictsWith', 'supersededBy']) {
     if (Object.prototype.hasOwnProperty.call(input, key)) {
       return invalid('trust, status, sourceRefs, scope, and workspaceId are assigned by the runtime.');
     }
@@ -484,7 +487,7 @@ function rejectRuntimeFields(input) {
 }
 
 function validateMemorySearch(input) {
-  const rejected = rejectRuntimeFields(input);
+  const rejected = rejectRuntimeFields(input, true);
   if (rejected) return rejected;
   const query = text(input.query, 500);
   if (!query) return invalid('query is required and must be at most 500 characters.');
@@ -521,6 +524,14 @@ function validateMemoryRemember(input) {
   if (input.pinned !== undefined) {
     if (typeof input.pinned !== 'boolean') return invalid('pinned must be a boolean.');
     value.pinned = input.pinned;
+  }
+  if (input.expiresAt !== undefined) {
+    if (typeof input.expiresAt !== 'string' || input.expiresAt.length > 40 || !Number.isFinite(Date.parse(input.expiresAt))) return invalid('expiresAt must be an ISO timestamp.');
+    value.expiresAt = new Date(input.expiresAt).toISOString();
+  }
+  if (input.topicKey !== undefined || input.topicValue !== undefined) {
+    if (typeof input.topicKey !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(input.topicKey) || !text(input.topicValue, 200)) return invalid('topicKey and topicValue must describe a single-value topic.');
+    value.topicKey = input.topicKey; value.topicValue = input.topicValue.trim();
   }
   return { ok: true, value };
 }

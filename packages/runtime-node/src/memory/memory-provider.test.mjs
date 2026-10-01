@@ -264,3 +264,28 @@ test('关闭记忆后既不写也不检索', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('search filters stale validity even when the index still contains the old active versions', async () => {
+  const root=tempRoot('validity'); const store=createMemoryStore({rootDir:root});
+  const provider=createMemoryProvider({rootDir:root,store});
+  try {
+    const stale=store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'unique validity token',sourceRefs:['ev']}).item;
+    provider.rebuildIndex(); store.markMaintained({id:stale.id,workspaceId:'ws-1',needsReverify:true});
+    const result=outputOf(await provider.executeCapability(call('local.memory.search',{query:'validity',scope:'project'}),context()));
+    assert.deepEqual(result.items,[]);
+    const expired=store.rememberStated({workspaceId:'ws-1',kind:'fact',text:'unique validity deadline',expiresAt:'2020-01-01T00:00:00Z',anchorMessageId:'m-user',messages:context().messages});
+    assert.equal(expired.ok,true);provider.rebuildIndex();
+    assert.deepEqual(outputOf(await provider.executeCapability(call('local.memory.search',{query:'validity'}),context())).items,[]);
+  } finally {provider.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('model memory writes cannot forge validity, hashes or conflict authority', async () => {
+  const root=tempRoot('authority');const provider=createMemoryProvider({rootDir:root});
+  try {
+    for(const extra of [{needsReverify:false},{fileAnchors:[{path:'a',contentHash:'fake'}]},{conflictId:'fake'}]) {
+      const result=outputOf(await provider.executeCapability(call('local.memory.remember',{kind:'fact',text:'claim',anchorMessageId:'m-user',...extra}),context()));
+      assert.equal(result.ok,false);
+    }
+    assert.equal(createMemoryStore({rootDir:root}).list({workspaceId:'ws-1'}).length,0);
+  } finally{provider.close();rmSync(root,{recursive:true,force:true});}
+});

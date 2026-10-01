@@ -164,3 +164,17 @@ test('记忆页的每个动作都经 IPC 落到存储', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('existing restore IPC resolves conflicting memory, guards project scope and refreshes facts', async () => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'memory-choice-ipc-'));
+  try {
+    const {handlers,store}=harness(root);
+    const a=store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'A',sourceRefs:['ev1'],topicKey:'choice',topicValue:'a'}).item;
+    const b=store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'B',sourceRefs:['ev2'],topicKey:'choice',topicValue:'b'}).item;
+    assert.equal((await handlers.get('project-memory:restore')({}, {workspaceId:'ws-2',id:a.id,resolveConflict:true})).ok,false);
+    const changed=[];const service=createProjectMemoryService({store,onChanged:ws=>changed.push(ws)});
+    assert.equal(service.restore({workspaceId:'ws-1',id:a.id}).code,'CONFLICT_CHOICE_REQUIRED');
+    assert.equal(service.restore({workspaceId:'ws-1',id:b.id,resolveConflict:true}).ok,true);
+    assert.deepEqual(changed,['ws-1']);assert.equal(store.get(a.id).status,'forgotten');assert.equal(store.get(b.id).status,'active');
+  } finally {rmSync(root,{recursive:true,force:true});}
+});

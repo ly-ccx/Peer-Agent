@@ -67,3 +67,21 @@ test('快照只记录当时的 active 条目，之后的变更不改这份快照
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('new snapshots exclude expired, conflicted and changed verified facts while frozen snapshots retain their original content', () => {
+  const root=tempRoot(); let clock=new Date('2026-09-01T00:00:00Z');
+  try {
+    const store=createMemoryStore({rootDir:root,now:()=>clock});
+    const stale=store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'old file',sourceRefs:['ev']}).item;
+    const expiry=stated(store,{expiresAt:'2026-09-02T00:00:00Z'}).item;
+    const pinned=stated(store,{text:'pinned',expiresAt:'2026-09-02T00:00:00Z',pinned:true}).item;
+    const old=createSnapshot('ws-1',{rootDir:root,store,now:()=>clock});
+    clock=new Date('2026-10-01T00:00:00Z'); store.markMaintained({id:stale.id,workspaceId:'ws-1',needsReverify:true});
+    const conflict=store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'A',sourceRefs:['evA'],topicKey:'choice',topicValue:'a'}).item;
+    store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'B',sourceRefs:['evB'],topicKey:'choice',topicValue:'b'});
+    const next=createSnapshot('ws-1',{rootDir:root,store,now:()=>clock});
+    assert.deepEqual(next.itemIds,[pinned.id]); assert.equal(next.itemIds.includes(conflict.id),false);
+    const frozen=readSnapshots('ws-1',{rootDir:root,store})[0]; assert.deepEqual(frozen.itemIds,old.itemIds);
+    assert.ok(frozen.itemIds.includes(stale.id));assert.ok(frozen.itemIds.includes(expiry.id));
+  } finally{rmSync(root,{recursive:true,force:true});}
+});

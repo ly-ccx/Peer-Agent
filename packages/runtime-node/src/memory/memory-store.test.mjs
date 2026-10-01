@@ -257,6 +257,23 @@ test('workspaceId 不能逃出项目目录', () => {
   }
 });
 
+test('conflicting memories persist and a scoped user choice retires alternatives across restart', () => {
+  const root = tempRoot();
+  try {
+    const store = createMemoryStore({ rootDir: root, now: () => new Date('2026-10-01T00:00:00Z') });
+    const a = stated(store, { topicKey: 'test.command', topicValue: 'pnpm test' }).item;
+    const b = stated(store, { topicKey: 'test.command', topicValue: 'bun test', text: '使用 bun test' }).item;
+    assert.equal(store.get(a.id).status, 'conflicted'); assert.equal(store.get(b.id).status, 'conflicted');
+    const restarted = createMemoryStore({ rootDir: root });
+    assert.equal(restarted.resolveConflict({ id: b.id, workspaceId: 'another' }).ok, false);
+    assert.equal(restarted.restore({ id: b.id, workspaceId: 'ws-1' }).reason, 'conflict_choice_required');
+    assert.equal(restarted.resolveConflict({ id: b.id, workspaceId: 'ws-1' }).item.status, 'active');
+    assert.equal(restarted.get(a.id).status, 'forgotten');
+    assert.equal(restarted.get(a.id).supersededBy, b.id);
+    assert.equal(restarted.get(b.id).conflictId, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('推断偏好只有满 3 次后才能由 Curator 写入，工具路径仍然要求用户锚点', () => {
   const root = tempRoot('curated');
   try {

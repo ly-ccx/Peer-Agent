@@ -1,7 +1,7 @@
 import { createCardProjection, verdictRefFor } from '@peer-agent/runtime-node';
 
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
-export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot }) {
+export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
@@ -64,6 +64,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     }));
     return projection.project(workspaceId, { approvals: approvalStore.list({ workspaceId }),
       confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable,
+      memories: memoryStore?.list({ workspaceId }) || [],
       handoffs: rows.flatMap(row => { const facts = supervisor.deliveryFacts?.(row.sessionId); return facts ? [facts] : []; }) });
   }
   return { delivery, cards, resolve: (workspaceId, cardId) => projection.resolve(workspaceId, cardId, { resolution: 'retried' }) };

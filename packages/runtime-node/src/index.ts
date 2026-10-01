@@ -305,7 +305,9 @@ export {
   memorySpecByCapability,
   validateMemoryInput,
 } from './project-agent/tool-specs.mjs';
-export { createMemoryStore, isMemoryWorkspaceId } from './memory/memory-store.mjs';
+export { createMemoryStore, isMemoryWorkspaceId, isEffectiveMemory } from './memory/memory-store.mjs';
+export { createMemoryMaintenance } from './memory/maintenance.mjs';
+export { createMemoryFileAnchors } from './memory/file-anchors.mjs';
 export { createMemoryIndex } from './memory/memory-index.mjs';
 export { memorySecretReason } from './memory/memory-redaction.mjs';
 export { createSnapshot, readSnapshots } from './memory/memory-snapshot.mjs';

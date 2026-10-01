@@ -183,3 +183,10 @@ test('paused and superseded tasks stay separate from done and carry a replacemen
   const groups = groupDrawerSessions([item!, session({ sessionId: 'p', status: 'paused' })]);
   assert.equal(groups.paused.length, 2); assert.equal(groups.done.length, 0); assert.equal(groups.queued.length, 0);
 });
+
+test('memory page retains maintenance state and sources while overview only uses effective records', () => {
+  const records=readMemoryRecords([{id:'fresh',kind:'fact',text:'current',trust:'verified',status:'active',sourceRefs:['ev']},{id:'stale',kind:'fact',text:'old',trust:'verified',status:'active',needsReverify:true,sourceRefs:['ev-old']},{id:'conflict',kind:'fact',text:'alternative',trust:'verified',status:'conflicted'}]);
+  assert.equal(records[1].needsReverify,true);assert.deepEqual(records[1].sourceRefs,['ev-old']);
+  assert.deepEqual(readMemoryItems(records).map(item=>item.id),['fresh']);
+  assert.equal(filterMemoryRecords(records,{kind:'',trust:'',status:'conflicted'}).length,1);
+});

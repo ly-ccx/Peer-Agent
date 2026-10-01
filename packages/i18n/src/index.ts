@@ -264,6 +264,11 @@ export type TranslationKey =
   | 'projectAgent.drawer.memory.trust.verified'
   | 'projectAgent.drawer.memory.status.active'
   | 'projectAgent.drawer.memory.status.forgotten'
+  | 'projectAgent.drawer.memory.status.expired'
+  | 'projectAgent.drawer.memory.sources'
+  | 'projectAgent.drawer.memory.status.conflicted'
+  | 'projectAgent.drawer.memory.needsReverify'
+  | 'projectAgent.drawer.memory.keepThis'
   | 'projectAgent.drawer.memory.pin'
   | 'projectAgent.drawer.memory.unpin'
   | 'projectAgent.drawer.memory.revoke'
@@ -1396,6 +1401,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.trust.verified': '已验证',
     'projectAgent.drawer.memory.status.active': '生效中',
     'projectAgent.drawer.memory.status.forgotten': '已撤销',
+    'projectAgent.drawer.memory.sources': '来源',
+    'projectAgent.drawer.memory.status.expired': '已过期',
+    'projectAgent.drawer.memory.status.conflicted': '有冲突',
+    'projectAgent.drawer.memory.needsReverify': '可能已过时 · 待核实',
+    'projectAgent.drawer.memory.keepThis': '保留这条',
     'projectAgent.drawer.memory.pin': '固定',
     'projectAgent.drawer.memory.unpin': '取消固定',
     'projectAgent.drawer.memory.revoke': '撤销',
@@ -2326,6 +2336,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.trust.verified': 'Verified',
     'projectAgent.drawer.memory.status.active': 'Active',
     'projectAgent.drawer.memory.status.forgotten': 'Revoked',
+    'projectAgent.drawer.memory.sources': 'Sources',
+    'projectAgent.drawer.memory.status.expired': 'Expired',
+    'projectAgent.drawer.memory.status.conflicted': 'Conflicted',
+    'projectAgent.drawer.memory.needsReverify': 'Possibly outdated · Needs verification',
+    'projectAgent.drawer.memory.keepThis': 'Keep this memory',
     'projectAgent.drawer.memory.pin': 'Pin',
     'projectAgent.drawer.memory.unpin': 'Unpin',
     'projectAgent.drawer.memory.revoke': 'Revoke',

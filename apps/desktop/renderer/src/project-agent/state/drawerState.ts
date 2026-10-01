@@ -56,6 +56,8 @@ export interface MemoryRecord {
   readonly trust: string;
   readonly status: string;
   readonly pinned: boolean;
+  readonly needsReverify?: boolean;
+  readonly sourceRefs?: readonly string[];
 }
 
 export interface MemorySwitches {
@@ -207,7 +209,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
 
 export function readMemoryItems(raw: unknown): DrawerMemoryItem[] {
   return readMemoryRecords(raw)
-    .filter((item) => item.status !== 'forgotten' && item.status !== 'deleted')
+    .filter((item) => item.status === 'active' && !item.needsReverify)
     .map((item) => ({
       id: item.id,
       kind: item.kind,
@@ -234,6 +236,8 @@ export function readMemoryRecords(raw: unknown): MemoryRecord[] {
       trust: readString(record.trust) || 'stated',
       status: readString(record.status) || 'active',
       pinned: record.pinned === true,
+      needsReverify: record.needsReverify === true,
+      sourceRefs: readStringList(record.sourceRefs),
     });
   }
   return items;

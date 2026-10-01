@@ -28,6 +28,7 @@ test('inactive, conflicted, secret, and policy-loosening candidates are refused'
   assert.deepEqual(assessMemoryCandidate(item({ status: 'forgotten' })), { ok: false, reason: 'inactive' });
   assert.deepEqual(assessMemoryCandidate(item({ status: 'expired' })), { ok: false, reason: 'inactive' });
   assert.deepEqual(assessMemoryCandidate(item({ status: 'conflicted' })), { ok: false, reason: 'conflicted' });
+  assert.deepEqual(assessMemoryCandidate(item({ needsReverify: true, trust: 'verified' }), { resolvableRefs: ['src/login.tsx'] }), { ok: false, reason: 'needs_reverify' });
   assert.equal(refusal(assessMemoryCandidate(item({ text: 'key is sk-abcdefghi' }))), 'sensitive');
   assert.equal(refusal(assessMemoryCandidate(item({ text: 'api_key=secret-value' }))), 'sensitive');
   assert.equal(refusal(assessMemoryCandidate(item({ text: 'Authorization: Bearer abcdefgh' }))), 'sensitive');

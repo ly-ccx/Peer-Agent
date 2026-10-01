@@ -31,6 +31,7 @@ test('卡片动作只调用约定的 IPC', () => {
   assert.equal(card.includes('conversationStore'), false);
   const calls = [...card.matchAll(/clientApi\.(\w+)/g)].map((match) => match[1]);
   assert.deepEqual(calls, [
+    'projectMemoryRestore',
     'projectAgentDecideApproval',
     'projectAgentSubmitInput',
     'projectAgentStartFamiliarize',

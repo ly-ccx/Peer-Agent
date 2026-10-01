@@ -19,6 +19,20 @@ export function validateCuratorCandidate(raw) {
   const text = raw.text.trim();
   if (!text || text.length > TEXT_MAX) return { ok: false, reason: 'invalid' };
   const evidenceRefs = [];
+  const extra = {};
+  if (raw.topicKey != null || raw.topicValue != null) {
+    if (typeof raw.topicKey !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(raw.topicKey)
+      || typeof raw.topicValue !== 'string' || !raw.topicValue.trim() || raw.topicValue.length > 200) return { ok: false, reason: 'invalid' };
+    extra.topicKey = raw.topicKey.toLowerCase(); extra.topicValue = raw.topicValue.trim().toLowerCase();
+  }
+  if (raw.expiresAt != null) {
+    if (typeof raw.expiresAt !== 'string' || raw.expiresAt.length > 40 || !Number.isFinite(Date.parse(raw.expiresAt))) return { ok: false, reason: 'invalid' };
+    extra.expiresAt = new Date(raw.expiresAt).toISOString();
+  }
+  if (raw.filePaths != null) {
+    if (!Array.isArray(raw.filePaths) || raw.filePaths.length > 16 || raw.filePaths.some(value => typeof value !== 'string' || !value || value.length > 500)) return { ok: false, reason: 'invalid' };
+    extra.filePaths = [...new Set(raw.filePaths)];
+  }
   if (raw.evidenceRefs != null) {
     if (!Array.isArray(raw.evidenceRefs) || raw.evidenceRefs.length > 16) return { ok: false, reason: 'invalid' };
     for (const ref of raw.evidenceRefs) {
@@ -28,6 +42,7 @@ export function validateCuratorCandidate(raw) {
       if (!evidenceRefs.includes(next)) evidenceRefs.push(next);
     }
   }
+  if ([extra.topicKey, extra.topicValue, ...(extra.filePaths || [])].some(value => typeof value === 'string' && memorySecretReason(value))) return { ok: false, reason: 'sensitive' };
   return {
     ok: true,
     candidate: {
@@ -36,6 +51,7 @@ export function validateCuratorCandidate(raw) {
       text,
       evidenceRefs,
       untrusted: raw.untrusted === true,
+      ...extra,
     },
   };
 }
@@ -66,7 +82,7 @@ export function parseCuratorOutput(text) {
  */
 export function decideMemoryAdmission(raw, context = {}) {
   const checked = validateCuratorCandidate(raw);
-  if (!checked.ok) return { decision: 'reject', reason: 'invalid' };
+  if (!checked.ok) return { decision: 'reject', reason: checked.reason };
   const item = checked.candidate;
   if (memorySecretReason(item.text)) return { decision: 'reject', reason: 'sensitive' };
   if (LOOSENING.test(item.text)) return { decision: 'reject', reason: 'loosens_policy' };

@@ -12,7 +12,7 @@ function tempRoot(name) {
   return mkdtempSync(path.join(os.tmpdir(), `b3-07-${name}-`));
 }
 
-function world(name, { learnPreferences = true, memoryEnabled = true, textFor } = {}) {
+function world(name, { learnPreferences = true, memoryEnabled = true, textFor, resolveFileAnchors = null } = {}) {
   const root = tempRoot(name);
   let nowMs = Date.parse('2026-09-27T00:00:00.000Z');
   const calls = [];
@@ -24,6 +24,7 @@ function world(name, { learnPreferences = true, memoryEnabled = true, textFor } 
     now: () => new Date(nowMs),
     learnPreferences: () => learnPreferences,
     memoryEnabled: () => memoryEnabled,
+    resolveFileAnchors,
     async runTurn(request) {
       calls.push(request);
       const text = typeof textFor === 'function' ? textFor(request, calls.length) : textFor;
@@ -177,6 +178,23 @@ test('关闭学习偏好后仍提取有证据的事实', async () => {
   } finally {
     box.cleanup();
   }
+});
+
+test('a newly evidenced extraction refreshes a possibly outdated fact with host hashes', async () => {
+  let hash = 'first';
+  const box = world('reverify', { resolveFileAnchors: () => [{ path: 'src/main.ts', contentHash: hash, commit: hash }],
+    textFor: (_request, index) => JSON.stringify({ candidates: [{ kind: 'fact', trust: 'verified', text: '入口在 src/main.ts', evidenceRefs: [`ev-${index}`],
+      filePaths: ['src/main.ts'], topicKey: 'entry.path', topicValue: 'src/main.ts' }] }) });
+  try {
+    const first = await box.curator.consider(task(1, { evidenceRefs: ['ev-1'], evidenceTexts: { 'ev-1': '入口在 src/main.ts' } }));
+    const old = box.store.get(first.learnedIds[0]); assert.equal(old.fileAnchors[0].contentHash, 'first');
+    box.store.markMaintained({ id: old.id, workspaceId: 'ws-1', needsReverify: true });
+    hash = 'second'; box.advance(CURATOR_INTERVAL_MS);
+    const second = await box.curator.consider(task(2, { evidenceRefs: ['ev-2'], evidenceTexts: { 'ev-2': '入口在 src/main.ts' } }));
+    assert.equal(second.learnedIds.length, 1); assert.equal(box.store.get(old.id).status, 'forgotten');
+    const refreshed = box.store.get(second.learnedIds[0]); assert.equal(refreshed.needsReverify, undefined);
+    assert.equal(refreshed.fileAnchors[0].contentHash, 'second'); assert.deepEqual(refreshed.sourceRefs, ['ev-2']);
+  } finally { box.cleanup(); }
 });
 
 test('关闭记忆后既不提取也不写入', async () => {
@@ -342,4 +360,20 @@ test('到点后整理先前被频率挡住的 episode，不需要新材料', asy
   } finally {
     box.cleanup();
   }
+});
+
+test('reverification refuses old evidence and missing host anchors', async () => {
+  const box=world('old-evidence',{resolveFileAnchors:()=>[{path:'a',contentHash:'actual',commit:null}],textFor:JSON.stringify({candidates:[{kind:'fact',trust:'verified',text:'actual fact',evidenceRefs:['ev'],filePaths:['a']}]})});
+  try {
+    const first=await box.curator.consider(task(1,{evidenceRefs:['ev'],evidenceTexts:{ev:'actual fact'}}));
+    box.store.markMaintained({id:first.learnedIds[0],workspaceId:'ws-1',needsReverify:true});box.advance(CURATOR_INTERVAL_MS);
+    const second=await box.curator.consider(task(2,{evidenceRefs:['ev'],evidenceTexts:{ev:'actual fact'}}));
+    assert.equal(second.learnedIds.length,0);assert.equal(second.decisions[0].reason,'fresh_evidence_required');
+    assert.equal(box.store.get(first.learnedIds[0]).needsReverify,true);
+  } finally{box.cleanup();}
+  const unavailable=world('missing-anchor',{resolveFileAnchors:()=>[],textFor:JSON.stringify({candidates:[{kind:'fact',trust:'verified',text:'actual fact',evidenceRefs:['ev'],filePaths:['a']}]})});
+  try {
+    const result=await unavailable.curator.consider(task(1,{evidenceRefs:['ev'],evidenceTexts:{ev:'actual fact'}}));
+    assert.equal(result.learnedIds.length,0);assert.equal(result.decisions[0].reason,'file_anchor_unavailable');
+  } finally{unavailable.cleanup();}
 });

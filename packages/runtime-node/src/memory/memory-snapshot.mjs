@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-import { createMemoryStore, isMemoryWorkspaceId } from './memory-store.mjs';
+import { createMemoryStore, isEffectiveMemory, isMemoryWorkspaceId } from './memory-store.mjs';
 
 function fail(reason) {
   return { ok: false, reason };
@@ -81,6 +81,7 @@ export function createSnapshot(workspaceId, options = {}) {
   const store = options.store || createMemoryStore(options);
   const now = options.now || (() => new Date());
   const active = store.list({ workspaceId, status: 'active' })
+    .filter(item => isEffectiveMemory(item, now().getTime()))
     .sort((left, right) => left.id.localeCompare(right.id));
   const snapshot = {
     snapshotId: `snap-${randomUUID()}`,
