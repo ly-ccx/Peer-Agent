@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createObjectiveActions,objectiveActionCardId} from './objective-actions.mjs';
 import {createObjectiveStore} from './objective-store.mjs';
+import {createWatchProbeRuntime} from './watch-probe-provider.mjs';
 import {createObjectiveService} from './objective-service.mjs';
 import {projectCards} from './card-projection.mjs';
 import {createDelegationProvider} from './delegation-provider.mjs';
@@ -68,4 +69,13 @@ test('objective wake allows independent verification only for its actual owned t
  let verified=0;const provider=createDelegationProvider({supervisor:{get:()=>({workspaceId:'ws',origin:{objectiveId:'o'}})},verification:{async run(){verified++;return {ok:true,facts:{}};},record(){}}});
  const context={mode:'project_agent',role:'project_agent',workspaceId:'ws',conversationId:'c',turnId:'t',objectiveWakeIds:['other'],currentInputAnchors:[],messages:[]};
  const result=await provider.executeCapability({call:{toolCallId:'t',capabilityId:'local.delegation.verify_session',arguments:{sessionId:'s'}}},context);assert.match(result.result.outputPreview.legacyResult.output,/objective_verification_out_of_scope/);assert.equal(verified,0);const allowed=await provider.executeCapability({call:{toolCallId:'v',capabilityId:'local.delegation.verify_session',arguments:{sessionId:'s'}}},{...context,objectiveWakeIds:['o']});assert.equal(allowed.result.status,'success');assert.equal(verified,1);
+});
+
+
+test('a task_event watch without an optional probe creates actual SDK Evidence and can trigger act',async()=>{
+ const w=world();try{const objectiveId=w.item.objectiveId;w.store.update('ws',objectiveId,{watches:[{watchId:'task',kind:'event',source:{type:'task_event',filter:'failed'}}],milestones:[{id:'m',title:'Work',status:'active',sessionIds:['failed-session']}]});
+  const runtime=createWatchProbeRuntime({resolveObjective:(ws,id)=>w.store.get(ws,id),resolveWorkspacePath:()=>w.root,canObserve:()=>true,readSessions:()=>[{sessionId:'failed-session',status:'failed'}]});const executionKey='internal-event',execution=await runtime.execute({workspaceId:'ws',objectiveId,watchId:'task',executionKey});assert.equal(execution.result.status,'success');assert.equal(execution.grant.preset,'observe');const observed=execution.result.outputPreview.observation;assert.match(observed.value,/failed-session/);
+  const ref='task-evidence';w.evidence.set(ref,{workspaceId:'ws',objectiveId,watchId:'task',executionKey,execution});w.store.appendObservation('ws',{...observed,objectiveId,watchId:'task',observedAt:new Date().toISOString(),evidenceRefs:[ref]},{executionKey});
+  const allowed=w.service().prepareSpawn(task(),w.context([{kind:'objective_signal',eventId:'event-task',workspaceId:'ws',objectiveId,watchId:'task',executionKey}]));assert.equal(allowed.ok,true);assert.ok(allowed.objectiveActionId);
+ }finally{w.cleanup();}
 });
