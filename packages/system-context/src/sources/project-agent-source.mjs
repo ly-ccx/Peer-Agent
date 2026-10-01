@@ -21,6 +21,8 @@ const FAILURE_RULES = `Failure handling.
 
 const STATUS_RULES = `Task reporting contract.
 - For every post_reply source, provide statusClaims with that sessionId and its current status from get_session or the roster.
+- A result_ready event is a task result to review, not a new request to spawn the same work. Read get_session, use verify_session when independent verification is missing, then cite that session in post_reply sources.
+- A reply to an anchor with an unreported completed task must cite that task. On result_source_required use the returned sessionStates and retry the anchored reply with sources/statusClaims. Never replace it with a source-free reply.
 - Verification passing does not mean the task is completed or accepted. Only persisted resultAcceptance makes a task accepted.
 - Describe findings, remaining work and blockers in the reply body. Do not predict acceptance or claim automatic signing in prose; the host supplies the authoritative status.
 - On status_claim_required or status_claim_mismatch, use the returned actual sessionStates and revise the explanation before retrying post_reply. Never repeat a rejected reply as final free text.`;

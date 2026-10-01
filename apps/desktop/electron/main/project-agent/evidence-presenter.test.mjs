@@ -3,6 +3,12 @@ import test from 'node:test';
 
 import { evidenceBodyFromRecord, evidenceRefAllowed } from './evidence-presenter.mjs';
 
+test('file evidence exposes the execution snapshot and its original truncation', () => {
+  const body=evidenceBodyFromRecord({evidenceRef:'tool-result://read',toolName:'read_file',
+    bodyPreview:{kind:'file',text:'original content',truncated:true}},()=>{throw Error('must not read current files');});
+  assert.equal(body?.kind,'file'); assert.equal(body?.text,'original content'); assert.equal(body?.truncated,true);
+});
+
 test('证据引用接受已登记的 URI，拒绝路径穿越', () => {
   assert.equal(evidenceRefAllowed('ev-1'), true);
   assert.equal(evidenceRefAllowed('tool-result://host-verifier'), true);

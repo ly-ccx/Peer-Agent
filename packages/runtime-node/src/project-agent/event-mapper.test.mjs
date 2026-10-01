@@ -16,6 +16,15 @@ const SESSION = {
   leaves: [{ taskId: 'orient', status: 'pending' }],
 };
 
+test('completed without a verdict wakes once and does not claim verification', () => {
+  const ready={...SESSION,status:'result_ready',completedAt:'2026-10-01T00:01:00Z',version:5};
+  const events=mapDelegationEvents({sessions:[SESSION]},{sessions:[ready]});
+  const event=events.find(item=>item.kind==='result_ready');
+  assert.ok(event); assert.equal(event.payload.outcome,null);
+  assert.equal(mapDelegationEvents({sessions:[ready]},{sessions:[{...ready,version:6}]}).some(item=>item.kind==='result_ready'),false);
+  assert.equal(mapDelegationEvents({sessions:[]},{sessions:[ready]}).find(item=>item.kind==='result_ready').eventId,event.eventId);
+});
+
 test('eventId 由会话、种类和版本或批准号决定，重复映射得到同一批 id', () => {
   const failed = delegationEventId({ sessionId: 'session-1', kind: 'failed', version: 4 });
   assert.equal(delegationEventId({ sessionId: 'session-1', kind: 'failed', version: 4 }), failed);

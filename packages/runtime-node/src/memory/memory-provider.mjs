@@ -101,6 +101,11 @@ export function createMemoryProvider(options = {}) {
   }
 
   async function executeCapability(request, context = {}) {
+    const nested = context.toolContext && typeof context.toolContext === 'object' ? context.toolContext : {};
+    context = { ...nested, ...context,
+      mode: context.mode ?? nested.mode,
+      role: context.role ?? context.turnProfile?.role ?? nested.role ?? nested.turnRole ?? nested.turnProfile?.role,
+    };
     const call = request?.call ?? {};
     const capabilityId = call.capabilityId;
     const item = memorySpecByCapability(capabilityId);

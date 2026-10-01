@@ -20,6 +20,7 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         sources: input?.sources,
         statusClaims: input?.statusClaims,
         sessionStates: Array.isArray(delivery.sessionStates) ? delivery.sessionStates : [],
+        unreportedResults: delivery.unreportedResults,
         question: input?.question,
         ...(typeof view?.turnId === 'string' && view.turnId ? { turnId: view.turnId } : {}),
         userMessages: Array.isArray(view?.messages) ? view.messages : [],

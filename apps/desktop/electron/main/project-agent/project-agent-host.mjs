@@ -421,6 +421,14 @@ export function registerDesktopProjectAgent({
   onViewing = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
+  function readEvidenceBody(evidenceRef) {
+    try {
+      const record = goalPlanStore.findEvidenceIndexRecords?.([evidenceRef])?.[0];
+      if (!record) return null;
+      const body = evidenceBodyFromRecord(record, ref => readRegisteredArtifact(dataHome, ref, record));
+      return body?.text ? body : null;
+    } catch { return null; }
+  }
   const registry = createProjectRegistry({
     filePath: path.join(dataHome, 'projects', 'registry.json'),
   });
@@ -492,19 +500,7 @@ export function registerDesktopProjectAgent({
       const profile = workspaceId ? profileStore.read(workspaceId) : null;
       return memoryUseEnabled({ settings, profile });
     },
-    resolveEvidence(ref) {
-      if (typeof goalPlanStore?.findEvidenceIndexRecords !== 'function') return '';
-      let records = [];
-      try {
-        records = goalPlanStore.findEvidenceIndexRecords([ref]) || [];
-      } catch {
-        return '';
-      }
-      const record = records[0];
-      if (!record) return '';
-      const body = evidenceBodyFromRecord(record, (artifactRef) => readRegisteredArtifact(dataHome, artifactRef, record));
-      return typeof body?.text === 'string' ? body.text : '';
-    },
+    resolveEvidence: ref => readEvidenceBody(ref)?.text || '',
     contradicts(workspaceId) {
       const folder = registry.get(workspaceId)?.path;
       if (typeof folder !== 'string' || !folder) return [];
@@ -625,7 +621,8 @@ export function registerDesktopProjectAgent({
     inbox,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
-    ...createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast }),
+    ...createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
+      resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),
     executeTurn: (input) => {
       const history = conversationStore.getPersistedConversationHistory(input.conversationId)?.messages || [];
       const messages = projectConversationHistory(history.filter((message) => message.kind === 'user_input' || message.kind === 'agent_reply' || !message.kind && ['user', 'assistant'].includes(message.role))).messages;
@@ -645,7 +642,9 @@ export function registerDesktopProjectAgent({
     readSettings: getSettings,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
     readFacts: (workspaceId) => delegationFactsForWorkspace(
-      typeof goalPlanStore?.listPlans === 'function' ? goalPlanStore.listPlans() : [],
+      (goalPlanStore.listPlans?.() || [])
+        .filter(meta => conversationStore.getConversation(meta.conversationId)?.workspaceId === workspaceId)
+        .map(meta => goalPlanStore.getPlan(meta.planId)).filter(Boolean),
       workspaceId,
     ),
     subscribePlans: (listener) => (
@@ -683,20 +682,7 @@ export function registerDesktopProjectAgent({
       return { ok: true };
     },
     approvals: approvalStore,
-    readEvidenceBody(evidenceRef) {
-      if (typeof goalPlanStore?.findEvidenceIndexRecords !== 'function') return null;
-      let records = [];
-      try {
-        records = goalPlanStore.findEvidenceIndexRecords([evidenceRef]) || [];
-      } catch {
-        return null;
-      }
-      const record = records[0];
-      if (!record) return null;
-      const body = evidenceBodyFromRecord(record, (ref) => readRegisteredArtifact(dataHome, ref, record));
-      if (!body?.text) return null;
-      return { evidenceRef, kind: body.kind, text: body.text };
-    },
+    readEvidenceBody,
     bindWorkspace: (sender) => workspace.addWorkspace(sender),
     rememberWorkspace({ workspaceId, path: folder, name }) {
       const settings = getSettings() || {};

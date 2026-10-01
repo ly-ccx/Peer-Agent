@@ -1,5 +1,5 @@
 const OUTPUT_LIMIT = 2000;
-const KINDS = new Set(['screenshot', 'command', 'diff']);
+const KINDS = new Set(['screenshot', 'command', 'diff', 'file']);
 const TOKEN_REF = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
 const URI_REF = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/;
 
@@ -16,7 +16,7 @@ export function presentEvidence(body = {}) {
     evidenceRef,
     kind,
     summary,
-    truncated: text.length > summary.length,
+    truncated: body.truncated === true || text.length > summary.length,
   };
 }
 
@@ -36,6 +36,12 @@ export function evidenceRefAllowed(evidenceRef) {
  */
 export function evidenceBodyFromRecord(record, readArtifact = () => '') {
   if (!record || typeof record !== 'object') return null;
+  if (record.bodyPreview?.kind === 'file' && typeof record.bodyPreview.text === 'string') {
+    return {
+      evidenceRef: record.evidenceRef, kind: 'file', text: record.bodyPreview.text,
+      truncated: record.bodyPreview.truncated === true,
+    };
+  }
   const chunks = [];
   let kind = kindFromTool(record.toolName);
   for (const artifact of Array.isArray(record.userArtifacts) ? record.userArtifacts : []) {

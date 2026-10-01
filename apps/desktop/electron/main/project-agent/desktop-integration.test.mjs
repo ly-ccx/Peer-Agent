@@ -19,7 +19,7 @@ const provider = { id: 'configured', provider: 'openai', model: 'test-model', en
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
 after(() => { if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome; rmSync(root, { recursive: true, force: true }); });
 
-function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true } = {}) {
+function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null } = {}) {
   const home = dataHome || mkdtempSync(path.join(root, 'home-'));
   const project = folder || path.join(home, 'workspace');
   mkdirSync(project, { recursive: true });
@@ -33,7 +33,8 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
     async sendMessage(input) { calls.push(input); return send ? send(input, { plans, conversations, api }) : { terminalStatus: 'done', text: 'hello' }; },
   } });
   const registrations = registerDesktopProjectAgent({ enabled: () => true, dataHome: home,
-    conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {} },
+    conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
+      ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
     holdsLease: () => true, getSettings: () => ({ workspaces: [{ path: project, name: 'test' }] }), mergeSettings() {},
     listModels: () => configured ? [provider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
@@ -59,6 +60,46 @@ async function tool(env, name, args, ordinal = 1) {
     toolCallId: crypto.randomUUID(), requestPermission: async () => { throw new Error('agent must not ask for approval'); },
   });
 }
+
+test('familiarize completion wakes, verifies, requires sources, persists acceptance and reversible memory', async () => {
+  let env, sessionId, report = false;
+  env = harness({verify:async()=>({passed:true,evidenceRefs:['ev-file'],verifierModel:provider.id}),send:async input=>{
+    if (!report) return {terminalStatus:'done',text:'ready'};
+    assert.ok(input.turnProfile.context.events.some(event=>event.kind==='result_ready'));
+    const verified=await tool({...env,turnId:input.streamId},'verify_session',{sessionId});
+    assert.equal(JSON.parse(verified.output).ok,true,verified.output);
+    const args={text:'README describes a test project.',replyTo:[`lifecycle-research-${env.bot.workspaceId}`]};
+    const missing=await tool({...env,turnId:input.streamId},'post_reply',args,2);
+    assert.equal(JSON.parse(missing.output).error,'result_source_required');
+    const cited={...args,sources:[sessionId],statusClaims:[{sessionId,status:env.api.supervisor.get({sessionId}).status}]};
+    const result=await tool({...env,turnId:input.streamId},'post_reply',cited,3);
+    assert.equal(JSON.parse(result.output).ok,true,result.output);
+    input.webContents.send('chat:stream:tool-call',{toolCallId:'r',tool:'post_reply',args:cited});
+    input.webContents.send('chat:stream:tool-result',{toolCallId:'r',result:JSON.parse(result.output)});
+    return {terminalStatus:'done'};
+  }});
+  try {
+    const opened=await env.invoke('start-familiarize');sessionId=opened.profile.familiarize.sessionId;
+    const planId=env.api.supervisor.get({sessionId}).planId;
+    env.plans.recordEvidenceRefs({planId,evidenceRef:'ev-file',toolName:'read_file',capabilityId:'local.file.read',
+      bodyPreview:{kind:'file',text:'test project',truncated:false}});
+    env.plans.revisePlan(planId,{tasks:[{taskId:'read',title:'Read',status:'completed',evidenceRefs:['ev-file']}]},{reason:'read complete',changedBy:'test'});
+    env.plans.recordManualConfirmation(planId,{decision:'approve',criterionIds:['c1','c2'],decidedBy:'user'});
+    env.plans.setPlanStatus(planId,'completed');report=true;
+    await env.api.host.sync([env.bot.workspaceId]);
+    assert.equal(env.plans.getPlan(planId).resultAcceptance?.acceptedBy,'policy',JSON.stringify(env.history().filter(item=>item.card)));
+    const reply=env.history().find(message=>message.content==='README describes a test project.');
+    assert.deepEqual(reply.meta.sessionStates,[{sessionId,status:'accepted'}]);
+    const store=createMemoryStore({rootDir:env.home});
+    const item=store.list({workspaceId:env.bot.workspaceId}).find(item=>item.trust==='verified');
+    assert.ok(item);assert.deepEqual(reply.meta.memoryLearned,[item.id]);
+    assert.equal((await env.invoke('read-evidence',{evidenceRef:'ev-file'})).summary,'test project');
+    assert.equal(store.forget({id:item.id,workspaceId:env.bot.workspaceId,reason:'acceptance replay'}).ok,true);
+    assert.equal(store.list({workspaceId:env.bot.workspaceId,status:'active'}).some(row=>row.id===item.id),false);
+    assert.equal(store.restore({id:item.id,workspaceId:env.bot.workspaceId}).ok,true);
+    assert.equal(store.list({workspaceId:env.bot.workspaceId,status:'active'}).some(row=>row.id===item.id),true);
+  } finally {env.dispose();}
+});
 
 test('desktop registration routes real inputs and includes history, roster and wake facts at L7', async () => {
   const env = harness();
@@ -214,7 +255,8 @@ for (const policy of ['auto', 'confirm', 'write-failed']) test(`desktop reportin
       criterionResults: [{ criterionId: 'c1', passed: true, evidenceRef: 'ev-pass' }],
       hostVerification: { independentVerifier: 'passed', verifierModel: provider.id },
     }, { reason: 'verified host facts', changedBy: 'test' });
-    env.plans.recordEvidenceRefs({ planId, evidenceRefs: ['ev-pass'] });
+    env.plans.recordEvidenceRefs({ planId, evidenceRefs: ['ev-pass'],toolName:'read_file',capabilityId:'local.file.read',
+      bodyPreview:{kind:'file',text:'Verified result',truncated:false} });
     env.plans.setPlanStatus(planId, 'completed');
     assert.equal(env.plans.getPlan(planId).resultAcceptance, undefined);
     if (policy === 'write-failed') {

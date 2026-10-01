@@ -35,6 +35,18 @@ function ids(output) {
   return output.items.map((item) => item.id).sort();
 }
 
+test('production nested context admits project agent memory but never worker writes', async () => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'nested-memory-'));
+  try {
+    const provider=createMemoryProvider({rootDir:root});
+    const args={text:'登录页在 src/login.tsx',kind:'fact',anchorMessageId:'m-user'};
+    const nested={toolContext:{...context(),role:undefined,turnRole:'project_agent'}};
+    assert.equal(outputOf(await provider.executeCapability(call('local.memory.remember',args),nested)).ok,true);
+    const denied=await provider.executeCapability(call('local.memory.remember',args),{toolContext:{...context(),mode:'goal',role:undefined,turnRole:'session_worker'}});
+    assert.equal(outputOf(denied).error,'not_project_agent');
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
 test('记忆能力只放进项目代理白名单', () => {
   for (const capabilityId of MEMORY_CAPABILITY_IDS) {
     assert.equal(PROJECT_AGENT_ALLOWED_CAPABILITIES.includes(capabilityId), true);
