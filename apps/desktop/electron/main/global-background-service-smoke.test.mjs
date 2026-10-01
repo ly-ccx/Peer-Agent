@@ -10,7 +10,7 @@ import { _electron as electron } from 'playwright-core';
 
 // Opt-in UI test: a display and the Desktop build are required. The default
 // suite still exercises real HTTP services in global-background-tasks.test.mjs.
-test('isolated Electron: projected service appears globally and UI stop releases its port', {
+test('isolated Electron: current production background panel via test entry stops a projected service and releases its port', {
   skip: process.env.PEER_BACKGROUND_UI_SMOKE !== '1', timeout: 90_000,
 }, async (t) => {
   const home = mkdtempSync(path.join(tmpdir(), 'peer-background-ui-'));
@@ -220,5 +220,5 @@ test('isolated Electron: projected service appears globally and UI stop releases
     await closePanel();
   }
   assert.deepEqual(errors, []);
-  t.diagnostic(`Production component + preload + IPC: ${id}, source retained, live TCP ${port}, log evidence, stop-feedback cross product and explicit stop verified.`);
+  t.diagnostic(`Test-only entry + production provider/panel/preload/IPC: ${id}, source retained, live TCP ${port}, log evidence, stop-feedback cross product and explicit stop verified. Product entry is the task monitor.`);
 });
