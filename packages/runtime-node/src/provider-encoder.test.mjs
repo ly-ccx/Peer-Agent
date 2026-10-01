@@ -2,6 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { encodeAnthropicMessagesRequest, encodeOpenAIChatRequest } from './provider-encoders/request-encoder.mjs';
+import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
+import { DELEGATION_TOOL_SPECS } from './project-agent/tool-specs.mjs';
+
+test('portable Responses encoding preserves optional Manifest fields and explicit strict policy', () => {
+  const spawn = DELEGATION_TOOL_SPECS.find(tool => tool.name === 'spawn_session');
+  const schema = structuredClone(spawn.inputSchema);
+  const original = structuredClone(schema);
+  const tools = [
+    { function: { name: spawn.name, parameters: schema } },
+    { name: 'flat', parameters: schema },
+    { name: 'strict', parameters: schema, strict: true },
+    { function: { name: 'non_strict', parameters: schema, strict: false } },
+  ];
+  const encoded = encodeOpenAIResponsesRequest({ model: 'test', messages: [], tools });
+  assert.deepEqual(encoded.tools.map(tool => tool.strict), [false, false, true, false]);
+  for (const tool of encoded.tools) assert.deepEqual(tool.parameters, original);
+  assert.deepEqual(schema, original);
+});
 
 // 回归背景（线上 400 复现）: GLM Coding Plan(国区) 走 anthropic-messages wire，
 // 渠道声明的输出上限 maxOutputTokens = 131072（models.dev limit.output）。

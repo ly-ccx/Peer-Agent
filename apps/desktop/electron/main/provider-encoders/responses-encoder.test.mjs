@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { encodeOpenAIResponsesRequest } from './responses-encoder.mjs';
+import { DELEGATION_TOOL_SPECS, validateDelegationInput } from '../../../../../packages/runtime-node/src/project-agent/tool-specs.mjs';
 
 describe('OpenAI Responses request encoder (ADR 28)', () => {
   it('moves system messages into instructions and keeps the rest as input', () => {
@@ -84,8 +85,54 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
       tools: [{ type: 'function', function: { name: 'ls', description: 'list', parameters: { type: 'object' } } }],
     });
     assert.deepEqual(body.tools, [
-      { type: 'function', name: 'ls', description: 'list', parameters: { type: 'object' } },
+      { type: 'function', name: 'ls', description: 'list', parameters: { type: 'object' }, strict: false },
     ]);
+  });
+
+  it('preserves projected optional and nested criterion fields without implicit strict normalization', () => {
+    const spawn = DELEGATION_TOOL_SPECS.find((tool) => tool.name === 'spawn_session');
+    assert.ok(spawn);
+    const schema = structuredClone(spawn.inputSchema);
+    const before = structuredClone(schema);
+    const body = encodeOpenAIResponsesRequest({
+      model: 'gpt-6-luna', messages: [],
+      tools: [
+        { type: 'function', function: { name: spawn.name, parameters: schema } },
+        { type: 'function', name: spawn.name, parameters: schema },
+      ],
+    });
+    for (const tool of body.tools) {
+      assert.equal(tool.strict, false);
+      assert.deepEqual(tool.parameters, before);
+      assert.equal(tool.parameters.required.includes('objectiveId'), false);
+      assert.equal(tool.parameters.required.includes('supersedes'), false);
+      const criterion = tool.parameters.properties.successCriteria.items.anyOf[1];
+      assert.deepEqual(criterion.required, ['kind', 'description']);
+    }
+    assert.deepEqual(schema, before, 'encoding must not mutate the projected Manifest schema');
+  });
+
+  it('retains an explicit boolean strict policy for nested and flat tool definitions', () => {
+    const tools = [true, false].flatMap((strict) => [
+      { type: 'function', function: { name: 'nested', parameters: { type: 'object' }, strict } },
+      { type: 'function', name: 'flat', parameters: { type: 'object' }, strict },
+    ]);
+    const body = encodeOpenAIResponsesRequest({ model: 'gpt-6-luna', messages: [], tools });
+    assert.deepEqual(body.tools.map((tool) => tool.strict), [true, true, false, false]);
+  });
+
+  it('still rejects malformed present optional values at the local execution boundary', () => {
+    const valid = {
+      anchorMessageIds: ['input-1'], title: 'Read project', brief: 'Read README',
+      successCriteria: [{ kind: 'manual', description: 'Summarize the README' }],
+      kind: 'research', readOnly: true,
+    };
+    assert.equal(validateDelegationInput('spawn_session', valid).ok, true);
+    for (const invalid of [
+      { ...valid, objectiveId: '' },
+      { ...valid, supersedes: '' },
+      { ...valid, successCriteria: [{ ...valid.successCriteria[0], command: '' }] },
+    ]) assert.equal(validateDelegationInput('spawn_session', invalid).ok, false);
   });
 
   it('adds reasoning only when supportsReasoning and effort is active', () => {
