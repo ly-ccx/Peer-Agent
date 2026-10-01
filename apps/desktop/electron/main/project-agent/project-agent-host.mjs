@@ -497,11 +497,12 @@ export function registerDesktopProjectAgent({
     broadcast,
     conversationStore,
     goalPlanStore,
-    readSearchCorpus() {
-      const bots = typeof directory.list === 'function' ? directory.list() : [];
+    readSearchCorpus(catalog) {
+      const bots = Array.isArray(catalog) ? catalog : (typeof directory.list === 'function' ? directory.list() : []);
       const messages = [];
-      for (const workspaceId of directory.workspaceIds()) {
-        const conversationId = directory.conversationId(workspaceId);
+      for (const bot of bots) {
+        const workspaceId = bot.workspaceId;
+        const conversationId = bot.profile?.agentConversationId;
         if (!conversationId) continue;
         let history = [];
         try {

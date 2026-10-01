@@ -99,6 +99,23 @@ test('列表项截断最后一条可见消息，并计入批准、提问、确�
   }
 });
 
+test('query returns a complete catalog and matched items from one current projection', () => {
+  const root = tempRoot();
+  let reads = 0;
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => { reads++; return []; } });
+    const result = directory.query('demo-project');
+    assert.equal(reads, 1, 'one history read per bot for the entire query snapshot');
+    assert.deepEqual(result.items, result.catalog);
+    assert.equal(result.catalog[0].workspaceId, entry.workspaceId);
+    const missing = directory.query('no matching bot');
+    assert.deepEqual(missing.items, []);
+    assert.equal(missing.catalog.length, 1, 'message/memory corpus still needs unmatched bots');
+    assert.equal(reads, 2, 'a new query obtains current facts rather than retaining a stale snapshot');
+    assert.deepEqual(directory.search('demo-project'), directory.query('demo-project').items);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('读游标之后未读清零，对话按 kind 分页', () => {
   const root = tempRoot();
   try {

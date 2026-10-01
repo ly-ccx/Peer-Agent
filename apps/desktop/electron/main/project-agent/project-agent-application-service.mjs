@@ -434,13 +434,14 @@ export function createProjectAgentApplicationService({
 
   function search(payload = {}) {
     if (!open()) return disabled();
-    const items = typeof directory?.search === 'function' ? directory.search(payload.query) : [];
+    const snapshot = typeof directory?.query === 'function' ? directory.query(payload.query) : null;
+    const items = snapshot?.items ?? (typeof directory?.search === 'function' ? directory.search(payload.query) : []);
     let hits = [];
     if (searchIndex && typeof readSearchCorpus === 'function') {
       try {
         const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null;
         if (token === null || token !== corpusToken) {
-          searchIndex.sync(collectConversationSearchDocuments(readSearchCorpus() || {}));
+          searchIndex.sync(collectConversationSearchDocuments(readSearchCorpus(snapshot?.catalog) || {}));
           if (token !== null) corpusToken = token;
         }
         hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : '');

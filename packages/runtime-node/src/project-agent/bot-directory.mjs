@@ -301,16 +301,17 @@ export function createBotDirectory({
     return { ok: true, at, messageId: typeof last?.id === 'string' ? last.id : null };
   }
 
-  function search(query) {
-    const text = typeof query === 'string' ? query.trim().toLowerCase() : '';
+  function query(value) {
+    const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
     const built = rows();
-    if (!text) return sortBotList(built.map((row) => row.item));
+    const catalog = sortBotList(built.map((row) => row.item));
+    if (!text) return { items: catalog, catalog };
     const matched = built.filter((row) => {
       if (row.item.profile.displayName.toLowerCase().includes(text)) return true;
       if (row.item.preview.toLowerCase().includes(text)) return true;
       return row.titles.some((title) => title.toLowerCase().includes(text));
     });
-    return sortBotList(matched.map((row) => row.item));
+    return { items: sortBotList(matched.map((row) => row.item)), catalog };
   }
 
   return {
@@ -324,7 +325,8 @@ export function createBotDirectory({
       return Array.isArray(approvals) ? approvals : [];
     },
     markRead,
-    search,
+    query,
+    search: (value) => query(value).items,
     conversationId: (workspaceId) => profiles.read(workspaceId)?.agentConversationId || '',
     workspaceIds: () => activeProfiles().map((profile) => profile.workspaceId),
   };
