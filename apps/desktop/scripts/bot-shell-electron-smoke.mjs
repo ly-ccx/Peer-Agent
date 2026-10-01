@@ -37,32 +37,40 @@ const serviceText = readFileSync(applicationService, 'utf8');
 const readSeam = 'return directory.readConversation(payload.workspaceId, payload);';
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
 let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
-  (globalThis.rcBotShellReads ??= []).push({ before: payload.before ?? null, nextCursor: result.nextCursor,
+  globalThis.rcBotShellRecord('reads',{  before: payload.before ?? null, nextCursor: result.nextCursor,
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });
   return result;`);
 const timingSeams = [
   ['function list(payload = {}) {', 'function list(payload = {}) { const rcListStart = performance.now();'],
-  ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; (globalThis.rcListTimings ??= []).push({ count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
+  ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; globalThis.rcBotShellRecord(\'list\',{  count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
   ['function search(payload = {}) {', 'function search(payload = {}) { const rcStart = performance.now(); let rcStampMs = 0, rcIndexMs = 0;'],
   ['let hits = [];', 'const rcProjectionMs = performance.now() - rcStart; let hits = [];'],
   ["const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null;", "const rcStampStart = performance.now(); const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null; rcStampMs = performance.now() - rcStampStart; const rcIndexStart = performance.now();"],
   ["hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : '');", "hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : ''); rcIndexMs = performance.now() - rcIndexStart;"],
-  ['return { ok: true, items, hits };', '(globalThis.rcSearchTimings ??= []).push({ projectionMs: rcProjectionMs, stampMs: rcStampMs, indexMs: rcIndexMs, totalMs: performance.now() - rcStart }); return { ok: true, items, hits };'],
+  ['return { ok: true, items, hits };', 'globalThis.rcBotShellRecord(\'search\',{  projectionMs: rcProjectionMs, stampMs: rcStampMs, indexMs: rcIndexMs, totalMs: performance.now() - rcStart }); return { ok: true, items, hits };'],
 ];
 for (const [before, after] of timingSeams) {
   assert.equal(observedService.split(before).length, 2, 'exact search observation seam required');
   observedService = observedService.replace(before, after);
 }
 writeFileSync(applicationService, observedService);
+const observedFile = path.join(root, 'observations.json');
+writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
 const entry = path.join(root, 'entry.mjs');
 writeFileSync(entry, `import {app} from 'electron';
+import {writeFileSync,renameSync} from 'node:fs';
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 app.setPath('userData',${JSON.stringify(path.join(root, 'chromium'))});
-globalThis.rcBotShellTurns=[];
+const observations={reads:[],list:[],search:[],turns:[]};
+globalThis.rcBotShellRecord=(key,value)=>{
+  observations[key].push(value);
+  const file=${JSON.stringify(observedFile)};
+  writeFileSync(file+'.next',JSON.stringify(observations));renameSync(file+'.next',file);
+};
 globalThis.rcBotShellService={
   resolveGoalRole(input){return resolveRoleRoute({...input,providers:[{id:'rc-scripted',model:'scripted-fixture',enabled:true,apiKeyConfigured:true,supportsTools:true,supportsStructured:true,supportsVision:false,isDefault:true}]});},
   async sendMessage(input){
-    globalThis.rcBotShellTurns.push({role:input.turnProfile?.role,workspaceId:input.turnProfile?.workspaceId});
+    globalThis.rcBotShellRecord('turns',{role:input.turnProfile?.role,workspaceId:input.turnProfile?.workspaceId});
     await new Promise(resolve=>setTimeout(resolve,120));
     const text=input.messages?.findLast(message=>message.role==='user')?.content || '';
     return {terminalStatus:'done',text:'RC scripted reply: '+text};
@@ -79,20 +87,11 @@ const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse',
   synthetic: true, scale: fixture.scale, platform: process.platform, startedAt: new Date().toISOString(),
   checks: [], pageErrors: [], receiptSamples: [], scope: 'Real source Electron main/preload/renderer and durable input; scripted cognition only; not installed or real-model timing' };
 let app, handle, page; const logs = [];
-// Node inspector can collect its read-only evaluate promise during a main GC.
-// Retry only the observation; production actions and timing samples are retained.
-const readMain = async (fn) => {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try { return await app.evaluate(fn); }
-    catch (error) {
-      if (!String(error.message).includes('Resulting promise was garbage collected') || attempt === 2) throw error;
-      (report.observationRetries ??= []).push('INSPECTOR_PROMISE_COLLECTED');
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-};
+// Test-only facts are captured after each timing sample and atomically published.
+// Reading them never replays a product action or relies on inspector Promise lifetime.
+const readObserved = key => JSON.parse(readFileSync(observedFile, 'utf8'))[key];
 const tracePaging = async (phase) => {
-  (report.paging ??= []).push({ phase, reads: (await readMain(() => globalThis.rcBotShellReads ?? [])).slice(-20),
+  (report.paging ??= []).push({ phase, reads: readObserved('reads').slice(-20),
     view: await page.locator('.bot-thread').evaluate(node => ({ top: node.scrollTop, height: node.scrollHeight,
       viewport: node.clientHeight, busy: node.getAttribute('aria-busy'), ids: [...node.querySelectorAll('[id^="bot-msg-"]')].map(row => row.id) })) });
 };
@@ -110,13 +109,13 @@ try {
   page.setDefaultTimeout(15000); page.on('pageerror', error => report.pageErrors.push(error.message));
   await page.locator('.bot-shell').waitFor();
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
-  assert.equal((await readMain(() => globalThis.rcBotShellTurns)).length, 0, 'idle bots must not open model turns');
+  assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
   report.checks.push('200 real bot rows; no idle model turns');
-  report.listInitialMs = (await readMain(() => globalThis.rcListTimings ?? [])).find(sample => sample.count === fixture.scale.bots)?.durationMs;
+  report.listInitialMs = readObserved('list').find(sample => sample.count === fixture.scale.bots)?.durationMs;
   const listSamples = [];
   for (let i = 0; i < 5; i++) {
     assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
-    listSamples.push(await readMain(() => globalThis.rcListTimings.at(-1).durationMs));
+    listSamples.push(readObserved('list').at(-1).durationMs);
   }
   report.metrics = { productionList: metric('list', listSamples) };
   assert.equal(report.metrics.productionList.pass, true, 'real desktop list projection p50 must stay below 100ms');
@@ -145,7 +144,7 @@ try {
     report.searchSamples.push(await page.evaluate(() => globalThis.rcSearchMeasurement));
   }
   report.metrics.visibleSearch = metric('search', report.searchSamples);
-  report.searchTimings = await readMain(() => globalThis.rcSearchTimings ?? []);
+  report.searchTimings = readObserved('search');
   assert.equal(report.metrics.visibleSearch.pass, true, 'input to visible full-corpus result p50 must stay below 150ms');
   await page.locator('.bot-search').fill('');
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
