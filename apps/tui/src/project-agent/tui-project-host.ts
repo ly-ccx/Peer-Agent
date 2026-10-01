@@ -54,10 +54,11 @@ export function createTuiProjectHost(options: {
   let watches: ReturnType<typeof createDesktopObjectiveWatchHost>;
   let objectives: ReturnType<typeof createObjectiveService>;
   let closed = false;
+  let admissionClosed = false;
   const changed = () => options.onChanged?.();
   const memoryEnabled = (workspaceId: string) => getSettings().memory?.enabled !== false && profiles.read(workspaceId)?.memoryEnabled !== false;
   const readMessages = (id: string): any[] => conversations.getPersistedConversationHistory?.(id)?.messages as any[] ?? [];
-  const holds = (id: string): boolean => !closed && id === selectedId && profiles.read(id)?.status === 'active' && leases.holds(id);
+  const holds = (id: string): boolean => !closed && !admissionClosed && id === selectedId && profiles.read(id)?.status === 'active' && leases.holds(id);
   const scheduler = createExecutionScheduler({ rootDir: runtimeRoot, getConcurrency: () => getSettings().projectAgent?.concurrency } as never);
   scheduler.configure({ isWorkspaceReady: (id: string) => host?.isReady(id) === true });
   const leases = createHostLease({ rootDir: runtimeRoot, hostId: `tui-${randomUUID()}`, surface: 'tui', appVersion: options.appVersion ?? '',
@@ -168,7 +169,7 @@ export function createTuiProjectHost(options: {
     }).join('|');
   }
   async function tick() {
-    if (closed || !selectedId) return;
+    if (closed || admissionClosed || !selectedId) return;
     const next = currentWakeStamp();
     if (running.size && next === wakeStamp) return Promise.allSettled([...running]);
     wakeStamp = next;
@@ -192,7 +193,7 @@ export function createTuiProjectHost(options: {
   if(options.autoStart!==false){watches.start(()=>selectedId?[selectedId]:[]);void tick();}
   return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, lifecycle, readEvidence,
     workspaceId:()=>selectedId, holdsLease:holds, tick,
-    async selectWorkspace(id: string) {if(id===selectedId)return;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;host.restart(id);await tick();changed();},
+    async selectWorkspace(id: string) {if(id===selectedId)return;admissionClosed=true;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;admissionClosed=false;await host.restart(id);changed();},
     async takeover() {if(!selectedId)return {requested:false};const request=leases.requestTakeover(selectedId);if(request.reason==='free')leases.acquire(selectedId);await tick();return request;},
     async decideApproval(approvalId: string, decision: 'approve'|'deny') {
       if(!holds(selectedId))return {ok:false,error:'desktop_approval_required'};
@@ -213,6 +214,6 @@ export function createTuiProjectHost(options: {
       else if(planApproval)await supervisor.cancel({sessionId:record.sessionId,reason:'plan_approval_denied'});
       approvals.append({...record,state:decision==='approve'?'approved':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui'});changed();return {ok:true};
     },
-    async close() {if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
+    async close() {admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
   };
 }

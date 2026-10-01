@@ -49,6 +49,28 @@ test('terminal task scheduling stays closed until recovery and after host drain'
   expect(scheduler.isWorkspaceReady(f.workspaceId)).toBe(false);
 });
 
+test('closing a terminal host blocks new input while its old turn drains', async () => {
+  const f = fixture();
+  let release!: () => void, entered!: () => void, calls = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const host = start(f, async () => { calls++; entered(); await gate; return { ok: true, text: 'done' }; });
+  host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'before-close', surface: 'tui', text: 'first' });
+  const first = host.tick();
+  await started;
+  const closing = host.close();
+  host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'during-close', surface: 'tui', text: 'second' });
+  const late = host.tick();
+  try {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(calls).toBe(1);
+    expect(host.holdsLease(f.workspaceId)).toBe(false);
+  } finally {
+    release();
+    await Promise.allSettled([first, closing, late]);
+  }
+});
+
 test('terminal composition consumes a durable input once and projects its shared reply', async () => {
   const f = fixture(), calls: any[] = [];
   const host = start(f, async input => { calls.push(input); return { ok: true, text: 'received', toolCalls: [] }; });
