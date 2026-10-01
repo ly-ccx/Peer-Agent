@@ -44,7 +44,7 @@ globalThis.rcBotShellService={
 app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(error=>{console.error(error);app.exit(1)});
 `);
 const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1',
-  PEER_WORKSPACE_ROOT: fixture.bots[0].path, HOME: root };
+  PEER_WORKSPACE_ROOT: fixture.bots[0].path };
 delete env.ELECTRON_RUN_AS_NODE;
 const owned = createOwnedProcessRegistry();
 const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8' }).trim(),
