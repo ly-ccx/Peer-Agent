@@ -62,7 +62,9 @@ const entry = path.join(root, 'entry.mjs');
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
 writeFileSync(entry, `import {app,dialog} from 'electron';
 import {writeFileSync,renameSync} from 'node:fs';
+import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/lab-main-thread-probe.mjs')).href)};
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
+startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
 app.setPath('userData',${JSON.stringify(path.join(root, 'chromium'))});
 ${process.argv.includes('--diagnostics') ? `dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(diagnosticsFile)}});` : ''}
 const observations={reads:[],list:[],search:[],turns:[]};
@@ -90,7 +92,10 @@ const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse',
   sourceDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: source, encoding: 'utf8' }).trim()),
   synthetic: true, scale: fixture.scale, platform: process.platform, startedAt: new Date().toISOString(),
   checks: [], pageErrors: [], receiptSamples: [], scope: 'Real source Electron main/preload/renderer and durable input; scripted cognition only; not installed or real-model timing' };
-let app, handle, page; const logs = [];
+let app, handle, page, tracing = false; const logs = [];
+const interaction = async phase => {
+  report.interactionBefore = await page.evaluate(phase => ({ phase, frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus() }), phase);
+};
 // Test-only facts are captured after each timing sample and atomically published.
 // Reading them never replays a product action or relies on inspector Promise lifetime.
 const readObserved = key => JSON.parse(readFileSync(observedFile, 'utf8'))[key];
@@ -107,6 +112,7 @@ const until = async (read, predicate, timeout = 30000) => {
 try {
   app = await _electron.launch({ args: [entry], env, cwd: isolation.launch.desktopDir, timeout: 30000 });
   handle = owned.register({ process: app.process(), close: () => app.close() });
+  await app.context().tracing.start({ screenshots: true, snapshots: true }); tracing = true;
   for (const stream of [app.process().stdout, app.process().stderr]) stream.on('data', data => logs.push(String(data)));
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean, 120000);
   report.windowReadyMs = Date.now() - Date.parse(report.startedAt);
@@ -114,6 +120,7 @@ try {
   await page.locator('.bot-shell').waitFor();
   await page.bringToFront();
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
+  await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
   report.avatarAnimation = await page.evaluate(() => ({ avatars: document.querySelectorAll('.bot-avatar').length, activeAvatars: document.querySelectorAll('[data-avatar-animated="true"]').length, animations: document.getAnimations().length }));
@@ -128,6 +135,7 @@ try {
   assert.equal(report.metrics.productionList.pass, true, 'real desktop list projection p50 must stay below 100ms');
   report.searchSamples = [];
   for (let i = 0; i < 5; i++) {
+    await interaction(`search-clear-${i}`);
     await page.locator('.bot-search').fill('');
     await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
     await page.evaluate(() => {
@@ -147,6 +155,7 @@ try {
         const timer = setTimeout(() => { cleanup(); reject(Error('Visible full-corpus search result missing')); }, 5000);
       });
     });
+    await interaction(`search-query-${i}`);
     await page.locator('.bot-search').fill('unique-needle');
     report.searchSamples.push(await page.evaluate(() => globalThis.rcSearchMeasurement));
   }
@@ -156,6 +165,7 @@ try {
   await page.locator('.bot-search').fill('');
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   report.checks.push('five input-to-visible searches across the real message corpus under budget');
+  await interaction('open-bot');
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
   await page.locator('.bot-composer textarea').waitFor();
   for (let i = 0; i < 5; i++) {
@@ -180,6 +190,7 @@ try {
       });
     }, text);
     (report.inputWindowStates ??= []).push(await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus(), composer: document.querySelectorAll('.bot-composer textarea').length })));
+    await interaction(`send-${i}`);
     await page.locator('.bot-composer textarea').press('Enter');
     const sample = await page.evaluate(() => globalThis.rcReceiptMeasurement);
     report.receiptSamples.push(sample.elapsed);
@@ -254,11 +265,16 @@ try {
   report.ok = true;
 } catch (error) {
   report.error = error.stack; process.exitCode = 1;
+  if (page) report.interactionAfter = await page.evaluate(() => ({ frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus(), search: [...document.querySelectorAll('.bot-search')].map(node => ({ value: node.value, width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height, visibility: getComputedStyle(node).visibility, display: getComputedStyle(node).display })), composers: document.querySelectorAll('.bot-composer textarea').length })).catch(() => null);
   if (page && app) await tracePaging('failure').catch(() => {});
   if (page) await page.screenshot({ path: path.join(root, 'failure.png') }).catch(() => {});
   const failureOutput = process.argv.indexOf('--output');
   if (page && failureOutput >= 0) await page.screenshot({ path: path.join(path.dirname(process.argv[failureOutput + 1]), 'bot-shell-failure.png') }).catch(() => {});
 } finally {
+  if (tracing) {
+    const output = process.argv.indexOf('--output');
+    await app.context().tracing.stop({ path: path.join(output >= 0 ? path.dirname(process.argv[output + 1]) : root, 'bot-shell-trace.zip') }).catch(() => {});
+  }
   if (handle) report.ownedStop = await owned.stop({ handleId: handle, reason: 'owned' });
   report.finishedAt = new Date().toISOString();
   report.mainAuthorizationErrors = logs.filter(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED'));

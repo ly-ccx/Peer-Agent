@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -19,7 +19,7 @@ const provider = { id: 'configured', provider: 'openai', model: 'test-model', en
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
 after(() => { if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome; rmSync(root, { recursive: true, force: true }); });
 
-function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, holdsLease = () => true, projectCount = 1 } = {}) {
+function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, readRuntimePolicy = null, holdsLease = () => true, projectCount = 1 } = {}) {
   const home = dataHome || mkdtempSync(path.join(root, 'home-'));
   const project = folder || path.join(home, 'workspace');
   mkdirSync(project, { recursive: true });
@@ -39,7 +39,7 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
     conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
       ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
-    holdsLease, getSettings: () => { settingsReads++; return { ...settings, workspaces }; }, mergeSettings() {},
+    holdsLease, getSettings: () => { settingsReads++; return { ...settings, workspaces }; }, ...(readRuntimePolicy ? { readRuntimePolicy } : {}), mergeSettings() {},
     listModels: () => configured ? [provider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
   });
   const handlers = new Map();
@@ -66,6 +66,33 @@ test('desktop diagnostic assembly reads actual input and turn stores without run
     assert.equal(after.report.bots[0].turns.at(-1).outcome,'done');assert.ok(after.report.bots[0].turns.at(-1).durationMs>=0);
     const text=JSON.stringify(after.report);assert.equal(text.includes(env.home),false);assert.equal(text.includes('hello'),false);
   } finally { env.dispose(); }
+});
+
+test('diagnostic read leaves a corrupt actual project registry untouched', async () => {
+  const env = harness();
+  try {
+    const projects = path.join(env.home, 'projects'), file = path.join(projects, 'registry.json');
+    writeFileSync(file, '{broken');
+    const before = readdirSync(projects).sort(), count = env.calls.length;
+    const result = await env.diagnostics('read');
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.report.errors, ['PROJECTS_UNAVAILABLE']);
+    assert.equal(readFileSync(file, 'utf8'), '{broken');
+    assert.deepEqual(readdirSync(projects).sort(), before);
+    assert.equal(env.calls.length, count);
+  } finally { env.dispose(); }
+});
+
+test('200-bot maintenance uses a fresh runtime policy port and still revokes all runners on classic switch', async () => {
+  const policy={projectAgent:{shell:'bots'},memory:{enabled:true}};
+  const env=harness({projectCount:200,settings:{projectAgent:{shell:'bots'}},readRuntimePolicy:()=>policy});
+  try {
+    const before=env.settingsReads();await env.api.host.sync();
+    const ids=env.api.listItems().map(item=>item.workspaceId);assert.ok(ids.every(id=>env.api.host.runnerFor(id)));
+    assert.ok(env.settingsReads()-before<20,'maintenance must not request full identity migration per bot');
+    policy.projectAgent.shell='classic';await env.api.host.sync();assert.ok(ids.every(id=>!env.api.host.runnerFor(id)));
+    assert.equal(env.calls.length,0);
+  } finally {env.dispose();}
 });
 
 test('targeted wake checks global eligibility once while retaining 200 lease-owning bots', async () => {

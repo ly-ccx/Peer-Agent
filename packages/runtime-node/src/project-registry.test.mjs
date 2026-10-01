@@ -16,6 +16,25 @@ function tempDir() {
   return mkdtempSync(path.join(tmpdir(), 'peer-project-registry-'));
 }
 
+test('diagnostic snapshots are fresh copies and never repair corrupt registry files', () => {
+  const dir = tempDir(), filePath = path.join(dir, 'registry.json');
+  try {
+    const registry = createProjectRegistry({ filePath });
+    assert.deepEqual(registry.diagnosticSnapshot(), []);
+    assert.deepEqual(readdirSync(dir), []);
+    const entry = registry.ensureForPath(dir);
+    const snapshot = registry.diagnosticSnapshot();
+    snapshot[0].previousPaths.push('mutated');
+    assert.deepEqual(registry.diagnosticSnapshot()[0].previousPaths, []);
+    writeFileSync(filePath, '{broken');
+    assert.throws(() => registry.diagnosticSnapshot(), /CORRUPT_REGISTRY/);
+    assert.equal(readFileSync(filePath, 'utf8'), '{broken');
+    assert.deepEqual(readdirSync(dir), ['registry.json']);
+    assert.equal(registry.get(entry.workspaceId), null);
+    assert.ok(readdirSync(dir).some(name => name.includes('.corrupt-')));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('ensureForPath keeps the same id for the same path', () => {
   let minted = 0;
   const registry = createProjectRegistry({
