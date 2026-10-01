@@ -13,6 +13,7 @@ import {
   createMemoryCurator,
   createMemoryMaintenance,
   createMemoryFileAnchors,
+  isEffectiveMemory,
   createDigestQueue,
   createProjectAgentRunner,
   inQuietHours,
@@ -829,7 +830,7 @@ export function registerDesktopProjectAgent({
       }
       let memories = [];
       try {
-        memories = memoryStore.list({ status: 'active' }) || [];
+        memories = (memoryStore.list({ status: 'active' }) || []).filter(item => isEffectiveMemory(item));
       } catch {
         memories = [];
       }

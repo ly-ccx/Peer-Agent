@@ -13,6 +13,7 @@ test('conflict requires a shared single-value topic in the same scope', () => {
 });
 
 test('new authoritative statements replace older claims; ambiguous contradictory values need a choice', () => {
+  assert.deepEqual(memoryConflictDecision(item('new', { kind: 'decision', topicValue: 'bun test' }), [item('old')]), { replaceIds: [], conflictIds: ['old'] });
   assert.deepEqual(memoryConflictDecision(item('new', { topicValue: 'bun test', createdAt: '2026-10-02T00:00:00Z' }), [item('old')]),
     { replaceIds: ['old'], conflictIds: [] });
   assert.deepEqual(memoryConflictDecision(item('new', { topicValue: 'bun test' }), [item('old')]), { replaceIds: [], conflictIds: ['old'] });

@@ -407,3 +407,16 @@ test('desktop daily memory maintenance obeys classic, lease and memory switches 
     } finally {env.dispose();}
   }
 });
+
+test('global bot search excludes changed, expired and conflicted memories', async()=>{
+  const env=harness();
+  try {
+    const store=createMemoryStore({rootDir:env.home});
+    const stale=store.writeVerified({workspaceId:env.bot.workspaceId,kind:'fact',text:'searchvalidity stale',sourceRefs:['ev']}).item;
+    store.markMaintained({id:stale.id,workspaceId:env.bot.workspaceId,needsReverify:true});
+    store.writeVerified({workspaceId:env.bot.workspaceId,kind:'fact',text:'searchvalidity expired',sourceRefs:['ev-expiry'],expiresAt:'2020-01-01T00:00:00Z'});
+    store.writeVerified({workspaceId:env.bot.workspaceId,kind:'fact',text:'searchvalidity fresh',sourceRefs:['ev-fresh']});
+    const result=await env.invoke('search',{query:'searchvalidity'});
+    assert.equal(result.ok,true);const memories=result.hits.filter(hit=>hit.kind==='memory');assert.equal(memories.length,1);assert.match(JSON.stringify(memories[0]),/fresh/);
+  }finally{env.dispose();}
+});
