@@ -688,13 +688,14 @@ test('restoration click creates one durable user anchor and refuses cross-projec
   try {
     const store = createConversationStore({ storeDir: root });
     const parent = store.createConversation({ title: 'project', role: 'project_agent', workspaceId: 'ws-1' });
-    const calls = []; let online = true;
+    const calls = []; let online = true; let archived = false;
     const service = createProjectAgentApplicationService({ enabled: () => true, conversationStore: store,
-      agentOnline: () => online, profileStore: { read: () => ({ status: 'active', agentConversationId: parent.id }) },
+      agentOnline: () => online, profileStore: { read: () => ({ status: archived ? 'archived' : 'active', agentConversationId: parent.id }) },
       sessions: { get: () => ({ sessionId: 's1', workspaceId: 'ws-1', title: 'old', status: 'superseded', origin: { parentConversationId: parent.id } }),
         resume: (input, context) => { calls.push([input, context]); return { sessionId: 's1', status: 'queued' }; } } });
     const payload = { sessionId: 's1', workspaceId: 'ws-1', requestId: 'request-1' };
     assert.equal((await service.resumeSession({ ...payload, workspaceId: 'other' })).code, 'OUT_OF_SCOPE');
+    archived = true; assert.equal((await service.resumeSession(payload)).code, 'OUT_OF_SCOPE'); archived = false;
     online = false; assert.equal((await service.resumeSession(payload)).code, 'AGENT_OFFLINE');
     assert.equal(store.getPersistedConversationHistory(parent.id).messages.length, 0);
     online = true;

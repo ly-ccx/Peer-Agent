@@ -317,7 +317,7 @@ export function createProjectAgentApplicationService({
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : '';
     const session = await sessions.get({ sessionId: payload.sessionId });
     const profile = profileStore?.read(workspaceId);
-    if (!session || !profile || profile.status === 'deleted' || session.workspaceId !== workspaceId || session.origin?.parentConversationId !== profile.agentConversationId) return { ok: false, code: 'OUT_OF_SCOPE' };
+    if (!session || !profile || profile.status !== 'active' || session.workspaceId !== workspaceId || session.origin?.parentConversationId !== profile.agentConversationId) return { ok: false, code: 'OUT_OF_SCOPE' };
     if (agentOnline(workspaceId) !== true) return { ok: false, code: 'AGENT_OFFLINE' };
     if (typeof payload.requestId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(payload.requestId)) return { ok: false, code: 'INVALID_INPUT' };
     const anchorMessageId = `resume:${session.sessionId}:${payload.requestId}`;
