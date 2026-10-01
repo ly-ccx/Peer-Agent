@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createI18n } from '@peer-agent/i18n';
 import {
+  acknowledgeInput,
   applyOptimistic,
   conversationRows,
   mergeConversationPage,
@@ -13,6 +14,20 @@ import {
   windowConversationRows,
   type BotChatMessage,
 } from './botConversationState.ts';
+
+test('durable receipt acknowledges its input and preserves identity until the canonical echo', () => {
+  const pending = [{ inputId: 'a', text: 'body', quoteRefs: ['reply'], createdAt: 'now', state: 'sending' as const },
+    { inputId: 'b', text: 'failed', quoteRefs: [], createdAt: 'now', state: 'failed' as const }];
+  const acknowledged = acknowledgeInput(pending, 'a');
+  assert.equal(acknowledged[0]!.state, 'received');
+  assert.equal(acknowledged[1]!.state, 'failed');
+  const shown = applyOptimistic([], acknowledged);
+  assert.equal(shown[0]!.pending, 'received');
+  assert.deepEqual(shown[0]!.dispositions, []);
+  const echo = normalizeBotMessage({ id: 'input-a', role: 'user', inputId: 'a', content: 'body' });
+  assert.ok(echo);
+  assert.equal(applyOptimistic([echo], acknowledged).filter(item => item.inputId === 'a').length, 1);
+});
 
 function message(partial: Partial<BotChatMessage> & Pick<BotChatMessage, 'id' | 'kind' | 'createdAt'>): BotChatMessage {
   return {

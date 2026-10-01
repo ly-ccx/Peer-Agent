@@ -87,7 +87,7 @@ export interface BotChatMessage {
   readonly cards: readonly BotChatCard[];
   readonly quoteRefs: readonly string[];
   readonly separatorLabel: string;
-  readonly pending?: 'sending' | 'failed';
+  readonly pending?: 'sending' | 'received' | 'failed';
   readonly images?: readonly { readonly id: string; readonly name: string; readonly dataUrl: string }[];
 }
 
@@ -96,7 +96,12 @@ export interface PendingBotInput {
   readonly text: string;
   readonly quoteRefs: readonly string[];
   readonly createdAt: string;
-  readonly state: 'sending' | 'failed';
+  readonly state: 'sending' | 'received' | 'failed';
+}
+
+/** A successful durable submit receipt acknowledges only this input, never a reply. */
+export function acknowledgeInput(pending: readonly PendingBotInput[], inputId: string): PendingBotInput[] {
+  return pending.map(item => item.inputId === inputId ? { ...item, state: 'received' } : item);
 }
 
 export type ConversationRow =

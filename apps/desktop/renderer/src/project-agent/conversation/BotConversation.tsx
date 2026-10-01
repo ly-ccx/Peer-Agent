@@ -46,6 +46,9 @@ export function BotConversation({
   }, [conversation.status, conversation.messages, onReplyArrived, workspaceId]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   useEffect(() => {
+    if (highlightedId) void conversation.locateMessage(highlightedId);
+  }, [highlightedId, conversation.locateMessage]);
+  useEffect(() => {
     if (focusMessageId) setHighlightedId(focusMessageId);
   }, [focusMessageId, focusRequestId]);
   const [quote, setQuote] = useState<{ messageId: string; text: string } | null>(null);
@@ -61,6 +64,9 @@ export function BotConversation({
           label={label}
           avatarMood={avatarMood}
           rows={conversation.rows}
+          hasOlder={conversation.hasOlder}
+          olderError={conversation.olderError}
+          onLoadOlder={conversation.loadOlder}
           highlightedId={highlightedId}
           i18n={i18n}
           onJump={(messageId) => setHighlightedId(messageId)}

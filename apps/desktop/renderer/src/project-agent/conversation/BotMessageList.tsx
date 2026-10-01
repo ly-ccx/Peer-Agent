@@ -20,6 +20,9 @@ export function BotMessageList({
   label,
   avatarMood,
   rows,
+  hasOlder = false,
+  olderError = false,
+  onLoadOlder,
   highlightedId,
   i18n,
   onJump,
@@ -34,6 +37,9 @@ export function BotMessageList({
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
   readonly rows: readonly ConversationRow[];
+  readonly hasOlder?: boolean;
+  readonly olderError?: boolean;
+  readonly onLoadOlder?: () => Promise<void>;
   readonly highlightedId: string | null;
   readonly i18n: I18nRuntime;
   readonly onJump: (messageId: string) => void;
@@ -45,11 +51,30 @@ export function BotMessageList({
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [anchor, setAnchor] = useState(Math.max(0, rows.length - 1));
   const messages = rows.flatMap((row) => (row.type === 'message' ? [row.message] : []));
   const anchors = new Map(messages.map((message) => [message.id, clip(message.content)]));
   const replied = repliedUserIds(messages);
   const windowed = windowConversationRows(rows, anchor);
+  const loadOlder = async () => {
+    if (!onLoadOlder || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const node = scrollerRef.current;
+    const previousHeight = node?.scrollHeight ?? 0;
+    const previousTop = node?.scrollTop ?? 0;
+    pinnedRef.current = false;
+    try { await onLoadOlder(); }
+    finally {
+      requestAnimationFrame(() => {
+        if (node) node.scrollTop = previousTop + Math.max(0, node.scrollHeight - previousHeight);
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+      });
+    }
+  };
 
   useEffect(() => {
     if (pinnedRef.current) setAnchor(Math.max(0, rows.length - 1));
@@ -80,9 +105,16 @@ export function BotMessageList({
         pinnedRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
         if (node.scrollTop < 48 && windowed.start > 0) {
           setAnchor((current) => Math.max(0, current - 40));
+        } else if (node.scrollTop < 48 && hasOlder && !olderError) {
+          void loadOlder();
         }
       }}
     >
+      {hasOlder && windowed.start === 0 ? (
+        <button className="bot-thread-older" type="button" disabled={loadingOlder} onClick={() => void loadOlder()}>
+          {i18n.t(olderError ? 'projectAgent.chat.olderFailed' : loadingOlder ? 'projectAgent.chat.loadingOlder' : 'projectAgent.chat.loadOlder')}
+        </button>
+      ) : null}
       {rows.length === 0 ? (
         <div className="bot-thread-empty">
           <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} />

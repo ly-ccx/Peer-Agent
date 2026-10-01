@@ -1070,7 +1070,7 @@ export interface BootstrapPreloadApi {
     createdAt?: string;
     answerTo?: string;
   }) => Promise<{ ok: boolean; code?: string }>;
-  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
+  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
   readonly projectAgentReadEvidence: (params: { evidenceRef: string }) => Promise<{ ok: boolean; code?: string; evidenceRef?: string; kind?: string; summary?: string; truncated?: boolean }>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;

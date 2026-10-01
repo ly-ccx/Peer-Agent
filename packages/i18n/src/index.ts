@@ -128,6 +128,10 @@ export type TranslationKey =
   | 'projectAgent.chat.empty'
   | 'projectAgent.chat.loadFailed'
   | 'projectAgent.chat.thinking'
+  | 'projectAgent.chat.received'
+  | 'projectAgent.chat.loadOlder'
+  | 'projectAgent.chat.loadingOlder'
+  | 'projectAgent.chat.olderFailed'
   | 'projectAgent.chat.sending'
   | 'projectAgent.chat.failed'
   | 'projectAgent.chat.retry'
@@ -1317,6 +1321,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
     'projectAgent.chat.loadFailed': '对话没有加载出来',
     'projectAgent.chat.thinking': '思考中…',
+    'projectAgent.chat.received': '已收到',
+    'projectAgent.chat.loadOlder': '查看更早消息',
+    'projectAgent.chat.loadingOlder': '正在加载更早消息',
+    'projectAgent.chat.olderFailed': '加载失败，重试',
     'projectAgent.chat.sending': '发送中',
     'projectAgent.chat.failed': '没有发出去',
     'projectAgent.chat.retry': '重发',
@@ -2304,6 +2312,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
     'projectAgent.chat.loadFailed': 'The conversation did not load',
     'projectAgent.chat.thinking': 'Thinking…',
+    'projectAgent.chat.received': 'Received',
+    'projectAgent.chat.loadOlder': 'Earlier messages',
+    'projectAgent.chat.loadingOlder': 'Loading earlier messages',
+    'projectAgent.chat.olderFailed': 'Load failed, retry',
     'projectAgent.chat.sending': 'Sending',
     'projectAgent.chat.failed': 'Not sent',
     'projectAgent.chat.retry': 'Retry',
