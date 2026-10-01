@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "pnpm --filter @peer-agent/desktop dev",
     "build": "pnpm -r --workspace-concurrency=1 build",
-    "test": "pnpm -r --if-present test && pnpm marketplace:test && pnpm changelog:test",
+    "test": "pnpm -r --if-present test && pnpm marketplace:test && pnpm changelog:test && pnpm upgrade:test",
+    "upgrade:test": "node --test scripts/rc-upgrade-matrix.test.mjs",
+    "upgrade:matrix": "node scripts/rc-upgrade-matrix.mjs",
     "typecheck": "pnpm -r typecheck",
     "context:parity-check": "node scripts/check-architecture-governance.mjs",
     "architecture:check": "node scripts/check-architecture-governance.mjs",
