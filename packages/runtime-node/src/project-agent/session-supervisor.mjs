@@ -212,7 +212,7 @@ export function createSessionSupervisor({
     return 'never';
   }
 
-  function project(plan) {
+  function project(plan, plans = null) {
     const origin = plan.delegationOrigin;
     const conversation = conversationStore.getConversation?.(plan.conversationId);
     const session = projectWorkSession(snapshotOf(plan), {
@@ -227,7 +227,7 @@ export function createSessionSupervisor({
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
       ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
       ...(origin.phase === 'queued'
-        ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, delegatedPlans())) : {}),
+        ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;
@@ -1058,6 +1058,17 @@ export function createSessionSupervisor({
       });
     },
     list,
+    /** One fresh plan read for a presentation query; same default bound/order as list(). */
+    listByWorkspaceIds(workspaceIds) {
+      const grouped = new Map(workspaceIds.map(id => [id, []]));
+      if (!grouped.size) return grouped;
+      const plans = delegatedPlans();
+      for (const plan of plans) {
+        const rows = grouped.get(plan.delegationOrigin.workspaceId);
+        if (rows && rows.length < 50) rows.push(project(plan, plans));
+      }
+      return grouped;
+    },
     /** Complete project facts for the host; model-facing list() remains bounded. */
     sessionsForProject(workspaceId) {
       const workspace = text(workspaceId);

@@ -89,6 +89,7 @@ export function createBotDirectory({
   readMessages = () => [],
   readMessagesBatch = null,
   listSessions = () => [],
+  readSessionsBatch = null,
   getSession = () => null,
   listApprovals = () => [],
   readApprovalsBatch = null,
@@ -146,8 +147,8 @@ export function createBotDirectory({
     }
   }
 
-  function sessionsOf(workspaceId) {
-    const sessions = listSessions(workspaceId);
+  function sessionsOf(workspaceId, batch = null) {
+    const sessions = batch instanceof Map && batch.has(workspaceId) ? batch.get(workspaceId) : listSessions(workspaceId);
     return Array.isArray(sessions) ? sessions : [];
   }
 
@@ -164,11 +165,11 @@ export function createBotDirectory({
     }
   }
 
-  function projectRow(profile, classicBatch = null, messageBatch = null, approvalBatch = null) {
+  function projectRow(profile, classicBatch = null, messageBatch = null, approvalBatch = null, sessionBatch = null) {
     const messages = messagesOf(profile, messageBatch);
     const visible = messages.filter(isVisibleBotMessage);
     const last = visible.length ? toListMessage(visible[visible.length - 1]) : null;
-    const sessions = sessionsOf(profile.workspaceId);
+    const sessions = sessionsOf(profile.workspaceId, sessionBatch);
     const questions = questionsIn(messages);
     const confirmations = listConfirmations(profile.workspaceId);
     const openConfirmations = (Array.isArray(confirmations) ? confirmations : [])
@@ -222,7 +223,10 @@ export function createBotDirectory({
     let approvals = null;
     try { approvals = readApprovalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
     catch { /* Existing single reads retain their normal failure behavior. */ }
-    return current.map(profile => projectRow(profile, batch, messages, approvals));
+    let sessions = null;
+    try { sessions = readSessionsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
+    catch { /* Existing single reads retain their normal failure behavior. */ }
+    return current.map(profile => projectRow(profile, batch, messages, approvals, sessions));
   }
 
   function list() {
