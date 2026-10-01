@@ -249,13 +249,13 @@ export function createBotDirectory({
     const page = filtered.slice(start, start + size).map((message) => ({ ...message,
       ...(message.cards ? { cards: message.cards.map((card) => byCard.get(card.cardId) || card) } : {}),
     }));
+    const nextCursor = start + size < filtered.length ? (page[page.length - 1]?.id ?? null) : null;
     if (!before) {
       const present = new Set(filtered.flatMap((message) => (message.cards || []).map((card) => card.cardId)));
       for (const card of cards) if (!present.has(card.cardId) && card.resolvedState !== 'resolved') {
         page.push({ id: card.cardId, role: 'assistant', kind: 'system_card', content: '', cards: [card] });
       }
     }
-    const nextCursor = start + size < filtered.length ? (page[page.length - 1]?.id ?? null) : null;
     const familiarizeOffer = (before == null || before === '') && !profile.familiarize
       ? FAMILIARIZE_OFFER
       : null;
