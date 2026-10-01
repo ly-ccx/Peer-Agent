@@ -10,7 +10,7 @@
  * 命名空间：统一 `motion-` 前缀（新命名空间，与旧 `za-` keyframes 解耦），
  *          便于治理脚本 check-architecture-governance.mjs 识别与强制准入。
  *
- * reduced-motion：由 tokens.css 末尾的全局兜底（animation-duration:1ms）统一降级，
+ * reduced-motion：由 tokens.css 末尾的全局兜底（animation:none）统一降级，
  *                本文件不重复写媒体查询（见准入纪律 §4：reduced-motion 收敛到全局）。
  *
  * 依赖 token（tokens.css）：

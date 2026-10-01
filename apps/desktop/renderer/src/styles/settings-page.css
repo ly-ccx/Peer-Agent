@@ -2196,3 +2196,6 @@
   overflow-y: auto;
   padding: 20px 22px;
 }
+
+.general-bot-time { display: inline-flex; align-items: center; gap: 4px; }
+.general-bot-time .pa-dropdown { min-width: 52px; }

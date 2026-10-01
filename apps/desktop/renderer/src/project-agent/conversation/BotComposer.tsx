@@ -15,9 +15,10 @@ export function BotComposer({
 }) {
   const [text, setText] = useState('');
   const trimmed = text.trim();
+  const tooLong = trimmed.length > 100_000;
 
   function send() {
-    if (!trimmed) return;
+    if (!trimmed || tooLong) return;
     onSend(trimmed);
     setText('');
   }
@@ -38,6 +39,8 @@ export function BotComposer({
         rows={2}
         placeholder={i18n.t('projectAgent.chat.placeholder')}
         aria-label={i18n.t('projectAgent.chat.placeholder')}
+        aria-invalid={tooLong}
+        aria-describedby={tooLong ? 'bot-input-error' : undefined}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.key === 'Process') return;
@@ -47,9 +50,10 @@ export function BotComposer({
           }
         }}
       />
+      {tooLong ? <p id="bot-input-error" role="alert">{i18n.t('projectAgent.chat.inputTooLong')}</p> : null}
       <div className="bot-composer-bar">
         <p>{i18n.t('projectAgent.chat.hint')}</p>
-        <button type="submit" disabled={!trimmed}>
+        <button type="submit" disabled={!trimmed || tooLong}>
           {i18n.t('projectAgent.chat.send')}
         </button>
       </div>

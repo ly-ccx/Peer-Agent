@@ -232,13 +232,13 @@ export function BotListShell({
       }
       if (pageOverride) return;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        if (typingTarget(event.target) && event.target !== searchRef.current) return;
+        if (event.target !== searchRef.current) return;
         event.preventDefault();
         list.setHighlightedId(moveBotSelection(list.visible, list.highlightedId, event.key === 'ArrowDown' ? 1 : -1));
         return;
       }
       if (event.key === 'Enter' && !meta) {
-        if (typingTarget(event.target) && event.target !== searchRef.current) return;
+        if (event.target !== searchRef.current) return;
         const next = enterBotSelection(list.visible, list.highlightedId);
         if (!next) return;
         event.preventDefault();
@@ -308,6 +308,7 @@ export function BotListShell({
         <div className="bot-search-frame">
           <input
             ref={searchRef}
+            aria-controls="bot-list"
             className="bot-search"
             type="search"
             value={list.query}

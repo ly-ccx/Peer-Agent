@@ -20,7 +20,7 @@ export function UserBubble({
   const answered = message.dispositions.some((item) => item.kind === 'answered');
   const markText = (item: BotChatMessage['dispositions'][number]) => (
     item.kind === 'out_of_scope'
-      ? i18n.t(item.labelKey, { title: item.title || (i18n.locale === 'zh-CN' ? '这个任务' : 'that task') })
+      ? i18n.t(item.labelKey, { title: item.title || i18n.t('projectAgent.chat.taskFallback') })
       : i18n.t(item.labelKey)
   );
   return (

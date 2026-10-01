@@ -838,11 +838,15 @@ textarea:focus-visible,
   *,
   *::before,
   *::after {
+    animation: none !important;
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+    transition: none !important;
     transition-duration: 1ms !important;
   }
+
+  .bot-avatar { --bot-gaze-x: 0px !important; --bot-gaze-y: 0px !important; }
 
   /* 扫光停动后直接撤掉遮罩,文字回归纯 ink-base 静态可读 */
   .za-streaming-text::after {

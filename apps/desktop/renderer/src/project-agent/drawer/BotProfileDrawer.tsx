@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useState, useRef, type RefObject } from 'react';
+import { useFocusScope } from '../../app/hooks/useFocusScope';
 import { Drawer } from '../../app/components/Drawer';
 import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
@@ -77,6 +78,8 @@ export function BotProfileDrawer({
   const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
   const layout = drawerLayout(width);
   const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(memory.open ? 'in' : 'off');
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useFocusScope(bodyRef, layout === 'push' && memory.open && dockPhase !== 'off', { restore: triggerRef });
   const close = () => {
     onMemory({ ...memory, open: false });
     triggerRef.current?.focus();
@@ -192,7 +195,7 @@ export function BotProfileDrawer({
   if (layout === 'cover' ? !memory.open : dockPhase === 'off') return null;
 
   const body = (
-    <div className="bot-drawer-body">
+    <div className="bot-drawer-body" ref={bodyRef}>
       <header className="bot-drawer-head">
         <p>{profile.displayName}</p>
         <button
@@ -208,7 +211,22 @@ export function BotProfileDrawer({
             key={tab.id}
             type="button"
             role="tab"
+            id={`bot-tab-${workspaceId}-${tab.id}`}
+            aria-controls={`bot-pane-${workspaceId}`}
+            tabIndex={memory.tab === tab.id ? 0 : -1}
+            data-overlay-autofocus={memory.tab === tab.id ? true : undefined}
             aria-selected={memory.tab === tab.id}
+            onKeyDown={(event) => {
+              const index = TABS.findIndex(item => item.id === tab.id);
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1
+                : event.key === 'ArrowRight' ? (index + 1) % TABS.length
+                : event.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length : null;
+              if (next === null) return;
+              event.preventDefault();
+              const target = TABS[next]!;
+              onMemory({ ...memory, tab: target.id, sessionId: null });
+              document.getElementById(`bot-tab-${workspaceId}-${target.id}`)?.focus();
+            }}
             onClick={() => onMemory({ ...memory, open: true, tab: tab.id })}
           >
             {i18n.t(tab.key)}
@@ -227,7 +245,7 @@ export function BotProfileDrawer({
         </section>
       ) : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
-      <div key={memory.tab} className="bot-drawer-pane motion-enter-fade">
+      <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className="bot-drawer-pane motion-enter-fade">
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}
@@ -333,6 +351,8 @@ export function BotProfileDrawer({
     <aside
       className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
       aria-label={i18n.t('projectAgent.drawer.title')}
+      inert={!memory.open}
+      aria-hidden={!memory.open}
     >
       {body}
     </aside>

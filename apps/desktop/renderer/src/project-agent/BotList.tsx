@@ -1,6 +1,7 @@
 import type { BotListItem } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { formatBotListTime } from './state/botListState';
+import { botListKey } from './state/botListKeyboard';
 import { BotRow } from './BotRow';
 
 interface BotListProps {
@@ -26,7 +27,18 @@ export function BotList({
 }: BotListProps) {
   return (
     <div
+      id="bot-list"
       className="bot-list"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.isDefaultPrevented() || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+        const action = botListKey(items.map(item => item.workspaceId), highlightedId, event.key);
+        if (!action) return;
+        event.preventDefault();
+        onHighlight(action.id);
+        if (action.open) onOpen(action.id);
+        document.getElementById(`bot-row-${action.id}`)?.scrollIntoView({ block: 'nearest' });
+      }}
       role="listbox"
       aria-label={i18n.t('projectAgent.list.brand')}
       aria-activedescendant={highlightedId ? `bot-row-${highlightedId}` : undefined}

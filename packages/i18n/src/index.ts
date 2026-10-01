@@ -52,6 +52,38 @@ export type TranslationKey =
   | 'developer.saveFailed'
   | 'developer.probeFailed'
   | 'developer.ipcUnavailable'
+  | "projectAgent.chat.taskFallback"
+  | "projectAgent.chat.inputTooLong"
+  | "projectAgent.quick.title"
+  | "projectAgent.quick.content"
+  | "projectAgent.quick.placeholder"
+  | "projectAgent.quick.chooseBot"
+  | "projectAgent.quick.noBots"
+  | "projectAgent.quick.textOnly"
+  | "projectAgent.quick.empty"
+  | "projectAgent.quick.workspace"
+  | "projectAgent.quick.attach"
+  | "projectAgent.quick.attachmentLimit"
+  | "projectAgent.quick.imageLimit"
+  | "projectAgent.quick.fileLimit"
+  | "projectAgent.quick.sending"
+  | "projectAgent.quick.failed"
+  | "projectAgent.background.title"
+  | "projectAgent.background.device"
+  | "projectAgent.background.close"
+  | "projectAgent.background.readFailed"
+  | "projectAgent.background.previous"
+  | "projectAgent.background.retry"
+  | "projectAgent.background.loading"
+  | "projectAgent.background.unavailable"
+  | "projectAgent.background.empty"
+  | "projectAgent.background.history"
+  | "projectAgent.background.more"
+  | "projectAgent.background.refresh"
+  | "projectAgent.settings.quietStart"
+  | "projectAgent.settings.quietEnd"
+  | "projectAgent.settings.hour"
+  | "projectAgent.settings.minute"
   | 'projectAgent.host.title'
   | 'projectAgent.host.hint'
   | 'projectAgent.host.action'
@@ -997,6 +1029,39 @@ type TranslationValues = Record<string, string | number>;
 
 const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
   'zh-CN': {
+    "projectAgent.chat.taskFallback": "这个任务",
+    "projectAgent.chat.inputTooLong": "消息最多支持 100000 个 UTF-16 单元，请缩短后发送。",
+    "projectAgent.quick.title": "快速会话",
+    "projectAgent.quick.content": "快速会话内容",
+    "projectAgent.quick.placeholder": "向 Peer Agent 发起任务…",
+    "projectAgent.quick.chooseBot": "选择机器人",
+    "projectAgent.quick.noBots": "还没有机器人",
+    "projectAgent.quick.textOnly": "机器人快捷对话先只发送文字",
+    "projectAgent.quick.empty": "先写一句话",
+    "projectAgent.quick.workspace": "选择工作区",
+    "projectAgent.quick.attach": "添加附件",
+    "projectAgent.quick.attachmentLimit": "最多只能添加 {count} 个附件",
+    "projectAgent.quick.imageLimit": "图片 {name} 超过 8 MB",
+    "projectAgent.quick.fileLimit": "文件 {name} 超过 512 KB",
+    "projectAgent.quick.sending": "正在发送",
+    "projectAgent.quick.failed": "发送失败",
+    "projectAgent.background.title": "后台运行",
+    "projectAgent.background.device": "本机",
+    "projectAgent.background.close": "关闭",
+    "projectAgent.background.readFailed": "暂时无法读取后台运行",
+    "projectAgent.background.previous": " · 显示上次结果",
+    "projectAgent.background.retry": "重试",
+    "projectAgent.background.loading": "正在读取…",
+    "projectAgent.background.unavailable": "此运行记录已不可用",
+    "projectAgent.background.empty": "暂无后台运行",
+    "projectAgent.background.history": "最近结束",
+    "projectAgent.background.more": "显示更多",
+    "projectAgent.background.refresh": "刷新状态",
+    "projectAgent.settings.quietStart": "免打扰开始时间",
+    "projectAgent.settings.quietEnd": "免打扰结束时间",
+    "projectAgent.settings.hour": "{label}：小时",
+    "projectAgent.settings.minute": "{label}：分钟",
+
     ...remoteAccessZh,
     'app.newTask': '新任务',
     'searchChats.open': '搜索任务',
@@ -1984,6 +2049,39 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'header.capabilities.status.unavailable': '不可用',
   },
   'en-US': {
+    "projectAgent.chat.taskFallback": "that task",
+    "projectAgent.chat.inputTooLong": "Messages support up to 100000 UTF-16 units. Shorten the draft before sending.",
+    "projectAgent.quick.title": "Quick Chat",
+    "projectAgent.quick.content": "Quick Chat message",
+    "projectAgent.quick.placeholder": "Ask Peer Agent to help…",
+    "projectAgent.quick.chooseBot": "Choose bot",
+    "projectAgent.quick.noBots": "No bots yet",
+    "projectAgent.quick.textOnly": "Bot Quick Chat currently supports text only",
+    "projectAgent.quick.empty": "Write a message first",
+    "projectAgent.quick.workspace": "Choose workspace",
+    "projectAgent.quick.attach": "Add attachment",
+    "projectAgent.quick.attachmentLimit": "Add up to {count} attachments",
+    "projectAgent.quick.imageLimit": "Image {name} exceeds 8 MB",
+    "projectAgent.quick.fileLimit": "File {name} exceeds 512 KB",
+    "projectAgent.quick.sending": "Sending",
+    "projectAgent.quick.failed": "Send failed",
+    "projectAgent.background.title": "Background runs",
+    "projectAgent.background.device": "This device",
+    "projectAgent.background.close": "Close",
+    "projectAgent.background.readFailed": "Unable to read background runs",
+    "projectAgent.background.previous": " · Previous snapshot",
+    "projectAgent.background.retry": "Retry",
+    "projectAgent.background.loading": "Loading…",
+    "projectAgent.background.unavailable": "Run record unavailable",
+    "projectAgent.background.empty": "No background runs",
+    "projectAgent.background.history": "Recently ended",
+    "projectAgent.background.more": "Show more",
+    "projectAgent.background.refresh": "Refresh status",
+    "projectAgent.settings.quietStart": "Quiet hours start",
+    "projectAgent.settings.quietEnd": "Quiet hours end",
+    "projectAgent.settings.hour": "{label}: hour",
+    "projectAgent.settings.minute": "{label}: minute",
+
     ...remoteAccessEn,
     'app.newTask': 'New task',
     'searchChats.open': 'Search tasks',
