@@ -67,6 +67,7 @@ export function createSessionSupervisor({
   conversationStore,
   goalPlanStore,
   goalRunner = null,
+  objectives = null,
   executionScheduler = goalRunner?.executionScheduler ?? null,
   isolationPlanner = goalRunner?.isolationPlanner ?? null,
   canManageWorkspace = () => true,
@@ -329,6 +330,11 @@ export function createSessionSupervisor({
     if (!parentConversationId || !workspaceId || anchorMessageIds.length === 0 || !title || !brief) {
       return { error: 'invalid_input', message: 'spawn input is incomplete' };
     }
+    if (input?.objectiveId) {
+      if (typeof objectives?.prepareSpawn !== 'function') return {error:'objectives_unavailable'};
+      const authorized = objectives.prepareSpawn(input, context);
+      if (!authorized?.ok) return authorized;
+    }
     const supersedes = text(input?.supersedes);
     const key = spawnIdentity(parentConversationId, {
       anchorMessageIds,
@@ -339,10 +345,12 @@ export function createSessionSupervisor({
       successCriteria: input?.successCriteria,
       dependsOn: input?.dependsOn,
       isolation: input?.isolation || 'auto',
+      ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
       ...(supersedes ? { supersedes } : {}),
     });
     const replay = findByKey(key, parentConversationId, input);
     if (replay) {
+      if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,replay.delegationOrigin.sessionId);
       return {
         sessionId: replay.delegationOrigin.sessionId,
         status: replay.delegationOrigin.phase || project(replay).status,
@@ -465,6 +473,7 @@ export function createSessionSupervisor({
           readOnly: input.readOnly === true,
           priority: input.priority || 'normal',
           isolation: input.isolation || 'auto',
+          ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
           phase,
           idempotencyKey: key,
           ...(text(context?.parentSessionId) ? { parentSessionId: text(context.parentSessionId) } : {}),
@@ -493,16 +502,18 @@ export function createSessionSupervisor({
       }
       await promote(plan.planId);
       const reportedPhase = goalPlanStore.getPlan(plan.planId)?.delegationOrigin.phase || phase;
-      emit({ kind: 'session_started', sessionId, planId: plan.planId, workspaceId });
       const queuedBehind = reportedPhase === 'queued'
         ? openPlans(workspaceId).filter((item) => item.delegationOrigin.phase === 'queued'
           || occupiesRunningSlot(item)).length - 1
         : 0;
+      const queueReason = executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason;
+      // All fallible spawn work must finish before a durable objective link is added.
+      if (input.objectiveId && !objectives.linkSession(workspaceId,input.objectiveId,sessionId)?.ok) throw new Error('objective binding failed');
+      emit({ kind: 'session_started', sessionId, planId: plan.planId, workspaceId });
       return {
         sessionId,
         status: reportedPhase,
-        ...(executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason
-          ? { queueReason: executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason } : {}),
+        ...(queueReason ? { queueReason } : {}),
         ...(queuedBehind > 0 ? { queuedBehind } : {}),
       };
     } catch (error) {
@@ -512,6 +523,7 @@ export function createSessionSupervisor({
         goalPlanStore.setRunnerState(planId, { status: 'failed', lastError: reason });
         if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
         await promote();
+        if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,spawnedSessionId);
         return { sessionId: spawnedSessionId, status: 'failed', error: 'spawn_failed', message: reason };
       }
       if (planId) {
@@ -521,6 +533,7 @@ export function createSessionSupervisor({
           if (cleaned?.deliveryBinding?.worktreePath) {
             goalPlanStore.setPlanStatus(planId, 'failed');
             await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
+            if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,spawnedSessionId);
             return { sessionId: spawnedSessionId, status: 'failed', error: 'spawn_failed', message: reason };
           }
         }
@@ -637,10 +650,10 @@ export function createSessionSupervisor({
     return session;
   }
 
-  function policyFor(workspaceId) {
+  function policyFor(workspaceId, plan) {
     if (typeof resolveAcceptancePolicy !== 'function') return 'auto';
     try {
-      return resolveAcceptancePolicy(workspaceId) === 'confirm' ? 'confirm' : 'auto';
+      return resolveAcceptancePolicy(workspaceId, plan) === 'confirm' ? 'confirm' : 'auto';
     } catch {
       return 'auto';
     }
@@ -704,7 +717,7 @@ export function createSessionSupervisor({
     return {
       plan,
       sessionId: origin.sessionId,
-      policy: policyFor(origin.workspaceId),
+      policy: policyFor(origin.workspaceId, plan),
       reported: messages.some((message) => replyCites(message, origin.sessionId)),
       readOnly: origin.readOnly === true,
       changedFiles: Array.isArray(extra.changedFiles) ? extra.changedFiles : filesOf(plan),

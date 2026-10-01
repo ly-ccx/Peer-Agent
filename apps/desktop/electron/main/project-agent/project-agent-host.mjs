@@ -4,6 +4,8 @@ import { projectConversationHistory } from '@peer-agent/runtime-core';
 
 import {
   createApprovalStore,
+  createObjectiveStore,
+  createObjectiveService,
   createBotDirectory,
   createBotLifecycle,
   createBotProfileStore,
@@ -37,6 +39,8 @@ import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
+import { createProjectObjectivesIpcRegistrations } from '../ipc/register-project-objectives-ipc.mjs';
+import { createProjectObjectivesService } from './project-objectives-service.mjs';
 import { createProjectMemoryIpcRegistrations } from '../ipc/register-project-memory-ipc.mjs';
 import { installSessionVerification, createSessionVerification } from './session-verification.mjs';
 import { installProjectProactivity } from './proactivity-port.mjs';
@@ -488,7 +492,10 @@ export function registerDesktopProjectAgent({
     verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
     appendMessage,
   });
+  const objectiveStore = createObjectiveStore({rootDir:dataHome});
+  let objectiveService;
   const supervisor = createSessionSupervisor({
+    objectives: {prepareSpawn:(...args)=>objectiveService.prepareSpawn(...args),linkSession:(...args)=>objectiveService.linkSession(...args)},
     conversationStore,
     goalPlanStore,
     goalRunner,
@@ -502,7 +509,7 @@ export function registerDesktopProjectAgent({
       workerModelProviderId: input.workerModel?.modelProviderId,
       projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy,
     }),
-    resolveAcceptancePolicy: (workspaceId) => profileStore.read(workspaceId)?.acceptancePolicy,
+    resolveAcceptancePolicy: (workspaceId, plan) => plan?.delegationOrigin?.objectiveId ? 'confirm' : profileStore.read(workspaceId)?.acceptancePolicy,
     readSessionFacts: (plan) => ({ autoHandoffOnPolicyAccept: profileStore.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true, hostAuthority: {
       ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
       ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
@@ -510,7 +517,20 @@ export function registerDesktopProjectAgent({
     emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.supersededBy || event.reason || ''}` }]),
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
-  const uninstallDelegation = installDelegation({ supervisor, storeDir: runtimeRoot });
+  objectiveService = createObjectiveService({store:objectiveStore,canManageWorkspace:ownsProject,resolveConversationId,
+    readConversation: id => conversationStore.getPersistedConversationHistory(id)?.messages || [],
+    readSession: id => { const session=supervisor.get({sessionId:id,detail:'report'}); return session ? {...session,evidenceRefs:session.report?.evidenceRefs || []} : null; },
+    resolveEvidence: ref => {
+      const record=goalPlanStore.findEvidenceIndexRecords?.([ref])?.[0];
+      const plan=record?.planId ? goalPlanStore.getPlan?.(record.planId) : null;
+      return plan?.delegationOrigin ? {...record,workspaceId:plan.delegationOrigin.workspaceId,sessionId:plan.delegationOrigin.sessionId} : null;
+    },
+    onChanged: workspaceId => { if(typeof broadcast==='function')broadcast('project-agent:changed',{workspaceIds:[workspaceId]}); },
+  });
+  const objectives = createProjectObjectivesService({service:objectiveService,store:objectiveStore,profileStore,conversationStore,
+    enabled:runtimeEnabled,holdsLease,onAppendedMessage,
+  });
+  const uninstallDelegation = installDelegation({ supervisor, objectives:objectiveService, storeDir: runtimeRoot });
   const uninstallVerification = installSessionVerification(verification);
   const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore });
   const uninstallDelivery = installDeliveryFacts({
@@ -871,6 +891,7 @@ export function registerDesktopProjectAgent({
       workspaceIdForConversation,
       host,
       supervisor,
+      objectives,
       dispose: () => { host.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
@@ -891,6 +912,7 @@ export function registerDesktopProjectAgent({
   return [
     ...createProjectAgentIpcRegistrations({ projectAgent }),
     ...createProjectMemoryIpcRegistrations({ memory }),
+    ...createProjectObjectivesIpcRegistrations({ objectives }),
   ];
 }
 

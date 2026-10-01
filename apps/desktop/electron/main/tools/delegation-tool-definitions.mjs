@@ -28,7 +28,7 @@ export const DELEGATION_TOOL_DEFINITIONS = DELEGATION_TOOL_SPECS.map((item) => (
     executorCapabilityId: item.capabilityId,
   }),
   permissionPolicy: {
-    kind: item.name === 'list_sessions' || item.name === 'get_session' || item.name === 'get_verification_detail'
+    kind: item.name === 'list_sessions' || item.name === 'get_session' || item.name === 'get_verification_detail' || item.name === 'list_objectives' || item.name === 'get_objective'
       ? 'goal-read'
       : 'goal-create',
   },

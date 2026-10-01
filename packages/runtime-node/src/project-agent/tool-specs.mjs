@@ -2,9 +2,11 @@
  * 调度工具的名字、capabilityId 和输入约束。桌面与 TUI 共用这一份。
  * 开任务和写回复的执行不在这里，只做能在调用前判定的输入校验。
  */
+import { OBJECTIVE_TOOL_SPECS, validateObjectiveToolInput } from './objective-tool-specs.mjs';
 import { TOOL_LEVELS } from './digest.mjs';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 export const DELEGATION_TOOL_SPECS = Object.freeze([
+  ...OBJECTIVE_TOOL_SPECS,
   spec('spawn_session', 'local.delegation.spawn_session', {
     type: 'object',
     properties: {
@@ -46,6 +48,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
       priority: { type: 'string', enum: ['high', 'normal', 'low'] },
       dependsOn: { type: 'array', items: { type: 'string' } },
       supersedes: { type: 'string' },
+      objectiveId: { type: 'string', maxLength: 200 },
       isolation: { type: 'string', enum: ['auto', 'none', 'worktree'] },
     },
     required: ['anchorMessageIds', 'title', 'brief', 'successCriteria', 'kind', 'readOnly'],
@@ -163,6 +166,7 @@ export function validateDelegationInput(name, raw) {
   const item = SPECS_BY_NAME.get(name);
   if (!item) return invalid(`Unknown delegation tool: ${name}`);
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'spawn_session') return validateSpawn(input);
   if (name === 'resume_session') {
     const sessionId = text(input.sessionId, 200), anchorMessageId = text(input.anchorMessageId, 200);
@@ -262,6 +266,11 @@ function validateSpawn(input) {
     const isolation = text(input.isolation, 40);
     if (!['auto', 'none', 'worktree'].includes(isolation)) return invalid('isolation must be auto, none, or worktree.');
     value.isolation = isolation;
+  }
+  if (input.objectiveId !== undefined) {
+    const objectiveId = text(input.objectiveId, 200);
+    if (!objectiveId) return invalid('objectiveId must be a target id.');
+    value.objectiveId = objectiveId;
   }
   if (input.supersedes !== undefined) {
     const supersedes = text(input.supersedes, 200);

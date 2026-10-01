@@ -1,3 +1,4 @@
+import { OBJECTIVE_TOOL_SPECS } from './objective-tool-specs.mjs';
 import { createHash } from 'node:crypto';
 
 import { createEvidenceBundle } from '@peer-agent/runtime-core';
@@ -24,6 +25,7 @@ const OUTPUT_LIMIT = 2000;
 
 export function createDelegationProvider({
   supervisor = null,
+  objectives = null,
   replyComposer = null,
   verification = null,
   proactivity = null,
@@ -225,6 +227,12 @@ export function createDelegationProvider({
   }
 
   async function dispatch(name, input, view) {
+    if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) {
+      const method = name.slice(0, name.indexOf('_'));
+      if (typeof objectives?.[method] !== 'function') return {ok:false,output:{ok:false,error:'objectives_unavailable'}};
+      const result = await objectives[method](input, view);
+      return result?.ok === true ? {ok:true,output:result} : {ok:false,output:{...result,error:result?.code || 'objective_failed'}};
+    }
     if (name === 'spawn_session') {
       return accepted(
         await callPort(supervisor?.spawn, input, 'supervisor_unavailable', spawnContext(view)),

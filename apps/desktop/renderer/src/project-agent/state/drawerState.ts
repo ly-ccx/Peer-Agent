@@ -16,6 +16,7 @@ export interface DrawerMemory {
   readonly open: boolean;
   readonly tab: DrawerTab;
   readonly sessionId: string | null;
+  readonly objectiveId?: string;
 }
 
 export interface DrawerStore {
@@ -31,6 +32,7 @@ export interface DrawerSession {
   readonly spawnedAt: string;
   readonly conversationId: string;
   readonly anchorMessageId: string;
+  readonly objectiveId?: string;
   readonly modelLabel: string;
   readonly summary: string;
   readonly evidenceRefs: readonly string[];
@@ -132,7 +134,7 @@ export function readDrawerMemory(workspaceId: string, store: DrawerStore): Drawe
     const sessionId = typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
       ? parsed.sessionId.trim()
       : null;
-    return { open: parsed.open === true, tab, sessionId };
+    return { open: parsed.open === true, tab, sessionId, ...(typeof parsed.objectiveId==='string'&&parsed.objectiveId ? {objectiveId:parsed.objectiveId} : {}) };
   } catch {
     return closedDrawer();
   }
@@ -192,6 +194,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     spawnedAt: readString(record.spawnedAt),
     conversationId: readString(record.conversationId),
     anchorMessageId: readString(origin.anchorMessageId),
+    ...(readString(origin.objectiveId) ? {objectiveId:readString(origin.objectiveId)} : {}),
     modelLabel: frozenModelLabel(origin.modelSelection),
     summary: readString(report.summary),
     evidenceRefs: readStringList(report.evidenceRefs),

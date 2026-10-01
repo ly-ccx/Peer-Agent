@@ -245,6 +245,7 @@ export function BotProfileDrawer({
       {memory.tab === 'tasks' && !(memory.sessionId && (detail || selected)) ? (
         <TasksTab
           sessions={sessions}
+          onOpenObjective={(objectiveId) => onMemory({...memory,tab:'objectives',sessionId:null,objectiveId})}
           history={history}
           goals={goals}
           onResume={async (sessionId) => {
@@ -275,7 +276,8 @@ export function BotProfileDrawer({
         />
       ) : null}
       {memory.tab === 'objectives' ? (
-        <ObjectivesTab workspacePath={path} i18n={i18n} onOpenAutomations={onOpenAutomations} />
+        <ObjectivesTab key={workspaceId} workspaceId={workspaceId} workspacePath={path} i18n={i18n} selectedId={memory.objectiveId}
+          onOpenSession={(sessionId) => onMemory({...memory,tab:'tasks',sessionId})} onOpenAutomations={onOpenAutomations} />
       ) : null}
       {memory.tab === 'memory' ? (
         <MemoryTab workspaceId={workspaceId} i18n={i18n} onItems={setMemories} />

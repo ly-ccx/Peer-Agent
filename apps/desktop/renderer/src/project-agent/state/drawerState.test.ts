@@ -190,3 +190,9 @@ test('memory page retains maintenance state and sources while overview only uses
   assert.deepEqual(readMemoryItems(records).map(item=>item.id),['fresh']);
   assert.equal(filterMemoryRecords(records,{kind:'',trust:'',status:'conflicted'}).length,1);
 });
+
+test('task origin and persisted drawer state retain objective navigation',()=>{
+  assert.equal(readDrawerSession({sessionId:'s',status:'running',origin:{objectiveId:'objective-x'}})?.objectiveId,'objective-x');
+  const store=memoryStore();writeDrawerMemory('w',{open:true,tab:'objectives',sessionId:null,objectiveId:'objective-x'},store);
+  assert.equal(readDrawerMemory('w',store).objectiveId,'objective-x');
+});
