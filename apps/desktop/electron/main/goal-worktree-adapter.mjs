@@ -165,12 +165,15 @@ export function createGoalWorktreeAdapter({
   async function inspectIsolationFacts(plan) {
     const root = trimPath(plan.deliveryBinding?.targetWorkspacePath) || trimPath(plan.targetWorkspacePath);
     if (!root) return { git: false };
+    try { if (!(await stat(root)).isDirectory()) return { ok: false }; }
+    catch { return { ok: false }; }
     let dirty;
     try {
       const inside = trimPath((await runGit(['rev-parse', '--is-inside-work-tree'], { cwd: root })).stdout);
       if (inside !== 'true') return { git: false };
       dirty = Boolean(trimPath((await runGit(['status', '--porcelain', '-uall'], { cwd: root })).stdout));
     } catch (error) {
+      if (await worktreeStillPresent(root)) return { ok: false };
       return isMissingGitWorktreeError(error) ? { git: false } : { ok: false };
     }
     const disk = await statfs(root);

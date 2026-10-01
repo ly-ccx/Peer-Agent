@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
+
+test('missing directories and broken Git metadata are not silently reclassified as non-Git workspaces', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-git-inspection-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const adapter = createGoalWorktreeAdapter();
+  assert.deepEqual(await adapter.inspectIsolationFacts({ targetWorkspacePath: path.join(root, 'missing') }), { ok: false });
+  assert.deepEqual(await adapter.inspectIsolationFacts({ targetWorkspacePath: root }), { git: false });
+  mkdirSync(path.join(root, '.git'));
+  assert.deepEqual(await adapter.inspectIsolationFacts({ targetWorkspacePath: root }), { ok: false });
+});
 
 function boundPlan(overrides = {}) {
   return {
