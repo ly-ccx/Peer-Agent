@@ -1,4 +1,4 @@
-import { hasCurrentUserUrgency } from './user-priority.mjs';
+import { hasCurrentUserUrgency, isCanonicalUserInput } from './user-priority.mjs';
 
 const ENDED = new Set(['completed', 'failed', 'cancelled']);
 const SUSPENDED = new Set(['paused', 'superseded']);
@@ -52,7 +52,7 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
   }
   function anchor(plan, anchorMessageId) {
     const history = conversationStore.getPersistedConversationHistory?.(plan.delegationOrigin.parentConversationId);
-    return history?.messages?.some(message => message.id === anchorMessageId && message.role === 'user' && message.kind === 'user_input') === true;
+    return history?.messages?.some(message => message.id === anchorMessageId && isCanonicalUserInput(message)) === true;
   }
   async function resume(input, context) {
     const plan = findBySession(input.sessionId);

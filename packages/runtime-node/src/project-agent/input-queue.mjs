@@ -183,6 +183,7 @@ export function createInputQueue({
           appendMessage(targetId, {
             id: messageId,
             role: 'user',
+            kind: 'user_input',
             content: input.text,
             createdAt: input.createdAt,
             inputId: input.inputId,

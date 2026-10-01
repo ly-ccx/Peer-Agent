@@ -1684,3 +1684,17 @@ test('high priority requires a current positive user urgency anchor for promotio
     assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).delegationOrigin.priority, 'normal');
   } finally { await env.cleanup(); }
 });
+
+
+test('legacy queue input anchors remain usable without rewriting their message records', async () => {
+  const env = await harness();
+  try {
+    env.conversationStore.appendMessage(env.parent.id, { id: 'input-legacy', inputId: 'legacy', role: 'user', content: '紧急，请优先处理' });
+    const context = contextOf(env, { currentInputAnchors: ['input-legacy'] });
+    const opened = await env.supervisor.spawn(spawnInput({ title: 'legacy', priority: 'high', anchorMessageIds: ['input-legacy'] }), context);
+    assert.ok(opened.sessionId, opened.error);
+    await env.supervisor.spawn(spawnInput({ title: 'replacement', brief: 'replace legacy', supersedes: opened.sessionId }), contextOf(env));
+    assert.ok((await env.supervisor.resume({ sessionId: opened.sessionId, anchorMessageId: 'input-legacy' }, context)).sessionId);
+    assert.equal(env.conversationStore.getPersistedConversationHistory(env.parent.id).messages.find(message => message.id === 'input-legacy').kind, undefined);
+  } finally { await env.cleanup(); }
+});
