@@ -38,6 +38,17 @@ function start(f: ReturnType<typeof fixture>, executeTurn: (request: any) => Pro
   return host;
 }
 
+test('terminal task scheduling stays closed until recovery and after host drain', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  const scheduler = host.executor.executionScheduler;
+  expect(scheduler.isWorkspaceReady(f.workspaceId)).toBe(false);
+  expect(scheduler.isWorkspaceReady('another-workspace')).toBe(false);
+  await host.tick();
+  expect(scheduler.isWorkspaceReady(f.workspaceId)).toBe(true);
+  host.host.drain(f.workspaceId);
+  expect(scheduler.isWorkspaceReady(f.workspaceId)).toBe(false);
+});
+
 test('terminal composition consumes a durable input once and projects its shared reply', async () => {
   const f = fixture(), calls: any[] = [];
   const host = start(f, async input => { calls.push(input); return { ok: true, text: 'received', toolCalls: [] }; });
