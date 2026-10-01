@@ -20,8 +20,8 @@ const CHANNELS = [
   'project-memory:set-switches',
 ];
 
-function harness(root) {
-  const store = createMemoryStore({ rootDir: root });
+function harness(root, options = {}) {
+  const store = createMemoryStore({ rootDir: root, ...options });
   const profileStore = createBotProfileStore({ rootDir: root });
   profileStore.create({
     workspaceId: 'ws-1',
@@ -168,7 +168,8 @@ test('记忆页的每个动作都经 IPC 落到存储', async () => {
 test('existing restore IPC resolves conflicting memory, guards project scope and refreshes facts', async () => {
   const root=mkdtempSync(path.join(os.tmpdir(),'memory-choice-ipc-'));
   try {
-    const {handlers,store}=harness(root);
+    // Equal timestamps exercise a conflict; a newer verified claim supersedes the old one.
+    const {handlers,store}=harness(root,{now:()=>new Date('2026-10-01T00:00:00.000Z')});
     const a=store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'A',sourceRefs:['ev1'],topicKey:'choice',topicValue:'a'}).item;
     const b=store.writeVerified({workspaceId:'ws-1',kind:'fact',text:'B',sourceRefs:['ev2'],topicKey:'choice',topicValue:'b'}).item;
     assert.equal((await handlers.get('project-memory:restore')({}, {workspaceId:'ws-2',id:a.id,resolveConflict:true})).ok,false);
