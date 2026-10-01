@@ -27,6 +27,15 @@ const seam = 'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService
 assert.equal(mainText.split(seam).length, 2, 'exact production executor assembly seam required');
 writeFileSync(main, mainText.replace(seam,
   'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: globalThis.rcBotShellService });'));
+// Observe production pagination without changing its results or admitting a new IPC.
+const applicationService = path.join(isolation.launch.desktopDir, 'electron/main/project-agent/project-agent-application-service.mjs');
+const serviceText = readFileSync(applicationService, 'utf8');
+const readSeam = 'return directory.readConversation(payload.workspaceId, payload);';
+assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
+writeFileSync(applicationService, serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
+  (globalThis.rcBotShellReads ??= []).push({ before: payload.before ?? null, nextCursor: result.nextCursor,
+    count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });
+  return result;`));
 const entry = path.join(root, 'entry.mjs');
 writeFileSync(entry, `import {app} from 'electron';
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
@@ -52,6 +61,11 @@ const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse',
   synthetic: true, scale: fixture.scale, platform: process.platform, startedAt: new Date().toISOString(),
   checks: [], pageErrors: [], receiptSamples: [], scope: 'Real source Electron main/preload/renderer and durable input; scripted cognition only; not installed or real-model timing' };
 let app, handle, page; const logs = [];
+const tracePaging = async (phase) => {
+  (report.paging ??= []).push({ phase, reads: (await app.evaluate(() => globalThis.rcBotShellReads ?? [])).slice(-20),
+    view: await page.locator('.bot-thread').evaluate(node => ({ top: node.scrollTop, height: node.scrollHeight,
+      viewport: node.clientHeight, busy: node.getAttribute('aria-busy'), ids: [...node.querySelectorAll('[id^="bot-msg-"]')].map(row => row.id) })) });
+};
 const until = async (read, predicate, timeout = 30000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
@@ -117,8 +131,10 @@ try {
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = 0; });
   await page.locator('#bot-msg-rc-message-9900').waitFor();
   await page.locator('.bot-thread[aria-busy="false"]').waitFor();
+  await tracePaging('initial older page');
   for (const older of [9850, 9800, 9750, 9700]) {
     await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; node.scrollTop = 0; });
+    await tracePaging(`request ${older + 30}`);
     await page.locator(`#bot-msg-rc-message-${older + 30}`).waitFor();
     await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   }
@@ -150,6 +166,7 @@ try {
   report.ok = true;
 } catch (error) {
   report.error = error.stack; process.exitCode = 1;
+  if (page && app) await tracePaging('failure').catch(() => {});
   if (page) await page.screenshot({ path: path.join(root, 'failure.png') }).catch(() => {});
 } finally {
   if (handle) report.ownedStop = await owned.stop({ handleId: handle, reason: 'owned' });
