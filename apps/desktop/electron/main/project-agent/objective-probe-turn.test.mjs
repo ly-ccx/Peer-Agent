@@ -8,4 +8,6 @@ test('temporary objective probe keeps real SDK executions apart from model summa
  const execution={call:{capabilityId:'local.file.read',arguments:{path:'a'}},grant:{granted:true},result:{status:'success',outputPreview:{content:'actual'}}};
  agentTurnExecutor.runTurn=async input=>{input.agentProgress.onToolExecution(execution);input.sink.send('chat:stream:delta',{content:'summary'});return {ok:true};};
  const result=await runObjectiveProbeTurn({request,agentTurnExecutor});assert.equal(result.ok,true);assert.deepEqual(result.toolExecutions,[execution]);assert.equal(result.succeeded,undefined);
+ execution.result.status='completed';execution.call.capabilityId='local.search.aggregate';execution.result.outputPreview={status:'partial',lanes:[{status:'completed',matchCount:1}]};
+ const searched=await runObjectiveProbeTurn({request,agentTurnExecutor});assert.equal(searched.ok,true);assert.deepEqual(searched.toolExecutions,[execution]);
 });

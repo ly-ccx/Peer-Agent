@@ -14,6 +14,12 @@ test('objective probe policy refuses every side effect and realpath escape, incl
   assert.equal(check('local.file.read',{path:'a'}).allowed,true);
   assert.equal(check('local.file.read',{path:'escape/private'}).reason,'objective_probe_outside_workspace');
   assert.equal(check('local.search.aggregate',{queries:[{path:'.'},{path:outside}]}).allowed,false);
+  writeFileSync(path.join(outside,'large'),Buffer.alloc(1024*1024+1));
+  for(const target of ['private','large','missing']){
+   assert.equal(check('local.file.read',{path:path.join(outside,target)}).reason,'objective_probe_outside_workspace');
+   assert.equal(check('local.file.read',{path:`../${path.basename(outside)}/${target}`}).reason,'objective_probe_outside_workspace');
+   assert.equal(check('local.file.read',{path:`escape/${target}`}).reason,'objective_probe_outside_workspace');
+  }
   assert.equal(evaluateObjectiveProbeCall({policy,call:{capabilityId:'local.file.read',arguments:{path:'a'}},workspacePath:outside}).allowed,false);
  }finally{rmSync(root,{recursive:true,force:true});rmSync(outside,{recursive:true,force:true});}
 });

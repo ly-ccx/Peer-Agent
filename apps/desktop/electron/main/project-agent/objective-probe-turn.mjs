@@ -15,7 +15,7 @@ export async function runObjectiveProbeTurn({request,agentTurnExecutor,projectPo
    agentProgress:{onToolCall:()=>{if(++calls>8)controller.abort();},onToolExecution:execution=>{executions.push(structuredClone(execution));}}});
   if(controller.signal.aborted)return {ok:false,unavailableReason:request.signal?.aborted?'cancelled':timedOut?'agent_probe_timeout':'agent_probe_tool_limit',toolExecutions:executions};
   if(result?.ok===false||sink.getTerminal()?.channel==='chat:stream:error')return {ok:false,unavailableReason:'agent_probe_failed',toolExecutions:executions};
-  const actual=executions.filter(execution=>execution.grant?.granted&&execution.result?.status==='success');
+  const actual=executions.filter(execution=>execution.grant?.granted&&['success','completed'].includes(execution.result?.status));
   if(!actual.length)return {ok:false,unavailableReason:'agent_probe_no_evidence',toolExecutions:executions};
   const digest=createHash('sha256').update(JSON.stringify(actual.map(execution=>({capabilityId:execution.call.capabilityId,arguments:execution.call.arguments,status:execution.result.status,outputPreview:execution.result.outputPreview})))).digest('hex');
   return {ok:true,digest,summary:sink.getText().slice(0,2000)||`${actual.length} actual readonly checks`,value:digest,severity:'info',toolExecutions:executions};
