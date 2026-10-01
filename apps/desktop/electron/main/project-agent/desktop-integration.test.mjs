@@ -512,3 +512,37 @@ test('production file observation, proposal card approval, task quota and explic
   const approved=JSON.parse((await tool(env,'spawn_session',{...input,title:'Changed by model'},3)).output);assert.equal(approved.ok,true,JSON.stringify(approved));assert.equal(env.api.supervisor.get({sessionId:approved.sessionId}).title,'Read README');assert.equal(env.api.objectives.list(req).items[0].usage.autoSessions,1);
  }finally{env.dispose();}
 });
+
+
+test('actual SDK reports survive restart and suppress repeated wake delivery while allowing human followups', async () => {
+  let env, current, sessionId;
+  const send=async input=>{
+    if(!sessionId)return {terminalStatus:'done',text:'Ready'};
+    const args={text:'Verified project',replyTo:[`lifecycle-research-${current.bot.workspaceId}`],sources:[sessionId],statusClaims:[{sessionId,status:current.api.supervisor.get({sessionId}).status}]};
+    const result=await tool({...current,turnId:input.streamId,currentInputAnchors:input.turnProfile.context.inputAnchors?.map(a=>a.messageId)||[]},'post_reply',args);
+    assert.equal(result.execution.result.status,'success');
+    input.webContents.send('chat:stream:tool-call',{toolCallId:'report',tool:'post_reply',args});
+    input.webContents.send('chat:stream:tool-result',{toolCallId:'report',result:JSON.parse(result.output)});
+    return {terminalStatus:'done'};
+  };
+  env=harness({send,verify:async()=>({passed:true,evidenceRefs:['ev'],verifierModel:provider.id})});current=env;
+  try{
+    sessionId=(await env.invoke('start-familiarize')).profile.familiarize.sessionId;
+    const planId=env.api.supervisor.get({sessionId}).planId;
+    env.plans.revisePlan(planId,{tasks:[{taskId:'read',title:'Read',status:'completed',evidenceRefs:['ev']}]},{reason:'read',changedBy:'test'});
+    env.plans.recordManualConfirmation(planId,{decision:'approve',criterionIds:['c1','c2'],decidedBy:'user'});
+    env.plans.setPlanStatus(planId,'completed');
+    await tool(env,'verify_session',{sessionId});
+    const event={eventId:'wake-first',kind:'session_verified',sessionId,at:new Date().toISOString()};
+    env.api.host.inbox.append(env.bot.workspaceId,[event]);await env.api.host.sync([env.bot.workspaceId]);
+    assert.equal(env.history().filter(m=>m.content==='Verified project').length,1);
+    // Persisted snapshots are the deduplication source; no in-memory composer survives this restart.
+    env.dispose();current=harness({dataHome:env.home,folder:env.project,send});
+    await current.api.host.sync([current.bot.workspaceId]);
+    current.api.host.inbox.append(current.bot.workspaceId,[{...event,eventId:'wake-repeat'}]);await current.api.host.sync([current.bot.workspaceId]);
+    assert.equal(current.history().filter(m=>m.content==='Verified project').length,1);
+    assert.equal(current.history().some(m=>m.content?.includes('回复未通过宿主校验')),false);
+    await current.submit('followup','再告诉我结果');
+    assert.equal(current.history().filter(m=>m.content==='Verified project').length,2);
+  }finally{env.dispose();if(current!==env)current.dispose();}
+});

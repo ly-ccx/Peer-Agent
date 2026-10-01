@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { useRef, useState } from 'react';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import type { BotChatMessage } from '../state/botConversationState';
 import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
 import { CardView } from './CardView';
@@ -45,6 +46,7 @@ export function ReplyBubble({
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [excerpt, setExcerpt] = useState('');
+  const [showAllEvidence, setShowAllEvidence] = useState(false);
   const used = message.meta.memoryUsed ?? [];
   const learned = message.meta.memoryLearned ?? [];
   const surfacing = message.meta.surfacing;
@@ -90,11 +92,18 @@ export function ReplyBubble({
         </button>
       ) : null}
       <div className="bot-reply-marks">
-        {evidenceRefs.map((evidenceRef) => (
+        {(showAllEvidence ? evidenceRefs : evidenceRefs.slice(0, 3)).map((evidenceRef, index) => (
           <button key={evidenceRef} type="button" onClick={() => onOpenEvidence?.(evidenceRef)}>
-            {i18n.t('projectAgent.chat.evidence')}
+            <PeerIcon name="fileText" size={13} />
+            {i18n.t('projectAgent.chat.evidence')} {index + 1}
           </button>
         ))}
+        {evidenceRefs.length > 3 ? (
+          <button type="button" aria-expanded={showAllEvidence} onClick={() => setShowAllEvidence(!showAllEvidence)}>
+            <PeerIcon name={showAllEvidence ? 'chevronUp' : 'chevronDown'} size={13} />
+            {i18n.t(showAllEvidence ? 'projectAgent.chat.evidenceCollapse' : 'projectAgent.chat.evidenceMore', { count: evidenceRefs.length - 3 })}
+          </button>
+        ) : null}
         {onOpenProcess ? (
           <button type="button" onClick={onOpenProcess}>
             {i18n.t('projectAgent.chat.process')}

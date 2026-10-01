@@ -25,26 +25,33 @@ export const OBJECTIVE_TOOL_SPECS=Object.freeze([
   spec('close_objective',object({objectiveId:string(200),status:{type:'string',enum:['achieved','abandoned']},evidenceRefs:array(string(500),32)},['objectiveId','status'])),
 ]);
 
-function matches(rule, value) {
-  if (rule.anyOf) return rule.anyOf.some(option => matches(option, value));
-  if (Object.hasOwn(rule, 'const') && value !== rule.const) return false;
-  if (rule.enum && !rule.enum.includes(value)) return false;
-  if (rule.type === 'string') return typeof value === 'string' && !!value.trim() && value.length >= (rule.minLength || 0) && value.length <= (rule.maxLength || Infinity);
-  if (rule.type === 'boolean') return typeof value==='boolean';
-  if (rule.type === 'integer') return Number.isInteger(value) && value >= (rule.minimum ?? -Infinity) && value <= (rule.maximum ?? Infinity);
-  if (rule.type === 'array') return Array.isArray(value) && value.length >= (rule.minItems || 0) && value.length <= (rule.maxItems || Infinity) && value.every(item => matches(rule.items, item));
-  if (rule.type === 'object') return !!value && typeof value === 'object' && !Array.isArray(value)
-    && (rule.required || []).every(key => Object.hasOwn(value, key))
-    && Object.entries(value).every(([key, item]) => Object.hasOwn(rule.properties, key) && matches(rule.properties[key], item));
-  return true;
+function issues(rule, value, path = '') {
+  if (rule.anyOf) return rule.anyOf.map(option => issues(option, value, path)).sort((a,b) => a.length-b.length)[0];
+  const fail = reason => [`${path || 'input'}: ${reason}`];
+  if (Object.hasOwn(rule, 'const') && value !== rule.const) return fail(`expected ${rule.const}`);
+  if (rule.enum && !rule.enum.includes(value)) return fail(`expected ${rule.enum.join('/')}`);
+  if (rule.type === 'string') return typeof value === 'string' && !!value.trim() && value.length >= (rule.minLength || 0) && value.length <= (rule.maxLength || Infinity) ? [] : fail('invalid string');
+  if (rule.type === 'boolean') return typeof value==='boolean' ? [] : fail('expected boolean');
+  if (rule.type === 'integer') return Number.isInteger(value) && value >= (rule.minimum ?? -Infinity) && value <= (rule.maximum ?? Infinity) ? [] : fail('integer outside allowed range');
+  if (rule.type === 'array') {
+    if (!Array.isArray(value) || value.length < (rule.minItems || 0) || value.length > (rule.maxItems || Infinity)) return fail('invalid list');
+    return value.flatMap((item,index) => issues(rule.items,item,`${path}[${index}]`));
+  }
+  if (rule.type === 'object') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return fail('expected object');
+    const at = child => path ? `${path}.${child}` : child;
+    return [...(rule.required || []).filter(child => !Object.hasOwn(value,child)).map(child=>`${at(child)}: required`),
+      ...Object.entries(value).flatMap(([child,item])=>Object.hasOwn(rule.properties,child) ? issues(rule.properties[child],item,at(child)) : [`${at(child)}: forbidden`])];
+  }
+  return [];
 }
 
 export function validateObjectivePlanFields(input) {
-  return matches(object(fields), input);
+  return issues(object(fields), input).length === 0;
 }
 export function validateObjectiveToolInput(name, input) {
   const spec = OBJECTIVE_TOOL_SPECS.find(item => item.name === name);
-  return spec && matches(spec.inputSchema, input)
-    ? {ok:true,value:structuredClone(input)}
-    : {ok:false,error:'invalid_input',message:'Objective input has missing, invalid or forbidden fields.'};
+  const failures = spec ? issues(spec.inputSchema,input) : ['tool: unknown'];
+  return failures.length === 0 ? {ok:true,value:structuredClone(input)}
+    : {ok:false,error:'invalid_input',message:`Objective input has missing, invalid or forbidden fields: ${failures.slice(0,8).join('; ')}`.slice(0,1200)};
 }

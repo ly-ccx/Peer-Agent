@@ -102,11 +102,20 @@ export function createDelegationProvider({
     }
 
     let input = validated.value;
+    if (['spawn_session', 'resume_session', 'message_session', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
+      && onlyHandoffAnswers(view)) return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
+      output: { ok: false, error: 'host_decision_already_handled', message: 'The host handles this merge decision. A separate current user instruction is required for new work.' } });
     if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['resume_session','message_session','reprioritize_session','cancel_session','set_proactivity'].includes(item.name)){
       return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     }
-    if(item.name==='verify_session'&&view.objectiveWakeIds.length&&!view.currentInputAnchors.length){const session=await supervisor?.get?.({sessionId:input.sessionId});if(!session||session.workspaceId!==view.workspaceId||!view.objectiveWakeIds.includes(session.origin?.objectiveId))return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_verification_out_of_scope'}});}
+    if (item.name === 'verify_session' && view.objectiveWakeIds.length && !view.currentInputAnchors.length) {
+      const session = await supervisor?.get?.({ sessionId: input.sessionId });
+      if (!session || session.workspaceId !== view.workspaceId
+        || !view.objectiveWakeIds.includes(session.origin?.objectiveId) && !view.sessionWakeIds.includes(input.sessionId)) {
+        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'objective_verification_out_of_scope' } });
+      }
+    }
     if (['message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
       const scope = resolveAnchorScope({
         messages: view.messages,
@@ -388,11 +397,20 @@ function executionView(context) {
     memoryIds: idList(context?.turnMemoryIds ?? nested.turnMemoryIds),
     currentInputAnchors: idList(context?.currentInputAnchors ?? nested.currentInputAnchors),
     objectiveWakeIds: idList(context?.objectiveWakeIds ?? nested.objectiveWakeIds),
+    sessionWakeIds: idList(context?.sessionWakeIds ?? nested.sessionWakeIds),
     objectiveWakeEvents: Array.isArray(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) ? structuredClone(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) : [],
     turnToolCalls: Array.isArray(context?.turnToolCalls)
       ? context.turnToolCalls.slice()
       : (Array.isArray(nested.turnToolCalls) ? nested.turnToolCalls.slice() : []),
   };
+}
+
+function onlyHandoffAnswers(view) {
+  if (!view.currentInputAnchors.length) return false;
+  return view.currentInputAnchors.every(id => {
+    const message = view.messages?.find(item => item.id === id && item.role === 'user');
+    return typeof message?.answerTo === 'string' && /^card:question:[^:]+:handoff-[a-f0-9]{16}$/.test(message.answerTo);
+  });
 }
 
 function idList(value) {

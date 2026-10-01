@@ -724,3 +724,27 @@ test('objective-only wake cannot bypass confirmation by omitting objectiveId or 
  assert.equal(mutations,0);
  const human=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),{toolContext:{...view,currentInputAnchors:['u1']}});assert.equal(human.result.status,'success');assert.equal(mutations,1);
 });
+
+test('a host handled handoff answer is not authority for another task or repeated mutations', async () => {
+  let spawns=0;
+  const provider=createDelegationProvider({supervisor:{spawn:()=>{spawns+=1;return {sessionId:'new',status:'running'};}}});
+  const answer={...USER,answerTo:'card:question:s1:handoff-0123456789abcdef',content:'合回改动'};
+  const ctx=agentContext({workspaceId:'ws',currentInputAnchors:['u1'],messages:[answer]});
+  const result=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),ctx);
+  assert.equal(outputOf(result).error,'host_decision_already_handled');assert.equal(spawns,0);
+  const manual={id:'u2',kind:'user_input',role:'user',content:'Also start independent work'};
+  const allowed=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput({anchorMessageIds:['u2']}),'manual'),{...ctx,turnId:'manual',currentInputAnchors:['u1','u2'],messages:[answer,manual]});
+  assert.equal(outputOf(allowed).ok,true);assert.equal(spawns,1);
+});
+
+test('mixed objective and task wakes still verify the actual ordinary task event', async () => {
+  let runs=0;
+  const provider=createDelegationProvider({supervisor:{get:()=>({workspaceId:'ws',origin:{}})},verification:{
+    run:async()=>{runs+=1;return {ok:false,error:'test-verifier-reached'};}
+  }});
+  const context=agentContext({workspaceId:'ws',objectiveWakeIds:['obj'],currentInputAnchors:[]});
+  const denied=await provider.executeCapability(call('local.delegation.verify_session',{sessionId:'ordinary'}),context);
+  assert.equal(outputOf(denied).error,'objective_verification_out_of_scope');assert.equal(runs,0);
+  const allowed=await provider.executeCapability(call('local.delegation.verify_session',{sessionId:'ordinary'},'mixed'),{...context,sessionWakeIds:['ordinary']});
+  assert.equal(outputOf(allowed).error,'test-verifier-reached');assert.equal(runs,1);
+});

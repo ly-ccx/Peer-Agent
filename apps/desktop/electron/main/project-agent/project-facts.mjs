@@ -9,6 +9,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     const profile = profileStore.read(workspaceId);
     const messages = conversationStore.getPersistedConversationHistory(profile?.agentConversationId)?.messages || [];
     return {
+      reportedMessages: messages.filter(message => message.kind === 'agent_reply'),
       sessionIds: rows.map((row) => row.sessionId),
       sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status })),
       unreportedResults: rows.filter(row => row.status === 'result_ready'

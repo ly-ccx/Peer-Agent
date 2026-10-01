@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { createConversationRefresh } from './conversationRefresh.ts';
 import {
   applyOptimistic,
   CONVERSATION_PAGE_SIZE,
@@ -67,20 +68,12 @@ function pageMessages(raw: readonly Record<string, unknown>[] | undefined): BotC
   return normalized;
 }
 
-function lastRawId(raw: readonly Record<string, unknown>[] | undefined): string | null {
-  const last = raw && raw.length > 0 ? raw[raw.length - 1] : null;
-  const id = last && typeof last.id === 'string' ? last.id.trim() : '';
-  return id || null;
-}
-
 export function useBotConversation(workspaceId: string) {
   const [messages, setMessages] = useState<readonly BotChatMessage[]>([]);
   const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
   const [pending, setPending] = useState<readonly PendingBotInput[]>([]);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [awaitingSince, setAwaitingSince] = useState<string | null>(null);
-  const tailRef = useRef<string | null>(null);
-  const loadingRef = useRef(false);
   const generationRef = useRef(0);
 
   const dropEchoed = useCallback((next: readonly BotChatMessage[]) => {
@@ -90,10 +83,8 @@ export function useBotConversation(workspaceId: string) {
   }, []);
 
   const load = useCallback(async (id: string, ticket: number) => {
-    loadingRef.current = true;
     let before: string | null = null;
     let all: BotChatMessage[] = [];
-    let tail: string | null = null;
     try {
       for (let page = 0; page < 40; page += 1) {
         const result = await clientApi.projectAgentReadConversation({
@@ -109,57 +100,17 @@ export function useBotConversation(workspaceId: string) {
         const raw = result.messages ?? [];
         if (page === 0) setFamiliarizeOffer(readFamiliarizeOffer(result.familiarizeOffer));
         all = mergeConversationPage(all, pageMessages(raw));
-        tail = lastRawId(raw) ?? tail;
         if (!result.nextCursor) break;
         before = result.nextCursor;
       }
       if (generationRef.current !== ticket) return;
-      tailRef.current = tail;
       setMessages(all);
       dropEchoed(all);
       setStatus('ready');
     } catch {
       if (generationRef.current === ticket) setStatus('error');
-    } finally {
-      if (generationRef.current === ticket) loadingRef.current = false;
     }
   }, [dropEchoed]);
-
-  const appendAfterTail = useCallback(async (id: string) => {
-    const ticket = generationRef.current;
-    if (loadingRef.current) return;
-    let before = tailRef.current;
-    if (!before) {
-      await load(id, ticket);
-      return;
-    }
-    let guard = 0;
-    while (guard < 40) {
-      guard += 1;
-      if (generationRef.current !== ticket) return;
-      const result = await clientApi.projectAgentReadConversation({
-        workspaceId: id,
-        limit: CONVERSATION_PAGE_SIZE,
-        before,
-      });
-      if (generationRef.current !== ticket || !result?.ok) return;
-      const raw = result.messages ?? [];
-      const incoming = pageMessages(raw);
-      if (incoming.length > 0) {
-        setMessages((current) => {
-          const merged = mergeConversationPage([...current], incoming);
-          dropEchoed(merged);
-          return merged;
-        });
-      }
-      const nextTail = lastRawId(raw);
-      if (nextTail) tailRef.current = nextTail;
-      if (!result.nextCursor || raw.length === 0) break;
-      before = result.nextCursor;
-    }
-    if (generationRef.current !== ticket) return;
-    void clientApi.projectAgentMarkRead({ workspaceId: id }).catch(() => {});
-  }, [dropEchoed, load]);
 
   useEffect(() => {
     const ticket = generationRef.current + 1;
@@ -169,24 +120,27 @@ export function useBotConversation(workspaceId: string) {
     setPending([]);
     setAwaitingSince(null);
     setStatus('loading');
-    tailRef.current = null;
-    void load(workspaceId, ticket).then(() => {
-      if (generationRef.current !== ticket) return;
-      void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
+    const refresh = createConversationRefresh(async () => {
+      await load(workspaceId, ticket);
+      if (generationRef.current === ticket) {
+        void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
+      }
     });
-  }, [load, workspaceId]);
-
-  useEffect(() => {
     const onChange = (event: { workspaceIds?: readonly string[] }) => {
       const ids = event?.workspaceIds ?? [];
       if (ids.length > 0 && !ids.includes(workspaceId)) return;
-      void appendAfterTail(workspaceId);
+      void refresh.request();
     };
-    const off = clientApi.onProjectAgentConversationChanged(onChange);
+    const offMessages = clientApi.onProjectAgentConversationChanged(onChange);
+    const offFacts = clientApi.onProjectAgentChanged(onChange);
+    void refresh.request();
     return () => {
-      off?.();
+      refresh.stop();
+      generationRef.current += 1;
+      offMessages?.();
+      offFacts?.();
     };
-  }, [appendAfterTail, workspaceId]);
+  }, [load, workspaceId]);
 
   useEffect(() => {
     if (!awaitingSince) return;

@@ -124,6 +124,8 @@ export interface DelegationEvent {
 }
 
 export interface AgentReplyMeta {
+  /** Host generated factual delivery keys; model input cannot set them. */
+  readonly reportFactKeys?: readonly string[];
   readonly replyTo: readonly string[];
   readonly sources: readonly string[];
   readonly verdictRef?: string;

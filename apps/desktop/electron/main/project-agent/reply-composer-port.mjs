@@ -2,7 +2,7 @@
  * 把 post_reply 交给 ReplyComposer，并用当前设置覆盖档位和安静时段。
  * 模型参数里没有送达事实；没有这些设置时按标准档、不在安静时段计算。
  */
-import { composeReply } from '@peer-agent/runtime-node';
+import { composeReply, prepareReplyReport } from '@peer-agent/runtime-node';
 
 export function createDesktopReplyComposer({ readDelivery = null } = {}) {
   return {
@@ -42,6 +42,11 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
       });
       if (!composed.ok) return { error: composed.error, message: composed.message,
         ...(composed.sessionStates ? { sessionStates: composed.sessionStates } : {}) };
+      const report = prepareReplyReport({ workspaceId: view?.workspaceId, message: composed.message,
+        currentInputAnchors: view?.currentInputAnchors || [],
+        reportedMessages: delivery.reportedMessages || view?.messages || [], toolCalls: view?.turnToolCalls || [] });
+      if (report.suppressed) return { ok: true, suppressed: true, reason: 'facts_already_reported' };
+      if (report.keys.length) composed.meta.reportFactKeys = report.keys;
       return {
         messageId: composed.message.id,
         message: composed.message,
