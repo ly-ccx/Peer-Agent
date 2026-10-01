@@ -27,8 +27,6 @@ import {
   createProjectInbox,
   createWatchPublisher,
   delegationFactsForWorkspace,
-  projectClassicGoals,
-  projectHistory,
   normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
@@ -40,6 +38,7 @@ import {
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
 import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
+import { createClassicGoalProjection } from './classic-goal-projection.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
@@ -252,6 +251,7 @@ export function registerDesktopProjectAgent({
     resolveFileAnchors: fileAnchors.capture,
     onWrote: memoryChanged,
   });
+  const classicGoals = createClassicGoalProjection({ registry, conversationStore, goalPlanStore });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -262,21 +262,8 @@ export function registerDesktopProjectAgent({
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
     readCards: (workspaceId) => projectFacts.cards(workspaceId),
-    listClassicGoals(workspaceId) {
-      try {
-        const folder = typeof registry?.get === 'function' ? (registry.get(workspaceId)?.path || '') : '';
-        if (!folder || typeof conversationStore?.listConversations !== 'function') return [];
-        const conversations = conversationStore.listConversations() || [];
-        const history = projectHistory(Array.isArray(conversations) ? conversations : [], { workspacePath: folder });
-        const plans = typeof goalPlanStore?.listPlans === 'function' ? goalPlanStore.listPlans() : [];
-        return projectClassicGoals(Array.isArray(plans) ? plans : [], {
-          workspacePath: folder,
-          conversationIds: history.map((item) => item.id),
-        });
-      } catch {
-        return [];
-      }
-    },
+    listClassicGoals: classicGoals.one,
+    readClassicGoalsBatch: classicGoals.batch,
   });
   const lifecycle = createBotLifecycle({
     rootDir: dataHome,

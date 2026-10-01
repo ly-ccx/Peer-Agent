@@ -8,8 +8,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { createProjectRegistry, createBotDirectory, createInputQueue, createProjectInbox, createProjectAgentHost,
-  createMemoryStore, createMemoryProvider } from '@peer-agent/runtime-node';
+  createMemoryStore, createMemoryProvider, createGoalPlanStore } from '@peer-agent/runtime-node';
 import { createProjectAgentApplicationService } from '../electron/main/project-agent/project-agent-application-service.mjs';
+import { createClassicGoalProjection } from '../electron/main/project-agent/classic-goal-projection.mjs';
 import { seedBotShellHome, RC_SCALE } from './seed-bot-shell-home.mjs';
 
 export const PERF_BUDGETS = Object.freeze({ list: 100, search: 150, received: 300, consume: 200, memory: 50, coldInbox: 1000, idleBytesPerBot: 2 * 1024 * 1024, realModel: 6000 });
@@ -28,7 +29,10 @@ function readers(home, fixture) {
   const registry = createProjectRegistry({ filePath: path.join(home, 'projects/registry.json') });
   const memories = createMemoryStore({ rootDir: home });
   const readMessages = id => conversations.getPersistedConversationHistory(id)?.messages || [];
-  const directory = createBotDirectory({ rootDir: home, registry, readMessages });
+  const classicGoals = createClassicGoalProjection({ registry, conversationStore: conversations,
+    goalPlanStore: createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') }) });
+  const directory = createBotDirectory({ rootDir: home, registry, readMessages,
+    listClassicGoals: classicGoals.one, readClassicGoalsBatch: classicGoals.batch });
   return { conversations, registry, memories, readMessages, directory };
 }
 

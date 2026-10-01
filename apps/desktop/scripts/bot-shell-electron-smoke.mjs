@@ -41,6 +41,8 @@ let observedService = serviceText.replace(readSeam, `const result = directory.re
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });
   return result;`);
 const timingSeams = [
+  ['function list(payload = {}) {', 'function list(payload = {}) { const rcListStart = performance.now();'],
+  ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; (globalThis.rcListTimings ??= []).push({ count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
   ['function search(payload = {}) {', 'function search(payload = {}) { const rcStart = performance.now(); let rcStampMs = 0, rcIndexMs = 0;'],
   ['let hits = [];', 'const rcProjectionMs = performance.now() - rcStart; let hits = [];'],
   ["const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null;", "const rcStampStart = performance.now(); const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null; rcStampMs = performance.now() - rcStampStart; const rcIndexStart = performance.now();"],
@@ -98,6 +100,14 @@ try {
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal((await app.evaluate(() => globalThis.rcBotShellTurns)).length, 0, 'idle bots must not open model turns');
   report.checks.push('200 real bot rows; no idle model turns');
+  report.listInitialMs = (await app.evaluate(() => globalThis.rcListTimings ?? [])).find(sample => sample.count === fixture.scale.bots)?.durationMs;
+  const listSamples = [];
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
+    listSamples.push((await app.evaluate(() => globalThis.rcListTimings)).at(-1).durationMs);
+  }
+  report.metrics = { productionList: metric('list', listSamples) };
+  assert.equal(report.metrics.productionList.pass, true, 'real desktop list projection p50 must stay below 100ms');
   report.searchSamples = [];
   for (let i = 0; i < 5; i++) {
     await page.locator('.bot-search').fill('');
@@ -122,7 +132,7 @@ try {
     await page.locator('.bot-search').fill('unique-needle');
     report.searchSamples.push(await page.evaluate(() => globalThis.rcSearchMeasurement));
   }
-  report.metrics = { visibleSearch: metric('search', report.searchSamples) };
+  report.metrics.visibleSearch = metric('search', report.searchSamples);
   report.searchTimings = await app.evaluate(() => globalThis.rcSearchTimings ?? []);
   assert.equal(report.metrics.visibleSearch.pass, true, 'input to visible full-corpus result p50 must stay below 150ms');
   await page.locator('.bot-search').fill('');

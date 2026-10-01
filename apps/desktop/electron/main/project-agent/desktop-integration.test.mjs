@@ -71,6 +71,20 @@ test('targeted wake checks global eligibility once while retaining 200 lease-own
   } finally { env.dispose(); }
 });
 
+test('200-bot search reads classic conversation and Goal catalogs once per projection', () => {
+  const env = harness({ projectCount: 200 });
+  let conversationReads = 0, planReads = 0;
+  const readConversations = env.conversations.listConversations;
+  const readPlans = env.plans.listPlans;
+  env.conversations.listConversations = (...args) => { conversationReads++; return readConversations(...args); };
+  env.plans.listPlans = (...args) => { planReads++; return readPlans(...args); };
+  try {
+    assert.equal(env.invoke('search', { query: 'test' }).ok, true);
+    assert.equal(conversationReads, 1, 'one canonical metadata read for the projection');
+    assert.ok(planReads <= 2, 'one projection read and at most one corpus rebuild read');
+  } finally { env.dispose(); }
+});
+
 async function tool(env, name, args, ordinal = 1) {
   const { registry, projection } = createRuntimeToolProjection({ projectionOptions: { mode: 'project_agent' } });
   return executeProjectedModelTool({ name, args, workspacePath: env.project,

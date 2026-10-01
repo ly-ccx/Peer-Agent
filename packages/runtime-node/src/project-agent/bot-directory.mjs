@@ -92,6 +92,7 @@ export function createBotDirectory({
   listApprovals = () => [],
   listConfirmations = () => [],
   listClassicGoals = () => [],
+  readClassicGoalsBatch = null,
   readCards = () => [],
   now = () => new Date(),
 } = {}) {
@@ -147,7 +148,10 @@ export function createBotDirectory({
     return Array.isArray(sessions) ? sessions : [];
   }
 
-  function classicGoalsOf(workspaceId) {
+  function classicGoalsOf(workspaceId, batch = null) {
+    if (batch instanceof Map && batch.has(workspaceId)) {
+      return Array.isArray(batch.get(workspaceId)) ? batch.get(workspaceId) : [];
+    }
     if (typeof listClassicGoals !== 'function') return [];
     try {
       const goals = listClassicGoals(workspaceId);
@@ -157,7 +161,7 @@ export function createBotDirectory({
     }
   }
 
-  function projectRow(profile) {
+  function projectRow(profile, classicBatch = null) {
     const messages = messagesOf(profile);
     const visible = messages.filter(isVisibleBotMessage);
     const last = visible.length ? toListMessage(visible[visible.length - 1]) : null;
@@ -166,7 +170,7 @@ export function createBotDirectory({
     const confirmations = listConfirmations(profile.workspaceId);
     const openConfirmations = (Array.isArray(confirmations) ? confirmations : [])
       .filter((item) => item && item.accepted !== true && item.needsConfirm !== false);
-    const classicGoals = classicGoalsOf(profile.workspaceId);
+    const classicGoals = classicGoalsOf(profile.workspaceId, classicBatch);
     const mappedSessions = [
       ...sessions.map((session) => ({
         status: session?.status,
@@ -204,7 +208,11 @@ export function createBotDirectory({
   }
 
   function rows() {
-    return activeProfiles().map(projectRow);
+    const current = activeProfiles();
+    let batch = null;
+    try { batch = readClassicGoalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
+    catch { /* Legacy per-project reads remain available. */ }
+    return current.map(profile => projectRow(profile, batch));
   }
 
   function list() {
