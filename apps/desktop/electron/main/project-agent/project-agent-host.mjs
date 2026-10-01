@@ -23,6 +23,8 @@ import {
   createProjectRegistry,
   createSessionSupervisor,
   createExecutionScheduler,
+  createCircuitBreaker,
+  createProjectRecovery,
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
@@ -98,6 +100,12 @@ export function createProjectAgentHost({
   readFacts = null,
   subscribePlans = null,
   reconcileSessions = null,
+  restoreQueue = null,
+  recoverTasks = null,
+  activateSessions = null,
+  acquireLease = null,
+  readMessages = null,
+  onRecoveryPhase = null,
 } = {}) {
   if (typeof executeTurn !== 'function') {
     throw new TypeError('ProjectAgentHost requires executeTurn');
@@ -112,6 +120,8 @@ export function createProjectAgentHost({
     appendMessage,
   });
   const runners = new Map();
+  const stagedInputs = new Map();
+  const stoppedWorkspaces = new Set();
   const digests = digestQueue || createDigestQueue({
     file: rootDir ? path.join(rootDir, 'digest-queue.json') : null,
   });
@@ -132,6 +142,7 @@ export function createProjectAgentHost({
   const watch = typeof readFacts === 'function' ? createWatchPublisher({ now }) : null;
 
   function drop(workspaceId) {
+    recovery.drop(workspaceId);
     const runner = runners.get(workspaceId);
     if (!runner) return;
     runner.dispose();
@@ -160,9 +171,12 @@ export function createProjectAgentHost({
       workspaceId,
       conversationId,
       inbox: inboxStore,
-      holdsLease: () => holdsLease(workspaceId) === true,
+      holdsLease: () => recovery.isReady(workspaceId),
+      circuitBreaker: createCircuitBreaker({ rootDir, workspaceId, ...(now ? { now } : {}) }),
+      onInputsCompleted: inputs => queue.completeExecution?.(workspaceId, inputs.map(input => input.inputId)),
       executeTurn,
       appendMessage,
+      readMessages: () => typeof readMessages === 'function' ? readMessages(conversationId) : [],
       resolveModel: () => resolveTurnModel(workspaceId, conversationId),
       resolveContext: (info) => (
         typeof resolveContext === 'function'
@@ -190,36 +204,63 @@ export function createProjectAgentHost({
     return runner;
   }
 
+  const recovery = createProjectRecovery({ rootDir, holdsLease, ...(now ? { now } : {}), onPhase: onRecoveryPhase,
+    ports: {
+      lease(workspaceId) {
+        if (!holdsLease(workspaceId) && typeof acquireLease === 'function') acquireLease(workspaceId);
+        if (holdsLease(workspaceId) !== true) throw new Error('lease_unavailable');
+      },
+      async inputs(workspaceId) {
+        const conversationId = resolveConversationId(workspaceId);
+        if (!conversationId) throw new Error('conversation_unavailable');
+        ensureRunner(workspaceId, conversationId);
+        stagedInputs.set(workspaceId, await consumeInputs(workspaceId));
+      },
+      inbox: workspaceId => inboxStore.takeBatch(workspaceId),
+      queue: workspaceId => typeof restoreQueue === 'function' ? restoreQueue(workspaceId) : undefined,
+      tasks: workspaceId => typeof recoverTasks === 'function' ? recoverTasks(workspaceId) : undefined,
+      watch: workspaceId => publishWatch(workspaceId),
+      digest: workspaceId => armDigest(runners.get(workspaceId), workspaceId),
+    },
+  });
+
+  async function consumeInputs(workspaceId) {
+    const consumed = queue.consume(workspaceId);
+    if (consumed.skipped) throw new Error(consumed.skipped);
+    if (consumed.consumed?.length && typeof onInputsConsumed === 'function') await onInputsConsumed(workspaceId, consumed.consumed);
+    return consumed.consumed || [];
+  }
+
+  function pendingInputs(workspaceId, conversationId, consumed) {
+    if (typeof queue.pendingExecution !== 'function') return consumed;
+    const messages = typeof readMessages === 'function' ? readMessages(conversationId) : [];
+    const repliedTo = messages.filter(message => message.role === 'assistant' && message.kind === 'agent_reply').flatMap(message => message.replyTo || message.meta?.replyTo || []);
+    return queue.pendingExecution(workspaceId, { repliedTo });
+  }
+
   async function sync(workspaceIds) {
     const listed = Array.isArray(workspaceIds) ? workspaceIds : listWorkspaceIds();
-    const wanted = [];
-    const seen = new Set();
-    for (const workspaceId of listed) {
-      if (typeof workspaceId !== 'string' || seen.has(workspaceId)) continue;
-      seen.add(workspaceId);
-      if (holdsLease(workspaceId) !== true) continue;
-      const conversationId = resolveConversationId(workspaceId);
-      if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
-      wanted.push({ workspaceId, conversationId: conversationId.trim() });
-    }
-    const wantedIds = new Set(wanted.map((item) => item.workspaceId));
-    for (const workspaceId of [...runners.keys()]) {
-      if (!wantedIds.has(workspaceId)) drop(workspaceId);
-    }
-    const runs = [];
-    for (const { workspaceId, conversationId } of wanted) {
-      const runner = ensureRunner(workspaceId, conversationId);
-      const due = armDigest(runner, workspaceId);
-      publishWatch(workspaceId);
-      const consumed = queue.consume(workspaceId);
-      if (consumed.consumed?.length && typeof onInputsConsumed === 'function') {
-        await onInputsConsumed(workspaceId, consumed.consumed);
-      }
-      if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
-      else if (due || inboxStore.takeBatch(workspaceId).events.length > 0) runs.push(runner.kick());
-    }
-    await Promise.all(runs);
-    return { workspaces: wanted.map((item) => item.workspaceId) };
+    const wanted = [...new Set(listed)].filter(workspaceId => typeof workspaceId === 'string' && !stoppedWorkspaces.has(workspaceId) && resolveConversationId(workspaceId));
+    const wantedIds = new Set(wanted);
+    for (const workspaceId of runners.keys()) if (!wantedIds.has(workspaceId) || !holdsLease(workspaceId)) drop(workspaceId);
+    const outcomes = await Promise.all(wanted.map(async workspaceId => {
+      if (!holdsLease(workspaceId) && typeof acquireLease !== 'function') return { workspaceId, skipped: 'not-host' };
+      const recovered = await recovery.recover(workspaceId);
+      if (!recovered.ok) return { workspaceId, ...recovered };
+      try {
+        if (!recovered.reused && typeof activateSessions === 'function') await activateSessions(workspaceId);
+        const conversationId = resolveConversationId(workspaceId), runner = ensureRunner(workspaceId, conversationId);
+        const consumed = [...(stagedInputs.get(workspaceId) || []), ...await consumeInputs(workspaceId)];
+        stagedInputs.delete(workspaceId);
+        const pending = pendingInputs(workspaceId, conversationId, consumed);
+        const due = armDigest(runner, workspaceId);
+        publishWatch(workspaceId);
+        if (pending.length) await runner.enqueueUserInputs(pending);
+        else if (due || runner.parked() || inboxStore.takeBatch(workspaceId).events.length > 0) await runner.kick();
+        return { workspaceId, ok: true };
+      } catch (error) { drop(workspaceId); try { recovery.fail(workspaceId, error); } catch { /* Returned failure still identifies the project. */ } return { workspaceId, ok: false, error: error?.message || String(error) }; }
+    }));
+    return { workspaces: outcomes.filter(item => item.ok).map(item => item.workspaceId), outcomes };
   }
 
   function armDigest(runner, workspaceId) {
@@ -233,6 +274,7 @@ export function createProjectAgentHost({
   }
 
   async function deliverDigests() {
+    await sync();
     const settings = normalizeProjectAgentSettings(
       typeof readSettings === 'function' ? readSettings()?.projectAgent : null,
     );
@@ -243,7 +285,7 @@ export function createProjectAgentHost({
     for (const workspaceId of listed) {
       if (typeof workspaceId !== 'string' || seen.has(workspaceId)) continue;
       seen.add(workspaceId);
-      if (holdsLease(workspaceId) !== true) continue;
+      if (!recovery.isReady(workspaceId)) continue;
       const conversationId = resolveConversationId(workspaceId);
       if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
       const preview = digests.consider(workspaceId, at, settings.digestTime);
@@ -314,32 +356,12 @@ export function createProjectAgentHost({
 
   async function sweepWatch() {
     if (!watch || hostDisposed) return 30_000;
+    await sync();
     if (typeof reconcileSessions === 'function') await reconcileSessions();
-    const listed = listWorkspaceIds();
-    const seen = new Set();
-    const runs = [];
     const at = typeof now === 'function' ? now() : new Date();
     const atIso = at instanceof Date ? at.toISOString() : (typeof at === 'string' ? at : new Date().toISOString());
     let delay = 30_000;
-    for (const workspaceId of listed) {
-      if (typeof workspaceId !== 'string' || seen.has(workspaceId)) continue;
-      seen.add(workspaceId);
-      if (holdsLease(workspaceId) !== true) continue;
-      const conversationId = resolveConversationId(workspaceId);
-      if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
-      const runner = ensureRunner(workspaceId, conversationId.trim());
-      publishWatch(workspaceId);
-      // An input may have arrived before lease acquisition, or while this host was
-      // offline. The durable queue must recover without another user submission.
-      const consumed = queue.consume(workspaceId);
-      if (consumed.consumed?.length && typeof onInputsConsumed === 'function') {
-        await onInputsConsumed(workspaceId, consumed.consumed);
-      }
-      if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
-      else if (inboxStore.takeBatch(workspaceId).events.length > 0) runs.push(runner.kick());
-      delay = Math.min(delay, watch.nextDelay(workspaceId, atIso));
-    }
-    await Promise.all(runs);
+    for (const workspaceId of listWorkspaceIds()) if (recovery.isReady(workspaceId)) delay = Math.min(delay, watch.nextDelay(workspaceId, atIso));
     return delay;
   }
 
@@ -396,6 +418,9 @@ export function createProjectAgentHost({
   return {
     sync,
     dispose,
+    stop(workspaceId) { stoppedWorkspaces.add(workspaceId); drop(workspaceId); },
+    isReady: recovery.isReady,
+    recovery,
     runnerFor: (workspaceId) => runners.get(workspaceId) ?? null,
     inbox: inboxStore,
     inputQueue: queue,
@@ -412,6 +437,8 @@ export function registerDesktopProjectAgent({
   workspace,
   broadcast,
   holdsLease,
+  acquireLease = null,
+  releaseLease = null,
   getSettings,
   mergeSettings,
   dialog,
@@ -424,8 +451,11 @@ export function registerDesktopProjectAgent({
   onViewing = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
+  let host = null;
+  const runtimeEnabled = () => enabled() && getSettings()?.projectAgent?.shell !== 'classic';
+  const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
-  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => getSettings()?.projectAgent?.concurrency });
+  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => getSettings()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
   function readEvidenceBody(evidenceRef) {
     try {
       const record = goalPlanStore.findEvidenceIndexRecords?.([evidenceRef])?.[0];
@@ -451,7 +481,8 @@ export function registerDesktopProjectAgent({
     goalPlanStore,
     goalRunner,
     executionScheduler,
-    canManageWorkspace: (workspaceId) => enabled() && holdsLease(workspaceId),
+    canManageWorkspace: ownsProject,
+    deferRecovery: true,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
@@ -557,11 +588,13 @@ export function registerDesktopProjectAgent({
   });
   const lifecycle = createBotLifecycle({
     rootDir: dataHome,
-    enabled,
+    enabled: runtimeEnabled,
     registry,
     conversationStore,
     memoryStore,
     spawn: async (request) => {
+      await host.sync([request.workspaceId]);
+      if (!host.isReady(request.workspaceId)) return { error: 'recovery_pending' };
       const anchorMessageId = `lifecycle-${request.kind}-${request.workspaceId}`;
       if (!hasMessage(request.conversationId, anchorMessageId)) appendMessage(request.conversationId, {
         id: anchorMessageId, role: 'user', kind: 'user_input', content: request.task.brief,
@@ -572,8 +605,16 @@ export function registerDesktopProjectAgent({
     },
     removeWorkspace: (folder) => workspace.removeWorkspace(folder),
     moveToTrash: (folder) => shell.trashItem(folder),
+    stopWorkspace: async workspaceId => {
+      if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
+      host.stop(workspaceId);
+      const result = await supervisor.cancelWorkspace(workspaceId);
+      if (!result.ok) return { ok: false, code: result.error || 'STOP_FAILED' };
+      releaseLease?.(workspaceId);
+      return { ok: true };
+    },
   });
-  if (typeof enabled === 'function' && enabled() === true) {
+  if (runtimeEnabled()) {
     try {
       const settings = typeof getSettings === 'function' ? getSettings() : null;
       const workspaces = Array.isArray(settings?.workspaces) ? settings.workspaces : [];
@@ -613,14 +654,19 @@ export function registerDesktopProjectAgent({
 
   const inputQueue = createInputQueue({
     rootDir: runtimeRoot,
-    holdsLease,
+    holdsLease: ownsProject,
     resolveConversationId,
     hasMessage,
     appendMessage,
   });
-  const host = createProjectAgentHost({
+  host = createProjectAgentHost({
     rootDir: runtimeRoot,
-    holdsLease,
+    holdsLease: ownsProject,
+    acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
+    readMessages: conversationId => conversationStore.getPersistedConversationHistory(conversationId)?.messages || [],
+    restoreQueue: workspaceId => supervisor.recoverQueue(workspaceId),
+    recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
+    activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
     listWorkspaceIds: () => directory.workspaceIds(),
     resolveConversationId,
     hasMessage,
@@ -662,7 +708,7 @@ export function registerDesktopProjectAgent({
     ),
   });
   const projectAgent = createProjectAgentApplicationService({
-    enabled,
+    enabled: runtimeEnabled,
     directory,
     lifecycle,
     profileStore,
@@ -683,9 +729,13 @@ export function registerDesktopProjectAgent({
       else {
         const turn = messages.find((message) => message.id === turnId && message.kind === 'agent_turn');
         await host.sync([workspaceId]);
-        if (turn?.userInputs?.length) await host.runnerFor(workspaceId).enqueueUserInputs(turn.userInputs);
-        else await host.runnerFor(workspaceId).kick();
+        const restored = host.runnerFor(workspaceId);
+        if (!restored) return { ok: false, code: 'RECOVERY_FAILED' };
+        if (restored.parked()) await restored.retry();
+        else if (turn?.userInputs?.length) await restored.enqueueUserInputs(turn.userInputs);
+        else await restored.retry();
       }
+      if (host.runnerFor(workspaceId)?.status() === 'error') return { ok: false, code: 'TURN_FAILED' };
       projectFacts.resolve(workspaceId, card.cards?.[0]?.cardId || `card:agent_unavailable:${turnId}`);
       return { ok: true };
     },

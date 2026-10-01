@@ -16,7 +16,7 @@ function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-12-life-'));
 }
 
-function harness(root, { enabled = () => true, spawn = null, removeWorkspace = null, moveToTrash = null, gitRun = null } = {}) {
+function harness(root, { enabled = () => true, spawn = null, removeWorkspace = null, moveToTrash = null, stopWorkspace = null, gitRun = null } = {}) {
   const folder = path.join(root, 'demo-project');
   mkdirSync(folder, { recursive: true });
   const registry = createProjectRegistry({ filePath: path.join(root, 'projects', 'registry.json') });
@@ -32,6 +32,7 @@ function harness(root, { enabled = () => true, spawn = null, removeWorkspace = n
     spawn,
     removeWorkspace,
     moveToTrash,
+    stopWorkspace,
     gitRun,
     now: () => new Date('2026-09-27T00:00:00.000Z'),
   });
@@ -79,7 +80,7 @@ test('开关关闭时不创建档案，也不创建对话', () => {
   }
 });
 
-test('删除只移出列表并归档，文件夹和记忆都还在', () => {
+test('删除只移出列表并归档，文件夹和记忆都还在', async () => {
   const root = tempRoot();
   try {
     const removed = [];
@@ -93,7 +94,7 @@ test('删除只移出列表并归档，文件夹和记忆都还在', () => {
       text: '目录里有 keep.txt',
       sourceRefs: ['file:keep.txt'],
     }]);
-    const deleted = life.deleteBot(entry.workspaceId);
+    const deleted = await life.deleteBot(entry.workspaceId);
     assert.equal(deleted.ok, true);
     assert.equal(deleted.profile.status, 'archived');
     assert.deepEqual(removed, [folder]);
@@ -110,7 +111,7 @@ test('删除只移出列表并归档，文件夹和记忆都还在', () => {
   }
 });
 
-test('受管文件夹未确认时不进废纸篓，确认后只调用注入实现', () => {
+test('受管文件夹未确认时不进废纸篓，确认后只调用注入实现', async () => {
   const root = tempRoot();
   try {
     const removed = [];
@@ -121,12 +122,12 @@ test('受管文件夹未确认时不进废纸篓，确认后只调用注入实�
     });
     writeFileSync(path.join(folder, 'keep.txt'), 'stay');
     life.ensureBot(entry.workspaceId, { managed: true });
-    const denied = life.deleteBot(entry.workspaceId);
+    const denied = await life.deleteBot(entry.workspaceId);
     assert.equal(denied.code, 'CONFIRM_REQUIRED');
     assert.equal(trashed.length, 0);
     assert.equal(removed.length, 0);
     assert.equal(life.readProfile(entry.workspaceId).status, 'active');
-    const confirmed = life.deleteBot(entry.workspaceId, { confirmManaged: true });
+    const confirmed = await life.deleteBot(entry.workspaceId, { confirmManaged: true });
     assert.equal(confirmed.ok, true);
     assert.deepEqual(trashed, [folder]);
     assert.deepEqual(removed, [folder]);
@@ -292,4 +293,19 @@ test('开关关闭时批量确保不创建档案和对话', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test('deletion validates confirmation then waits for workspace shutdown before filesystem removal', async () => {
+  const root = tempRoot(); const order = []; let release;
+  const idle = new Promise(resolve => { release = resolve; });
+  const { entry, life } = harness(root, { stopWorkspace: async () => { order.push('stop'); await idle; return { ok: true }; },
+    moveToTrash: async () => { order.push('trash'); return { ok: true }; }, removeWorkspace: async () => { order.push('remove'); return { ok: true }; } });
+  try {
+    life.ensureBot(entry.workspaceId, { managed: true });
+    assert.equal((await life.deleteBot(entry.workspaceId)).code, 'CONFIRM_REQUIRED'); assert.deepEqual(order, []);
+    const deleting = life.deleteBot(entry.workspaceId, { confirmManaged: true });
+    await Promise.resolve(); assert.deepEqual(order, ['stop']); assert.equal(life.readProfile(entry.workspaceId).status, 'active');
+    release(); assert.equal((await deleting).profile.status, 'archived'); assert.deepEqual(order, ['stop', 'trash', 'remove']);
+  } finally { release(); rmSync(root, { recursive: true, force: true }); }
 });

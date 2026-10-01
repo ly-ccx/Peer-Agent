@@ -294,9 +294,9 @@ function unavailableCards(facts) {
       cardId,
       kind: 'agent_unavailable',
       content: `代理暂时不可用：${reason}`,
-      factResolved: false,
-      factState: '',
-      actions: [ipcAction('retry', 'project-agent:retry', { turnId, cardId })],
+      factResolved: item.superseded === true,
+      factState: item.superseded === true ? 'superseded' : '',
+      actions: item.superseded === true ? [] : [ipcAction('retry', 'project-agent:retry', { turnId, cardId })],
       refs: refs({ turnId }),
     }));
   }

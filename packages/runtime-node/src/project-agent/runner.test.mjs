@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createInputQueue, inputMessageId } from './input-queue.mjs';
+import { createCircuitBreaker } from './circuit-breaker.mjs';
 import { createProjectInbox } from './project-inbox.mjs';
 import { SAME_PROVIDER_RETRY_DELAYS_MS, createProjectAgentRunner } from './runner.mjs';
 import { createScriptedTurnExecutor } from '../testing/scripted-turn-executor.mjs';
@@ -722,4 +723,51 @@ test('被频率挡住的整理到点后自己再跑，学到的 id 出现在下�
   } finally {
     box.cleanup();
   }
+});
+
+
+test('runner counts failed turns once, suppresses open wakes and acknowledges successful inputs once', async () => {
+  const box = world('breaker-runner'); let clock = Date.parse('2026-10-01T00:00:00Z'); let calls = 0, succeed = false;
+  const breaker = createCircuitBreaker({ rootDir: box.root, workspaceId: box.workspaceId, now: () => new Date(clock).toISOString() });
+  const completed = [];
+  const runner = runnerFor(box, async () => { calls++; return succeed ? { text: 'done' } : { ok: false, retryable: true, error: 'offline' }; },
+    { circuitBreaker: breaker, now: () => new Date(clock).toISOString(), onInputsCompleted: inputs => completed.push(...inputs) });
+  try {
+    await runner.enqueueUserInputs([input('one', 'do it')]);
+    assert.equal(calls, 4); assert.equal(breaker.state().failures, 1);
+    for (let n = 0; n < 4; n++) await runner.retry();
+    assert.equal(breaker.state().status, 'open'); assert.equal(calls, 20);
+    await runner.kick(); await runner.enqueueUserInputs([input('two', 'then this'), input('two', 'duplicate')]);
+    assert.equal(calls, 20);
+    assert.match(box.messages.at(-1).content, /连续失败|暂停自动/);
+    assert.deepEqual(completed, []);
+    succeed = true; await runner.retry();
+    assert.equal(breaker.state().status, 'closed'); assert.deepEqual(completed.map(item => item.inputId), ['one', 'two']);
+    const before = calls; await runner.enqueueUserInputs([input('two', 'replay')]); assert.equal(calls, before);
+    succeed = false; await runner.enqueueUserInputs([input('three', 'again')]);
+    for (let n = 0; n < 4; n++) await runner.retry();
+    const openCalls = calls; clock += 10 * 60_000; succeed = true; await runner.kick();
+    assert.ok(calls > openCalls); assert.equal(breaker.state().status, 'closed');
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('restart repairs a circuit card interrupted after failure persistence without executing or duplicating', async () => {
+  const box = world('breaker-card-gap'); let calls = 0;
+  const breaker = createCircuitBreaker({ rootDir: box.root, workspaceId: box.workspaceId });
+  for (let n = 0; n < 5; n++) breaker.failure({ turnId: `fail-${n}`, reason: 'offline', retry: { kind: 'user', userInputs: [input('one', 'do it')] } });
+  let runner;
+  try {
+    const restart = () => runnerFor(box, async () => { calls++; return { text: 'unexpected' }; }, {
+      circuitBreaker: createCircuitBreaker({ rootDir: box.root, workspaceId: box.workspaceId }),
+      readMessages: () => box.messages,
+    });
+    runner = restart(); await runner.enqueueUserInputs([input('one', 'do it')]);
+    assert.equal(calls, 0);
+    const card = box.messages.find(message => message.card === 'agent_unavailable');
+    assert.equal(card?.turnId, 'fail-4'); assert.match(card?.content, /暂停自动/);
+    assert.deepEqual(box.messages.find(message => message.id === 'fail-4')?.userInputs.map(item => item.inputId), ['one']);
+    runner.dispose(); runner = restart(); await runner.enqueueUserInputs([input('one', 'do it')]);
+    assert.equal(box.messages.filter(message => message.card === 'agent_unavailable').length, 1);
+    assert.equal(calls, 0);
+  } finally { runner?.dispose(); box.cleanup(); }
 });

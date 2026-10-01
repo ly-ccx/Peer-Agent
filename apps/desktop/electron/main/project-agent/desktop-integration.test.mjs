@@ -380,3 +380,16 @@ test('production failed dependency projects a question and an answer does not st
     assert.equal(env.api.supervisor.get({sessionId:child.sessionId}).status,'waiting_user');
   } finally {env.dispose();}
 });
+
+test('classic shell leaves queued bot input unconsumed and starts no bot or delegated work', async () => {
+  const initial = harness(); await initial.submit('old', 'old'); initial.dispose();
+  const env = harness({ dataHome: initial.home, folder: initial.project, settings: { projectAgent: { shell: 'classic' } } });
+  try {
+    env.api.host.inputQueue.submitInput({ workspaceId: initial.bot.workspaceId, inputId: 'classic-pending', text: 'wait', surface: 'desktop' });
+    const before = env.api.host.inputQueue.cursor(initial.bot.workspaceId);
+    await env.api.host.sync([initial.bot.workspaceId]);
+    assert.equal(env.api.host.inputQueue.cursor(initial.bot.workspaceId), before);
+    assert.equal(env.calls.length, 0); assert.equal(env.starts.length, 0); assert.equal(env.api.host.isReady(initial.bot.workspaceId), false);
+    assert.equal((await env.invoke('start-familiarize')).code, 'PROJECT_AGENT_DISABLED');
+  } finally { env.dispose(); }
+});

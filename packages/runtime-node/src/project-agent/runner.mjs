@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn } from './agent-turn-plan.mjs';
+import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn, unavailableCard } from './agent-turn-plan.mjs';
 
 /**
  * 与桌面 llm-chat-service 的同提供方重试退避一致（ADR 30）：
@@ -23,6 +23,7 @@ export function createProjectAgentRunner({
   holdsLease = () => true,
   executeTurn,
   appendMessage,
+  readMessages = () => [],
   resolveModel = () => ({ ok: false, missing: '没有可用的模型' }),
   resolveContext = () => null,
   resolveRoster = () => null,
@@ -34,6 +35,8 @@ export function createProjectAgentRunner({
   onDigestDelivered = null,
   onCurator = null,
   onReplied = null,
+  circuitBreaker = null,
+  onInputsCompleted = null,
 } = {}) {
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   const conversation = typeof conversationId === 'string' ? conversationId.trim() : '';
@@ -52,6 +55,8 @@ export function createProjectAgentRunner({
   const turnSink = sink && typeof sink.send === 'function' ? sink : { send() {} };
 
   const userInputs = [];
+  const knownInputs = new Set();
+  let manualTrial = false;
   const timers = [];
   /** @type {Array<{ events: object[], throughSeq: number }>} */
   const preempted = [];
@@ -86,6 +91,23 @@ export function createProjectAgentRunner({
   function commit(throughSeq) {
     if (!Number.isInteger(throughSeq) || throughSeq <= 0) return;
     inbox.commitBatch(workspace, { throughSeq, ok: true });
+  }
+
+  function restoreCircuitCard() {
+    const state = circuitBreaker?.state();
+    if (!state || state.status === 'closed' || !state.lastTurnId) return;
+    const messages = readMessages() || [], turnId = state.lastTurnId;
+    if (!messages.some(message => message.id === turnId)) {
+      const plan = planAgentTurn({ kind: state.retry?.kind || 'wake', userInputs: state.retry?.userInputs || [], workspaceId: workspace });
+      remember(agentTurnMessage({ turnId, plan }));
+    }
+    if (!messages.some(message => message.id === `${turnId}-card`)) {
+      const card = unavailableCard(turnId, state.reason, workspace);
+      card.content = '代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。';
+      card.meta = { circuitOpenUntil: state.openUntil };
+      for (const item of card.cards || []) item.content = card.content;
+      remember(card);
+    }
   }
 
   function takeNext() {
@@ -128,7 +150,11 @@ export function createProjectAgentRunner({
   function kick() {
     if (disposed) return Promise.resolve({ skipped: 'disposed' });
     if (holdsLease() !== true) return Promise.resolve({ skipped: 'not-host' });
-    if (failedJob && !retryArmed) return Promise.resolve({ skipped: 'error' });
+    if (failedJob && !retryArmed) {
+      const state = circuitBreaker?.state();
+      if (state && state.status !== 'closed' && Date.parse(stamp()) >= Date.parse(state.openUntil)) retryArmed = true;
+      else return Promise.resolve({ skipped: 'error' });
+    }
     if (!pumping) pumping = pump().finally(() => { pumping = null; });
     return pumping;
   }
@@ -155,9 +181,13 @@ export function createProjectAgentRunner({
         return;
       }
       drained = false;
-      const outcome = await runJob(job);
+      let outcome;
+      try { outcome = await runJob(job); } catch (error) {
+        circuitBreaker?.failure({ turnId: job.turnId || `failed-${randomUUID()}`, reason: error?.message || String(error), retry: { kind: job.kind, userInputs: job.userInputs } });
+        outcome = 'error';
+      }
       if (outcome === 'disposed') return;
-      if (outcome === 'error') {
+      if (outcome === 'error' || outcome === 'circuit_open') {
         failedJob = job;
         setStatus('error');
         return;
@@ -166,6 +196,11 @@ export function createProjectAgentRunner({
   }
 
   async function runJob(job) {
+    if (job.kind !== 'digest') {
+      const admitted = circuitBreaker?.admit({ manual: manualTrial });
+      manualTrial = false;
+      if (admitted?.allowed === false) { restoreCircuitCard(); return 'circuit_open'; }
+    }
     const controller = new AbortController();
     abortController = controller;
     turnKind = job.kind;
@@ -187,8 +222,10 @@ export function createProjectAgentRunner({
         return 'preempted';
       }
       const outcome = await runRounds(job, signal);
-      if (disposed || outcome.disposed) return 'disposed';
+      job.turnId = outcome.turnId;
+      if (disposed || outcome.disposed) { circuitBreaker?.abandonTrial(); return 'disposed'; }
       if (outcome.preempted) {
+        circuitBreaker?.abandonTrial();
         if (outcome.rounds.length > 0) {
           remember(agentTurnMessage({ turnId: outcome.turnId, plan: outcome.plan, rounds: outcome.rounds }));
         }
@@ -204,6 +241,14 @@ export function createProjectAgentRunner({
         reason: outcome.reason,
         memoryUsed: outcome.memoryIds,
       });
+      if (outcome.failed || finished.failed) {
+        const failure = circuitBreaker?.failure({ turnId: outcome.turnId, reason: outcome.reason || 'invalid reply', retry: { kind: job.kind, userInputs: job.userInputs } });
+        if (failure?.opened) for (const message of finished.messages) if (message.card === 'agent_unavailable') {
+          const content = `代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。`;
+          message.content = content; message.meta = { ...message.meta, circuitOpenUntil: failure.openUntil };
+          for (const card of message.cards || []) card.content = content;
+        }
+      }
       if (!stampLearned(finished.messages, learned)) pendingLearned.unshift(...learned);
       if (disposed) return 'disposed';
       for (const message of finished.messages) {
@@ -222,7 +267,11 @@ export function createProjectAgentRunner({
         }
       }
       if (outcome.failed || finished.failed) return 'error';
+      circuitBreaker?.success();
       commit(job.throughSeq);
+      if (job.kind === 'user' && typeof onInputsCompleted === 'function') {
+        try { await onInputsCompleted(job.userInputs); } catch { /* Canonical replies let the host repair a missing execution acknowledgement. */ }
+      }
       if (job.kind === 'user' || job.kind === 'wake') scheduleCurator(job);
       return 'ok';
     } finally {
@@ -387,12 +436,17 @@ export function createProjectAgentRunner({
 
   function enqueueUserInputs(inputs) {
     if (disposed) return Promise.resolve({ skipped: 'disposed' });
-    const list = (Array.isArray(inputs) ? inputs : []).filter((item) => item && typeof item === 'object');
+    const list = (Array.isArray(inputs) ? inputs : []).filter(item => {
+      if (!item || typeof item !== 'object') return false;
+      if (typeof item.inputId !== 'string') return true;
+      if (knownInputs.has(item.inputId)) return false;
+      knownInputs.add(item.inputId); return true;
+    });
     userInputs.push(...list);
     if (turnKind === 'wake' && abortController && !abortController.signal.aborted) {
       abortController.abort();
     }
-    if (failedJob && !retryArmed) return Promise.resolve({ queued: list.length, skipped: 'error' });
+    if (failedJob && !retryArmed) return kick().then(result => ({ ...result, queued: list.length }));
     return kick();
   }
 
@@ -418,6 +472,7 @@ export function createProjectAgentRunner({
 
   function retry() {
     if (disposed) return Promise.resolve({ skipped: 'disposed' });
+    manualTrial = true;
     if (!failedJob) return kick();
     retryArmed = true;
     return kick();

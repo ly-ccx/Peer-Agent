@@ -29,6 +29,7 @@ export function createBotLifecycle({
   spawn = null,
   removeWorkspace = null,
   moveToTrash = null,
+  stopWorkspace = null,
   gitRun = null,
   readdir = readdirSync,
 } = {}) {
@@ -301,23 +302,30 @@ export function createBotLifecycle({
     });
   }
 
-  function deleteBot(workspaceId, options = {}) {
+  async function deleteBot(workspaceId, options = {}) {
     if (!isBotWorkspaceId(workspaceId)) return fail('INVALID_WORKSPACE');
     const profile = profiles.read(workspaceId);
     if (!profile) return fail('NOT_FOUND');
     if (profile.status === 'archived') return { ok: true, profile, reused: true };
     if (profile.managed === true && options.confirmManaged !== true) return fail('CONFIRM_REQUIRED');
     const folder = workspacePath(workspaceId);
+    if (profile.managed === true && (typeof moveToTrash !== 'function' || !folder)) return fail(!folder ? 'NOT_FOUND' : 'TRASH_UNAVAILABLE');
+    if (typeof stopWorkspace === 'function') {
+      try { const stopped = await stopWorkspace(workspaceId); if (stopped?.ok === false) return stopped; }
+      catch (error) { return { ok: false, code: 'STOP_FAILED', message: error?.message || String(error) }; }
+    }
     let trashed = null;
     if (profile.managed === true) {
       if (typeof moveToTrash !== 'function') return fail('TRASH_UNAVAILABLE');
       if (!folder) return fail('NOT_FOUND');
-      const result = moveToTrash(folder);
+      let result;
+      try { result = await moveToTrash(folder); } catch (error) { return { ok: false, code: 'TRASH_FAILED', message: error?.message || String(error) }; }
       if (result && result.ok === false) return result;
       trashed = folder;
     }
     if (typeof removeWorkspace === 'function' && folder) {
-      const removed = removeWorkspace(folder);
+      let removed;
+      try { removed = await removeWorkspace(folder); } catch (error) { return { ok: false, code: 'REMOVE_FAILED', message: error?.message || String(error) }; }
       if (removed && removed.ok === false) return removed;
     }
     const saved = profiles.save({ ...profile, status: 'archived' });

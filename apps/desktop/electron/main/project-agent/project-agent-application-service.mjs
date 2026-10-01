@@ -227,9 +227,9 @@ export function createProjectAgentApplicationService({
     return { ok: true, profile: profileStore.read(workspaceId) };
   }
 
-  function deleteBot(payload = {}) {
+  async function deleteBot(payload = {}) {
     if (!open()) return disabled();
-    const result = lifecycle.deleteBot(payload.workspaceId, {
+    const result = await lifecycle.deleteBot(payload.workspaceId, {
       confirmManaged: payload.confirmManaged === true,
     });
     if (result?.ok) queueChanged(payload.workspaceId);
@@ -308,6 +308,7 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     const session = await sessions.cancel(payload);
     if (!session) return { ok: false, code: 'NOT_FOUND' };
+    if (session.error) return { ok: false, code: session.error };
     queueChanged(payload.workspaceId || session.workspaceId);
     return { ok: true, session };
   }

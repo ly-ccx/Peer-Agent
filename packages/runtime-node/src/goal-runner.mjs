@@ -863,7 +863,7 @@ export function createGoalRunner({
    * - compacting_context / resuming_after_compaction without checkpoint: resume running if possible
    * - running / exploring with no in-memory session: process died; mark idle + process_recovery
    */
-  function recoverContextCheckpoints({ maxAgeMs = 24 * 60 * 60 * 1000 } = {}) {
+  function recoverContextCheckpoints({ maxAgeMs = 24 * 60 * 60 * 1000, includeDelegated = true, workspaceId = null, deferPump = false } = {}) {
     if (typeof goalPlanStore.listPlans !== 'function') {
       return { scanned: 0, recovered: [], skipped: [] };
     }
@@ -876,7 +876,8 @@ export function createGoalRunner({
       const planId = meta?.planId;
       if (!planId) continue;
       const plan = goalPlanStore.getPlan(planId);
-      if (!plan || plan.status !== 'executing') {
+      if (!plan || includeDelegated === false && plan.delegationOrigin || workspaceId && plan.delegationOrigin?.workspaceId !== workspaceId) continue;
+      if (plan.status !== 'executing') {
         skipped.push({ planId, reason: 'not_executing' });
         continue;
       }
@@ -896,7 +897,7 @@ export function createGoalRunner({
               runnerStatus: 'running',
             });
             recovered.push({ planId, action: 'supersede_preparing', checkpointId: cp.checkpointId });
-            if (runner.enabled) schedulePump(planId);
+            if (runner.enabled && !deferPump) schedulePump(planId);
             continue;
           } catch (error) {
             skipped.push({ planId, reason: 'supersede_failed', error: error?.message || String(error) });
@@ -924,7 +925,7 @@ export function createGoalRunner({
               updatedAt: now(),
             });
           }
-          schedulePump(planId);
+          if (!deferPump) schedulePump(planId);
           recovered.push({ planId, action: 'resume_committed', checkpointId: cp.checkpointId });
           continue;
         } catch (error) {
@@ -943,7 +944,7 @@ export function createGoalRunner({
             phase: runner.phase || 'act',
             updatedAt: now(),
           });
-          schedulePump(planId);
+          if (!deferPump) schedulePump(planId);
           recovered.push({ planId, action: 'unstick_runner_status', previousStatus: status });
           continue;
         } catch (error) {

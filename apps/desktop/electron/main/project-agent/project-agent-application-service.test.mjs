@@ -169,7 +169,7 @@ test('列表与单项只投影本进程已知的代理状态', () => {
   assert.equal('agentStatus' in item.state, false);
 });
 
-test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', () => {
+test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', async () => {
   const events = [];
   const queued = [];
   const service = createProjectAgentApplicationService({
@@ -187,7 +187,7 @@ test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', ()
     schedule: (fn) => { queued.push(fn); return 1; },
   });
   service.markRead({ workspaceId: 'ws-1' });
-  service.deleteBot({ workspaceId: 'ws-2' });
+  await service.deleteBot({ workspaceId: 'ws-2' });
   service.markRead({ workspaceId: 'ws-1' });
   assert.equal(events.length, 0);
   assert.equal(queued.length, 1);

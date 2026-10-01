@@ -1700,3 +1700,20 @@ test('legacy queue input anchors remain usable without rewriting their message r
     assert.equal(env.conversationStore.getPersistedConversationHistory(env.parent.id).messages.find(message => message.id === 'input-legacy').kind, undefined);
   } finally { await env.cleanup(); }
 });
+
+test('cancellation preserves completed results and workspace shutdown cancels only unfinished work', async () => {
+  const env = await harness();
+  try {
+    const completed = await env.supervisor.spawn(spawnInput({ title: 'ready' }), contextOf(env));
+    const completedPlan = planIdOf(env, completed.sessionId); env.goalPlanStore.setPlanStatus(completedPlan, 'completed');
+    assert.equal((await env.supervisor.cancel({ sessionId: completed.sessionId })).error, 'session_not_running');
+    assert.equal(env.goalPlanStore.getPlan(completedPlan).status, 'completed');
+    const first = await env.supervisor.spawn(spawnInput({ title: 'first' }), contextOf(env));
+    const queued = await env.supervisor.spawn(spawnInput({ title: 'child', brief: 'dependent', dependsOn: [first.sessionId] }), contextOf(env));
+    await env.supervisor.cancel({ sessionId: first.sessionId });
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).runner.status, 'waiting_user');
+    assert.equal((await env.supervisor.cancelWorkspace('ws-1')).ok, true);
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).status, 'cancelled');
+    assert.equal(env.goalPlanStore.getPlan(completedPlan).status, 'completed');
+  } finally { await env.cleanup(); }
+});

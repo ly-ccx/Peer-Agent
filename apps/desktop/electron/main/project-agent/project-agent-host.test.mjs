@@ -335,3 +335,18 @@ test('periodic lease recovery drains an existing inbox once without fresh watch 
     assert.equal(calls.length, 1);
   } finally { host.dispose(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('one project recovery failure never runs its model or blocks another owned project', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-host-recovery-')); const messages = [], calls = [], phases = [];
+  const host = createProjectAgentHost({ rootDir: root, holdsLease: () => true, listWorkspaceIds: () => ['bad', 'good'], resolveConversationId: id => `c-${id}`,
+    hasMessage: (_id, messageId) => messages.some(message => message.id === messageId), appendMessage: (_id, message) => messages.push(message),
+    recoverTasks: id => { if (id === 'bad') throw new Error('broken checkpoint'); }, onRecoveryPhase: item => phases.push(`${item.workspaceId}:${item.phase}`),
+    resolveModel: () => ({ modelProviderId: 'model' }), executeTurn: async input => { calls.push(input.workspaceId); return { text: 'done' }; } });
+  try {
+    for (const workspaceId of ['bad', 'good']) host.inputQueue.submitInput({ workspaceId, inputId: `${workspaceId}-input`, surface: 'desktop', text: 'do it' });
+    const result = await host.sync();
+    assert.equal(result.outcomes.find(item => item.workspaceId === 'bad').phase, 'tasks');
+    assert.equal(host.isReady('bad'), false); assert.equal(host.isReady('good'), true); assert.deepEqual(calls, ['good']);
+    assert.deepEqual(phases.filter(item => item.startsWith('good:')), ['lease', 'inputs', 'inbox', 'queue', 'tasks', 'watch', 'digest'].map(phase => `good:${phase}`));
+  } finally { host.dispose(); rmSync(root, { recursive: true, force: true }); }
+});
