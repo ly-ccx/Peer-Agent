@@ -255,3 +255,21 @@ test('构造期拒绝缺失依赖', () => {
   assert.throws(() => createRemoteAccessController({ deviceName: 'm', createSession: () => {} }), /INVALID_SETTINGS_STORE/);
   assert.throws(() => createRemoteAccessController({ settingsStore: memorySettings(), deviceName: 'm' }), /INVALID_CREATE_SESSION/);
 });
+
+test('recent activity remains available when disabled or after connection startup fails', async () => {
+  const summary = { at: 123, operation: 'project.input.submit', workspaceId: 'ws-1' };
+  let starts = 0;
+  const controller = createRemoteAccessController({ settingsStore: memorySettings(), deviceName: 'mac', readLastAccess: () => summary,
+    createSession: () => { starts++; return { start: async () => { throw Error('network down'); }, stop() {} }; } });
+  assert.deepEqual(controller.status().lastAccess, summary); assert.equal(starts, 0);
+  await assert.rejects(controller.update(valid), /network down/);
+  assert.deepEqual(controller.status().lastAccess, summary);
+  await controller.update({ enabled: false }); assert.deepEqual(controller.status().lastAccess, summary);
+});
+
+test('manual apply retries a failed connection with unchanged settings', async () => {
+  const sessions = [];
+  const controller = createRemoteAccessController({ settingsStore: memorySettings({ remoteAccess: valid }), deviceName: 'mac',
+    createSession: () => { const session = { stopped: false, start: async () => {}, stop() { this.stopped = true; }, status: () => ({ online: false, lastFailure: { reason: 'timeout' } }) }; sessions.push(session); return session; } });
+  await controller.apply(); await controller.apply(); assert.equal(sessions.length, 2); assert.equal(sessions[0].stopped, true);
+});

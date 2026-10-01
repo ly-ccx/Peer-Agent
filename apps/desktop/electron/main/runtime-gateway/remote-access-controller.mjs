@@ -87,6 +87,7 @@ export function normalizeRemoteSettings(input, current = {}) {
 export function createRemoteAccessController({
   settingsStore, settingsKey = 'remoteAccess', deviceName,
   createSession, logger = { info() {}, warn() {}, error() {} },
+  readLastAccess = () => null,
 }) {
   if (!settingsStore || typeof settingsStore.getAll !== 'function' || typeof settingsStore.merge !== 'function') {
     throw new Error('INVALID_SETTINGS_STORE');
@@ -145,6 +146,8 @@ export function createRemoteAccessController({
     const settings = readSettings();
     let live = { online: false, deviceId: null, connectionEpoch: 0 };
     try { live = { ...live, ...(session?.status?.() ?? {}) }; } catch { /* status must never throw */ }
+    let lastAccess=live.lastAccess??null;
+    if(!lastAccess)try{lastAccess=readLastAccess();}catch{}
     return {
       settings,
       active: session !== null,
@@ -156,7 +159,7 @@ export function createRemoteAccessController({
       lastFailure: live.lastFailure ?? null,
       // Present only while the server is waiting for this device to be claimed.
       pairing: live.pairing ?? null,
-      lastAccess: live.lastAccess ?? null,
+      lastAccess,
     };
   }
 
@@ -188,7 +191,7 @@ export function createRemoteAccessController({
     const unchanged = sessionFor
       && sessionFor.gatewayOrigin === settings.gatewayOrigin
       && sessionFor.workspaceId === settings.workspaceId && sessionPolicy === policySignature(settings);
-    if (unchanged) return status();
+    if (unchanged && !status().lastFailure) return status();
     // Anything that changes the target requires a fresh session: the connector
     // pins origin and delegation at construction.
     if (session) stopSession('settings changed');

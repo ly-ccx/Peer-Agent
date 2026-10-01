@@ -1,150 +1,77 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../../clientApi';
-import type { RemoteAccessPatch } from '../../preload/contracts/bootstrapPreloadApi';
-import type { Status } from './remoteAccessPresentation';
+import { BotAvatar } from '../../project-agent/BotAvatar';
+import { Checkbox } from '../../ui/boolean-controls/Checkbox';
+import { Switch } from '../../ui/boolean-controls/Switch';
 import { connectionSummary, describeFailure } from './remoteAccessPresentation';
+import { changeProjectGrant, createRemoteAccessPanelState } from './remoteAccessPanelState';
+import { RemoteAccessPairing } from './RemoteAccessPairing';
+import './remote-access.css';
 
-export function RemoteAccessPanel() {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-
-  const refresh = useCallback(async () => {
-    const r = await clientApi.getRemoteAccess();
-    if (r.ok && r.status) setStatus(r.status);
-    else setError(r.error ?? 'unknown');
-  }, []);
-
+export function RemoteAccessPanel({ i18n }: { i18n: I18nRuntime }) {
+  const state = useMemo(() => createRemoteAccessPanelState(clientApi), []);
+  const { status, bots, error, listFailed, busy } = useSyncExternalStore(state.subscribe, state.getSnapshot);
+  const [gateway, setGateway] = useState('');
   useEffect(() => {
-    refresh();
-    // A pairing challenge arrives from the server after the dial succeeds, and it
-    // expires. Without polling, a panel opened before the challenge arrived would
-    // never show it and the device could not be claimed.
-    const timer = setInterval(refresh, 3000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+    state.start();
+    const timer = setInterval(() => { void state.refresh(); }, 3000);
+    return () => { clearInterval(timer); state.stop(); };
+  }, [state]);
+  useEffect(() => { if (status) setGateway(status.settings.gatewayOrigin); }, [status?.settings.gatewayOrigin]);
+  const t = i18n.t;
+  const settings = status?.settings;
+  const access = status?.lastAccess;
+  const accessedBot = bots.find(bot => bot.workspaceId === access?.workspaceId);
 
-  async function apply(patch: RemoteAccessPatch) {
-    setIsSaving(true);
-    setError(null);
-    try {
-      const r = await clientApi.updateRemoteAccess(patch);
-      if (r.ok && r.status) setStatus(r.status);
-      else setError(r.error ?? 'update_failed');
-    } catch { setError('update_failed'); }
-    finally { setIsSaving(false); }
-  }
-
-  if (!status) return (
-    <div className="general-panel">
-      <h3>远程访问</h3>
-      <p className="text-muted">正在加载…</p>
-    </div>
-  );
-
-  const s = status.settings;
-  return (
-    <div className="general-panel">
-      <h3>远程访问</h3>
-      <p className="general-setting-copy">
-        允许远程网页读取本机任务状态。连接由 macOS 钥匙串持久化，重启不丢失绑定。
-      </p>
-
-      {error && <p className="text-warning">错误：{error}</p>}
-
-      <div className="general-setting-row">
-        <label className="setting-label">启用远程连接</label>
-        <button className="toggle" onClick={() => apply({ enabled: !s.enabled })} disabled={isSaving}>
-          {s.enabled ? '已开启' : '已关闭'}
-        </button>
-      </div>
-
-      <div className="general-setting-row">
-        <label className="setting-label">Gateway 地址</label>
-        <input
-          type="text" defaultValue={s.gatewayOrigin}
-          placeholder="https://gw.peer-wo.com" disabled={isSaving}
-          onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== s.gatewayOrigin) apply({ gatewayOrigin: v }); }}
-          style={{ width: 360 }}
-        />
-      </div>
-
-      <div className="general-setting-row">
-        <label className="setting-label">工作区 ID</label>
-        <input
-          type="text" defaultValue={s.workspaceId}
-          placeholder="default" disabled={isSaving}
-          onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== s.workspaceId) apply({ workspaceId: v }); }}
-          style={{ width: 200 }}
-        />
-      </div>
-
-      <div className="general-setting-row">
-        <label className="setting-label">连接状态</label>
-        <span>{connectionSummary(status)}</span>
-        {status.deviceId && <code style={{ marginLeft: 8 }}>{status.deviceId}</code>}
-      </div>
-
-      {!status.online && status.lastFailure && (
-        <p className="text-warning" style={{ marginTop: 4 }}>
-          连接失败：{describeFailure(status.lastFailure)}
-        </p>
-      )}
-
-      {status.pairing && <PairingBlock pairing={status.pairing} gatewayOrigin={s.gatewayOrigin} />}
-    </div>
-  );
-}
-
-/** The handoff to the gateway page. The device is not usable until the user
- * claims it there, so this block has to state what to copy, where to paste it,
- * and how long it stays valid. */
-function PairingBlock({ pairing, gatewayOrigin }: {
-  pairing: NonNullable<Status['pairing']>;
-  gatewayOrigin: string;
-}) {
-  const [copied, setCopied] = useState<string | null>(null);
-
-  async function copy(label: string, value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(label);
-      setTimeout(() => setCopied((c) => (c === label ? null : c)), 2000);
-    } catch { setCopied(null); }
-  }
-
-  const remaining = pairing.expiresAt - Date.now();
-  const expired = remaining <= 0;
-
-  return (
-    <div className="general-setting-block" style={{ marginTop: 12, padding: 12, border: '1px solid var(--line, #ddd)', borderRadius: 6 }}>
-      <p style={{ margin: 0, fontWeight: 600 }}>待认领：这台设备还没有绑定</p>
-      <p className="general-setting-copy" style={{ marginTop: 4 }}>
-        打开 <a href={gatewayOrigin || 'https://gw.peer-wo.com'} target="_blank" rel="noreferrer">{gatewayOrigin || 'https://gw.peer-wo.com'}</a>
-        ，在「添加设备」里填入下面两项完成绑定。
-      </p>
-
-      <div className="general-setting-row">
-        <label className="setting-label">挑战 ID</label>
-        <code style={{ wordBreak: 'break-all' }}>{pairing.challengeId}</code>
-        <button onClick={() => copy('challengeId', pairing.challengeId)} style={{ marginLeft: 8 }}>
-          {copied === 'challengeId' ? '已复制' : '复制'}
-        </button>
-      </div>
-
-      <div className="general-setting-row">
-        <label className="setting-label">一次性 Key</label>
-        <code style={{ wordBreak: 'break-all' }}>{pairing.pairingKey}</code>
-        <button onClick={() => copy('pairingKey', pairing.pairingKey)} style={{ marginLeft: 8 }}>
-          {copied === 'pairingKey' ? '已复制' : '复制'}
-        </button>
-      </div>
-
-      <p className="general-setting-copy" style={{ marginTop: 4 }}>
-        {expired
-          ? '这次挑战已过期，关闭再打开远程连接可重新获取。'
-          : `有效期剩余约 ${Math.max(1, Math.round(remaining / 60000))} 分钟。一次性 Key 请勿转发。`}
-      </p>
-    </div>
-  );
+  return <section className="remote-access-panel" aria-labelledby="remote-access-title">
+    <header><h2 id="remote-access-title">{t('remoteAccess.title')}</h2><p>{t('remoteAccess.description')}</p></header>
+    {error && <p className="remote-access-error" role="alert">{t('remoteAccess.error', { reason: error })}</p>}
+    {!status || !settings ? <p role="status">{t('remoteAccess.loading')}</p> : <>
+      <section className="remote-access-card">
+        <div className="remote-access-enable">
+          <div><h3 id="remote-access-enable">{t('remoteAccess.enable')}</h3><p>{t('remoteAccess.enableHint')}</p></div>
+          <Switch aria-labelledby="remote-access-enable" checked={settings.enabled} disabled={busy || !settings.gatewayOrigin}
+            onCheckedChange={enabled => { void state.update({ enabled, projectGrants: settings.projectGrants }); }} />
+        </div>
+        <form className="remote-access-gateway" onSubmit={event => { event.preventDefault(); void state.update({ gatewayOrigin: gateway.trim() }); }}>
+          <label htmlFor="remote-gateway">{t('remoteAccess.gateway')}</label>
+          <div><input id="remote-gateway" value={gateway} onChange={event => setGateway(event.target.value)}
+            placeholder="https://gateway.example.com" disabled={busy} autoComplete="off" spellCheck={false} />
+            <button type="submit" disabled={busy || !gateway.trim() || gateway.trim() === settings.gatewayOrigin}>{t('remoteAccess.gatewaySave')}</button></div>
+          <p>{t('remoteAccess.gatewayHint')}</p>
+        </form>
+        <div className="remote-access-connection"><span>{t('remoteAccess.status')}</span>
+          <strong data-online={status.online}>{connectionSummary(status, i18n)}</strong>
+          {settings.enabled && <button type="button" disabled={busy} onClick={() => { void state.reconnect(); }}>{t('remoteAccess.retry')}</button>}
+        </div>
+        {!status.online && status.lastFailure && <p className="remote-access-error">{describeFailure(status.lastFailure, i18n)}</p>}
+        {settings.gatewayOrigin && <div className="remote-access-links">
+          <a href={`${settings.gatewayOrigin}/devices`} target="_blank" rel="noreferrer">{t('remoteAccess.openDevices')}</a>
+          <a href={`${settings.gatewayOrigin}/bots`} target="_blank" rel="noreferrer">{t('remoteAccess.openBots')}</a>
+        </div>}
+      </section>
+      {status.pairing && <RemoteAccessPairing pairing={status.pairing} i18n={i18n} />}
+      <section className="remote-access-card">
+        <div className="remote-access-section-title"><h3>{t('remoteAccess.grants')}</h3><span>{t('remoteAccess.version', { version: settings.delegationVersion })}</span></div>
+        <p>{t('remoteAccess.grantsHint')}</p>
+        {listFailed ? <p role="alert">{t('remoteAccess.listFailed')}</p> : !bots.length ? <p>{t('remoteAccess.empty')}</p> :
+          <table className="remote-access-grants"><thead><tr><th scope="col">{t('remoteAccess.bot')}</th><th scope="col">{t('remoteAccess.read')}</th><th scope="col">{t('remoteAccess.message')}</th></tr></thead>
+            <tbody>{bots.map(bot => {
+              const grant = settings.projectGrants.find(row => row.workspaceId === bot.workspaceId);
+              const name = bot.profile.displayName;
+              return <tr key={bot.workspaceId}><th scope="row"><div className="remote-access-bot"><BotAvatar avatar={bot.profile.avatar} label={name} workspaceId={bot.workspaceId} /><span>{name}</span></div></th>
+                <td><label className="remote-access-checkbox"><Checkbox aria-label={t('remoteAccess.readLabel', { name })} checked={grant?.allowProjectRead ?? false} disabled={busy}
+                  onChange={event => { void state.update({ projectGrants: changeProjectGrant(settings.projectGrants, bot.workspaceId, 'read', event.target.checked) }); }} /></label></td>
+                <td><label className="remote-access-checkbox"><Checkbox aria-label={t('remoteAccess.messageLabel', { name })} checked={grant?.allowProjectMessage ?? false} disabled={busy || !grant?.allowProjectRead}
+                  onChange={event => { void state.update({ projectGrants: changeProjectGrant(settings.projectGrants, bot.workspaceId, 'message', event.target.checked) }); }} /></label></td>
+              </tr>;
+            })}</tbody></table>}
+      </section>
+      <section className="remote-access-card remote-access-activity"><h3>{t('remoteAccess.lastAccess')}</h3>
+        {access ? <div><span>{t(`remoteAccess.operation.${access.operation}`)}{accessedBot ? ` · ${accessedBot.profile.displayName}` : ''}</span>
+          <time dateTime={new Date(access.at).toISOString()}>{new Date(access.at).toLocaleString(i18n.locale)}</time></div> : <p>{t('remoteAccess.noAccess')}</p>}
+      </section>
+    </>}
+  </section>;
 }

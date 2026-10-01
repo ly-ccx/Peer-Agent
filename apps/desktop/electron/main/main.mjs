@@ -29,7 +29,7 @@ import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createTaskOverviewBroadcastScheduler } from './task-overview-broadcast.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
-import { setupRemoteAccess } from './runtime-gateway/setup-remote-access.mjs';
+import { setupRemoteAccess,readRemoteAccessSummary } from './runtime-gateway/setup-remote-access.mjs';
 import { createRemoteAccessController } from './runtime-gateway/remote-access-controller.mjs';
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
@@ -3517,8 +3517,7 @@ function startLocalRuntime() {
       console.log('[remote] seeded settings from environment');
     }
     remoteAccess = createRemoteAccessController({
-      settingsStore,
-      deviceName: os.hostname(),
+      settingsStore,deviceName:os.hostname(),readLastAccess:()=>readRemoteAccessSummary(userDataPath),
       createSession: config => setupRemoteAccess({
         ...config,userDataPath,deviceName:os.hostname(),goalPlanStore,sessionStore,
         buildProjection:buildRuntimeProjection,host:localToolHost,
