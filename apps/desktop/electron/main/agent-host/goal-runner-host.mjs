@@ -1,8 +1,11 @@
+import path from 'node:path';
+import { readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { projectConversationHistory } from '@peer-agent/runtime-core';
 import {
   buildGoalRunnerTickMessage,
   createGoalRunner,
+  createExecutionScheduler,
   delegatedPlanRunsWithLease,
   describeVisualRepair,
 } from '@peer-agent/runtime-node';
@@ -244,6 +247,19 @@ export function createDesktopGoalRunnerHost({
   getMainWindows,
   hostLeases = null,
 } = {}) {
+  const executionScheduler = agentTurnExecutor.executionScheduler ?? createExecutionScheduler();
+  function currentPlans() {
+    // listPlans is an active-only UI index; accepted dependencies must remain visible here.
+    const root = goalPlanStore.getStoreDir?.();
+    if (!root) return [];
+    return readdirSync(root).filter(name => name.endsWith('.json'))
+      .flatMap(name => {
+        try { const plan = goalPlanStore.getPlan(name.slice(0, -5)); return plan ? [plan] : []; }
+        catch { return []; }
+      });
+  }
+  executionScheduler.configure({ rootDir: goalPlanStore.getStoreDir?.()
+    ? path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime') : null });
   function routeRole(role, plan) {
     const workerModelProviderId = resolveConversationModelProviderId({
       conversationId: plan?.conversationId,
@@ -310,7 +326,10 @@ export function createDesktopGoalRunnerHost({
       plan,
       (workspaceId) => hostLeases?.holds?.(workspaceId) === true,
     );
-    if (allowed !== null) return allowed;
+    if (allowed !== null) {
+      executionScheduler.reconcile(currentPlans());
+      return allowed && executionScheduler.canRunPlan(plan);
+    }
     return true;
   }
 
@@ -396,7 +415,7 @@ export function createDesktopGoalRunnerHost({
         };
         const delegated = resolveDelegatedTurn(plan, 'worker');
         const outcome = await agentTurnExecutor.runTurn({
-          turnProfile: delegated?.turnProfile ?? { role: 'goal_runner' },
+          turnProfile: delegated?.turnProfile ?? { role: 'goal_runner', planId: plan.planId },
           sink: createBroadcastSink({ getWindows: getMainWindows }),
           messages,
           streamId,
@@ -442,7 +461,7 @@ export function createDesktopGoalRunnerHost({
           startedAt: Date.now(),
         });
         await agentTurnExecutor.runTurn({
-          turnProfile: delegated?.turnProfile ?? roleTurnProfile('explorer', routed),
+          turnProfile: delegated?.turnProfile ?? { ...roleTurnProfile('explorer', routed), planId: plan.planId },
           sink: webContents,
           messages: [{ role: 'user', content: buildExplorerMessage({ plan, explorer }) }],
           streamId,
@@ -489,9 +508,9 @@ export function createDesktopGoalRunnerHost({
               repairSuggestions: [],
             };
           }
-          return runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore,
+          return executionScheduler.withTurn({ planId: plan.planId, signal }, leaseSignal => runPlanVisualVerifier({ plan, verifierRunId, signal: leaseSignal, goalPlanStore,
             workspacePath: reviewWorkspacePath(plan),
-            llmChatService, modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId });
+            llmChatService, modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId }));
         }
         const delegated = resolveDelegatedTurn(plan, 'verifier');
         const routed = delegated ? null : routeRole('verifier', plan);
@@ -508,7 +527,7 @@ export function createDesktopGoalRunnerHost({
             verifierRunId, streamId, startedAt: Date.now(),
           });
           const outcome = await agentTurnExecutor.runTurn({
-            turnProfile: delegated?.turnProfile ?? roleTurnProfile('verifier', routed),
+            turnProfile: delegated?.turnProfile ?? { ...roleTurnProfile('verifier', routed), planId: plan.planId },
             sink, signal,
             messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId, evidenceSnapshots }) },
               ...(attempt ? [{ role: 'user', content: 'The previous verifier response had invalid report format. '
@@ -536,16 +555,22 @@ export function createDesktopGoalRunnerHost({
     },
   };
   const goalRunner = createGoalRunner(goalRunnerOptions);
+  goalRunner.executionScheduler = executionScheduler;
+  const pause = goalRunner.pause;
+  goalRunner.pause = (planId, reason) => {
+    executionScheduler.cancelPlan(planId);
+    return pause(planId, reason);
+  };
   goalRunner.verifyDelegatedSession = async ({ plan, focus } = {}) => {
     if (typeof goalRunnerOptions.verifierRunner?.runVerifier !== 'function') {
       return { ok: false, error: 'verifier_unavailable' };
     }
-    return goalRunnerOptions.verifierRunner.runVerifier({
-      plan,
+    return executionScheduler.yieldTurn(signal => goalRunnerOptions.verifierRunner.runVerifier({
+      plan, signal,
       verifierRunId: `delegated-verify-${plan?.planId || 'session'}`,
       stage: 'delegated',
       ...(typeof focus === 'string' && focus.trim() ? { focus: focus.trim() } : {}),
-    });
+    }));
   };
   return {
     goalRunner,

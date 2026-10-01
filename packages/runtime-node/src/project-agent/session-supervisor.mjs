@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 
@@ -12,10 +14,7 @@ import { spawnIdentity, identityFromPlan } from './spawn-identity.mjs';
 
 /**
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
- * 每个项目同时只有一个 phase=running 的任务，其余 queued。
- * 占用名额的任务完成、失败，或任一任务被取消后，启动队列里最早且依赖已满足的下一个。
- * 重试用尽后落成 interrupted 的失败也让出名额。监督者建立时会再扫一遍已经落盘的队列。
- * 名额仍被占用时，这次唤醒直接返回。
+ * ExecutionScheduler 负责槽位、优先级与依赖；监督者只持久化准入并启动 Runner。
  * 只读写入判定在 evaluateWorkSessionWrite。协议里的 writeScope 只有 workspace_and_boundaries，不能用来表示禁止写。
  * 开任务时把当时的 active 记忆 id 冻成 memorySnapshotId。
  * 事件 kind 用 session_started / cancelled，收件箱映射留给 B2-05。
@@ -65,6 +64,7 @@ export function createSessionSupervisor({
   conversationStore,
   goalPlanStore,
   goalRunner = null,
+  executionScheduler = goalRunner?.executionScheduler ?? null,
   catalog = [],
   resolveModel = null,
   memoryStore = null,
@@ -82,6 +82,7 @@ export function createSessionSupervisor({
     throw new Error('createSessionSupervisor requires conversationStore and goalPlanStore');
   }
 
+  executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
   let tail = Promise.resolve();
   let depth = 0;
   function exclusive(task) {
@@ -165,18 +166,6 @@ export function createSessionSupervisor({
     return TERMINAL.has(plan?.status) || finalFailureReleased(plan);
   }
 
-  function depsMet(dependsOn) {
-    if (!Array.isArray(dependsOn) || dependsOn.length === 0) return true;
-    const byId = new Map(delegatedPlans().map((plan) => [plan.delegationOrigin.sessionId, plan]));
-    return dependsOn.every((id) => settled(byId.get(id)));
-  }
-
-  function decidePhase(workspaceId, dependsOn) {
-    if (openPlans(workspaceId).some(occupiesRunningSlot)) return 'queued';
-    if (!depsMet(dependsOn)) return 'queued';
-    return 'running';
-  }
-
   function snapshotOf(plan) {
     return {
       planId: plan.planId,
@@ -215,6 +204,8 @@ export function createSessionSupervisor({
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(origin.verifying === true ? { verifying: true, phase: 'verifying' } : {}),
       origin,
+      ...(origin.phase === 'queued'
+        ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, delegatedPlans())) : {}),
     });
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;
@@ -347,6 +338,13 @@ export function createSessionSupervisor({
       };
     }
 
+    const dependencies = stringList(input?.dependsOn);
+    if (dependencies.some(id => findBySession(id)?.delegationOrigin.workspaceId !== workspaceId)) {
+      return { error: 'invalid_dependency', message: 'dependencies must be existing sessions in this project' };
+    }
+    if (input?.priority != null && !['high', 'normal', 'low'].includes(input.priority)) {
+      return { error: 'invalid_input', message: 'priority must be high, normal, or low' };
+    }
     const frozen = freezeModels(input || {}, workspaceId);
     if (!frozen.ok) return { error: 'model_unavailable', missing: frozen.missing };
 
@@ -424,7 +422,7 @@ export function createSessionSupervisor({
       const hold = resolvePlanApproval(approvalPolicy(workspaceId, context), input);
       const phase = hold
         ? 'awaiting_approval'
-        : (replacingHolder ? 'queued' : decidePhase(workspaceId, input.dependsOn));
+        : 'queued';
       const plan = goalPlanStore.createGoalContract({
         conversationId: child.id,
         title,
@@ -445,6 +443,7 @@ export function createSessionSupervisor({
           sessionId,
           parentConversationId,
           readOnly: input.readOnly === true,
+          priority: input.priority || 'normal',
           phase,
           idempotencyKey: key,
           ...(text(context?.parentSessionId) ? { parentSessionId: text(context.parentSessionId) } : {}),
@@ -455,30 +454,23 @@ export function createSessionSupervisor({
       spawnedSessionId = sessionId;
       if (!plan?.delegationOrigin?.sessionId) throw new Error('delegationOrigin was not stored');
       if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
-      if (phase === 'running') {
-        if (typeof goalRunner?.start !== 'function') throw new Error('goal runner unavailable');
-        await goalRunner.start(plan.planId, { awaitIdle: true });
-      }
-      let reportedPhase = phase;
       if (replacingOpen) {
-        const cancelled = await cancelLocked({
-          sessionId: supersedes,
-          reason: 'superseded by a new session',
-          promote: false,
-        });
+        const cancelled = await cancelLocked({ sessionId: supersedes, reason: 'superseded by a new session', promote: false });
         if (!cancelled) throw new Error('superseded session was not found');
-        if (replacingHolder) {
-          releasedHolder = true;
-          const current = goalPlanStore.getPlan(plan.planId) || plan;
-          goalPlanStore.revisePlan(plan.planId, {
-            status: 'executing',
-            delegationOrigin: { ...current.delegationOrigin, phase: 'running' },
-          }, { reason: 'replacement took the running slot', changedBy: 'session-supervisor' });
+        releasedHolder = replacingHolder;
+      }
+      if (replacingHolder && !hold) {
+        const current = goalPlanStore.getPlan(plan.planId) || plan;
+        if (executionScheduler.inspect(current, delegatedPlans()).allowed) {
+          goalPlanStore.revisePlan(plan.planId, { status: 'executing', delegationOrigin: { ...current.delegationOrigin, phase: 'running' } },
+            { reason: 'replacement inherited available slot', changedBy: 'session-supervisor' });
+          executionScheduler.reconcile(delegatedPlans());
           if (typeof goalRunner?.start !== 'function') throw new Error('goal runner unavailable');
-          await goalRunner.start(plan.planId, { awaitIdle: true });
-          reportedPhase = 'running';
+          await goalRunner.start(plan.planId, { awaitIdle: false });
         }
       }
+      await promote(plan.planId);
+      const reportedPhase = goalPlanStore.getPlan(plan.planId)?.delegationOrigin.phase || phase;
       emit({ kind: 'session_started', sessionId, planId: plan.planId, workspaceId });
       const queuedBehind = reportedPhase === 'queued'
         ? openPlans(workspaceId).filter((item) => item.delegationOrigin.phase === 'queued'
@@ -486,7 +478,7 @@ export function createSessionSupervisor({
         : 0;
       return {
         sessionId,
-        status: hold && !replacingHolder ? 'awaiting_approval' : reportedPhase,
+        status: reportedPhase,
         ...(queuedBehind > 0 ? { queuedBehind } : {}),
       };
     } catch (error) {
@@ -502,25 +494,48 @@ export function createSessionSupervisor({
     }
   }
 
-  async function promote(workspaceId) {
-    const open = openPlans(workspaceId);
-    if (open.some(occupiesRunningSlot)) return;
-    const next = open
-      .filter((plan) => plan.delegationOrigin.phase === 'queued' && depsMet(plan.delegationOrigin.dependsOn))
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.planId).localeCompare(String(b.planId)))[0];
-    if (!next) return;
-    if (typeof goalRunner?.start !== 'function') return;
-    goalPlanStore.revisePlan(next.planId, {
-      status: 'executing',
-      delegationOrigin: { ...next.delegationOrigin, phase: 'running' },
-    }, { reason: 'session queue promoted', changedBy: 'session-supervisor' });
-    await goalRunner.start(next.planId, { awaitIdle: true });
+  async function promote(spawningPlanId = null) {
+    const plans = delegatedPlans();
+    const { start, blocked } = executionScheduler.select(plans);
+    for (const plan of blocked) {
+      goalPlanStore.revisePlan(plan.planId, {
+        status: 'executing',
+        delegationOrigin: { ...plan.delegationOrigin, phase: 'queued' },
+      }, { reason: 'dependency requires a user decision', changedBy: 'session-supervisor' });
+      goalPlanStore.setRunnerState(plan.planId, { status: 'waiting_user', phase: 'waiting_user',
+        blockedReason: '前置任务未成功签收，请取消或重新安排依赖任务。' });
+    }
+    // Reserve every selected slot before any asynchronous Runner startup.
+    if (typeof goalRunner?.start !== 'function') {
+      if (start.length) throw new Error('goal runner unavailable');
+      return;
+    }
+    for (const plan of start) {
+      goalPlanStore.revisePlan(plan.planId, {
+        status: 'executing', delegationOrigin: { ...plan.delegationOrigin, phase: 'running' },
+      }, { reason: 'scheduler admitted session', changedBy: 'session-supervisor' });
+    }
+    executionScheduler.reconcile(delegatedPlans());
+    let spawnError;
+    let failedStart = false;
+    for (const plan of start) {
+      try { await goalRunner.start(plan.planId, { awaitIdle: false }); }
+      catch (error) {
+        failedStart = true;
+        goalPlanStore.setPlanStatus(plan.planId, 'failed');
+        goalPlanStore.setRunnerState(plan.planId, { status: 'failed', lastError: error?.message || 'runner start failed' });
+        if (plan.planId === spawningPlanId) spawnError = error;
+      }
+    }
+    if (failedStart) await promote();
+    if (spawnError) throw spawnError;
   }
 
   async function cancelLocked(input) {
     const plan = findBySession(text(input?.sessionId));
     if (!plan) return null;
     const reason = text(input?.reason) || 'cancelled';
+    executionScheduler.cancelPlan(plan.planId);
     if (typeof goalRunner?.pause === 'function') goalRunner.pause(plan.planId, reason);
     if (typeof abortStream === 'function') {
       await abortStream({
@@ -538,7 +553,7 @@ export function createSessionSupervisor({
       workspaceId: plan.delegationOrigin.workspaceId,
       reason,
     });
-    if (input?.promote !== false) await promote(plan.delegationOrigin.workspaceId);
+    if (input?.promote !== false) await promote();
     const next = goalPlanStore.getPlan(plan.planId);
     return next ? project(next) : null;
   }
@@ -655,7 +670,7 @@ export function createSessionSupervisor({
     }, { reason: acceptedBy === 'policy' ? 'policy acceptance' : 'user acceptance', changedBy: 'session-supervisor' });
   }
 
-  function settleLocked(sessionId) {
+  async function settleLocked(sessionId) {
     const plan = findBySession(text(sessionId));
     if (!plan) return null;
     if (plan.resultAcceptance?.acceptedAt) {
@@ -674,6 +689,7 @@ export function createSessionSupervisor({
     if (decision.acceptedBy !== 'policy') return { ok: true, accepted: false, ...decision };
     try {
       const saved = writeAcceptance(plan, 'policy', decision.verdictRef);
+      await promote();
       return {
         ok: true,
         accepted: true,
@@ -685,7 +701,7 @@ export function createSessionSupervisor({
     }
   }
 
-  function confirmLocked(sessionId) {
+  async function confirmLocked(sessionId) {
     const plan = findBySession(text(sessionId));
     if (!plan) return null;
     if (plan.resultAcceptance?.acceptedAt) {
@@ -696,6 +712,7 @@ export function createSessionSupervisor({
     if (decision.acceptedBy !== 'user') return { ok: false, error: 'not_confirmable', ...decision };
     try {
       const saved = writeAcceptance(plan, 'user', decision.verdictRef);
+      await promote();
       return {
         ok: true,
         accepted: true,
@@ -727,6 +744,9 @@ export function createSessionSupervisor({
     }
     const relay = `来自项目代理转达：用户说${body}`;
     const waiting = canConsumeRequestedUserInput(plan);
+    if (waiting && plan.delegationOrigin.phase === 'queued') {
+      return { error: 'dependency_requires_replan', message: '请取消或重新安排依赖任务。' };
+    }
     conversationStore.appendMessage(plan.conversationId, {
       id: randomUUID(),
       role: 'user',
@@ -817,15 +837,15 @@ export function createSessionSupervisor({
     const current = goalPlanStore.getPlan(planId) || plan;
     if (!current) return { ok: false, reason: 'missing_plan' };
     if (current.delegationOrigin?.phase === 'awaiting_approval') {
-      const phase = decidePhase(current.delegationOrigin.workspaceId, current.delegationOrigin.dependsOn);
       goalPlanStore.revisePlan(planId, {
-        status: phase === 'running' ? 'executing' : 'paused',
-        delegationOrigin: { ...current.delegationOrigin, phase },
+        status: 'paused', delegationOrigin: { ...current.delegationOrigin, phase: 'queued' },
       }, { reason: 'plan approved', changedBy: 'session-supervisor' });
-      if (phase !== 'running') return { ok: true, planId, queued: true };
-      if (typeof goalRunner?.start !== 'function') return { ok: false, reason: 'runner_unavailable', planId };
-      await goalRunner.start(planId, { awaitIdle: true });
-      return { ok: true, planId, started: true };
+      await promote();
+      const started = goalPlanStore.getPlan(planId)?.delegationOrigin.phase === 'running';
+      return { ok: true, planId, ...(started ? { started: true } : { queued: true }) };
+    }
+    if (current.delegationOrigin?.phase === 'queued') {
+      return { ok: false, reason: 'scheduler_not_admitted', planId };
     }
     if (typeof goalRunner?.resume !== 'function') return { ok: false, reason: 'runner_unavailable', planId };
     const resumed = await goalRunner.resume(planId);
@@ -843,7 +863,7 @@ export function createSessionSupervisor({
     if (!origin?.sessionId || !origin.workspaceId) return { ok: false, reason: 'not_delegated' };
     if (occupiesRunningSlot(plan)) return { ok: false, reason: 'still_running' };
     if (origin.phase !== 'running' || !settled(plan)) return { ok: false, reason: 'not_slot_holder' };
-    await promote(origin.workspaceId);
+    await promote();
     return { ok: true, planId };
   }
 
@@ -866,18 +886,16 @@ export function createSessionSupervisor({
   }
 
   async function reconcilePersistedQueues() {
-    const workspaces = new Set();
     for (const plan of delegatedPlans()) {
-      const workspaceId = plan.delegationOrigin?.workspaceId;
-      if (workspaceId) workspaces.add(workspaceId);
-      if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) settleLocked(plan.delegationOrigin.sessionId);
+      if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) await settleLocked(plan.delegationOrigin.sessionId);
     }
-    for (const workspaceId of workspaces) await promote(workspaceId);
+    await promote();
   }
 
   const reconciled = exclusive(() => reconcilePersistedQueues());
 
   return {
+    executionScheduler,
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
     },

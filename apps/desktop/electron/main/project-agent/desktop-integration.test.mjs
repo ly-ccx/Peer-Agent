@@ -19,7 +19,7 @@ const provider = { id: 'configured', provider: 'openai', model: 'test-model', en
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
 after(() => { if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome; rmSync(root, { recursive: true, force: true }); });
 
-function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null } = {}) {
+function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {} } = {}) {
   const home = dataHome || mkdtempSync(path.join(root, 'home-'));
   const project = folder || path.join(home, 'workspace');
   mkdirSync(project, { recursive: true });
@@ -36,14 +36,14 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
     conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
       ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
-    holdsLease: () => true, getSettings: () => ({ workspaces: [{ path: project, name: 'test' }] }), mergeSettings() {},
+    holdsLease: () => true, getSettings: () => ({ ...settings, workspaces: [{ path: project, name: 'test' }] }), mergeSettings() {},
     listModels: () => configured ? [provider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
   });
   const handlers = new Map();
   for (const registration of registrations) registration.register({ handle(channel, fn) { handlers.set(channel, fn); } });
   const bot = api.listItems()[0];
   const invoke = (channel, payload = {}) => handlers.get(`project-agent:${channel}`)({}, { workspaceId: bot.workspaceId, ...payload });
-  return { home, project, api, bot, plans, conversations, calls, routes, starts, events, invoke,
+  return { executor, home, project, api, bot, plans, conversations, calls, routes, starts, events, invoke,
     history: () => conversations.getPersistedConversationHistory(bot.profile.agentConversationId).messages,
     async submit(inputId = crypto.randomUUID(), text = 'hello') {
       api.host.inputQueue.submitInput({ workspaceId: bot.workspaceId, inputId, text, surface: 'desktop' });
@@ -334,4 +334,47 @@ test('reply source ownership includes sessions beyond the model list page', asyn
     const reply = await tool(env, 'post_reply', { text: 'Last task', sources: [latest.sessionId], statusClaims: [{sessionId:latest.sessionId,status:env.api.supervisor.get({sessionId:latest.sessionId}).status}], replyTo: ['input-anchor'] });
     assert.equal(reply.success, true, JSON.stringify(reply));
   } finally { env.dispose(); }
+});
+
+test('production registration shares executor scheduling with supervisor and reads live global settings', async () => {
+  const settings={projectAgent:{concurrency:1}};
+  const env=harness({settings});
+  try {
+    assert.equal(env.api.supervisor.executionScheduler,env.executor.executionScheduler);
+    assert.equal(env.executor.executionScheduler.stats().limit,1);
+    settings.projectAgent.concurrency=3;
+    assert.equal(env.api.supervisor.executionScheduler.stats().limit,3);
+    await env.submit('sched-anchor','读取并行');
+    const ids=[];
+    for(let n=0;n<3;n++) {
+      const result=JSON.parse((await tool(env,'spawn_session',{anchorMessageIds:['input-sched-anchor'],title:`读取任务${n}`,brief:`读取不同文件${n}`,
+        kind:'research',readOnly:true,successCriteria:['读取内容'],priority:n===2?'high':'normal'})).output);
+      assert.ok(result.sessionId,result.error);ids.push(result.sessionId);
+    }
+    assert.equal(env.starts.length,2);
+    assert.equal(env.api.supervisor.get({sessionId:ids[2]}).status,'queued');
+    assert.equal(env.api.supervisor.get({sessionId:ids[2]}).queuedBehind.length,2);
+    await env.api.supervisor.cancel({sessionId:ids[0]});
+    assert.equal(env.starts.length,3);
+  } finally {env.dispose();}
+});
+
+test('production failed dependency projects a question and an answer does not start the blocked child', async () => {
+  const env=harness();
+  try {
+    await env.submit('dep-anchor','处理依赖');
+    const args={anchorMessageIds:['input-dep-anchor'],title:'前置任务',brief:'前置任务',kind:'research',readOnly:true,successCriteria:['读取内容']};
+    const dep=JSON.parse((await tool(env,'spawn_session',args)).output);
+    const child=JSON.parse((await tool(env,'spawn_session',{...args,title:'后续任务',brief:'等待签收',dependsOn:[dep.sessionId]})).output);
+    await env.api.supervisor.cancel({sessionId:dep.sessionId});
+    const cards=(await env.invoke('read-conversation')).messages.flatMap(message=>message.cards || []);
+    const card=cards.find(c=>c.cardId===`card:question:${child.sessionId}:dependency`);
+    assert.ok(card);assert.equal(card.kind,'question');
+    assert.equal(env.api.supervisor.get({sessionId:child.sessionId}).status,'waiting_user');
+    assert.equal(env.starts.length,1);
+    const answer=await env.invoke('submit-input',{inputId:'dependency-answer',text:'重新安排任务',answerTo:card.cardId});
+    assert.equal(answer.ok,true);await env.api.host.sync([env.bot.workspaceId]);
+    assert.equal(env.starts.length,1);
+    assert.equal(env.api.supervisor.get({sessionId:child.sessionId}).status,'waiting_user');
+  } finally {env.dispose();}
 });

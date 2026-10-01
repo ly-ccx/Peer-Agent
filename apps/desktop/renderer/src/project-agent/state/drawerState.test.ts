@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createI18n } from '@peer-agent/i18n';
 import {
   briefFromMemories,
   closeDrawer,
   conversationModelLabel,
   drawerLayout,
   formatDrawerStamp,
+  formatDrawerSessionStatus,
   groupDrawerSessions,
   locateDrawerSession,
   openDrawer,
@@ -46,6 +48,20 @@ function session(partial: Partial<DrawerSession> & Pick<DrawerSession, 'sessionI
     ...partial,
   };
 }
+
+test('缺失前置任务没有 blocker 行时仍显示需要重新安排的原因', () => {
+  const missing = readDrawerSession({ sessionId: 'blocked', status: 'waiting_user', statusLabel: '等待你',
+    queueReason: 'dependency_missing', queuedBehind: [] });
+  assert.ok(missing);
+  assert.equal(formatDrawerSessionStatus(missing, createI18n('zh-CN')), '前置任务已缺失，请重新安排');
+  assert.equal(formatDrawerSessionStatus(missing, createI18n('en-US')), 'Dependency is missing; please replan');
+  const i18n = createI18n('zh-CN');
+  assert.equal(formatDrawerSessionStatus(session({ sessionId: 'normal', status: 'running', statusLabel: '进行中' }), i18n), '进行中');
+  assert.equal(formatDrawerSessionStatus(session({ sessionId: 'failed', status: 'waiting_user', queueReason: 'dependency_failed',
+    queuedBehind: [{ sessionId: 'dep', title: '检查' }] }), i18n), '前置任务需要处理：检查');
+  assert.equal(formatDrawerSessionStatus(session({ sessionId: 'queued', status: 'queued', queueReason: 'write_slot',
+    queuedBehind: [{ sessionId: 'dep', title: '修改' }] }), i18n), '等待 修改');
+});
 
 test('打开、定位，并按机器人记住抽屉', () => {
   const closed: DrawerMemory = { open: false, tab: 'overview', sessionId: null };
@@ -142,4 +158,10 @@ test('记忆只读投影和对话模型标签', () => {
   assert.equal(conversationModelLabel({
     resolutions: [{ role: 'session_worker', label: '工人' }, { role: 'project_agent', label: '对话模型' }],
   }), '对话模型');
+});
+
+test('queue reasons use host blockers and tolerate malformed older responses', () => {
+  const session=readDrawerSession({sessionId:'s',status:'queued',queueReason:'write_slot',queuedBehind:[null,{sessionId:'a',title:'写入任务'},{title:'bad'}]});
+  assert.deepEqual(session?.queuedBehind,[{sessionId:'a',title:'写入任务'}]);assert.equal(session?.queueReason,'write_slot');
+  assert.deepEqual(readDrawerSession({sessionId:'old'})?.queuedBehind,[]);
 });

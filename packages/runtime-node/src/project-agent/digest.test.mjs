@@ -180,6 +180,7 @@ test('今日小结到点合并，空队列跳过，同一天不重复', () => {
 
 test('缺省设置是标准档、关闭的安静时段和 09:00', () => {
   assert.deepEqual(normalizeProjectAgentSettings(null), {
+    concurrency: 4,
     proactivity: 'standard',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
@@ -191,4 +192,9 @@ test('缺省设置是标准档、关闭的安静时段和 09:00', () => {
   assert.equal(normalizeProjectAgentSettings({ shell: 'other' }).shell, 'bots');
   assert.equal(normalizeProjectAgentSettings({ proactivity: 'nope', digestTime: '9am' }).proactivity, 'standard');
   assert.equal(normalizeProjectAgentSettings({ proactivity: 'high', digestTime: '18:30' }).digestTime, '18:30');
+});
+
+test('global concurrency accepts only integers from one to eight', () => {
+  for (const concurrency of [1, 4, 8]) assert.equal(normalizeProjectAgentSettings({ concurrency }).concurrency, concurrency);
+  for (const concurrency of [0, 9, 1.5, '2', null]) assert.equal(normalizeProjectAgentSettings({ concurrency }).concurrency, 4);
 });

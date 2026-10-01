@@ -1,3 +1,4 @@
+import { createExecutionScheduler } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -5,11 +6,12 @@ import { randomUUID } from 'node:crypto';
  * The sink receives stream events. The service still owns tools, permissions, and persistence.
  * @param {{ llmChatService: { sendMessage: (input: object) => Promise<object> } }} options
  */
-export function createAgentTurnExecutor({ llmChatService } = {}) {
+export function createAgentTurnExecutor({ llmChatService, executionScheduler = createExecutionScheduler() } = {}) {
   if (typeof llmChatService?.sendMessage !== 'function') {
     throw new Error('AgentTurnExecutor requires llmChatService.sendMessage');
   }
   return {
+    executionScheduler,
     resolveGoalRole(input) {
       return llmChatService.resolveGoalRole?.(input) ?? { ok: false, missing: '没有可用的模型' };
     },
@@ -18,45 +20,52 @@ export function createAgentTurnExecutor({ llmChatService } = {}) {
      * @param {object} [input.turnProfile]
      * @param {{ send: (channel: string, payload: unknown) => void }} input.sink
      */
-    runTurn({ turnProfile = null, sink, signal, ...sendMessageArgs } = {}) {
-      if (!sink || typeof sink.send !== 'function') {
-        throw new Error('AgentTurnExecutor requires a sink with send()');
-      }
-      const projectAgent = turnProfile?.role === 'project_agent' || sendMessageArgs.mode === 'project_agent';
-      if (!projectAgent) {
-        if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted' });
-        const streamId = sendMessageArgs.streamId || randomUUID();
-        const abort = () => llmChatService.abort?.(streamId);
-        signal?.addEventListener('abort', abort, { once: true });
-        return Promise.resolve().then(() => signal?.aborted
-          ? { ok: false, terminalStatus: 'aborted' }
-          : llmChatService.sendMessage({
-          ...sendMessageArgs,
-          streamId,
-          webContents: sink,
-          turnProfile,
-        })).finally(() => signal?.removeEventListener('abort', abort));
-      }
-      if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' });
-      const collected = collectTurn(sink);
+    runTurn(input = {}) {
+      if (!input.sink || typeof input.sink.send !== 'function') throw new Error('AgentTurnExecutor requires a sink with send()');
+      const profile = input.turnProfile;
+      const priority = input.plan?.kind === 'user' ? 'high' : profile?.role === 'memory_curator' ? 'low' : undefined;
+      return executionScheduler.withTurn({ planId: profile?.planId, priority, signal: input.signal }, signal => runTurn({ ...input, signal }));
+    },
+  };
+
+  function runTurn({ turnProfile = null, sink, signal, ...sendMessageArgs } = {}) {
+    if (!sink || typeof sink.send !== 'function') {
+      throw new Error('AgentTurnExecutor requires a sink with send()');
+    }
+    const projectAgent = turnProfile?.role === 'project_agent' || sendMessageArgs.mode === 'project_agent';
+    if (!projectAgent) {
+      if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted' });
       const streamId = sendMessageArgs.streamId || randomUUID();
       const abort = () => llmChatService.abort?.(streamId);
       signal?.addEventListener('abort', abort, { once: true });
-      return llmChatService.sendMessage({
+      return Promise.resolve().then(() => signal?.aborted
+        ? { ok: false, terminalStatus: 'aborted' }
+        : llmChatService.sendMessage({
         ...sendMessageArgs,
         streamId,
-        webContents: collected.sink,
+        webContents: sink,
         turnProfile,
-      }).then((outcome) => ({
-        ...outcome,
-        ...(collected.error() || ['error', 'aborted', 'interrupted'].includes(outcome?.terminalStatus)
-          ? { ok: false, retryable: false, error: outcome?.error || collected.error() || outcome.terminalStatus }
-          : {}),
-        text: typeof outcome?.text === 'string' && outcome.text ? outcome.text : collected.text(),
-        toolCalls: Array.isArray(outcome?.toolCalls) ? outcome.toolCalls : collected.toolCalls(),
       })).finally(() => signal?.removeEventListener('abort', abort));
-    },
-  };
+    }
+    if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' });
+    const collected = collectTurn(sink);
+    const streamId = sendMessageArgs.streamId || randomUUID();
+    const abort = () => llmChatService.abort?.(streamId);
+    signal?.addEventListener('abort', abort, { once: true });
+    return llmChatService.sendMessage({
+      ...sendMessageArgs,
+      streamId,
+      webContents: collected.sink,
+      turnProfile,
+    }).then((outcome) => ({
+      ...outcome,
+      ...(collected.error() || ['error', 'aborted', 'interrupted'].includes(outcome?.terminalStatus)
+        ? { ok: false, retryable: false, error: outcome?.error || collected.error() || outcome.terminalStatus }
+        : {}),
+      text: typeof outcome?.text === 'string' && outcome.text ? outcome.text : collected.text(),
+      toolCalls: Array.isArray(outcome?.toolCalls) ? outcome.toolCalls : collected.toolCalls(),
+    })).finally(() => signal?.removeEventListener('abort', abort));
+  }
 }
 
 function collectTurn(sink) {

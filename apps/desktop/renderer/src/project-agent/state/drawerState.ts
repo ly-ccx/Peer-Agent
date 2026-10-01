@@ -3,6 +3,8 @@
  * 设置写入由调用方只经已有 IPC 发出。
  */
 
+import type { I18nRuntime } from '@peer-agent/i18n';
+
 export const DRAWER_WIDTH = 380;
 export const DRAWER_PUSH_MIN_WIDTH = 960;
 
@@ -33,6 +35,8 @@ export interface DrawerSession {
   readonly summary: string;
   readonly evidenceRefs: readonly string[];
   readonly progress: string;
+  readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
+  readonly queueReason?: string;
 }
 
 export interface DrawerMemoryItem {
@@ -153,6 +157,15 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
   return groups;
 }
 
+export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
+  if (session.queueReason === 'dependency_missing') return i18n.t('projectAgent.drawer.dependencyMissing');
+  return session.queuedBehind?.length
+    ? i18n.t(session.queueReason === 'dependency_failed'
+      ? 'projectAgent.drawer.dependencyFailed' : 'projectAgent.drawer.queuedBehind',
+      { tasks: session.queuedBehind.map(item => item.title).join(', ') })
+    : session.statusLabel || session.status;
+}
+
 export function readDrawerSession(raw: unknown): DrawerSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
@@ -176,6 +189,13 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     summary: readString(report.summary),
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
+    queueReason: readString(record.queueReason),
+    queuedBehind: Array.isArray(record.queuedBehind) ? record.queuedBehind.flatMap(item => {
+      if (!item || typeof item !== 'object') return [];
+      const row = item as Record<string, unknown>;
+      const id = readString(row.sessionId);
+      return id ? [{ sessionId: id, title: readString(row.title) || id }] : [];
+    }) : [],
   };
 }
 

@@ -39,6 +39,15 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     });
     const questions = rows.flatMap((row) => {
       if (row.status !== 'waiting_user') return [];
+      if (['dependency_failed', 'dependency_missing'].includes(row.queueReason)) {
+        const questionId = 'dependency';
+        const answerTo = `card:question:${row.sessionId}:${questionId}`;
+        return [{ sessionId: row.sessionId, questionId,
+          prompt: `「${row.title}」的前置任务未成功签收。要取消还是重新安排？`,
+          options: ['取消这个任务', '重新安排任务'],
+          answered: messages.some(answer => answer.answerTo === answerTo),
+        }];
+      }
       const history = conversationStore.getPersistedConversationHistory(row.conversationId)?.messages || [];
       return history.flatMap((message) => (message.segments || []).flatMap((segment) => {
         if (segment.tool !== 'request_user_input' || !segment.args) return [];

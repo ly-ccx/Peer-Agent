@@ -210,6 +210,7 @@ test('project agent settings keep the standard level and merge quiet hours', () 
   const { service, getSettings } = createHarness();
   const first = service.update({ projectAgent: { proactivity: 'high', digestTime: '18:30' } });
   assert.deepEqual(first.projectAgent, {
+    concurrency: 4,
     proactivity: 'high',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '18:30',
@@ -265,4 +266,13 @@ test('switching shells keeps workspaces and the stored developer flag', () => {
   assert.deepEqual(bots.workspaces, initial.workspaces);
   assert.equal(bots.developer.projectAgentMode, true);
   assert.equal(getSettings().systemInstructions, 'alpha');
+});
+
+test('global concurrency is persisted through existing settings and unrelated project settings survive', () => {
+  const {service,getSettings}=createHarness();
+  service.update({projectAgent:{proactivity:'high',concurrency:2}});
+  assert.equal(getSettings().projectAgent.concurrency,2);
+  assert.equal(service.update({projectAgent:{concurrency:8}}).projectAgent.proactivity,'high');
+  assert.equal(getSettings().projectAgent.concurrency,8);
+  assert.equal(service.update({projectAgent:{concurrency:9}}).projectAgent.concurrency,4);
 });

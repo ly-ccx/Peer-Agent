@@ -33,12 +33,18 @@ export interface DelegationOrigin {
   readonly surface: InputSurface;
   readonly memorySnapshotId: string;
   readonly objectiveId?: string;
+  readonly priority?: 'high' | 'normal' | 'low';
   readonly modelSelection: ModelSelectionSnapshot;
   readonly parentSessionId?: string;
   readonly depth: number;
 }
 
-export interface WorkSessionConversationMeta {
+export interface SessionQueueFacts {
+  readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
+  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | null;
+}
+
+export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly sessionId?: string;
   readonly conversationId?: string;
   readonly workspaceId: string;
@@ -51,7 +57,7 @@ export interface WorkSessionConversationMeta {
   readonly phase?: 'starting' | 'verifying';
 }
 
-export interface WorkSession {
+export interface WorkSession extends SessionQueueFacts {
   readonly sessionId: string;
   readonly workspaceId: string;
   readonly title: string;
@@ -355,6 +361,8 @@ export function projectWorkSession(
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
     ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
     origin: conversationMeta.origin,
+    ...(conversationMeta.queuedBehind ? { queuedBehind: conversationMeta.queuedBehind.map(item => ({ ...item })) } : {}),
+    ...(conversationMeta.queueReason ? { queueReason: conversationMeta.queueReason } : {}),
     ...(conversationMeta.supersededBy ? { supersededBy: conversationMeta.supersededBy } : {}),
   };
 }

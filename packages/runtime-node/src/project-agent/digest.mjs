@@ -4,6 +4,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { normalizeConcurrency } from './execution-scheduler.mjs';
 
 import { decideSurfacing } from '@peer-agent/protocol';
 
@@ -25,6 +26,7 @@ const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export function defaultProjectAgentSettings() {
   return {
+    concurrency: 4,
     proactivity: 'standard',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
@@ -41,6 +43,7 @@ export function normalizeProjectAgentSettings(value) {
     ? source.quietHours
     : {};
   return {
+    concurrency: normalizeConcurrency(source.concurrency),
     proactivity: GLOBAL_LEVELS.includes(source.proactivity) ? source.proactivity : defaults.proactivity,
     quietHours: {
       enabled: hours.enabled === true,

@@ -22,6 +22,7 @@ import {
   normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
+  createExecutionScheduler,
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
@@ -421,6 +422,8 @@ export function registerDesktopProjectAgent({
   onViewing = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
+  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => getSettings()?.projectAgent?.concurrency });
   function readEvidenceBody(evidenceRef) {
     try {
       const record = goalPlanStore.findEvidenceIndexRecords?.([evidenceRef])?.[0];
@@ -445,6 +448,7 @@ export function registerDesktopProjectAgent({
     conversationStore,
     goalPlanStore,
     goalRunner,
+    executionScheduler,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
