@@ -96,6 +96,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     if (dependencies.some(failed)) return { allowed: false, reason: 'dependency_failed', queuedBehind: describe(dependencies.filter(failed)) };
     const unmet = dependencies.filter(item => item.status !== 'completed' || !item.resultAcceptance?.acceptedAt);
     if (unmet.length) return { allowed: false, reason: 'dependencies', queuedBehind: describe(unmet) };
+    if (origin.isolationBlock) return { allowed: false, reason: origin.isolationBlock, queuedBehind: [] };
     const kind = slot(plan);
     const occupants = sameProject.filter(item => item.planId !== plan.planId && occupying(item) && slot(item) === kind);
     const limit = kind === 'read' ? 2 : kind === 'write' ? 1 : Infinity;

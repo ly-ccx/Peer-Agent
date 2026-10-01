@@ -293,6 +293,10 @@ export type TranslationKey =
   | 'projectAgent.drawer.queuedBehind'
   | 'projectAgent.drawer.dependencyFailed'
   | 'projectAgent.drawer.dependencyMissing'
+  | 'projectAgent.drawer.diskSpace'
+  | 'projectAgent.drawer.isolationFailed'
+  | 'projectAgent.drawer.settings.autoHandoff'
+  | 'projectAgent.drawer.settings.autoHandoffHint'
   | 'projectAgent.drawer.settings.proactivity'
   | 'projectAgent.drawer.settings.proactivity.inherit'
   | 'projectAgent.drawer.settings.proactivity.quiet'
@@ -1415,6 +1419,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': '等待 {tasks}',
     'projectAgent.drawer.dependencyFailed': '前置任务需要处理：{tasks}',
     'projectAgent.drawer.dependencyMissing': '前置任务已缺失，请重新安排',
+    'projectAgent.drawer.diskSpace': '排队中：可用磁盘不足 2 GB',
+    'projectAgent.drawer.isolationFailed': '排队中：隔离工作区暂不可用',
+    'projectAgent.drawer.settings.autoHandoff': '策略签收后自动合回',
+    'projectAgent.drawer.settings.autoHandoffHint': '默认关闭。开启后，已验证并签收的改动可自动合回本项目。',
     'projectAgent.drawer.settings.proactivity': '主动性',
     'projectAgent.drawer.settings.proactivity.inherit': '跟随全局',
     'projectAgent.drawer.settings.proactivity.quiet': '安静',
@@ -2335,6 +2343,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': 'Waiting for {tasks}',
     'projectAgent.drawer.dependencyFailed': 'Dependency needs attention: {tasks}',
     'projectAgent.drawer.dependencyMissing': 'Dependency is missing; please replan',
+    'projectAgent.drawer.diskSpace': 'Queued: less than 2 GB of free disk space',
+    'projectAgent.drawer.isolationFailed': 'Queued: isolated workspace is unavailable',
+    'projectAgent.drawer.settings.autoHandoff': 'Merge automatically after policy acceptance',
+    'projectAgent.drawer.settings.autoHandoffHint': 'Off by default. Verified, accepted changes may merge into this project when enabled.',
     'projectAgent.drawer.settings.proactivity': 'How often to speak up',
     'projectAgent.drawer.settings.proactivity.inherit': 'Follow the global setting',
     'projectAgent.drawer.settings.proactivity.quiet': 'Quiet',

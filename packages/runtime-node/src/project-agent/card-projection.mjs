@@ -7,6 +7,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
+import { formatGoalDeliveryHandoff } from '@peer-agent/protocol';
 
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const ID_MAX = 200;
@@ -28,6 +29,7 @@ export function projectCards(workspaceId, facts = {}, resolutions = []) {
     ...confirmCards(facts),
     ...readmeCards(workspaceId, facts),
     ...unavailableCards(facts),
+    ...handoffCards(facts),
   ];
   const byId = new Map();
   for (const card of built) {
@@ -191,6 +193,24 @@ function taskQuestionCards(facts) {
     }));
   }
   return cards;
+}
+
+function handoffCards(facts) {
+  return asList(facts.handoffs).filter(row => row.status === 'completed' && row.accepted && row.worktreePath
+    && !['delivered', 'delivering'].includes(row.handoff?.status)).map(row => {
+    const conflict = row.conflict === true;
+    const reason = formatGoalDeliveryHandoff({ deliveryHandoff: row.handoff,
+      deliveryBinding: { executionIsolation: 'worktree' } });
+    const questionId = row.questionId || 'handoff';
+    const cardId = cardIdOf('question', `${row.sessionId}:${questionId}`);
+    return draft({ cardId, kind: 'question',
+      content: conflict ? `「${row.title}」${reason || '合回未成功'}。要让任务处理、自己处理，还是放弃？`
+        : `「${row.title}」已签收。要把改动合回项目吗？`,
+      factResolved: row.deferred === true, factState: row.deferred ? 'deferred' : '',
+      actions: answerActions(cardId, conflict ? ['让任务自己解决', '我来处理', '放弃这次改动'] : ['合回改动', '暂不合回']),
+      refs: refs({ sessionId: row.sessionId, questionId }),
+    });
+  });
 }
 
 function replyQuestionCards(facts) {

@@ -97,6 +97,7 @@ export function createProjectAgentHost({
   clearSchedule = null,
   readFacts = null,
   subscribePlans = null,
+  reconcileSessions = null,
 } = {}) {
   if (typeof executeTurn !== 'function') {
     throw new TypeError('ProjectAgentHost requires executeTurn');
@@ -313,6 +314,7 @@ export function createProjectAgentHost({
 
   async function sweepWatch() {
     if (!watch || hostDisposed) return 30_000;
+    if (typeof reconcileSessions === 'function') await reconcileSessions();
     const listed = listWorkspaceIds();
     const seen = new Set();
     const runs = [];
@@ -449,6 +451,7 @@ export function registerDesktopProjectAgent({
     goalPlanStore,
     goalRunner,
     executionScheduler,
+    canManageWorkspace: holdsLease,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
@@ -457,7 +460,7 @@ export function registerDesktopProjectAgent({
       projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy,
     }),
     resolveAcceptancePolicy: (workspaceId) => profileStore.read(workspaceId)?.acceptancePolicy,
-    readSessionFacts: (plan) => ({ hostAuthority: {
+    readSessionFacts: (plan) => ({ autoHandoffOnPolicyAccept: profileStore.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true, hostAuthority: {
       ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
       ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
     } }),
@@ -625,6 +628,7 @@ export function registerDesktopProjectAgent({
     inbox,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
+    reconcileSessions: () => supervisor.reconcile(),
     ...createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),
     executeTurn: (input) => {

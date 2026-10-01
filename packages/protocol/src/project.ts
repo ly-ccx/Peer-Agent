@@ -34,6 +34,8 @@ export interface BotProfile {
   readonly memoryEnabled?: boolean;
   readonly planApproval?: 'never' | 'writes' | 'always';
   readonly acceptancePolicy?: 'auto' | 'confirm';
+  /** Policy acceptance keeps a separate merge confirmation unless explicitly enabled. */
+  readonly autoHandoffOnPolicyAccept?: boolean;
   readonly modelPolicy?: ProjectModelPolicy | null;
   readonly updatedAt?: string;
 }

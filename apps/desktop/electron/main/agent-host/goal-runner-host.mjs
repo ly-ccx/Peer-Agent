@@ -6,10 +6,12 @@ import {
   buildGoalRunnerTickMessage,
   createGoalRunner,
   createExecutionScheduler,
+  createIsolationPlanner,
   delegatedPlanRunsWithLease,
   describeVisualRepair,
 } from '@peer-agent/runtime-node';
 import { preparePlanExecutionWorkspace } from '../goal-preferred-worktree.mjs';
+import { createGoalDeliveryHandoff } from '../goal-delivery-handoff.mjs';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
@@ -248,6 +250,7 @@ export function createDesktopGoalRunnerHost({
   hostLeases = null,
 } = {}) {
   const executionScheduler = agentTurnExecutor.executionScheduler ?? createExecutionScheduler();
+  const deliveryHandoff = createGoalDeliveryHandoff({ goalPlanStore });
   function currentPlans() {
     // listPlans is an active-only UI index; accepted dependencies must remain visible here.
     const root = goalPlanStore.getStoreDir?.();
@@ -260,6 +263,16 @@ export function createDesktopGoalRunnerHost({
   }
   executionScheduler.configure({ rootDir: goalPlanStore.getStoreDir?.()
     ? path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime') : null });
+  const isolationPlanner = typeof goalWorktreeAdapter?.inspectIsolationFacts === 'function'
+    ? createIsolationPlanner({
+      readFacts: plan => goalWorktreeAdapter.inspectIsolationFacts(plan),
+      isolatePlan: plan => goalWorktreeAdapter.isolatePlan(plan, { ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch }),
+      recordIsolation: (plan, isolation) => goalPlanStore.recordDeliveryIsolation(plan.planId, isolation),
+      recordOrigin: (plan, patch) => goalPlanStore.revisePlan(plan.planId,
+        { delegationOrigin: { ...(goalPlanStore.getPlan(plan.planId)?.delegationOrigin || plan.delegationOrigin), ...patch } },
+        { reason: 'execution isolation facts', changedBy: 'isolation-planner' }),
+      discardLine: (plan, options) => goalWorktreeAdapter.discardLine(plan, options),
+    }) : null;
   function routeRole(role, plan) {
     const workerModelProviderId = resolveConversationModelProviderId({
       conversationId: plan?.conversationId,
@@ -339,6 +352,17 @@ export function createDesktopGoalRunnerHost({
     uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
     prepareIsolation: async (plan) => {
       if (!plan) return plan;
+      if (plan.delegationOrigin) {
+        if (plan.delegationOrigin.readOnly === true) return plan;
+        if (plan.delegationOrigin.isolationBlock) throw new Error('execution isolation is not ready');
+        if (plan.deliveryBinding?.executionIsolation === 'worktree') {
+          if (!(await goalWorktreeAdapter?.inspectIsolationFacts?.(plan))?.existingWorktree) {
+            throw new Error('declared worktree is unavailable');
+          }
+          return plan;
+        }
+        return plan;
+      }
       const conversation = plan.conversationId
         ? conversationStore.getConversation(plan.conversationId)
         : null;
@@ -352,6 +376,10 @@ export function createDesktopGoalRunnerHost({
     },
     chatRuntime: {
       async runGoalTurn({ plan, turnNumber }) {
+        if (plan.delegationOrigin && plan.deliveryBinding?.executionIsolation === 'worktree'
+          && !(await goalWorktreeAdapter?.inspectIsolationFacts?.(plan))?.existingWorktree) {
+          return { failed: true, failureReason: 'declared worktree is unavailable' };
+        }
         const conversation = conversationStore.getConversation(plan.conversationId);
         if (!conversation) {
           return { failed: true, failureReason: 'Goal conversation not found' };
@@ -556,6 +584,12 @@ export function createDesktopGoalRunnerHost({
   };
   const goalRunner = createGoalRunner(goalRunnerOptions);
   goalRunner.executionScheduler = executionScheduler;
+  goalRunner.isolationPlanner = isolationPlanner;
+  goalRunner.handoffDelegatedPlan = async plan => {
+    const next = await deliveryHandoff.handoffPlan(plan, { retry: plan.deliveryHandoff?.status === 'stopped' });
+    return isolationPlanner ? isolationPlanner.cleanup(next) : next;
+  };
+  goalRunner.discardDelegatedLine = plan => goalWorktreeAdapter?.discardLine?.(plan, { deleteBranch: true });
   const pause = goalRunner.pause;
   goalRunner.pause = (planId, reason) => {
     executionScheduler.cancelPlan(planId);

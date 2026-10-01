@@ -52,6 +52,29 @@ function queuedExecutor(scripts, seen) {
   };
 }
 
+test('delegated startup does not rebuild a vanished worktree outside the isolation admission gate', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-strict-host-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
+  const model = { modelProviderId: 'm', providerId: 'p', modelId: 'm', family: 'f' };
+  const plan = store.createPlan({ title: 'Missing isolation', goal: 'Never recreate outside admission',
+    conversationId: 'c', targetWorkspacePath: root, tasks: [{ taskId: 't', title: 'Write', status: 'pending' }],
+    delegationOrigin: { anchorMessageId: 'a', inputId: 'i', workspaceId: 'w', sessionId: 's', phase: 'running',
+      modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() } },
+    deliveryBinding: { repoId: 'r', targetWorkspacePath: root, targetBranch: 'main', targetBranchSource: 'workspace_head',
+      executionIsolation: 'worktree', taskBranch: 'task', worktreePath: path.join(root, 'missing'), boundAt: new Date().toISOString() } });
+  store.recordApproval(plan.planId, { decision: 'approve' });
+  let rebuilds = 0; let turns = 0;
+  const host = createDesktopGoalRunnerHost({ goalPlanStore: store, conversationStore: { getConversation: () => ({ id: 'c', messages: [] }) },
+    goalWorktreeAdapter: { inspectIsolationFacts: async () => ({ existingWorktree: false, git: true, freeBytes: 0 }),
+      isolatePlan: async p => { rebuilds++; return { ok: true, plan: p }; } },
+    agentTurnExecutor: { runTurn: async () => { turns++; return { requestedUserInput: true }; } },
+    hostLeases: { holds: () => true }, llmChatService: {}, broadcast() {}, resolveConversationModelProviderId: () => 'm',
+    toDesktopProviderMessages: messages => messages, desktopContinuityContextFromProjection: () => [], getMainWindows: () => [] });
+  await assert.rejects(host.goalRunner.start(plan.planId, { awaitIdle: true }), /worktree is unavailable/);
+  assert.equal(rebuilds, 0); assert.equal(turns, 0);
+});
+
 test('host runs one goal turn, one explorer, and one verifier through a scripted executor', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'goal-runner-host-'));
   const previousHome = process.env.PEER_AGENT_HOME;

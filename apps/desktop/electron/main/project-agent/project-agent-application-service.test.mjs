@@ -98,6 +98,32 @@ test('头像选色通过宿主保存并返回最新档案', async () => {
   assert.deepEqual(calls, [['ws-1', '#61b68c']]);
 });
 
+test('automatic merge is explicit, saved through host policy, and invalid patches are atomic', async () => {
+  let profile = { workspaceId: 'ws-1', status: 'active', displayName: 'Bot' };
+  let saves = 0;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    profileStore: { read: () => profile, save: next => { saves++; profile = next; return { ok: true }; } } });
+  assert.equal((await service.updateProfile({ workspaceId: 'ws-1', displayName: 'Changed', autoHandoffOnPolicyAccept: 'true' })).ok, false);
+  assert.equal(saves, 0); assert.equal(profile.displayName, 'Bot');
+  const result = await service.updateProfile({ workspaceId: 'ws-1', autoHandoffOnPolicyAccept: true });
+  assert.equal(result.ok, true); assert.equal(result.profile.autoHandoffOnPolicyAccept, true);
+  assert.equal((await service.updateProfile({ workspaceId: 'ws-1', autoHandoffOnPolicyAccept: false })).profile.autoHandoffOnPolicyAccept, false);
+});
+
+test('failed handoff cleanup stays actionable and does not acknowledge a successful card decision', async () => {
+  const inputs = [];
+  let relays = 0;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    inputQueue: { submitInput: input => { inputs.push(input); return input; } },
+    sessions: { handleHandoffAnswer: async () => ({ handled: true, error: 'cleanup_failed' }),
+      deliverAnswer: () => { relays++; } } });
+  const result = await service.submitInput({ workspaceId: 'w', text: '放弃这次改动', answerTo: 'card:question:s:handoff_conflict-current' });
+  assert.equal(result.ok, false); assert.equal(result.code, 'HANDOFF_FAILED');
+  assert.equal(inputs.length, 1); assert.equal(result.input, inputs[0]);
+  assert.equal(relays, 0);
+  assert.match(result.message, /保留/);
+});
+
 test('头像展示只读取已保存图片，由主进程编码为 data URL', () => {
   const calls = [];
   const service = createProjectAgentApplicationService({

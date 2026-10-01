@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, rm, stat, statfs, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { pathOf } from '@peer-agent/runtime-node';
@@ -111,6 +111,20 @@ async function worktreeStillPresent(worktreePath) {
   }
 }
 
+async function freeBytesAtDestination(destination) {
+  let location = path.resolve(destination);
+  for (;;) {
+    try {
+      const disk = await statfs(location);
+      return Number(disk.bavail) * Number(disk.bsize);
+    } catch (error) {
+      const parent = path.dirname(location);
+      if (error?.code !== 'ENOENT' || parent === location) throw error;
+      location = parent;
+    }
+  }
+}
+
 function toAdapterRun(plan) {
   const binding = plan.deliveryBinding || {};
   const workspacePath = trimPath(binding.targetWorkspacePath) || trimPath(plan.targetWorkspacePath);
@@ -152,15 +166,51 @@ export function resolveGoalSitePath(plan) {
  * Existing task branches are attached in place; automation-style branches stay a fallback.
  */
 export function createGoalWorktreeAdapter({
-  worktreeAdapter = createAutomationWorktreeAdapter({
-    rootDir: path.join(pathOf('goalPlans'), 'worktrees'),
-    artifactDir: path.join(pathOf('goalPlans'), 'artifacts'),
-  }),
+  worktreeAdapter = null,
   goalPlanStore = null,
   runGit = defaultRunGit,
-  rootDir = path.join(pathOf('goalPlans'), 'worktrees'),
+  rootDir = worktreeAdapter?.getRootDir?.() || path.join(pathOf('goalPlans'), 'worktrees'),
+  readFreeBytes = freeBytesAtDestination,
 } = {}) {
+  worktreeAdapter ??= createAutomationWorktreeAdapter({ rootDir,
+    artifactDir: path.join(pathOf('goalPlans'), 'artifacts') });
+  if (worktreeAdapter.getRootDir && path.resolve(worktreeAdapter.getRootDir()) !== path.resolve(rootDir)) {
+    throw new Error('Goal and Automation worktree execution roots must match');
+  }
   const retainLocks = new Map();
+
+  async function inspectIsolationFacts(plan) {
+    const root = trimPath(plan.deliveryBinding?.targetWorkspacePath) || trimPath(plan.targetWorkspacePath);
+    if (!root) return { git: false };
+    try { if (!(await stat(root)).isDirectory()) return { ok: false }; }
+    catch { return { ok: false }; }
+    let dirty;
+    try {
+      const inside = trimPath((await runGit(['rev-parse', '--is-inside-work-tree'], { cwd: root })).stdout);
+      if (inside !== 'true') return { git: false };
+      dirty = Boolean(trimPath((await runGit(['status', '--porcelain', '-uall'], { cwd: root })).stdout));
+    } catch (error) {
+      if (await worktreeStillPresent(root)) return { ok: false };
+      return isMissingGitWorktreeError(error) ? { git: false } : { ok: false };
+    }
+    const freeBytes = await readFreeBytes(rootDir);
+    const binding = plan.deliveryBinding || {};
+    let existingWorktree = false;
+    if (binding.executionIsolation === 'worktree' && binding.worktreePath && binding.taskBranch) {
+      try {
+        const targetCommon = trimPath((await runGit(['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root })).stdout);
+        const actualCommon = trimPath((await runGit(['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: binding.worktreePath })).stdout);
+        const actualBranch = trimPath((await runGit(['symbolic-ref', '--short', 'HEAD'], { cwd: binding.worktreePath })).stdout);
+        const actualRoot = trimPath((await runGit(['rev-parse', '--show-toplevel'], { cwd: binding.worktreePath })).stdout);
+        const declaredRoot = await realpath(binding.worktreePath);
+        existingWorktree = declaredRoot !== await realpath(root)
+          && actualRoot === declaredRoot
+          && Boolean(targetCommon) && targetCommon === actualCommon && actualBranch === binding.taskBranch;
+      } catch { /* Missing, foreign, or detached checkouts never prove isolation. */ }
+    }
+    return { git: true, dirty, freeBytes,
+      existingWorktree };
+  }
 
   function recordIsolation(plan, isolation) {
     if (typeof goalPlanStore?.recordDeliveryIsolation !== 'function') {
@@ -345,6 +395,14 @@ export function createGoalWorktreeAdapter({
     if (!worktreePath && !branch) {
       return { ok: true, plan };
     }
+    if (plan.delegationOrigin && worktreePath) {
+      let present;
+      try { await stat(worktreePath); present = true; }
+      catch (error) { if (error?.code !== 'ENOENT') return { ok: false, reason: 'worktree_inspection_failed', plan }; }
+      if (present && !(await inspectIsolationFacts(plan)).existingWorktree) {
+        return { ok: false, reason: 'invalid_worktree', plan };
+      }
+    }
     if (worktreePath && root) {
       try {
         await removeWorktreeOnly(root, worktreePath);
@@ -381,6 +439,12 @@ export function createGoalWorktreeAdapter({
     const worktreePath = trimPath(plan.deliveryBinding?.worktreePath);
     const branch = trimPath(plan.deliveryBinding?.taskBranch);
     if (!worktreePath || !branch) return plan;
+    // Delegated failure retention belongs to the planner, including empty worktrees.
+    if (plan.delegationOrigin && plan.status === 'failed') return plan;
+    if (plan.delegationOrigin && (plan.status === 'cancelled' || plan.deliveryHandoff?.status === 'delivered')) {
+      const result = await discardLine(plan, { deleteBranch: false });
+      return result.ok ? result.plan : plan;
+    }
     const lockKey = plan.planId;
     const pending = retainLocks.get(lockKey);
     if (pending) return pending;
@@ -444,5 +508,6 @@ export function createGoalWorktreeAdapter({
     discardLine,
     retainOrCleanupPlan,
     resolveSitePath: resolveGoalSitePath,
+    inspectIsolationFacts,
   });
 }

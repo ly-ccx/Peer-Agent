@@ -55,6 +55,8 @@ async function harness({
   readSessionFacts = null,
   approvalStore = null,
   readPlanApproval = null,
+  isolationPlanner = undefined,
+  canManageWorkspace = undefined,
 } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-'));
   const previous = process.env.PEER_AGENT_HOME;
@@ -108,6 +110,8 @@ async function harness({
     readSessionFacts,
     approvalStore,
     readPlanApproval,
+    ...(isolationPlanner ? { isolationPlanner } : {}),
+    ...(canManageWorkspace ? { canManageWorkspace } : {}),
     now: () => '2026-09-27T00:00:00.000Z',
   });
   return {
@@ -556,6 +560,35 @@ test('启动失败时归档子会话并删掉计划', { timeout: 20_000 }, async
   }
 });
 
+test('failed startup retains an isolated Plan when rollback cleanup fails', async () => {
+  let env;
+  const planner = { prepare: async plan => ({ ok: true, plan: env.goalPlanStore.recordDeliveryIsolation(plan.planId,
+    { executionIsolation: 'worktree', taskBranch: 'fixture', worktreePath: '/fixture/retained' }) }),
+    cleanup: async plan => plan };
+  env = await harness({ isolationPlanner: planner, goalRunner: { start: async () => { throw new Error('start failed'); } } });
+  try {
+    const result = await env.supervisor.spawn(spawnInput({ isolation: 'worktree' }), contextOf(env));
+    assert.equal(result.error, 'spawn_failed'); assert.ok(result.sessionId);
+    const saved = env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: result.sessionId }).planId);
+    assert.equal(saved.status, 'failed');
+    assert.equal(saved.deliveryBinding.worktreePath, '/fixture/retained');
+    assert.equal(env.conversationStore.getConversation(saved.conversationId).status, 'active');
+  } finally { await env.cleanup(); }
+});
+
+test('cancellation waits for the active turn to settle before removing its execution site', async () => {
+  const calls = [];
+  const env = await harness({ goalRunner: { start: async () => {}, pause: () => calls.push('abort'),
+    waitForIdle: async () => { await Promise.resolve(); calls.push('settled'); } },
+    isolationPlanner: { prepare: async plan => ({ ok: true, plan }), cleanup: async plan => { calls.push('cleanup'); return plan; } } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    await env.supervisor.cancel({ sessionId: opened.sessionId });
+    assert.deepEqual(calls, ['abort', 'settled', 'cleanup']);
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).status, 'cancelled');
+  } finally { await env.cleanup(); }
+});
+
 function hostPassPatch() {
   return {
     tasks: [{ taskId: 'leaf', status: 'completed', evidenceRefs: ['ev-1'] }],
@@ -625,6 +658,38 @@ test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 
   } finally {
     await env.cleanup();
   }
+});
+
+test('policy acceptance only authorizes merge when host project policy enables it', async () => {
+  for (const enabled of [false, true]) {
+    const env = await harness({ readSessionFacts: () => ({ autoHandoffOnPolicyAccept: enabled,
+      hostAuthority: { independentVerifier: 'passed' } }) });
+    try {
+      let merged = 0;
+      env.goalRunner.handoffDelegatedPlan = async plan => { merged++; return plan; };
+      const opened = await completedSession(env);
+      env.goalPlanStore.recordDeliveryIsolation(opened.planId, { executionIsolation: 'worktree', taskBranch: 'fixture', worktreePath: '/fixture' });
+      env.conversationStore.appendMessage(env.parent.id, { id: 'reply', role: 'assistant', kind: 'agent_reply', sources: [opened.sessionId], content: 'Checked' });
+      const result = await env.supervisor.settle(opened.sessionId, { autoHandoffOnPolicyAccept: true, userAgreed: true });
+      assert.equal(result.accepted, true);
+      assert.equal(merged, enabled ? 1 : 0);
+      assert.equal(Boolean(env.goalPlanStore.getPlan(opened.planId).delegationOrigin.handoffAuthorizedAt), enabled);
+    } finally { await env.cleanup(); }
+  }
+});
+
+test('a host without this workspace lease never prepares or starts an isolated session', async () => {
+  let prepared = 0; let started = 0;
+  const env = await harness({ canManageWorkspace: () => false,
+    isolationPlanner: { prepare: async plan => { prepared++; return { ok: true, plan }; }, cleanup: async plan => plan },
+    goalRunner: { start: async () => { started++; } } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ isolation: 'worktree' }), contextOf(env));
+    assert.equal(opened.error, undefined);
+    assert.equal(opened.status, 'queued');
+    await env.supervisor.reconcile();
+    assert.equal(prepared, 0); assert.equal(started, 0);
+  } finally { await env.cleanup(); }
 });
 
 test('项目策略为 confirm 时不代签，用户确认写入 acceptedBy user', { timeout: 20_000 }, async () => {

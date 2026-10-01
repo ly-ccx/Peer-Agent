@@ -34,6 +34,11 @@ export interface DelegationOrigin {
   readonly memorySnapshotId: string;
   readonly objectiveId?: string;
   readonly priority?: 'high' | 'normal' | 'low';
+  readonly isolation?: 'auto' | 'none' | 'worktree';
+  readonly isolationBlock?: 'disk_space' | 'isolation_failed' | null;
+  readonly isolationRetainedAt?: string;
+  readonly handoffAuthorizedAt?: string;
+  readonly handoffDeferredAt?: string;
   readonly modelSelection: ModelSelectionSnapshot;
   readonly parentSessionId?: string;
   readonly depth: number;
@@ -41,7 +46,7 @@ export interface DelegationOrigin {
 
 export interface SessionQueueFacts {
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
-  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | null;
+  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | 'disk_space' | 'isolation_failed' | null;
 }
 
 export interface WorkSessionConversationMeta extends SessionQueueFacts {

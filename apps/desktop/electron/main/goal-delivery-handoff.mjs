@@ -626,6 +626,7 @@ export function createGoalDeliveryHandoff({
   function canHandoff(plan) {
     if (!plan || typeof plan !== 'object') return false;
     if (!isCompleted(plan)) return false;
+    if (plan.delegationOrigin && (!plan.resultAcceptance?.acceptedAt || !plan.delegationOrigin.handoffAuthorizedAt)) return false;
     if (!isQualityReady(plan)) return false;
     const binding = plan.deliveryBinding;
     if (!binding) return false;
@@ -640,6 +641,8 @@ export function createGoalDeliveryHandoff({
   function handoffGateReason(plan) {
     if (!plan || typeof plan !== 'object') return 'missing_plan';
     if (!isCompleted(plan)) return 'plan_not_completed';
+    if (plan.delegationOrigin && !plan.resultAcceptance?.acceptedAt) return 'acceptance_required';
+    if (plan.delegationOrigin && !plan.delegationOrigin.handoffAuthorizedAt) return 'handoff_confirmation_required';
     const binding = plan.deliveryBinding;
     if (!binding) return 'missing_binding';
     const taskBranch = trim(binding.taskBranch);
