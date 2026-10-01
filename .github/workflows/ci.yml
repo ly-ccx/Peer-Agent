@@ -107,7 +107,7 @@ jobs:
 
       - name: Bot shell Electron smoke (macOS)
         if: runner.os == 'macOS'
-        run: pnpm --filter @peer-agent/desktop smoke:bots --output "$RUNNER_TEMP/bot-shell-report.json"
+        run: DEBUG=pw:protocol pnpm --filter @peer-agent/desktop smoke:bots --output "$RUNNER_TEMP/bot-shell-report.json" 2> "$RUNNER_TEMP/bot-shell-protocol.log"
 
       - name: Bot shell Electron smoke (Linux)
         if: runner.os == 'Linux'
@@ -122,4 +122,5 @@ jobs:
             ${{ runner.temp }}/bot-shell-report.json
             ${{ runner.temp }}/bot-shell-failure.png
             ${{ runner.temp }}/bot-shell-trace.zip
+            ${{ runner.temp }}/bot-shell-protocol.log
           if-no-files-found: ignore
