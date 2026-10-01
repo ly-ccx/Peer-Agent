@@ -73,15 +73,21 @@ test('targeted wake checks global eligibility once while retaining 200 lease-own
 
 test('200-bot search reads classic conversation and Goal catalogs once per projection', () => {
   const env = harness({ projectCount: 200 });
-  let conversationReads = 0, planReads = 0;
+  let conversationReads = 0, planReads = 0, batchReads = 0, singleReads = 0;
   const readConversations = env.conversations.listConversations;
   const readPlans = env.plans.listPlans;
+  const readBatch = env.conversations.getPersistedConversationHistories;
+  const readSingle = env.conversations.getPersistedConversationHistory;
   env.conversations.listConversations = (...args) => { conversationReads++; return readConversations(...args); };
   env.plans.listPlans = (...args) => { planReads++; return readPlans(...args); };
+  env.conversations.getPersistedConversationHistories = (...args) => { batchReads++; return readBatch(...args); };
+  env.conversations.getPersistedConversationHistory = (...args) => { singleReads++; return readSingle(...args); };
   try {
     assert.equal(env.invoke('search', { query: 'test' }).ok, true);
     assert.equal(conversationReads, 1, 'one canonical metadata read for the projection');
     assert.ok(planReads <= 2, 'one projection read and at most one corpus rebuild read');
+    assert.equal(batchReads, 2, 'one directory read and one initial corpus read');
+    assert.equal(singleReads, 0, 'no repeated index read for each bot');
   } finally { env.dispose(); }
 });
 

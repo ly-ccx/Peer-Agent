@@ -62,6 +62,14 @@ export interface StoredConversation extends ConversationMeta {
   readonly messages: readonly Record<string, unknown>[];
 }
 
+export interface PersistedConversationHistory {
+  conversationId: string;
+  contentRevision: number;
+  messages: Record<string, unknown>[];
+  excludedFromMessageId: string | null;
+  requiresRuntimeCheck: true;
+}
+
 export interface ConversationListPage {
   readonly items: ConversationMeta[];
   readonly nextCursor: string | null;
@@ -162,13 +170,9 @@ export interface ConversationStore {
   /** Internal raw read. Caller must enforce parent-child access before use. */
   readInheritedBackground?(snapshotId: string): InheritedBackgroundSnapshot;
   /** Persisted records before any streaming sidecar target; still requires runtime liveness checks. */
-  getPersistedConversationHistory?(id: string): {
-    conversationId: string;
-    contentRevision: number;
-    messages: Record<string, unknown>[];
-    excludedFromMessageId: string | null;
-    requiresRuntimeCheck: true;
-  } | null;
+  getPersistedConversationHistory?(id: string): PersistedConversationHistory | null;
+  /** Current index batch; no cross-file transaction or permission/liveness attestation. */
+  getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   deleteConversationsByWorkspace?(workspacePath: string | null | undefined): ConversationMeta[];

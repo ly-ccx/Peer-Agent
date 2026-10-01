@@ -87,6 +87,7 @@ export function createBotDirectory({
   rootDir = null,
   registry = null,
   readMessages = () => [],
+  readMessagesBatch = null,
   listSessions = () => [],
   getSession = () => null,
   listApprovals = () => [],
@@ -126,9 +127,10 @@ export function createBotDirectory({
       .map((entry) => entry.name);
   }
 
-  function messagesOf(profile) {
+  function messagesOf(profile, batch = null) {
     if (!profile?.agentConversationId || typeof readMessages !== 'function') return [];
-    const messages = readMessages(profile.agentConversationId, profile.workspaceId);
+    const messages = batch instanceof Map && batch.has(profile.agentConversationId) ? batch.get(profile.agentConversationId)
+      : readMessages(profile.agentConversationId, profile.workspaceId);
     return Array.isArray(messages) ? messages : [];
   }
 
@@ -161,8 +163,8 @@ export function createBotDirectory({
     }
   }
 
-  function projectRow(profile, classicBatch = null) {
-    const messages = messagesOf(profile);
+  function projectRow(profile, classicBatch = null, messageBatch = null) {
+    const messages = messagesOf(profile, messageBatch);
     const visible = messages.filter(isVisibleBotMessage);
     const last = visible.length ? toListMessage(visible[visible.length - 1]) : null;
     const sessions = sessionsOf(profile.workspaceId);
@@ -212,7 +214,10 @@ export function createBotDirectory({
     let batch = null;
     try { batch = readClassicGoalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
     catch { /* Legacy per-project reads remain available. */ }
-    return current.map(profile => projectRow(profile, batch));
+    let messages = null;
+    try { messages = readMessagesBatch?.(current.map(profile => profile.agentConversationId).filter(Boolean)) ?? null; }
+    catch { /* Existing single reads retain their normal failure behavior. */ }
+    return current.map(profile => projectRow(profile, batch, messages));
   }
 
   function list() {

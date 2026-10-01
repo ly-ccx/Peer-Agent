@@ -142,6 +142,25 @@ test('query returns a complete catalog and matched items from one current projec
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('list/query use a current message batch, while details and unavailable adapters use single reads', () => {
+  const root = tempRoot();
+  let singles = 0, batches = 0, unavailable = false;
+  const message = content => ({ id: content, role: 'assistant', kind: 'agent_reply', content, createdAt: '2026-09-27T09:00:00.000Z' });
+  try {
+    const { entry, directory } = harness(root, {
+      readMessages: () => { singles++; return [message('single current')]; },
+      readMessagesBatch: ids => { batches++; if (unavailable) throw Error('unavailable'); return new Map(ids.map(id => [id, [message('batch current')]])); },
+    });
+    assert.equal(directory.query('batch current').items[0].preview, 'batch current');
+    assert.equal(batches, 1); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.preview, 'single current');
+    assert.equal(singles, 1);
+    unavailable = true;
+    assert.equal(directory.list()[0].preview, 'single current');
+    assert.equal(singles, 2); assert.equal(batches, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('读游标之后未读清零，对话按 kind 分页', () => {
   const root = tempRoot();
   try {

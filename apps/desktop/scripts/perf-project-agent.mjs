@@ -32,6 +32,7 @@ function readers(home, fixture) {
   const classicGoals = createClassicGoalProjection({ registry, conversationStore: conversations,
     goalPlanStore: createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') }) });
   const directory = createBotDirectory({ rootDir: home, registry, readMessages,
+    readMessagesBatch: ids => new Map([...conversations.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])),
     listClassicGoals: classicGoals.one, readClassicGoalsBatch: classicGoals.batch });
   return { conversations, registry, memories, readMessages, directory };
 }

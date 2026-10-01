@@ -258,6 +258,8 @@ export function registerDesktopProjectAgent({
     readMessages: (conversationId) => (
       conversationStore.getPersistedConversationHistory(conversationId)?.messages || []
     ),
+    readMessagesBatch: typeof conversationStore.getPersistedConversationHistories === 'function'
+      ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
@@ -488,13 +490,16 @@ export function registerDesktopProjectAgent({
     readSearchCorpus(catalog) {
       const bots = Array.isArray(catalog) ? catalog : (typeof directory.list === 'function' ? directory.list() : []);
       const messages = [];
+      let histories = null;
+      try { histories = conversationStore.getPersistedConversationHistories?.(bots.map(bot => bot.profile?.agentConversationId).filter(Boolean)); }
+      catch { /* Per-conversation fallback below preserves optional corpus recovery. */ }
       for (const bot of bots) {
         const workspaceId = bot.workspaceId;
         const conversationId = bot.profile?.agentConversationId;
         if (!conversationId) continue;
         let history = [];
         try {
-          history = conversationStore.getPersistedConversationHistory(conversationId)?.messages || [];
+          history = (histories instanceof Map ? histories.get(conversationId) : conversationStore.getPersistedConversationHistory(conversationId))?.messages || [];
         } catch {
           history = [];
         }
