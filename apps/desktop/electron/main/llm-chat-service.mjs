@@ -280,6 +280,7 @@ export function projectTurnSystemContext(profile, {
     const origin = plan?.delegationOrigin && typeof plan.delegationOrigin === 'object'
       ? plan.delegationOrigin
       : {};
+    fields.workSessionExecution = { phase: origin.phase };
     const bag = turnContext?.workSessionOrigin && typeof turnContext.workSessionOrigin === 'object'
       ? turnContext.workSessionOrigin
       : {};
