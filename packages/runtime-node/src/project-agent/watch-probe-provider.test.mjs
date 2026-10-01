@@ -6,6 +6,14 @@ import path from 'node:path';
 import {createWatchProbeRuntime} from './watch-probe-provider.mjs';
 import {createWatchState} from './watch-state.mjs';
 
+test('verified task watch uses the owned independent verdict before acceptance and excludes other objectives',async()=>{
+ const objective={objectiveId:'o',status:'active',milestones:[{sessionIds:['own']}],watches:[{watchId:'w',kind:'event',source:{type:'task_event',filter:'verified'}}]};
+ const rows=[{sessionId:'own',status:'result_ready',verdict:{outcome:'passed',independentVerifier:'passed'}},{sessionId:'other',status:'accepted'}];
+ const runtime=createWatchProbeRuntime({resolveObjective:()=>objective,canObserve:()=>true,resolveWorkspacePath:()=>'/tmp',readSessions:()=>rows});
+ const read=async()=>JSON.parse((await runtime.execute({workspaceId:'ws',objectiveId:'o',watchId:'w',executionKey:'verification'})).result.outputPreview.observation.value);
+ assert.deepEqual(await read(),[{sessionId:'own',status:'result_ready'}]);rows[0].verdict.independentVerifier='missing';assert.deepEqual(await read(),[]);
+});
+
 test('owned watch executes through Projection SDK Grant and Evidence, while lease and pause denial execute no probe',async()=>{
  const root=mkdtempSync(path.join(os.tmpdir(),'watch-runtime-'));let lease=true,calls=0;
  const objective={objectiveId:'o',status:'active',milestones:[],watches:[{watchId:'w',kind:'schedule',probe:{type:'deterministic',check:'file_hash',spec:{path:'a.txt'}}}]};

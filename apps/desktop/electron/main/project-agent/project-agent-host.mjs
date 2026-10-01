@@ -534,7 +534,7 @@ export function registerDesktopProjectAgent({
     onChanged: workspaceId => { if(typeof broadcast==='function')broadcast('project-agent:changed',{workspaceIds:[workspaceId]});objectiveWatches?.changed(workspaceId); },
   });
   objectiveWatches=createDesktopObjectiveWatchHost({rootDir:runtimeRoot,store:objectiveStore,ownsProject,isReady:workspaceId=>host?.isReady(workspaceId)===true,
-    resolveWorkspacePath:workspaceId=>registry.get(workspaceId)?.path,readSessions:workspaceId=>supervisor.list({workspaceId}),agentTurnExecutor,projectPolicy:workspaceId=>profileStore.read(workspaceId)?.modelPolicy,inbox,
+    resolveWorkspacePath:workspaceId=>registry.get(workspaceId)?.path,readSessions:workspaceId=>supervisor.list({workspaceId}).map(row=>({...row,verdict:supervisor.acceptance(row.sessionId)?.verdict})),agentTurnExecutor,projectPolicy:workspaceId=>profileStore.read(workspaceId)?.modelPolicy,inbox,
     wake:workspaceId=>{void host?.sync([workspaceId]).catch(()=>{});},onChanged:workspaceId=>broadcast?.('project-agent:changed',{workspaceIds:[workspaceId]})});
   const objectives = createProjectObjectivesService({service:objectiveService,store:objectiveStore,profileStore,conversationStore,
     enabled:runtimeEnabled,holdsLease,onAppendedMessage,
