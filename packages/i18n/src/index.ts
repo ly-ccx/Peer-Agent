@@ -241,6 +241,37 @@ export type TranslationKey =
   | 'projectAgent.drawer.openScene'
   | 'projectAgent.drawer.scene'
   | 'projectAgent.drawer.sceneMissing'
+  | 'projectAgent.drawer.objective.source'
+  | 'projectAgent.drawer.objective.empty'
+  | 'projectAgent.drawer.objective.hint'
+  | 'projectAgent.drawer.objective.active'
+  | 'projectAgent.drawer.objective.paused'
+  | 'projectAgent.drawer.objective.achieved'
+  | 'projectAgent.drawer.objective.abandoned'
+  | 'projectAgent.drawer.objective.pending'
+  | 'projectAgent.drawer.objective.report_only'
+  | 'projectAgent.drawer.objective.propose'
+  | 'projectAgent.drawer.objective.act'
+  | 'projectAgent.drawer.objective.autonomy'
+  | 'projectAgent.drawer.objective.budget'
+  | 'projectAgent.drawer.objective.probes'
+  | 'projectAgent.drawer.objective.last'
+  | 'projectAgent.drawer.objective.next'
+  | 'projectAgent.drawer.objective.unchecked'
+  | 'projectAgent.drawer.objective.event'
+  | 'projectAgent.drawer.objective.edit'
+  | 'projectAgent.drawer.objective.save'
+  | 'projectAgent.drawer.objective.cancel'
+  | 'projectAgent.drawer.objective.pause'
+  | 'projectAgent.drawer.objective.resume'
+  | 'projectAgent.drawer.objective.reopen'
+  | 'projectAgent.drawer.objective.abandon'
+  | 'projectAgent.drawer.objective.failed'
+  | 'projectAgent.drawer.objective.loading'
+  | 'projectAgent.drawer.objective.title'
+  | 'projectAgent.drawer.objective.outcome'
+  | 'projectAgent.drawer.objective.tasks'
+  | 'projectAgent.drawer.objective.noTasks'
   | 'projectAgent.drawer.objectives.body'
   | 'projectAgent.drawer.objectives.hint'
   | 'projectAgent.drawer.memory.empty'
@@ -1378,6 +1409,37 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.openScene': '打开现场',
     'projectAgent.drawer.scene': '任务现场',
     'projectAgent.drawer.sceneMissing': '现场还没有会话',
+    'projectAgent.drawer.objective.source': '所属目标',
+    'projectAgent.drawer.objective.empty': '还没有持续目标',
+    'projectAgent.drawer.objective.hint': '告诉机器人你想持续推进或关注什么。',
+    'projectAgent.drawer.objective.active': '进行中',
+    'projectAgent.drawer.objective.paused': '已暂停',
+    'projectAgent.drawer.objective.achieved': '已达成',
+    'projectAgent.drawer.objective.abandoned': '已放弃',
+    'projectAgent.drawer.objective.pending': '等待你确认',
+    'projectAgent.drawer.objective.report_only': '只报告',
+    'projectAgent.drawer.objective.propose': '先提议',
+    'projectAgent.drawer.objective.act': '直接处理',
+    'projectAgent.drawer.objective.autonomy': '自主档位',
+    'projectAgent.drawer.objective.budget': '每日自动任务',
+    'projectAgent.drawer.objective.probes': '每日检查预算',
+    'projectAgent.drawer.objective.last': '最近检查',
+    'projectAgent.drawer.objective.next': '下次检查',
+    'projectAgent.drawer.objective.unchecked': '尚未检查',
+    'projectAgent.drawer.objective.event': '事件变化时检查',
+    'projectAgent.drawer.objective.edit': '调整计划',
+    'projectAgent.drawer.objective.save': '保存',
+    'projectAgent.drawer.objective.cancel': '取消',
+    'projectAgent.drawer.objective.pause': '暂停',
+    'projectAgent.drawer.objective.resume': '恢复',
+    'projectAgent.drawer.objective.reopen': '重新打开',
+    'projectAgent.drawer.objective.abandon': '放弃',
+    'projectAgent.drawer.objective.failed': '操作失败，请刷新后重试。',
+    'projectAgent.drawer.objective.loading': '正在读取目标',
+    'projectAgent.drawer.objective.title': '目标名称',
+    'projectAgent.drawer.objective.outcome': '达成的样子',
+    'projectAgent.drawer.objective.tasks': '关联任务',
+    'projectAgent.drawer.objective.noTasks': '还没有关联任务',
     'projectAgent.drawer.objectives.body': '目标将在后续版本开放',
     'projectAgent.drawer.objectives.hint': '现在可以先通过对话交代具体任务。',
     'projectAgent.drawer.memory.empty': '还没有记忆',
@@ -2313,6 +2375,37 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.openScene': 'Open the scene',
     'projectAgent.drawer.scene': 'Task scene',
     'projectAgent.drawer.sceneMissing': 'This task has no scene yet',
+    'projectAgent.drawer.objective.source': 'Objective',
+    'projectAgent.drawer.objective.empty': 'No ongoing objectives',
+    'projectAgent.drawer.objective.hint': 'Tell this bot what to work on or watch over time.',
+    'projectAgent.drawer.objective.active': 'Active',
+    'projectAgent.drawer.objective.paused': 'Paused',
+    'projectAgent.drawer.objective.achieved': 'Achieved',
+    'projectAgent.drawer.objective.abandoned': 'Abandoned',
+    'projectAgent.drawer.objective.pending': 'Awaiting your confirmation',
+    'projectAgent.drawer.objective.report_only': 'Report only',
+    'projectAgent.drawer.objective.propose': 'Propose first',
+    'projectAgent.drawer.objective.act': 'Act directly',
+    'projectAgent.drawer.objective.autonomy': 'Autonomy',
+    'projectAgent.drawer.objective.budget': 'Automatic tasks per day',
+    'projectAgent.drawer.objective.probes': 'Checks per day',
+    'projectAgent.drawer.objective.last': 'Last check',
+    'projectAgent.drawer.objective.next': 'Next check',
+    'projectAgent.drawer.objective.unchecked': 'Not checked yet',
+    'projectAgent.drawer.objective.event': 'Check on events',
+    'projectAgent.drawer.objective.edit': 'Edit plan',
+    'projectAgent.drawer.objective.save': 'Save',
+    'projectAgent.drawer.objective.cancel': 'Cancel',
+    'projectAgent.drawer.objective.pause': 'Pause',
+    'projectAgent.drawer.objective.resume': 'Resume',
+    'projectAgent.drawer.objective.reopen': 'Reopen',
+    'projectAgent.drawer.objective.abandon': 'Abandon',
+    'projectAgent.drawer.objective.failed': 'Could not save. Refresh and retry.',
+    'projectAgent.drawer.objective.loading': 'Loading objectives',
+    'projectAgent.drawer.objective.title': 'Title',
+    'projectAgent.drawer.objective.outcome': 'Desired outcome',
+    'projectAgent.drawer.objective.tasks': 'Related tasks',
+    'projectAgent.drawer.objective.noTasks': 'No related tasks yet',
     'projectAgent.drawer.objectives.body': 'Objectives will open in a later version',
     'projectAgent.drawer.objectives.hint': 'For now, you can give this bot specific tasks in chat.',
     'projectAgent.drawer.memory.empty': 'No memories yet',

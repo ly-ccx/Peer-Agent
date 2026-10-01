@@ -165,6 +165,7 @@ describe('project agent mode gate', () => {
     const agentNames = agent.tools.map((tool) => tool.function?.name ?? tool.name);
     assert.deepEqual(agentNames, [
       'list_files', 'read_file', 'search_files', 'batch_search',
+      'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
       'spawn_session', 'resume_session', 'reprioritize_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
     ]);

@@ -555,3 +555,7 @@ export { createIsolationPlanner, decideIsolation, MIN_WORKTREE_FREE_BYTES, FAILE
 
 export { createCircuitBreaker, CIRCUIT_FAILURE_LIMIT, CIRCUIT_COOLDOWN_MS } from './project-agent/circuit-breaker.mjs';
 export { createProjectRecovery, RECOVERY_PHASES } from './project-agent/recovery.mjs';
+
+export { createObjectiveStore, validateObjectiveDefinition } from './project-agent/objective-store.mjs';
+export { createObjectiveService } from './project-agent/objective-service.mjs';
+export { OBJECTIVE_TOOL_SPECS, validateObjectiveToolInput } from './project-agent/objective-tool-specs.mjs';

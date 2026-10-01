@@ -31,6 +31,7 @@ export function TasksTab({
   onOpenHistory,
   onOpenClassic,
   onResume,
+  onOpenObjective,
 }: {
   readonly sessions: readonly DrawerSession[];
   readonly history?: readonly HistoryConversation[];
@@ -39,6 +40,7 @@ export function TasksTab({
   readonly i18n: I18nRuntime;
   readonly onSelect: (sessionId: string) => void;
   readonly onOpenHistory?: (conversationId: string) => void;
+  readonly onOpenObjective?: (objectiveId: string) => void;
   readonly onResume?: (sessionId: string) => Promise<void>;
   readonly onOpenClassic?: (goal: ClassicGoalRow) => void;
 }) {
@@ -91,7 +93,9 @@ export function TasksTab({
                     </span>
                     <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                   </button>
-                  {group === 'paused' && onResume && (
+                  {session.objectiveId && onOpenObjective && <button type="button" className="bot-task-resume"
+                    onClick={() => onOpenObjective(session.objectiveId!)}>{i18n.t('projectAgent.drawer.objective.source')}</button>}
+                  {group === 'paused'  && onResume && (
                     <button type="button" className="bot-task-resume" disabled={resuming !== null}
                       aria-label={`${i18n.t('projectAgent.drawer.resume')} ${session.title}`}
                       onClick={() => { void restore(session.sessionId); }}>

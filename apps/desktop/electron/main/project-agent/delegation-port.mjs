@@ -10,3 +10,9 @@ export function liveDelegationSupervisor() {
     typeof current?.supervisor?.[name] === 'function' ? current.supervisor[name](...args) : { error: 'supervisor_unavailable' }
   )]));
 }
+
+export function liveObjectiveService() {
+  return Object.fromEntries(['create','update','pause','resume','list','get','close','prepareSpawn','linkSession'].map(name => [name, (...args) => (
+    typeof current?.objectives?.[name] === 'function' ? current.objectives[name](...args) : {ok:false,error:'objectives_unavailable'}
+  )]));
+}

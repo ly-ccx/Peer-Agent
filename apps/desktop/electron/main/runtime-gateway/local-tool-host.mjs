@@ -4,7 +4,7 @@ import { createCapabilityProviderRegistry } from './capability-provider-registry
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
 import { createLocalDelegationProvider } from './local-delegation-provider.mjs';
-import { liveDelegationSupervisor, delegationStoreDir } from '../project-agent/delegation-port.mjs';
+import { liveDelegationSupervisor, liveObjectiveService, delegationStoreDir } from '../project-agent/delegation-port.mjs';
 import { liveDeliveryFacts } from '../project-agent/delivery-facts-port.mjs';
 import { createDesktopReplyComposer } from '../project-agent/reply-composer-port.mjs';
 import { liveSessionVerification } from '../project-agent/session-verification.mjs';
@@ -64,6 +64,7 @@ export function createLocalToolHost({
   });
   const activeDelegationProvider = delegationProvider ?? createLocalDelegationProvider({
     supervisor: liveDelegationSupervisor(),
+    objectives: liveObjectiveService(),
     storeDir: delegationStoreDir,
     verification: liveSessionVerification(),
     proactivity: liveProjectProactivity(),

@@ -893,3 +893,27 @@
 .bot-task-resume { display: inline-flex; align-items: center; gap: 4px; padding: 6px 9px; margin-right: 10px; border: 1px solid var(--chrome-hairline); border-radius: 8px; color: var(--ink-muted); font-size: 12px; background: transparent; }
 .bot-task-resume:hover { color: var(--ink-primary); background: var(--za-surface-2); }
 .bot-task-resume:disabled { opacity: .5; cursor: wait; }
+
+.bot-objective { border-bottom: 1px solid var(--border-color, #2b3039); padding: 16px 0; scroll-margin-top: 12px; }
+.bot-objective.is-selected { outline: 1px solid var(--border-color, #2b3039); outline-offset: 8px; border-radius: 8px; }
+.bot-objective header { display: flex; align-items: baseline; gap: 12px; justify-content: space-between; }
+.bot-objective h2 { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.bot-objective-status { flex-shrink: 0; font-size: 11px; color: var(--text-secondary); }
+.bot-objective-outcome, .bot-objective-observation { margin: 8px 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.bot-objective-facts { margin: 12px 0; font-size: 11px; color: var(--text-secondary); }
+.bot-objective-facts > div { display: flex; justify-content: space-between; gap: 12px; margin: 4px 0; }
+.bot-objective-facts dd { margin: 0; text-align: right; }
+.bot-objective-controls { display: grid; gap: 8px; margin: 12px 0; }
+.bot-objective-controls label { display: grid; grid-template-columns: 1fr minmax(100px, 48%); align-items: center; gap: 8px; font-size: 12px; }
+.bot-objective-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.bot-objective-actions button, .bot-objective-task-links button { background: transparent; border: 1px solid var(--border-color, #2b3039); border-radius: 6px; padding: 5px 8px; font-size: 11px; color: inherit; cursor: pointer; }
+.bot-objective-actions button:disabled { opacity: .45; cursor: default; }
+.bot-objective-task-links { display: grid; gap: 6px; font-size: 11px; }
+.bot-objective-task-links > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bot-objective-task-links button { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow-wrap: anywhere; }
+.bot-objective-task-links small { color: var(--text-secondary); }
+.bot-objective-edit { display: grid; gap: 8px; margin: 10px 0; }
+.bot-objective-edit label { display: grid; gap: 4px; font-size: 12px; }
+.bot-objective-edit input, .bot-objective-edit textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-color, #2b3039); background: transparent; color: inherit; border-radius: 6px; padding: 8px; font: inherit; }
+.bot-objective-edit textarea { resize: vertical; min-height: 70px; }
+.bot-objective-error { font-size: 12px; color: var(--color-danger, #e78585); }

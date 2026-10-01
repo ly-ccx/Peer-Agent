@@ -420,3 +420,50 @@ test('global bot search excludes changed, expired and conflicted memories', asyn
     assert.equal(result.ok,true);const memories=result.hits.filter(hit=>hit.kind==='memory');assert.equal(memories.length,1);assert.match(JSON.stringify(memories[0]),/fresh/);
   }finally{env.dispose();}
 });
+
+test('objective tools and desktop commands share canonical authority, persist scope and bind actual Goal tasks',async()=>{
+  const env=harness();
+  try{
+    await env.submit('objective','持续盯着 CI，发现问题先提议');
+    const anchor=env.history().find(m=>m.kind==='user_input'&&m.content.includes('持续盯着')).id;
+    env.currentInputAnchors=[anchor];
+    const created=await tool(env,'create_objective',{title:'CI',outcome:'CI green',autonomy:'propose',anchorMessageId:anchor});
+    const made=JSON.parse(created.output);assert.equal(made.ok,true,created.output);const objectiveId=made.item.objectiveId;
+    assert.equal(env.api.objectives.list({workspaceId:env.bot.workspaceId}).items.length,1);
+    const req={workspaceId:env.bot.workspaceId,objectiveId,requestId:'pause-once'};
+    assert.equal(env.api.objectives.pause(req).item.status,'paused');
+    const command=env.history().find(m=>m.meta?.objectiveCommand==='pause');assert.equal(command.role,'user');assert.equal(command.kind,'user_input');
+    assert.equal(env.api.objectives.resume({...req,requestId:'resume'}).item.status,'active');
+    assert.equal(env.api.objectives.pause(req).replayed,true);
+    assert.equal(env.api.objectives.list(req).items[0].status,'active');
+    const before=env.history().length;
+    assert.equal(env.api.objectives.update({...req,requestId:'forge',patch:{status:'achieved'}}).code,'INVALID_INPUT');
+    assert.equal(env.history().length,before);
+    const spawned=await tool(env,'spawn_session',{title:'Check CI',brief:'read CI',kind:'research',readOnly:true,anchorMessageIds:[anchor],successCriteria:[{kind:'file-exists',description:'README exists',path:'README.md'}],objectiveId},2);
+    const work=JSON.parse(spawned.output);assert.equal(work.ok,true,spawned.output);
+    const session=env.api.supervisor.get({sessionId:work.sessionId});assert.equal(session.origin.objectiveId,objectiveId);
+    assert.ok(env.api.objectives.list(req).items[0].milestones.some(m=>m.sessionIds.includes(work.sessionId)));
+    const closed=await tool(env,'close_objective',{objectiveId,status:'achieved',evidenceRefs:['summary-only']},3);
+    assert.equal(JSON.parse(closed.output).error,'ACHIEVEMENT_UNPROVEN');
+    const other=await tool({...env,bot:{...env.bot,workspaceId:'foreign'}},'get_objective',{objectiveId},4);assert.equal(JSON.parse(other.output).ok,false);
+    assert.equal(env.api.objectives.update({...req,requestId:'act',patch:{autonomy:'act'}}).item.autonomy,'act');
+    env.plans.recordEvidenceRefs({planId:session.planId,evidenceRef:'ev-objective',toolName:'read_file',capabilityId:'local.file.read',bodyPreview:{kind:'file',text:'README exists',truncated:false}});
+    env.plans.revisePlan(session.planId,{tasks:[{taskId:'check',title:'Read',status:'completed',evidenceRefs:['ev-objective']}],
+      criterionResults:[{criterionId:'c1',passed:true,evidenceRef:'ev-objective'}],hostVerification:{independentVerifier:'passed',verifierModel:provider.id}}, {reason:'verified check',changedBy:'test'});
+    env.plans.setPlanStatus(session.planId,'completed');
+    assert.equal(env.plans.getPlan(session.planId).resultAcceptance,undefined);
+    assert.equal((await env.invoke('confirm-result',{sessionId:work.sessionId})).ok,true);
+    const achieved=await tool(env,'close_objective',{objectiveId,status:'achieved',evidenceRefs:['ev-objective']},5);
+    assert.equal(JSON.parse(achieved.output).ok,true,achieved.output);
+    assert.equal(env.api.objectives.list(req).items[0].status,'achieved');
+  }finally{env.dispose();}
+});
+test('classic mode and absent project lease refuse objective commands without adding user authority',async()=>{
+  for(const options of [{settings:{projectAgent:{shell:'classic'}}},{holdsLease:()=>false}]){
+    const env=harness(options);try{
+      const before=env.conversations.listConversations().length;
+      assert.equal(env.api.objectives.pause({workspaceId:env.bot?.workspaceId || 'no-host',objectiveId:'objective-x',requestId:'x'}).ok,false);
+      assert.equal(env.conversations.listConversations().length,before);assert.equal(env.calls.length,0);
+    }finally{env.dispose();}
+  }
+});

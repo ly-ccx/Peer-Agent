@@ -1,0 +1,1 @@
+Abandon an objective or mark it achieved. Achievement requires actual successful watch signals and acceptance of all related non-dropped tasks, with scoped Evidence references. Textual summaries cannot prove completion.

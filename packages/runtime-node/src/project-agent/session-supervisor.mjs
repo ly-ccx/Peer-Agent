@@ -67,6 +67,7 @@ export function createSessionSupervisor({
   conversationStore,
   goalPlanStore,
   goalRunner = null,
+  objectives = null,
   executionScheduler = goalRunner?.executionScheduler ?? null,
   isolationPlanner = goalRunner?.isolationPlanner ?? null,
   canManageWorkspace = () => true,
@@ -329,6 +330,11 @@ export function createSessionSupervisor({
     if (!parentConversationId || !workspaceId || anchorMessageIds.length === 0 || !title || !brief) {
       return { error: 'invalid_input', message: 'spawn input is incomplete' };
     }
+    if (input?.objectiveId) {
+      if (typeof objectives?.prepareSpawn !== 'function') return {error:'objectives_unavailable'};
+      const authorized = objectives.prepareSpawn(input, context);
+      if (!authorized?.ok) return authorized;
+    }
     const supersedes = text(input?.supersedes);
     const key = spawnIdentity(parentConversationId, {
       anchorMessageIds,
@@ -339,10 +345,12 @@ export function createSessionSupervisor({
       successCriteria: input?.successCriteria,
       dependsOn: input?.dependsOn,
       isolation: input?.isolation || 'auto',
+      ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
       ...(supersedes ? { supersedes } : {}),
     });
     const replay = findByKey(key, parentConversationId, input);
     if (replay) {
+      if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,replay.delegationOrigin.sessionId);
       return {
         sessionId: replay.delegationOrigin.sessionId,
         status: replay.delegationOrigin.phase || project(replay).status,
@@ -465,6 +473,7 @@ export function createSessionSupervisor({
           readOnly: input.readOnly === true,
           priority: input.priority || 'normal',
           isolation: input.isolation || 'auto',
+          ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
           phase,
           idempotencyKey: key,
           ...(text(context?.parentSessionId) ? { parentSessionId: text(context.parentSessionId) } : {}),
@@ -474,6 +483,7 @@ export function createSessionSupervisor({
       planId = plan?.planId || null;
       spawnedSessionId = sessionId;
       if (!plan?.delegationOrigin?.sessionId) throw new Error('delegationOrigin was not stored');
+      if (input.objectiveId && !objectives.linkSession(workspaceId,input.objectiveId,sessionId)?.ok) throw new Error('objective binding failed');
       if (!hold && isolationPlanner && canManageWorkspace(workspaceId) === true) await isolationPlanner.prepare(plan, delegatedPlans());
       if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
       if (replacingOpen) {
@@ -637,10 +647,10 @@ export function createSessionSupervisor({
     return session;
   }
 
-  function policyFor(workspaceId) {
+  function policyFor(workspaceId, plan) {
     if (typeof resolveAcceptancePolicy !== 'function') return 'auto';
     try {
-      return resolveAcceptancePolicy(workspaceId) === 'confirm' ? 'confirm' : 'auto';
+      return resolveAcceptancePolicy(workspaceId, plan) === 'confirm' ? 'confirm' : 'auto';
     } catch {
       return 'auto';
     }
@@ -704,7 +714,7 @@ export function createSessionSupervisor({
     return {
       plan,
       sessionId: origin.sessionId,
-      policy: policyFor(origin.workspaceId),
+      policy: policyFor(origin.workspaceId, plan),
       reported: messages.some((message) => replyCites(message, origin.sessionId)),
       readOnly: origin.readOnly === true,
       changedFiles: Array.isArray(extra.changedFiles) ? extra.changedFiles : filesOf(plan),

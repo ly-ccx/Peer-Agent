@@ -324,6 +324,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     const names = materializedNames('project_agent');
     assert.deepEqual(names, [
       'list_files', 'read_file', 'search_files', 'batch_search',
+      'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
       'spawn_session', 'resume_session', 'reprioritize_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
     ]);
@@ -347,6 +348,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
       scoped.map((tool) => tool.name),
       [
         'list_files', 'read_file', 'search_files', 'batch_search',
+        'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
         'spawn_session', 'resume_session', 'reprioritize_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'post_reply',
         'memory_search', 'memory_remember', 'memory_forget',
       ],
@@ -377,6 +379,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     );
     assert.deepEqual(names, [
       'list_files', 'read_file', 'search_files', 'batch_search',
+      'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
       'spawn_session', 'resume_session', 'reprioritize_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
     ]);
