@@ -69,19 +69,42 @@ function publicItem(item) {
 
 export function createMemoryProvider(options = {}) {
   let opened = null;
+  let indexedVersion = null;
+  const indexedItems = new Map();
+
+  function synchronizeIndex(store, index) {
+    const version = store.getVersion?.();
+    if (version !== undefined && version === indexedVersion) return;
+    const effective = store.list({ status: 'active' }).filter(item => isEffectiveMemory(item));
+    const remaining = new Set(indexedItems.keys());
+    for (const item of effective) {
+      remaining.delete(item.id);
+      const fingerprint = JSON.stringify([item.text, item.scope, item.workspaceId, item.kind]);
+      if (indexedItems.get(item.id) !== fingerprint) index.upsert(item);
+      indexedItems.set(item.id, fingerprint);
+    }
+    for (const id of remaining) { index.remove(id); indexedItems.delete(id); }
+    indexedVersion = version;
+  }
 
   function resources() {
-    if (opened) return opened;
+    if (opened) { synchronizeIndex(opened.store, opened.index); return opened; }
     const store = options.store || createMemoryStore(options);
     const index = createMemoryIndex({ file: resolveIndexFile(options) });
-    index.rebuild(store.list({ status: 'active' }).filter(item => isEffectiveMemory(item)));
+    // The index is disposable. Its initial contents may have been built by another host.
+    const items = store.list({ status: 'active' }).filter(item => isEffectiveMemory(item));
+    index.rebuild(items);
+    indexedItems.clear();
+    for (const item of items) indexedItems.set(item.id, JSON.stringify([item.text, item.scope, item.workspaceId, item.kind]));
+    indexedVersion = store.getVersion?.();
     opened = { store, index };
     return opened;
   }
 
   function rebuildIndex() {
     const { store, index } = resources();
-    index.rebuild(store.list({ status: 'active' }).filter(item => isEffectiveMemory(item)));
+    indexedVersion = null;
+    synchronizeIndex(store, index);
   }
 
   function searchable(workspaceId, scope) {
@@ -200,6 +223,7 @@ export function createMemoryProvider(options = {}) {
     }
     if (items.length) {
       resources().store.markUsed?.(items.map((item) => item.id));
+      indexedVersion = opened.store.getVersion?.();
     }
     return { ok: true, items };
   }
@@ -217,7 +241,7 @@ export function createMemoryProvider(options = {}) {
       messages: context?.messages,
     });
     if (!saved.ok) return { ok: false, error: saved.reason };
-    index.rebuild(store.list({ status: 'active' }).filter(item => isEffectiveMemory(item)));
+    synchronizeIndex(store, index);
     return { ok: true, id: saved.item.id, trust: saved.item.trust, status: saved.item.status };
   }
 
@@ -229,6 +253,8 @@ export function createMemoryProvider(options = {}) {
     });
     if (!saved.ok) return { ok: false, error: saved.reason };
     index.remove(saved.item.id);
+    indexedItems.delete(saved.item.id);
+    indexedVersion = store.getVersion?.();
     return { ok: true, id: saved.item.id, status: 'forgotten' };
   }
 
@@ -240,6 +266,8 @@ export function createMemoryProvider(options = {}) {
     close() {
       opened?.index.close();
       opened = null;
+      indexedVersion = null;
+      indexedItems.clear();
     },
   };
 }
@@ -267,7 +295,9 @@ function finish({ call, capabilityId, name, locale, status, output }) {
     },
     result: {
       toolCallId: call.toolCallId,
+      capabilityId,
       status,
+      output,
       outputPreview: {
         status,
         tool: name,

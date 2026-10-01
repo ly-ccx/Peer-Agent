@@ -153,10 +153,10 @@ export interface ChatSystemContextBlock {
   readonly trust?: string;
 }
 
-export type ChatSupplementalSystemContextInput = Pick<
+export type ChatSupplementalSystemContextInput = Partial<Pick<
   SystemContextInput,
-  'continuityContext' | 'explorerContext' | 'verifierContext' | 'taskAcceptance'
->;
+  'continuityContext' | 'explorerContext' | 'verifierContext' | 'taskAcceptance' | 'role' | 'workspaceId' | 'sessionId' | 'planId' | 'turnContext' | 'projectMemory' | 'workSessionOrigin' | 'runtimeReminders'
+>>;
 
 function firstPinnedUserText(
   history: readonly ChatMessage[],
@@ -175,6 +175,8 @@ function firstPinnedUserText(
 
 export interface ChatModelInput {
   readonly content: string;
+  /** Host event turns admit their context separately and have no new user message. */
+  readonly omitCurrentUser?: boolean;
   readonly images?: readonly ChatMessageImage[];
   readonly history: readonly ChatMessage[];
   readonly modelMessages: readonly ModelMessage[];

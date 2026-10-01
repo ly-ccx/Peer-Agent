@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
+import { BotHostControl } from './BotHostControl';
 import { BotPolicyFields } from './BotPolicyFields';
 import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 
@@ -238,6 +239,7 @@ export function BotSettingsTab({
           onChange={value => { void saveConcurrency(value); }} />
         <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.concurrencyHint')}</p>
       </div>
+      <BotHostControl workspaceId={workspaceId} i18n={i18n} />
       <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
         onChange={patch => { void savePolicy(patch); }} />
       <div className="bot-settings-field">

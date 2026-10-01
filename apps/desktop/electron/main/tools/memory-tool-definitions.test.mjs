@@ -13,7 +13,7 @@ import {
 test('memory prompts are loaded from resource files and only project_agent can see them', () => {
   for (const tool of MEMORY_TOOL_DEFINITIONS) {
     const asset = readFileSync(
-      new URL(`./prompts/memory/${tool.name}.md`, import.meta.url),
+      new URL(`../../../../../packages/runtime-node/src/project-agent/prompts/memory/${tool.name}.md`, import.meta.url),
       'utf8',
     ).trim();
     assert.equal(tool.prompt(), asset);

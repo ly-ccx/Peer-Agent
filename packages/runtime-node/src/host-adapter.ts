@@ -39,6 +39,13 @@ export function createNodeRuntimeHostAdapter(
       const call = request.call;
       const session = options.sessionProvider.getSession();
       const locale = resolveLocale(session);
+      const signal = context.signal as AbortSignal | undefined;
+      const reason = signal?.aborted ? 'execution_cancelled' : options.executionGate?.(request, context);
+      if (reason) return {
+        call, grant: options.resultFactory.createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }),
+        result: { ...options.resultFactory.createFailedResult({ call, locale, reason, dataLevel: defaultDataLevel(call) }),
+          status: signal?.aborted ? 'cancelled' : 'denied' },
+      };
       const execution = await options.providerExecutor.execute(request, {
         ...context,
         locale,

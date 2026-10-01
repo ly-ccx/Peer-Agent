@@ -17,7 +17,8 @@ const workspaces: string[] = [];
 const liveHosts: TuiHost[] = [];
 
 function createHost(options: string | CreateTuiHostOptions): TuiHost {
-  const host = createTuiHost(options);
+  const resolved = typeof options === 'string' ? {workspaceRoot: options} : options;
+  const host = createTuiHost({ ...resolved, userDataPath: resolved.userDataPath ?? path.join(resolved.workspaceRoot, '.peer-agent-test') });
   liveHosts.push(host);
   return host;
 }
@@ -890,6 +891,10 @@ describe('TUI Runtime host', () => {
     }, context(2));
     expect(read.result.status).toBe('completed');
     const evidenceRef = `tool-result://${read.result.toolCallId}`;
+    await writeFile(path.join(workspaceRoot, 'evidence.txt'), 'changed after execution', 'utf8');
+    const indexed = host.goalBridge!.store.findEvidenceIndexRecords([evidenceRef]);
+    expect(indexed[0]?.bodyPreview?.text).toBe('governed evidence');
+    expect(indexed[0]?.toolName).toBe('read_file');
 
     const updated = await host.execute('local.goal.update', {
       planId,

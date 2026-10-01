@@ -83,8 +83,12 @@ export function createHostLease({
   const tracksEligibility = typeof projectAgentEnabled === 'function' && typeof botWorkspaceIds === 'function';
   const held = new Map();
   const yieldedUntil = new Map();
+  const draining = new Map();
+  const yieldBlocked = new Set();
+  let yieldHandler = null;
   let timer = null;
   let disposed = false;
+  let closing = false;
 
   function root() {
     return rootDir || pathOf('projectRuntime');
@@ -201,9 +205,11 @@ export function createHostLease({
   }
 
   function acquire(workspaceId) {
+    if (closing) return {acquired:false,reason:'closing'};
     const dirName = workspaceDir(workspaceId);
     if (!dirName) return { acquired: false, reason: 'invalid', lease: null };
     if (disposed) return { acquired: false, reason: 'disposed', lease: readLease(dirName) };
+    if (yieldBlocked.has(dirName) || (yieldedUntil.get(dirName) ?? 0) > clock()) return { acquired: false, reason: 'yielded', lease: readLease(dirName) };
     const file = leaseFile(dirName);
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const record = buildRecord();
@@ -280,10 +286,10 @@ export function createHostLease({
     if (!dirName || !held.has(dirName)) return false;
     const current = readLease(dirName);
     if (!isOurs(current)) {
-      held.delete(dirName);
+      drainAndRelease(dirName, 'lost');
       return false;
     }
-    return true;
+    return !yieldBlocked.has(dirName);
   }
 
   function release(workspaceId) {
@@ -310,17 +316,41 @@ export function createHostLease({
     mkdirSync(path.dirname(yieldFile(dirName)), { recursive: true });
     writeFileSync(yieldFile(dirName), `${JSON.stringify({
       workspaceId: dirName,
+      holderHostId: current.hostId,
+      holderPid: current.pid,
       requestedAt: stamp(),
     })}\n`);
     return { requested: true, holder: current.hostId };
   }
 
+  function drainAndRelease(workspaceId, reason, requestFile = null) {
+    if (draining.has(workspaceId)) return;
+    const finish = () => {
+      release(workspaceId);
+      yieldBlocked.delete(workspaceId);
+      if (reason !== 'lost' || yieldHandler) yieldedUntil.set(workspaceId, clock() + expireMs);
+      if (requestFile) removeFile(requestFile);
+    };
+    if (!yieldHandler) { finish(); return; }
+    // Gate new execution immediately, but heartbeat the owned lease until all old work stops.
+    yieldBlocked.add(workspaceId);
+    const job = Promise.resolve().then(() => yieldHandler(workspaceId, reason))
+      .then(finish).catch(() => {
+        // Keep ownership and retry draining on the next pulse; never admit a second host early.
+      }).finally(() => { draining.delete(workspaceId); });
+    draining.set(workspaceId, job);
+  }
+
   function takeYield(workspaceId) {
     const file = yieldFile(workspaceId);
-    if (!existsSync(file) || !holds(workspaceId)) return false;
-    release(workspaceId);
-    yieldedUntil.set(workspaceId, clock() + expireMs);
-    removeFile(file);
+    if (!existsSync(file) || !isOurs(readLease(workspaceId))) return false;
+    try {
+      const request = JSON.parse(readFileSync(file, 'utf8'));
+      if (request.holderHostId && (request.holderHostId !== id || request.holderPid !== processId)) {
+        removeFile(file); return false;
+      }
+    } catch { removeFile(file); return false; }
+    drainAndRelease(workspaceId, 'takeover', file);
     return true;
   }
 
@@ -345,7 +375,7 @@ export function createHostLease({
     const at = clock();
     const wantedSet = new Set(wanted);
     for (const workspaceId of [...held.keys()]) {
-      if (!wantedSet.has(workspaceId)) release(workspaceId);
+      if (!wantedSet.has(workspaceId)) drainAndRelease(workspaceId, 'ineligible');
     }
     for (const workspaceId of wantedSet) {
       if ((yieldedUntil.get(workspaceId) ?? 0) > at) continue;
@@ -358,7 +388,7 @@ export function createHostLease({
     const file = leaseFile(workspaceId);
     const current = readLease(workspaceId);
     if (!isOurs(current)) {
-      held.delete(workspaceId);
+      drainAndRelease(workspaceId, 'lost');
       return false;
     }
     const next = { ...current, heartbeatAt: stamp() };
@@ -402,12 +432,25 @@ export function createHostLease({
   return {
     acquire,
     holds,
+    /** The host must abort and await its active turns before ownership can change. */
+    setYieldHandler(handler) {
+      yieldHandler = typeof handler === 'function' ? handler : null;
+      return () => { if (yieldHandler === handler) yieldHandler = null; };
+    },
+    awaitDrained: () => Promise.allSettled([...draining.values()]),
     release,
     releaseAll,
     requestTakeover,
     pulse,
     dispose,
     close,
+    async closeAfterDraining() {
+      closing = true;
+      for (const workspaceId of [...held.keys()]) drainAndRelease(workspaceId, 'closing');
+      await Promise.allSettled([...draining.values()]);
+      if (held.size) throw new Error('host_drain_incomplete');
+      close();
+    },
     heldWorkspaceIds: () => [...held.keys()],
   };
 }

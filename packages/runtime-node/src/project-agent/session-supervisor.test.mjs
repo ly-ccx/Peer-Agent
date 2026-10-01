@@ -1641,6 +1641,30 @@ test('manual delegated pause closes admission until an anchored restore', async 
   } finally { await env.cleanup(); }
 });
 
+test('new host resumes only a handoff suspension and preserves its verification intent', async () => {
+  const resumed = [];
+  let env;
+  env = await harness({goalRunner:{async start(){}, async resume(planId, options){
+    resumed.push({planId,...options}); env.goalPlanStore.resumeRunner(planId,{intent:options.intent});
+  }}});
+  try {
+    const handoff = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true}),contextOf(env));
+    const manual = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true,successCriteria:['other outcome']}),contextOf(env));
+    for (const [session, reason] of [[handoff,'host_handoff'],[manual,'user_pause']]) {
+      const planId = env.supervisor.get({sessionId:session.sessionId}).planId;
+      const plan = env.goalPlanStore.getPlan(planId);
+      env.goalPlanStore.revisePlan(planId,{delegationOrigin:{...plan.delegationOrigin,phase:'paused',pausedFromPhase:'running',pausedRunnerIntent:'verify'}},{reason:'test suspension',changedBy:'test'});
+      env.goalPlanStore.setRunnerState(planId,{enabled:true,status:'paused',intent:'block',blockedReason:reason});
+      env.goalPlanStore.setPlanStatus(planId,'paused');
+    }
+    await env.supervisor.resumeRecovered('ws-1');
+    const planId = env.supervisor.get({sessionId:handoff.sessionId}).planId;
+    assert.deepEqual(resumed,[{planId,awaitIdle:false,intent:'verify'}]);
+    assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.phase,'running');
+    assert.equal(env.supervisor.get({sessionId:manual.sessionId}).status,'paused');
+  } finally {await env.cleanup();}
+});
+
 test('supersession closes the persisted admission gate before waiting for an in-flight tool', async () => {
   let release; let began;
   const settling = new Promise(resolve => { release = resolve; });

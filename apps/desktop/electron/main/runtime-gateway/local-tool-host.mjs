@@ -53,6 +53,7 @@ export function createLocalToolHost({
   extraProviders = [],
   hookRunner = null,
   onRuntimeEvent = null,
+  executionGate = null,
 }) {
   const activeMemoryProvider = memoryProvider ?? createLocalMemoryProvider({
     enabled: (workspaceId) => liveMemoryGate().enabled(workspaceId),
@@ -102,6 +103,7 @@ export function createLocalToolHost({
   });
 
   const hostAdapter = createNodeRuntimeHostAdapter({
+    ...(executionGate ? { executionGate } : {}),
     workspaceRoot,
     providerExecutor: providerRegistry,
     sessionProvider: sessionStore,

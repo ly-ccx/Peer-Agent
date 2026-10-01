@@ -25,7 +25,7 @@ const MAX_CONCURRENCY = 8;
 const MAX_QUERIES = 8;
 const AGGREGATE_MATCH_CAP = 500;
 
-const SEARCH_MODE_SCOPES = Object.freeze(['chat', 'plan', 'goal', 'explorer'] as const);
+const SEARCH_MODE_SCOPES = Object.freeze(['chat', 'plan', 'goal', 'explorer', 'project_agent'] as const);
 
 export const NODE_SEARCH_AGGREGATE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Object.freeze([
   {

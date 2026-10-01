@@ -402,6 +402,7 @@ function executionView(context) {
     toolCallOrdinal: context?.toolCallOrdinal ?? nested.toolCallOrdinal ?? '',
     workspaceId: text(context?.workspaceId) || text(nested.workspaceId),
     workspacePath: text(context?.workspacePath) || text(nested.workspacePath) || '',
+    surface: context?.surface ?? nested.surface,
     conversationId: text(context?.conversationId) || text(nested.conversationId),
     memoryIds: idList(context?.turnMemoryIds ?? nested.turnMemoryIds),
     currentInputAnchors: idList(context?.currentInputAnchors ?? nested.currentInputAnchors),
@@ -534,6 +535,7 @@ function spawnContext(view) {
     parentConversationId: text(view?.conversationId) || '',
     workspaceId: text(view?.workspaceId) || '',
     workspacePath: text(view?.workspacePath) || '',
+    surface: view?.surface,
     currentInputAnchors: view.currentInputAnchors,
     objectiveWakeIds: view.currentInputAnchors.length?[]:view.objectiveWakeIds,
     objectiveWakeEvents: view.currentInputAnchors.length?[]:view.objectiveWakeEvents,
@@ -642,7 +644,9 @@ function finish({ call, capabilityId, name, locale, status, output }) {
     },
     result: {
       toolCallId: call.toolCallId,
+      capabilityId,
       status,
+      output,
       outputPreview: {
         status,
         tool: name,

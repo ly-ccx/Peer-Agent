@@ -11,6 +11,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  statSync,
 } from 'node:fs';
 import path from 'node:path';
 
@@ -104,6 +105,14 @@ export function createMemoryStore({
   rootDir = null,
   now = () => new Date(),
 } = {}) {
+  const foldedCache = new Map();
+  function fileVersion(file) {
+    try { const stat = statSync(file); return `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`; }
+    catch { return null; }
+  }
+  function getVersion() {
+    return [userFile(), ...projectFiles().sort()].map(file => `${file}:${fileVersion(file)}`).join('|');
+  }
   function projectsRoot() {
     return rootDir ? path.join(rootDir, 'projects') : pathOf('projects');
   }
@@ -191,7 +200,10 @@ export function createMemoryStore({
   }
 
   function readFolded(file) {
-    if (!existsSync(file)) return [];
+    const version = fileVersion(file);
+    if (version === null) { foldedCache.delete(file); return []; }
+    const cached = foldedCache.get(file);
+    if (cached?.version === version) return cached.items;
     let raw = '';
     try {
       raw = readFileSync(file, 'utf8');
@@ -208,7 +220,9 @@ export function createMemoryStore({
         // 坏行跳过，不挡住其余条目。
       }
     }
-    return [...byId.values()];
+    const items = [...byId.values()];
+    foldedCache.set(file, { version, items });
+    return items;
   }
 
   function append(file, record) {
@@ -504,5 +518,6 @@ export function createMemoryStore({
     get,
     userFile,
     projectFile,
+    getVersion,
   };
 }

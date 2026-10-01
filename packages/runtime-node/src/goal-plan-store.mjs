@@ -2115,6 +2115,20 @@ export function createGoalPlanStore({
   const changeFile = path.join(storeDir, '.changes.jsonl');
   const evidenceRecordCache = new Map();
   const missingEvidenceRefCache = new Set();
+  let evidenceCacheVersion = null;
+  function fileVersion(file) {
+    try {
+      const stat = statSync(file);
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+    } catch { return null; }
+  }
+  function refreshEvidenceCache() {
+    const version = fileVersion(evidenceIndexFile);
+    if (version === evidenceCacheVersion) return;
+    evidenceRecordCache.clear();
+    missingEvidenceRefCache.clear();
+    evidenceCacheVersion = version;
+  }
   // 桌面预览产物只占证据索引里的少数 planId。listPlans 会对每个 completed
   // 计划问一次「有没有预览产物」；索引可达数十 MB，不能为此反复全量解析。
   // 缓存按 mtime+size 失效，本进程 append 时按写入字节数增量更新。
@@ -2286,6 +2300,7 @@ export function createGoalPlanStore({
   // runner-progress 内存叠加 + 写盘节流：保证同 tick 内 getPlan 读到最新计数，
   // 同时把磁盘写入合并到 1s 窗口，降低 CLI 后台跑时跨进程 .changes.jsonl 放大。
   const runnerProgressOverlay = new Map();
+  const runnerProgressVersions = new Map();
   const runnerProgressTimers = new Map();
   // soft progress：同进程广播 100ms；跨进程写盘 1s。硬状态仍即时。
   const runnerProgressNotifyTimers = new Map();
@@ -2295,6 +2310,7 @@ export function createGoalPlanStore({
   function clearRunnerProgressState(planId) {
     if (planId) {
       runnerProgressOverlay.delete(planId);
+      runnerProgressVersions.delete(planId);
       const timer = runnerProgressTimers.get(planId);
       if (timer) {
         clearTimeout(timer);
@@ -2312,6 +2328,17 @@ export function createGoalPlanStore({
     for (const timer of runnerProgressNotifyTimers.values()) clearTimeout(timer);
     runnerProgressNotifyTimers.clear();
     runnerProgressOverlay.clear();
+    runnerProgressVersions.clear();
+  }
+
+  function currentRunnerProgress(planId) {
+    const overlay = runnerProgressOverlay.get(planId);
+    if (!overlay) return null;
+    if (runnerProgressVersions.get(planId) !== fileVersion(planFile(planId))) {
+      clearRunnerProgressState(planId);
+      return null;
+    }
+    return overlay;
   }
 
   function flushRunnerProgressPersist(planId, { notify = false } = {}) {
@@ -2320,7 +2347,7 @@ export function createGoalPlanStore({
       clearTimeout(timer);
       runnerProgressTimers.delete(planId);
     }
-    const overlay = runnerProgressOverlay.get(planId);
+    const overlay = currentRunnerProgress(planId);
     if (!overlay) return null;
     const normalized = normalizePlan(overlay);
     const next = guardUiCompletion({
@@ -2332,6 +2359,7 @@ export function createGoalPlanStore({
     syncIndex(next);
     // 落盘后保留 overlay 内容一致；完整 persist 路径会清 overlay。
     runnerProgressOverlay.set(planId, next);
+    runnerProgressVersions.set(planId, fileVersion(planFile(planId)));
     publishPersistedChange('persist', next.planId, {
       conversationId: next.conversationId ?? null,
       changeKind: 'runner-progress',
@@ -2355,7 +2383,7 @@ export function createGoalPlanStore({
     if (runnerProgressNotifyTimers.has(planId)) return;
     const timer = setTimeout(() => {
       runnerProgressNotifyTimers.delete(planId);
-      const plan = runnerProgressOverlay.get(planId) || plans.get(planId);
+      const plan = getPlan(planId);
       if (!plan) return;
       notifyChanged('persist', planId, {
         conversationId: conversationId ?? plan.conversationId ?? null,
@@ -2447,6 +2475,7 @@ export function createGoalPlanStore({
   }
 
   function findEvidenceIndexRecords(refs) {
+    refreshEvidenceCache();
     const normalizedRefs = normalizeEvidenceRefList(refs);
     const missing = normalizedRefs.filter(
       (ref) => !evidenceRecordCache.has(ref) && !missingEvidenceRefCache.has(ref),
@@ -2474,6 +2503,7 @@ export function createGoalPlanStore({
   }
 
   function recordEvidenceRefs(entry = {}) {
+    refreshEvidenceCache();
     const refs = normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef);
     if (refs.length === 0) return [];
     const conversationId = normalizeConversationId(entry.conversationId);
@@ -2497,7 +2527,8 @@ export function createGoalPlanStore({
       .filter(Boolean);
     const mergedRecords = [];
     for (const record of records) {
-      const merged = mergeEvidenceIndexRecords(evidenceRecordCache.get(record.evidenceRef), record);
+      const previous = findEvidenceIndexRecords([record.evidenceRef])[0];
+      const merged = mergeEvidenceIndexRecords(previous, record);
       let sizeBefore = 0;
       try {
         sizeBefore = statSync(evidenceIndexFile).size;
@@ -2508,6 +2539,7 @@ export function createGoalPlanStore({
       noteDesktopPreviewEvidenceAppend(merged, sizeBefore);
       missingEvidenceRefCache.delete(record.evidenceRef);
       evidenceRecordCache.set(record.evidenceRef, merged);
+      evidenceCacheVersion = fileVersion(evidenceIndexFile);
       mergedRecords.push(merged);
     }
     return mergedRecords;
@@ -2918,7 +2950,7 @@ export function createGoalPlanStore({
   }
 
   function getPlan(planId) {
-    const overlay = runnerProgressOverlay.get(planId);
+    const overlay = currentRunnerProgress(planId);
     if (overlay) return guardUiCompletion(normalizePlan(overlay));
     return guardUiCompletion(normalizePlan(readJson(planFile(planId))));
   }
@@ -3560,6 +3592,7 @@ export function createGoalPlanStore({
         ...(normalized.timing ? { timing: normalized.timing } : {}),
       });
       runnerProgressOverlay.set(planId, next);
+      if (!runnerProgressVersions.has(planId)) runnerProgressVersions.set(planId, fileVersion(planFile(planId)));
       scheduleRunnerProgressPersist(planId);
       // soft progress：IPC 合并；硬状态跃迁仍走下面即时 persist 路径。
       scheduleRunnerProgressNotify(next.planId, next.conversationId ?? null);

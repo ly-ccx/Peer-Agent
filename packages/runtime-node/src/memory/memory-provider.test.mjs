@@ -35,6 +35,21 @@ function ids(output) {
   return output.items.map((item) => item.id).sort();
 }
 
+test('a warm provider sees another host’s new, revised and forgotten memory', async () => {
+  const root = tempRoot('external-index');
+  const provider = createMemoryProvider({ rootDir: root });
+  const other = createMemoryStore({ rootDir: root });
+  const search = async query => outputOf(await provider.executeCapability(call('local.memory.search', { query }), context()));
+  try {
+    assert.equal((await search('external')).items.length, 0);
+    const saved = other.writeVerified({ workspaceId: 'ws-1', kind: 'fact', text: 'external handoff marker', sourceRefs: ['ev'] });
+    assert.equal(saved.ok, true);
+    assert.deepEqual(ids(await search('external')), [saved.item.id]);
+    other.forget({ id: saved.item.id, workspaceId: 'ws-1', reason: 'test' });
+    assert.deepEqual(ids(await search('external')), []);
+  } finally { provider.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('the host familiarity anchor cannot turn file observations into stated memory', async () => {
   const root = tempRoot('familiarity-provenance');
   const provider = createMemoryProvider({ rootDir: root });

@@ -37,6 +37,7 @@ const READ_MODE_SCOPES = Object.freeze([
   'plan',
   'goal',
   'explorer',
+  'project_agent',
 ] as const);
 const WRITE_MODE_SCOPES = Object.freeze(['chat', 'goal'] as const);
 

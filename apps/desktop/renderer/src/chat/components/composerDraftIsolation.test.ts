@@ -149,7 +149,7 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
     readSource('../../../../electron/main/main.mjs'),
     readSource('../../../../electron/main/llm-chat-service.mjs'),
     readSource('./GoalPlanPanel.tsx'),
-    readSource('../../../../electron/main/agent-host/goal-runner-host.mjs'),
+    readSource('../../../../../../packages/runtime-node/src/project-agent/goal-runner-host.mjs'),
   ]);
   // The create-branch dialog now owns its own markup and source picker, so the
   // push-by-default assertions below read that module instead of ChatSurface.

@@ -1,18 +1,4 @@
-import { readFileSync } from 'node:fs';
-
-import { MEMORY_TOOL_SPECS } from '@peer-agent/runtime-node';
-
-const promptAssetCache = new Map();
-
-function readPromptAsset(filename) {
-  if (!promptAssetCache.has(filename)) {
-    promptAssetCache.set(
-      filename,
-      readFileSync(new URL(`./prompts/memory/${filename}`, import.meta.url), 'utf8').trim(),
-    );
-  }
-  return promptAssetCache.get(filename);
-}
+import { MEMORY_TOOL_SPECS, projectToolDescription } from '@peer-agent/runtime-node';
 
 const MEMORY_RUNTIME = Object.freeze({
   adapter: 'runtime-gateway.local-memory-provider',
@@ -24,7 +10,7 @@ export const MEMORY_TOOL_DEFINITIONS = MEMORY_TOOL_SPECS.map((item) => ({
   name: item.name,
   capabilityId: item.capabilityId,
   availableInModes: ['project_agent'],
-  prompt: () => readPromptAsset(`${item.name}.md`),
+  prompt: () => projectToolDescription(item.name),
   runtime: Object.freeze({
     ...MEMORY_RUNTIME,
     executorCapabilityId: item.capabilityId,

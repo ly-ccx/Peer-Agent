@@ -241,6 +241,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'project-agent:confirm-result',
   'project-agent:accept-readme',
   'project-agent:retry',
+  'project-agent:takeover-host',
   'project-agent:submit-input',
   'project-agent:update-profile',
   'project-objectives:list',

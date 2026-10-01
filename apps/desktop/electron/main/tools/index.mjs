@@ -73,6 +73,7 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
 }
 
 import { isSelectionDiscussion } from '../selection-background-context.mjs';
+import { evaluateWorkSessionWrite } from '@peer-agent/runtime-node';
 
 function excludeCapabilityPrefixes(value) {
   if (!Array.isArray(value)) return [];
@@ -96,6 +97,13 @@ export function createRuntimeToolProjection({
     });
   }
   const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);
+  if (projectionOptions.readOnlyWorkSession === true) {
+    const allowed = new Set(projection.capabilities.filter(capability => evaluateWorkSessionWrite(
+      { delegationOrigin: { readOnly: true } }, capability,
+    ).allowed).map(capability => capability.capabilityId));
+    registry = createToolRegistry({ tools: registry.listTools().filter(tool => allowed.has(tool.runtime?.executorCapabilityId || tool.capabilityId)) });
+    return createRuntimeToolProjection({ registry, projectionOptions: { ...projectionOptions, readOnlyWorkSession: false } });
+  }
   const modelProjection = createModelToolProjectionFromRuntimeProjection(
     projection,
     registry,

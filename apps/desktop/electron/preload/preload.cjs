@@ -199,6 +199,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentStartFamiliarize: (params) => ipcRenderer.invoke('project-agent:start-familiarize', params),
   projectAgentConfirmResult: (params) => ipcRenderer.invoke('project-agent:confirm-result', params),
   projectAgentAcceptReadme: (params) => ipcRenderer.invoke('project-agent:accept-readme', params),
+  projectAgentTakeoverHost: (params) => ipcRenderer.invoke('project-agent:takeover-host', params),
   projectAgentRetry: (params) => ipcRenderer.invoke('project-agent:retry', params),
   projectObjectivesList: (params) => ipcRenderer.invoke('project-objectives:list', params),
   projectObjectivesUpdate: (params) => ipcRenderer.invoke('project-objectives:update', params),

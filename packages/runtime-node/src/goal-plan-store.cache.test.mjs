@@ -71,3 +71,39 @@ test('同进程 persist 后 listPlans 立即反映变更（writeJsonl 使缓存�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('旧宿主的待刷进度在新宿主写盘后失效，不覆盖接管状态', async () => {
+  const { dir, store } = createTempStore();
+  try {
+    const plan = store.createPlan({ title: 'handoff', goal: 'handoff' });
+    const nextHost = createGoalPlanStore({ storeDir: dir });
+    store.setRunnerState(plan.planId, { turnCount: 7 });
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 7);
+    nextHost.setRunnerState(plan.planId, { status: 'paused', turnCount: 11 });
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 11);
+    assert.equal(store.getPlan(plan.planId).runner.status, 'paused');
+    // Cover the pending flush without first reading from the old store.
+    store.setRunnerState(plan.planId, { turnCount: 12 });
+    nextHost.setRunnerState(plan.planId, { status: 'paused', turnCount: 23 });
+    await new Promise(resolve => setTimeout(resolve, 1150));
+    assert.equal(nextHost.getPlan(plan.planId).runner.turnCount, 23);
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 23);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('证据索引跨进程追加后，命中和缺失缓存均失效且保留已有字段', () => {
+  const { dir, store } = createTempStore();
+  try {
+    const nextHost = createGoalPlanStore({ storeDir: dir });
+    assert.deepEqual(store.findEvidenceIndexRecords(['tool-result://shared']), []);
+    nextHost.recordEvidenceRefs({ evidenceRefs: ['tool-result://shared'], toolName: 'read_file',
+      artifactRefs: ['local-file-artifact://snapshot'] });
+    assert.equal(store.findEvidenceIndexRecords(['tool-result://shared'])[0].toolName, 'read_file');
+    nextHost.recordEvidenceRefs({ evidenceRefs: ['tool-result://shared'], capabilityId: 'local.file.read', toolName: 'read_file', bodyPreview: { kind: 'file', text: 'snapshot body' } });
+    assert.equal(store.findEvidenceIndexRecords(['tool-result://shared'])[0].bodyPreview.text, 'snapshot body');
+    store.recordEvidenceRefs({ evidenceRefs: ['tool-result://shared'], capabilityId: 'local.file.read' });
+    const merged = nextHost.findEvidenceIndexRecords(['tool-result://shared'])[0];
+    assert.equal(merged.bodyPreview.text, 'snapshot body');
+    assert.deepEqual(merged.artifactRefs, ['local-file-artifact://snapshot']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

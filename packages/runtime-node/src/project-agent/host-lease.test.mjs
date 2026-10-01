@@ -229,6 +229,42 @@ test('任务计划只在持有租约时推进，普通计划不看租约', () =>
   assert.equal(delegatedPlanRunsWithLease({ delegationOrigin: { surface: 'desktop' } }, () => true), false);
 });
 
+test('接管先关闭执行闸，旧回合停止前保留心跳，停止后才允许新宿主取得租约', async () => {
+  const root = tempRoot(), clock = clockedSchedule();
+  const holder = service(root, clock, { projectAgentEnabled: () => true, botWorkspaceIds: () => ['ws-drain'] });
+  const client = service(root, clock, { hostId: 'host-b', pid: 202, surface: 'tui' });
+  let finish, calls = 0;
+  holder.setYieldHandler(() => { calls++; return new Promise(resolve => { finish = resolve; }); });
+  try {
+    client.requestTakeover('ws-drain'); holder.pulse();
+    assert.equal(holder.holds('ws-drain'), false);
+    assert.equal(client.acquire('ws-drain').acquired, false);
+    await Promise.resolve();
+    clock.set(25_000); holder.pulse();
+    assert.equal(calls, 1);
+    assert.equal(Date.parse(readLease(root, 'ws-drain').heartbeatAt), 25_000);
+    assert.equal(client.acquire('ws-drain').acquired, false);
+    finish(); await holder.awaitDrained();
+    assert.equal(holder.acquire('ws-drain').reason, 'yielded');
+    assert.equal(client.acquire('ws-drain').acquired, true);
+  } finally { holder.close(); client.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('停止失败时保留租约并重试，不在失败窗口接入另一宿主', async () => {
+  const root = tempRoot(), clock = clockedSchedule();
+  const holder = service(root, clock), client = service(root, clock, { hostId: 'host-b', pid: 202 });
+  let calls = 0;
+  holder.setYieldHandler(async () => { if (++calls === 1) throw new Error('drain failed'); });
+  try {
+    holder.acquire('ws-retry'); client.requestTakeover('ws-retry'); holder.pulse();
+    await holder.awaitDrained();
+    assert.equal(client.acquire('ws-retry').acquired, false);
+    holder.pulse(); await holder.awaitDrained();
+    assert.equal(calls, 2);
+    assert.equal(client.acquire('ws-retry').acquired, true);
+  } finally { holder.close(); client.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('archived bots stop being eligible for automatic lease acquisition', () => {
   const root = tempRoot(), projects = path.join(root, 'projects'); const file = path.join(projects, 'ws-archive', 'profile.json');
   try {
@@ -238,4 +274,46 @@ test('archived bots stop being eligible for automatic lease acquisition', () => 
     writeFileSync(file, JSON.stringify({ status: 'archived' })); holder.pulse();
     assert.equal(holder.holds('ws-archive'), false); assert.deepEqual(listBotWorkspaceIds(projects), []); holder.close();
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('external ownership loss drains old execution without removing the new host lease', async () => {
+  const root=tempRoot(), clock=clockedSchedule();
+  const holder=service(root,clock), next=service(root,clock,{hostId:'new-host',pid:202,surface:'tui'});
+  const losses=[];
+  try {
+    holder.setYieldHandler(async(id,reason)=>{losses.push({id,reason});});
+    holder.acquire('ws-loss');clock.set(21_000);next.acquire('ws-loss');
+    assert.equal(holder.holds('ws-loss'),false);
+    assert.equal(holder.holds('ws-loss'),false);
+    await holder.awaitDrained();
+    assert.deepEqual(losses,[{id:'ws-loss',reason:'lost'}]);
+    assert.equal(next.holds('ws-loss'),true);
+    assert.equal(readLease(root,'ws-loss').hostId,'new-host');
+  } finally {holder.close();next.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('graceful close keeps ownership until all execution has stopped', async () => {
+  const root=tempRoot(), clock=clockedSchedule();
+  const holder=service(root,clock), next=service(root,clock,{hostId:'new-host',pid:202,surface:'tui'});
+  let release; const stopped=new Promise(resolve=>{release=resolve;});
+  try {
+    holder.acquire('ws-close'); holder.setYieldHandler(()=>stopped);
+    const closing=holder.closeAfterDraining();
+    assert.equal(holder.holds('ws-close'),false);
+    assert.equal(next.acquire('ws-close').acquired,false);
+    assert.equal(holder.acquire('ws-new').acquired,false);
+    release(); await closing;
+    assert.equal(next.acquire('ws-close').acquired,true);
+  } finally {release();holder.close();next.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('failed graceful drain keeps a live lease rather than opening execution to a second host', async () => {
+  const root=tempRoot(), clock=clockedSchedule();
+  const holder=service(root,clock), next=service(root,clock,{hostId:'new-host',pid:202,surface:'tui'});
+  try {
+    holder.acquire('ws-close');holder.setYieldHandler(async()=>{throw new Error('still running');});
+    await assert.rejects(holder.closeAfterDraining(),/host_drain_incomplete/);
+    assert.equal(next.acquire('ws-close').acquired,false);
+    assert.equal(readLease(root,'ws-close').hostId,'host-a');
+  } finally {holder.close();next.close();rmSync(root,{recursive:true,force:true});}
 });

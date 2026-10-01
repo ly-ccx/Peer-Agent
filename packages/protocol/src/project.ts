@@ -15,6 +15,14 @@ export interface ProjectRegistryEntry {
   readonly remoteAlias?: string;
 }
 
+export interface ProjectHostTakeoverRequest {
+  readonly workspaceId: string;
+}
+
+export type ProjectHostTakeoverResult =
+  | { readonly ok: true; readonly requested: boolean; readonly alreadyHost?: boolean }
+  | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'HOST_UNAVAILABLE' | 'INVALID_INPUT' };
+
 export type BotAvatar =
   | { readonly kind: 'generated'; readonly shape: string; readonly color: string; readonly variant?: number }
   | { readonly kind: 'image'; readonly ref: string };

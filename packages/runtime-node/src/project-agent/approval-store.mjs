@@ -15,6 +15,7 @@
  * @property {string | null} conversationId
  * @property {string | null} streamId
  * @property {string | null} planId
+ * @property {string | null} [sessionId]
  * @property {string} capabilityId
  * @property {string} summary 展示文本，已脱敏
  * @property {string | null} riskLevel
@@ -245,10 +246,11 @@ export function createApprovalStore({
   }
 
   /** 进程启动：所有 open 变成 stale。没有 open 时不写盘。 */
-  function markStaleOnStartup() {
+  function markStaleOnStartup({ canRecover = () => true } = {}) {
     const decidedAt = now().toISOString();
     const changed = [];
     for (const record of list({ state: 'open' })) {
+      if (!canRecover(record)) continue;
       const next = append({
         ...record,
         state: 'stale',
@@ -285,9 +287,10 @@ function runningLeafIds(tasks, out = []) {
 /**
  * 启动装配：open 转 stale；仍在执行的 GoalPlan 按 ADR 73 挂起。
  * 没有 GoalPlan 的会话只标记，不恢复。stale 项的一次性放行在决定批准时写入。
- * @param {{ approvalStore?: { markStaleOnStartup?: () => PendingApproval[] }, goalPlanStore?: object, now?: () => Date }} [deps]
+ * @param {{ approvalStore?: { markStaleOnStartup?: (options?: object) => PendingApproval[] }, goalPlanStore?: object, canRecover?: (record: PendingApproval) => boolean, now?: () => Date }} [deps]
  */
 export function applyStartupApprovalRecovery({
+  canRecover = () => true,
   approvalStore = null,
   goalPlanStore = null,
   now = () => new Date(),
@@ -297,7 +300,7 @@ export function applyStartupApprovalRecovery({
   }
   let stale = [];
   try {
-    stale = approvalStore.markStaleOnStartup() || [];
+    stale = approvalStore.markStaleOnStartup({ canRecover }) || [];
   } catch {
     return { stale: [], interruptedPlanIds: [] };
   }
