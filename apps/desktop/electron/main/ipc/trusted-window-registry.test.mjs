@@ -33,6 +33,28 @@ const queryEntry = Object.freeze({
   originPolicy: 'app-origin',
 });
 
+test('Quick Chat may list bots and submit inputs, while administration and popovers remain denied', () => {
+  for (const role of ['quick-chat', 'quick-chat-popover']) {
+    const sender = createWebContents();
+    const registry = createTrustedWindowRegistry();
+    registry.registerWindow({ window: { webContents: sender }, role, allowedLocations: ['https://app.local/index.html'] });
+    for (const channel of ['project-agent:list', 'project-agent:submit-input']) {
+      const entry = getDesktopIpcPolicy(channel);
+      if (role === 'quick-chat') {
+        assert.deepEqual(registry.authorize({ entry, event: createEvent(sender) }), { role });
+        assert.throws(() => registry.authorize({ entry, event: createEvent(createWebContents()) }), DesktopIpcAuthorizationError);
+        assert.throws(() => registry.authorize({ entry, event: createEvent(sender, { url: sender.mainFrame.url, parent: {} }) }), /trusted top frame/);
+        sender.mainFrame.url = 'https://evil.invalid/index.html';
+        assert.throws(() => registry.authorize({ entry, event: createEvent(sender) }), /untrusted location/);
+        sender.mainFrame.url = 'https://app.local/index.html';
+      } else assert.throws(() => registry.authorize({ entry, event: createEvent(sender) }), /not allowed for this window role/);
+    }
+    for (const channel of ['settings:get', 'project-agent:update-profile', 'project-agent:delete', 'project-agent:decide-approval', 'project-agent:read-evidence']) {
+      assert.throws(() => registry.authorize({ entry: getDesktopIpcPolicy(channel), event: createEvent(sender) }), /not allowed for this window role/);
+    }
+  }
+});
+
 test('trusted window registry authorizes only the registered role, top frame, and location', () => {
   const sender = createWebContents();
   const registry = createTrustedWindowRegistry();
