@@ -127,6 +127,7 @@ export function watchFactsFromPlan(plan) {
     version: text(plan?.updatedAt) || text(plan?.planId) || sessionId,
     status: watchStatus(plan, needsUser.length > 0),
     ...(plan.status === 'completed' ? { completedAt: text(plan.timing?.completedAt) || text(plan.updatedAt) } : {}),
+    ...(terminalVerifierRevision(plan) ? { resultRevision: terminalVerifierRevision(plan) } : {}),
     ...(startedAt ? { startedAt } : {}),
     ...(lastProgressAt ? { lastProgressAt } : {}),
     leaves,
@@ -152,6 +153,13 @@ export function delegationFactsForWorkspace(plans, workspaceId) {
     if (facts) sessions.push(facts);
   }
   return { sessions };
+}
+
+function terminalVerifierRevision(plan) {
+  const runs = Array.isArray(plan?.runner?.verifierRuns) ? plan.runner.verifierRuns : [];
+  const latest = runs.at(-1);
+  if (!['passed', 'failed'].includes(latest?.status) || !text(latest?.completedAt)) return '';
+  return JSON.stringify([text(latest.verifierRunId), latest.status, latest.completedAt]);
 }
 
 function watchStatus(plan, waiting) {

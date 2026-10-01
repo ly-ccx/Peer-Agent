@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { watchFactsFromPlan } from './watchdog.mjs';
+
 import {
   PROGRESS_THROTTLE_MS,
   delegationEventId,
@@ -186,4 +188,21 @@ test('失败和中断事件带上中断原因、最后错误，第三次同类�
   assert.equal(interrupted[0].payload.sameCauseCount, 3);
   assert.equal(interrupted[0].payload.stopAutoRetry, true);
   assert.equal(interrupted[0].payload.askUser, true);
+});
+
+test('completed before verifier finishes wakes again for the terminal revision, once', () => {
+  const plan = {planId:'p',status:'completed',updatedAt:'v1',timing:{completedAt:'t1'},
+    delegationOrigin:{sessionId:'s',workspaceId:'w'},runner:{verifierRuns:[]}};
+  const before = watchFactsFromPlan(plan);
+  const finished = watchFactsFromPlan({...plan,runner:{verifierRuns:[{
+    verifierRunId:'run-1',status:'passed',completedAt:'t2'}]}});
+  const events = mapDelegationEvents({sessions:[before]},{sessions:[finished]});
+  assert.equal(events.filter(x=>x.kind==='result_ready').length,1);
+  assert.notEqual(events[0].eventId,mapDelegationEvents({sessions:[]},{sessions:[before]}).find(x=>x.kind==='result_ready').eventId);
+  assert.equal(events[0].payload.outcome,null);
+  const accepted = watchFactsFromPlan({...plan,updatedAt:'v2',resultAcceptance:{acceptedAt:'t3'},runner:{verifierRuns:[{
+    verifierRunId:'run-1',status:'passed',completedAt:'t2'}]}});
+  assert.equal(mapDelegationEvents({sessions:[finished]},{sessions:[accepted]}).length,0);
+  const pending = watchFactsFromPlan({...plan,runner:{verifierRuns:[{verifierRunId:'run-1',status:'running'}]}});
+  assert.equal(mapDelegationEvents({sessions:[before]},{sessions:[pending]}).length,0);
 });
