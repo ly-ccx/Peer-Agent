@@ -9,7 +9,7 @@ import { createAgentTurnExecutor } from '../../agent-host/agent-turn-executor.mj
 
 const [root, killedPhase = ''] = process.argv.slice(2);
 const setup = JSON.parse(readFileSync(path.join(root, 'fixture.json'), 'utf8'));
-const workspaceId = 'ws-crash', runtimeRoot = path.join(root, 'project-runtime');
+const workspaceId = setup.workspaceId ?? 'ws-crash', runtimeRoot = path.join(root, 'project-runtime');
 const conversations = createConversationStore({ storeDir: path.join(root, 'conversations') });
 const plans = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
 const lease = createHostLease({ rootDir: runtimeRoot, hostId: `fixture-${process.pid}`, surface: 'desktop', staleMs: 1000, heartbeatMs: 20 });
@@ -23,8 +23,9 @@ function checkpoint(phase) {
 let host;
 const scheduler = createExecutionScheduler({ rootDir: runtimeRoot });
 scheduler.configure({ isWorkspaceReady: id => host?.isReady(id) === true });
+let workerCalls = 0;
 const executor = createAgentTurnExecutor({ executionScheduler: scheduler, llmChatService: {
-  async sendMessage() { return { requestedUserInput: true, terminalStatus: 'done' }; },
+  async sendMessage() { workerCalls++; return { requestedUserInput: true, terminalStatus: 'done' }; },
 } });
 const goalHost = createDesktopGoalRunnerHost({ goalPlanStore: plans, conversationStore: conversations,
   agentTurnExecutor: executor, hostLeases: lease, broadcast() {}, llmChatService: {},
@@ -68,7 +69,7 @@ host = createProjectAgentHost({ rootDir: runtimeRoot, holdsLease: id => lease.ho
 const result = await host.sync();
 for (const meta of plans.listPlans()) await goalHost.goalRunner.waitForIdle(meta.planId);
 const messages = conversations.getPersistedConversationHistory(setup.conversationId).messages;
-process.send?.({ done: true, result, counts: { inputs: messages.filter(message => message.id === 'input-input-one').length,
+process.send?.({ done: true, result, workerCalls, counts: { inputs: messages.filter(message => message.id === 'input-input-one').length,
   replies: messages.filter(message => message.kind === 'agent_reply').length, tasks: plans.listPlans().length },
   reply: messages.find(message => message.kind === 'agent_reply')?.content });
 host.dispose(); lease.close(); process.disconnect?.();
