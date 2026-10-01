@@ -564,3 +564,5 @@ export { createWatchState } from './project-agent/watch-state.mjs';
 export { createWatchRunner } from './project-agent/watch-runner.mjs';
 export { createWatchProbeRuntime } from './project-agent/watch-probe-provider.mjs';
 export { mapObjectiveObservationEvent } from './project-agent/event-mapper.mjs';
+
+export {createObjectiveActions,objectiveActionCardId} from './project-agent/objective-actions.mjs';

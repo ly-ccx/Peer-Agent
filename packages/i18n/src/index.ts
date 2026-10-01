@@ -255,6 +255,8 @@ export type TranslationKey =
   | 'projectAgent.drawer.objective.autonomy'
   | 'projectAgent.drawer.objective.budget'
   | 'projectAgent.drawer.objective.probes'
+  | 'projectAgent.drawer.objective.autoAccept'
+  | 'projectAgent.drawer.objective.autoUsage'
   | 'projectAgent.drawer.objective.usage'
   | 'projectAgent.drawer.objective.watch.unavailable'
   | 'projectAgent.drawer.objective.watch.auth'
@@ -1433,6 +1435,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.objective.autonomy': '自主档位',
     'projectAgent.drawer.objective.budget': '每日自动任务',
     'projectAgent.drawer.objective.probes': '每日检查预算',
+    'projectAgent.drawer.objective.autoAccept': '允许自动签收',
+    'projectAgent.drawer.objective.autoUsage': '今日自动任务 {used}/{limit}',
     'projectAgent.drawer.objective.usage': '今日检查 {used}/{limit}',
     'projectAgent.drawer.objective.watch.unavailable': '暂时无法检查',
     'projectAgent.drawer.objective.watch.auth': '登录 GitHub 后可检查 CI',
@@ -2409,6 +2413,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.objective.autonomy': 'Autonomy',
     'projectAgent.drawer.objective.budget': 'Automatic tasks per day',
     'projectAgent.drawer.objective.probes': 'Checks per day',
+    'projectAgent.drawer.objective.autoAccept': 'Allow automatic acceptance',
+    'projectAgent.drawer.objective.autoUsage': 'Automatic tasks today {used}/{limit}',
     'projectAgent.drawer.objective.usage': 'Checks today {used}/{limit}',
     'projectAgent.drawer.objective.watch.unavailable': 'Check temporarily unavailable',
     'projectAgent.drawer.objective.watch.auth': 'Sign in to GitHub to check CI',

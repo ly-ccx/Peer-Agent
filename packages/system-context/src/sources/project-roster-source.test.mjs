@@ -67,3 +67,9 @@ test('用户输入锚点及任务锚点只进入 L7，id 不截断替换且正�
   assert.doesNotMatch(section.content, /bad\nid|<tool_call>/);
   assert.deepEqual(source.render(source.observe({ role: 'work_session', turnContext: context })), []);
 });
+
+
+test('objective identity, frozen proposal and actual card answer remain facts in L7',()=>{
+ const source=createProjectRosterPromptSource(),section=source.render(source.observe({role:'project_agent',turnContext:{objectives:[{objectiveId:'o',title:'CI',outcome:'Stable',autonomy:'propose',status:'active',originMessageId:'u'}],objectiveProposals:[{actionId:'a',objectiveId:'o',state:'reserved',input:{title:'Fix CI',brief:'Fix the failure'}}],events:[{kind:'objective_signal',objectiveId:'o',watchId:'w',eventId:'e'}],inputAnchors:[{messageId:'input-answer',text:'开始',answerTo:'card:question:objective:a'}]}}))[0];
+ assert.equal(section.layer,'L7_CONTINUITY');assert.match(section.content,/"objectiveId":"o"/);assert.match(section.content,/objectiveId=o; watchId=w; eventId=e/);assert.match(section.content,/answerTo=card:question:objective:a/);assert.match(section.content,/Fix the failure/);
+});

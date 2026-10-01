@@ -34,6 +34,7 @@ export interface DelegationOrigin {
   readonly surface: InputSurface;
   readonly memorySnapshotId: string;
   readonly objectiveId?: string;
+  readonly objectiveActionId?: string;
   readonly priority?: 'high' | 'normal' | 'low';
   readonly isolation?: 'auto' | 'none' | 'worktree';
   readonly isolationBlock?: 'disk_space' | 'isolation_failed' | null;

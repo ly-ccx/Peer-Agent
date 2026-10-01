@@ -101,8 +101,9 @@ export function createDelegationProvider({
       });
     }
 
-    const input = validated.value;
-    if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['spawn_session','resume_session','message_session','reprioritize_session','cancel_session','verify_session','set_proactivity'].includes(item.name)){
+    let input = validated.value;
+    if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
+    if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['resume_session','message_session','reprioritize_session','cancel_session','verify_session','set_proactivity'].includes(item.name)){
       return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     }
     if (['message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
@@ -182,6 +183,12 @@ export function createDelegationProvider({
       }
     }
 
+    if(item.name==='spawn_session'&&(input.objectiveId||view.objectiveWakeIds.length&&!view.currentInputAnchors.length||view.messages.some(message=>view.currentInputAnchors.includes(message.id)&&message.answerTo?.startsWith('card:question:objective:')))){
+      if(typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objectives_unavailable'}});
+      const authorized=await objectives.prepareSpawn(input,spawnContext(view));
+      if(!authorized?.ok)return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,...authorized}});
+      input=authorized.input||input;
+    }
     const key = idempotencyKey({
       turnId: view.turnId,
       toolCallOrdinal: view.toolCallOrdinal,
@@ -500,6 +507,9 @@ function spawnContext(view) {
     workspaceId: text(view?.workspaceId) || '',
     workspacePath: text(view?.workspacePath) || '',
     currentInputAnchors: view.currentInputAnchors,
+    objectiveWakeIds: view.currentInputAnchors.length?[]:view.objectiveWakeIds,
+    objectiveWakeEvents: view.currentInputAnchors.length?[]:view.objectiveWakeEvents,
+    objectiveProposalAnswer: view.messages.some(message=>view.currentInputAnchors.includes(message.id)&&message.answerTo?.startsWith('card:question:objective:')),
     ...historyCarry(view?.messages),
   };
 }

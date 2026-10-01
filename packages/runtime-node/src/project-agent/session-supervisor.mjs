@@ -324,19 +324,23 @@ export function createSessionSupervisor({
   async function spawnLocked(input, context) {
     const parentConversationId = text(context?.parentConversationId);
     const workspaceId = text(context?.workspaceId);
-    const anchorMessageIds = stringList(input?.anchorMessageIds);
-    const title = text(input?.title);
-    const brief = text(input?.brief);
+    let anchorMessageIds = stringList(input?.anchorMessageIds);
+    let title = text(input?.title);
+    let brief = text(input?.brief);
+    let objectiveActionId = null;
     if (!parentConversationId || !workspaceId || anchorMessageIds.length === 0 || !title || !brief) {
       return { error: 'invalid_input', message: 'spawn input is incomplete' };
     }
-    if (input?.objectiveId) {
+    if (input?.objectiveId || context?.objectiveWakeEvents?.length&&!context?.currentInputAnchors?.length || context?.objectiveProposalAnswer) {
       if (typeof objectives?.prepareSpawn !== 'function') return {error:'objectives_unavailable'};
       const authorized = objectives.prepareSpawn(input, context);
       if (!authorized?.ok) return authorized;
+      input = authorized.input || input;
+      objectiveActionId = authorized.objectiveActionId || null;
+      anchorMessageIds = stringList(input.anchorMessageIds); title = text(input.title); brief = text(input.brief);
     }
     const supersedes = text(input?.supersedes);
-    const key = spawnIdentity(parentConversationId, {
+    const key = objectiveActionId ? spawnIdentity(parentConversationId, {objectiveActionId}) : spawnIdentity(parentConversationId, {
       anchorMessageIds,
       title,
       brief,
@@ -474,6 +478,7 @@ export function createSessionSupervisor({
           priority: input.priority || 'normal',
           isolation: input.isolation || 'auto',
           ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
+          ...(objectiveActionId ? {objectiveActionId} : {}),
           phase,
           idempotencyKey: key,
           ...(text(context?.parentSessionId) ? { parentSessionId: text(context.parentSessionId) } : {}),

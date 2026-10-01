@@ -31,6 +31,7 @@ export function projectCards(workspaceId, facts = {}, resolutions = []) {
     ...unavailableCards(facts),
     ...memoryConflictCards(facts),
     ...handoffCards(facts),
+    ...objectiveProposalCards(facts),
   ];
   const byId = new Map();
   for (const card of built) {
@@ -460,3 +461,5 @@ function timestamp(now) {
   if (typeof value === 'string' && value.trim()) return value.trim();
   return new Date().toISOString();
 }
+
+function objectiveProposalCards(facts){return asList(facts.objectiveProposals).filter(row=>row.state==='proposed').map(row=>{const cardId=cardIdOf('question',`objective:${row.actionId}`);return draft({cardId,kind:'question',content:clip(`「${row.input.title}」：${row.input.brief}。要开始这个任务吗？`,'要开始目标任务吗？'),factResolved:false,factState:'',actions:answerActions(cardId,['开始','暂不']),refs:refs({objectiveId:row.objectiveId,objectiveActionId:row.actionId})});});}

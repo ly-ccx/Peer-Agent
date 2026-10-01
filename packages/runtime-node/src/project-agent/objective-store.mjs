@@ -22,7 +22,7 @@ export function validateObjectiveDefinition(raw) {
   if(budget.maxTokensPerDay!==undefined) return fail('TOKEN_BUDGET_UNSUPPORTED');
   if(!Number.isInteger(budget.maxAutoSessionsPerDay)||budget.maxAutoSessionsPerDay<0||budget.maxAutoSessionsPerDay>3
     || !Number.isInteger(budget.maxProbeRunsPerDay)||budget.maxProbeRunsPerDay<1||budget.maxProbeRunsPerDay>1440) return fail('INVALID_BUDGET');
-  const planFields=Object.fromEntries(['title','outcome','autonomy','watches','milestones','successSignals','budget','deadline'].filter(key=>raw[key]!==undefined).map(key=>[key,raw[key]]));
+  const planFields=Object.fromEntries(['autoAccept','title','outcome','autonomy','watches','milestones','successSignals','budget','deadline'].filter(key=>raw[key]!==undefined).map(key=>[key,raw[key]]));
   if(!validateObjectivePlanFields(planFields))return fail('INVALID_OBJECTIVE');
   if(raw.deadline!==undefined && (typeof raw.deadline!=='string'||!Number.isFinite(Date.parse(raw.deadline)))) return fail('INVALID_DEADLINE');
   const watches=raw.watches || [], milestones=raw.milestones || [], signals=raw.successSignals || [];
@@ -53,9 +53,11 @@ export function validateObjectiveDefinition(raw) {
       ||(signal.operator!=='succeeded'&&!text(signal.value,500)))return fail('INVALID_SIGNAL');
     signalIds.add(signal.signalId);
   }
+  if(raw.autoAcceptApprovedBy!==undefined&&!text(raw.autoAcceptApprovedBy,200))return fail('INVALID_OBJECTIVE');
   if(raw.status!==undefined&&!STATUSES.has(raw.status))return fail('INVALID_STATUS');
   return {ok:true,value:{workspaceId:raw.workspaceId,projectAgentConversationId:raw.projectAgentConversationId,originMessageId:raw.originMessageId,
     title:raw.title.trim(),outcome:raw.outcome.trim(),autonomy:raw.autonomy,createdBy:raw.createdBy,watches:copy(watches),milestones:copy(milestones),successSignals:copy(signals),
+    ...(raw.autoAccept===true?{autoAccept:true,...(raw.autoAcceptApprovedBy?{autoAcceptApprovedBy:raw.autoAcceptApprovedBy}:{})}:{}),
     budget:{maxAutoSessionsPerDay:budget.maxAutoSessionsPerDay,maxProbeRunsPerDay:budget.maxProbeRunsPerDay},...(raw.deadline?{deadline:new Date(raw.deadline).toISOString()}:{}),
     status:raw.status || (raw.createdBy==='agent_proposal'?'paused':'active'),...(raw.pendingConfirmation===true?{pendingConfirmation:true}:{})}};
 }

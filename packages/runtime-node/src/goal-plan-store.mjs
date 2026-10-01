@@ -1782,7 +1782,7 @@ function normalizeDelegationOrigin(value) {
     depth: Number.isInteger(value.depth) && value.depth >= 0 ? value.depth : 1,
   };
   for (const key of [
-    'workspaceId', 'sessionId', 'parentSessionId', 'objectiveId',
+    'workspaceId', 'sessionId', 'parentSessionId', 'objectiveId', 'objectiveActionId',
     'idempotencyKey', 'parentConversationId', 'supersededBy', 'lastResumeAnchorMessageId',
   ]) {
     const text = normalizeOptionalString(value[key]);
