@@ -356,11 +356,10 @@ export function createDesktopGoalRunnerHost({
         if (plan.delegationOrigin.readOnly === true) return plan;
         if (plan.delegationOrigin.isolationBlock) throw new Error('execution isolation is not ready');
         if (plan.deliveryBinding?.executionIsolation === 'worktree') {
-          const prepared = await goalWorktreeAdapter?.isolatePlan?.(plan);
-          if (!prepared?.ok || !(await goalWorktreeAdapter.inspectIsolationFacts(prepared.plan)).existingWorktree) {
+          if (!(await goalWorktreeAdapter?.inspectIsolationFacts?.(plan))?.existingWorktree) {
             throw new Error('declared worktree is unavailable');
           }
-          return prepared.plan;
+          return plan;
         }
         return plan;
       }
