@@ -121,4 +121,7 @@ jobs:
           path: |
             ${{ runner.temp }}/bot-shell-report.json
             ${{ runner.temp }}/bot-shell-failure.png
+            ${{ runner.temp }}/bot-shell-trace.zip
+            ${{ runner.temp }}/bot-shell-protocol.log
+            ${{ runner.temp }}/bot-shell-main-*
           if-no-files-found: ignore
