@@ -1,3 +1,4 @@
+import { createAgentTurnExecutor } from './agent-turn-executor.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
@@ -340,7 +341,7 @@ test('one usable model keeps goal execution, explorer, verifier, and visual revi
     });
     assert.equal(seen[0].role, 'goal_runner');
     assert.equal(seen[0].modelProviderId, 'only-model');
-    assert.deepEqual(seen[0].turnProfile, { role: 'goal_runner' });
+    assert.deepEqual(seen[0].turnProfile, { role: 'goal_runner', planId: plan.planId });
     assert.equal(seen[1].modelProviderId, 'only-model');
     assert.equal(seen[1].turnProfile.modelSelection.modelProviderId, 'only-model');
     assert.equal(seen[2].modelProviderId, 'only-model');
@@ -595,6 +596,7 @@ test('ordinary plans still run, and task plans run only while this desktop holds
         inputId: 'input-1',
         surface: 'desktop',
         workspaceId: 'ws-task',
+        sessionId: 'task-session', phase: 'running',
         depth: 1,
         modelSelection: {
           worker: selection,
@@ -652,4 +654,35 @@ test('ordinary plans still run, and task plans run only while this desktop holds
     else process.env.PEER_AGENT_HOME = previousHome;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('production inline verifier shares the only round lease and a cancelled waiting plan never calls the provider', async () => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'b4-inline-verifier-'));
+  try {
+    const store=createGoalPlanStore({storeDir:path.join(root,'goal-plans')});
+    const plan=store.createPlan({conversationId:'c',title:'核验调度',goal:'核验调度',successCriteria:['核验'],tasks:[{taskId:'t1',title:'核验',status:'pending'}]});
+    admitVerifierFixture(store,plan);
+    const seen=[];let host;
+    const executor=createAgentTurnExecutor({llmChatService:{async sendMessage(input) {
+      seen.push(input.turnProfile.role);
+      assert.equal(executor.executionScheduler.stats().active,1);
+      if(input.turnProfile.role==='project_agent') {
+        const cancelled=executor.runTurn({turnProfile:{role:'work_session',planId:'queued-plan'},sink:{send(){}}});
+        executor.executionScheduler.cancelPlan('queued-plan');
+        assert.equal((await cancelled).terminalStatus,'aborted');
+        const report=await host.goalRunner.verifyDelegatedSession({plan});
+        assert.equal(report.passed,true);assert.equal(executor.executionScheduler.stats().active,1);
+        return {terminalStatus:'done'};
+      }
+      input.webContents.send('chat:stream:delta',{content:VERIFIER_JSON});
+      return {terminalStatus:'done',text:VERIFIER_JSON};
+    }}});
+    executor.executionScheduler.configure({getConcurrency:()=>1});
+    host=createDesktopGoalRunnerHost({goalPlanStore:store,conversationStore:{getConversation:()=>({id:'c',messages:[]})},
+      agentTurnExecutor:executor,broadcast(){},llmChatService:{},resolveConversationModelProviderId:()=> 'test',workspaceRoot:root,getMainWindows:()=>[]});
+    assert.equal(host.goalRunner.executionScheduler,executor.executionScheduler);
+    await executor.runTurn({turnProfile:{role:'project_agent'},plan:{kind:'user'},sink:{send(){}}});
+    assert.deepEqual(seen,['project_agent','verifier']);
+    assert.equal(executor.executionScheduler.stats().active,0);
+  } finally {rmSync(root,{recursive:true,force:true});}
 });

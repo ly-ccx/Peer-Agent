@@ -28,3 +28,23 @@ test('a started-task reply does not count as delivery of its completed result', 
     assert.deepEqual(facts.delivery('w1').unreportedResults, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('failed dependency facts produce a stable decision card without a fabricated tool call', () => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'b4-dependency-card-'));
+  let status='waiting_user';const messages=[];
+  try {
+    const facts=createDesktopProjectFacts({runtimeRoot:root,
+      supervisor:{sessionsForProject:()=>[{sessionId:'child',title:'后续任务',status,queueReason:'dependency_failed',queuedBehind:[{sessionId:'dep',title:'前置任务'}]}],acceptance:()=>null},
+      approvalStore:{list:()=>[]},profileStore:{read:()=>({agentConversationId:'parent'})},
+      conversationStore:{getPersistedConversationHistory:()=>({messages})}});
+    const first=facts.cards('w');assert.equal(first.length,1);
+    assert.equal(first[0].cardId,'card:question:child:dependency');
+    assert.match(first[0].content,/未成功签收/);assert.equal(first[0].kind,'question');
+    assert.equal(first[0].resolvedState,'open');assert.equal(first[0].actions.length,2);
+    assert.deepEqual(facts.cards('w'),first);
+    messages.push({role:'user',answerTo:first[0].cardId,content:'重新安排任务'});
+    assert.equal(facts.cards('w')[0].resolvedState,'resolved');
+    assert.equal(status,'waiting_user'); // Answering does not change dependency admission.
+    status='cancelled';assert.equal(facts.cards('w').length,0);
+  } finally {rmSync(root,{recursive:true,force:true});}
+});

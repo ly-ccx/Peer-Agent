@@ -547,3 +547,5 @@ export {
 // of startRemoteDeviceConnector.
 export { startRemoteDeviceConnector } from './remote-device-connector.mjs';
 export { createRemoteBindingStore } from './remote-binding-store.mjs';
+
+export { createExecutionScheduler, normalizeConcurrency } from './project-agent/execution-scheduler.mjs';

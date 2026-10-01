@@ -43,7 +43,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
         },
         additionalProperties: false,
       },
-      priority: { type: 'string' },
+      priority: { type: 'string', enum: ['high', 'normal', 'low'] },
       dependsOn: { type: 'array', items: { type: 'string' } },
       supersedes: { type: 'string' },
       isolation: { type: 'string' },
@@ -233,7 +233,7 @@ function validateSpawn(input) {
   }
   if (input.priority !== undefined) {
     const priority = text(input.priority, 40);
-    if (!priority) return invalid('priority must be a short string.');
+    if (!['high', 'normal', 'low'].includes(priority)) return invalid('priority must be high, normal, or low.');
     value.priority = priority;
   }
   if (input.dependsOn !== undefined) {

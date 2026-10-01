@@ -444,3 +444,11 @@ test('confirm reasons stay ordered and a user override cannot mint policy accept
   assert.equal(blocked.acceptedBy, undefined);
   assert.equal(blocked.mode, 'confirm');
 });
+
+test('queue projection copies only host supplied blockers and leaves admission to the host', () => {
+  const blockers=[{sessionId:'dep',title:'Dependency'}];
+  const session=projectWorkSession(plan({status:'paused'}),meta({queuedBehind:blockers,queueReason:'dependencies'}));
+  assert.equal(session.status,'queued');assert.deepEqual(session.queuedBehind,blockers);
+  blockers[0]!.title='mutated';assert.equal(session.queuedBehind?.[0]?.title,'Dependency');
+  assert.equal(projectWorkSession(plan(),meta()).queuedBehind,undefined);
+});

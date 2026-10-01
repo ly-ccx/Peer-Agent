@@ -143,3 +143,9 @@ test('记忆只读投影和对话模型标签', () => {
     resolutions: [{ role: 'session_worker', label: '工人' }, { role: 'project_agent', label: '对话模型' }],
   }), '对话模型');
 });
+
+test('queue reasons use host blockers and tolerate malformed older responses', () => {
+  const session=readDrawerSession({sessionId:'s',status:'queued',queueReason:'write_slot',queuedBehind:[null,{sessionId:'a',title:'写入任务'},{title:'bad'}]});
+  assert.deepEqual(session?.queuedBehind,[{sessionId:'a',title:'写入任务'}]);assert.equal(session?.queueReason,'write_slot');
+  assert.deepEqual(readDrawerSession({sessionId:'old'})?.queuedBehind,[]);
+});

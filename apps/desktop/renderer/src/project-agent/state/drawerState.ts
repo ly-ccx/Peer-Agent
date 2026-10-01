@@ -33,6 +33,8 @@ export interface DrawerSession {
   readonly summary: string;
   readonly evidenceRefs: readonly string[];
   readonly progress: string;
+  readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
+  readonly queueReason?: string;
 }
 
 export interface DrawerMemoryItem {
@@ -176,6 +178,13 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     summary: readString(report.summary),
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
+    queueReason: readString(record.queueReason),
+    queuedBehind: Array.isArray(record.queuedBehind) ? record.queuedBehind.flatMap(item => {
+      if (!item || typeof item !== 'object') return [];
+      const row = item as Record<string, unknown>;
+      const id = readString(row.sessionId);
+      return id ? [{ sessionId: id, title: readString(row.title) || id }] : [];
+    }) : [],
   };
 }
 

@@ -1791,6 +1791,7 @@ function normalizeDelegationOrigin(value) {
   if (value.readOnly === true || value.readOnly === false) origin.readOnly = value.readOnly;
   if (value.verifying === true) origin.verifying = true;
   if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;
+  if (['high', 'normal', 'low'].includes(value.priority)) origin.priority = value.priority;
   if (Array.isArray(value.dependsOn)) {
     const dependsOn = value.dependsOn
       .filter((item) => typeof item === 'string' && item.trim())

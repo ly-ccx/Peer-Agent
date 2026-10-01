@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { BOT_AVATAR_COLORS, type BotProfile, type ModelRoutingMenuOption } from '@peer-agent/protocol';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import { BotPolicyFields } from './BotPolicyFields';
@@ -48,6 +48,27 @@ export function BotSettingsTab({
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [concurrency, setConcurrency] = useState('4');
+  useEffect(() => {
+    let live = true;
+    void clientApi.getSettings().then(settings => {
+      if (!live) return;
+      const project = settings.projectAgent as { concurrency?: number } | undefined;
+      setConcurrency(String(project?.concurrency || 4));
+    }).catch(() => { if (live) setError('FAILED'); });
+    return () => { live = false; };
+  }, []);
+  async function saveConcurrency(value: string) {
+    if (busy) return;
+    setBusy(true); setError('');
+    try {
+      const saved = await clientApi.updateSettings({ projectAgent: { concurrency: Number(value) } });
+      const project = saved.projectAgent as { concurrency?: number } | undefined;
+      setConcurrency(String(project?.concurrency || 4));
+    } catch { setError('FAILED'); }
+    finally { setBusy(false); }
+  }
+
 
   async function saveName() {
     const displayName = name.trim();
@@ -207,6 +228,14 @@ export function BotSettingsTab({
           options={PROACTIVITY_LEVELS.map((item) => ({ value: item, label: i18n.t(`projectAgent.drawer.settings.proactivity.${item}`) }))}
           onChange={(next) => { void saveProactivity(next); }}
         />
+      </div>
+      <div className="bot-settings-field">
+        <span>{i18n.t('projectAgent.drawer.settings.concurrency')}</span>
+        <Dropdown value={concurrency} disabled={busy}
+          ariaLabel={i18n.t('projectAgent.drawer.settings.concurrency')}
+          options={Array.from({ length: 8 }, (_, index) => ({ value: String(index + 1), label: String(index + 1) }))}
+          onChange={value => { void saveConcurrency(value); }} />
+        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.concurrencyHint')}</p>
       </div>
       <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
         onChange={patch => { void savePolicy(patch); }} />

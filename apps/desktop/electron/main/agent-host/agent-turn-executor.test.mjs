@@ -105,14 +105,18 @@ test('project cancellation aborts the existing stream and detaches after complet
   const controller = new AbortController();
   const aborted = [];
   let release;
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
   const executor = createAgentTurnExecutor({ llmChatService: {
     sendMessage(input) {
       assert.equal(Object.hasOwn(input, 'signal'), false);
+      started();
       return new Promise(resolve => { release = resolve; });
     },
     abort(streamId) { aborted.push(streamId); release({ terminalStatus: 'aborted' }); },
   } });
   const pending = executor.runTurn({ mode: 'project_agent', streamId: 'cancel-stream', signal: controller.signal, sink: { send() {} } });
+  await ready;
   controller.abort();
   const result = await pending;
   assert.equal(result.ok, false);
@@ -121,4 +125,33 @@ test('project cancellation aborts the existing stream and detaches after complet
   const alreadyAborted = await executor.runTurn({ mode: 'project_agent', signal: controller.signal, sink: { send() {} } });
   assert.equal(alreadyAborted.terminalStatus, 'aborted');
   assert.deepEqual(aborted, ['cancel-stream']);
+});
+
+test('all executor roles share the cap; cancelled waiters never reach sendMessage and errors release leases', async () => {
+  const gates=[]; const seen=[];
+  const executor=createAgentTurnExecutor({llmChatService:{sendMessage(input) {
+    seen.push(input.turnProfile.role); return new Promise((resolve,reject)=>gates.push({resolve,reject}));
+  }}});
+  executor.executionScheduler.configure({getConcurrency:()=>1});
+  const sink={send(){}};
+  const worker=executor.runTurn({turnProfile:{role:'work_session'},sink});
+  await Promise.resolve();
+  const controller=new AbortController();
+  const cancelled=executor.runTurn({turnProfile:{role:'verifier'},sink,signal:controller.signal});
+  const user=executor.runTurn({turnProfile:{role:'project_agent'},plan:{kind:'user'},sink});
+  controller.abort(); assert.equal((await cancelled).terminalStatus,'aborted');
+  assert.deepEqual(seen,['work_session']);
+  const failure=assert.rejects(worker,/failed/);gates.shift().reject(Error('failed'));await failure;
+  await Promise.resolve();assert.deepEqual(seen,['work_session','project_agent']);
+  gates.shift().resolve({terminalStatus:'done'});await user;
+  assert.deepEqual(executor.executionScheduler.stats(),{active:0,waiting:0,limit:1});
+});
+
+test('cancelling an active plan aborts the service and returns the shared lease', async () => {
+  let ready; const started=new Promise(resolve=>{ready=resolve;}); let finish;
+  const executor=createAgentTurnExecutor({llmChatService:{sendMessage(){ready();return new Promise(resolve=>{finish=resolve;});},
+    abort(){finish({terminalStatus:'aborted'});}}});
+  const turn=executor.runTurn({turnProfile:{role:'work_session',planId:'p'},sink:{send(){}}});
+  await started;executor.executionScheduler.cancelPlan('p');
+  assert.equal((await turn).terminalStatus,'aborted');assert.equal(executor.executionScheduler.stats().active,0);
 });

@@ -288,6 +288,10 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.delete'
   | 'projectAgent.drawer.settings.deleteManaged'
   | 'projectAgent.drawer.settings.deleteConfirm'
+  | 'projectAgent.drawer.settings.concurrency'
+  | 'projectAgent.drawer.settings.concurrencyHint'
+  | 'projectAgent.drawer.queuedBehind'
+  | 'projectAgent.drawer.dependencyFailed'
   | 'projectAgent.drawer.settings.proactivity'
   | 'projectAgent.drawer.settings.proactivity.inherit'
   | 'projectAgent.drawer.settings.proactivity.quiet'
@@ -1405,6 +1409,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.delete': '删除机器人',
     'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
     'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
+    'projectAgent.drawer.settings.concurrency': '全局并发回合',
+    'projectAgent.drawer.settings.concurrencyHint': '所有机器人共享，范围 1–8；每个项目最多 1 个原地写任务、2 个只读任务。',
+    'projectAgent.drawer.queuedBehind': '等待 {tasks}',
+    'projectAgent.drawer.dependencyFailed': '前置任务需要处理：{tasks}',
     'projectAgent.drawer.settings.proactivity': '主动性',
     'projectAgent.drawer.settings.proactivity.inherit': '跟随全局',
     'projectAgent.drawer.settings.proactivity.quiet': '安静',
@@ -2320,6 +2328,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.delete': 'Delete bot',
     'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
     'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',
+    'projectAgent.drawer.settings.concurrency': 'Global concurrent turns',
+    'projectAgent.drawer.settings.concurrencyHint': 'Shared by all bots, from 1 to 8. Each project admits one in-place writer and two readers.',
+    'projectAgent.drawer.queuedBehind': 'Waiting for {tasks}',
+    'projectAgent.drawer.dependencyFailed': 'Dependency needs attention: {tasks}',
     'projectAgent.drawer.settings.proactivity': 'How often to speak up',
     'projectAgent.drawer.settings.proactivity.inherit': 'Follow the global setting',
     'projectAgent.drawer.settings.proactivity.quiet': 'Quiet',

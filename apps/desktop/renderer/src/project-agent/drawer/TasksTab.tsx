@@ -74,7 +74,11 @@ export function TasksTab({
                   >
                     <span className="bot-task-row-copy">
                       <span className="bot-task-row-title" title={session.title}>{session.title}</span>
-                      <span className="bot-task-row-meta">{session.statusLabel || session.status}</span>
+                      <span className="bot-task-row-meta">{session.queuedBehind?.length
+                        ? i18n.t(session.queueReason === 'dependency_failed' || session.queueReason === 'dependency_missing'
+                          ? 'projectAgent.drawer.dependencyFailed' : 'projectAgent.drawer.queuedBehind',
+                          { tasks: session.queuedBehind.map(item => item.title).join(', ') })
+                        : session.statusLabel || session.status}</span>
                     </span>
                     <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                   </button>
