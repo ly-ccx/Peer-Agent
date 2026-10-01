@@ -182,8 +182,10 @@ export function createProjectAgentHost({
   async function sync(workspaceIds) {
     const listed = Array.isArray(workspaceIds) ? workspaceIds : listWorkspaceIds();
     const wanted = [...new Set(listed)].filter(workspaceId => typeof workspaceId === 'string' && !stoppedWorkspaces.has(workspaceId) && resolveConversationId(workspaceId));
-    const wantedIds = new Set(wanted);
-    for (const workspaceId of runners.keys()) if (!wantedIds.has(workspaceId) || !holdsLease(workspaceId)) drop(workspaceId);
+    // A targeted wake is not a replacement for the complete project inventory.
+    const inventory = Array.isArray(workspaceIds) ? listWorkspaceIds() : wanted;
+    const registeredIds = new Set(inventory.filter(workspaceId => typeof workspaceId === 'string' && !stoppedWorkspaces.has(workspaceId) && resolveConversationId(workspaceId)));
+    for (const workspaceId of runners.keys()) if (!registeredIds.has(workspaceId) || !holdsLease(workspaceId)) drop(workspaceId);
     const outcomes = await Promise.all(wanted.map(async workspaceId => {
       if (!holdsLease(workspaceId) && typeof acquireLease !== 'function') return { workspaceId, skipped: 'not-host' };
       const recovered = await recovery.recover(workspaceId);
