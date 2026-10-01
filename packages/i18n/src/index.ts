@@ -96,6 +96,20 @@ export type TranslationKey =
   | 'developer.projectAgent.switch'
   | 'developer.projectAgent.diagnostics'
   | 'developer.projectAgent.inactive'
+  | 'developer.diagnostics.description'
+  | 'developer.diagnostics.refresh'
+  | 'developer.diagnostics.export'
+  | 'developer.diagnostics.busy'
+  | 'developer.diagnostics.saved'
+  | 'developer.diagnostics.cancelled'
+  | 'developer.diagnostics.failed'
+  | 'developer.diagnostics.unknown'
+  | 'developer.diagnostics.generated'
+  | 'developer.diagnostics.bots'
+  | 'developer.diagnostics.slots'
+  | 'developer.diagnostics.waiting'
+  | 'developer.diagnostics.errors'
+  | 'developer.diagnostics.preview'
   | 'projectAgent.list.brand'
   | 'projectAgent.list.newBot'
   | 'projectAgent.list.searchPlaceholder'
@@ -1325,6 +1339,20 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.projectAgent.switch': '界面在设置 → 通用里切换。项目代理会继续推进已有任务。',
     'developer.projectAgent.diagnostics': '项目代理诊断',
     'developer.projectAgent.inactive': '未启用',
+    'developer.diagnostics.description': '只读运行快照。标识与正文只保留长度和哈希，项目路径匿名化；每个机器人保留最近 200 条事件和 20 次回合，旧回合时长显示未知。',
+    'developer.diagnostics.refresh': '刷新诊断',
+    'developer.diagnostics.export': '导出 JSON',
+    'developer.diagnostics.busy': '正在读取诊断…',
+    'developer.diagnostics.saved': '诊断已导出',
+    'developer.diagnostics.cancelled': '已取消导出',
+    'developer.diagnostics.failed': '诊断读取或导出失败，请重试。',
+    'developer.diagnostics.unknown': '未知',
+    'developer.diagnostics.generated': '快照时间',
+    'developer.diagnostics.bots': '机器人',
+    'developer.diagnostics.slots': '使用中的回合槽位',
+    'developer.diagnostics.waiting': '等待回合',
+    'developer.diagnostics.errors': '不可用的来源',
+    'developer.diagnostics.preview': '查看脱敏 JSON',
     'projectAgent.list.brand': 'Peer',
     'projectAgent.list.newBot': '新建机器人',
     'projectAgent.list.searchPlaceholder': '搜索机器人、消息、任务',
@@ -2352,6 +2380,20 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.projectAgent.switch': 'Choose the interface in Settings → General. The project agent keeps working on existing tasks.',
     'developer.projectAgent.diagnostics': 'Project agent diagnostics',
     'developer.projectAgent.inactive': 'Not enabled',
+    'developer.diagnostics.description': 'Read-only runtime snapshot. Identifiers and text retain only length and hash; project paths are anonymized. Keeps the latest 200 events and 20 turns per bot. Older turn timing is unknown.',
+    'developer.diagnostics.refresh': 'Refresh diagnostics',
+    'developer.diagnostics.export': 'Export JSON',
+    'developer.diagnostics.busy': 'Reading diagnostics…',
+    'developer.diagnostics.saved': 'Diagnostics exported',
+    'developer.diagnostics.cancelled': 'Export cancelled',
+    'developer.diagnostics.failed': 'Could not read or export diagnostics. Try again.',
+    'developer.diagnostics.unknown': 'Unknown',
+    'developer.diagnostics.generated': 'Snapshot time',
+    'developer.diagnostics.bots': 'Bots',
+    'developer.diagnostics.slots': 'Active turn slots',
+    'developer.diagnostics.waiting': 'Waiting turns',
+    'developer.diagnostics.errors': 'Unavailable sources',
+    'developer.diagnostics.preview': 'View redacted JSON',
     'projectAgent.list.brand': 'Peer',
     'projectAgent.list.newBot': 'New bot',
     'projectAgent.list.searchPlaceholder': 'Search bots, messages, tasks',
