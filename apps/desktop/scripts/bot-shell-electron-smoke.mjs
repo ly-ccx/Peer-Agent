@@ -1,3 +1,4 @@
+import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -187,7 +188,8 @@ try {
     const window = BrowserWindow.getAllWindows().find(window => new URL(window.webContents.getURL()).searchParams.get('window') === 'quick-chat');
     window.show(); window.webContents.send('quick-chat:shown');
   });
-  await quick.getByLabel('选择机器人', { exact: true }).selectOption({ label: 'project-000' });
+  await quick.getByRole('button', { name: '选择机器人', exact: true }).click();
+  await quick.getByRole('option', { name: 'project-000', exact: true }).click();
   await quick.getByLabel('快速会话内容', { exact: true }).fill('RC_QUICK_INPUT');
   await quick.getByRole('button', { name: '发送', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
@@ -239,6 +241,7 @@ try {
   await page.locator('.bot-shell').waitFor();
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
+  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
   report.ok = true;

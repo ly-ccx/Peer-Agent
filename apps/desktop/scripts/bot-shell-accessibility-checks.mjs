@@ -32,9 +32,9 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   assert.equal(await page.locator('.bot-drawer-dock:not([inert])').count(), 0);
   checks.push('docked drawer enters selected tab, roves with arrows/endpoints, closes with focus returned; hidden dock is inert');
 
-  await page.setViewportSize({ width: 1024, height: 780 });
+  await page.setViewportSize({ width: 900, height: 780 });
   await trigger.focus(); await trigger.press('Enter');
-  const modal = page.getByRole('dialog', { name: '机器人档案', exact: true });
+  const modal = page.getByRole('dialog', { name: '档案', exact: true });
   await modal.waitFor();
   const ends = () => modal.evaluate(node => {
     const items = [...node.querySelectorAll('button,input,textarea,select,a[href],[tabindex]')]
@@ -50,7 +50,7 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   await page.keyboard.press('Escape'); await modal.waitFor({ state: 'detached' });
   await until(() => focused(trigger), Boolean);
   await page.setViewportSize({ width: 1360, height: 900 });
-  checks.push('narrow modal drawer constrains Tab in both directions, Escape returns focus');
+  checks.push('900px emulated viewport modal drawer constrains Tab in both directions, Escape returns focus');
 
   const composer = page.locator('.bot-composer textarea');
   await composer.fill('界'.repeat(100001));
@@ -68,6 +68,7 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   assert.equal(moving, 0);
   await trigger.click(); await page.getByRole('tab', { name: '记忆', exact: true }).click();
   assert.equal(await page.locator('.bot-drawer-pane').evaluate(node => getComputedStyle(node).animationName), 'none');
+  report.reducedDrawerState = await page.locator('.bot-drawer-dock').evaluate(node => ({ attrs: [...node.attributes].map(a => [a.name,a.value]), active: document.activeElement?.className, focused: document.hasFocus(), buttons: [...node.querySelectorAll('button')].slice(0,8).map(item => ({text:item.textContent,disabled:item.disabled,inert:!!item.closest('[inert]'),hidden:!!item.closest('[aria-hidden=\"true\"]')})) }));
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   checks.push('reduced motion stops avatar/enter displacement animations while drawer remains usable');
 
@@ -92,7 +93,7 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   checks.push('actual list name/preview/time contrast reaches 4.5:1');
 
   await page.locator('.bot-me-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  const quiet = page.getByRole('switch', { name: '免打扰时段', exact: true }); await quiet.waitFor();
+  const quiet = page.getByRole('switch', { name: '安静时段', exact: true }); await quiet.waitFor();
   const previous = await quiet.getAttribute('aria-checked'); await quiet.focus(); await quiet.press('Space');
   await until(() => quiet.getAttribute('aria-checked'), value => value !== previous);
   const choose = async (label, name) => { await page.getByRole('button', { name: label, exact: true }).click(); await page.getByRole('option', { name, exact: true }).click(); };
