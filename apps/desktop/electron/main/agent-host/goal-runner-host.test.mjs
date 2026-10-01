@@ -33,6 +33,7 @@ function queuedExecutor(scripts, seen) {
         role: input.turnProfile?.role ?? null,
         modelProviderId: input.modelProviderId ?? null,
         turnProfile: input.turnProfile ?? null,
+        workspacePath: input.workspacePath ?? null,
         content: input.messages?.map((message) => message.content).join('\n') ?? '',
       });
       return next.runTurn(input);
@@ -148,6 +149,29 @@ test('host runs one goal turn, one explorer, and one verifier through a scripted
   }
 });
 
+test('verifier retries malformed output once through the same readonly executor', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verifier-format-'));
+  const previousHome = process.env.PEER_AGENT_HOME;
+  process.env.PEER_AGENT_HOME = root;
+  try {
+    const seen = [];
+    const { host, plan } = openRoutedHost({ root, providers: [routableProvider({ id: 'one', isDefault: true })],
+      modelId: 'one', seen, visualInputs: [], scripts: [
+        [{ type: 'delta', content: 'Done.' }, { type: 'terminal', channel: 'done' }],
+        [{ type: 'delta', content: VERIFIER_JSON }, { type: 'terminal', channel: 'done' }],
+      ] });
+    const report = await host.verifierRunner.runVerifier({ plan, verifierRunId: 'format-1' });
+    assert.equal(report.passed, true);
+    assert.equal(seen.length, 2);
+    assert.deepEqual(seen.map(item => item.role), ['verifier', 'verifier']);
+    assert.match(seen[1].content, /Done\./);
+  } finally {
+    if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
+    else process.env.PEER_AGENT_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function routableProvider(overrides) {
   return {
     enabled: true,
@@ -166,6 +190,7 @@ function openRoutedHost({
   scripts,
   seen,
   visualInputs,
+  conversationWorkspacePath = null,
 }) {
   const goalPlanStore = createGoalPlanStore();
   const plan = goalPlanStore.createPlan({
@@ -182,7 +207,7 @@ function openRoutedHost({
     goalPlanStore,
     conversationStore: {
       getConversation() {
-        return { id: 'conv-route', messages: [{ role: 'user', content: 'go', timestamp: 1 }] };
+        return { id: 'conv-route', workspacePath: conversationWorkspacePath, messages: [{ role: 'user', content: 'go', timestamp: 1 }] };
       },
       appendMessage() {},
     },
@@ -216,6 +241,39 @@ function openRoutedHost({
   });
   return { host, plan };
 }
+
+test('readonly reviewers and report repair retain the task workspace instead of the global active project', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'goal-review-workspace-'));
+  const previousHome = process.env.PEER_AGENT_HOME;
+  process.env.PEER_AGENT_HOME = root;
+  try {
+    for (const { binding, expected } of [
+      { binding: {}, expected: '/bound-project' },
+      { binding: { targetWorkspacePath: '/target-project' }, expected: '/target-project' },
+      { binding: { targetWorkspacePath: '/target-project', deliveryBinding: { executionIsolation: 'worktree', worktreePath: '/task-worktree' } }, expected: '/task-worktree' },
+    ]) {
+      const seen = [], visualInputs = [];
+      const { host, plan } = openRoutedHost({ root: '/unrelated-active-project',
+        conversationWorkspacePath: '/bound-project',
+        providers: [routableProvider({ id: 'one', isDefault: true, supportsVision: true })], modelId: 'one',
+        seen, visualInputs, scripts: [
+          [{ type: 'delta', content: EXPLORER_JSON }, { type: 'terminal', channel: 'done' }],
+          [{ type: 'delta', content: 'Done.' }, { type: 'terminal', channel: 'done' }],
+          [{ type: 'delta', content: VERIFIER_JSON }, { type: 'terminal', channel: 'done' }],
+        ] });
+      Object.assign(plan, binding);
+      await host.explorerRunner.runExplorer({ plan, explorer: { explorerId: 'scope', request: { question: 'Read this project' } } });
+      assert.equal((await host.verifierRunner.runVerifier({ plan, verifierRunId: 'scope' })).passed, true);
+      await host.verifierRunner.runVerifier({ plan, verifierRunId: 'visual-scope', stage: 'visual' });
+      assert.deepEqual(seen.map(turn => turn.workspacePath), [expected, expected, expected]);
+      assert.equal(visualInputs[0].workspacePath, expected);
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
+    else process.env.PEER_AGENT_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('one usable model keeps goal execution, explorer, verifier, and visual review on that model', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'goal-runner-host-route-'));

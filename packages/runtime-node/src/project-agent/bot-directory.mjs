@@ -246,7 +246,19 @@ export function createBotDirectory({
     }
     const cards = readCards(workspaceId) || [];
     const byCard = new Map(cards.map((card) => [card.cardId, card]));
+    const bySession = new Map();
+    const currentStates = message => {
+      const sources = Array.isArray(message.sources) ? message.sources
+        : (Array.isArray(message.meta?.sources) ? message.meta.sources : []);
+      return [...new Set(sources.filter(id => typeof id === 'string' && id))].slice(0, 20).flatMap(sessionId => {
+        if (!bySession.has(sessionId)) bySession.set(sessionId, getSession(sessionId));
+        const session = bySession.get(sessionId);
+        return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status }] : [];
+      });
+    };
     const page = filtered.slice(start, start + size).map((message) => ({ ...message,
+      ...(message.kind === 'agent_reply' && (message.sources?.length || message.meta?.sessionStates)
+        ? { meta: { ...message.meta, sessionStates: currentStates(message) } } : {}),
       ...(message.cards ? { cards: message.cards.map((card) => byCard.get(card.cardId) || card) } : {}),
     }));
     const nextCursor = start + size < filtered.length ? (page[page.length - 1]?.id ?? null) : null;

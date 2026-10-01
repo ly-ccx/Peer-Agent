@@ -4,6 +4,7 @@
  * 模型附在工具参数上的结论、标记和卡片不会进入结果。
  */
 import { planDelivery } from './digest.mjs';
+import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 
 const TEXT_MAX = 2000;
 const ID_MAX = 200;
@@ -22,6 +23,7 @@ const EVENT_KINDS = new Set([
 const SEVERITIES = new Set(['info', 'notable', 'urgent']);
 const PROACTIVITY = new Set(['off', 'low', 'normal', 'high', 'quiet', 'standard', 'muted']);
 const OUTCOMES = new Set(['passed', 'failed', 'partial', 'unverifiable']);
+const SESSION_STATUSES = new Set(WORK_SESSION_STATUSES);
 
 /**
  * @param {object} [input]
@@ -89,6 +91,23 @@ export function composeReply(input = {}) {
     return fail('forged_sources', 'sources must be session ids of this project.', { sessionIds: forged });
   }
 
+  const actualStates = new Map((Array.isArray(input.sessionStates) ? input.sessionStates : [])
+    .filter(item => item && typeof item.sessionId === 'string' && SESSION_STATUSES.has(item.status))
+    .map(item => [item.sessionId, { sessionId: item.sessionId, status: item.status }]));
+  const sessionStates = sources.ids.map(id => actualStates.get(id)).filter(Boolean);
+  const claims = input.statusClaims;
+  if (sources.ids.length || claims != null) {
+    if (!Array.isArray(claims) || claims.length !== sources.ids.length
+      || new Set(claims.map(item => item?.sessionId)).size !== claims.length
+      || claims.some(item => !item || !sources.ids.includes(item.sessionId) || !SESSION_STATUSES.has(item.status))
+      || sessionStates.length !== sources.ids.length) {
+      return fail('status_claim_required', 'Declare exactly one current task status for each cited source.', { sessionStates });
+    }
+    if (claims.some(item => actualStates.get(item.sessionId)?.status !== item.status)) {
+      return fail('status_claim_mismatch', 'Task status differs from the persisted host state. Revise the explanation before posting.', { sessionStates });
+    }
+  }
+
   const verdicts = indexVerdicts(input.verdicts);
   const marks = marksFor(sources.ids, verdicts);
   const verdictRef = latestVerdictRef(sources.ids, verdicts);
@@ -96,6 +115,7 @@ export function composeReply(input = {}) {
   const meta = {
     replyTo: anchors,
     sources: sources.ids,
+    ...(sessionStates.length ? { sessionStates } : {}),
     ...(verdictRef ? { verdictRef } : {}),
     memoryUsed: memoryUsed.ids,
     memoryLearned: learned,

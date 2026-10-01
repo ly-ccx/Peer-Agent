@@ -3,6 +3,7 @@
  * 开任务和写回复的执行不在这里，只做能在调用前判定的输入校验。
  */
 import { TOOL_LEVELS } from './digest.mjs';
+import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 export const DELEGATION_TOOL_SPECS = Object.freeze([
   spec('spawn_session', 'local.delegation.spawn_session', {
     type: 'object',
@@ -119,6 +120,12 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
       text: { type: 'string', maxLength: 2000 },
       proactive: { type: 'boolean' },
       sources: { type: 'array', items: { type: 'string' } },
+      statusClaims: { type: 'array', maxItems: 20, items: {
+        type: 'object', properties: {
+          sessionId: { type: 'string' },
+          status: { type: 'string', enum: [...WORK_SESSION_STATUSES] },
+        }, required: ['sessionId', 'status'], additionalProperties: false,
+      } },
       question: {
         type: 'object',
         properties: {
@@ -377,6 +384,15 @@ function validateReply(input) {
     const sources = stringList(input.sources, { max: 20, itemMax: 200 });
     if (!sources) return invalid('sources must be a list of session ids.');
     value.sources = sources;
+  }
+  if (input.statusClaims !== undefined) {
+    if (!Array.isArray(input.statusClaims) || input.statusClaims.length > 20
+      || input.statusClaims.some(item => !item || typeof item !== 'object' || Array.isArray(item)
+        || !text(item.sessionId, 200) || !WORK_SESSION_STATUSES.includes(item.status)
+        || Object.keys(item).some(key => !['sessionId', 'status'].includes(key)))) {
+      return invalid('statusClaims must list current sessionId/status pairs.');
+    }
+    value.statusClaims = input.statusClaims.map(item => ({ sessionId: item.sessionId.trim(), status: item.status }));
   }
   if (input.question !== undefined) {
     const options = stringList(input.question?.options, { min: 1, max: 8, itemMax: 200 });

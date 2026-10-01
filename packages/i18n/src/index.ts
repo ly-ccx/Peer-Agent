@@ -145,6 +145,16 @@ export type TranslationKey =
   | 'projectAgent.chat.today'
   | 'projectAgent.chat.earlierDay'
   | 'projectAgent.chat.replyTo'
+  | 'projectAgent.chat.sessionState.queued'
+  | 'projectAgent.chat.sessionState.starting'
+  | 'projectAgent.chat.sessionState.running'
+  | 'projectAgent.chat.sessionState.waiting_user'
+  | 'projectAgent.chat.sessionState.verifying'
+  | 'projectAgent.chat.sessionState.result_ready'
+  | 'projectAgent.chat.sessionState.accepted'
+  | 'projectAgent.chat.sessionState.failed'
+  | 'projectAgent.chat.sessionState.cancelled'
+  | 'projectAgent.chat.sessionState.superseded'
   | 'projectAgent.chat.verdict.passed'
   | 'projectAgent.chat.verdict.failed'
   | 'projectAgent.chat.verdict.partial'
@@ -1252,6 +1262,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.today': '今天 {time}',
     'projectAgent.chat.earlierDay': '{date} {time}',
     'projectAgent.chat.replyTo': '回复',
+    'projectAgent.chat.sessionState.queued': '排队中',
+    'projectAgent.chat.sessionState.starting': '正在启动',
+    'projectAgent.chat.sessionState.running': '进行中',
+    'projectAgent.chat.sessionState.waiting_user': '需要你处理',
+    'projectAgent.chat.sessionState.verifying': '核验中',
+    'projectAgent.chat.sessionState.result_ready': '待你确认',
+    'projectAgent.chat.sessionState.accepted': '已签收',
+    'projectAgent.chat.sessionState.failed': '任务失败',
+    'projectAgent.chat.sessionState.cancelled': '已取消',
+    'projectAgent.chat.sessionState.superseded': '已取代',
     'projectAgent.chat.verdict.passed': '结论：已验证',
     'projectAgent.chat.verdict.failed': '结论：没通过',
     'projectAgent.chat.verdict.partial': '结论：部分验证',
@@ -2157,6 +2177,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.today': 'Today {time}',
     'projectAgent.chat.earlierDay': '{date} {time}',
     'projectAgent.chat.replyTo': 'Reply',
+    'projectAgent.chat.sessionState.queued': 'Queued',
+    'projectAgent.chat.sessionState.starting': 'Starting',
+    'projectAgent.chat.sessionState.running': 'Running',
+    'projectAgent.chat.sessionState.waiting_user': 'Needs your input',
+    'projectAgent.chat.sessionState.verifying': 'Verifying',
+    'projectAgent.chat.sessionState.result_ready': 'Awaiting your confirmation',
+    'projectAgent.chat.sessionState.accepted': 'Accepted',
+    'projectAgent.chat.sessionState.failed': 'Failed',
+    'projectAgent.chat.sessionState.cancelled': 'Cancelled',
+    'projectAgent.chat.sessionState.superseded': 'Superseded',
     'projectAgent.chat.verdict.passed': 'Verdict: verified',
     'projectAgent.chat.verdict.failed': 'Verdict: failed',
     'projectAgent.chat.verdict.partial': 'Verdict: partial',

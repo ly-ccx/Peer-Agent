@@ -22,6 +22,28 @@ function reply(extra = {}) {
   });
 }
 
+test('核验通过但任务仍阻塞时不能声明已签收', () => {
+  const result = reply({ sources: ['sess-1'],
+    statusClaims: [{ sessionId: 'sess-1', status: 'accepted' }],
+    sessionStates: [{ sessionId: 'sess-1', status: 'waiting_user' }],
+    verdicts: [{ sessionId: 'sess-1', outcome: 'passed' }],
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'status_claim_mismatch');
+});
+
+test('状态声明必须覆盖来源，待确认不能声明已签收，真实签收可汇报', () => {
+  for (const status of ['waiting_user', 'result_ready', 'accepted']) {
+    const facts = { sources: ['sess-1'], sessionStates: [{sessionId:'sess-1',status}] };
+    const matched = reply({...facts,statusClaims:[{sessionId:'sess-1',status}]});
+    assert.equal(matched.ok,true);assert.deepEqual(matched.meta.sessionStates,facts.sessionStates);
+    if (status !== 'accepted') assert.equal(reply({...facts,statusClaims:[{sessionId:'sess-1',status:'accepted'}]}).error,'status_claim_mismatch');
+    for (const claims of [undefined,[],[{sessionId:'sess-2',status}], [{sessionId:'sess-1',status},{sessionId:'sess-1',status}]]) {
+      assert.equal(reply({...facts,statusClaims:claims}).error,'status_claim_required');
+    }
+  }
+});
+
 test('未知锚点和非用户消息都不能作为 replyTo', () => {
   const missing = reply({ replyTo: ['missing', 'input-a'] });
   assert.equal(missing.ok, false);
@@ -110,6 +132,8 @@ test('标记和送达由宿主事实重算，模型自带的结论与卡片被�
     text: '两件都看过了',
     replyTo: ['input-a'],
     sources: ['sess-1', 'sess-2', 'sess-1'],
+    statusClaims: [{sessionId:'sess-1',status:'failed'},{sessionId:'sess-2',status:'waiting_user'}],
+    sessionStates: [{sessionId:'sess-1',status:'failed'},{sessionId:'sess-2',status:'waiting_user'}],
     userMessages: USERS,
     projectSessionIds: ['sess-1', 'sess-2'],
     verdicts: [

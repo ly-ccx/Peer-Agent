@@ -82,6 +82,25 @@ test('runTurn rejects a missing chat service or sink', () => {
   assert.throws(() => executor.runTurn({ sink: {} }), /sink/);
 });
 
+test('readonly verifier cancellation uses the existing abort seam without sending a signal parameter', async () => {
+  const controller = new AbortController();
+  let release;
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const aborted = [];
+  const executor = createAgentTurnExecutor({llmChatService:{
+    sendMessage(input) {
+      assert.equal(Object.hasOwn(input,'signal'),false);
+      started();return new Promise(resolve=>{release=resolve;});
+    },
+    abort(id) {aborted.push(id);release({terminalStatus:'aborted'});},
+  }});
+  const pending=executor.runTurn({turnProfile:{role:'verifier'},streamId:'verify-cancel',signal:controller.signal,sink:{send(){}}});
+  await ready;controller.abort();
+  assert.equal((await pending).terminalStatus,'aborted');
+  assert.deepEqual(aborted,['verify-cancel']);
+});
+
 test('project cancellation aborts the existing stream and detaches after completion', async () => {
   const controller = new AbortController();
   const aborted = [];

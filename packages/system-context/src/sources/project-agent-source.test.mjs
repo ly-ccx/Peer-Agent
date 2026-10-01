@@ -25,6 +25,9 @@ test('项目代理规则只在 project_agent 角色进入 L1', () => {
   assert.match(section.content, /GoalPlan interruption reason and the last error/);
   assert.match(section.content, /stop automatic retries and ask the user/);
   assert.match(section.content, /Do not start another attempt/);
+  assert.match(section.content, /statusClaims/);
+  assert.match(section.content, /Only persisted resultAcceptance/);
+  assert.match(section.content, /Never repeat a rejected reply as final free text/);
   assert.doesNotMatch(section.content, /mem-/);
 });
 
