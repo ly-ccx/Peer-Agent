@@ -13,6 +13,23 @@ export function userAuthorizesObjectiveAutonomy(content,autonomy){
   return /(?:发现|出|有).{0,12}(?:直接|自动).{0,6}(?:修|处理|做)|(?:直接|自动)(?:修|处理|推进|动手)|自己(?:推进|处理|做)|automatically\s+(?:fix|handle)|(?:fix|handle).{0,12}(?:automatically|without\s+asking)/i.test(text);
 }
 
+function affirmativeResume(content,pending){
+  const text=cleanUserText(content);
+  if(/不要|别|不能|不允许|不同意|不恢复|不确认|不重启|暂不|先不|\b(?:no|not|cannot|never)\b|can['’]t|won['’]t|don['’]?t/i.test(text))return false;
+  return (pending?/(?:同意|确认|开始|可以|^好[的啊吧]?\s*$|\byes\b|\bconfirm\b|\bapprove\b|\bstart\b|\bresume\b)/i:/(?:恢复|重启|重新(?:开启|开始)|继续.{0,8}目标|\bresume\b|\brestart\b|\breopen\b|\bcontinue\b.{0,30}\bobjective\b)/i).test(text);
+}
+function authorizesBudget(content,current,next){
+  const text=cleanUserText(content);
+  if(/不要|别|不能|不允许|\b(?:no|not|cannot|never)\b|can['’]t|won['’]t|don['’]?t/i.test(text))return false;
+  const parts=text.split(/[；;。\n]/);
+  const dimensions=[['maxAutoSessionsPerDay',/自动任务|自动会话|auto(?:matic)?[ -]?(?:task|session)/i],['maxProbeRunsPerDay',/探测|巡检|probe|observation/i]];
+  return dimensions.every(([key,subject])=>next[key]<=current[key]||parts.some(part=>{
+    if(!subject.test(part)||!/(?:提高|增加|上调|放宽|调整).{0,20}(?:到|为)|\b(?:raise|increase|expand|set)\b.{0,60}\bto\b/i.test(part))return false;
+    const amount=part.match(/(?:到|为|\bto\b)\s*(\d+)\b/i);
+    return amount&&next[key]<=Number(amount[1]);
+  }));
+}
+
 /** Owns user provenance, objective scope, transitions and factual achievement; no model execution. */
 export function createObjectiveService({store,readConversation,resolveConversationId,canManageWorkspace=()=>true,readSession=()=>null,resolveEvidence=()=>null,onChanged=null}={}) {
   if(!store)throw TypeError('ObjectiveService requires store');
@@ -28,6 +45,7 @@ export function createObjectiveService({store,readConversation,resolveConversati
     const createdBy=input.createdBy || 'user_request',autonomy=input.autonomy || 'propose';
     if(createdBy==='user_request'&&!/(?:目标|持续|盯着|监控|每天|定期|一直|直到|发布前|发版前|稳定下来|(?:CI|构建|测试|test|build).{0,10}(?:挂了|失败|fail)|\bgoal\b|\bmonitor\b|\bwatch\b|\bkeep\b)/i.test(cleanUserText(anchor.content)))return fail('OBJECTIVE_NOT_REQUESTED');
     if(createdBy==='user_request'&&!userAuthorizesObjectiveAutonomy(anchor.content,autonomy))return fail('AUTONOMY_NOT_AUTHORIZED');
+    if(input.budget&&!authorizesBudget(anchor.content,{maxAutoSessionsPerDay:3,maxProbeRunsPerDay:60},input.budget))return fail('BUDGET_NOT_AUTHORIZED');
     if(createdBy==='agent_proposal'&&autonomy==='act')return fail('AUTONOMY_NOT_AUTHORIZED');
     if(Array.isArray(input.milestones)&&input.milestones.some(m=>m.sessionIds?.length||m.status==='done'))return fail('SESSION_OUT_OF_SCOPE');
     const requestId=createHash('sha256').update(`${view.conversationId}\0${anchor.id}\0${input.title}\0${input.outcome}`).digest('hex');
@@ -45,7 +63,8 @@ export function createObjectiveService({store,readConversation,resolveConversati
     const raisesAutonomy=input.autonomy!==undefined&&LEVEL[input.autonomy]>LEVEL[current.autonomy];
     const expandsBudget=input.budget&&(input.budget.maxAutoSessionsPerDay>current.budget.maxAutoSessionsPerDay||input.budget.maxProbeRunsPerDay>current.budget.maxProbeRunsPerDay);
     if(raisesAutonomy||expandsBudget){const anchor=currentUser(input,view);if(!anchor)return fail('CURRENT_USER_REQUIRED');
-      if(!userAuthorizesObjectiveAutonomy(anchor.content,input.autonomy || current.autonomy))return fail('AUTONOMY_NOT_AUTHORIZED');}
+      if(raisesAutonomy&&!userAuthorizesObjectiveAutonomy(anchor.content,input.autonomy))return fail('AUTONOMY_NOT_AUTHORIZED');
+      if(expandsBudget&&!authorizesBudget(anchor.content,current.budget,input.budget))return fail('BUDGET_NOT_AUTHORIZED');}
     const patch={};for(const key of ['title','outcome','watches','milestones','successSignals','autonomy','budget','deadline'])if(input[key]!==undefined)patch[key]=input[key];
     const checked=validateObjectiveDefinition({...current,...patch});if(!checked.ok)return checked;
     if(patch.milestones?.some(m=>m.sessionIds?.some(id=>{const session=readSession(id);return !session||session.workspaceId!==view.workspaceId||session.origin?.objectiveId!==current.objectiveId;})))return fail('SESSION_OUT_OF_SCOPE');
@@ -55,7 +74,7 @@ export function createObjectiveService({store,readConversation,resolveConversati
   function pause(input,view){if(!scope(view,true))return fail('NOT_HOST');const current=owned(input,view);return current?changed(store.update(view.workspaceId,current.objectiveId,{status:'paused'},mutationOptions(input,view)),view.workspaceId):fail('NOT_FOUND');}
   function resume(input,view){
     const current=owned(input,view);if(!current)return fail('NOT_FOUND');const anchor=currentUser(input,view);if(!anchor)return fail('CURRENT_USER_REQUIRED');
-    if(current.pendingConfirmation){const text=cleanUserText(anchor.content);if(!/(?:同意|确认|开始|可以|好|yes|confirm|approve|start)/i.test(text)||/(?:不|别|不要|不同意|no\b|don['’]?t)/i.test(text))return fail('CONFIRMATION_REQUIRED');}
+    if(!affirmativeResume(anchor.content,current.pendingConfirmation))return fail('CONFIRMATION_REQUIRED');
     if(!userAuthorizesObjectiveAutonomy(anchor.content,current.autonomy))return fail('AUTONOMY_NOT_AUTHORIZED');
     return changed(store.update(view.workspaceId,current.objectiveId,{status:'active',pendingConfirmation:false},mutationOptions(input,view)),view.workspaceId);
   }

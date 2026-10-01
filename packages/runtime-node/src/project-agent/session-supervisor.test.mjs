@@ -6,6 +6,7 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 
 import { createConversationStore } from '../../../conversation-store/src/index.mjs';
+import { createObjectiveStore } from './objective-store.mjs';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createGoalRunner } from '../goal-runner.mjs';
 import { createScriptedTurnExecutor } from '../testing/scripted-turn-executor.mjs';
@@ -55,6 +56,7 @@ async function harness({
   readSessionFacts = null,
   approvalStore = null,
   readPlanApproval = null,
+  objectives = null,
   isolationPlanner = undefined,
   canManageWorkspace = undefined,
   now = () => '2026-09-27T00:00:00.000Z',
@@ -103,6 +105,7 @@ async function harness({
     conversationStore,
     goalPlanStore,
     goalRunner,
+    objectives,
     catalog,
     routing: routing(),
     abortStream: async (request) => { aborts.push(request); },
@@ -1716,4 +1719,20 @@ test('cancellation preserves completed results and workspace shutdown cancels on
     assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).status, 'cancelled');
     assert.equal(env.goalPlanStore.getPlan(completedPlan).status, 'completed');
   } finally { await env.cleanup(); }
+});
+
+test('failed isolation and runner startup leave no deleted task linked to the durable objective',async()=>{
+ for(const failure of ['isolation','runner']){
+  let store, objectiveId;
+  const objectives={prepareSpawn:()=>({ok:true}),linkSession:(workspaceId,id,sessionId)=>store.linkSession(workspaceId,id,sessionId)};
+  const env=await harness({objectives,goalRunner:{async start(){if(failure==='runner')throw Error('runner failed');}},
+   ...(failure==='isolation'?{isolationPlanner:{async prepare(){throw Error('isolation failed');}}}:{})});
+  try{
+   store=createObjectiveStore({rootDir:env.root});objectiveId=store.create({workspaceId:'ws-1',projectAgentConversationId:env.parent.id,originMessageId:'anchor-1',title:'Monitor',outcome:'Green',autonomy:'propose',createdBy:'user_request'}).item.objectiveId;
+   const result=await env.supervisor.spawn(spawnInput({objectiveId}),contextOf(env));assert.equal(result.error,'spawn_failed');
+   const restarted=createObjectiveStore({rootDir:env.root});assert.deepEqual(restarted.get('ws-1',objectiveId).milestones,[]);
+   const leftovers=readdirSync(env.goalPlanStore.getStoreDir()).filter(name=>name.endsWith('.json')).map(name=>env.goalPlanStore.getPlan(name.slice(0,-5))).filter(plan=>plan?.delegationOrigin);
+   assert.equal(leftovers.length,0);
+  }finally{await env.cleanup();}
+ }
 });

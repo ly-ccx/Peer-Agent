@@ -436,6 +436,9 @@ test('objective tools and desktop commands share canonical authority, persist sc
     assert.equal(env.api.objectives.resume({...req,requestId:'resume'}).item.status,'active');
     assert.equal(env.api.objectives.pause(req).replayed,true);
     assert.equal(env.api.objectives.list(req).items[0].status,'active');
+    assert.equal(env.api.objectives.update({...req,requestId:'lower-budget',patch:{budget:{maxAutoSessionsPerDay:1,maxProbeRunsPerDay:10}}}).ok,true);
+    assert.equal(env.api.objectives.update({...req,requestId:'raise-budget',patch:{budget:{maxAutoSessionsPerDay:2,maxProbeRunsPerDay:20}}}).ok,true);
+    const budgetCommand=env.history().find(m=>m.meta?.objectiveCommand==='update'&&m.content.includes('探测上限调整到 20'));assert.ok(budgetCommand);
     const before=env.history().length;
     assert.equal(env.api.objectives.update({...req,requestId:'forge',patch:{status:'achieved'}}).code,'INVALID_INPUT');
     assert.equal(env.history().length,before);

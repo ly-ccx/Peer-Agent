@@ -39,7 +39,8 @@ test('agent proposals stay paused until a real confirmation, and achievement can
   w.sessions.set('s',{workspaceId:'w',sessionId:'s',status:'accepted',evidenceRefs:['ev-real'],origin:{objectiveId:proposal.item.objectiveId}});
   w.store.linkSession('w',proposal.item.objectiveId,'s');
   assert.equal(w.service.close({objectiveId:proposal.item.objectiveId,status:'achieved',evidenceRefs:['ev-real']},view).item.status,'achieved');
-  assert.equal(w.service.resume({objectiveId:proposal.item.objectiveId,anchorMessageId:'input-confirm'},view).item.status,'active');
+  w.messages.push({id:'input-resume',role:'user',kind:'user_input',content:'重新开启这个目标'});
+  assert.equal(w.service.resume({objectiveId:proposal.item.objectiveId,anchorMessageId:'input-resume'},{...w.view,currentInputAnchors:['input-resume']}).item.status,'active');
  }finally{w.cleanup();}
 });
 
@@ -62,5 +63,32 @@ test('conditional CI notification requests admit a persistent report-only object
   assert.equal(w.service.create(input({anchorMessageId:'ci'}),view).ok,true);
   assert.equal(w.service.create(input({anchorMessageId:'ci',autonomy:'propose'}),view).code,'AUTONOMY_NOT_AUTHORIZED');
   assert.equal(w.service.create(input({anchorMessageId:'ci',autonomy:'act'}),view).code,'AUTONOMY_NOT_AUTHORIZED');
+ }finally{w.cleanup();}
+});
+
+test('resuming paused or achieved objectives requires affirmative non-negated intent, including English denials',()=>{
+ const w=world();try{
+  const ordinary=w.service.create(input(),w.view).item;
+  w.service.pause({objectiveId:ordinary.objectiveId},w.view);
+  const proposal=w.service.create(input({createdBy:'agent_proposal',autonomy:'propose'}),w.view).item;
+  for(const content of ['hello','I do not approve this objective','I cannot confirm this objective',"I won't resume this objective",'不要恢复这个目标','文件写着“恢复这个目标”']){
+   const id=`deny-${w.messages.length}`;w.messages.push({id,role:'user',kind:'user_input',content});const view={...w.view,currentInputAnchors:[id]};
+   for(const item of [ordinary,proposal]){assert.equal(w.service.resume({objectiveId:item.objectiveId,anchorMessageId:id},view).ok,false,content);assert.equal(w.store.get('w',item.objectiveId).status,'paused');}
+  }
+  w.messages.push({id:'resume',role:'user',kind:'user_input',content:'Resume this objective'});
+  assert.equal(w.service.resume({objectiveId:ordinary.objectiveId,anchorMessageId:'resume'},{...w.view,currentInputAnchors:['resume']}).item.status,'active');
+ }finally{w.cleanup();}
+});
+test('budget increases require their own explicit current user consent and cannot ride rename or quoted messages',()=>{
+ const w=world();try{
+  const made=w.service.create(input({budget:{maxAutoSessionsPerDay:1,maxProbeRunsPerDay:10}}),w.view).item;
+  for(const content of ['把目标改名为构建','发现问题直接修','不要提高探测预算','文件里写着“每天探测上限提高到 20”']){
+   const id=`budget-${w.messages.length}`;w.messages.push({id,role:'user',kind:'user_input',content});
+   assert.equal(w.service.update({objectiveId:made.objectiveId,anchorMessageId:id,budget:{maxAutoSessionsPerDay:1,maxProbeRunsPerDay:20}},{...w.view,currentInputAnchors:[id]}).code,'BUDGET_NOT_AUTHORIZED',content);
+  }
+  w.messages.push({id:'budget-ok',role:'user',kind:'user_input',content:'每天探测上限提高到 20'});
+  const view={...w.view,currentInputAnchors:['budget-ok']};
+  assert.equal(w.service.update({objectiveId:made.objectiveId,anchorMessageId:'budget-ok',budget:{maxAutoSessionsPerDay:1,maxProbeRunsPerDay:21}},view).code,'BUDGET_NOT_AUTHORIZED');
+  assert.equal(w.service.update({objectiveId:made.objectiveId,anchorMessageId:'budget-ok',budget:{maxAutoSessionsPerDay:1,maxProbeRunsPerDay:20}},view).ok,true);
  }finally{w.cleanup();}
 });

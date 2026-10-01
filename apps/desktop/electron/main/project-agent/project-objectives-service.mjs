@@ -16,7 +16,8 @@ export function createProjectObjectivesService({service,store,profileStore,conve
       ||(payload.expectedVersion!==undefined&&(!Number.isInteger(payload.expectedVersion)||payload.expectedVersion<1)))return {ok:false,code:'INVALID_INPUT'};
     if(method==='update'&&(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(key=>!['title','outcome','autonomy','watches','milestones','successSignals','budget','deadline'].includes(key))
       ||!validateObjectiveToolInput('update_objective',{...patch,objectiveId}).ok))return {ok:false,code:'INVALID_INPUT'};
-    const action=method==='update'?(patch.autonomy==='act'?'持续目标允许直接处理，发现问题就直接修':patch.autonomy==='report_only'?'持续目标只报告变化':patch.autonomy==='propose'?'持续目标先提议再执行':(item.autonomy==='act'?'调整持续目标计划，继续直接处理':'调整持续目标计划')):method==='resume'?(item.autonomy==='act'?'确认并恢复这个目标，发现问题就直接修':'确认并恢复这个持续目标'):method==='pause'?'暂停这个目标':'放弃这个目标';
+    let action=method==='update'?(patch.autonomy==='act'?'持续目标允许直接处理，发现问题就直接修':patch.autonomy==='report_only'?'持续目标只报告变化':patch.autonomy==='propose'?'持续目标先提议再执行':(item.autonomy==='act'?'调整持续目标计划，继续直接处理':'调整持续目标计划')):method==='resume'?(item.autonomy==='act'?'确认并恢复这个目标，发现问题就直接修':'确认并恢复这个持续目标'):method==='pause'?'暂停这个目标':'放弃这个目标';
+    if(method==='update'&&patch.budget)action+=`;每天自动任务上限调整到 ${patch.budget.maxAutoSessionsPerDay};每天探测上限调整到 ${patch.budget.maxProbeRunsPerDay}`;
     const fingerprint=createHash('sha256').update(JSON.stringify({workspaceId,objectiveId,method,patch})).digest('hex');
     const messageId=`objective-command:${createHash('sha256').update(`${workspaceId}:${requestId}`).digest('hex')}`;
     const context=view(workspaceId),history=conversationStore.getPersistedConversationHistory(context.conversationId)?.messages || [];

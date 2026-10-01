@@ -483,7 +483,6 @@ export function createSessionSupervisor({
       planId = plan?.planId || null;
       spawnedSessionId = sessionId;
       if (!plan?.delegationOrigin?.sessionId) throw new Error('delegationOrigin was not stored');
-      if (input.objectiveId && !objectives.linkSession(workspaceId,input.objectiveId,sessionId)?.ok) throw new Error('objective binding failed');
       if (!hold && isolationPlanner && canManageWorkspace(workspaceId) === true) await isolationPlanner.prepare(plan, delegatedPlans());
       if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
       if (replacingOpen) {
@@ -503,16 +502,18 @@ export function createSessionSupervisor({
       }
       await promote(plan.planId);
       const reportedPhase = goalPlanStore.getPlan(plan.planId)?.delegationOrigin.phase || phase;
-      emit({ kind: 'session_started', sessionId, planId: plan.planId, workspaceId });
       const queuedBehind = reportedPhase === 'queued'
         ? openPlans(workspaceId).filter((item) => item.delegationOrigin.phase === 'queued'
           || occupiesRunningSlot(item)).length - 1
         : 0;
+      const queueReason = executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason;
+      // All fallible spawn work must finish before a durable objective link is added.
+      if (input.objectiveId && !objectives.linkSession(workspaceId,input.objectiveId,sessionId)?.ok) throw new Error('objective binding failed');
+      emit({ kind: 'session_started', sessionId, planId: plan.planId, workspaceId });
       return {
         sessionId,
         status: reportedPhase,
-        ...(executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason
-          ? { queueReason: executionScheduler.inspect(goalPlanStore.getPlan(plan.planId) || plan, delegatedPlans()).reason } : {}),
+        ...(queueReason ? { queueReason } : {}),
         ...(queuedBehind > 0 ? { queuedBehind } : {}),
       };
     } catch (error) {
@@ -522,6 +523,7 @@ export function createSessionSupervisor({
         goalPlanStore.setRunnerState(planId, { status: 'failed', lastError: reason });
         if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
         await promote();
+        if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,spawnedSessionId);
         return { sessionId: spawnedSessionId, status: 'failed', error: 'spawn_failed', message: reason };
       }
       if (planId) {
@@ -531,6 +533,7 @@ export function createSessionSupervisor({
           if (cleaned?.deliveryBinding?.worktreePath) {
             goalPlanStore.setPlanStatus(planId, 'failed');
             await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
+            if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,spawnedSessionId);
             return { sessionId: spawnedSessionId, status: 'failed', error: 'spawn_failed', message: reason };
           }
         }
