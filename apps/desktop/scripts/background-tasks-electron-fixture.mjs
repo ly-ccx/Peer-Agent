@@ -2,7 +2,7 @@
 // Never connects to the user's data home or running Peer instance.
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { executeProjectedModelTool } from '../electron/main/chat-runtime/projected-tool-executor.mjs';
@@ -88,5 +88,7 @@ app.whenReady().then(async () => {
     preload: path.join(desktop, 'electron/preload/preload.cjs'), contextIsolation: true, nodeIntegration: false,
   } });
   const html = `<html data-theme="dark"><meta charset="utf-8"><style>${css}</style><body><div id="root"></div><script>${result.outputFiles[0].text.replaceAll('</script', '<\\/script')}</script></body></html>`;
-  await win.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
+  const pageFile = path.join(home, 'background-smoke.html');
+  writeFileSync(pageFile, html);
+  await win.loadFile(pageFile);
 }).catch((error) => { console.error(error); app.exit(1); });
