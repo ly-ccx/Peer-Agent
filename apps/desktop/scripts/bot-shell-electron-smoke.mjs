@@ -59,7 +59,9 @@ writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], tu
 const entry = path.join(root, 'entry.mjs');
 writeFileSync(entry, `import {app} from 'electron';
 import {writeFileSync,renameSync} from 'node:fs';
+import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/lab-main-thread-probe.mjs')).href)};
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
+startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
 app.setPath('userData',${JSON.stringify(path.join(root, 'chromium'))});
 const observations={reads:[],list:[],search:[],turns:[]};
 globalThis.rcBotShellRecord=(key,value)=>{
