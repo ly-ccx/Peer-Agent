@@ -39,6 +39,7 @@ function agentContext(overrides = {}) {
     toolCallOrdinal: 0,
     conversationId: 'conv-1',
     messages: [USER, ASSISTANT],
+    currentInputAnchors: ['u1'],
     ...overrides,
   };
 }
@@ -725,10 +726,10 @@ test('objective-only wake cannot bypass confirmation by omitting objectiveId or 
  const human=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),{toolContext:{...view,currentInputAnchors:['u1']}});assert.equal(human.result.status,'success');assert.equal(mutations,1);
 });
 
-test('a host handled handoff answer is not authority for another task or repeated mutations', async () => {
+for (const prefix of ['handoff','handoff_conflict']) test(`a host handled ${prefix} answer is not authority for another task or repeated mutations`, async () => {
   let spawns=0;
   const provider=createDelegationProvider({supervisor:{spawn:()=>{spawns+=1;return {sessionId:'new',status:'running'};}}});
-  const answer={...USER,answerTo:'card:question:s1:handoff-0123456789abcdef',content:'合回改动'};
+  const answer={...USER,answerTo:`card:question:s1:${prefix}-0123456789abcdef`,content:'合回改动'};
   const ctx=agentContext({workspaceId:'ws',currentInputAnchors:['u1'],messages:[answer]});
   const result=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),ctx);
   assert.equal(outputOf(result).error,'host_decision_already_handled');assert.equal(spawns,0);
@@ -747,4 +748,18 @@ test('mixed objective and task wakes still verify the actual ordinary task event
   assert.equal(outputOf(denied).error,'objective_verification_out_of_scope');assert.equal(runs,0);
   const allowed=await provider.executeCapability(call('local.delegation.verify_session',{sessionId:'ordinary'},'mixed'),{...context,sessionWakeIds:['ordinary']});
   assert.equal(outputOf(allowed).error,'test-verifier-reached');assert.equal(runs,1);
+});
+
+test('ordinary wake cannot open more tasks from a historical user instruction', async () => {
+  let spawns=0;
+  const provider=createDelegationProvider({supervisor:{spawn:()=>{spawns+=1;return {sessionId:'new'};}}});
+  const result=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),agentContext({currentInputAnchors:[]}));
+  assert.equal(outputOf(result).error,'current_user_required');assert.equal(spawns,0);
+});
+
+
+test('a current user turn cannot use an unrelated historical anchor to create work', async()=>{
+ const provider=createDelegationProvider({supervisor:{spawn:()=>({sessionId:'bad'})}});
+ const result=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),agentContext({currentInputAnchors:['u2'],messages:[USER,{id:'u2',role:'user',kind:'user_input'}]}));
+ assert.equal(outputOf(result).error,'current_user_required');
 });

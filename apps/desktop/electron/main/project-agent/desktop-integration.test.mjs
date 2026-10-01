@@ -127,7 +127,7 @@ test('the default LocalToolHost dispatches through supervisor, Grant and Evidenc
   const env = harness();
   try {
     await env.submit('anchor', 'read project');
-    const opened = await tool(env, 'spawn_session', { anchorMessageIds: ['input-anchor'], title: 'Read', brief: 'Read files', kind: 'research', readOnly: true, successCriteria: ['Read'] });
+    const opened = await tool({ ...env, currentInputAnchors: ['input-anchor'] }, 'spawn_session', { anchorMessageIds: ['input-anchor'], title: 'Read', brief: 'Read files', kind: 'research', readOnly: true, successCriteria: ['Read'] });
     assert.equal(opened.success, true, JSON.stringify(opened));
     assert.equal(opened.execution.grant.granted, true); assert.equal(opened.execution.result.status, 'success');
     const output = JSON.parse(opened.output);
@@ -366,6 +366,7 @@ test('production failed dependency projects a question and an answer does not st
   try {
     await env.submit('dep-anchor','处理依赖');
     const args={anchorMessageIds:['input-dep-anchor'],title:'前置任务',brief:'前置任务',kind:'research',readOnly:true,successCriteria:['读取内容']};
+    env.currentInputAnchors=args.anchorMessageIds;
     const dep=JSON.parse((await tool(env,'spawn_session',args)).output);
     const child=JSON.parse((await tool(env,'spawn_session',{...args,title:'后续任务',brief:'等待签收',dependsOn:[dep.sessionId]})).output);
     await env.api.supervisor.cancel({sessionId:dep.sessionId});

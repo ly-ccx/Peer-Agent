@@ -54,7 +54,7 @@ host = createProjectAgentHost({ rootDir: runtimeRoot, holdsLease: id => lease.ho
         const args = { anchorMessageIds: ['input-input-one'], title: 'One task', brief: 'Read the project once', kind: 'research', readOnly: true, successCriteria: ['Read'] };
         const result = await provider.executeCapability({ call: { toolCallId: `spawn-${input.turnId}`, capabilityId: 'local.delegation.spawn_session', arguments: args } },
           { mode: 'project_agent', role: 'project_agent', workspaceId, workspacePath: setup.workspacePath, conversationId: setup.conversationId,
-            messages: conversations.getPersistedConversationHistory(setup.conversationId).messages, turnId: input.turnId, toolCallOrdinal: 1 });
+            messages: conversations.getPersistedConversationHistory(setup.conversationId).messages, currentInputAnchors: input.plan.turnProfile.context.inputAnchors.map(anchor => anchor.messageId), turnId: input.turnId, toolCallOrdinal: 1 });
         const output = JSON.parse(result.result.outputPreview.legacyResult.output);
         if (!output.sessionId) throw new Error(JSON.stringify(output));
         recorded.push({ name: 'spawn_session', input: args, result: output }); checkpoint('task_created'); return output;

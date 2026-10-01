@@ -102,6 +102,10 @@ export function createDelegationProvider({
     }
 
     let input = validated.value;
+    if (item.name === 'spawn_session' && !view.currentInputAnchors.length && !view.objectiveWakeIds.length) {
+      return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
+        output: { ok: false, error: 'current_user_required', message: 'Historical user messages cannot authorize new tasks during an ordinary wake.' } });
+    }
     if (['spawn_session', 'resume_session', 'message_session', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
       && onlyHandoffAnswers(view)) return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
       output: { ok: false, error: 'host_decision_already_handled', message: 'The host handles this merge decision. A separate current user instruction is required for new work.' } });
@@ -165,6 +169,11 @@ export function createDelegationProvider({
           status: 'failed',
           output: anchorError,
         });
+      }
+      if (view.currentInputAnchors.length && !input.objectiveId
+        && !view.messages.some(message => view.currentInputAnchors.includes(message.id) && message.answerTo?.startsWith('card:question:objective:'))
+        && !input.anchorMessageIds.some(id => view.currentInputAnchors.includes(id))) {
+        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'current_user_required' } });
       }
       if (input.modelPreference?.modelProviderId && typeof checkModel === 'function') {
         const checked = await checkModel({ modelProviderId: input.modelPreference.modelProviderId });
@@ -409,7 +418,7 @@ function onlyHandoffAnswers(view) {
   if (!view.currentInputAnchors.length) return false;
   return view.currentInputAnchors.every(id => {
     const message = view.messages?.find(item => item.id === id && item.role === 'user');
-    return typeof message?.answerTo === 'string' && /^card:question:[^:]+:handoff-[a-f0-9]{16}$/.test(message.answerTo);
+    return typeof message?.answerTo === 'string' && /^card:question:[^:]+:handoff(?:_conflict)?-[a-f0-9]{16}$/.test(message.answerTo);
   });
 }
 

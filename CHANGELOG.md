@@ -8,6 +8,28 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-beta.4] - 2026-10-01
+
+### Added
+
+- Host scheduling for concurrent tasks, priorities and accepted dependencies; independent Git worktrees with explicit merge decisions.
+- Pause, supersede and resume with retained task context and ordered crash recovery.
+- Project objectives, read-only scheduled and event probes, factual change notifications, and report/propose/act autonomy with device budgets.
+- Memory expiry, conflict handling, and file source freshness checks.
+
+### Changed
+
+- Custom animated bot avatars, colors and SVG controls; refreshed profile, task, memory and objective surfaces.
+- Canonical task reports deduplicate unchanged host facts; card updates and evidence disclosure refresh reliably.
+- Ordinary wakes and handled merge decisions cannot create additional tasks using historical user authority.
+- Workspace builds run sequentially to prevent concurrent shared output cleanup.
+
+### Limitations
+
+- Token hard limits remain unsupported; objective tasks require acceptance unless the user explicitly enables automatic acceptance.
+- TUI and remote project bot surfaces remain scheduled for Beta5. Cross-platform interactive installation and five days of owner daily use are not claimed.
+- Downgrade to beta.3 or 0.0.18 keeps added project data; objectives pause while using an older app.
+
 ## [0.1.0-beta.3] - 2026-09-28
 
 ### Notes
