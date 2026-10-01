@@ -161,6 +161,29 @@ test('list/query use a current message batch, while details and unavailable adap
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('approval batch is current and scoped; details and unavailable adapters retain live single reads', () => {
+  const root = tempRoot();
+  let singles = 0, batches = 0, state = 'open', unavailable = false;
+  try {
+    const { entry, directory } = harness(root, {
+      listConfirmations: () => [], readMessages: () => [],
+      listApprovals: () => { singles++; return [{ approvalId: 'single', state: 'open' }]; },
+      readApprovalsBatch: ids => {
+        batches++; if (unavailable) throw Error('unavailable');
+        return new Map(ids.map(id => [id, [{ approvalId: id, state }]]));
+      },
+    });
+    assert.equal(directory.list()[0].state.needsYou, 1);
+    state = 'approved';
+    assert.equal(directory.list()[0].state.needsYou, 0);
+    assert.equal(batches, 2); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 1);
+    unavailable = true;
+    assert.equal(directory.query('').catalog[0].state.needsYou, 1);
+    assert.equal(singles, 2); assert.equal(batches, 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('读游标之后未读清零，对话按 kind 分页', () => {
   const root = tempRoot();
   try {

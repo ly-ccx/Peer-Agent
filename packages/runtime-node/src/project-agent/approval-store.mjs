@@ -245,6 +245,17 @@ export function createApprovalStore({
     });
   }
 
+  /** A fresh presentation snapshot; approval decisions still use their existing live reads. */
+  function listByWorkspaceIds(ids) {
+    const result = new Map((Array.isArray(ids) ? ids : [])
+      .filter(id => workspaceDir(id) !== UNSCOPED_DIR).map(id => [id, []]));
+    if (!result.size) return result;
+    for (const record of foldAll()) {
+      result.get(record.workspaceId)?.push(record);
+    }
+    return result;
+  }
+
   /** 进程启动：所有 open 变成 stale。没有 open 时不写盘。 */
   function markStaleOnStartup({ canRecover = () => true } = {}) {
     const decidedAt = now().toISOString();
@@ -264,6 +275,7 @@ export function createApprovalStore({
   return {
     append,
     list,
+    listByWorkspaceIds,
     markStaleOnStartup,
     fileFor,
   };

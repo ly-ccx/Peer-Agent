@@ -91,6 +91,7 @@ export function createBotDirectory({
   listSessions = () => [],
   getSession = () => null,
   listApprovals = () => [],
+  readApprovalsBatch = null,
   listConfirmations = () => [],
   listClassicGoals = () => [],
   readClassicGoalsBatch = null,
@@ -163,7 +164,7 @@ export function createBotDirectory({
     }
   }
 
-  function projectRow(profile, classicBatch = null, messageBatch = null) {
+  function projectRow(profile, classicBatch = null, messageBatch = null, approvalBatch = null) {
     const messages = messagesOf(profile, messageBatch);
     const visible = messages.filter(isVisibleBotMessage);
     const last = visible.length ? toListMessage(visible[visible.length - 1]) : null;
@@ -184,7 +185,8 @@ export function createBotDirectory({
         .filter((goal) => goal?.waitingUser === true)
         .map((goal) => ({ status: 'waiting_user', updatedAt: goal.updatedAt })),
     ];
-    const approvals = listApprovals(profile.workspaceId);
+    const approvals = approvalBatch instanceof Map && approvalBatch.has(profile.workspaceId)
+      ? approvalBatch.get(profile.workspaceId) : listApprovals(profile.workspaceId);
     return {
       item: projectBotListItem({
         profile: { ...profile },
@@ -217,7 +219,10 @@ export function createBotDirectory({
     let messages = null;
     try { messages = readMessagesBatch?.(current.map(profile => profile.agentConversationId).filter(Boolean)) ?? null; }
     catch { /* Existing single reads retain their normal failure behavior. */ }
-    return current.map(profile => projectRow(profile, batch, messages));
+    let approvals = null;
+    try { approvals = readApprovalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
+    catch { /* Existing single reads retain their normal failure behavior. */ }
+    return current.map(profile => projectRow(profile, batch, messages, approvals));
   }
 
   function list() {

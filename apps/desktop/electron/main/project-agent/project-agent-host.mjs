@@ -263,6 +263,7 @@ export function registerDesktopProjectAgent({
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
+    readApprovalsBatch: ids => approvalStore.listByWorkspaceIds(ids),
     readCards: (workspaceId) => projectFacts.cards(workspaceId),
     listClassicGoals: classicGoals.one,
     readClassicGoalsBatch: classicGoals.batch,
