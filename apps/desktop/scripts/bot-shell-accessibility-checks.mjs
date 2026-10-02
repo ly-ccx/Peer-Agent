@@ -217,12 +217,34 @@ async function checkSettings({ page, until, report, captureDirectory }) {
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-default-light.png') });
   const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
   const themedSwitches = [];
-  for (const theme of ['light', 'dark']) {
-    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
-    const paint = await handoff.evaluate(node => ({ theme: document.documentElement.dataset.theme,
-      track: getComputedStyle(node).backgroundColor, thumb: getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor }));
-    assert.notEqual(paint.track, paint.thumb); themedSwitches.push(paint);
+  for (const palette of ['catppuccin', 'frost']) for (const theme of ['light', 'dark']) {
+    await page.evaluate(({ theme, palette }) => {
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.dataset.palette = palette;
+    }, { theme, palette });
+    for (const checked of [false, true]) {
+      if ((await handoff.getAttribute('aria-checked') === 'true') !== checked) await handoff.press('Space');
+      await until(profile, p => (p.autoHandoffOnPolicyAccept === true) === checked);
+      await settleColorTransitions(page);
+      const paint = await handoff.evaluate(node => {
+        const track = getComputedStyle(node).backgroundColor;
+        const thumb = getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor;
+        const luminance = value => value.match(/[\d.]+/g).slice(0, 3).map(Number).map(x => x / 255)
+          .map(x => x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)
+          .reduce((n, x, i) => n + x * [0.2126, 0.7152, 0.0722][i], 0);
+        const values = [luminance(track), luminance(thumb)].sort((a, b) => b - a);
+        return { theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette,
+          checked: node.getAttribute('aria-checked') === 'true', track, thumb, contrast: (values[0] + 0.05) / (values[1] + 0.05) };
+      });
+      assert.ok(paint.contrast >= 3, 'switch thumb contrast must reach 3:1 in each theme and state');
+      themedSwitches.push(paint);
+    }
+    await handoff.press('Space');
+    await until(profile, p => p.autoHandoffOnPolicyAccept !== true);
   }
+  if (original.autoHandoffOnPolicyAccept === true) await handoff.press('Space');
+  await until(profile, p => (p.autoHandoffOnPolicyAccept === true) === (original.autoHandoffOnPolicyAccept === true));
+  await settleColorTransitions(page);
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-default.png') });
   await page.evaluate(original => {
     for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
@@ -235,6 +257,15 @@ async function checkSettings({ page, until, report, captureDirectory }) {
     const result = await window.peerAgent.projectAgentUpdateProfile({ workspaceId, planApproval: original.planApproval || 'never', acceptancePolicy: original.acceptancePolicy || 'auto', modelPolicy: original.modelPolicy || {} });
     if (!result.ok) throw Error('Fixture policy restore failed');
   }, { workspaceId, original });
+}
+
+async function settleColorTransitions(page) {
+  // Theme changes animate button colors. Capture the settled product, not a transition frame.
+  await page.evaluate(async () => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition)
+      .map(animation => animation.finished.catch(() => {})));
+  });
 }
 
 async function tabsVisible(page) {
