@@ -43,10 +43,10 @@ test('changelog data keeps stable releases separate from the beta channel', asyn
   const manifest = await readJson('docs/changelog-data/manifest.json');
   assert.deepEqual(Object.keys(manifest.channels).sort(), ['beta', 'stable']);
   assert.equal(manifest.latest.stable, 'v0.0.18');
-  assert.equal(manifest.latest.beta, 'v0.1.0-rc.3');
+  assert.equal(manifest.latest.beta, 'v0.1.0-rc.4');
   assert.ok(manifest.channels.stable.every((entry) => entry.channel === 'stable'));
   assert.ok(manifest.channels.beta.every((entry) => entry.channel === 'beta'));
-  assert.equal(manifest.channels.beta[0].version, 'v0.1.0-rc.3');
+  assert.equal(manifest.channels.beta[0].version, 'v0.1.0-rc.4');
   assert.ok(manifest.channels.beta.some((entry) => entry.version === 'v0.1.0-beta.1'));
   assert.ok(manifest.channels.beta.some((entry) => entry.version === 'v0.0.5-beta.4'));
 });
