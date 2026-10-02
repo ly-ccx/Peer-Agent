@@ -271,7 +271,7 @@ jobs:
   #           ubuntu-latest → peer-linux-x64.tar.gz
   # 失败策略：needs 纳入 release，任一 CLI 目标失败阻断整个 tag 发布。
   build-cli:
-    needs: meta
+    needs: [meta, build]
     strategy:
       fail-fast: false
       matrix:
@@ -351,6 +351,19 @@ jobs:
           test "$OUT" = "peer ${{ needs.meta.outputs.version }}"
           test -x ./apps/tui/dist/peer
           test -x ./apps/tui/dist/peer-credential-helper
+
+      # Preserve the Desktop helper's Developer ID identity for shared keychain access.
+      # This is build-time assembly; the installed CLI remains self-contained.
+      - name: Download signed macOS desktop artifact
+        if: matrix.target == 'darwin-arm64'
+        uses: actions/download-artifact@v8
+        with:
+          name: dist-mac
+          path: signed-desktop
+
+      - name: Prepare signed macOS CLI helper
+        if: matrix.target == 'darwin-arm64'
+        run: node scripts/prepare-macos-cli-helper.mjs "${{ needs.meta.outputs.version }}"
 
       - name: Package CLI archive
         shell: bash
