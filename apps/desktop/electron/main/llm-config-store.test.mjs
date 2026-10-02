@@ -207,6 +207,24 @@ test('GPT-6 Astra subscription metadata persists across config reload', () => wi
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
 }));
 
+test('GPT-6.1 Sol subscription selection and context survive updates and reload', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const selected = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt', model: 'gpt-6.1-sol' });
+  assert.equal(selected.model, 'gpt-6.1-sol');
+  assert.equal(selected.contextWindow, 400_000);
+  store.updateProvider(selected.id, { modelOptionValues: { contextTier: 1_000_000 } });
+  const restored = createLlmConfigStore({ configFile }).listProviders().find(row => row.id === selected.id);
+  assert.equal(restored.model, 'gpt-6.1-sol');
+  assert.equal(restored.contextWindow, 1_000_000);
+  assert.equal(restored.maxOutputTokens, 128_000);
+  assert.deepEqual(restored.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(restored.cacheReadPrice, 0.1);
+  assert.equal(restored.longContextInputThreshold, 272_000);
+  assert.equal(restored.longContextInputPrice, 4);
+  assert.equal(restored.longContextCacheReadPrice, 0.2);
+  assert.equal(restored.longContextOutputPrice, 15);
+}));
+
 test('GPT-5.6 subscription model persists prompt cache and reasoning effort metadata', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({
