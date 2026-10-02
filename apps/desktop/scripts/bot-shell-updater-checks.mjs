@@ -6,36 +6,28 @@ export async function checkBotShellUpdater({ page, app, until, report, home, cap
   const checks = report.updater = [];
   const badge = page.locator('.bot-column-footer .sidebar-version-badge');
   await badge.waitFor({ timeout: 5000 });
+  const accountMark = page.locator('.bot-column-footer .bot-me-mark');
+  assert.equal(await accountMark.locator('svg').count(), 1, 'the account mark must use an SVG icon');
+  assert.equal((await accountMark.textContent()).trim(), '', 'the account mark must not repeat the account name as a character icon');
+  const footer = page.locator('.bot-column-footer');
+  assert.equal(await page.locator('.bot-me-details .sidebar-version-badge').count(), 1);
+  const initialFooter = await footer.boundingBox();
+  assert.ok(initialFooter.height <= 64, 'idle account and update controls should form a compact footer');
+  assert.equal(await badge.locator('.pa-dropdown-trigger').count(), 0, 'update channel belongs in settings only');
+  const accountBox = await page.locator('.bot-me-button').boundingBox();
+  const versionBox = await badge.boundingBox();
+  assert.ok(Math.abs(accountBox.y + accountBox.height / 2 - versionBox.y - versionBox.height / 2) <= 1,
+    'account and version must share one row while idle');
+  report.updaterFooterHeight = initialFooter.height;
+  checks.push('SVG account mark, account menu and update metadata form one compact group without a duplicate character icon');
+  await accountMark.click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('menuitem', { name: '设置', exact: true }).waitFor({ state: 'detached' });
   const initial = await page.evaluate(() => window.peerAgent.updaterGetStatus());
   assert.equal(await badge.locator('.sidebar-version-text').textContent(), `v${initial.currentVersion}`);
   assert.equal(await badge.locator('select').count(), 0);
-  const channel = badge.locator('.pa-dropdown-trigger');
-  assert.equal(await channel.locator('svg').count(), 1);
-  await channel.focus(); await channel.press('Enter');
-  const menu = page.getByRole('listbox', { name: '更新通道', exact: true });
-  await menu.waitFor();
-  // Visibility precedes the upward menu's entry animation finishing.
-  // Wait for the original geometry condition rather than sampling its first frame.
-  const rects = await until(() => page.evaluate(() => {
-    const trigger = document.querySelector('.bot-column-footer .pa-dropdown-trigger').getBoundingClientRect();
-    const menu = document.querySelector('.pa-dropdown-menu.sidebar-version-channel').getBoundingClientRect();
-    return { trigger: { top: trigger.top }, menu: { top: menu.top, bottom: menu.bottom }, height: innerHeight };
-  }), rects => rects.menu.top >= 0 && rects.menu.bottom <= rects.trigger.top + 1, 3000);
-  assert.ok(rects.menu.top >= 0 && rects.menu.bottom <= rects.trigger.top + 1);
-  report.updaterMenuGeometry = rects;
-  await channel.press('Escape');
-  assert.equal(await channel.evaluate(node => node === document.activeElement), true);
-  for (const [preference, option, label] of [
-    ['beta', 'Beta（尝鲜版）', 'Beta'],
-    ['stable', '正式（稳定版）', '正式'],
-    ['auto', '自动（跟随当前版本）', '自动'],
-  ]) {
-    await channel.click(); await page.getByRole('option', { name: option, exact: true }).click();
-    await until(() => page.evaluate(() => window.peerAgent.updaterGetStatus()), state => state.preference === preference);
-    assert.equal(JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8')).updateChannel, preference);
-    await until(() => channel.textContent(), text => text === label);
-  }
-  checks.push('visible current version; SVG custom channel menu opens upwards, Escape restores focus; all three preferences persist through production IPC');
+  checks.push('current version aligns with the account in one row; update channel is absent from the footer');
 
   await badge.locator('.sidebar-version-text-btn').click();
   const dialog = page.getByRole('dialog', { name: '发现新版本', exact: true });
@@ -43,36 +35,66 @@ export async function checkBotShellUpdater({ page, app, until, report, home, cap
   await page.keyboard.press('Escape'); await dialog.waitFor({ state: 'detached' });
   checks.push('version button opens the existing update modal and Escape closes it');
 
-  for (const [option, label] of [['Beta（尝鲜版）', 'Beta'], ['自动（跟随当前版本）', '自动']]) {
+  for (const [preference, option] of [
+    ['beta', 'Beta（尝鲜版）'], ['stable', '正式（稳定版）'], ['auto', '自动（跟随当前版本）'],
+  ]) {
     await page.locator('.bot-me-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page.getByRole('button', { name: '更新与关于', exact: true }).click();
-    await page.getByRole('button', { name: '更新通道', exact: true }).click();
+    const settingsChannel = page.getByRole('button', { name: '更新通道', exact: true });
+    assert.equal(await settingsChannel.locator('svg').count(), 1);
+    await settingsChannel.focus(); await settingsChannel.press('Enter');
+    await page.getByRole('listbox', { name: '更新通道', exact: true }).waitFor();
+    await settingsChannel.press('Escape');
+    assert.equal(await settingsChannel.evaluate(node => node === document.activeElement), true);
+    await settingsChannel.click();
     await page.getByRole('option', { name: option, exact: true }).click();
+    await until(() => page.evaluate(() => window.peerAgent.updaterGetStatus()), state => state.preference === preference);
+    assert.equal(JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8')).updateChannel, preference);
     await page.locator('.settings-nav').getByRole('button', { name: '设置', exact: true }).click();
-    await until(() => channel.textContent(), text => text === label, 3000);
+    assert.equal(await badge.locator('.pa-dropdown-trigger').count(), 0);
   }
-  checks.push('changing the channel in Updates & about refreshes the already mounted footer from confirmed main status');
+  checks.push('Updates & about retains its SVG channel selector, keyboard focus and all three persisted preferences through production IPC');
 
   const emit = event => app.evaluate(({ BrowserWindow }, event) => {
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send('updater:event', event);
   }, event);
   report.updaterPhaseScope = 'Synthetic updater events verify renderer states only; no release download or install is performed';
   const fit = async () => {
-    const layout = await badge.evaluate(node => {
-      const column = node.closest('.bot-column').getBoundingClientRect();
-      const footer = node.closest('.bot-column-footer');
-      const controls = [...node.querySelectorAll('button')].map(button => {
-        const box = button.getBoundingClientRect();
-        return { text: button.textContent, width: box.width, height: box.height, left: box.left, right: box.right,
-          top: box.top, bottom: box.bottom, transform: getComputedStyle(button).transform };
-      });
-      return { controls, column: { left: column.left, right: column.right }, viewport: innerHeight,
-        scrollWidth: footer.scrollWidth, clientWidth: footer.clientWidth };
+    const layouts = await badge.evaluate(node => {
+      const measure = () => {
+        const column = node.closest('.bot-column').getBoundingClientRect();
+        const footer = node.closest('.bot-column-footer');
+        const controls = [...footer.querySelectorAll('button')].map(button => {
+          const box = button.getBoundingClientRect();
+          return { text: button.textContent, width: box.width, height: box.height, left: box.left, right: box.right,
+            top: box.top, bottom: box.bottom, transform: getComputedStyle(button).transform };
+        });
+        const account = footer.querySelector('.bot-me-button').getBoundingClientRect();
+        const version = node.getBoundingClientRect();
+        return { controls, accountRight: account.right, versionLeft: version.left, versionRight: version.right,
+          footerRight: footer.getBoundingClientRect().right, column: { left: column.left, right: column.right }, viewport: innerHeight,
+          scrollWidth: footer.scrollWidth, clientWidth: footer.clientWidth };
+      };
+      const normal = measure();
+      const version = node.querySelector('.sidebar-version-text');
+      const original = version.textContent;
+      try {
+        // Source Electron's version is short; also measure a long candidate label.
+        // Restore the text before capture and do not alter updater status or actions.
+        version.textContent = 'v0.1.0-rc.999';
+        return [normal, { ...measure(), longVersionLabel: true }];
+      } finally {
+        version.textContent = original;
+      }
     });
-    (report.updaterLayouts ??= []).push(layout);
-    assert.equal(layout.scrollWidth <= layout.clientWidth && layout.controls.every(box =>
-      box.width > 0 && box.height >= 24 && box.left >= layout.column.left && box.right <= layout.column.right
-      && box.top >= 0 && box.bottom <= layout.viewport), true, 'every footer control must remain visible inside the narrow column');
+    for (const layout of layouts) {
+      (report.updaterLayouts ??= []).push(layout);
+      assert.equal(layout.scrollWidth <= layout.clientWidth && layout.controls.every(box =>
+        box.width > 0 && box.height >= 24 && box.left >= layout.column.left && box.right <= layout.column.right
+        && box.top >= 0 && box.bottom <= layout.viewport), true, 'every footer control must remain visible inside the narrow column');
+      assert.ok(layout.versionLeft >= layout.accountRight && layout.versionRight <= layout.footerRight
+        && layout.footerRight - layout.versionRight <= 5, 'version group must stay on the right without overlapping the account');
+    }
   };
   for (const locale of ['zh-CN', 'en-US']) {
     await page.evaluate(locale => window.peerAgent.setLocale(locale), locale);
@@ -85,18 +107,31 @@ export async function checkBotShellUpdater({ page, app, until, report, home, cap
         else await page.locator('.bot-column-resizer').press(width === 240 ? 'Home' : 'End');
         await emit({ type: 'update-available', version: '0.1.0-rc.99' });
         await badge.locator('.sidebar-version-update-icon svg').waitFor(); await fit();
+        if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
+          await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-available-dark-narrow.png') });
+        }
         await emit({ type: 'download-progress', percent: 42 });
         await until(() => badge.locator('.sidebar-version-progress-text').textContent(), text => text === '42%'); await fit();
+        if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
+          await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-progress-dark-narrow.png') });
+        }
         await emit({ type: 'update-downloaded', version: '0.1.0-rc.99' });
         await badge.locator('.sidebar-version-install-btn').waitFor(); await fit();
+        if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
+          await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-install-dark-narrow.png') });
+        }
       }
     }
   }
-  checks.push('available SVG indicator, 42% progress and install control fit 240–360px columns in both locales and themes');
+  checks.push('available SVG indicator, 42% progress and install control fit 240–360px columns in both locales and themes, including a temporarily measured long candidate label');
   await page.evaluate(() => window.peerAgent.setLocale('zh-CN'));
   await page.reload(); await badge.waitFor();
   await page.locator('.bot-column-resizer').dblclick();
   assert.equal((await page.evaluate(() => window.peerAgent.updaterGetStatus())).preference, 'auto');
-  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'bot-updater-footer.png') });
+  if (captureDirectory) {
+    await page.screenshot({ path: path.join(captureDirectory, 'bot-updater-footer.png') });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-idle-dark.png') });
+  }
   checks.push('reload restores production update state and persisted channel without duplicate badges');
 }
