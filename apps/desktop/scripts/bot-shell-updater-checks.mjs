@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-export async function checkBotShellUpdater({ page, app, until, report, home, captureDirectory }) {
+export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, report, home, captureDirectory }) {
   const checks = report.updater = [];
   const badge = page.locator('.bot-column-footer .sidebar-version-badge');
   await badge.waitFor({ timeout: 5000 });
@@ -55,9 +55,6 @@ export async function checkBotShellUpdater({ page, app, until, report, home, cap
   }
   checks.push('Updates & about retains its SVG channel selector, keyboard focus and all three persisted preferences through production IPC');
 
-  const emit = event => app.evaluate(({ BrowserWindow }, event) => {
-    for (const window of BrowserWindow.getAllWindows()) window.webContents.send('updater:event', event);
-  }, event);
   report.updaterPhaseScope = 'Synthetic updater events verify renderer states only; no release download or install is performed';
   const fit = async () => {
     const layouts = await badge.evaluate(node => {
@@ -105,17 +102,17 @@ export async function checkBotShellUpdater({ page, app, until, report, home, cap
         await page.locator('.bot-column-resizer').focus();
         if (width === 292) await page.locator('.bot-column-resizer').dblclick();
         else await page.locator('.bot-column-resizer').press(width === 240 ? 'Home' : 'End');
-        await emit({ type: 'update-available', version: '0.1.0-rc.99' });
+        await emitUpdaterEvent({ type: 'update-available', version: '0.1.0-rc.99' });
         await badge.locator('.sidebar-version-update-icon svg').waitFor(); await fit();
         if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
           await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-available-dark-narrow.png') });
         }
-        await emit({ type: 'download-progress', percent: 42 });
+        await emitUpdaterEvent({ type: 'download-progress', percent: 42 });
         await until(() => badge.locator('.sidebar-version-progress-text').textContent(), text => text === '42%'); await fit();
         if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
           await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-progress-dark-narrow.png') });
         }
-        await emit({ type: 'update-downloaded', version: '0.1.0-rc.99' });
+        await emitUpdaterEvent({ type: 'update-downloaded', version: '0.1.0-rc.99' });
         await badge.locator('.sidebar-version-install-btn').waitFor(); await fit();
         if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
           await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-install-dark-narrow.png') });
