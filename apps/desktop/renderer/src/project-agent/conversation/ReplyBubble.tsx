@@ -67,10 +67,15 @@ export function ReplyBubble({
           key={anchorId}
           type="button"
           className="bot-reply-bar"
+          title={anchors.get(anchorId) || anchorId}
           onClick={() => onJump(anchorId)}
         >
-          <span>{i18n.t('projectAgent.chat.replyTo')}</span>
-          <span>{anchors.get(anchorId) || anchorId}</span>
+          <PeerIcon name="back" size={15} />
+          <span className="bot-reply-bar-copy">
+            <span className="bot-reply-bar-label">{i18n.t('projectAgent.chat.replyTo')}</span>
+            <span className="bot-reply-bar-excerpt">{anchors.get(anchorId) || anchorId}</span>
+          </span>
+          <PeerIcon name="chevronRight" size={14} />
         </button>
       ))}
       <div
@@ -88,6 +93,7 @@ export function ReplyBubble({
       </div>
       {excerpt ? (
         <button type="button" className="bot-quote-action" onClick={() => onQuote(excerpt)}>
+          <PeerIcon name="back" size={14} />
           {i18n.t('projectAgent.chat.quote')}
         </button>
       ) : null}
@@ -106,12 +112,14 @@ export function ReplyBubble({
         ) : null}
         {onOpenProcess ? (
           <button type="button" onClick={onOpenProcess}>
-            {i18n.t('projectAgent.chat.process')}
+            <PeerIcon name="terminal" size={14} />
+            {i18n.t('projectAgent.chat.openProcess')}
           </button>
         ) : null}
         {sourceIds.map((sessionId) => {
           const state = message.meta.sessionStates?.find(state => state.sessionId === sessionId);
           return <button key={sessionId} type="button" onClick={() => onLocateSession(sessionId)}>
+            <PeerIcon name="arrowUpRight" size={14} />
             {state ? i18n.t(`projectAgent.chat.sessionState.${state.status}`) : i18n.t('projectAgent.chat.source')}
           </button>;
         })}
@@ -120,7 +128,7 @@ export function ReplyBubble({
             ? VERDICT_KEYS[mark.outcome as keyof typeof VERDICT_KEYS]
             : null;
           if (!key) return null;
-          return <span key={`${mark.sessionId ?? ''}-${mark.outcome}`}>{i18n.t(key)}</span>;
+          return <span className="bot-reply-status" key={`${mark.sessionId ?? ''}-${mark.outcome}`}>{i18n.t(key)}</span>;
         })}
         <MemoryChip
           workspaceId={workspaceId}
@@ -133,7 +141,10 @@ export function ReplyBubble({
           label={i18n.t('projectAgent.chat.memoryLearned', { count: learned.length })}
         />
         {surfacing && surfacing in SURFACING_KEYS ? (
-          <span>{i18n.t(SURFACING_KEYS[surfacing as keyof typeof SURFACING_KEYS])}</span>
+          <span className="bot-reply-delivery">
+            <PeerIcon name="info" size={13} />
+            {i18n.t('projectAgent.chat.surfacingLabel')}{i18n.t(SURFACING_KEYS[surfacing as keyof typeof SURFACING_KEYS])}
+          </span>
         ) : null}
       </div>
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />
@@ -154,7 +165,7 @@ function MemoryChip({
   const [rows, setRows] = useState<readonly MemoryRecord[]>([]);
   if (ids.length === 0) return null;
   return (
-    <span className="bot-memory-chip">
+    <div className="bot-memory-chip">
       <button
         type="button"
         aria-expanded={open}
@@ -178,13 +189,15 @@ function MemoryChip({
           });
         }}
       >
+        <PeerIcon name="fileText" size={13} />
         {label}
+        <PeerIcon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
       </button>
       {open ? (
         <ul>
           {rows.map((row) => <li key={row.id}>{row.text}</li>)}
         </ul>
       ) : null}
-    </span>
+    </div>
   );
 }

@@ -3,7 +3,7 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  background: var(--frost-bg, var(--bg));
+  background: var(--paper-base);
 }
 
 .bot-thread {
@@ -38,14 +38,14 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--frost-text-secondary, var(--text-secondary));
+  color: var(--graphite-soft);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .bot-thread-older:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--graphite-base);
   outline-offset: 2px;
 }
 
@@ -62,7 +62,7 @@
 .bot-thread-error,
 .bot-thinking {
   margin: 0;
-  color: var(--frost-text-secondary, var(--text-secondary));
+  color: var(--graphite-soft);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -155,7 +155,7 @@
 
 .bot-separator {
   margin: 4px 0;
-  color: var(--frost-text-tertiary, var(--text-tertiary));
+  color: var(--graphite-fade);
   font-size: 12px;
   text-align: center;
 }
@@ -163,7 +163,8 @@
 .bot-user,
 .bot-reply,
 .bot-system {
-  max-width: 720px;
+  max-width: min(720px, 100%);
+  min-width: 0;
 }
 
 .bot-user {
@@ -174,7 +175,7 @@
   max-width: min(560px, 80%);
   padding: 10px 12px;
   border-radius: 12px;
-  background: var(--frost-fill-secondary, var(--fill-secondary));
+  background: var(--paper-sheet);
 }
 
 .bot-user-marks,
@@ -199,16 +200,19 @@
   list-style: none;
 }
 
-.bot-user-marks span,
-.bot-reply-marks span,
 .bot-reply-marks button,
 .bot-quote-action,
 .bot-card-actions button,
 .bot-user-marks button {
-  border: 1px solid var(--frost-separator, var(--separator));
-  border-radius: 999px;
-  background: transparent;
-  color: var(--frost-text-secondary, var(--text-secondary));
+  border: 1px solid var(--chrome-hairline);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border-radius: 8px;
+  background: var(--paper-sheet);
+  color: var(--graphite-soft);
   font-size: 12px;
   line-height: 1.4;
   padding: 6px 12px;
@@ -232,7 +236,10 @@
   color: var(--chrome-canvas, #fff);
 }
 
-.bot-card-actions button:hover {
+.bot-card-actions button:hover,
+.bot-reply-marks button:hover,
+.bot-quote-action:hover,
+.bot-user-marks button:hover {
   background: var(--chrome-hover);
   color: var(--graphite-base);
 }
@@ -243,7 +250,10 @@
   opacity: 0.9;
 }
 
-.bot-card-actions button:active {
+.bot-card-actions button:active,
+.bot-reply-marks button:active,
+.bot-quote-action:active,
+.bot-user-marks button:active {
   transform: scale(0.98);
 }
 
@@ -265,56 +275,124 @@
 .bot-card p,
 .bot-quote-chip {
   margin: 0;
-  color: var(--frost-text, var(--text));
+  color: var(--graphite-base);
   font-size: 14px;
   line-height: 1.55;
   white-space: pre-wrap;
 }
 
-.bot-user-quote,
-.bot-quote-chip {
-  border-left: 2px solid var(--frost-separator, var(--separator));
-  color: var(--frost-text-secondary, var(--text-secondary));
-  padding-left: 8px;
+.bot-user-quote {
+  border-left: 2px solid var(--chrome-hairline);
+  color: var(--graphite-soft);
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--paper-sunken);
+  overflow-wrap: anywhere;
 }
 
 .bot-reply {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   align-self: flex-start;
+  width: fit-content;
+  overflow-wrap: anywhere;
 }
 
 .bot-user.is-anchored,
 .bot-reply.is-anchored,
 .bot-system.is-anchored {
-  outline: 2px solid var(--frost-separator, var(--separator));
+  outline: 2px solid var(--chrome-hairline);
   outline-offset: 4px;
   border-radius: 8px;
 }
 
 .bot-reply-bar {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
+  gap: 10px;
+  align-items: center;
+  align-self: flex-start;
   width: fit-content;
-  max-width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--frost-text-secondary, var(--text-secondary));
-  font-size: 12px;
+  max-width: min(420px, 100%);
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--chrome-hairline);
+  border-left: 3px solid var(--graphite-fade);
+  border-radius: 8px;
+  background: var(--paper-sheet);
+  color: var(--graphite-soft);
+  font: inherit;
   text-align: left;
+  cursor: pointer;
+  transition: background var(--za-motion-fast) var(--za-ease-standard);
 }
 
-.bot-reply-bar span:last-child {
+.bot-reply-bar:hover {
+  background: var(--paper-hover);
+}
+
+.bot-reply-bar-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bot-reply-bar-label {
+  color: var(--graphite-soft);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.bot-reply-bar-excerpt {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--graphite-base);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.bot-reply-marks {
+  gap: 6px 8px;
+  padding-top: 2px;
+}
+
+.bot-user-marks > span,
+.bot-reply-status,
+.bot-reply-delivery {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  color: var(--graphite-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.bot-reply-delivery {
+  margin-inline-start: auto;
+}
+
+.bot-quote-action {
+  align-self: flex-start;
+}
+
+.bot-reply-marks button:focus-visible,
+.bot-quote-action:focus-visible,
+.bot-reply-bar:focus-visible,
+.bot-quote-chip button:focus-visible,
+.bot-user-marks button:focus-visible,
+.bot-card-actions button:focus-visible {
+  outline: 2px solid var(--graphite-base);
+  outline-offset: 2px;
 }
 
 .bot-reply-body {
-  color: var(--frost-text, var(--text));
+  color: var(--graphite-base);
   font-size: 14px;
   line-height: 1.6;
 }
@@ -353,17 +431,44 @@
 
 .bot-quote-chip {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
-  justify-content: space-between;
+  padding: 6px 8px;
+  border: 1px solid var(--chrome-hairline);
+  border-left: 3px solid var(--graphite-fade);
+  border-radius: 8px;
+  background: var(--paper-sheet);
+  color: var(--graphite-soft);
+  font-size: 13px;
+}
+
+.bot-quote-chip > span {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .bot-quote-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--frost-text-secondary, var(--text-secondary));
+  color: var(--graphite-soft);
   cursor: pointer;
+}
+
+.bot-quote-chip button:hover {
+  background: var(--paper-hover);
+  color: var(--graphite-base);
 }
 
 .bot-composer-bar button {
@@ -396,7 +501,7 @@
   border: 0;
   outline: none;
   background: transparent;
-  color: var(--frost-text, var(--text));
+  color: var(--graphite-base);
   font: inherit;
   font-size: 14px;
   line-height: 1.5;
@@ -411,14 +516,14 @@
 
 .bot-composer-bar p {
   margin: 0;
-  color: var(--frost-text-tertiary, var(--text-tertiary));
+  color: var(--graphite-fade);
   font-size: 12px;
 }
 
 .bot-composer-bar button:disabled {
   background: transparent;
-  color: var(--frost-text-tertiary, var(--text-tertiary));
-  box-shadow: inset 0 0 0 1px var(--frost-separator, var(--separator));
+  color: var(--graphite-fade);
+  box-shadow: inset 0 0 0 1px var(--chrome-hairline);
   cursor: default;
   opacity: 1;
 }

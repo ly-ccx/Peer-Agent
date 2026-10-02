@@ -199,6 +199,7 @@ export type TranslationKey =
   | 'projectAgent.chat.evidenceCollapse'
   | 'projectAgent.chat.evidence'
   | 'projectAgent.chat.process'
+  | 'projectAgent.chat.openProcess'
   | 'projectAgent.chat.memoryUsed'
   | 'projectAgent.chat.memoryLearned'
   | 'projectAgent.chat.digest'
@@ -220,6 +221,7 @@ export type TranslationKey =
   | 'projectAgent.chat.verdict.failed'
   | 'projectAgent.chat.verdict.partial'
   | 'projectAgent.chat.verdict.unverifiable'
+  | 'projectAgent.chat.surfacingLabel'
   | 'projectAgent.chat.surfacing.interrupt'
   | 'projectAgent.chat.surfacing.message'
   | 'projectAgent.chat.surfacing.digest'
@@ -1450,6 +1452,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.evidenceMore': '还有 {count} 条证据',
     'projectAgent.chat.evidenceCollapse': '收起证据',
     'projectAgent.chat.process': '过程',
+    'projectAgent.chat.openProcess': '查看过程',
     'projectAgent.chat.memoryUsed': '参考了 {count} 条记忆',
     'projectAgent.chat.memoryLearned': '新记住 {count} 条',
     'projectAgent.chat.digest': '今日小结',
@@ -1471,7 +1474,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.verdict.failed': '结论：没通过',
     'projectAgent.chat.verdict.partial': '结论：部分验证',
     'projectAgent.chat.verdict.unverifiable': '结论：无法验证',
-    'projectAgent.chat.surfacing.interrupt': '马上告诉你',
+    'projectAgent.chat.surfacingLabel': '通知方式：',
+    'projectAgent.chat.surfacing.interrupt': '即时提醒',
     'projectAgent.chat.surfacing.message': '出现在对话里',
     'projectAgent.chat.surfacing.digest': '收进小结',
     'projectAgent.chat.surfacing.silent': '不打扰',
@@ -2499,6 +2503,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.evidenceMore': '{count} more evidence records',
     'projectAgent.chat.evidenceCollapse': 'Collapse evidence',
     'projectAgent.chat.process': 'Process',
+    'projectAgent.chat.openProcess': 'View process',
     'projectAgent.chat.memoryUsed': 'Used {count} memories',
     'projectAgent.chat.memoryLearned': 'Remembered {count} new',
     'projectAgent.chat.digest': 'Daily digest',
@@ -2520,7 +2525,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.verdict.failed': 'Verdict: failed',
     'projectAgent.chat.verdict.partial': 'Verdict: partial',
     'projectAgent.chat.verdict.unverifiable': 'Verdict: unverifiable',
-    'projectAgent.chat.surfacing.interrupt': 'Tell you now',
+    'projectAgent.chat.surfacingLabel': 'Delivery: ',
+    'projectAgent.chat.surfacing.interrupt': 'Immediate',
     'projectAgent.chat.surfacing.message': 'Show in the chat',
     'projectAgent.chat.surfacing.digest': 'Keep for the digest',
     'projectAgent.chat.surfacing.silent': 'Stay quiet',

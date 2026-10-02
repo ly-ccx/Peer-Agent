@@ -1,6 +1,7 @@
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
+import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -22,6 +23,9 @@ const fixture = seedBotShellHome({ home });
 const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
 const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 seededMessages.at(-1).replyTo = ['rc-message-9500'];
+seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。';
+seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
+seededMessages.at(-1).meta = { surfacing: 'interrupt', memoryUsed: ['rc-memory-123'] };
 writeFileSync(fixtureConversation, seededMessages.map(row => JSON.stringify(row)).join('\n') + '\n');
 const settings = JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8'));
 settings.memory = { enabled: false };
@@ -241,6 +245,7 @@ try {
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
+  await checkBotShellReply({ page, until, report, captureDirectory: root });
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
