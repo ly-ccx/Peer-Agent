@@ -90,7 +90,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.ok(quoteLayout.overflow <= quoteLayout.width); assert.ok(quoteLayout.height <= 65);
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'reply-narrow-quote.png') });
   const cancel = composerQuote.getByRole('button', { name: '取消引用', exact: true });
-  await cancel.focus(); await cancel.press('Tab'); await cancel.press('Shift+Tab');
+  await cancel.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
   assert.equal(await cancel.evaluate(node => node === document.activeElement && getComputedStyle(node).outlineStyle === 'solid'), true);
   await cancel.press('Enter'); await composerQuote.waitFor({ state: 'detached' });
   assert.equal(await composer.inputValue(), '保留我的草稿');
