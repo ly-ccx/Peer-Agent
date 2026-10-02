@@ -13,7 +13,7 @@ import {
 //
 // 端点事实(参考 cline / opencode 的订阅实现):
 // - 订阅对话只走 https://chatgpt.com/backend-api/codex/responses。
-// - 该 codex 平面**没有列模型接口**,可用模型是 codex 平面固定的 gpt-5.x 家族。
+// - 该 codex 平面**没有列模型接口**,订阅可用模型由内置目录维护。
 // - 历史上曾用订阅 token 去打 https://api.openai.com/v1/models(按量计费平面):
 //   要么 401,要么(本机网络)直接 ECONNRESET,且即便成功也只会混进订阅用不了的
 //   API-only 模型。因此**不再发起这次注定失败的请求**——内置清单即权威目录。
@@ -53,6 +53,23 @@ const SUBSCRIPTION_CATALOG = [
     inputPrice: 10,
     outputPrice: 50,
     cacheReadPrice: 1,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  {
+    // https://developers.openai.com/api/docs/models/gpt-6.1-sol
+    id: 'gpt-6.1-sol',
+    label: 'GPT-6.1 Sol',
+    maxOutputTokens: 128_000,
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.1,
+    longContextInputThreshold: 272_000,
+    longContextInputPrice: 4,
+    longContextCacheReadPrice: 0.2,
+    longContextOutputPrice: 15,
     supportsVision: true,
     supportsReasoning: true,
     supportsPromptCaching: true,
