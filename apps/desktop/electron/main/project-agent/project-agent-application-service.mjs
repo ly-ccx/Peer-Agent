@@ -355,6 +355,13 @@ export function createProjectAgentApplicationService({
     const current = listed.find((item) => item.approvalId === payload.approvalId);
     if (!current) return { ok: false, code: 'NOT_FOUND' };
     if (current.state === 'approved' || current.state === 'denied' || current.state === 'expired') {
+      const waiting = decision === 'approved' && current.state === 'approved' && isPlanApproval(current) && current.sessionId
+        && typeof sessions?.get === 'function' ? await sessions.get({ sessionId: current.sessionId }) : null;
+      if (waiting?.origin?.phase === 'awaiting_approval' && typeof sessions?.resumeFromApproval === 'function') {
+        const resumed = await sessions.resumeFromApproval(current);
+        queueChanged(payload.workspaceId);
+        return { ok: true, approval: current, resumed };
+      }
       return { ok: true, approval: current };
     }
     const currentSession = current.sessionId && typeof sessions?.get === 'function'
@@ -366,6 +373,13 @@ export function createProjectAgentApplicationService({
         ? 'task'
         : 'once';
     const plan = isPlanApproval(current);
+    const decisionRecord = { ...current, state: decision,
+      decidedAt: typeof now === 'function' ? now() : now, decidedBy: 'local_ui' };
+    let saved = null;
+    if (plan && decision === 'approved') {
+      saved = approvals.append(decisionRecord);
+      if (!saved) return { ok: false, code: 'NOT_FOUND' };
+    }
     let resumed = null;
     if (decision === 'approved' && (plan || current.state === 'stale')) {
       if (!plan && current.state === 'stale' && typeof rememberGrant === 'function') {
@@ -383,7 +397,7 @@ export function createProjectAgentApplicationService({
       }
       if (typeof sessions?.resumeFromApproval === 'function') {
         try {
-          resumed = await sessions.resumeFromApproval(current);
+          resumed = await sessions.resumeFromApproval(saved || current);
         } catch (error) {
           resumed = { ok: false, message: error?.message || 'resume failed' };
         }
@@ -408,12 +422,7 @@ export function createProjectAgentApplicationService({
         // 现场请求已经不在时，持久记录仍然是两处共同的事实。
       }
     }
-    const saved = approvals.append({
-      ...current,
-      state: decision,
-      decidedAt: typeof now === 'function' ? now() : now,
-      decidedBy: 'local_ui',
-    });
+    saved ||= approvals.append(decisionRecord);
     if (!saved) return { ok: false, code: 'NOT_FOUND' };
     queueChanged(payload.workspaceId);
     return { ok: true, approval: saved, ...(resumed ? { resumed } : {}) };

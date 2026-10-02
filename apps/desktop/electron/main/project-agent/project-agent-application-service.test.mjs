@@ -33,6 +33,48 @@ const METHODS = [
   ['startFamiliarize', { workspaceId: 'ws-1' }],
 ];
 
+test('desktop persists the local plan decision before resuming its task', async () => {
+  let record = { approvalId: 'plan:s', workspaceId: 'w', sessionId: 's', planId: 'p',
+    kind: 'plan_approval', capabilityId: 'goal.plan', state: 'open' };
+  const order = [];
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    approvals: { list: () => [record], append(row) { order.push('save'); record = row; return row; } },
+    sessions: { get: () => ({ status: 'awaiting_approval' }), async resumeFromApproval(current) {
+      order.push('resume'); assert.equal(record.state, 'approved'); assert.equal(current.decidedBy, 'local_ui');
+      assert.equal(current.decidedAt, record.decidedAt); return { ok: true };
+    } }, directory: { list: () => [], search: () => [] }, schedule: () => 1,
+    now: () => '2026-10-02T04:00:00.000Z',
+  });
+  const result = await service.decideApproval({ workspaceId: 'w', approvalId: 'plan:s', decision: 'approve' });
+  assert.equal(result.resumed?.ok, true);
+  assert.deepEqual(order, ['save', 'resume']);
+});
+
+test('desktop replays an already persisted approval only while the plan still awaits admission', async () => {
+  for (const phase of ['awaiting_approval', 'running', 'paused', 'superseded', 'queued']) {
+    let resumed = 0;
+    const record = { approvalId: 'plan:s', sessionId: 's', state: 'approved', capabilityId: 'goal.plan' };
+    const service = createProjectAgentApplicationService({ enabled: () => true,
+      approvals: { list: () => [record], append() { throw Error('no rewrite'); } },
+      sessions: { get: () => ({ origin: { phase } }), async resumeFromApproval() { resumed++; return { ok: true }; } },
+    });
+    assert.equal((await service.decideApproval({ approvalId: 'plan:s', decision: 'approve' })).ok, true);
+    assert.equal(resumed, phase === 'awaiting_approval' ? 1 : 0);
+    await service.decideApproval({ approvalId: 'plan:s', decision: 'deny' });
+    assert.equal(resumed, phase === 'awaiting_approval' ? 1 : 0);
+  }
+});
+
+test('desktop never resumes a plan if persisting the decision fails', async () => {
+  let resumed = 0;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    approvals: { list: () => [{ approvalId: 'plan:s', sessionId: 's', state: 'open' }], append() { throw Error('disk failure'); } },
+    sessions: { get: () => ({}), resumeFromApproval() { resumed++; } },
+  });
+  await assert.rejects(service.decideApproval({ approvalId: 'plan:s', decision: 'approve' }), /disk failure/);
+  assert.equal(resumed, 0);
+});
+
 function throwing(label) {
   return () => {
     throw new Error(`should not call ${label}`);
