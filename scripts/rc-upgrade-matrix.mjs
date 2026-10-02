@@ -19,6 +19,8 @@ const entries = ['apps/desktop/electron/main/settings-store.mjs', 'packages/conv
   'apps/desktop/electron/main/workspace-application-service.mjs', 'packages/runtime-node/src/goal-plan-store.mjs',
   'packages/runtime-node/src/automation-store.mjs'];
 const betas = Array.from({ length: 5 }, (_, i) => `v0.1.0-beta.${i + 1}`);
+const candidateVersion = readFileSync(path.join(repository, 'VERSION'), 'utf8').trim();
+const updaterVersions = [...new Set([...betas.map(ref => ref.slice(1)), '0.1.0-rc.1', candidateVersion])];
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 function tree(root) {
   const result = {};
@@ -179,7 +181,7 @@ export async function runUpgradeMatrix({ output, includeRecovery = true } = {}) 
       const result = loadMigratedSettings(f.settingsFile, { now, log() {} }); assert.equal(result.schemaVersion, undefined);
       assert.deepEqual(readFileSync(f.settingsFile), original); preserved(f);
     });
-    for (const version of [...betas.map(ref => ref.slice(1)), '0.1.0-rc.1']) await check(`${version} auto -> GA stable updater graduation`, async () => {
+    for (const version of updaterVersions) await check(`${version} auto -> GA stable updater graduation`, async () => {
       const before = tree(consecutive.home), value = await updater(version);
       assert.equal(value.status.channel, 'stable'); assert.equal(value.status.phase, 'available'); assert.equal(value.status.availableVersion, '0.1.0');
       assert.deepEqual(value.calls, ['latest']); assert.equal(value.autoDownload, false); assert.deepEqual(tree(consecutive.home), before);
@@ -191,7 +193,7 @@ export async function runUpgradeMatrix({ output, includeRecovery = true } = {}) 
     });
   } catch (error) { report.setupError = String(error.message).split(root).join('<fixture>'); }
   finally {
-    report.ok = !report.setupError && report.checks.length === 19 && report.checks.every(row => row.ok) && includeRecovery;
+    report.ok = !report.setupError && report.checks.length === 13 + updaterVersions.length && report.checks.every(row => row.ok) && includeRecovery;
     report.finishedAt = new Date().toISOString(); rmSync(root, { recursive: true, force: true }); report.fixtureRemoved = true;
     if (output) writeFileSync(output, JSON.stringify(report, null, 2));
   }
