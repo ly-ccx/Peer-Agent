@@ -1,10 +1,11 @@
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
+import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, cpSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -22,6 +23,9 @@ const fixture = seedBotShellHome({ home });
 const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
 const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 seededMessages.at(-1).replyTo = ['rc-message-9500'];
+seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。';
+seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
+seededMessages.at(-1).meta = { surfacing: 'interrupt', memoryUsed: ['rc-memory-123'] };
 writeFileSync(fixtureConversation, seededMessages.map(row => JSON.stringify(row)).join('\n') + '\n');
 const settings = JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8'));
 settings.memory = { enabled: false };
@@ -61,8 +65,12 @@ const observedFile = path.join(root, 'observations.json');
 writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
 const entry = path.join(root, 'entry.mjs');
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
-writeFileSync(entry, `import {app,dialog} from 'electron';
-import {writeFileSync,renameSync} from 'node:fs';
+const updaterCommand = path.join(root, 'updater-command.json');
+const updaterReceipt = path.join(root, 'updater-receipt.json');
+writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
+writeFileSync(updaterReceipt, JSON.stringify({ seq: 0 }));
+writeFileSync(entry, `import {app,dialog,BrowserWindow} from 'electron';
+import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/lab-main-thread-probe.mjs')).href)};
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
@@ -83,6 +91,23 @@ globalThis.rcBotShellService={
     return {terminalStatus:'done',text:'RC scripted reply: '+text};
   },abort(){}
 };
+// Keep synthetic updater delivery outside inspector Promise lifetime. Only this
+// isolated entry consumes the disposable command file; product IPC is unchanged.
+let updaterSequence=0;
+const updaterTimer=setInterval(()=>{
+  const command=JSON.parse(readFileSync(${JSON.stringify(updaterCommand)},'utf8'));
+  if(command.seq<=updaterSequence)return;
+  let receipt;
+  try {
+    const windows=BrowserWindow.getAllWindows();
+    if(!windows.length)return;
+    for(const window of windows)window.webContents.send('updater:event',command.event);
+    receipt={seq:command.seq,ok:true,windows:windows.length};
+  }catch(error){receipt={seq:command.seq,ok:false,error:error.message};}
+  updaterSequence=command.seq;
+  const file=${JSON.stringify(updaterReceipt)};
+  writeFileSync(file+'.next',JSON.stringify(receipt));renameSync(file+'.next',file);
+},25);updaterTimer.unref();
 app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(error=>{console.error(error);app.exit(1)});
 `);
 const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1',
@@ -110,6 +135,15 @@ const until = async (read, predicate, timeout = 30000) => {
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
   throw Error('Shell acceptance timed out');
 };
+let updaterSequence = 0;
+const emitUpdaterEvent = async event => {
+  const seq = ++updaterSequence;
+  writeFileSync(updaterCommand + '.next', JSON.stringify({ seq, event }));
+  renameSync(updaterCommand + '.next', updaterCommand);
+  const receipt = await until(() => JSON.parse(readFileSync(updaterReceipt, 'utf8')), value => value.seq === seq, 5000);
+  assert.equal(receipt.ok, true, receipt.error || 'isolated main must acknowledge synthetic event delivery');
+  (report.updaterReceipts ??= []).push({ ...receipt, type: event.type });
+};
 try {
   app = await _electron.launch({ args: [entry], env, cwd: isolation.launch.desktopDir, timeout: 30000 });
   handle = owned.register({ process: app.process(), close: () => app.close() });
@@ -123,7 +157,7 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
-  await checkBotShellUpdater({ page, app, until, report, home, captureDirectory: root });
+  await checkBotShellUpdater({ page, emitUpdaterEvent, until, report, home, captureDirectory: root });
   assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
   report.avatarAnimation = await page.evaluate(() => ({ avatars: document.querySelectorAll('.bot-avatar').length, activeAvatars: document.querySelectorAll('[data-avatar-animated="true"]').length, animations: document.getAnimations().length }));
   report.checks.push('200 real bot rows; no idle model turns');
@@ -241,6 +275,7 @@ try {
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
+  await checkBotShellReply({ page, until, report, captureDirectory: root });
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });

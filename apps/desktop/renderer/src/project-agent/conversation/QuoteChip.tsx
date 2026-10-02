@@ -10,9 +10,10 @@ export function QuoteChip({
 }) {
   return (
     <p className="bot-quote-chip">
-      <span>{text}</span>
+      <PeerIcon name="back" size={15} />
+      <span title={text}>{text}</span>
       <button type="button" aria-label={removeLabel} onClick={onRemove}>
-        <PeerIcon name="close" size={12} />
+        <PeerIcon name="close" size={14} />
       </button>
     </p>
   );
