@@ -91,13 +91,13 @@ export function ReplyBubble({
       >
         <MarkdownMessage content={message.content} />
       </div>
-      {excerpt ? (
-        <button type="button" className="bot-quote-action" onClick={() => onQuote(excerpt)}>
-          <PeerIcon name="back" size={14} />
-          {i18n.t('projectAgent.chat.quote')}
-        </button>
-      ) : null}
       <div className="bot-reply-marks">
+        {excerpt ? (
+          <button type="button" className="bot-quote-action" onClick={() => onQuote(excerpt)}>
+            <PeerIcon name="back" size={14} />
+            {i18n.t('projectAgent.chat.quote')}
+          </button>
+        ) : null}
         {(showAllEvidence ? evidenceRefs : evidenceRefs.slice(0, 3)).map((evidenceRef, index) => (
           <button key={evidenceRef} type="button" onClick={() => onOpenEvidence?.(evidenceRef)}>
             <PeerIcon name="fileText" size={13} />
