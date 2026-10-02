@@ -20,7 +20,7 @@ const entries = ['apps/desktop/electron/main/settings-store.mjs', 'packages/conv
   'packages/runtime-node/src/automation-store.mjs'];
 const betas = Array.from({ length: 5 }, (_, i) => `v0.1.0-beta.${i + 1}`);
 const candidateVersion = readFileSync(path.join(repository, 'VERSION'), 'utf8').trim();
-const updaterVersions = [...new Set([...betas.map(ref => ref.slice(1)), '0.1.0-rc.1', candidateVersion])];
+const updaterVersions = [...new Set([...betas.map(ref => ref.slice(1)), '0.1.0-rc.1', '0.1.0-rc.2', candidateVersion])];
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 function tree(root) {
   const result = {};

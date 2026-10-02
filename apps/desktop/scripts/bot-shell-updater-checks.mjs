@@ -14,12 +14,15 @@ export async function checkBotShellUpdater({ page, app, until, report, home, cap
   await channel.focus(); await channel.press('Enter');
   const menu = page.getByRole('listbox', { name: '更新通道', exact: true });
   await menu.waitFor();
-  const rects = await page.evaluate(() => {
+  // Visibility precedes the upward menu's entry animation finishing.
+  // Wait for the original geometry condition rather than sampling its first frame.
+  const rects = await until(() => page.evaluate(() => {
     const trigger = document.querySelector('.bot-column-footer .pa-dropdown-trigger').getBoundingClientRect();
     const menu = document.querySelector('.pa-dropdown-menu.sidebar-version-channel').getBoundingClientRect();
     return { trigger: { top: trigger.top }, menu: { top: menu.top, bottom: menu.bottom }, height: innerHeight };
-  });
+  }), rects => rects.menu.top >= 0 && rects.menu.bottom <= rects.trigger.top + 1, 3000);
   assert.ok(rects.menu.top >= 0 && rects.menu.bottom <= rects.trigger.top + 1);
+  report.updaterMenuGeometry = rects;
   await channel.press('Escape');
   assert.equal(await channel.evaluate(node => node === document.activeElement), true);
   for (const [preference, option, label] of [
