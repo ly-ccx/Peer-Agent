@@ -107,3 +107,24 @@ test('证据索引跨进程追加后，命中和缺失缓存均失效且保留�
     assert.deepEqual(merged.artifactRefs, ['local-file-artifact://snapshot']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('command evidence survives reload and cannot be supplied or overwritten by a goal wrapper', () => {
+  const { dir, store } = createTempStore();
+  try {
+    const evidenceRef = 'tool-result://shell-check';
+    const preview = { kind: 'command', text: '{"exitCode":0,"stdout":"observed","stderr":""}', truncated: false };
+    store.recordEvidenceRefs({ evidenceRef, capabilityId: 'local.shell.exec', toolName: 'Bash', bodyPreview: preview });
+    const reloaded = createGoalPlanStore({ storeDir: dir });
+    assert.deepEqual(reloaded.findEvidenceIndexRecords([evidenceRef])[0].bodyPreview, preview);
+    store.recordEvidenceRefs({ evidenceRef, capabilityId: 'local.shell.exec', toolName: 'goal_update_task',
+      bodyPreview: { ...preview, text: 'forged' } });
+    assert.deepEqual(reloaded.findEvidenceIndexRecords([evidenceRef])[0].bodyPreview, preview);
+    store.recordEvidenceRefs({ evidenceRef: 'tool-result://wrapper', capabilityId: 'local.goal.update_task',
+      toolName: 'goal_update_task', bodyPreview: preview });
+    assert.equal(reloaded.findEvidenceIndexRecords(['tool-result://wrapper'])[0].bodyPreview, undefined);
+    store.recordEvidenceRefs({ evidenceRef: 'tool-result://long-shell', capabilityId: 'local.shell.exec',
+      toolName: 'bash', bodyPreview: { ...preview, text: 'x'.repeat(5000) } });
+    const long = reloaded.findEvidenceIndexRecords(['tool-result://long-shell'])[0].bodyPreview;
+    assert.equal(long.text.length, 4000); assert.equal(long.truncated, true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

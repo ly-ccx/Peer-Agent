@@ -9,6 +9,13 @@ test('file evidence exposes the execution snapshot and its original truncation',
   assert.equal(body?.kind,'file'); assert.equal(body?.text,'original content'); assert.equal(body?.truncated,true);
 });
 
+test('command evidence exposes the immutable execution snapshot without rereading artifacts', () => {
+  const preview = { kind: 'command', text: '{"exitCode":0,"stdout":"observed","stderr":""}', truncated: true };
+  const body = evidenceBodyFromRecord({ evidenceRef: 'tool-result://check', bodyPreview: preview },
+    () => { throw Error('must not read changed artifacts'); });
+  assert.deepEqual(body, { evidenceRef: 'tool-result://check', ...preview });
+});
+
 test('证据引用接受已登记的 URI，拒绝路径穿越', () => {
   assert.equal(evidenceRefAllowed('ev-1'), true);
   assert.equal(evidenceRefAllowed('tool-result://host-verifier'), true);

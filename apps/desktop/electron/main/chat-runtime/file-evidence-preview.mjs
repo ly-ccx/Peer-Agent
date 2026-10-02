@@ -1,1 +1,1 @@
-export { fileEvidencePreview } from '@peer-agent/runtime-node';
+export { fileEvidencePreview, toolResultEvidencePreview } from '@peer-agent/runtime-node';

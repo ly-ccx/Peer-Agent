@@ -386,8 +386,8 @@ export interface EvidenceIndexRecord {
   readonly toolName?: string;
   readonly createdAt: string;
   readonly artifactRefs?: readonly string[];
-  /** Redacted, bounded execution-time snapshot of a successful file Tool Result. */
-  readonly bodyPreview?: { readonly kind: 'file'; readonly text: string; readonly truncated: boolean };
+  /** Redacted, bounded execution-time snapshot of a successful local Tool Result. */
+  readonly bodyPreview?: { readonly kind: 'file' | 'command'; readonly text: string; readonly truncated: boolean };
 }
 
 /** 批准事实（Evidence）。 */

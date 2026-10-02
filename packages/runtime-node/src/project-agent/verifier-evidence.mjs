@@ -12,19 +12,23 @@ export function verifierEvidenceSnapshots(plan, records = []) {
   visit(plan?.tasks);
   const indexed = new Map();
   for (const record of records) {
-    if (!refs.has(record?.evidenceRef) || !(record.planId === plan?.planId
-      || plan?.conversationId && record.conversationId === plan.conversationId)) continue;
-    if (record.bodyPreview?.kind !== 'file' || typeof record.bodyPreview.text !== 'string') continue;
+    const owned = record?.planId ? record.planId === plan?.planId
+      : plan?.conversationId && record?.conversationId === plan.conversationId;
+    if (!refs.has(record?.evidenceRef) || !owned) continue;
+    if (!['file', 'command'].includes(record.bodyPreview?.kind) || typeof record.bodyPreview.text !== 'string') continue;
     indexed.set(record.evidenceRef, record);
   }
   let remaining = BODY_BUDGET;
   const snapshots = [];
-  for (const [evidenceRef, record] of indexed) {
+  for (const evidenceRef of refs) {
     if (!remaining) break;
+    const record = indexed.get(evidenceRef);
+    if (!record) continue;
     const text = record.bodyPreview.text.slice(0, Math.min(4000, remaining));
     if (!text) continue;
     remaining -= text.length;
-    snapshots.push({ evidenceRef, toolName: record.toolName, kind: 'file', text,
+    snapshots.push({ evidenceRef, toolName: record.toolName, kind: record.bodyPreview.kind, text,
+      ...(record.createdAt ? { createdAt: record.createdAt } : {}),
       truncated: record.bodyPreview.truncated === true || text.length < record.bodyPreview.text.length });
   }
   return snapshots;
