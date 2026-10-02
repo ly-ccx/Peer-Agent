@@ -5,7 +5,8 @@ import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
 import { BotHostControl } from './BotHostControl';
-import { BotPolicyFields } from './BotPolicyFields';
+import { BotApprovalFields, BotPolicyFields } from './BotPolicyFields';
+import { PeerIcon } from '../../ui/icons/PeerIcon';
 import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 
 const PROACTIVITY_LEVELS = ['inherit', 'quiet', 'low', 'standard', 'high', 'muted'] as const;
@@ -178,7 +179,9 @@ export function BotSettingsTab({
   }
 
   return (
-    <div className="bot-drawer-tab">
+    <div className="bot-drawer-tab bot-settings-tab">
+      <section className="bot-settings-section bot-settings-identity">
+        <h2>{i18n.t('projectAgent.drawer.settings.appearance')}</h2>
       <div className="bot-settings-field">
         <label htmlFor="bot-settings-name">{i18n.t('projectAgent.drawer.settings.name')}</label>
         <div className="bot-settings-name-row">
@@ -188,8 +191,7 @@ export function BotSettingsTab({
           </button>
         </div>
       </div>
-      <section className="bot-settings-avatar-section">
-        <h2>{i18n.t('projectAgent.drawer.settings.avatar')}</h2>
+      <div className="bot-settings-avatar-section">
         <div className="bot-avatar-settings">
           <BotAvatar avatar={profile.avatar} label={profile.displayName} workspaceId={workspaceId} />
           <div className="bot-avatar-settings-actions">
@@ -219,36 +221,50 @@ export function BotSettingsTab({
           </div>
           {profile.avatar.kind === 'image' ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.avatarColorImageHint')}</p> : null}
         </div>
+      </div>
       </section>
-      <div className="bot-settings-field">
+      <section className="bot-settings-section">
+        <h2>{i18n.t('projectAgent.drawer.settings.workflow')}</h2>
+      <div className="bot-settings-row">
         <span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span>
         <Dropdown
           value={level}
           disabled={busy}
           ariaLabel={i18n.t('projectAgent.drawer.settings.proactivity')}
-          className="bot-settings-proactivity"
           options={PROACTIVITY_LEVELS.map((item) => ({ value: item, label: i18n.t(`projectAgent.drawer.settings.proactivity.${item}`) }))}
           onChange={(next) => { void saveProactivity(next); }}
         />
       </div>
-      <div className="bot-settings-field">
-        <span>{i18n.t('projectAgent.drawer.settings.concurrency')}</span>
-        <Dropdown value={concurrency} disabled={busy}
-          ariaLabel={i18n.t('projectAgent.drawer.settings.concurrency')}
-          options={Array.from({ length: 8 }, (_, index) => ({ value: String(index + 1), label: String(index + 1) }))}
-          onChange={value => { void saveConcurrency(value); }} />
-        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.concurrencyHint')}</p>
-      </div>
-      <BotHostControl workspaceId={workspaceId} i18n={i18n} />
-      <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
+      <BotApprovalFields profile={profile} busy={busy} i18n={i18n}
         onChange={patch => { void savePolicy(patch); }} />
-      <div className="bot-settings-field">
+      <div className="bot-settings-row bot-settings-toggle-row">
         <label htmlFor="bot-auto-handoff">{i18n.t('projectAgent.drawer.settings.autoHandoff')}</label>
         <Switch id="bot-auto-handoff" checked={profile.autoHandoffOnPolicyAccept === true} disabled={busy}
           onCheckedChange={value => { void savePolicy({ autoHandoffOnPolicyAccept: value }); }} />
-        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
       </div>
-      {error ? <p className="bot-drawer-note">{error}</p> : null}
+      <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
+      </section>
+      <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
+        onChange={patch => { void savePolicy(patch); }} />
+      <details className="bot-settings-disclosure bot-runtime-settings">
+        <summary>{i18n.t('projectAgent.drawer.settings.runtime')}<PeerIcon name="chevronDown" size={14} /></summary>
+        <div className="bot-settings-disclosure-body">
+          <BotHostControl workspaceId={workspaceId} i18n={i18n} />
+          <div className="bot-settings-global">
+            <span className="bot-settings-scope">{i18n.t('projectAgent.drawer.settings.globalScope')}</span>
+            <div className="bot-settings-row">
+              <span>{i18n.t('projectAgent.drawer.settings.concurrency')}</span>
+              <Dropdown value={concurrency} disabled={busy}
+                ariaLabel={i18n.t('projectAgent.drawer.settings.concurrency')}
+                options={Array.from({ length: 8 }, (_, index) => ({ value: String(index + 1), label: String(index + 1) }))}
+                onChange={value => { void saveConcurrency(value); }} />
+            </div>
+            <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.concurrencyHint')}</p>
+          </div>
+        </div>
+      </details>
+      {error ? <p className="bot-drawer-note" role="alert">{error}</p> : null}
+      <div className="bot-settings-danger">
       <button type="button" disabled={busy} onClick={() => { void remove(); }}>
         {confirmDelete
           ? i18n.t('projectAgent.drawer.settings.deleteConfirm')
@@ -256,6 +272,7 @@ export function BotSettingsTab({
             ? i18n.t('projectAgent.drawer.settings.deleteManaged')
             : i18n.t('projectAgent.drawer.settings.delete')}
       </button>
+      </div>
     </div>
   );
 }

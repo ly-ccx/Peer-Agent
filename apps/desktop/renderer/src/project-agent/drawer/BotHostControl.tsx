@@ -13,10 +13,10 @@ export function BotHostControl({ workspaceId, i18n }: { workspaceId: string; i18
     } catch { setStatus('failed'); }
     finally { setBusy(false); }
   }
-  return <section className="bot-settings-field">
+  return <section className="bot-host-control">
     <span>{i18n.t('projectAgent.host.title')}</span>
     <p className="bot-drawer-note">{i18n.t('projectAgent.host.hint')}</p>
-    <button type="button" disabled={busy} onClick={() => { void takeOver(); }}>
+    <button className="bot-host-action" type="button" disabled={busy} onClick={() => { void takeOver(); }}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
         <path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" />
       </svg>

@@ -388,6 +388,11 @@ export type TranslationKey =
   | 'projectAgent.drawer.memory.learnPreferences'
   | 'projectAgent.drawer.memory.learnLater'
   | 'projectAgent.drawer.settings.name'
+  | 'projectAgent.drawer.settings.appearance'
+  | 'projectAgent.drawer.settings.workflow'
+  | 'projectAgent.drawer.settings.runtime'
+  | 'projectAgent.drawer.settings.globalScope'
+  | 'projectAgent.drawer.settings.advancedModels'
   | 'projectAgent.drawer.settings.save'
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
@@ -1631,6 +1636,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.learnPreferences': '从我的习惯里学偏好',
     'projectAgent.drawer.memory.learnLater': '学偏好会在后续阶段生效，这个开关现在就会记住。',
     'projectAgent.drawer.settings.name': '名字',
+    'projectAgent.drawer.settings.appearance': '外观',
+    'projectAgent.drawer.settings.workflow': '工作方式',
+    'projectAgent.drawer.settings.runtime': '运行与全局设置',
+    'projectAgent.drawer.settings.globalScope': '影响所有机器人',
+    'projectAgent.drawer.settings.advancedModels': '更多角色与模型限制',
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
     'projectAgent.drawer.settings.avatarNew': '重新生成',
@@ -2672,6 +2682,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.learnPreferences': 'Learn preferences from my habits',
     'projectAgent.drawer.memory.learnLater': 'Preference learning starts in a later step. This switch is saved now.',
     'projectAgent.drawer.settings.name': 'Name',
+    'projectAgent.drawer.settings.appearance': 'Appearance',
+    'projectAgent.drawer.settings.workflow': 'Working style',
+    'projectAgent.drawer.settings.runtime': 'Runtime and global settings',
+    'projectAgent.drawer.settings.globalScope': 'Applies to all bots',
+    'projectAgent.drawer.settings.advancedModels': 'More roles and model limits',
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
     'projectAgent.drawer.settings.avatarNew': 'Generate another',
