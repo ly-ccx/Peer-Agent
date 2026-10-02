@@ -205,7 +205,7 @@
 .bot-quote-action,
 .bot-card-actions button,
 .bot-user-marks button {
-  border: 1px solid var(--frost-separator, var(--separator));
+  border: 1px solid var(--chrome-hairline);
   border-radius: 999px;
   background: transparent;
   color: var(--frost-text-secondary, var(--text-secondary));
