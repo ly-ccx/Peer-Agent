@@ -240,7 +240,7 @@
 .bot-reply-marks button:hover,
 .bot-quote-action:hover,
 .bot-user-marks button:hover {
-  background: var(--chrome-hover);
+  background: var(--paper-hover);
   color: var(--graphite-base);
 }
 
