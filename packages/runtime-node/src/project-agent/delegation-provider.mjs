@@ -651,6 +651,9 @@ function finish({ call, capabilityId, name, locale, status, output }) {
         status,
         tool: name,
         legacyResult: { success: granted, output: outputText },
+        ...(granted && name === 'post_reply'
+          ? { control: { terminal: true, reason: 'project_agent_reply' } }
+          : {}),
       },
       evidence: createEvidenceBundle({
         evidenceId: `delegation-${call.toolCallId || name}`,

@@ -136,9 +136,11 @@ export function createTuiTurnExecutor(options: {
         calls.push({ toolCallId: call.toolCallId, execution, name: toolName, input: call.arguments, result });
         input.sink.send('chat:stream:tool-result', { streamId, toolCallId: call.toolCallId,
           result: JSON.stringify(execution.result), evidenceRefs: collectToolEvidenceRefs({toolCallId:call.toolCallId, execution}) });
-        const control = (execution.result as any).control ?? (execution.result.metadata as any)?.control;
-        return { call, result: execution, ...(control?.requestUserInput || control?.kind === 'request_user_input' || control?.reason === 'request_user_input'
-          ? {terminal: true, terminalReason: 'requested_user_input'} : {}) };
+        const control = (execution.result as any).control ?? (execution.result.outputPreview as any)?.control
+          ?? (execution.result.output as any)?.control ?? (execution.result.metadata as any)?.control;
+        const requestUserInput = control?.requestUserInput || control?.kind === 'request_user_input' || control?.reason === 'request_user_input';
+        return { call, result: execution, ...(control?.terminal === true || requestUserInput
+          ? {terminal: true, terminalReason: requestUserInput ? 'requested_user_input' : control.reason} : {}) };
       } },
     });
     try {
@@ -155,7 +157,8 @@ export function createTuiTurnExecutor(options: {
           },
         } }, { signal: controller.signal });
       const requestedUserInput = result.reason === 'requested_user_input';
-      const ok = result.status === 'completed' || requestedUserInput;
+      const replied = result.status === 'stopped' && result.reason === 'project_agent_reply';
+      const ok = result.status === 'completed' || requestedUserInput || replied;
       const text = !ok && streamedText ? streamedText : result.output ?? '';
       input.sink.send(ok ? 'chat:stream:done' : 'chat:stream:error', { streamId, error: result.reason });
       if (!input.ephemeral) options.persistTurn?.(input, { text, calls, usage: result.state?.usage,

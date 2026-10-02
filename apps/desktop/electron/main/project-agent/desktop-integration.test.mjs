@@ -14,6 +14,8 @@ const { projectTurnSystemContext } = await import('../llm-chat-service.mjs');
 const { createAgentTurnExecutor } = await import('../agent-host/agent-turn-executor.mjs');
 const { executeProjectedModelTool } = await import('../chat-runtime/projected-tool-executor.mjs');
 const { createRuntimeToolProjection } = await import('../tools/index.mjs');
+const { buildOpenAIToolsFromModelProjection } = await import('../tools/index.mjs');
+const { agentLoopOpenAI } = await import('../chat-runtime/openai-agent-loop.mjs');
 const { createProjectRosterPromptSource } = await import('../../../../../packages/system-context/src/sources/project-roster-source.mjs');
 const provider = { id: 'configured', provider: 'openai', model: 'test-model', enabled: true,
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
@@ -172,6 +174,53 @@ async function tool(env, name, args, ordinal = 1) {
     toolCallId: crypto.randomUUID(), requestPermission: async () => { throw new Error('agent must not ask for approval'); },
   });
 }
+
+test('production Responses loop ends after a governed post_reply and persists one canonical reply', async () => {
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  const streamEvents = [], executions = [];
+  globalThis.fetch = async () => {
+    requests++;
+    const frames = requests === 1 ? [
+      { type: 'response.output_item.added', item: { type: 'function_call', id: 'fc-terminal', call_id: 'terminal-reply', name: 'post_reply' } },
+      { type: 'response.function_call_arguments.done', item_id: 'fc-terminal', arguments: JSON.stringify({ replyTo: ['input-terminal'], text: 'Connection ready' }) },
+      { type: 'response.completed', response: { usage: { input_tokens: 100, output_tokens: 20 } } },
+    ] : [{ type: 'response.completed', response: { usage: { input_tokens: 120, output_tokens: 0 } } }];
+    return new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+  };
+  const env = harness({ send: async input => {
+    const { registry, projection, modelProjection } = createRuntimeToolProjection({ projectionOptions: { mode: 'project_agent' } });
+    await agentLoopOpenAI({ baseUrl: 'https://example.test/backend-api/codex', apiKey: 'fixture', authMethod: 'oauth_chatgpt',
+      model: 'test-model', systemPrompt: 'Use the governed reply tool.', messages: input.messages,
+      tools: buildOpenAIToolsFromModelProjection(modelProjection), streamId: input.streamId,
+      conversationId: input.conversationId, signal: input.signal, workspacePath: env.project,
+      runtimeMode: 'project_agent', registry, runtimeProjection: projection, goalPlanStore: env.plans,
+      toolContext: { mode: 'project_agent', turnRole: 'project_agent', workspaceId: env.bot.workspaceId,
+        conversationId: input.conversationId, turnId: input.streamId, currentInputAnchors: ['input-terminal'],
+        messages: env.history(), readFiles: new Map(), turnToolCalls: [], onToolExecution: execution => executions.push(execution) },
+      permissionGate: { createFilePermissionRequester: () => async () => ({ granted: true }),
+        createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }),
+        createShellApprovalDecider: () => async () => ({ granted: true }) },
+      webContents: { send(channel, payload) { streamEvents.push({ channel, payload }); input.webContents.send(channel, payload); } },
+    });
+    return { terminalStatus: 'done' };
+  } });
+  try {
+    await env.submit('terminal', 'Reply once');
+    assert.equal(requests, 1, 'a successful reply must not require a trailing model response');
+    assert.equal(executions.length, 1);
+    assert.equal(executions[0].grant.granted, true);
+    assert.equal(executions[0].result.status, 'success');
+    assert.equal(executions[0].result.evidence.toolCallId, 'terminal-reply');
+    const channels = streamEvents.map(event => event.channel);
+    assert.ok(channels.indexOf('chat:stream:tool-result') < channels.indexOf('chat:stream:done'));
+    assert.equal(channels.filter(channel => channel === 'chat:stream:done').length, 1);
+    assert.equal(channels.includes('chat:stream:error'), false);
+    assert.equal(env.history().filter(message => message.card === 'agent_unavailable').length, 0);
+    assert.deepEqual(env.history().filter(message => message.kind === 'agent_reply').map(message => message.content), ['Connection ready']);
+    assert.ok(env.plans.findEvidenceIndexRecords(['tool-result://terminal-reply']).length);
+  } finally { globalThis.fetch = originalFetch; env.dispose(); }
+});
 
 test('familiarize completion wakes, verifies, requires sources, persists acceptance and reversible memory', async () => {
   let env, sessionId, report = false;

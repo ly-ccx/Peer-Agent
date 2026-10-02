@@ -48,6 +48,41 @@ function outputOf(result) {
   return JSON.parse(result.result.outputPreview.legacyResult.output);
 }
 
+test('successful post_reply ends the provider loop, including suppression and idempotent replay', async () => {
+  for (const suppressed of [false, true]) {
+    let calls = 0;
+    const provider = createDelegationProvider({ replyComposer: { postReply() {
+      calls++;
+      return suppressed ? { ok: true, suppressed: true, reason: 'facts_already_reported' }
+        : { ok: true, message: { id: 'reply', kind: 'agent_reply', content: 'Done' } };
+    } } });
+    const args = { replyTo: ['u1'], text: 'Done' };
+    for (const id of ['reply-first', 'reply-replayed']) {
+      const result = await provider.executeCapability(call('local.delegation.post_reply', args, id), agentContext());
+      assert.deepEqual(result.result.outputPreview.control, { terminal: true, reason: 'project_agent_reply' });
+      assert.equal(result.grant.granted, true);
+      assert.equal(result.result.status, 'success');
+      assert.equal(result.result.evidence.toolCallId, id);
+    }
+    assert.equal(calls, 1, 'replay must retain the receipt without repeating delivery');
+  }
+});
+
+test('failed, denied, invalid and unconfigured post_reply cannot terminate a provider loop', async () => {
+  for (const [replyComposer, context, args] of [
+    [{ postReply: () => ({ ok: false, error: 'verification_required' }) }, agentContext(), { replyTo: ['u1'], text: 'Done' }],
+    [{ postReply: () => ({ ok: false, error: 'cancelled' }) }, agentContext(), { replyTo: ['u1'], text: 'Done' }],
+    [null, agentContext(), { replyTo: ['u1'], text: 'Done' }],
+    [{ postReply: () => ({ ok: true }) }, agentContext({ mode: 'chat', role: 'chat' }), { replyTo: ['u1'], text: 'Done' }],
+    [{ postReply: () => ({ ok: true }) }, agentContext(), { text: '' }],
+  ]) {
+    const result = await createDelegationProvider({ replyComposer }).executeCapability(call('local.delegation.post_reply', args), context);
+    assert.equal(result.result.outputPreview.control, undefined);
+    assert.equal(result.result.status, 'failed');
+    assert.equal(result.grant.granted, false);
+  }
+});
+
 test('delegation capabilities are on the project agent whitelist and nowhere else is required', () => {
   for (const capabilityId of DELEGATION_CAPABILITY_IDS) {
     assert.equal(PROJECT_AGENT_ALLOWED_CAPABILITIES.includes(capabilityId), true);

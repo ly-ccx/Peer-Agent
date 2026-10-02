@@ -10,6 +10,7 @@ import { buildTuiSystemPrompt } from '../tui-language.ts';
 import { createTuiTurnExecutor } from './tui-turn-executor.ts';
 import type { TuiRuntime } from '../tui-runtime.ts';
 import type { TuiTurnRequest } from './tui-turn-executor.ts';
+import { createProjectToolProvider } from './project-tool-provider.ts';
 
 const cleanup: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => { while (cleanup.length) await cleanup.pop()!(); });
@@ -135,4 +136,53 @@ test('role routing uses the shared desktop model catalog and its capability flag
   ]));
   expect(env.executor.resolveGoalRole({role:'project_agent'})).toMatchObject({ok:true,selection:{modelProviderId:'text-model',modelId:'text'}});
   expect(env.executor.resolveGoalRole({role:'visual_verifier',taskRequiresVision:true})).toMatchObject({ok:true,selection:{modelProviderId:'vision-model',modelId:'vision'}});
+});
+
+test('successful project replies terminate the actual TUI pipeline with Grant and Evidence', async () => {
+  for (const suppressed of [false, true]) {
+    let posts = 0;
+    const events: string[] = [];
+    let projectProvider: ReturnType<typeof createProjectToolProvider>;
+    const env = harness({ async stream() { return {
+      content: '', toolCalls: [{ id: 'reply', name: 'post_reply',
+        arguments: JSON.stringify({ text: 'connection ready', sources: [], replyTo: ['user-reply'] }) }],
+    }; } }, { getProviders: () => [projectProvider] });
+    projectProvider = createProjectToolProvider({ rootDir: env.home, supervisor: {}, objectives: {},
+      replyComposer: { postReply() { posts++; return { ok: true, suppressed }; } },
+      verification: {}, proactivity: {}, checkModel: () => ({ ok: true }), memoryEnabled: () => false });
+    cleanup.push(() => projectProvider.dispose());
+    for (let replay = 0; replay < 2; replay++) {
+      const outcome = await env.executor.runTurn({ ...env.input, ephemeral: false, limits: { maxRounds: 2, maxToolCalls: 4 },
+        sink: { send(channel) { events.push(channel); } } });
+      expect(outcome.toolCalls[0]?.execution.result.status).toBe('success');
+      expect(outcome.ok).toBe(true);
+      expect(outcome.terminalStatus).toBe('completed');
+      expect(outcome.requestedUserInput).toBeUndefined();
+      expect(outcome.toolCalls).toHaveLength(1);
+      expect(outcome.toolCalls[0].execution.grant.granted).toBe(true);
+      expect(outcome.toolCalls[0].execution.result.status).toBe('success');
+      expect(outcome.toolCalls[0].execution.result.evidence).toBeDefined();
+      expect(env.persisted.at(-1).interrupted).toBe(false);
+    }
+    expect(env.requests).toHaveLength(2);
+    expect(posts).toBe(1);
+    expect(events.filter(channel => channel === 'chat:stream:done')).toHaveLength(2);
+    expect(events).not.toContain('chat:stream:error');
+    expect(events.indexOf('chat:stream:tool-result')).toBeLessThan(events.indexOf('chat:stream:done'));
+  }
+});
+
+test('a failed project reply remains nonterminal in the TUI pipeline', async () => {
+  let projectProvider: ReturnType<typeof createProjectToolProvider>;
+  const env = harness({ async stream() { return { content: '', toolCalls: [{ id: 'reply', name: 'post_reply',
+    arguments: JSON.stringify({ text: 'not verified', sources: [], replyTo: ['user-reply'] }) }] }; } },
+  { getProviders: () => [projectProvider] });
+  projectProvider = createProjectToolProvider({ rootDir: env.home, supervisor: {}, objectives: {},
+    replyComposer: { postReply() { return { ok: false, error: 'verification_required' }; } },
+    verification: {}, proactivity: {}, checkModel: () => ({ ok: true }), memoryEnabled: () => false });
+  cleanup.push(() => projectProvider.dispose());
+  const outcome = await env.executor.runTurn({ ...env.input, limits: { maxRounds: 2, maxToolCalls: 4 } });
+  expect(outcome.ok).toBe(false);
+  expect(env.requests).toHaveLength(2);
+  expect(outcome.toolCalls.every((call: any) => call.execution.result.outputPreview.control === undefined)).toBe(true);
 });
