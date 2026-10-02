@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 
 /** Actual production DOM, keyboard and persistence; no replacement of product results. */
-export async function checkBotShellAccessibility({ page, app, until, report }) {
+export async function checkBotShellAccessibility({ page, app, until, report, captureDirectory }) {
   const checks = report.accessibility = [];
   const focused = locator => locator.evaluate(node => node === document.activeElement);
   const list = page.getByRole('listbox', { name: 'Peer', exact: true });
@@ -23,6 +24,8 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   await until(() => focused(tabs.getByRole('tab', { selected: true })), Boolean);
   await page.keyboard.press('End');
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
+  await checkSettings({ page, until, report, captureDirectory });
+  await tabs.getByRole('tab', { name: '设置', exact: true }).focus();
   await page.keyboard.press('Home'); await page.keyboard.press('ArrowRight');
   assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
   await page.keyboard.press('Enter');
@@ -36,6 +39,14 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   await trigger.focus(); await trigger.press('Enter');
   const modal = page.getByRole('dialog', { name: '档案', exact: true });
   await modal.waitFor();
+  await modal.getByRole('tab', { name: '设置', exact: true }).click();
+  const narrow = modal.locator('.bot-settings-tab');
+  await narrow.waitFor();
+  assert.equal(await narrow.evaluate(node => node.scrollWidth <= node.clientWidth), true, 'settings must fit the cover drawer');
+  await narrow.locator('.bot-runtime-settings summary').press('Enter');
+  await narrow.locator('.bot-runtime-settings').getByRole('button', { name: '在桌面接管', exact: true }).scrollIntoViewIfNeeded();
+  assert.equal(await tabsVisible(page), true);
+  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-narrow.png') });
   const ends = () => modal.evaluate(node => {
     const items = [...node.querySelectorAll('button,input,textarea,select,a[href],[tabindex]')]
       .filter(item => item.tabIndex >= 0 && !item.disabled && item.getClientRects().length && !item.closest('[inert]'));
@@ -141,4 +152,94 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   await choose('Language', '简体中文');
   await page.locator('.settings-nav').getByRole('button', { name: '设置', exact: true }).click();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+}
+
+async function checkSettings({ page, until, report, captureDirectory }) {
+  const form = page.locator('.bot-settings-tab');
+  await form.waitFor();
+  const workspaceId = (await page.locator('.bot-row.is-open').getAttribute('id')).slice('bot-row-'.length);
+  const profile = () => page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).item.profile, workspaceId);
+  const original = await profile();
+  const advanced = form.locator('.bot-model-advanced');
+  const runtime = form.locator('.bot-runtime-settings');
+  assert.equal(await advanced.getAttribute('open'), null);
+  assert.equal(await runtime.getAttribute('open'), null);
+  assert.equal(await form.getByRole('button', { name: '项目代理', exact: true }).isVisible(), true);
+  assert.equal(await form.getByRole('button', { name: '探索', exact: true }).count(), 0);
+  const handoff = form.getByRole('switch', { name: '策略签收后自动合回', exact: true });
+  const switchPaint = await handoff.evaluate(node => {
+    const track = node.getBoundingClientRect(), thumb = node.querySelector('.peer-switch-thumb').getBoundingClientRect();
+    return { track: { width: track.width, height: track.height }, thumb: { width: thumb.width, height: thumb.height },
+      trackColor: getComputedStyle(node).backgroundColor, thumbColor: getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor };
+  });
+  assert.equal(switchPaint.track.width, 36);
+  assert.equal(switchPaint.track.height, 20);
+  assert.equal(switchPaint.thumb.width, 16);
+  assert.notEqual(switchPaint.trackColor, switchPaint.thumbColor, 'switch thumb must be visible');
+  await handoff.focus(); await handoff.press('Space');
+  await until(profile, p => p.autoHandoffOnPolicyAccept === !(original.autoHandoffOnPolicyAccept === true));
+  await handoff.press('Space');
+  await until(profile, p => p.autoHandoffOnPolicyAccept === (original.autoHandoffOnPolicyAccept === true));
+  await form.getByRole('button', { name: '开工前批准计划', exact: true }).click();
+  await page.getByRole('option', { name: '所有任务先批准', exact: true }).click();
+  await until(profile, p => p.planApproval === 'always');
+  await form.getByRole('button', { name: '签收策略', exact: true }).click();
+  await page.getByRole('option', { name: '由我确认结果', exact: true }).click();
+  await until(profile, p => p.acceptancePolicy === 'confirm');
+  await advanced.locator('summary').focus(); await advanced.locator('summary').press('Enter');
+  assert.notEqual(await advanced.getAttribute('open'), null);
+  const local = advanced.getByRole('switch', { name: '只使用本地模型', exact: true });
+  await local.press('Space'); await until(profile, p => p.modelPolicy?.scope?.localOnly === true);
+  await local.press('Space'); await until(profile, p => p.modelPolicy?.scope?.localOnly === false);
+  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-advanced.png') });
+  await advanced.locator('summary').press('Enter');
+  await runtime.locator('summary').press('Enter');
+  await runtime.getByText('影响所有机器人', { exact: true }).waitFor();
+  const oldConcurrency = (await page.evaluate(() => window.peerAgent.getSettings())).projectAgent.concurrency || 4;
+  const nextConcurrency = oldConcurrency === 5 ? 4 : 5;
+  await runtime.getByRole('button', { name: '全局并发回合', exact: true }).click();
+  await page.getByRole('option', { name: String(nextConcurrency), exact: true }).click();
+  await until(() => page.evaluate(() => window.peerAgent.getSettings()), s => s.projectAgent.concurrency === nextConcurrency);
+  await runtime.getByRole('button', { name: '全局并发回合', exact: true }).click();
+  await page.getByRole('option', { name: String(oldConcurrency), exact: true }).click();
+  await until(() => page.evaluate(() => window.peerAgent.getSettings()), s => s.projectAgent.concurrency === oldConcurrency);
+  await runtime.getByRole('button', { name: '在桌面接管', exact: true }).scrollIntoViewIfNeeded();
+  const hostPaint = await runtime.locator('.bot-host-action').evaluate(node => {
+    const button = node.getBoundingClientRect(), icon = node.querySelector('svg').getBoundingClientRect();
+    return { display: getComputedStyle(node).display, centered: Math.abs(icon.y + icon.height / 2 - button.y - button.height / 2) < 2 };
+  });
+  // Flex items blockify inline-flex in computed style; geometry proves icon/text alignment.
+  assert.equal(hostPaint.display, 'flex'); assert.equal(hostPaint.centered, true);
+  assert.equal(await tabsVisible(page), true, 'drawer tabs must remain visible after settings scroll');
+  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-runtime.png') });
+  await runtime.locator('summary').press('Enter');
+  await page.locator('.bot-drawer-body').evaluate(node => { node.scrollTop = 0; });
+  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-default-light.png') });
+  const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
+  const themedSwitches = [];
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    const paint = await handoff.evaluate(node => ({ theme: document.documentElement.dataset.theme,
+      track: getComputedStyle(node).backgroundColor, thumb: getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor }));
+    assert.notEqual(paint.track, paint.thumb); themedSwitches.push(paint);
+  }
+  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-default.png') });
+  await page.evaluate(original => {
+    for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
+  }, originalTheme);
+  report.settingsLayout = { switchPaint, hostPaint, planApproval: 'always', acceptancePolicy: 'confirm', globalSettingRestored: true,
+    themedSwitches,
+    scope: 'Actual isolated source UI and persistence, no model or permission grant exercised' };
+  report.accessibility.push('settings groups, keyboard disclosures, visible switches, policy/local-model/global-concurrency persistence and sticky tabs');
+  await page.evaluate(async ({ workspaceId, original }) => {
+    const result = await window.peerAgent.projectAgentUpdateProfile({ workspaceId, planApproval: original.planApproval || 'never', acceptancePolicy: original.acceptancePolicy || 'auto', modelPolicy: original.modelPolicy || {} });
+    if (!result.ok) throw Error('Fixture policy restore failed');
+  }, { workspaceId, original });
+}
+
+async function tabsVisible(page) {
+  return page.locator('.bot-drawer-tabs').evaluate(node => {
+    const rect = node.getBoundingClientRect();
+    return rect.top >= 0 && rect.bottom <= window.innerHeight;
+  });
 }

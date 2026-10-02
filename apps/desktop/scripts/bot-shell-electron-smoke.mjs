@@ -259,7 +259,7 @@ try {
   await page.locator('.bot-shell').waitFor();
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
-  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report });
+  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
