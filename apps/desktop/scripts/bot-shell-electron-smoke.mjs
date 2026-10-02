@@ -1,5 +1,6 @@
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
+import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -122,6 +123,7 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
+  await checkBotShellUpdater({ page, app, until, report, home, captureDirectory: root });
   assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
   report.avatarAnimation = await page.evaluate(() => ({ avatars: document.querySelectorAll('.bot-avatar').length, activeAvatars: document.querySelectorAll('[data-avatar-animated="true"]').length, animations: document.getAnimations().length }));
   report.checks.push('200 real bot rows; no idle model turns');
@@ -250,6 +252,9 @@ try {
   await page.locator('.bot-shell').waitFor({ state: 'detached' });
   await page.locator('.settings-nav').getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('.app-sidebar').waitFor();
+  assert.equal(await page.locator('.app-sidebar .sidebar-version-badge').count(), 1);
+  assert.equal(await page.locator('.app-sidebar .sidebar-version-channel').count(), 0);
+  assert.equal((await page.evaluate(() => window.peerAgent.updaterGetStatus())).preference, 'auto');
   report.checks.push('classic shell opens through settings');
   // Return through the same settings control, retaining persisted conversations.
   await page.locator('.app-sidebar').getByRole('button', { name: '设置', exact: true }).click();

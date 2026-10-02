@@ -1,8 +1,10 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { UpdateChannelPreference } from '@peer-agent/protocol';
 import type { CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
 import { useUpdater } from '../state/useUpdater';
 import { UpdateModal } from './UpdateModal';
+import { Dropdown } from './Dropdown';
 
 /**
  * VersionBadge —— 侧边栏品牌区右侧的版本徽标（表达层）。
@@ -18,8 +20,11 @@ import { UpdateModal } from './UpdateModal';
  *
  * 能力真相在主进程，本组件通过 useUpdater 消费状态与动作。
  */
-export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
-  const { status, hasUpdate, check, download, install, openReleasePage } = useUpdater();
+export function VersionBadge({ i18n, showChannel = false }: {
+  readonly i18n: I18nRuntime;
+  readonly showChannel?: boolean;
+}) {
+  const { status, hasUpdate, check, download, install, openReleasePage, setChannel } = useUpdater();
   const [modalOpen, setModalOpen] = useState(false);
   // 跨组件连续性（C1 时序衔接）：点「更新」后 download() 是异步转调主进程，
   // phase 要等主进程首个 download-progress 事件才变 downloading。若不处理，
@@ -129,6 +134,23 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
           >
             {i18n.t('updater.badge.install')}
           </button>
+        ) : null}
+
+        {showChannel ? (
+          <Dropdown
+            className="sidebar-version-channel"
+            value={status.preference}
+            triggerLabel={i18n.t(`updater.badge.channel.${status.preference}`)}
+            options={[
+              { value: 'auto', label: i18n.t('updater.settings.channel.auto') },
+              { value: 'beta', label: i18n.t('updater.settings.channel.beta') },
+              { value: 'stable', label: i18n.t('updater.settings.channel.stable') },
+            ]}
+            ariaLabel={i18n.t('updater.settings.channel')}
+            title={i18n.t('updater.settings.channel.description')}
+            menuPlacement="up"
+            onChange={(value) => void setChannel(value as UpdateChannelPreference)}
+          />
         ) : null}
       </div>
 

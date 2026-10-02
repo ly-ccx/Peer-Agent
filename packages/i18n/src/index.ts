@@ -1024,6 +1024,9 @@ export type TranslationKey =
   | 'updater.settings.channel.auto'
   | 'updater.settings.channel.beta'
   | 'updater.settings.channel.stable'
+  | 'updater.badge.channel.auto'
+  | 'updater.badge.channel.beta'
+  | 'updater.badge.channel.stable'
   | 'updater.settings.currentVersion'
   | 'updater.settings.checkNow'
   | 'updater.settings.checking'
@@ -2073,6 +2076,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.channel.auto': '自动（跟随当前版本）',
     'updater.settings.channel.beta': 'Beta（尝鲜版）',
     'updater.settings.channel.stable': '正式（稳定版）',
+    'updater.badge.channel.auto': '自动',
+    'updater.badge.channel.beta': 'Beta',
+    'updater.badge.channel.stable': '正式',
     'updater.settings.currentVersion': '当前版本',
     'updater.settings.checkNow': '检查更新',
     'updater.settings.checking': '检查中…',
@@ -3121,6 +3127,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.channel.auto': 'Auto (follow current version)',
     'updater.settings.channel.beta': 'Beta (early access)',
     'updater.settings.channel.stable': 'Stable (production)',
+    'updater.badge.channel.auto': 'Auto',
+    'updater.badge.channel.beta': 'Beta',
+    'updater.badge.channel.stable': 'Stable',
     'updater.settings.currentVersion': 'Current version',
     'updater.settings.checkNow': 'Check for updates',
     'updater.settings.checking': 'Checking…',
