@@ -255,6 +255,25 @@ describe('TUI Runtime host', () => {
     expect(approvals).toHaveLength(0);
   });
 
+  test('indexes a real successful shell result as immutable command evidence', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createHost({ workspaceRoot, accessLevel: 'full_local' });
+    const result = await host.execute('local.shell.exec', { command: 'echo RC_COMMAND_FACT' },
+      { ...sessionContext('shell-evidence-session'), mode: 'chat' });
+    expect(result.result.status).toBe('completed');
+    const ref = `tool-result://${result.result.toolCallId}`;
+    const record = host.goalBridge!.store.findEvidenceIndexRecords([ref])[0];
+    expect(record?.bodyPreview?.kind).toBe('command');
+    expect(JSON.parse(record!.bodyPreview!.text)).toEqual({ exitCode: 0, stdout: 'RC_COMMAND_FACT\n', stderr: '' });
+    expect(record?.toolName).toBe('bash');
+    const failed = await host.execute('local.shell.exec', { command: 'exit 1' },
+      { ...sessionContext('shell-evidence-session', 1), mode: 'chat' });
+    expect(failed.result.status).toBe('failed');
+    const failedRecord = host.goalBridge!.store.findEvidenceIndexRecords([`tool-result://${failed.result.toolCallId}`])[0];
+    expect(failedRecord?.bodyPreview).toBeUndefined();
+    expect(host.goalBridge!.store.findEvidenceIndexRecords([ref])[0]?.bodyPreview).toEqual(record?.bodyPreview);
+  });
+
   test('stops a chat background shell from goal through the shared task manager', async () => {
     const workspaceRoot = await createWorkspace();
     const userDataPath = await createWorkspace();

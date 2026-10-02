@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +16,53 @@ import {
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createRuntimeToolProjection } from '../tools/index.mjs';
 import { evidenceBodyFromRecord, presentEvidence } from '../project-agent/evidence-presenter.mjs';
+
+it('real desktop shell Tool Result reaches the scoped index and verifier snapshots', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'command-evidence-'));
+  try {
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict';
+      import path from 'node:path';
+      import { createToolContext, executeModelToolCall } from './apps/desktop/electron/main/chat-runtime/tool-orchestrator.mjs';
+      import { createRuntimeToolProjection } from './apps/desktop/electron/main/tools/index.mjs';
+      import { createGoalPlanStore, verifierEvidenceSnapshots } from './packages/runtime-node/dist/index.js';
+      import { disposeApplicationShellSessions } from './apps/desktop/electron/main/runtime-gateway/application-shell-sessions.mjs';
+      import { disposeApplicationShellTasks } from './apps/desktop/electron/main/runtime-gateway/application-shell-tasks.mjs';
+      const root = process.env.PEER_AGENT_HOME;
+      const storeDir = path.join(root, 'plans');
+      const store = createGoalPlanStore({ storeDir });
+      const plan = store.createGoalContract({ conversationId: 'shell-c', title: 'Command check', goal: 'Inspect actual shell output',
+        successCriteria: ['Check emits RC_COMMAND_FACT'], tasks: [{ taskId: 'check', title: 'Check', status: 'pending' }] });
+      store.recordApproval(plan.planId, { decision: 'approve', decidedBy: 'tester' });
+      store.setRunnerState(plan.planId, { enabled: true, status: 'running', runId: 'shell-run', currentTaskId: 'check' });
+      const { registry, projection } = createRuntimeToolProjection({ projectionOptions: { mode: 'goal' } });
+      try {
+        const permissionGate = {
+          createFilePermissionRequester: () => async () => ({ granted: true }),
+          createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }),
+          createShellApprovalDecider: () => async () => ({ granted: true }),
+        };
+        const result = await executeModelToolCall({ name: 'bash', rawArguments: JSON.stringify({ command: 'echo RC_COMMAND_FACT' }),
+          toolCallId: 'observed-shell', workspacePath: root, toolContext: { ...createToolContext({ conversationId: 'shell-c', mode: 'goal' }),
+            planId: plan.planId, goalRuntime: { planId: plan.planId, runId: 'shell-run', currentTaskId: 'check' } },
+          permissionGate, webContents: { send() {} }, streamId: 'shell-stream', conversationId: 'shell-c', registry,
+          runtimeProjection: projection, goalPlanStore: store });
+        assert.ok(result.result.execution, JSON.stringify(result));
+        assert.equal(result.result.execution.result.status, 'success');
+        const record = createGoalPlanStore({ storeDir }).findEvidenceIndexRecords(['tool-result://observed-shell'])[0];
+        assert.equal(record.bodyPreview.kind, 'command');
+        assert.equal(JSON.parse(record.bodyPreview.text).stdout.trim(), 'RC_COMMAND_FACT');
+        assert.equal(verifierEvidenceSnapshots({ ...plan, criterionResults: [{ evidenceRef: record.evidenceRef }] }, [record])[0].kind, 'command');
+        console.log('actual-shell-index-verifier-passed');
+      } finally {
+        await disposeApplicationShellSessions(root);
+        await disposeApplicationShellTasks(root);
+      }
+    `], { cwd: path.resolve(import.meta.dirname, '../../../../..'),
+      env: { ...process.env, PEER_AGENT_HOME: root }, encoding: 'utf8', timeout: 15000 });
+    assert.match(output, /actual-shell-index-verifier-passed/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 it('file Provider evidence is a redacted execution snapshot across index reload', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'file-evidence-'));

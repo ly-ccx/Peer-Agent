@@ -22,7 +22,7 @@ import {
   createApprovalStore,
   digestApprovalArgs,
   createFailedClientToolResult,
-  fileEvidencePreview,
+  toolResultEvidencePreview,
   createNodeRuntimeHostAdapter,
   createNodeResultFactory,
   createProviderRuntimeClock,
@@ -365,7 +365,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     });
     if (evidenceRefs.length === 0) return execution;
     try {
-      const bodyPreview = fileEvidencePreview(execution);
+      const bodyPreview = toolResultEvidencePreview(execution);
       const toolName = withBridgeTools(options.mode, bundleForMode(options.mode).projection.tools).find(tool => tool.capabilityId === options.capabilityId)?.name;
       const userArtifacts = (execution.result.evidence as any)?.userArtifacts;
       goalBridge.store.recordEvidenceRefs({

@@ -37,9 +37,9 @@ export function evidenceRefAllowed(evidenceRef) {
 /** @param {any} record @param {(ref: string, record?: any) => string} [readArtifact] */
 export function evidenceBodyFromRecord(record, readArtifact = () => '') {
   if (!record || typeof record !== 'object') return null;
-  if (record.bodyPreview?.kind === 'file' && typeof record.bodyPreview.text === 'string') {
+  if (['file', 'command'].includes(record.bodyPreview?.kind) && typeof record.bodyPreview.text === 'string') {
     return {
-      evidenceRef: record.evidenceRef, kind: 'file', text: record.bodyPreview.text,
+      evidenceRef: record.evidenceRef, kind: record.bodyPreview.kind, text: record.bodyPreview.text,
       truncated: record.bodyPreview.truncated === true,
     };
   }

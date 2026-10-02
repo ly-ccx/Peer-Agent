@@ -603,6 +603,7 @@ export { presentEvidence, evidenceRefAllowed, evidenceBodyFromRecord } from './p
 export { instructionLinesFromText, readProjectInstructionLines } from './project-agent/project-instruction-lines.mjs';
 
 export { fileEvidencePreview } from './project-agent/file-evidence-preview.mjs';
+export { toolResultEvidencePreview } from './project-agent/tool-result-evidence-preview.mjs';
 export { truncatePreview, redactShellOutput, outputRedactions } from './project-agent/output-redaction.mjs';
 export { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl } from './model-channel-wire.mjs';
 export { shouldPauseForHostHandoff, isHostHandoffPause } from './project-agent/session-host-handoff.mjs';

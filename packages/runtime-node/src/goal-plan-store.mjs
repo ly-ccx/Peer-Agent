@@ -828,11 +828,14 @@ function normalizeEvidenceIndexRecord(value) {
       .filter(Boolean)
     : [];
   if (userArtifacts.length > 0) record.userArtifacts = userArtifacts;
-  if (value.bodyPreview?.kind === 'file' && typeof value.bodyPreview.text === 'string'
+  const filePreview = value.bodyPreview?.kind === 'file'
     && ['local.file.read', 'local.file.list', 'local.file.search'].includes(record.capabilityId)
-    && ['read_file', 'list_files', 'search_files'].includes(record.toolName)) {
+    && ['read_file', 'list_files', 'search_files'].includes(record.toolName);
+  const commandPreview = value.bodyPreview?.kind === 'command' && record.capabilityId === 'local.shell.exec'
+    && ['bash', 'Bash'].includes(record.toolName);
+  if ((filePreview || commandPreview) && typeof value.bodyPreview.text === 'string') {
     record.bodyPreview = {
-      kind: 'file', text: value.bodyPreview.text.slice(0, 4000),
+      kind: value.bodyPreview.kind, text: value.bodyPreview.text.slice(0, 4000),
       truncated: value.bodyPreview.truncated === true || value.bodyPreview.text.length > 4000,
     };
   }

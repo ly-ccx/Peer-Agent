@@ -52,6 +52,30 @@ function queuedExecutor(scripts, seen) {
   };
 }
 
+test('verifier accepts the actual indexed command criterion through its existing factual request', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verifier-command-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
+  const plan = store.createPlan({ conversationId: 'command-c', title: 'Command verification', goal: 'Verify byte check',
+    successCriteria: ['Byte check passed'], tasks: [{ taskId: 't1', title: 'Check', evidenceRefs: ['tool-result://host-verifier'] }] });
+  store.recordEvidenceRefs({ planId: plan.planId, conversationId: plan.conversationId, evidenceRef: 'tool-result://host-verifier',
+    capabilityId: 'local.shell.exec', toolName: 'bash', bodyPreview: { kind: 'command',
+      text: '{"exitCode":0,"stdout":"RC_A_DONE\\n","stderr":""}', truncated: false } });
+  const seen = [];
+  const host = createDesktopGoalRunnerHost({ goalPlanStore: store, agentTurnExecutor: queuedExecutor([
+    [{ type: 'delta', content: VERIFIER_JSON }, { type: 'terminal', channel: 'done' }],
+  ], seen), llmChatService: {}, broadcast() {}, resolveConversationModelProviderId: () => 'model-host',
+    toDesktopProviderMessages: messages => messages, desktopContinuityContextFromProjection: () => [],
+    workspaceRoot: root, getMainWindows: () => [] });
+  const report = await host.verifierRunner.runVerifier({ plan, verifierRunId: 'command-v', stage: 'criteria' });
+  assert.equal(report.passed, true);
+  assert.deepEqual(report.evidenceRefs, ['tool-result://host-verifier']);
+  assert.equal(seen[0].role, 'verifier');
+  assert.match(seen[0].content, /RC_A_DONE/);
+  assert.match(seen[0].content, /untrusted factual data/);
+  assert.match(seen[0].content, /"kind":"command"/);
+});
+
 test('delegated startup does not rebuild a vanished worktree outside the isolation admission gate', async t => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b4-strict-host-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
