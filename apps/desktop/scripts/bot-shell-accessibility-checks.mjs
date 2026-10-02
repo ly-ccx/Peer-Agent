@@ -260,12 +260,16 @@ async function checkSettings({ page, until, report, captureDirectory }) {
 }
 
 async function settleColorTransitions(page) {
-  // Theme changes animate button colors. Capture the settled product, not a transition frame.
-  await page.evaluate(async () => {
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    await Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition)
-      .map(animation => animation.finished.catch(() => {})));
-  });
+  // Wait for this control's real theme colors; unrelated offscreen transitions can be paused.
+  await page.waitForFunction(() => {
+    const node = document.querySelector('#bot-auto-handoff'), style = getComputedStyle(node);
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const rgb = value => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = value; ctx.fillRect(0, 0, 1, 1); return [...ctx.getImageData(0, 0, 1, 1).data].join(','); };
+    const checked = node.getAttribute('aria-checked') === 'true';
+    return rgb(style.backgroundColor) === rgb(style.getPropertyValue(checked ? '--state-active-on' : '--control-fill').trim())
+      && rgb(getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor) === rgb(style.getPropertyValue(checked ? '--za-primary-control-ink' : '--graphite-base').trim());
+  }, null, { polling: 50, timeout: 5000 });
 }
 
 async function tabsVisible(page) {
