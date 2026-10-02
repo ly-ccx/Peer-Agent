@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { createHostLease, resolveRoleRoute } from '@peer-agent/runtime-node';
 import { createScriptedTurnExecutor } from '@peer-agent/runtime-node/testing';
+import { createVerifierPromptSource } from '@peer-agent/system-context';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createDesktopGoalRunnerHost } from './goal-runner-host.mjs';
 
@@ -44,6 +45,7 @@ function queuedExecutor(scripts, seen) {
         role: input.turnProfile?.role ?? null,
         modelProviderId: input.modelProviderId ?? null,
         turnProfile: input.turnProfile ?? null,
+        verifierContext: input.verifierContext ?? null,
         workspacePath: input.workspacePath ?? null,
         content: input.messages?.map((message) => message.content).join('\n') ?? '',
       });
@@ -57,6 +59,7 @@ test('verifier accepts the actual indexed command criterion through its existing
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const store = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
   const plan = store.createPlan({ conversationId: 'command-c', title: 'Command verification', goal: 'Verify byte check',
+    approval: { decision: 'approve', confirmationId: 'plan:local-decision', decidedBy: 'local_ui', decidedAt: '2026-10-02T04:00:00.000Z' },
     successCriteria: ['Byte check passed'], tasks: [{ taskId: 't1', title: 'Check', evidenceRefs: ['tool-result://host-verifier'] }] });
   store.recordEvidenceRefs({ planId: plan.planId, conversationId: plan.conversationId, evidenceRef: 'tool-result://host-verifier',
     capabilityId: 'local.shell.exec', toolName: 'bash', bodyPreview: { kind: 'command',
@@ -74,6 +77,13 @@ test('verifier accepts the actual indexed command criterion through its existing
   assert.match(seen[0].content, /RC_A_DONE/);
   assert.match(seen[0].content, /untrusted factual data/);
   assert.match(seen[0].content, /"kind":"command"/);
+  assert.deepEqual(seen[0].verifierContext.plan.approval, plan.approval);
+  const source = createVerifierPromptSource();
+  const brief = source.render(source.observe({ mode: 'explorer', verifierContext: seen[0].verifierContext }))
+    .find(block => block.id === 'runtime.verifier.brief');
+  assert.match(brief.content, /confirmationId=plan:local-decision/);
+  assert.equal(brief.layer, 'L7_CONTINUITY');
+  assert.deepEqual(report.evidenceRefs, ['tool-result://host-verifier']);
 });
 
 test('delegated startup does not rebuild a vanished worktree outside the isolation admission gate', async t => {

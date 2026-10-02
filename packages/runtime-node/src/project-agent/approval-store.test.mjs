@@ -33,6 +33,25 @@ function openRecord(overrides = {}) {
   };
 }
 
+test('compaction retains folded approved plan history while dropping settled tool permissions', () => {
+  const root = tempRoot('plan-history');
+  try {
+    const store = createApprovalStore({ rootDir: root, compactBytes: 1 });
+    const plan = openRecord({ approvalId: 'plan:s', workspaceId: 'w', sessionId: 's', planId: 'p',
+      capabilityId: 'goal.plan', kind: 'plan_approval' });
+    store.append(plan);
+    store.append({ ...plan, state: 'approved', decidedBy: 'local_ui', decidedAt: '2026-10-02T04:00:00.000Z' });
+    store.append(openRecord({ approvalId: 'tool:t', workspaceId: 'w', state: 'approved', decidedBy: 'local_ui' }));
+    const reloaded = createApprovalStore({ rootDir: root, compactBytes: 1 });
+    const rows = reloaded.list({ workspaceId: 'w' });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].approvalId, 'plan:s');
+    assert.equal(rows[0].state, 'approved');
+    assert.equal(rows[0].decidedBy, 'local_ui');
+    assert.equal(readFileSync(reloaded.fileFor('w'), 'utf8').trim().split('\n').length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('workspace batch scans the approval catalog once and retains fresh folded states and scopes', () => {
   const root = tempRoot('batch');
   const original = fs.readdirSync;

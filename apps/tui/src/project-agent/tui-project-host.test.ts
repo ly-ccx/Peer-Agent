@@ -38,6 +38,42 @@ function start(f: ReturnType<typeof fixture>, executeTurn: (request: any) => Pro
   return host;
 }
 
+test('terminal plan approval is durable before admission and replays only an awaiting plan', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  await host.tick();
+  let resumed = 0;
+  (host.supervisor as any).get = () => ({ origin: { phase: 'awaiting_approval' } });
+  (host.supervisor as any).resumeFromApproval = async (record: any) => {
+    expect(host.approvals.list({ workspaceId: f.workspaceId }).find((row: any) => row.approvalId === record.approvalId)?.state).toBe('approved');
+    expect(record.decidedBy).toBe('local_ui');
+    expect(Number.isFinite(Date.parse(record.decidedAt))).toBe(true);
+    resumed++; return { ok: true };
+  };
+  host.approvals.append({ approvalId: 'plan:s', workspaceId: f.workspaceId, sessionId: 's', planId: 'p',
+    conversationId: 'c', capabilityId: 'goal.plan', kind: 'plan_approval', state: 'open', argsDigest: 'a'.repeat(64) } as never);
+  expect((await host.decideApproval('plan:s', 'approve')).ok).toBe(true);
+  expect(resumed).toBe(1);
+  expect((await host.decideApproval('plan:s', 'approve')).ok).toBe(true);
+  expect(resumed).toBe(2);
+  expect((await host.decideApproval('plan:s', 'deny')).ok).toBe(true);
+  expect(resumed).toBe(2);
+  (host.supervisor as any).get = () => ({ origin: { phase: 'superseded' } });
+  expect((await host.decideApproval('plan:s', 'approve')).ok).toBe(true);
+  expect(resumed).toBe(2);
+});
+
+test('terminal never admits a plan if persisting approval fails', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  await host.tick();
+  let resumed = 0;
+  (host.supervisor as any).get = () => null;
+  (host.supervisor as any).resumeFromApproval = async () => { resumed++; return { ok: true }; };
+  host.approvals.append({ approvalId: 'plan:s', workspaceId: f.workspaceId, sessionId: 's', planId: 'p', state: 'open', capabilityId: 'goal.plan' });
+  (host.approvals as any).append = () => { throw Error('disk failure'); };
+  await expect(host.decideApproval('plan:s', 'approve')).rejects.toThrow('disk failure');
+  expect(resumed).toBe(0);
+});
+
 test('terminal task scheduling stays closed until recovery and after host drain', async () => {
   const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
   const scheduler = host.executor.executionScheduler;

@@ -62,6 +62,12 @@ function normalizeVerifierContext(ctx) {
     planId,
     title: asString(plan.title) || asString(plan.goal) || '(untitled goal)',
     goal: asString(plan.goal),
+    approval: ['approve', 'reject', 'revise'].includes(plan.approval?.decision)
+      && asString(plan.approval.confirmationId) && typeof plan.approval.decidedAt === 'string'
+      && Number.isFinite(Date.parse(plan.approval.decidedAt))
+      ? { decision: plan.approval.decision, confirmationId: asString(plan.approval.confirmationId).slice(0, 200),
+          decidedBy: asString(plan.approval.decidedBy).slice(0, 80), decidedAt: new Date(plan.approval.decidedAt).toISOString() }
+      : null,
     tasks: Array.isArray(ctx.tasks)
       ? ctx.tasks.map(normalizeTask).filter(Boolean).slice(0, MAX_ITEMS)
       : [],
@@ -89,6 +95,10 @@ function formatBrief(ctx) {
     `plan=${ctx.title}`,
   ];
   if (ctx.goal) lines.push(`goal=${ctx.goal}`);
+  lines.push(ctx.approval
+    ? `plan approval (historical facts): decision=${ctx.approval.decision} confirmationId=${ctx.approval.confirmationId} decidedBy=${ctx.approval.decidedBy || 'unknown'} decidedAt=${ctx.approval.decidedAt}`
+    : 'plan approval (historical facts): unknown; no recorded decision supplied.');
+  lines.push('Plan approval history is not capability permission, tool execution Evidence, or result acceptance.');
   if (ctx.tasks.length) {
     lines.push('leaf tasks:');
     for (const task of ctx.tasks) {

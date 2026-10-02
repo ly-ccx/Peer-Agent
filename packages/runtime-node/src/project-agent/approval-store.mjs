@@ -203,7 +203,8 @@ export function createApprovalStore({
       return;
     }
     if (size <= limit) return;
-    const kept = foldRecords(readLines(file)).filter((record) => KEPT_ON_COMPACT.has(record.state));
+    const kept = foldRecords(readLines(file)).filter((record) => KEPT_ON_COMPACT.has(record.state)
+      || record.state === 'approved' && record.kind === 'plan_approval' && record.capabilityId === 'goal.plan');
     const text = kept.length ? `${kept.map((record) => JSON.stringify(record)).join('\n')}\n` : '';
     replaceFile(file, text);
   }

@@ -14,6 +14,7 @@ import { decideSessionAcceptance } from './acceptance.mjs';
 import { createSessionContinuity } from './session-continuity.mjs';
 import { createSessionHandoff } from './session-handoff.mjs';
 import { digestApprovalArgs } from './approval-store.mjs';
+import { readLocalPlanApproval } from './local-plan-approval.mjs';
 import { spawnIdentity, identityFromPlan } from './spawn-identity.mjs';
 
 /**
@@ -928,8 +929,10 @@ export function createSessionSupervisor({
     if (!current) return { ok: false, reason: 'missing_plan' };
     if (['paused', 'superseded'].includes(current.delegationOrigin?.phase)) return { ok: false, reason: 'session_not_paused_by_approval', planId };
     if (current.delegationOrigin?.phase === 'awaiting_approval') {
+      const decision = readLocalPlanApproval(current, approvalStore);
+      if (!decision) return { ok: false, reason: 'plan_approval_required', planId };
       goalPlanStore.revisePlan(planId, {
-        status: 'paused', delegationOrigin: { ...current.delegationOrigin, phase: 'queued' },
+        approval: decision, status: 'paused', delegationOrigin: { ...current.delegationOrigin, phase: 'queued' },
       }, { reason: 'plan approved', changedBy: 'session-supervisor' });
       await promote();
       const started = goalPlanStore.getPlan(planId)?.delegationOrigin.phase === 'running';
@@ -980,6 +983,9 @@ export function createSessionSupervisor({
   async function reconcilePersistedQueues() {
     for (const plan of delegatedPlans()) {
       if (canManageWorkspace(plan.delegationOrigin.workspaceId) !== true || !executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)) continue;
+      if (plan.delegationOrigin.phase === 'awaiting_approval' && readLocalPlanApproval(plan, approvalStore)) {
+        await resumeFromApprovalLocked({ sessionId: plan.delegationOrigin.sessionId, planId: plan.planId });
+      }
       if (continuity.expired(plan)) {
         await cancelLocked({ sessionId: plan.delegationOrigin.sessionId, reason: 'supersession_expired', promote: false });
         continue;

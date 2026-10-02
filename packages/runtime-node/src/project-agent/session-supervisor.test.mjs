@@ -27,6 +27,81 @@ function model(id, extra = {}) {
   };
 }
 
+test('local plan approval is frozen before execution and survives store reload', async () => {
+  let latest;
+  const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
+    append(row) { latest = row; return row; }, list() { return latest ? [latest] : []; },
+  } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    assert.equal(opened.status, 'awaiting_approval');
+    const decided = { ...latest, state: 'approved', decidedBy: 'local_ui', decidedAt: '2026-10-02T04:00:00.000Z' };
+    latest = decided;
+    assert.equal((await env.supervisor.resumeFromApproval(decided)).ok, true);
+    const saved = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() }).getPlan(decided.planId);
+    assert.deepEqual(saved.approval, { decision: 'approve', confirmationId: decided.approvalId,
+      decidedBy: 'local_ui', decidedAt: decided.decidedAt });
+    assert.equal(saved.workflowKind, 'goal_self_driven');
+    assert.equal(saved.activation.kind, 'accepted_goal');
+  } finally { await env.cleanup(); }
+});
+
+test('an open plan record or claimed approval cannot start an awaiting plan', async () => {
+  let latest;
+  const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
+    append(row) { latest = row; return row; }, list() { return latest ? [latest] : []; },
+  } });
+  try {
+    await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const before = env.turns.length;
+    const result = await env.supervisor.resumeFromApproval({ ...latest, state: 'approved', decidedBy: 'local_ui' });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'plan_approval_required');
+    assert.equal(env.turns.length, before);
+    assert.equal(env.goalPlanStore.getPlan(latest.planId).delegationOrigin.phase, 'awaiting_approval');
+  } finally { await env.cleanup(); }
+});
+
+test('a plan approval freeze failure never admits or starts the task', async () => {
+  let latest;
+  const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
+    append(row) { latest = row; return row; }, list: () => [latest],
+  } });
+  try {
+    await env.supervisor.spawn(spawnInput(), contextOf(env));
+    latest = { ...latest, state: 'approved', decidedBy: 'local_ui', decidedAt: '2026-10-02T04:00:00.000Z' };
+    const revise = env.goalPlanStore.revisePlan;
+    env.goalPlanStore.revisePlan = (id, patch, options) => {
+      if (patch.approval) throw Error('plan disk failure');
+      return revise(id, patch, options);
+    };
+    await assert.rejects(env.supervisor.resumeFromApproval(latest), /plan disk failure/);
+    assert.equal(env.turns.length, 0);
+    assert.equal(env.goalPlanStore.getPlan(latest.planId).delegationOrigin.phase, 'awaiting_approval');
+    env.goalPlanStore.revisePlan = revise;
+    assert.equal((await env.supervisor.resumeFromApproval(latest)).ok, true);
+  } finally { await env.cleanup(); }
+});
+
+test('recovery admits a persisted approved plan without inventing a new local decision', async () => {
+  let latest;
+  const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
+    append(row) { latest = row; return row; }, list: () => [latest],
+  } });
+  try {
+    await env.supervisor.spawn(spawnInput(), contextOf(env));
+    await env.supervisor.reconcile();
+    assert.equal(env.turns.length, 0);
+    latest = { ...latest, state: 'approved', decidedBy: 'local_ui', decidedAt: '2026-10-02T04:00:00.000Z' };
+    await env.supervisor.reconcile();
+    assert.equal(env.goalPlanStore.getPlan(latest.planId).approval.confirmationId, latest.approvalId);
+    assert.equal(env.goalPlanStore.getPlan(latest.planId).delegationOrigin.phase, 'running');
+    assert.equal(env.turns.length, 1);
+    await env.supervisor.reconcile();
+    assert.equal(env.turns.length, 1);
+  } finally { await env.cleanup(); }
+});
+
 function routing() {
   return {
     tiers: {
@@ -747,6 +822,7 @@ test('计划批准挡住启动，批准后才跑；只读任务在 writes 下直
   const recorded = [];
   const env = await harness({
     approvalStore: {
+      list: () => [...new Map(recorded.map(row => [row.approvalId, row])).values()],
       append(row) {
         recorded.push(row);
         return row;
@@ -774,7 +850,9 @@ test('计划批准挡住启动，批准后才跑；只读任务在 writes 下直
     const turnsBefore = env.turns.length;
     await env.supervisor.cancel({ sessionId: direct.sessionId, reason: 'slot free' });
 
-    const resumed = await env.supervisor.resumeFromApproval(recorded[0]);
+    const decided = { ...recorded[0], state: 'approved', decidedBy: 'local_ui', decidedAt: '2026-10-02T04:00:00.000Z' };
+    recorded.push(decided);
+    const resumed = await env.supervisor.resumeFromApproval(decided);
     assert.equal(resumed.ok, true);
     assert.equal(env.turns.length > turnsBefore, true);
     assert.equal(env.goalPlanStore.getPlan(stored.planId).delegationOrigin.phase, 'running');
@@ -792,6 +870,7 @@ test('已有任务在跑时，批准计划只排队，取消占用后再启动',
       pause() {},
     },
     approvalStore: {
+      list: () => [...new Map(recorded.map(row => [row.approvalId, row])).values()],
       append(row) {
         recorded.push(row);
         return row;
@@ -810,11 +889,14 @@ test('已有任务在跑时，批准计划只排队，取消占用后再启动',
       contextOf(env, { inputId: 'input-held', planApproval: 'always' }),
     );
     assert.equal(held.status, 'awaiting_approval');
-    const resumed = await env.supervisor.resumeFromApproval(recorded[0]);
+    const decided = { ...recorded[0], state: 'approved', decidedBy: 'local_ui', decidedAt: '2026-10-02T04:00:00.000Z' };
+    recorded.push(decided);
+    const resumed = await env.supervisor.resumeFromApproval(decided);
     assert.equal(resumed.queued, true);
     assert.equal(starts.length, 1);
     const heldPlanId = env.supervisor.get({ sessionId: held.sessionId }).planId;
     assert.equal(env.goalPlanStore.getPlan(heldPlanId).delegationOrigin.phase, 'queued');
+    assert.equal(env.goalPlanStore.getPlan(heldPlanId).approval.confirmationId, decided.approvalId);
 
     await env.supervisor.cancel({ sessionId: running.sessionId, reason: '让出' });
     assert.equal(starts.length, 2);

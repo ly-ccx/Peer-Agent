@@ -202,17 +202,30 @@ export function createTuiProjectHost(options: {
       const planApproval=record.capabilityId==='goal.plan' || record.approvalId.startsWith('plan:');
       const live=[...liveApprovals.values()].find(row=>row.toolCallId===approvalId);
       if(record.state==='open'&&live){live.resolve(decision==='approve'?duration==='task'?'allow-session':'allow-once':'deny');return {ok:true};}
-      if(!['open','stale'].includes(record.state))return {ok:true,replayed:true};
+      if(!['open','stale'].includes(record.state)){
+        const session=decision==='approve' && record.state==='approved' && planApproval && record.sessionId ? supervisor.get({sessionId:record.sessionId}) : null;
+        if((session?.origin as {phase?: string} | undefined)?.phase==='awaiting_approval'){
+          const resumed=await supervisor.resumeFromApproval(record) as unknown as {ok: boolean; reason?: string};
+          changed();return resumed.ok ? {ok:true} : {ok:false,error:resumed.reason};
+        }
+        return {ok:true,replayed:true};
+      }
+      let saved: typeof record | null = null;
       if(decision==='approve'){
         const session=record.sessionId ? supervisor.get({sessionId:record.sessionId}) : null;
         if(session && ['paused','superseded'].includes(session.status))return {ok:false,error:'session_paused'};
         if(record.state==='open' && !planApproval)return {ok:false,error:'approval_not_live'};
         if(!planApproval)oneTimeApprovals.remember({...record,at:Date.now()});
-        const resumed=await supervisor.resumeFromApproval(record) as unknown as {ok: boolean; reason?: string};
+        if(planApproval){
+          saved=approvals.append({...record,state:'approved',decidedAt:new Date().toISOString(),decidedBy:'local_ui'});
+          if(!saved)return {ok:false,error:'approval_store_failed'};
+          changed();
+        }
+        const resumed=await supervisor.resumeFromApproval(saved || record) as unknown as {ok: boolean; reason?: string};
         if(!resumed.ok)return {ok:false,error:resumed.reason};
       }
       else if(planApproval)await supervisor.cancel({sessionId:record.sessionId,reason:'plan_approval_denied'});
-      approvals.append({...record,state:decision==='approve'?'approved':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui'});changed();return {ok:true};
+      if(!saved)approvals.append({...record,state:decision==='approve'?'approved':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui'});changed();return {ok:true};
     },
     async close() {admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
   };
