@@ -4,6 +4,7 @@ import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
+import { VersionBadge } from '../app/components/VersionBadge';
 import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
 import { botAvatarMood } from './state/botAvatarState';
@@ -341,28 +342,31 @@ export function BotListShell({
         {list.catalog.length === 0 && list.status === 'ready' && !list.searching ? (
           <p className="bot-list-hint">{i18n.t('projectAgent.list.emptyHint')}</p>
         ) : null}
-        <MeMenu
-          open={list.menuOpen}
-          i18n={i18n}
-          onToggle={() => list.setMenuOpen(!list.menuOpen)}
-          onClose={() => list.setMenuOpen(false)}
-          onOpenSettings={() => {
-            list.setMenuOpen(false);
-            onOpenSettings();
-          }}
-          onOpenHistory={() => {
-            list.setMenuOpen(false);
-            setMeHistoryOpen(true);
-          }}
-          onOpenAutomations={() => {
-            list.setMenuOpen(false);
-            onOpenAutomations();
-          }}
-          onOpenCapabilities={() => {
-            list.setMenuOpen(false);
-            onOpenCapabilities();
-          }}
-        />
+        <footer className="bot-column-footer">
+          <MeMenu
+            open={list.menuOpen}
+            i18n={i18n}
+            onToggle={() => list.setMenuOpen(!list.menuOpen)}
+            onClose={() => list.setMenuOpen(false)}
+            onOpenSettings={() => {
+              list.setMenuOpen(false);
+              onOpenSettings();
+            }}
+            onOpenHistory={() => {
+              list.setMenuOpen(false);
+              setMeHistoryOpen(true);
+            }}
+            onOpenAutomations={() => {
+              list.setMenuOpen(false);
+              onOpenAutomations();
+            }}
+            onOpenCapabilities={() => {
+              list.setMenuOpen(false);
+              onOpenCapabilities();
+            }}
+          />
+          <VersionBadge i18n={i18n} showChannel />
+        </footer>
         <div
           className="bot-column-resizer"
           role="separator"

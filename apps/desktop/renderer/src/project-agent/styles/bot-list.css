@@ -31,6 +31,7 @@
 .bot-need-filter,
 .bot-list,
 .bot-me,
+.bot-column-footer,
 .bot-new,
 .bot-upgrade-banner,
 .bot-column-resizer {
@@ -567,11 +568,61 @@
   object-fit: cover;
 }
 
-.bot-me {
-  position: relative;
+.bot-column-footer {
+  flex: none;
   margin-top: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--chrome-hairline);
+}
+
+.bot-column-footer .sidebar-version-badge {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0 6px;
+  color: var(--graphite-soft);
+  font-size: 11px;
+}
+
+.bot-column-footer .sidebar-version-text-btn,
+.bot-column-footer .sidebar-version-install-btn {
+  min-height: 28px;
+}
+
+.bot-column-footer .sidebar-version-install-btn {
+  animation: none;
+}
+
+.bot-column-footer .sidebar-version-channel {
+  min-width: 0;
+  margin-left: auto;
+}
+
+.bot-column-footer .sidebar-version-channel .pa-dropdown-trigger {
+  min-height: 28px;
+  gap: 5px;
+  padding: 3px 6px;
+  color: var(--graphite-soft);
+  background: transparent;
+  border-color: transparent;
+  font-size: 11px;
+}
+
+.bot-column-footer .sidebar-version-channel .pa-dropdown-trigger:hover,
+.bot-column-footer .sidebar-version-channel .pa-dropdown-trigger.open {
+  color: var(--graphite-base);
+  background: var(--chrome-hover);
+}
+
+.pa-dropdown-menu.sidebar-version-channel {
+  width: max-content;
+  min-width: 220px;
+  max-width: calc(100vw - 24px);
+}
+
+.bot-me {
+  position: relative;
 }
 
 .bot-me-button {
