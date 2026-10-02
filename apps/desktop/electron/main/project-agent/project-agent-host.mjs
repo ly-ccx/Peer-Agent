@@ -26,7 +26,6 @@ import {
   inQuietHours,
   createProjectInbox,
   createWatchPublisher,
-  delegationFactsForWorkspace,
   normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
@@ -40,6 +39,7 @@ import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
 import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createClassicGoalProjection } from './classic-goal-projection.mjs';
+import { createDelegationFactsReader } from './delegation-facts-reader.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
@@ -389,12 +389,7 @@ export function registerDesktopProjectAgent({
     inputQueue,
     readSettings: readRuntimePolicy,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
-    readFacts: (workspaceId) => delegationFactsForWorkspace(
-      (goalPlanStore.listPlans?.() || [])
-        .filter(meta => conversationStore.getConversation(meta.conversationId)?.workspaceId === workspaceId)
-        .map(meta => goalPlanStore.getPlan(meta.planId)).filter(Boolean),
-      workspaceId,
-    ),
+    readFacts: createDelegationFactsReader({ conversationStore, goalPlanStore }),
     subscribePlans: (listener) => (
       typeof goalPlanStore?.subscribeChanges === 'function'
         ? goalPlanStore.subscribeChanges(() => { listener(); })
