@@ -364,8 +364,8 @@ export function BotListShell({
               list.setMenuOpen(false);
               onOpenCapabilities();
             }}
+            metadata={<VersionBadge i18n={i18n} />}
           />
-          <VersionBadge i18n={i18n} showChannel />
         </footer>
         <div
           className="bot-column-resizer"

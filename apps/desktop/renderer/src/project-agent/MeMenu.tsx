@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { PeerIcon } from '../ui/icons';
 
 interface MeMenuProps {
   readonly open: boolean;
@@ -10,6 +11,7 @@ interface MeMenuProps {
   readonly onOpenHistory: () => void;
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
+  readonly metadata?: ReactNode;
 }
 
 export function MeMenu({
@@ -21,6 +23,7 @@ export function MeMenu({
   onOpenHistory,
   onOpenAutomations,
   onOpenCapabilities,
+  metadata,
 }: MeMenuProps) {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -60,17 +63,26 @@ export function MeMenu({
           </button>
         </div>
       ) : null}
-      <button
-        type="button"
-        className="bot-me-button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        onClick={onToggle}
-      >
-        <span className="bot-me-mark" aria-hidden="true">{i18n.t('projectAgent.list.me')}</span>
-        <span>{i18n.t('projectAgent.list.me')}</span>
-      </button>
+      <div className="bot-me-details">
+        <button
+          type="button"
+          className="bot-me-button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={open ? menuId : undefined}
+          onClick={onToggle}
+        >
+          <span className="bot-me-mark" aria-hidden="true">
+            <PeerIcon name="userRound" size={18} />
+          </span>
+          <span>{i18n.t('projectAgent.list.me')}</span>
+        </button>
+        {metadata ? (
+          <div className="bot-me-metadata" onPointerDown={() => { if (open) onClose(); }}>
+            {metadata}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

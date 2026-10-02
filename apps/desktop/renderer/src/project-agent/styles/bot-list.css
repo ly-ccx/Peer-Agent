@@ -571,74 +571,78 @@
 .bot-column-footer {
   flex: none;
   margin-top: 8px;
-  padding-top: 10px;
+  padding: 8px 4px 0;
   border-top: 1px solid var(--chrome-hairline);
 }
 
 .bot-column-footer .sidebar-version-badge {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
-  margin: 4px 0 0;
-  padding: 0 6px;
+  margin: 0;
+  padding: 0;
   color: var(--graphite-soft);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .bot-column-footer .sidebar-version-text-btn,
 .bot-column-footer .sidebar-version-install-btn {
-  min-height: 28px;
+  min-height: 24px;
+  padding: 0 4px;
 }
 
-.bot-column-footer .sidebar-version-install-btn {
+.bot-column-footer .sidebar-version-badge.has-update .sidebar-version-text-btn {
+  color: var(--graphite-soft);
+}
+
+.bot-column-footer .sidebar-version-update-icon {
+  color: var(--azure-seal);
   animation: none;
 }
 
-.bot-column-footer .sidebar-version-channel {
-  min-width: 0;
-  margin-left: auto;
-}
-
-.bot-column-footer .sidebar-version-channel .pa-dropdown-trigger {
-  min-height: 28px;
-  gap: 5px;
-  padding: 3px 6px;
-  color: var(--graphite-soft);
-  background: transparent;
-  border-color: transparent;
-  font-size: 11px;
-}
-
-.bot-column-footer .sidebar-version-channel .pa-dropdown-trigger:hover,
-.bot-column-footer .sidebar-version-channel .pa-dropdown-trigger.open {
-  color: var(--graphite-base);
-  background: var(--chrome-hover);
-}
-
-.pa-dropdown-menu.sidebar-version-channel {
-  width: max-content;
-  min-width: 220px;
-  max-width: calc(100vw - 24px);
+.bot-column-footer .sidebar-version-install-btn {
+  padding: 0 7px;
+  animation: none;
 }
 
 .bot-me {
   position: relative;
 }
 
+.bot-me-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bot-me-metadata {
+  flex: 1;
+  min-width: 0;
+}
+
 .bot-me-button {
   display: flex;
+  flex: none;
   gap: 8px;
   align-items: center;
-  width: 100%;
-  padding: 6px;
+  min-height: 36px;
+  padding: 2px 4px;
   color: var(--graphite-base);
   font: inherit;
   font-size: 13px;
+  font-weight: 500;
   text-align: left;
   background: transparent;
   border: 0;
   border-radius: 8px;
   cursor: pointer;
+}
+
+.bot-me-button:focus-visible {
+  outline: 2px solid var(--azure-seal);
+  outline-offset: 2px;
 }
 
 .bot-me-button:hover,
@@ -648,14 +652,13 @@
 
 .bot-me-mark {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  color: var(--chrome-canvas);
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--graphite-soft);
-  border-radius: 50%;
+  color: var(--graphite-soft);
+  background: var(--chrome-hover);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 10px;
 }
 
 .bot-me-menu {
