@@ -132,6 +132,21 @@ test('200-bot search reads classic conversation and Goal catalogs once per proje
   } finally { env.dispose(); }
 });
 
+test('host maintenance determines plan ownership without reading legacy conversation bodies', async () => {
+  const env = harness();
+  try {
+    const legacy = env.conversations.createConversation({ title: 'Large legacy history', workspacePath: env.project });
+    env.conversations.appendMessage(legacy.id, { id: 'large-message', role: 'assistant', content: 'history'.repeat(150_000) });
+    for (let i = 0; i < 12; i++) env.plans.createPlan({ title: `Legacy ${i}`, goal: `Historical task ${i}`, conversationId: legacy.id });
+    let bodyReads = 0;
+    const getConversation = env.conversations.getConversation;
+    env.conversations.getConversation = (...args) => { if (args[0] === legacy.id) bodyReads++; return getConversation(...args); };
+    await env.api.host.sync([env.bot.workspaceId]);
+    assert.equal(bodyReads, 0, 'task ownership must use metadata, never hydrate the same legacy body per plan');
+    assert.equal(env.calls.length, 0);
+  } finally { env.dispose(); }
+});
+
 test('search stamps a fresh catalog and observes another store writer between queries', () => {
   const env = harness();
   try {
