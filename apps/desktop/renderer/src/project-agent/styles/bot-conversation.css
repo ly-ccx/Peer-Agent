@@ -327,7 +327,7 @@
   border: 1px solid var(--frost-separator, var(--separator));
   border-radius: 16px;
   background: var(--frost-bg-elevated, var(--bg-elevated));
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--graphite-base) 5%, transparent);
+  box-shadow: none;
 }
 
 .bot-card.is-resolved {
@@ -343,15 +343,12 @@
   border: 1px solid var(--frost-separator, var(--separator));
   border-radius: 16px;
   background: var(--frost-bg-elevated, var(--bg-elevated));
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--graphite-base) 5%, transparent);
-  transition:
-    border-color var(--za-motion-fast) var(--za-ease-standard),
-    box-shadow var(--za-motion-medium) var(--za-ease-out);
+  box-shadow: none;
+  transition: border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-composer:focus-within {
   border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--frost-separator, var(--separator)));
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--graphite-base) 9%, transparent);
 }
 
 .bot-quote-chip {
