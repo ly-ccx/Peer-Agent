@@ -205,7 +205,7 @@
 .bot-quote-action,
 .bot-card-actions button,
 .bot-user-marks button {
-  border: 1px solid var(--chrome-hairline);
+  border: 1px solid var(--frost-separator, var(--separator));
   border-radius: 999px;
   background: transparent;
   color: var(--frost-text-secondary, var(--text-secondary));
@@ -324,9 +324,9 @@
   flex-direction: column;
   gap: 12px;
   padding: 16px 16px 14px;
-  border: 1px solid var(--frost-separator, var(--separator));
+  border: 1px solid var(--chrome-hairline);
   border-radius: 16px;
-  background: var(--frost-bg-elevated, var(--bg-elevated));
+  background: var(--paper-sheet);
   box-shadow: none;
 }
 
@@ -340,15 +340,15 @@
   gap: 8px;
   margin: 8px 16px 16px;
   padding: 12px 12px 10px;
-  border: 1px solid var(--frost-separator, var(--separator));
+  border: 1px solid var(--chrome-hairline);
   border-radius: 16px;
-  background: var(--frost-bg-elevated, var(--bg-elevated));
+  background: var(--control-composer);
   box-shadow: none;
   transition: border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-composer:focus-within {
-  border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--frost-separator, var(--separator)));
+  border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--chrome-hairline));
 }
 
 .bot-quote-chip {
