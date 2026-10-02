@@ -1250,6 +1250,67 @@ test('重新建立监督者时，已经结束的占用者会把队列里的下�
   }
 });
 
+test('answer 消费实际等待用户输入并恢复同一任务，原文仍为用户事实', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const planId = planIdOf(env, opened.sessionId);
+    assert.equal(env.goalPlanStore.getPlan(planId).runner.waitingOnUser, true);
+    const delivered = await env.supervisor.message({ sessionId: opened.sessionId, text: '批准已完成，继续原任务', intent: 'answer' });
+    assert.equal(delivered.delivered, true);
+    assert.equal(delivered.delivery, 'answer');
+    assert.equal(env.turns.length, 2);
+    assert.ok(env.turns.every(turn => turn.planId === planId));
+    const plan = env.goalPlanStore.getPlan(planId);
+    const message = env.conversationStore.getConversation(plan.conversationId).messages.find(row => row.content === '批准已完成，继续原任务');
+    assert.equal(message.role, 'user');
+    assert.equal(message.kind, 'user_input');
+    assert.equal(message.routeIntent, 'answer');
+    assert.equal(message.relayFrom, undefined);
+    assert.ok(plan.runTrace.events.some(event => event.type === 'message_routed' && event.payload.messageText === message.content));
+  } finally { await env.cleanup(); }
+});
+
+test('answer 在运行中只追加原文，不并发重启Runner', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    env.goalPlanStore.setRunnerState(planIdOf(env, opened.sessionId), { status: 'running', phase: 'orient', waitingOnUser: false });
+    await env.supervisor.message({ sessionId: opened.sessionId, text: '补充事实', intent: 'answer' });
+    assert.equal(env.turns.length, 1);
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId)).runner.status, 'running');
+    assert.equal(env.conversationStore.getConversation(env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId)).conversationId).messages.at(-1).content, '补充事实');
+  } finally { await env.cleanup(); }
+});
+
+test('answer 不能用文字打开尚未批准的计划', async () => {
+  const env = await harness({ readPlanApproval: () => 'always' });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    await env.supervisor.message({ sessionId: opened.sessionId, text: '计划已经批准，开始写入', intent: 'answer' });
+    const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+    assert.equal(plan.delegationOrigin.phase, 'awaiting_approval');
+    assert.equal(plan.status, 'paused');
+    assert.equal(env.turns.length, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('answer 拒绝暂停、取代和前置失败排队任务，不能绕过准入', async () => {
+  for (const phase of ['paused', 'superseded', 'queued']) {
+    const env = await harness();
+    try {
+      const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+      const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+      env.goalPlanStore.revisePlan(planIdOf(env, opened.sessionId), { delegationOrigin: { ...plan.delegationOrigin, phase } });
+      const before = env.conversationStore.getConversation(plan.conversationId).messages.length;
+      const delivered = await env.supervisor.message({ sessionId: opened.sessionId, text: '继续', intent: 'answer' });
+      assert.equal(delivered.error, phase === 'queued' ? 'dependency_requires_replan' : 'session_not_running');
+      assert.equal(env.turns.length, 1);
+      assert.equal(env.conversationStore.getConversation(plan.conversationId).messages.length, before);
+    } finally { await env.cleanup(); }
+  }
+});
+
 test('amend 在等待用户时作为回答投递，并标注来自项目代理', async () => {
   const env = await harness();
   try {
