@@ -1,9 +1,121 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
+import { EventEmitter } from 'node:events';
+import { createRequire, registerHooks } from 'node:module';
 
 import { buildReleaseUrl } from './release-page-url.mjs';
 import { isNewerVersion, isPrerelease } from './update-version.mjs';
+
+const require = createRequire(import.meta.url);
+const { AppUpdater } = require('electron-updater/out/AppUpdater.js');
+let fixtureId = 0;
+
+async function withUpdater({ current = '0.1.0-rc.3', preference = 'auto', candidates = ['0.0.18', '0.1.0-beta.5'] } = {}, run) {
+  const app = new EventEmitter();
+  app.isPackaged = true;
+  app.getVersion = () => current;
+  const updater = new AppUpdater(undefined, { version: current });
+  updater.configOnDisk = { value: Promise.resolve({ provider: 'generic' }) };
+  const events = [], checks = [];
+  let downloads = 0, installs = 0;
+  updater.checkForUpdates = async () => {
+    checks.push({ channel: updater.channel, allowDowngrade: updater.allowDowngrade });
+    const version = candidates.shift() ?? current;
+    updater.emit('checking-for-update');
+    // Deliberately inject the SDK's previous faulty available event, including older versions.
+    updater.emit('update-available', { version });
+    return { updateInfo: { version } };
+  };
+  updater.downloadUpdate = async () => {
+    downloads += 1;
+    updater.emit('download-progress', { percent: 42 });
+    updater.emit('update-downloaded', { version: '0.1.0-rc.4' });
+  };
+  updater.quitAndInstall = () => { installs += 1; };
+  globalThis.__peerUpdaterTest = { app, updater };
+  const id = ++fixtureId;
+  const electronUrl = `peer-updater-test:electron:${id}`;
+  const sdkUrl = `peer-updater-test:electron-updater:${id}`;
+  const hooks = registerHooks({
+    resolve(specifier, context, next) {
+      if (specifier === 'electron' || specifier === 'electron-updater') return { url: specifier === 'electron' ? electronUrl : sdkUrl, shortCircuit: true };
+      return next(specifier, context);
+    },
+    load(url, context, next) {
+      if (url === electronUrl) return { format: 'module', source: 'export const app = globalThis.__peerUpdaterTest.app; export const shell = {openExternal:async()=>{}};', shortCircuit: true };
+      if (url === sdkUrl) return { format: 'module', source: 'export default {autoUpdater:globalThis.__peerUpdaterTest.updater};', shortCircuit: true };
+      return next(url, context);
+    },
+  });
+  let module;
+  try {
+    module = await import(`./auto-updater.mjs?behavior=${id}`);
+    module.initAutoUpdater({ getPreference: () => preference, onEvent: event => events.push(event) });
+    await new Promise(setImmediate);
+    await run({ module, updater, events, checks, counts: () => ({ downloads, installs }) });
+  } finally {
+    module?.stopAutoUpdater();
+    hooks.deregister();
+    delete globalThis.__peerUpdaterTest;
+  }
+}
+
+describe('production updater rejects downgrade before presentation, download and installation', () => {
+  it('SDK channel setter never leaves downgrade enabled; RC3 rejects Beta5 and invalid candidates', async () => {
+    await withUpdater({}, async ({ module, updater, events, checks, counts }) => {
+      assert.equal(module.getUpdaterStatus().phase, 'not-available');
+      assert.equal(events.some(event => event.type === 'update-available'), false);
+      assert.deepEqual(checks.map(check => check.channel), ['latest', 'beta']);
+      assert.equal(checks.every(check => check.allowDowngrade === false), true);
+      for (const preference of ['stable', 'beta', 'auto']) {
+        module.setChannelPreference(preference);
+        assert.equal(updater.allowDowngrade, false);
+      }
+      for (const version of ['0.1.0-beta.5', '0.1.0-rc.3', 'invalid', '999', undefined]) {
+        updater.emit('update-available', { version });
+        updater.emit('update-downloaded', { version });
+        assert.equal(module.getUpdaterStatus().availableVersion, undefined);
+        assert.equal(updater.autoInstallOnAppQuit, false);
+        await module.downloadUpdate(); module.quitAndInstall();
+      }
+      assert.deepEqual(counts(), { downloads: 0, installs: 0 });
+    });
+  });
+
+  it('RC4 can download/install, preserving locked phases against old check events', async () => {
+    await withUpdater({ preference: 'beta', candidates: ['0.1.0-rc.4'] }, async ({ module, updater, checks, counts }) => {
+      assert.equal(module.getUpdaterStatus().phase, 'available');
+      module.quitAndInstall();
+      assert.deepEqual(counts(), { downloads: 0, installs: 0 });
+      assert.equal(module.getUpdaterStatus().phase, 'available');
+      await module.downloadUpdate();
+      assert.equal(module.getUpdaterStatus().phase, 'downloaded');
+      const before = checks.length;
+      updater.emit('update-available', { version: '0.1.0-beta.5' });
+      updater.emit('update-not-available', { version: '0.0.18' });
+      await module.checkForUpdates(); await module.downloadUpdate();
+      assert.equal(checks.length, before);
+      assert.equal(module.getUpdaterStatus().availableVersion, '0.1.0-rc.4');
+      assert.equal(updater.autoInstallOnAppQuit, true);
+      module.quitAndInstall();
+      assert.deepEqual(counts(), { downloads: 1, installs: 1 });
+    });
+  });
+
+  it('auto preview graduates only to a newer stable, while explicit beta never probes stable', async () => {
+    await withUpdater({ candidates: ['0.1.0'] }, async ({ module, updater, checks }) => {
+      assert.equal(module.getUpdaterStatus().channel, 'stable');
+      assert.equal(module.getUpdaterStatus().availableVersion, '0.1.0');
+      assert.deepEqual(checks.map(check => check.channel), ['latest']);
+      assert.equal(updater.allowDowngrade, false);
+    });
+    await withUpdater({ preference: 'beta', candidates: ['0.1.0-rc.4'] }, async ({ module, checks }) => {
+      assert.equal(module.getUpdaterStatus().channel, 'beta');
+      assert.deepEqual(checks.map(check => check.channel), ['beta']);
+    });
+  });
+});
 
 describe('auto-updater release page fallback', () => {
   describe('buildReleaseUrl', () => {
