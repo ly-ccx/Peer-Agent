@@ -51,6 +51,8 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal(report.replyFocus.active, true);
   assert.equal(report.replyFocus.outline, 'solid');
   assert.equal(report.replyFocus.width, '2px');
+  await page.locator('.bot-profile').hover();
+  await process.evaluate(async node => { await Promise.all(node.getAnimations().map(animation => animation.finished.catch(() => {}))); });
   const normal = await process.evaluate(node => getComputedStyle(node).backgroundColor);
   await process.hover();
   await until(() => process.evaluate(node => getComputedStyle(node).backgroundColor), color => color !== normal);
