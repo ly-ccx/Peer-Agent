@@ -60,12 +60,13 @@ async function updater(version, preference = 'auto', stableVersion = '0.1.0') {
   const source = path.join(repository, 'apps/desktop/electron/main/auto-updater.mjs');
   const raw = readFileSync(source, 'utf8');
   const helpers = new Map();
-  for (const name of ['release-page-url','update-download-stall','update-check-schedule','update-version','updater-phase']) {
+  for (const name of ['release-page-url','update-download-stall','update-check-schedule','update-version','updater-phase','update-github-provider']) {
     helpers.set(`./${name}.mjs`, await import(pathToFileURL(path.join(path.dirname(source), name + '.mjs')).href));
   }
   const app = new EventEmitter(); Object.assign(app, { isPackaged: true, getVersion: () => version });
   const feed = new EventEmitter(), calls = [];
-  Object.assign(feed, { async checkForUpdates() { calls.push(feed.channel); return { updateInfo: { version: feed.channel === 'latest' ? stableVersion : version } }; },
+  Object.assign(feed, { configOnDisk: { value: Promise.resolve({ provider: 'generic' }) },
+    async checkForUpdates() { calls.push(feed.channel); return { updateInfo: { version: feed.channel === 'latest' ? stableVersion : version } }; },
     downloadUpdate() { throw Error('Unapproved download'); }, quitAndInstall() { throw Error('Unapproved install'); } });
   const module = { exports: {} };
   const code = ts.transpileModule(raw, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
