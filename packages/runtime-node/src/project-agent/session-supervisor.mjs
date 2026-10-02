@@ -828,26 +828,21 @@ export function createSessionSupervisor({
         message: 'amend only applies to a session that can still run',
       };
     }
-    if (input?.intent !== 'amend') {
-      conversationStore.appendMessage(plan.conversationId, {
-        id: randomUUID(),
-        role: 'user',
-        content: body,
-      });
-      return project(goalPlanStore.getPlan(plan.planId) || plan);
-    }
-    const relay = `来自项目代理转达：用户说${body}`;
+    const amended = input?.intent === 'amend';
+    const relay = amended ? `来自项目代理转达：用户说${body}` : body;
     const waiting = canConsumeRequestedUserInput(plan);
     if (waiting && plan.delegationOrigin.phase === 'queued') {
       return { error: 'dependency_requires_replan', message: '请取消或重新安排依赖任务。' };
     }
+    if (waiting && plan.delegationOrigin.phase === 'awaiting_approval') {
+      return { error: 'plan_approval_required', message: 'Use the local plan approval before resuming this task.' };
+    }
     conversationStore.appendMessage(plan.conversationId, {
       id: randomUUID(),
       role: 'user',
-      kind: 'user_input',
       content: relay,
-      relayFrom: 'project_agent',
-      routeIntent: waiting ? 'answer' : 'correction',
+      ...(amended || waiting ? { kind: 'user_input', routeIntent: waiting ? 'answer' : 'correction' } : {}),
+      ...(amended ? { relayFrom: 'project_agent' } : {}),
     });
     if (waiting) {
       if (typeof goalPlanStore.consumeRequestedUserInput === 'function') {
@@ -859,14 +854,15 @@ export function createSessionSupervisor({
             summaryCode: 'msg_follow_up',
             intent: 'follow_up',
             messageText: relay,
-            relayFrom: 'project_agent',
+            ...(amended ? { relayFrom: 'project_agent' } : {}),
           },
         });
       }
       if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId);
       const fresh = goalPlanStore.getPlan(plan.planId) || plan;
-      return { ...project(fresh), delivered: true, delivery: 'answer', relayFrom: 'project_agent' };
+      return { ...project(fresh), delivered: true, delivery: 'answer', ...(amended ? { relayFrom: 'project_agent' } : {}) };
     }
+    if (!amended) return project(goalPlanStore.getPlan(plan.planId) || plan);
     if (typeof goalPlanStore.appendRunEvent === 'function') {
       goalPlanStore.appendRunEvent(plan.planId, {
         type: 'user_correction',
