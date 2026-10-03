@@ -65,6 +65,8 @@ export function BotConversation({
           label={label}
           avatarMood={avatarMood}
           rows={conversation.rows}
+          followRequestId={conversation.followRequestId}
+          waiting={conversation.thinking}
           hasOlder={conversation.hasOlder}
           olderError={conversation.olderError}
           onLoadOlder={conversation.loadOlder}
@@ -112,10 +114,13 @@ export function BotConversation({
           }}
         />
       )}
-      {conversation.thinking ? <p className="bot-thinking">{i18n.t('projectAgent.chat.thinking')}</p> : null}
+      {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
       <BotComposer
         i18n={i18n}
         quote={quote?.text ?? ''}
+        generating={conversation.generating}
+        stopping={conversation.stopping}
+        onStop={() => void conversation.stop()}
         onQuoteRemove={() => setQuote(null)}
         onSend={(text) => {
           const refs = quote ? quoteRefsFor(quote.messageId, quote.text) : [];

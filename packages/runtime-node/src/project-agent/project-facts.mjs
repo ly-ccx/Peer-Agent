@@ -64,8 +64,12 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       turnId: message.turnId, reason: message.content?.replace(/^代理暂时不可用：/, ''),
       superseded: messages.slice(messages.indexOf(message) + 1).some(later => later.role === 'assistant' && later.kind === 'agent_turn'),
     }));
+    const stopped = messages.filter(message => message.card === 'agent_stopped').map(message => ({
+      turnId: message.turnId, text: message.content,
+      superseded: messages.slice(messages.indexOf(message) + 1).some(later => later.kind === 'agent_turn'),
+    }));
     return projection.project(workspaceId, { approvals: approvalStore.list({ workspaceId }),
-      objectiveProposals:objectiveProposals(workspaceId), confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable,
+      objectiveProposals:objectiveProposals(workspaceId), confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable, stopped,
       memories: memoryStore?.list({ workspaceId }) || [],
       handoffs: rows.flatMap(row => { const facts = supervisor.deliveryFacts?.(row.sessionId); return facts ? [facts] : []; }) });
   }

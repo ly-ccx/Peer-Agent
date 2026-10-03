@@ -13,6 +13,7 @@ const CHANNELS = [
   'project-agent:delete',
   'project-agent:submit-input',
   'project-agent:read-conversation',
+  'project-agent:stop-response',
   'project-agent:read-evidence',
   'project-agent:list-sessions',
   'project-agent:get-session',
@@ -64,6 +65,7 @@ function harness() {
       acceptReadme: port('accept-readme'),
       takeoverHost: port('takeover-host'),
       retry: port('retry'),
+      stopResponse: port('stop-response'),
       diagnostics: port('diagnostics'),
     },
   });

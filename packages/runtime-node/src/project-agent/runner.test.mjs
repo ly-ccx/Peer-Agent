@@ -45,6 +45,90 @@ function input(inputId, text) {
   return { inputId, text, surface: 'desktop' };
 }
 
+test('a real text delta is observable while the provider is still pending', async () => {
+  const box = world(), started = gate('provider did not start'), finish = gate('provider did not finish');
+  const runner = runnerFor(box, async ({ sink, streamId }) => {
+    sink.send('chat:stream:delta', { streamId, content: 'First chunk' });
+    started.open();
+    await finish.ready;
+    return { text: 'First chunk and final', toolCalls: [] };
+  });
+  try {
+    const done = runner.enqueueUserInputs([input('live', 'hello')]);
+    await started.ready;
+    assert.equal(box.messages.filter(message => message.kind === 'agent_reply').length, 0);
+    assert.equal(runner.activity()?.segments[0]?.text, 'First chunk');
+    finish.open();
+    await done;
+    assert.equal(box.messages.filter(message => message.kind === 'agent_reply').length, 1);
+  } finally { finish.open(); runner.dispose(); box.cleanup(); }
+});
+
+test('stopping an exact user turn keeps partial text and real tools, completes inputs without a circuit failure', async () => {
+  const box = world(), started = gate('not started'), completed = [], failures = [];
+  let call = 0;
+  const runner = runnerFor(box, async ({ sink, streamId, signal }) => {
+    call++;
+    sink.send('chat:stream:delta', { streamId, content: 'Partial answer' });
+    started.open(streamId);
+    await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    return { ok: false, terminalStatus: 'aborted', text: 'Partial answer',
+      toolCalls: [{ name: 'read_file', input: { path: 'a' }, result: { ok: true } }] };
+  }, { onInputsCompleted: inputs => completed.push(...inputs),
+    circuitBreaker: { admit: () => ({ allowed: true }), failure: info => failures.push(info), abandonTrial() {} } });
+  try {
+    const done = runner.enqueueUserInputs([input('stop', 'hello')]);
+    const turnId = await started.ready;
+    assert.equal(runner.stopResponse('old').code, 'STALE_TURN');
+    assert.equal(runner.stopResponse(turnId).ok, true);
+    await done;
+    assert.equal(failures.length, 0);
+    assert.equal(completed[0].inputId, 'stop');
+    assert.equal(box.messages.find(message => message.kind === 'agent_turn').rounds[0].toolCalls[0].name, 'read_file');
+    assert.equal(box.messages.find(message => message.card === 'agent_stopped').content, 'Partial answer');
+    assert.equal(box.messages.some(message => message.kind === 'agent_reply'), false);
+    assert.equal(runner.stopResponse(turnId).code, 'STALE_TURN');
+    assert.equal(call, 1);
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('post_reply argument deltas remain provisional until the governed result is accepted', async () => {
+  const box = world(), started = gate('post reply not started'), finish = gate('post reply not released');
+  const runner = runnerFor(box, async ({ sink, streamId }) => {
+    sink.send('chat:stream:tool-progress', { streamId, tool: 'post_reply', toolCallId: 'reply', replyText: 'Draft reply' });
+    started.open(); await finish.ready;
+    sink.send('chat:stream:tool-call', { streamId, tool: 'post_reply', toolCallId: 'reply', args: { text: 'Draft reply' } });
+    sink.send('chat:stream:tool-result', { streamId, toolCallId: 'reply', result: JSON.stringify({ ok: true, output: { error: 'claim not supported' } }) });
+    return { toolCalls: [{ name: 'post_reply', input: { text: 'Draft reply' }, result: { ok: true, output: { error: 'claim not supported' } } }] };
+  });
+  try {
+    const done = runner.enqueueUserInputs([input('preview', 'hello')]);
+    await started.ready;
+    assert.equal(runner.activity().replyText, 'Draft reply');
+    assert.equal(box.messages.some(message => message.kind === 'agent_reply'), false);
+    finish.open(); await done;
+    assert.equal(runner.activity().replyText, '');
+    assert.equal(runner.activity().phase, 'error');
+    assert.equal(box.messages.some(message => message.kind === 'agent_reply'), false);
+    assert.equal(box.messages.some(message => message.card === 'agent_unavailable'), true);
+  } finally { finish.open(); runner.dispose(); box.cleanup(); }
+});
+
+test('a late stop cannot overwrite an already persisted reply while its acknowledgement is pending', async () => {
+  const box = world(), saving = gate('ack not entered'), ack = gate('ack not released');
+  const runner = runnerFor(box, async () => ({ text: 'Complete reply' }), {
+    async onReplied() { saving.open(); await ack.ready; },
+  });
+  try {
+    const done = runner.enqueueUserInputs([input('completed', 'hello')]);
+    await saving.ready;
+    assert.equal(runner.stopResponse(runner.activity().turnId).code, 'STALE_TURN');
+    ack.open(); await done;
+    assert.equal(box.messages.filter(message => message.kind === 'agent_reply').length, 1);
+    assert.equal(box.messages.some(message => message.card === 'agent_stopped'), false);
+  } finally { ack.open(); runner.dispose(); box.cleanup(); }
+});
+
 function gate(label) {
   let open;
   const ready = new Promise((resolve, reject) => {

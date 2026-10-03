@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
 import { createConversationRefresh } from './conversationRefresh.ts';
 import { createConversationPager } from './conversationPager.ts';
 import {
@@ -9,7 +11,7 @@ import {
   optimisticInputMessageId,
   showAgentThinking,
   type BotChatMessage,
-  type ConversationRow,
+  type ConversationDisplayRow,
   type PendingBotInput,
 } from './botConversationState';
 
@@ -66,6 +68,10 @@ export function useBotConversation(workspaceId: string) {
   const [awaitingSince, setAwaitingSince] = useState<string | null>(null);
   const [hasOlder, setHasOlder] = useState(false);
   const [olderError, setOlderError] = useState(false);
+  const [activity, setActivity] = useState<ProjectAgentActivity | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState(false);
+  const [followRequestId, setFollowRequestId] = useState(0);
   const pagerRef = useRef<ReturnType<typeof createConversationPager> | null>(null);
   const generationRef = useRef(0);
 
@@ -85,11 +91,13 @@ export function useBotConversation(workspaceId: string) {
     setHasOlder(false);
     setOlderError(false);
     setStatus('loading');
+    setActivity(null); setStopping(false); setStopError(false);
     const pager = createConversationPager({
       read: params => clientApi.projectAgentReadConversation({ workspaceId, ...params }),
       publish: snapshot => {
         if (generationRef.current !== ticket) return;
         setMessages(snapshot.messages);
+        setActivity(current => mergeBotActivity(current, snapshot.activity, workspaceId));
         dropEchoed(snapshot.messages);
         setHasOlder(snapshot.hasOlder);
         if ('familiarizeOffer' in snapshot) setFamiliarizeOffer(readFamiliarizeOffer(snapshot.familiarizeOffer));
@@ -111,6 +119,11 @@ export function useBotConversation(workspaceId: string) {
     };
     const offMessages = clientApi.onProjectAgentConversationChanged(onChange);
     const offFacts = clientApi.onProjectAgentChanged(onChange);
+    const offActivity = clientApi.onProjectAgentActivity(event => {
+      if (generationRef.current !== ticket || event.workspaceId !== workspaceId) return;
+      setActivity(current => mergeBotActivity(current, event, workspaceId));
+      if (['done', 'error', 'stopped', 'disposed'].includes(event.phase)) void refresh.request();
+    });
     void refresh.request();
     return () => {
       refresh.stop();
@@ -119,6 +132,7 @@ export function useBotConversation(workspaceId: string) {
       generationRef.current += 1;
       offMessages?.();
       offFacts?.();
+      offActivity?.();
     };
   }, [dropEchoed, workspaceId]);
 
@@ -177,6 +191,7 @@ export function useBotConversation(workspaceId: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
     const inputId = crypto.randomUUID();
+    setFollowRequestId(value => value + 1);
     await submit(inputId, trimmed, quoteRefs, new Date().toISOString());
   }, [submit]);
 
@@ -186,17 +201,35 @@ export function useBotConversation(workspaceId: string) {
     await submit(item.inputId, item.text, item.quoteRefs, item.createdAt);
   }, [pending, submit]);
 
-  const offered = familiarizeOffer
+  useEffect(() => { if (!isActivityRunning(activity)) setStopping(false); }, [activity]);
+
+  const offered = familiarizeOffer && !messages.some(message => ['user_input', 'agent_reply'].includes(message.kind))
     ? [...messages, familiarizeMessage(familiarizeOffer, messages[messages.length - 1]?.createdAt || '')]
     : messages;
   const shown = applyOptimistic(offered, pending);
-  const rows: ConversationRow[] = conversationRows(shown);
+  const rows: ConversationDisplayRow[] = conversationRows(shown);
+  const live = visibleBotActivity(activity, shown);
+  if (live) rows.push({ type: 'activity', activity: live });
+  const stop = async () => {
+    if (!isActivityRunning(activity) || !activity || stopping) return;
+    const ticket = generationRef.current;
+    setStopping(true); setStopError(false);
+    let accepted = false;
+    try {
+      const result = await clientApi.projectAgentStopResponse({ workspaceId, turnId: activity.turnId });
+      accepted = result.ok;
+      if (generationRef.current === ticket && !result.ok && result.code !== 'STALE_TURN') setStopError(true);
+    } catch { if (generationRef.current === ticket) setStopError(true); }
+    finally { if (generationRef.current === ticket && !accepted) setStopping(false); }
+  };
 
   return {
     status,
     messages: shown,
     rows,
-    thinking: showAgentThinking(pending, awaitingSince !== null),
+    thinking: !live && !isActivityRunning(activity) && showAgentThinking(pending, awaitingSince !== null),
+    generating: isActivityRunning(activity),
+    stopping, stopError, stop, followRequestId,
     hasOlder,
     olderError,
     loadOlder,

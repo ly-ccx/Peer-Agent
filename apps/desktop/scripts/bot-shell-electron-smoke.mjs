@@ -2,6 +2,7 @@ import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
+import { checkResponseInteraction } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -51,12 +52,11 @@ writeFileSync(main, mainText.replace(seam,
 // Observe production pagination without changing its results or admitting a new IPC.
 const applicationService = path.join(isolation.launch.desktopDir, 'electron/main/project-agent/project-agent-application-service.mjs');
 const serviceText = readFileSync(applicationService, 'utf8');
-const readSeam = 'return directory.readConversation(payload.workspaceId, payload);';
+const readSeam = 'const result = directory.readConversation(payload.workspaceId, payload);';
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
 let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
   globalThis.rcBotShellRecord('reads',{  before: payload.before ?? null, nextCursor: result.nextCursor,
-    count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });
-  return result;`);
+    count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });`);
 const timingSeams = [
   ['function list(payload = {}) {', 'function list(payload = {}) { const rcListStart = performance.now();'],
   ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; globalThis.rcBotShellRecord(\'list\',{  count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
@@ -74,6 +74,8 @@ writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
 writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
 const entry = path.join(root, 'entry.mjs');
+const streamCommand = path.join(root, 'stream-command.json');
+writeFileSync(streamCommand, JSON.stringify({ scenario: '', phase: 0 }));
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
 const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
@@ -101,6 +103,8 @@ globalThis.rcBotShellService={
     return {terminalStatus:'done',text:'RC scripted reply: '+text};
   },abort(){}
 };
+${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'scripts/rc-response-interaction-smoke.mjs')).href)});
+globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole});` : ''}
 // Keep synthetic updater delivery outside inspector Promise lifetime. Only this
 // isolated entry consumes the disposable command file; product IPC is unchanged.
 let updaterSequence=0;
@@ -272,7 +276,7 @@ try {
     await page.locator(`#bot-msg-rc-message-${older + 30}`).waitFor();
     await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   }
-  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
   await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
@@ -282,10 +286,11 @@ try {
     return row.top >= thread.top && row.bottom <= thread.bottom;
   }), Boolean);
   await tracePaging('quoted old message located inside viewport');
-  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
   await checkBotShellReply({ page, until, report, captureDirectory: root });
+  if (process.argv.includes('--streaming')) await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand });
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });

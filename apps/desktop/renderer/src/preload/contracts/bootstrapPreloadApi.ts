@@ -1,6 +1,9 @@
 import type { RuntimeSdkEvent } from '@peer-agent/runtime-sdk';
 import type {
   CapabilityManifest,
+  ProjectAgentActivity,
+  ProjectAgentStopResponseRequest,
+  ProjectAgentStopResponseResult,
   ChatSendRequest,
   ChatStartTaskRequest,
   ChatStartTaskResult,
@@ -1070,7 +1073,7 @@ export interface BootstrapPreloadApi {
     createdAt?: string;
     answerTo?: string;
   }) => Promise<{ ok: boolean; code?: string }>;
-  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
+  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
   readonly projectAgentReadEvidence: (params: { evidenceRef: string }) => Promise<{ ok: boolean; code?: string; evidenceRef?: string; kind?: string; summary?: string; truncated?: boolean }>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
@@ -1113,6 +1116,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentTakeoverHost: (params: import('@peer-agent/protocol').ProjectHostTakeoverRequest) => Promise<import('@peer-agent/protocol').ProjectHostTakeoverResult>;
   readonly projectAgentDiagnostics: (params: import('@peer-agent/protocol').ProjectDiagnosticsRequest) => Promise<import('@peer-agent/protocol').ProjectDiagnosticsResult>;
   readonly projectAgentRetry: (params: { workspaceId: string; turnId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentStopResponse: (params: ProjectAgentStopResponseRequest) => Promise<ProjectAgentStopResponseResult>;
   readonly projectObjectivesList: (params: ProjectObjectiveListRequest) => Promise<ProjectObjectiveListResult>;
   readonly projectObjectivesUpdate: (params: ProjectObjectiveUpdateRequest) => Promise<ProjectObjectiveItemResult>;
   readonly projectObjectivesPause: (params: ProjectObjectiveCommandRequest) => Promise<ProjectObjectiveItemResult>;
@@ -1127,6 +1131,7 @@ export interface BootstrapPreloadApi {
   readonly projectMemorySetSwitches: (params: ProjectMemorySetSwitchesRequest) => Promise<ProjectMemorySetSwitchesResult>;
   readonly onProjectAgentChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
   readonly onProjectAgentConversationChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
+  readonly onProjectAgentActivity: (listener: (event: ProjectAgentActivity) => void) => () => void;
   readonly workspaceList: () => Promise<{
     workspaces: readonly {
       id: string;

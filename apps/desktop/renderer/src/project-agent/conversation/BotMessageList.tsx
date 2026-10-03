@@ -6,6 +6,7 @@ import {
   repliedUserIds,
   type BotChatMessage,
   type ConversationRow,
+  type ConversationDisplayRow,
 } from '../state/botConversationState';
 import { BotAvatar } from '../BotAvatar';
 import type { BotAvatarMood } from '../state/botAvatarState';
@@ -13,6 +14,9 @@ import { CardView } from './CardView';
 import { ReplyBubble } from './ReplyBubble';
 import { UserBubble } from './UserBubble';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
+import { LiveReply } from './LiveReply';
+import { ReplyAnchors } from './ReplyAnchors';
+import { PeerIcon } from '../../ui/icons';
 
 export function BotMessageList({
   workspaceId,
@@ -32,12 +36,16 @@ export function BotMessageList({
   onLocateSession,
   onOpenEvidence,
   onOpenProcess,
+  followRequestId = 0,
+  waiting = false,
 }: {
   readonly workspaceId: string;
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
-  readonly rows: readonly ConversationRow[];
+  readonly rows: readonly ConversationDisplayRow[];
+  readonly followRequestId?: number;
+  readonly waiting?: boolean;
   readonly hasOlder?: boolean;
   readonly olderError?: boolean;
   readonly onLoadOlder?: () => Promise<void>;
@@ -53,7 +61,7 @@ export function BotMessageList({
 }) {
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const scroll = useConversationWindow(rows, highlightedId, highlightRequestId);
+  const scroll = useConversationWindow(rows, highlightedId, highlightRequestId, followRequestId);
   const messages = rows.flatMap((row) => (row.type === 'message' ? [row.message] : []));
   const anchors = new Map(messages.map((message) => [message.id, clip(message.content)]));
   const replied = repliedUserIds(messages);
@@ -72,6 +80,7 @@ export function BotMessageList({
   };
 
   return (
+    <div className="bot-thread-shell">
     <div
       className="bot-thread"
       data-single-system={rows.length === 1 && rows[0]?.type === 'message' && rows[0].message.kind === 'system_card'
@@ -103,7 +112,7 @@ export function BotMessageList({
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
         <div key={conversationRowKey(row)} className="bot-thread-row" data-conversation-row={conversationRowKey(row)}>
-        {row.type === 'separator' ? (
+        {row.type === 'activity' ? <LiveReply activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
@@ -121,6 +130,9 @@ export function BotMessageList({
             workspaceId={workspaceId}
             message={row.message}
             highlighted={highlightedId === row.message.id}
+            anchors={anchors}
+            onJump={onJump}
+            onOpenProcess={onOpenProcess ? () => onOpenProcess(row.message.id) : undefined}
             welcome={rows.length === 1 && row.message.cards.some((card) => card.kind === 'familiarize')}
             avatar={avatar}
             label={label}
@@ -147,6 +159,9 @@ export function BotMessageList({
       {scroll.view.after > 0 ? (
         <div className="bot-thread-spacer" style={{ height: scroll.view.after }} />
       ) : null}
+      {waiting ? <p className="bot-live-status" role="status">{i18n.t('projectAgent.chat.waiting')}</p> : null}
+    </div>
+    {!scroll.following ? <button type="button" className="bot-thread-latest" aria-label={i18n.t('projectAgent.chat.latest')} title={i18n.t('projectAgent.chat.latest')} onClick={scroll.followLatest}><PeerIcon name="chevronDown" size={18} /></button> : null}
     </div>
   );
 }
@@ -156,6 +171,9 @@ function SystemCard({
   message,
   highlighted,
   welcome,
+  anchors,
+  onJump,
+  onOpenProcess,
   avatar,
   label,
   avatarMood,
@@ -165,6 +183,9 @@ function SystemCard({
   readonly message: BotChatMessage;
   readonly highlighted: boolean;
   readonly welcome: boolean;
+  readonly onOpenProcess?: () => void;
+  readonly anchors: ReadonlyMap<string, string>;
+  readonly onJump: (id: string) => void;
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
@@ -176,7 +197,11 @@ function SystemCard({
   return (
     <div className={`bot-system${welcome ? ' bot-system-welcome' : ''}${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
       {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
+      <ReplyAnchors ids={message.replyTo} anchors={anchors} i18n={i18n} onJump={onJump} />
       <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
+      {onOpenProcess && cards.some(card => card.kind === 'agent_stopped') ? <div className="bot-reply-marks">
+        <button type="button" onClick={onOpenProcess}><PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.chat.openProcess')}</button>
+      </div> : null}
     </div>
   );
 }

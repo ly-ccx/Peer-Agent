@@ -13,7 +13,8 @@
 // 不替代真正的 Tool Result / Evidence。事实仍由后续 chat:stream:tool-call
 // 与本地能力执行结果（PermissionGrant -> Evidence）接管。
 
-const TOOL_ARG_PROGRESS_INTERVAL_MS = 120;
+import { readReplyTextPreview } from './reply-text-preview.mjs';
+const TOOL_ARG_PROGRESS_INTERVAL_MS = 50;
 
 // 从增量累积的 JSON 片段中尽早解析 path。
 // path 通常出现在 JSON 前部，远早于整段文件内容到达，可第一时间展示文件名。
@@ -68,5 +69,6 @@ export function emitToolArgProgress(progress, ctx) {
     path: progress.argPath ?? null,
     receivedChars: json.length,
     receivedLines,
+    ...(toolName === 'post_reply' ? { replyText: readReplyTextPreview(json) ?? '' } : {}),
   });
 }

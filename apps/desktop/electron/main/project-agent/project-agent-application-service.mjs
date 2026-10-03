@@ -85,6 +85,8 @@ export function createProjectAgentApplicationService({
   searchIndex = createConversationSearchIndex(),
   listModels = () => [],
   retryTurn = null,
+  readActivity = () => null,
+  stopResponseTurn = null,
   requestTakeover = null,
   diagnostics = null,
 } = {}) {
@@ -291,7 +293,15 @@ export function createProjectAgentApplicationService({
 
   function readConversation(payload = {}) {
     if (!open()) return disabled();
-    return directory.readConversation(payload.workspaceId, payload);
+    const result = directory.readConversation(payload.workspaceId, payload);
+    return result?.ok ? { ...result, activity: readActivity(payload.workspaceId) } : result;
+  }
+
+  function stopResponse(payload = {}) {
+    if (!open()) return disabled();
+    if (typeof payload.workspaceId !== 'string' || typeof payload.turnId !== 'string' || !payload.turnId || payload.turnId.length > 200) return { ok: false, code: 'INVALID_INPUT' };
+    if (!directory.get(payload.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
+    return stopResponseTurn?.(payload) || { ok: false, code: 'HOST_OFFLINE' };
   }
 
   function listSessions(payload = {}) {
@@ -637,6 +647,7 @@ export function createProjectAgentApplicationService({
     deleteBot,
     submitInput,
     readConversation,
+    stopResponse,
     listSessions,
     getSession,
     cancelSession,

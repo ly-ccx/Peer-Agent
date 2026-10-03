@@ -6,6 +6,7 @@ import { PeerIcon } from '../../ui/icons';
 import type { BotChatMessage } from '../state/botConversationState';
 import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
 import { CardView } from './CardView';
+import { ReplyAnchors } from './ReplyAnchors';
 
 const VERDICT_KEYS = {
   passed: 'projectAgent.chat.verdict.passed',
@@ -62,22 +63,7 @@ export function ReplyBubble({
       id={`bot-msg-${message.id}`}
       data-kind="agent_reply"
     >
-      {message.replyTo.map((anchorId) => (
-        <button
-          key={anchorId}
-          type="button"
-          className="bot-reply-bar"
-          title={anchors.get(anchorId) || anchorId}
-          onClick={() => onJump(anchorId)}
-        >
-          <PeerIcon name="back" size={15} />
-          <span className="bot-reply-bar-copy">
-            <span className="bot-reply-bar-label">{i18n.t('projectAgent.chat.replyTo')}</span>
-            <span className="bot-reply-bar-excerpt">{anchors.get(anchorId) || anchorId}</span>
-          </span>
-          <PeerIcon name="chevronRight" size={14} />
-        </button>
-      ))}
+      <ReplyAnchors ids={message.replyTo} anchors={anchors} i18n={i18n} onJump={onJump} />
       <div
         className="bot-reply-body"
         ref={bodyRef}

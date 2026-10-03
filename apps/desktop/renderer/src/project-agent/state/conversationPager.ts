@@ -5,12 +5,13 @@ interface Page {
   readonly messages?: readonly Record<string, unknown>[];
   readonly nextCursor?: string | null;
   readonly familiarizeOffer?: unknown;
+  readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity | null;
 }
 
 /** Recent reads and older reads share one cursor owner; stopping drops late results. */
 export function createConversationPager({ read, publish }: {
   readonly read: (params: { latest: true; limit: number; before?: string }) => Promise<Page>;
-  readonly publish: (snapshot: { messages: readonly BotChatMessage[]; hasOlder: boolean; familiarizeOffer?: unknown }) => void;
+  readonly publish: (snapshot: { messages: readonly BotChatMessage[]; hasOlder: boolean; familiarizeOffer?: unknown; activity?: import('@peer-agent/protocol').ProjectAgentActivity | null }) => void;
 }) {
   let messages: BotChatMessage[] = [];
   let cursor: string | null = null;
@@ -53,7 +54,7 @@ export function createConversationPager({ read, publish }: {
     messages = [...new Set(order.map(message => message.id))].map(id => byId.get(id)!);
     if (before || !initialized || !known.size) cursor = first!.nextCursor ?? null;
     initialized = true;
-    publish({ messages, hasOlder: cursor !== null, ...(!before ? { familiarizeOffer: first!.familiarizeOffer } : {}) });
+    publish({ messages, hasOlder: cursor !== null, ...(!before ? { familiarizeOffer: first!.familiarizeOffer, activity: first!.activity } : {}) });
   };
   return {
     refresh: () => serial(() => page()),

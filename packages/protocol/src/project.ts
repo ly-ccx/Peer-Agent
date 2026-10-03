@@ -101,6 +101,30 @@ export interface BotListFilter {
   readonly needsYouOnly?: boolean;
 }
 
+/** Ephemeral user-turn presentation. No tool arguments, reasoning or Evidence. */
+export interface ProjectAgentActivity {
+  readonly workspaceId: string;
+  readonly conversationId: string;
+  readonly turnId: string;
+  readonly revision: number;
+  readonly startedAt: string;
+  readonly replyTo: readonly string[];
+  readonly phase: 'waiting' | 'thinking' | 'responding' | 'tool' | 'settling' | 'done' | 'error' | 'stopped' | 'disposed';
+  readonly replyText: string;
+  readonly segments: readonly (
+    | { readonly kind: 'text'; readonly id: string; readonly text: string }
+    | { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly status: 'running' | 'done' | 'error' }
+  )[];
+}
+
+export interface ProjectAgentStopResponseRequest {
+  readonly workspaceId: string;
+  readonly turnId: string;
+}
+export type ProjectAgentStopResponseResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'HOST_OFFLINE' | 'STALE_TURN' | 'INVALID_INPUT' };
+
 export interface BotListSession {
   readonly status: WorkSessionStatus;
   readonly updatedAt?: string;

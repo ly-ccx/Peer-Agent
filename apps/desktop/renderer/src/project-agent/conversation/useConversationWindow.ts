@@ -1,11 +1,11 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ConversationRow } from '../state/botConversationState';
+import type { ConversationDisplayRow } from '../state/botConversationState';
 import { conversationOffsets, conversationRowAt, conversationViewport, restoreConversationOffset } from '../state/conversationWindow';
 
-export const conversationRowKey = (row: ConversationRow) => row.type === 'message' ? row.message.id : row.id;
+export const conversationRowKey = (row: ConversationDisplayRow) => row.type === 'message' ? row.message.id : row.type === 'activity' ? `live-${row.activity.turnId}` : row.id;
 
 /** Owns scroll geometry and reading identity; no IPC or conversation data ownership. */
-export function useConversationWindow(rows: readonly ConversationRow[], highlightedId: string | null, highlightRequestId: number) {
+export function useConversationWindow(rows: readonly ConversationDisplayRow[], highlightedId: string | null, highlightRequestId: number, followRequestId = 0) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const originRef = useRef<HTMLDivElement>(null);
   const heights = useRef(new Map<string, number>());
@@ -15,6 +15,7 @@ export function useConversationWindow(rows: readonly ConversationRow[], highligh
   const [revision, setRevision] = useState(0);
   const [top, setTop] = useState(0);
   const [height, setHeight] = useState(0);
+  const [following, setFollowing] = useState(true);
   const keys = useMemo(() => rows.map(conversationRowKey), [rows]);
   const offsets = useMemo(() => conversationOffsets(keys, heights.current), [keys, revision]);
   const origin = () => {
@@ -23,6 +24,17 @@ export function useConversationWindow(rows: readonly ConversationRow[], highligh
   };
   const view = conversationViewport(offsets, Math.max(0, top - origin()), height);
   const updateTop = (value: number) => setTop(current => Math.abs(current - value) < 0.5 ? current : value);
+  const followLatest = () => {
+    const node = scrollerRef.current;
+    pinned.current = true; reading.current = null; setFollowing(true);
+    if (node) { node.scrollTop = node.scrollHeight; updateTop(node.scrollTop); }
+  };
+  const previousFollow = useRef(followRequestId);
+  useLayoutEffect(() => {
+    if (previousFollow.current === followRequestId) return;
+    previousFollow.current = followRequestId;
+    followLatest();
+  }, [followRequestId]);
   const remember = () => {
     const node = scrollerRef.current;
     if (!node || !keys.length) return;
@@ -76,17 +88,19 @@ export function useConversationWindow(rows: readonly ConversationRow[], highligh
     if (index < 0 || !node) return;
     located.current = request;
     pinned.current = false;
+    setFollowing(false);
     reading.current = { key: highlightedId, delta: Math.max(0, (node.clientHeight - (heights.current.get(highlightedId) ?? 72)) / 2) };
     node.scrollTop = restoreConversationOffset(keys, offsets, reading.current, origin())!;
     updateTop(node.scrollTop);
   }, [highlightedId, highlightRequestId, keys, offsets]);
 
-  return { scrollerRef, originRef, view, visibleRows: rows.slice(view.start, view.end),
-    holdPosition: () => { remember(); pinned.current = false; },
+  return { scrollerRef, originRef, view, visibleRows: rows.slice(view.start, view.end), following, followLatest,
+    holdPosition: () => { remember(); pinned.current = false; setFollowing(false); },
     onScroll: () => {
       const node = scrollerRef.current;
       if (!node) return;
       pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+      setFollowing(pinned.current);
       remember(); updateTop(node.scrollTop);
     } };
 }

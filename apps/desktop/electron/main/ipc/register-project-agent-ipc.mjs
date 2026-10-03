@@ -17,6 +17,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     deleteBot: assertFunction(projectAgent?.deleteBot, 'projectAgent.deleteBot'),
     submitInput: assertFunction(projectAgent?.submitInput, 'projectAgent.submitInput'),
     readConversation: assertFunction(projectAgent?.readConversation, 'projectAgent.readConversation'),
+    stopResponse: assertFunction(projectAgent?.stopResponse, 'projectAgent.stopResponse'),
     readEvidence: assertFunction(projectAgent?.readEvidence, 'projectAgent.readEvidence'),
     listSessions: assertFunction(projectAgent?.listSessions, 'projectAgent.listSessions'),
     getSession: assertFunction(projectAgent?.getSession, 'projectAgent.getSession'),
@@ -46,6 +47,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:delete', (_event, payload) => ports.deleteBot(payload));
       ipc.handle('project-agent:submit-input', (_event, payload) => ports.submitInput(payload));
       ipc.handle('project-agent:read-conversation', (_event, payload) => ports.readConversation(payload));
+      ipc.handle('project-agent:stop-response', (_event, payload) => ports.stopResponse(payload));
       ipc.handle('project-agent:read-evidence', (_event, payload) => ports.readEvidence(payload));
       ipc.handle('project-agent:list-sessions', (_event, payload) => ports.listSessions(payload));
       ipc.handle('project-agent:get-session', (_event, payload) => ports.getSession(payload));
