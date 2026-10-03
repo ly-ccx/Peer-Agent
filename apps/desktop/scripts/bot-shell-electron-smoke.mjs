@@ -15,11 +15,21 @@ import { prepareLabIsolation } from './lab-workspace-isolate.mjs';
 import { createOwnedProcessRegistry } from './lab-process-identity.mjs';
 import { seedBotShellHome } from './seed-bot-shell-home.mjs';
 import { metric } from './perf-project-agent.mjs';
+import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
 
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const fixture = seedBotShellHome({ home });
+if (process.argv.includes('--accessibility')) {
+  const models = createLlmConfigStore({
+    configFile: path.join(home, 'llm-providers.json'),
+    credentialClient: { getSecret: () => null, deleteSecret() {}, setSecret() { throw Error('No fixture secrets allowed'); } },
+    providerFetch: () => { throw Error('No fixture model network allowed'); },
+  });
+  for (const suffix of ['A', 'B']) models.addProvider({ provider: 'openai', model: `rc-bot-model-${suffix.toLowerCase()}`,
+    modelLabel: `RC Bot model ${suffix}`, name: 'RC synthetic channel', baseUrl: 'http://127.0.0.1:1', metadataSource: 'custom' });
+}
 const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
 const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 seededMessages.at(-1).replyTo = ['rc-message-9500'];

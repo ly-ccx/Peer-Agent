@@ -49,10 +49,11 @@ export function BotPolicyFields({ profile, models, busy, i18n, onChange }: Polic
     return !setting ? 'inherit' : setting.mode === 'fixed' ? `model:${setting.modelProviderId}`
       : setting.mode === 'tier' ? `tier:${setting.tier}` : 'auto';
   }
+  const roleLabel = (role: ModelRole) => i18n.t(role === 'project_agent' ? 'projectAgent.drawer.model' : `modelRouting.role.${role}`);
   const roleField = (role: ModelRole) => <div className="bot-settings-row" key={role}>
-    <span>{i18n.t(`modelRouting.role.${role}`)}</span>
+    <span>{roleLabel(role)}</span>
     <Dropdown value={valueOf(policy.overrides?.[role])} disabled={busy}
-      ariaLabel={i18n.t(`modelRouting.role.${role}`)}
+      ariaLabel={roleLabel(role)}
       options={[
         { value: 'inherit', label: i18n.t('projectAgent.policy.inherit') },
         ...(policy.overrides?.[role]?.mode === 'auto' ? [{ value: 'auto', label: i18n.t('projectAgent.policy.autoPool'), disabled: true }] : []),
@@ -62,7 +63,7 @@ export function BotPolicyFields({ profile, models, busy, i18n, onChange }: Polic
       onChange={value => setRole(role, value)} />
   </div>;
   return <section className="bot-settings-section bot-policy-fields">
-    <h2>{i18n.t('modelRouting.title')}</h2>
+    <h2>{i18n.t('projectAgent.policy.models')}</h2>
     <p className="bot-drawer-note">{i18n.t('projectAgent.policy.modelsHint')}</p>
     {ROLES.slice(0, 3).map(roleField)}
     <details className="bot-settings-disclosure bot-model-advanced">
