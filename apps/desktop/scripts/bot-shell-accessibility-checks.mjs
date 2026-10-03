@@ -164,8 +164,9 @@ async function checkSettings({ page, until, report, captureDirectory }) {
   const runtime = form.locator('.bot-runtime-settings');
   assert.equal(await advanced.getAttribute('open'), null);
   assert.equal(await runtime.getAttribute('open'), null);
-  assert.equal(await form.getByRole('button', { name: '项目代理', exact: true }).isVisible(), true);
+  assert.equal(await form.getByRole('button', { name: '对话模型', exact: true }).isVisible(), true);
   assert.equal(await form.getByRole('button', { name: '探索', exact: true }).count(), 0);
+  await checkBotModels({ page, until, report, captureDirectory, workspaceId, original });
   const handoff = form.getByRole('switch', { name: '策略签收后自动合回', exact: true });
   const switchPaint = await handoff.evaluate(node => {
     const track = node.getBoundingClientRect(), thumb = node.querySelector('.peer-switch-thumb').getBoundingClientRect();
@@ -257,6 +258,65 @@ async function checkSettings({ page, until, report, captureDirectory }) {
     const result = await window.peerAgent.projectAgentUpdateProfile({ workspaceId, planApproval: original.planApproval || 'never', acceptancePolicy: original.acceptancePolicy || 'auto', modelPolicy: original.modelPolicy || {} });
     if (!result.ok) throw Error('Fixture policy restore failed');
   }, { workspaceId, original });
+}
+
+async function checkBotModels({ page, until, report, captureDirectory, workspaceId, original }) {
+  const form = page.locator('.bot-settings-tab');
+  const getBot = id => page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).item.profile, id);
+  const globalConfig = () => page.evaluate(async () => ({
+    routing: await window.peerAgent.modelRoutingGet(),
+    providers: await window.peerAgent.llmListProviders(),
+  }));
+  const globalBefore = await globalConfig();
+  const otherId = await page.evaluate(async workspaceId => (await window.peerAgent.projectAgentList()).items
+    .find(item => item.workspaceId !== workspaceId).workspaceId, workspaceId);
+  const otherBefore = await getBot(otherId);
+  const models = await page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).modelOptions, workspaceId);
+  const first = models.find(model => model.label === 'RC Bot model A');
+  const second = models.find(model => model.label === 'RC Bot model B');
+  assert.ok(first && second, 'production model projection must expose both configured fixtures');
+  assert.equal(await form.locator(':scope > section').first().getByRole('heading', { name: '机器人模型', exact: true }).count(), 1);
+  const choose = async (role, label) => {
+    await form.getByRole('button', { name: role, exact: true }).click();
+    await page.getByRole('option', { name: label, exact: true }).click();
+  };
+  await choose('任务执行', second.label);
+  await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.session_worker?.modelProviderId === second.id);
+  await choose('对话模型', first.label);
+  await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === first.id);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator('.bot-profile').click();
+  await page.getByRole('tab', { name: '设置', exact: true }).click();
+  await until(() => form.getByRole('button', { name: '对话模型', exact: true }).textContent(), text => text.includes(first.label));
+  assert.equal(await form.getByRole('button', { name: '任务执行', exact: true }).textContent(), second.label);
+  if (captureDirectory) {
+    await form.getByRole('button', { name: '对话模型', exact: true }).click();
+    await page.getByRole('option', { name: second.label, exact: true }).waitFor();
+    await page.screenshot({ path: path.join(captureDirectory, 'settings-model-picker.png') });
+    await page.keyboard.press('Escape');
+  }
+  await choose('对话模型', second.label);
+  const switched = await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === second.id);
+  assert.equal(switched.modelPolicy.overrides.project_agent.mode, 'fixed');
+  assert.deepEqual(switched.modelPolicy.overrides.session_worker, { mode: 'fixed', modelProviderId: second.id });
+  assert.deepEqual(switched.modelPolicy.overrides.verifier, original.modelPolicy?.overrides?.verifier);
+  await choose('对话模型', '跟随全局');
+  const inherited = await until(() => getBot(workspaceId), profile => !profile.modelPolicy?.overrides?.project_agent);
+  assert.deepEqual(inherited.modelPolicy.overrides.session_worker, switched.modelPolicy.overrides.session_worker);
+  assert.deepEqual(await globalConfig(), globalBefore, 'bot model selection must not change the global catalogue or routing');
+  assert.deepEqual(await getBot(otherId), otherBefore, 'bot model selection must not change another bot');
+  await page.evaluate(async ({ workspaceId, policy }) => {
+    const result = await window.peerAgent.projectAgentUpdateProfile({ workspaceId, modelPolicy: policy });
+    if (!result.ok) throw Error('Fixture model policy restore failed');
+  }, { workspaceId, policy: original.modelPolicy || {} });
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator('.bot-profile').click();
+  await page.getByRole('tab', { name: '设置', exact: true }).click();
+  await until(() => form.getByRole('button', { name: '任务执行', exact: true }).textContent(), text => text === '跟随全局');
+  report.botModelSettings = { fixedSelectionSaved: true, reopenRetained: true, modelSwitchSaved: true, inheritanceRestored: true,
+    independentRoles: true, otherBotUnchanged: true, globalConfigUnchanged: true,
+    scope: 'Production model catalogue projection, settings DOM, IPC validation and durable profile; no real model request' };
+  report.accessibility.push('bot model is first: configured choices save and survive reopen; fixed switch and inherit preserve other roles, bots and global routing');
 }
 
 async function settleColorTransitions(page) {

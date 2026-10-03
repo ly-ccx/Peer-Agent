@@ -180,6 +180,8 @@ export function BotSettingsTab({
 
   return (
     <div className="bot-drawer-tab bot-settings-tab">
+      <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
+        onChange={patch => { void savePolicy(patch); }} />
       <section className="bot-settings-section bot-settings-identity">
         <h2>{i18n.t('projectAgent.drawer.settings.appearance')}</h2>
       <div className="bot-settings-field">
@@ -244,8 +246,6 @@ export function BotSettingsTab({
       </div>
       <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
       </section>
-      <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
-        onChange={patch => { void savePolicy(patch); }} />
       <details className="bot-settings-disclosure bot-runtime-settings">
         <summary>{i18n.t('projectAgent.drawer.settings.runtime')}<PeerIcon name="chevronDown" size={14} /></summary>
         <div className="bot-settings-disclosure-body">
