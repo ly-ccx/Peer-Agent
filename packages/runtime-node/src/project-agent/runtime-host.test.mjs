@@ -67,3 +67,29 @@ test('targeted sync still drops unrequested bots whose lease or registration was
     } finally { h.close(); }
   }
 });
+
+
+test('a stopped response is never replayed after lease recovery, even if execution acknowledgement was lost', async () => {
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  let calls = 0;
+  const h = harness(async ({ sink, streamId, signal }) => {
+    calls++; sink.send('chat:stream:delta', { streamId, content: 'partial' }); started(streamId);
+    await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    return { terminalStatus: 'aborted', text: 'partial' };
+  });
+  try {
+    h.host.inputQueue.submitInput({ workspaceId: 'a', inputId: 'stopped', text: 'stop me', surface: 'desktop' });
+    const sync = h.host.sync(['a']);
+    const id = await ready;
+    // Simulate a durable acknowledgement failure, then recover from canonical facts.
+    h.host.inputQueue.completeExecution = () => { throw Error('ack interrupted'); };
+    assert.equal(h.host.runnerFor('a').stopResponse(id).ok, true);
+    await sync;
+    assert.equal(h.messages.some(message => message.card === 'agent_stopped'), true);
+    h.leased.delete('a'); await h.host.sync();
+    h.leased.add('a'); await h.host.sync(['a']);
+    assert.equal(calls, 1);
+    assert.equal(h.host.runnerFor('a').activity(), null);
+  } finally { h.close(); }
+});

@@ -25,6 +25,17 @@ export function UserBubble({
   );
   return (
     <article className={`bot-user${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`} data-kind="user_input">
+      <div className="bot-user-content">
+      {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
+      {message.images?.length ? (
+        <div className="bot-user-images">
+          {message.images.map((image) => (
+            <img key={image.id} src={image.dataUrl} alt={image.name} />
+          ))}
+        </div>
+      ) : null}
+      <p className="bot-user-text">{message.content}</p>
+      </div>
       <div className="bot-user-marks">
         {message.pending === 'received' || (!message.pending && message.inputId && !replied && message.dispositions.length === 0)
           ? <span>{i18n.t('projectAgent.chat.received')}</span> : null}
@@ -52,15 +63,6 @@ export function UserBubble({
             : <span key={`${item.kind}-${index}`}>{markText(item)}</span>
         ))}
       </div>
-      {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
-      {message.images?.length ? (
-        <div className="bot-user-images">
-          {message.images.map((image) => (
-            <img key={image.id} src={image.dataUrl} alt={image.name} />
-          ))}
-        </div>
-      ) : null}
-      <p className="bot-user-text">{message.content}</p>
     </article>
   );
 }

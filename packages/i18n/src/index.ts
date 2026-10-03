@@ -174,6 +174,21 @@ export type TranslationKey =
   | 'projectAgent.chat.empty'
   | 'projectAgent.chat.loadFailed'
   | 'projectAgent.chat.thinking'
+  | 'projectAgent.chat.waiting'
+  | 'projectAgent.chat.generating'
+  | 'projectAgent.chat.toolLabel.read'
+  | 'projectAgent.chat.toolLabel.search'
+  | 'projectAgent.chat.toolLabel.edit'
+  | 'projectAgent.chat.toolLabel.command'
+  | 'projectAgent.chat.toolRunning'
+  | 'projectAgent.chat.toolDone'
+  | 'projectAgent.chat.toolFailed'
+  | 'projectAgent.chat.stop'
+  | 'projectAgent.chat.stopHint'
+  | 'projectAgent.chat.stopping'
+  | 'projectAgent.chat.stopped'
+  | 'projectAgent.chat.stopFailed'
+  | 'projectAgent.chat.latest'
   | 'projectAgent.chat.received'
   | 'projectAgent.chat.loadOlder'
   | 'projectAgent.chat.loadingOlder'
@@ -1427,6 +1442,21 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
     'projectAgent.chat.loadFailed': '对话没有加载出来',
     'projectAgent.chat.thinking': '思考中…',
+    'projectAgent.chat.waiting': '等待回复…',
+    'projectAgent.chat.generating': '正在生成回复',
+    'projectAgent.chat.toolLabel.read': '文件读取',
+    'projectAgent.chat.toolLabel.search': '项目搜索',
+    'projectAgent.chat.toolLabel.edit': '文件编辑',
+    'projectAgent.chat.toolLabel.command': '命令执行',
+    'projectAgent.chat.toolRunning': '正在进行{tool}',
+    'projectAgent.chat.toolDone': '{tool}已结束',
+    'projectAgent.chat.toolFailed': '{tool} 未完成',
+    'projectAgent.chat.stop': '停止生成',
+    'projectAgent.chat.stopHint': '停止当前回复生成，已派发的任务继续运行',
+    'projectAgent.chat.stopping': '正在停止',
+    'projectAgent.chat.stopped': '生成已停止，以上内容未完成',
+    'projectAgent.chat.stopFailed': '停止失败，请再试一次。',
+    'projectAgent.chat.latest': '回到最新消息',
     'projectAgent.chat.received': '已收到',
     'projectAgent.chat.loadOlder': '查看更早消息',
     'projectAgent.chat.loadingOlder': '正在加载更早消息',
@@ -2478,6 +2508,21 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
     'projectAgent.chat.loadFailed': 'The conversation did not load',
     'projectAgent.chat.thinking': 'Thinking…',
+    'projectAgent.chat.waiting': 'Waiting for a response…',
+    'projectAgent.chat.generating': 'Generating a response',
+    'projectAgent.chat.toolLabel.read': 'file reading',
+    'projectAgent.chat.toolLabel.search': 'project search',
+    'projectAgent.chat.toolLabel.edit': 'file editing',
+    'projectAgent.chat.toolLabel.command': 'command execution',
+    'projectAgent.chat.toolRunning': 'Running {tool}',
+    'projectAgent.chat.toolDone': '{tool} finished',
+    'projectAgent.chat.toolFailed': '{tool} did not complete',
+    'projectAgent.chat.stop': 'Stop generating',
+    'projectAgent.chat.stopHint': 'Stop this response; dispatched tasks keep running',
+    'projectAgent.chat.stopping': 'Stopping',
+    'projectAgent.chat.stopped': 'Generation stopped. The content above is incomplete.',
+    'projectAgent.chat.stopFailed': 'Could not stop. Please try again.',
+    'projectAgent.chat.latest': 'Jump to latest message',
     'projectAgent.chat.received': 'Received',
     'projectAgent.chat.loadOlder': 'Earlier messages',
     'projectAgent.chat.loadingOlder': 'Loading earlier messages',

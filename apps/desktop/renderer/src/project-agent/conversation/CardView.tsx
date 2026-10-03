@@ -1,6 +1,8 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
+import { PeerIcon } from '../../ui/icons';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
 
 /**
@@ -43,8 +45,11 @@ function CardItem({
   const [done, setDone] = useState(false);
   const resolved = done || card.resolvedState === 'resolved';
   return (
-    <section className={`bot-card${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
-      <p>{card.content}</p>
+    <section className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
+      {card.kind === 'agent_stopped' ? <>
+        {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
+        <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
+      </> : <p>{card.content}</p>}
       {resolved || !card.actions?.length ? null : (
         <div className="bot-card-actions">
           {card.actions.map((action, index) => (

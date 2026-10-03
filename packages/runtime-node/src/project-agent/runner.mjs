@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn, unavailableCard } from './agent-turn-plan.mjs';
+import { createTurnActivity } from './turn-activity.mjs';
 
 /**
  * 与桌面 llm-chat-service 的同提供方重试退避一致（ADR 30）：
@@ -37,6 +38,7 @@ export function createProjectAgentRunner({
   onReplied = null,
   circuitBreaker = null,
   onInputsCompleted = null,
+  onActivity = null,
 } = {}) {
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   const conversation = typeof conversationId === 'string' ? conversationId.trim() : '';
@@ -53,6 +55,8 @@ export function createProjectAgentRunner({
       .map((value) => (Number.isFinite(value) && value >= 0 ? value : 0)),
   );
   const turnSink = sink && typeof sink.send === 'function' ? sink : { send() {} };
+  const activity = createTurnActivity({ workspaceId: workspace, conversationId: conversation, publish: onActivity });
+  let stoppedJob = null;
 
   const userInputs = [];
   const knownInputs = new Set();
@@ -65,6 +69,7 @@ export function createProjectAgentRunner({
   let pumping = null;
   let disposed = false;
   let turnKind = null;
+  let acceptingStop = false;
   let abortController = null;
   let statusValue = 'idle';
   let curatorFlight = null;
@@ -203,7 +208,7 @@ export function createProjectAgentRunner({
     }
     const controller = new AbortController();
     abortController = controller;
-    turnKind = job.kind;
+    turnKind = job.kind; acceptingStop = job.kind === 'user';
     const signal = controller.signal;
     setStatus('thinking');
     try {
@@ -226,6 +231,7 @@ export function createProjectAgentRunner({
       const outcome = await runRounds(job, signal);
       job.turnId = outcome.turnId;
       if (disposed || outcome.disposed) { circuitBreaker?.abandonTrial(); return 'disposed'; }
+      if (outcome.stopped) return completeStoppedTurn(job, outcome);
       if (outcome.preempted) {
         circuitBreaker?.abandonTrial();
         if (outcome.rounds.length > 0) {
@@ -237,6 +243,11 @@ export function createProjectAgentRunner({
         return 'preempted';
       }
       const learned = await takePendingLearned();
+      if (disposed) { pendingLearned.unshift(...learned); return 'disposed'; }
+      if (signal.aborted && signal.reason === 'user-stop') {
+        pendingLearned.unshift(...learned);
+        return completeStoppedTurn(job, outcome);
+      }
       const finished = finishAgentTurn({
         turnId: outcome.turnId,
         plan: outcome.plan,
@@ -255,6 +266,7 @@ export function createProjectAgentRunner({
       }
       if (!stampLearned(finished.messages, learned)) pendingLearned.unshift(...learned);
       if (disposed) return 'disposed';
+      acceptingStop = false;
       for (const message of finished.messages) {
         if (message?.kind === 'agent_turn') message.meta = { ...message.meta, diagnosticTiming: diagnosticTiming(outcome.failed || finished.failed ? 'error' : 'done') };
         if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
@@ -271,6 +283,7 @@ export function createProjectAgentRunner({
           try { await onReplied(message); } catch { /* 回复已落盘，签收失败留待后续重试，不重跑用户任务。 */ }
         }
       }
+      activity.finish(outcome.failed || finished.failed ? 'error' : 'done');
       if (outcome.failed || finished.failed) return 'error';
       circuitBreaker?.success();
       commit(job.throughSeq);
@@ -281,8 +294,26 @@ export function createProjectAgentRunner({
       return 'ok';
     } finally {
       if (abortController === controller) abortController = null;
-      turnKind = null;
+      turnKind = null; acceptingStop = false;
     }
+  }
+
+  async function completeStoppedTurn(job, outcome) {
+    circuitBreaker?.abandonTrial();
+    stoppedJob = { ...job, turnId: outcome.turnId };
+    const preview = activity.snapshot();
+    const partial = preview?.replyText || preview?.segments.filter(segment => segment.kind === 'text').at(-1)?.text || '';
+    remember(agentTurnMessage({ turnId: outcome.turnId, plan: outcome.plan, rounds: outcome.rounds }));
+    remember({ id: `${outcome.turnId}-stopped`, turnId: outcome.turnId, role: 'assistant',
+      kind: 'system_card', card: 'agent_stopped', content: partial, replyTo: preview?.replyTo || [],
+      cards: [{ cardId: `card:agent_stopped:${outcome.turnId}`, kind: 'agent_stopped', content: partial,
+        actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: workspace, turnId: outcome.turnId } }] }] });
+    activity.finish('stopped');
+    commit(job.throughSeq);
+    if (typeof onInputsCompleted === 'function') {
+      try { await onInputsCompleted(job.userInputs); } catch { /* Durable stopped turn is the recovery acknowledgement. */ }
+    }
+    return 'ok';
   }
 
   async function runRounds(job, signal) {
@@ -299,6 +330,8 @@ export function createProjectAgentRunner({
     });
     if (model.selection) plan.turnProfile.modelSelection = model.selection;
     if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
+    activity.begin({ turnId, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
+      startedAt: stamp(), visible: job.kind === 'user' });
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };
     }
@@ -326,6 +359,10 @@ export function createProjectAgentRunner({
       if (result.failed) {
         return { turnId, plan, rounds, failed: true, reason: result.reason, memoryIds };
       }
+      if (result.stopped) {
+        if (result.round) rounds.push(result.round);
+        return { turnId, plan, rounds, stopped: true, memoryIds };
+      }
       rounds.push(result.round);
       if (result.memoryIds?.length) memoryIds = result.memoryIds;
       toolCallsUsed += result.toolCallCount;
@@ -345,6 +382,7 @@ export function createProjectAgentRunner({
         return { preempted: true };
       }
       setStatus('waiting_provider');
+      activity.round();
       let raw;
       try {
         raw = await executeTurn({
@@ -357,7 +395,7 @@ export function createProjectAgentRunner({
           roundIndex: rounds.length,
           priorRounds: rounds,
           signal,
-          sink: turnSink,
+          sink: { ...turnSink, send(channel, payload) { activity.accept(channel, payload); turnSink.send(channel, payload); } },
           modelProviderId: plan.modelProviderId,
           limits: plan.limits,
           remainingToolCalls: Math.max(0, plan.limits.maxToolCalls - toolCallsUsed),
@@ -375,6 +413,7 @@ export function createProjectAgentRunner({
       }
       setStatus('thinking');
       if (disposed) return { disposed: true };
+      if (signal.aborted && signal.reason === 'user-stop') return { stopped: true, round: roundFrom(raw) };
       if (raw?.preempted === true || (job.kind === 'wake' && signal.aborted)) {
         return { preempted: true, round: roundFrom(raw) };
       }
@@ -488,6 +527,7 @@ export function createProjectAgentRunner({
     if (curatorTimer) clearTimeout(curatorTimer);
     curatorTimer = null;
     abortController?.abort();
+    activity.dispose();
   }
 
   function armCurator(retryAt) {
@@ -551,6 +591,19 @@ export function createProjectAgentRunner({
     enqueueTimer,
     kick,
     retry,
+    retryStopped(turnId) {
+      if (!stoppedJob || stoppedJob.turnId !== turnId || activity.snapshot()?.phase !== 'stopped') return Promise.resolve({ skipped: 'stale' });
+      const job = stoppedJob; stoppedJob = null;
+      userInputs.push(...job.userInputs);
+      return kick();
+    },
+    stopResponse(turnId) {
+      if (disposed || !acceptingStop || !abortController || abortController.signal.aborted || turnKind !== 'user' || activity.snapshot()?.turnId !== turnId
+        || ['done', 'error', 'stopped', 'disposed'].includes(activity.snapshot()?.phase)) return { ok: false, code: 'STALE_TURN' };
+      abortController.abort('user-stop');
+      return { ok: true };
+    },
+    activity: activity.snapshot,
     dispose,
     status: () => statusValue,
     parked: () => (failedJob

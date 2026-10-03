@@ -20,6 +20,7 @@ const METHODS = [
   ['deleteBot', { workspaceId: 'ws-1' }],
   ['submitInput', { workspaceId: 'ws-1', inputId: 'in-1', text: '你好' }],
   ['readConversation', { workspaceId: 'ws-1' }],
+  ['stopResponse', { workspaceId: 'ws-1', turnId: 't' }],
   ['listSessions', { workspaceId: 'ws-1' }],
   ['getSession', { sessionId: 'sess-1' }],
   ['cancelSession', { sessionId: 'sess-1' }],
@@ -816,4 +817,20 @@ test('paused approvals can be denied without restarting the task', async () => {
     assert.equal(saved.length, 2); assert.equal(cancelled.length, 1); assert.equal(restarts, 0);
     assert.equal(settled.length, state === 'open' ? 1 : 0);
   }
+});
+
+
+test('response stopping validates workspace and exact turn, delegates host authority, and reads current activity', async () => {
+  const calls = [], activity = { workspaceId: 'w', turnId: 't', revision: 2, phase: 'responding' };
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    directory: { get: id => id === 'w' ? { ok: true, item: { workspaceId: id } } : null,
+      readConversation: () => ({ ok: true, messages: [] }) },
+    readActivity: () => activity,
+    stopResponseTurn: payload => { calls.push(payload); return { ok: false, code: 'HOST_OFFLINE' }; },
+  });
+  assert.equal(service.stopResponse({ workspaceId: 'w', turnId: '' }).code, 'INVALID_INPUT');
+  assert.equal(service.stopResponse({ workspaceId: 'other', turnId: 't' }).code, 'NOT_FOUND');
+  assert.equal(service.stopResponse({ workspaceId: 'w', turnId: 't' }).code, 'HOST_OFFLINE');
+  assert.deepEqual(calls, [{ workspaceId: 'w', turnId: 't' }]);
+  assert.equal(service.readConversation({ workspaceId: 'w' }).activity, activity);
 });

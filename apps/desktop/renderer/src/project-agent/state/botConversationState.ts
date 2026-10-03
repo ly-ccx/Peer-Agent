@@ -77,6 +77,7 @@ export interface BotChatMessage {
   readonly content: string;
   readonly createdAt: string;
   readonly inputId?: string;
+  readonly turnId?: string;
   readonly replyTo: readonly string[];
   readonly sources: readonly string[];
   readonly marks: readonly BotChatMark[];
@@ -108,6 +109,8 @@ export type ConversationRow =
   | { readonly type: 'separator'; readonly id: string; readonly at: string; readonly proactive: boolean; readonly label: string }
   | { readonly type: 'message'; readonly message: BotChatMessage };
 
+export type ConversationDisplayRow = ConversationRow | { readonly type: 'activity'; readonly activity: import('@peer-agent/protocol').ProjectAgentActivity };
+
 const VISIBLE_KINDS = new Set(['user_input', 'agent_reply', 'system_card']);
 
 export function optimisticInputMessageId(inputId: string): string {
@@ -130,6 +133,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     role,
     content: readString(raw.content) || readString(raw.text),
     createdAt: readString(raw.createdAt) || readString(raw.at),
+    ...(readString(raw.turnId) ? { turnId: readString(raw.turnId) } : {}),
     ...(readString(raw.inputId) ? { inputId: readString(raw.inputId) } : {}),
     replyTo,
     sources,

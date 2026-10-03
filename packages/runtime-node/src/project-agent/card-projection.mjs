@@ -29,6 +29,7 @@ export function projectCards(workspaceId, facts = {}, resolutions = []) {
     ...confirmCards(facts),
     ...readmeCards(workspaceId, facts),
     ...unavailableCards(facts),
+    ...stoppedCards(facts),
     ...memoryConflictCards(facts),
     ...handoffCards(facts),
     ...objectiveProposalCards(facts),
@@ -303,6 +304,17 @@ function unavailableCards(facts) {
     }));
   }
   return cards;
+}
+
+function stoppedCards(facts) {
+  return asList(facts.stopped).flatMap(item => {
+    const turnId = boundedId(item?.turnId, ID_MAX);
+    if (!turnId) return [];
+    const cardId = cardIdOf('agent_stopped', turnId);
+    return [draft({ cardId, kind: 'agent_stopped', content: typeof item.text === 'string' ? item.text.slice(0, 32_000) : '',
+      factResolved: item.superseded === true, factState: item.superseded ? 'superseded' : '',
+      actions: item.superseded ? [] : [ipcAction('retry', 'project-agent:retry', { turnId, cardId })], refs: refs({ turnId }) })];
+  });
 }
 
 function memoryConflictCards(facts) {

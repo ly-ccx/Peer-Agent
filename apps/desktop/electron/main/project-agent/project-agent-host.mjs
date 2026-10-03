@@ -35,7 +35,6 @@ import {
   createProjectRecovery,
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
-import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
 import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createClassicGoalProjection } from './classic-goal-projection.mjs';
@@ -86,7 +85,7 @@ function fileStamp(file) {
  * main / IPC 在 B2-13 接入。输入从 consume() 的返回值入队，不再听 onCommitted。
  */
 export function createProjectAgentHost(options = {}) {
-  return createPortableProjectAgentHost({ ...options, createSink: () => createBroadcastSink({ getWindows: options.getWindows }) });
+  return createPortableProjectAgentHost({ ...options, onActivity: activity => options.broadcast?.('project-agent:activity', activity) });
 }
 
 export function registerDesktopProjectAgent({
@@ -386,6 +385,7 @@ export function registerDesktopProjectAgent({
     onStatus: (workspaceId) => {
       if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
     },
+    broadcast,
     inputQueue,
     readSettings: readRuntimePolicy,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
@@ -443,17 +443,25 @@ export function registerDesktopProjectAgent({
     inputQueue,
     sessions: supervisor,
     listModels,
+    readActivity: workspaceId => host.runnerFor(workspaceId)?.activity() || null,
+    stopResponseTurn: ({ workspaceId, turnId }) => {
+      if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
+      return host.runnerFor(workspaceId)?.stopResponse(turnId) || { ok: false, code: 'STALE_TURN' };
+    },
     retryTurn: async ({ workspaceId, turnId }) => {
       if (holdsLease(workspaceId) !== true) return { ok: false, code: 'HOST_OFFLINE' };
       const conversationId = resolveConversationId(workspaceId);
       const messages = conversationStore.getPersistedConversationHistory(conversationId)?.messages || [];
-      const card = messages.find((message) => message.turnId === turnId && message.card === 'agent_unavailable');
+      const card = messages.find((message) => message.turnId === turnId && ['agent_unavailable', 'agent_stopped'].includes(message.card));
       if (!card) return { ok: false, code: 'NOT_FOUND' };
-      if (projectFacts.cards(workspaceId).find((item) => item.cardId === `card:agent_unavailable:${turnId}`)?.resolvedState === 'resolved') return { ok: true, replayed: true };
+      if (projectFacts.cards(workspaceId).find((item) => item.cardId === `card:${card.card}:${turnId}`)?.resolvedState === 'resolved') return { ok: true, replayed: true };
       const later = messages.slice(messages.indexOf(card) + 1);
       if (later.some((message) => message.kind === 'agent_turn')) return { ok: false, code: 'STALE_TURN' };
       const runner = host.runnerFor(workspaceId);
-      if (runner?.parked()) await runner.retry();
+      if (card.card === 'agent_stopped' && runner?.activity()?.turnId === turnId) {
+        if ((await runner.retryStopped(turnId))?.skipped) return { ok: false, code: 'STALE_TURN' };
+      }
+      else if (runner?.parked()) await runner.retry();
       else {
         const turn = messages.find((message) => message.id === turnId && message.kind === 'agent_turn');
         await host.sync([workspaceId]);

@@ -585,6 +585,7 @@ export { createDesktopObjectiveWatchHost } from './project-agent/objective-watch
 export { curatorModelProviderId, runMemoryCuratorTurn } from './project-agent/memory-curator-turn.mjs';
 export { createProjectAgentHost } from './project-agent/runtime-host.mjs';
 export { createCollectingSink, createCallbackSink } from './project-agent/turn-sinks.mjs';
+export { emitToolArgProgress } from './provider-adapters/tool-arg-progress.mjs';
 export { conversationPrefersWorktree, preparePlanExecutionWorkspace } from './project-agent/goal-preferred-worktree.mjs';
 export { inspectSourceCheckout, commitSourceCheckout, stashSourceCheckout, resolveHandoffConflicts, previewHandoffMerge, cleanupHandoffPreview, triageTaskLine, createGoalDeliveryHandoff } from './project-agent/goal-delivery-handoff.mjs';
 export { createGoalRunnerAssistantPlaceholder, buildGoalRunnerStreamStartedPayload, mapGoalTurnOutcome } from './project-agent/goal-runner-message-persistence.mjs';

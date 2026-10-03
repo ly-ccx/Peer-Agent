@@ -30,6 +30,7 @@ export function createProjectAgentHost({
   onCurator = null,
   onMaintenance = null,
   onStatus = null,
+  onActivity = null,
   inbox = null,
   inputQueue = null,
   readSettings = null,
@@ -141,6 +142,7 @@ export function createProjectAgentHost({
       onStatus: typeof onStatus === 'function'
         ? (status) => onStatus(workspaceId, status)
         : null,
+      onActivity,
     });
     runners.set(workspaceId, runner);
     return runner;
@@ -177,6 +179,10 @@ export function createProjectAgentHost({
     if (typeof queue.pendingExecution !== 'function') return consumed;
     const messages = typeof readMessages === 'function' ? readMessages(conversationId) : [];
     const repliedTo = messages.filter(message => message.role === 'assistant' && message.kind === 'agent_reply').flatMap(message => message.replyTo || message.meta?.replyTo || []);
+    const stoppedTurns = new Set(messages.filter(message => message.card === 'agent_stopped').map(message => message.turnId));
+    for (const turn of messages) if (turn.kind === 'agent_turn' && stoppedTurns.has(turn.id)) {
+      repliedTo.push(...(turn.userInputs || []).map(input => `input-${input.inputId}`));
+    }
     return queue.pendingExecution(workspaceId, { repliedTo });
   }
 

@@ -210,6 +210,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentAcceptReadme: (params) => ipcRenderer.invoke('project-agent:accept-readme', params),
   projectAgentTakeoverHost: (params) => ipcRenderer.invoke('project-agent:takeover-host', params),
   projectAgentRetry: (params) => ipcRenderer.invoke('project-agent:retry', params),
+  projectAgentStopResponse: (params) => ipcRenderer.invoke('project-agent:stop-response', params),
   projectAgentDiagnostics: (params) => ipcRenderer.invoke('project-agent:diagnostics', params),
   projectObjectivesList: (params) => ipcRenderer.invoke('project-objectives:list', params),
   projectObjectivesUpdate: (params) => ipcRenderer.invoke('project-objectives:update', params),
@@ -232,6 +233,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('project-agent:conversation-changed', handler);
     return () => ipcRenderer.removeListener('project-agent:conversation-changed', handler);
+  },
+  onProjectAgentActivity: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:activity', handler);
+    return () => ipcRenderer.removeListener('project-agent:activity', handler);
   },
   quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
   quickChatSetTaskCardVisible: (visible) => ipcRenderer.invoke('quick-chat:set-task-card-visible', { visible }),
