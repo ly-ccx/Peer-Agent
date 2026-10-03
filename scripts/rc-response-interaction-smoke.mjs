@@ -125,10 +125,13 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await composer.inputValue(), '停止之后继续保留我的草稿');
   assert.equal(await page.locator('.bot-stop-response').count(), 0);
   await page.screenshot({ path: path.join(captureDirectory, 'stream-stopped.png') });
+  const stoppedProcess = page.locator('.bot-system').filter({ has: page.locator('.bot-stopped-reply') }).getByRole('button', { name: '查看过程', exact: true });
+  await stoppedProcess.click(); await page.locator('.bot-process').waitFor();
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
   await composer.fill(''); command('RC_STREAM_STOP', 3);
   await page.locator('.bot-stopped-reply').getByRole('button', { name: '重发', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '完成后只有一条正式回复' }).count(), count => count === 2);
-  checks.push('stop preserves incomplete text and draft; explicit retry creates one new reply');
+  checks.push('stop preserves incomplete text, exact-turn process and draft; explicit retry creates one new reply');
   await start('RC_STREAM_FAIL'); command('RC_STREAM_FAIL', 2);
   await live.getByText('流式回复正在', { exact: true }).waitFor();
   command('RC_STREAM_FAIL', 3); await live.waitFor({ state: 'detached' });

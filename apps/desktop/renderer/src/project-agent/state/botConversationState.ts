@@ -457,7 +457,11 @@ export function roundsForReply(messages: readonly BotChatMessage[], replyId: str
   let rounds: readonly BotToolRound[] = [];
   for (const message of messages) {
     if (message.kind === 'agent_turn') rounds = message.rounds;
-    if (message.kind === 'agent_reply' && message.id === replyId) return rounds;
+    if (message.id !== replyId) continue;
+    if (message.kind === 'agent_reply') return rounds;
+    if (message.kind === 'system_card' && message.cards.some(card => card.kind === 'agent_stopped')) {
+      return messages.find(turn => turn.kind === 'agent_turn' && turn.id === message.turnId)?.rounds || [];
+    }
   }
   return [];
 }

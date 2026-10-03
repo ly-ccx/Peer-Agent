@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import { mergeBotActivity, visibleBotActivity, isActivityRunning } from './botActivityState.ts';
-import { normalizeBotMessage } from './botConversationState.ts';
+import { normalizeBotMessage, roundsForReply } from './botConversationState.ts';
 const activity: ProjectAgentActivity = { workspaceId: 'w', conversationId: 'c', turnId: 't', revision: 3,
   startedAt: '2026-10-04T01:00:00Z', phase: 'responding', replyTo: ['u'], segments: [], replyText: 'draft' };
 test('late reattachment snapshots and other bots cannot rewind the live reply', () => {
@@ -18,4 +18,12 @@ test('a canonical reply or stopped card replaces the preview without a duplicate
   assert.equal(visibleBotActivity(activity, [turn]), activity);
   assert.equal(visibleBotActivity(activity, [turn, reply]), null);
   assert.equal(visibleBotActivity({ ...activity, phase: 'done' }, [turn]), null);
+});
+
+test('stopped process reads only its exact canonical turn, even beside a newer round', () => {
+  const turn = normalizeBotMessage({ id: 't', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'read_file', result: { ok: true } }] }] })!;
+  const other = normalizeBotMessage({ id: 'other', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'bash', result: { ok: true } }] }] })!;
+  const stopped = normalizeBotMessage({ id: 's', kind: 'system_card', turnId: 't', cards: [{ cardId: 's', kind: 'agent_stopped' }] })!;
+  assert.deepEqual(roundsForReply([turn, other, stopped], 's'), turn.rounds);
+  assert.deepEqual(roundsForReply([other, stopped], 's'), []);
 });

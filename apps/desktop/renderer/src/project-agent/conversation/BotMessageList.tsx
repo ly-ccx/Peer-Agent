@@ -132,6 +132,7 @@ export function BotMessageList({
             highlighted={highlightedId === row.message.id}
             anchors={anchors}
             onJump={onJump}
+            onOpenProcess={onOpenProcess ? () => onOpenProcess(row.message.id) : undefined}
             welcome={rows.length === 1 && row.message.cards.some((card) => card.kind === 'familiarize')}
             avatar={avatar}
             label={label}
@@ -172,6 +173,7 @@ function SystemCard({
   welcome,
   anchors,
   onJump,
+  onOpenProcess,
   avatar,
   label,
   avatarMood,
@@ -181,6 +183,7 @@ function SystemCard({
   readonly message: BotChatMessage;
   readonly highlighted: boolean;
   readonly welcome: boolean;
+  readonly onOpenProcess?: () => void;
   readonly anchors: ReadonlyMap<string, string>;
   readonly onJump: (id: string) => void;
   readonly avatar: BotAvatarModel;
@@ -196,6 +199,9 @@ function SystemCard({
       {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
       <ReplyAnchors ids={message.replyTo} anchors={anchors} i18n={i18n} onJump={onJump} />
       <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
+      {onOpenProcess && cards.some(card => card.kind === 'agent_stopped') ? <div className="bot-reply-marks">
+        <button type="button" onClick={onOpenProcess}><PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.chat.openProcess')}</button>
+      </div> : null}
     </div>
   );
 }
