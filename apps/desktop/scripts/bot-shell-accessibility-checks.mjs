@@ -214,8 +214,6 @@ async function checkSettings({ page, until, report, captureDirectory }) {
   assert.equal(await tabsVisible(page), true, 'drawer tabs must remain visible after settings scroll');
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-runtime.png') });
   await runtime.locator('summary').press('Enter');
-  await page.locator('.bot-drawer-body').evaluate(node => { node.scrollTop = 0; });
-  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-default-light.png') });
   const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
   const themedSwitches = [];
   for (const palette of ['catppuccin', 'frost']) for (const theme of ['light', 'dark']) {
@@ -239,6 +237,10 @@ async function checkSettings({ page, until, report, captureDirectory }) {
       });
       assert.ok(paint.contrast >= 3, 'switch thumb contrast must reach 3:1 in each theme and state');
       themedSwitches.push(paint);
+      if (captureDirectory && palette === 'frost' && !checked) {
+        await settingsFirstScreen(page);
+        await page.screenshot({ path: path.join(captureDirectory, `settings-default-${theme}.png`) });
+      }
     }
     await handoff.press('Space');
     await until(profile, p => p.autoHandoffOnPolicyAccept !== true);
@@ -246,6 +248,7 @@ async function checkSettings({ page, until, report, captureDirectory }) {
   if (original.autoHandoffOnPolicyAccept === true) await handoff.press('Space');
   await until(profile, p => (p.autoHandoffOnPolicyAccept === true) === (original.autoHandoffOnPolicyAccept === true));
   await settleColorTransitions(page);
+  await settingsFirstScreen(page);
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-default.png') });
   await page.evaluate(original => {
     for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
@@ -276,6 +279,7 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
   const second = models.find(model => model.label === 'RC Bot model B');
   assert.ok(first && second, 'production model projection must expose both configured fixtures');
   assert.equal(await form.locator(':scope > section').first().getByRole('heading', { name: '机器人模型', exact: true }).count(), 1);
+  await settingsFirstScreen(page);
   const choose = async (role, label) => {
     await form.getByRole('button', { name: role, exact: true }).click();
     await page.getByRole('option', { name: label, exact: true }).click();
@@ -317,6 +321,16 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
     independentRoles: true, otherBotUnchanged: true, globalConfigUnchanged: true,
     scope: 'Production model catalogue projection, settings DOM, IPC validation and durable profile; no real model request' };
   report.accessibility.push('bot model is first: configured choices save and survive reopen; fixed switch and inherit preserve other roles, bots and global routing');
+}
+
+async function settingsFirstScreen(page) {
+  await page.locator('.bot-drawer-body').evaluate(node => { node.scrollTop = 0; });
+  await page.waitForFunction(() => {
+    const body = document.querySelector('.bot-drawer-body'), heading = body?.querySelector('.bot-policy-fields h2');
+    if (!heading) return false;
+    const title = heading.getBoundingClientRect(), viewport = body.getBoundingClientRect();
+    return title.top >= viewport.top && title.bottom <= viewport.bottom;
+  }, null, { timeout: 5000 });
 }
 
 async function settleColorTransitions(page) {
