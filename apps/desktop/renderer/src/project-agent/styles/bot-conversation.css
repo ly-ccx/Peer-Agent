@@ -282,7 +282,6 @@
 }
 
 .bot-user-quote {
-  border-left: 2px solid var(--chrome-hairline);
   color: var(--graphite-soft);
   padding: 6px 10px;
   border-radius: 4px;
@@ -317,7 +316,6 @@
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid var(--chrome-hairline);
-  border-left: 3px solid var(--graphite-fade);
   border-radius: 8px;
   background: var(--paper-sheet);
   color: var(--graphite-soft);
@@ -435,7 +433,6 @@
   align-items: center;
   padding: 6px 8px;
   border: 1px solid var(--chrome-hairline);
-  border-left: 3px solid var(--graphite-fade);
   border-radius: 8px;
   background: var(--paper-sheet);
   color: var(--graphite-soft);
