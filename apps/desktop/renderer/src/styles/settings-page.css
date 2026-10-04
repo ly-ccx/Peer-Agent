@@ -317,7 +317,7 @@
 }
 
 .general-panel .peer-switch[data-state='unchecked'] .peer-switch-thumb {
-  background: var(--graphite-fade);
+  background: var(--graphite-soft);
 }
 
 .general-panel .peer-switch[data-state='checked'],
