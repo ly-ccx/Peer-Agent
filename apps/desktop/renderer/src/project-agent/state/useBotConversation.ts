@@ -233,6 +233,7 @@ export function useBotConversation(workspaceId: string) {
     rows,
     thinking: !live && !isActivityRunning(activity) && showAgentThinking(pending, awaitingSince !== null),
     generating: isActivityRunning(activity),
+    activeModelSelection: isActivityRunning(activity) ? activity?.modelSelection : undefined,
     stopping, stopError, stop, followRequestId,
     hasOlder,
     olderError,

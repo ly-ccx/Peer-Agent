@@ -6,7 +6,7 @@ const INTERVAL = 50;
 /** Bounded presentation projection of an existing TurnSink, independent of persistence. */
 export function createTurnActivity({ workspaceId, conversationId, publish = null } = {}) {
   let state = null, revision = 0, timer = null, round = 0, visible = false, replyCallId = null;
-  const snapshot = () => visible && state ? { ...state, replyTo: [...state.replyTo], segments: state.segments.map(segment => ({ ...segment })) } : null;
+  const snapshot = () => visible && state ? { ...state, replyTo: [...state.replyTo], ...(state.modelSelection ? { modelSelection: { ...state.modelSelection } } : {}), segments: state.segments.map(segment => ({ ...segment })) } : null;
   const flush = () => {
     if (timer) clearTimeout(timer);
     timer = null;
@@ -21,11 +21,12 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
   const tool = id => state?.segments.find(segment => segment.kind === 'tool' && segment.id === id);
   return {
     snapshot,
-    begin({ turnId, replyTo = [], startedAt = '', visible: show = false }) {
+    begin({ turnId, modelSelection, replyTo = [], startedAt = '', visible: show = false }) {
       if (timer) clearTimeout(timer);
       timer = null; visible = show; round = 0; replyCallId = null;
       state = { workspaceId, conversationId, turnId, replyTo: replyTo.slice(0, 32), startedAt, revision: ++revision,
-        phase: 'waiting', segments: [], replyText: '' };
+        phase: 'waiting', segments: [], replyText: '',
+        ...(modelSelection?.modelProviderId ? { modelSelection: { modelProviderId: modelSelection.modelProviderId, reasoningEffort: modelSelection.reasoningEffort } } : {}) };
       flush();
     },
     round() { round++; replyCallId = null; if (state) { state.phase = 'waiting'; changed(true); } },
@@ -62,6 +63,7 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
         const segment = tool(payload.toolCallId);
         if (segment) { segment.status = failedResult(payload.result) ? 'error' : 'done'; changed(); }
       } else if (channel === 'chat:stream:provider-recovery' || channel === 'chat:stream:connection-recovery') {
+        if (channel === 'chat:stream:provider-recovery' && payload.toProviderId) state.modelSelection = { modelProviderId: payload.toProviderId };
         state.replyText = ''; state.segments = []; state.phase = 'waiting'; changed(true);
       }
     },

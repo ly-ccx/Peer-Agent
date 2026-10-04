@@ -1,10 +1,11 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { BOT_AVATAR_COLORS, type BotProfile, type ModelRoutingMenuOption } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, type BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
 import { BotHostControl } from './BotHostControl';
+import type { BotModelsControlState } from '../state/useBotModels';
 import { BotApprovalFields, BotPolicyFields } from './BotPolicyFields';
 import { PeerIcon } from '../../ui/icons/PeerIcon';
 import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
@@ -33,15 +34,14 @@ function isProactivityLevel(value: string): value is ProactivityLevel {
 export function BotSettingsTab({
   workspaceId,
   profile,
-  modelOptions = [],
+  modelControls,
   i18n,
   onProfile,
   onDeleted,
 }: {
   readonly workspaceId: string;
   readonly profile: BotProfile;
-  readonly modelLabel: string;
-  readonly modelOptions?: readonly ModelRoutingMenuOption[];
+  readonly modelControls: BotModelsControlState;
   readonly i18n: I18nRuntime;
   readonly onProfile: (profile: BotProfile) => void;
   readonly onDeleted: () => void;
@@ -180,8 +180,9 @@ export function BotSettingsTab({
 
   return (
     <div className="bot-drawer-tab bot-settings-tab">
-      <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
-        onChange={patch => { void savePolicy(patch); }} />
+      <BotPolicyFields profile={profile} models={modelControls.models} views={modelControls.views} busy={busy || modelControls.busy} i18n={i18n}
+        onChange={patch => { if (patch.modelPolicy) void modelControls.save(patch.modelPolicy); }} />
+      {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
       <section className="bot-settings-section bot-settings-identity">
         <h2>{i18n.t('projectAgent.drawer.settings.appearance')}</h2>
       <div className="bot-settings-field">

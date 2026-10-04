@@ -1,11 +1,12 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { BotProfile, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy, RoleSetting } from '@peer-agent/protocol';
+import type { BotModelViews, BotProfile, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy } from '@peer-agent/protocol';
+import { BotModelControls } from '../BotModelControls';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
 import { PeerIcon } from '../../ui/icons/PeerIcon';
 
-const ROLES: readonly ModelRole[] = ['project_agent', 'session_worker', 'verifier', 'explorer', 'visual_verifier', 'memory_curator', 'objective_probe', 'compactor'];
-const TIERS = ['strong', 'fast', 'economy', 'vision'] as const;
+// Compaction currently uses the active conversation provider, without this role routing seam.
+const ROLES: readonly ModelRole[] = ['project_agent', 'session_worker', 'verifier', 'explorer', 'visual_verifier', 'memory_curator', 'objective_probe'];
 type Patch = Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy'>;
 type PolicyProps = {
   profile: BotProfile; busy: boolean; i18n: I18nRuntime;
@@ -32,35 +33,18 @@ export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps
 }
 
 /** Controlled project policy form. All writes and validation belong to update-profile. */
-export function BotPolicyFields({ profile, models, busy, i18n, onChange }: PolicyProps & {
+export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }: PolicyProps & {
   models: readonly ModelRoutingMenuOption[];
+  views: BotModelViews;
 }) {
   const policy = profile.modelPolicy || {};
   const scopeIds = policy.scope?.modelProviderIds;
   function setPolicy(next: ProjectModelPolicy) { onChange({ modelPolicy: next }); }
-  function setRole(role: ModelRole, value: string) {
-    const overrides = { ...policy.overrides };
-    if (value === 'inherit') delete overrides[role];
-    else if (value.startsWith('tier:')) overrides[role] = { mode: 'tier', tier: value.slice(5) as typeof TIERS[number] };
-    else overrides[role] = { mode: 'fixed', modelProviderId: value.slice(6) };
-    setPolicy({ ...policy, overrides });
-  }
-  function valueOf(setting?: RoleSetting) {
-    return !setting ? 'inherit' : setting.mode === 'fixed' ? `model:${setting.modelProviderId}`
-      : setting.mode === 'tier' ? `tier:${setting.tier}` : 'auto';
-  }
   const roleLabel = (role: ModelRole) => i18n.t(role === 'project_agent' ? 'projectAgent.drawer.model' : `modelRouting.role.${role}`);
-  const roleField = (role: ModelRole) => <div className="bot-settings-row" key={role}>
+  const roleField = (role: ModelRole) => <div className="bot-settings-row bot-model-settings-row" key={role}>
     <span>{roleLabel(role)}</span>
-    <Dropdown value={valueOf(policy.overrides?.[role])} disabled={busy}
-      ariaLabel={roleLabel(role)}
-      options={[
-        { value: 'inherit', label: i18n.t('projectAgent.policy.inherit') },
-        ...(policy.overrides?.[role]?.mode === 'auto' ? [{ value: 'auto', label: i18n.t('projectAgent.policy.autoPool'), disabled: true }] : []),
-        ...TIERS.map(tier => ({ value: `tier:${tier}`, label: i18n.t(`modelRouting.tier.${tier}`) })),
-        ...models.filter(model => !scopeIds || scopeIds.includes(model.id)).map(model => ({ value: `model:${model.id}`, label: model.label })),
-      ]}
-      onChange={value => setRole(role, value)} />
+    <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} i18n={i18n}
+      onChange={setPolicy} />
   </div>;
   return <section className="bot-settings-section bot-policy-fields">
     <h2>{i18n.t('projectAgent.policy.models')}</h2>

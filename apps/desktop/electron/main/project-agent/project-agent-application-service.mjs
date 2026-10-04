@@ -15,6 +15,7 @@ import {
 } from '@peer-agent/runtime-node';
 import { projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
+import { projectBotModelViews } from './model-controls.mjs';
 import { profilePolicyPatch } from './profile-policy.mjs';
 import { evidenceRefAllowed, presentEvidence } from './evidence-presenter.mjs';
 
@@ -84,6 +85,7 @@ export function createProjectAgentApplicationService({
   corpusStamp = null,
   searchIndex = createConversationSearchIndex(),
   listModels = () => [],
+  readModelRouting = () => undefined,
   retryTurn = null,
   readActivity = () => null,
   stopResponseTurn = null,
@@ -146,7 +148,12 @@ export function createProjectAgentApplicationService({
   function get(payload = {}) {
     if (!open()) return disabled();
     const result = directory.get(payload.workspaceId);
-    return result?.ok && result.item ? { ...result, item: withAgentStatus(result.item), modelOptions: listModels().filter(model => model.enabled !== false).map(projectModelRoutingMenuOption).filter(Boolean) } : result;
+    if (!result?.ok || !result.item) return result;
+    const providers = listModels().filter(model => model.enabled !== false);
+    return { ...result, item: withAgentStatus(result.item),
+      modelOptions: providers.map(projectModelRoutingMenuOption).filter(Boolean),
+      modelViews: projectBotModelViews({ providers, routing: readModelRouting(), projectPolicy: result.item.profile?.modelPolicy }),
+    };
   }
 
   function readAvatar(payload = {}) {

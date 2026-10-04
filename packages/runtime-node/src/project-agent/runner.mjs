@@ -330,7 +330,7 @@ export function createProjectAgentRunner({
     });
     if (model.selection) plan.turnProfile.modelSelection = model.selection;
     if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
-    activity.begin({ turnId, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
+    activity.begin({ turnId, modelSelection: model.selection, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
       startedAt: stamp(), visible: job.kind === 'user' });
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };

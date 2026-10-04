@@ -283,6 +283,14 @@ export type TranslationKey =
   | 'projectAgent.policy.acceptance.auto'
   | 'projectAgent.policy.acceptance.confirm'
   | 'projectAgent.policy.models'
+  | 'projectAgent.model.defaults'
+  | 'projectAgent.model.botOnly'
+  | 'projectAgent.model.nextReply'
+  | 'projectAgent.model.runningReply'
+  | 'projectAgent.model.unavailable'
+  | 'projectAgent.model.select'
+  | 'projectAgent.model.noEffort'
+  | 'projectAgent.model.saveFailed'
   | 'projectAgent.policy.modelsHint'
   | 'projectAgent.policy.inherit'
   | 'projectAgent.policy.autoPool'
@@ -1580,7 +1588,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.policy.acceptance.auto': '符合条件时自动签收',
     'projectAgent.policy.acceptance.confirm': '由我确认结果',
     'projectAgent.policy.models': '机器人模型',
-    'projectAgent.policy.modelsHint': '为当前机器人选择模型，或跟随全局配置。对话模型用于后续回复，任务模型用于新任务。',
+    'projectAgent.model.defaults': '默认与档位',
+    'projectAgent.model.botOnly': '本机器人',
+    'projectAgent.model.nextReply': '修改用于后续回复或新任务',
+    'projectAgent.model.runningReply': '本轮正在使用的模型',
+    'projectAgent.model.unavailable': '选择模型',
+    'projectAgent.model.select': '选择机器人模型',
+    'projectAgent.model.noEffort': '无可调推理强度',
+    'projectAgent.model.saveFailed': '模型设置未保存，请重试。',
+    'projectAgent.policy.modelsHint': '直接选择这个机器人的模型和推理强度。对话配置用于后续回复，任务配置用于新任务。',
     'projectAgent.policy.inherit': '跟随全局',
     'projectAgent.policy.autoPool': '已配置自动池',
     'projectAgent.policy.moreRoles': '更多角色',
@@ -2675,7 +2691,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.policy.acceptance.auto': 'Accept eligible results automatically',
     'projectAgent.policy.acceptance.confirm': 'I confirm results',
     'projectAgent.policy.models': 'Bot models',
-    'projectAgent.policy.modelsHint': 'Choose models for this bot or use global routing. Conversation changes apply to future replies; task changes apply to new tasks.',
+    'projectAgent.model.defaults': 'Defaults and tiers',
+    'projectAgent.model.botOnly': 'This bot',
+    'projectAgent.model.nextReply': 'Applies to future replies or new tasks',
+    'projectAgent.model.runningReply': 'Model used by the current reply',
+    'projectAgent.model.unavailable': 'Choose model',
+    'projectAgent.model.select': 'Choose bot model',
+    'projectAgent.model.noEffort': 'No adjustable effort',
+    'projectAgent.model.saveFailed': 'Model settings were not saved. Please retry.',
+    'projectAgent.policy.modelsHint': 'Choose this bot’s model and reasoning effort directly. Conversation changes apply to future replies; task changes apply to new tasks.',
     'projectAgent.policy.inherit': 'Use global routing',
     'projectAgent.policy.autoPool': 'Configured automatic pool',
     'projectAgent.policy.moreRoles': 'More roles',

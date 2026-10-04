@@ -155,3 +155,16 @@ test('cancelling an active plan aborts the service and returns the shared lease'
   await started;executor.executionScheduler.cancelPlan('p');
   assert.equal((await turn).terminalStatus,'aborted');assert.equal(executor.executionScheduler.stats().active,0);
 });
+
+
+test('frozen effort is passed to the existing chat service for bot and task turns', async () => {
+  const calls = [];
+  const executor = createAgentTurnExecutor({ llmChatService: { sendMessage: async input => { calls.push(input); return { terminalStatus: 'done' }; } } });
+  for (const role of ['project_agent', 'session_worker', 'verifier']) {
+    await executor.runTurn({ turnProfile: { role, modelSelection: { modelProviderId: 'm', reasoningEffort: 'high' } },
+      modelProviderId: 'm', effort: 'default', sink: { send() {} } });
+  }
+  assert.deepEqual(calls.map(call => call.effort), ['high', 'high', 'high']);
+  await executor.runTurn({ effort: 'low', sink: { send() {} } });
+  assert.equal(calls.at(-1).effort, 'low');
+});

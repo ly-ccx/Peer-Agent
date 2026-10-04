@@ -1,5 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { QuoteChip } from './QuoteChip';
 import { PeerIcon } from '../../ui/icons';
 import type { ProjectInputAttachment } from '@peer-agent/protocol';
@@ -15,6 +15,8 @@ export function BotComposer({
   generating = false,
   stopping = false,
   onStop,
+  modelControls,
+  modelUpdating = false,
 }: {
   readonly i18n: I18nRuntime;
   readonly quote: string;
@@ -23,6 +25,8 @@ export function BotComposer({
   readonly generating?: boolean;
   readonly stopping?: boolean;
   readonly onStop?: () => void;
+  readonly modelControls?: ReactNode;
+  readonly modelUpdating?: boolean;
 }) {
   const [text, setText] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -41,7 +45,7 @@ export function BotComposer({
   }, [text]);
 
   function send() {
-    if (!hasContent || tooLong || uploads.isReading()) return;
+    if (!hasContent || tooLong || uploads.isReading() || modelUpdating) return;
     onSend(trimmed, uploads.attachments);
     setText('');
     uploads.clear();
@@ -87,6 +91,7 @@ export function BotComposer({
         rows={2}
         placeholder={i18n.t('projectAgent.chat.placeholder')}
         aria-label={i18n.t('projectAgent.chat.placeholder')}
+        title={i18n.t('projectAgent.chat.hint')}
         aria-invalid={tooLong}
         aria-describedby={tooLong ? 'bot-input-error' : undefined}
         onChange={(event) => setText(event.target.value)}
@@ -111,11 +116,11 @@ export function BotComposer({
         <div className="bot-composer-leading">
           <button type="button" className="bot-attach-button" aria-label={i18n.t('projectAgent.chat.attach')}
             title={i18n.t('projectAgent.chat.attach')} onClick={() => fileInput.current?.click()}><PeerIcon name="plus" size={18} /></button>
-          <p>{i18n.t('projectAgent.chat.hint')}</p>
+          {modelControls ?? <p>{i18n.t('projectAgent.chat.hint')}</p>}
         </div>
         <div className="bot-composer-actions">
           {generating ? <button type="button" className="bot-stop-response" disabled={stopping} title={i18n.t('projectAgent.chat.stopHint')} aria-label={i18n.t(stopping ? 'projectAgent.chat.stopping' : 'projectAgent.chat.stop')} onClick={onStop}><PeerIcon name="stop" size={15} /></button> : null}
-          {!generating || hasContent ? <button type="submit" disabled={!hasContent || tooLong || uploads.reading} aria-label={i18n.t('projectAgent.chat.send')} title={i18n.t('projectAgent.chat.send')}><PeerIcon name="send" size={17} /></button> : null}
+          {!generating || hasContent ? <button type="submit" disabled={!hasContent || tooLong || uploads.reading || modelUpdating} aria-label={i18n.t('projectAgent.chat.send')} title={i18n.t('projectAgent.chat.send')}><PeerIcon name="send" size={17} /></button> : null}
         </div>
       </div>
     </form>

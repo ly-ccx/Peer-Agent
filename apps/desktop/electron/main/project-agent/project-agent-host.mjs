@@ -245,7 +245,8 @@ export function registerDesktopProjectAgent({
       getSettings,
       resolveRoute: (input) => (
         typeof agentTurnExecutor?.resolveGoalRole === 'function'
-          ? agentTurnExecutor.resolveGoalRole({ role: 'memory_curator', ...input })
+          ? agentTurnExecutor.resolveGoalRole({ role: 'memory_curator', ...input,
+            projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy })
           : null
       ),
       runTurn: (input) => agentTurnExecutor.runTurn(input),
@@ -443,6 +444,7 @@ export function registerDesktopProjectAgent({
     inputQueue,
     sessions: supervisor,
     listModels,
+    readModelRouting: () => readRuntimePolicy()?.modelRouting,
     readActivity: workspaceId => host.runnerFor(workspaceId)?.activity() || null,
     stopResponseTurn: ({ workspaceId, turnId }) => {
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };

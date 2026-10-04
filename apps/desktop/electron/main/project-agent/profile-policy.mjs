@@ -1,3 +1,4 @@
+import { isModelReasoningEffort, modelReasoningLevels } from '@peer-agent/protocol';
 const ROLES = new Set(['project_agent', 'session_worker', 'explorer', 'verifier', 'visual_verifier', 'memory_curator', 'objective_probe', 'compactor']);
 const TIERS = new Set(['strong', 'fast', 'economy', 'vision']);
 
@@ -38,6 +39,11 @@ export function profilePolicyPatch(payload, models = []) {
           const valid = setting.mode === 'tier' && TIERS.has(setting.tier)
             || setting.mode === 'fixed' && allowed.has(setting.modelProviderId)
             || setting.mode === 'auto' && ids(setting.pool) && setting.pool.length > 0;
+          if (setting.reasoningEffort !== undefined && (setting.mode !== 'fixed'
+            || !isModelReasoningEffort(setting.reasoningEffort)
+            || !modelReasoningLevels(models.find(model => model.id === setting.modelProviderId) || {}).includes(setting.reasoningEffort))) {
+            return { ok: false, code: 'INVALID_REASONING_EFFORT' };
+          }
           if (!valid) return { ok: false, code: 'INVALID_MODEL_POLICY' };
         }
       }

@@ -45,6 +45,8 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
     if (!sink || typeof sink.send !== 'function') {
       throw new Error('AgentTurnExecutor requires a sink with send()');
     }
+    const effort = turnProfile?.modelSelection?.reasoningEffort ?? sendMessageArgs.effort;
+    if (effort !== undefined) sendMessageArgs.effort = effort;
     const projectAgent = turnProfile?.role === 'project_agent' || sendMessageArgs.mode === 'project_agent';
     if (!projectAgent) {
       if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted' });

@@ -1,3 +1,4 @@
+import { modelDefaultReasoningEffort, modelReasoningLevels, type ModelReasoningEffort } from './model-reasoning.ts';
 /**
  * Role and tier model routing. Resolution is pure; hosts apply the result.
  * Order and filters follow ADR 83. An empty candidate set is an error, not a silent downgrade.
@@ -17,7 +18,7 @@ export type ModelRole =
 
 export type RoleSetting =
   | { readonly mode: 'tier'; readonly tier: ModelTier }
-  | { readonly mode: 'fixed'; readonly modelProviderId: string }
+  | { readonly mode: 'fixed'; readonly modelProviderId: string; readonly reasoningEffort?: ModelReasoningEffort }
   | { readonly mode: 'auto'; readonly pool: readonly string[] };
 
 export interface ModelTierBinding {
@@ -82,7 +83,16 @@ export interface ModelRoutingMenuOption {
   readonly supportsTools: boolean;
   readonly supportsStructured: boolean;
   readonly contextTokens: number;
+  readonly available?: boolean;
+  readonly reasoningEffortLevels?: readonly ModelReasoningEffort[];
+  readonly defaultReasoningEffort?: ModelReasoningEffort;
 }
+
+export interface BotRoleModelView {
+  readonly resolution: ModelResolution;
+  readonly eligibleModelIds: readonly string[];
+}
+export type BotModelViews = Partial<Record<ModelRole, BotRoleModelView>>;
 
 /** Project one configured provider into the routing menu contract. */
 export function projectModelRoutingMenuOption(provider: {
@@ -97,6 +107,12 @@ export function projectModelRoutingMenuOption(provider: {
   readonly supportsStructured?: unknown;
   readonly capabilities?: { readonly toolUse?: unknown } | null;
   readonly contextWindow?: unknown;
+  readonly apiKeyConfigured?: unknown;
+  readonly enabled?: unknown;
+  readonly supportsReasoning?: unknown;
+  readonly reasoningEffortLevels?: unknown;
+  readonly reasoningEffort?: unknown;
+  readonly defaultEffort?: unknown;
 } | null | undefined): ModelRoutingMenuOption | null {
   if (!provider || typeof provider.id !== 'string' || !provider.id.trim()) return null;
   const id = provider.id.trim();
@@ -117,6 +133,9 @@ export function projectModelRoutingMenuOption(provider: {
     supportsTools: provider.supportsTools !== false && provider.capabilities?.toolUse !== false,
     supportsStructured: provider.supportsStructured !== false,
     contextTokens: Number.isFinite(context) && context > 0 ? context : 128_000,
+    available: provider.enabled !== false && provider.apiKeyConfigured === true,
+    reasoningEffortLevels: modelReasoningLevels(provider),
+    defaultReasoningEffort: modelDefaultReasoningEffort(provider),
   };
 }
 
@@ -131,6 +150,7 @@ export interface CatalogModel {
   readonly contextTokens?: number;
   readonly local?: boolean;
   readonly reasoningEffort?: string;
+  readonly reasoningEffortLevels?: readonly ModelReasoningEffort[];
 }
 
 export type ModelResolution =
@@ -142,7 +162,7 @@ export type ModelResolution =
     }
   | {
       readonly ok: false;
-      readonly reason: 'capability' | 'scope' | 'auto_pool' | 'empty';
+      readonly reason: 'capability' | 'scope' | 'auto_pool' | 'empty' | 'reasoning';
       readonly missing: string;
     };
 
@@ -204,6 +224,7 @@ function inScope(model: CatalogModel, policy: ProjectModelPolicy | null | undefi
 }
 
 function missingText(input: RoleModelRequest, reason: Extract<ModelResolution, { ok: false }>['reason']): string {
+  if (reason === 'reasoning') return '所选模型不支持该推理强度';
   if (reason === 'auto_pool') return '所选模型不在自动池内';
   const localOnly = input.projectPolicy?.scope?.localOnly === true;
   if (input.role === 'visual_verifier') {
@@ -301,7 +322,7 @@ function layersOf(input: RoleModelRequest): Layer[] {
   return layers;
 }
 
-function fail(input: RoleModelRequest, reason: 'capability' | 'scope' | 'auto_pool' | 'empty'): ModelResolution {
+function fail(input: RoleModelRequest, reason: 'capability' | 'scope' | 'auto_pool' | 'empty' | 'reasoning'): ModelResolution {
   return { ok: false, reason, missing: missingText(input, reason) };
 }
 
@@ -348,10 +369,12 @@ export function resolveRoleModel(input: RoleModelRequest): ModelResolution {
     const ordered = orderCandidates(eligible, input);
     const chosen = ordered[0];
     if (!chosen) return fail(input, 'empty');
+    const requestedEffort = layer.setting.mode === 'fixed' ? layer.setting.reasoningEffort : undefined;
+    if (requestedEffort !== undefined && !chosen.reasoningEffortLevels?.includes(requestedEffort)) return fail(input, 'reasoning');
     const source: ModelSelectionSource = layer.setting.mode === 'auto' ? 'auto' : layer.source;
     return {
       ok: true,
-      selection: toSelection(chosen),
+      selection: { ...toSelection(chosen), ...(requestedEffort !== undefined ? { reasoningEffort: requestedEffort } : {}) },
       source,
       ...(input.role === 'verifier'
         ? { sameFamilyAsWorker: sameFamily(chosen, input.workerModel) }

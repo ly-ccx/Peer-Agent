@@ -127,6 +127,7 @@ function visionCatalog() {
 
 async function harness({
   catalog = visionCatalog(),
+  projectPolicy = null,
   goalPlanStore: injectedStore = null,
   goalRunner: injectedRunner = null,
   resolveAcceptancePolicy = null,
@@ -185,6 +186,7 @@ async function harness({
     objectives,
     catalog,
     routing: routing(),
+    projectPolicy,
     abortStream: async (request) => { aborts.push(request); },
     emitEvent: (event) => { events.push(event); },
     resolveAcceptancePolicy,
@@ -235,6 +237,29 @@ function contextOf(env, extra = {}) {
     ...extra,
   };
 }
+
+test('task role efforts are frozen at spawn and survive later bot changes and store reload', async () => {
+  const policy = { overrides: {
+    session_worker: { mode: 'fixed', modelProviderId: 'worker-1', reasoningEffort: 'high' },
+    verifier: { mode: 'fixed', modelProviderId: 'worker-1', reasoningEffort: 'low' },
+  } };
+  const env = await harness({ projectPolicy: policy,
+    catalog: visionCatalog().map(item => ({ ...item, reasoningEffortLevels: ['low', 'high'] })) });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
+    policy.overrides.session_worker.reasoningEffort = 'low';
+    policy.overrides.verifier.reasoningEffort = 'high';
+    const saved = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() }).getPlan(planId);
+    assert.equal(saved.delegationOrigin.modelSelection.worker.reasoningEffort, 'high');
+    assert.equal(saved.delegationOrigin.modelSelection.verifier.reasoningEffort, 'low');
+    const next = await env.supervisor.spawn(spawnInput({ title: 'new task', brief: 'different task' }),
+      contextOf(env, { inputId: 'input-next' }));
+    const nextPlan = env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: next.sessionId }).planId);
+    assert.equal(nextPlan.delegationOrigin.modelSelection.worker.reasoningEffort, 'low');
+    assert.equal(nextPlan.delegationOrigin.modelSelection.verifier.reasoningEffort, 'high');
+  } finally { await env.cleanup(); }
+});
 
 test('current-call task batch reads each plan once and retains project scope, legacy order and external changes', async () => {
   const env = await harness();
