@@ -180,9 +180,9 @@ async function checkSettings({ page, until, report, captureDirectory }) {
     return { track: { width: track.width, height: track.height }, thumb: { width: thumb.width, height: thumb.height },
       trackColor: getComputedStyle(node).backgroundColor, thumbColor: getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor };
   });
-  assert.equal(switchPaint.track.width, 36);
-  assert.equal(switchPaint.track.height, 20);
-  assert.equal(switchPaint.thumb.width, 16);
+  assert.equal(switchPaint.track.width, 40);
+  assert.equal(switchPaint.track.height, 23);
+  assert.equal(switchPaint.thumb.width, 15);
   assert.notEqual(switchPaint.trackColor, switchPaint.thumbColor, 'switch thumb must be visible');
   await handoff.focus(); await handoff.press('Space');
   await until(profile, p => p.autoHandoffOnPolicyAccept === !(original.autoHandoffOnPolicyAccept === true));
@@ -364,8 +364,8 @@ async function settleColorTransitions(page) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const rgb = value => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = value; ctx.fillRect(0, 0, 1, 1); return [...ctx.getImageData(0, 0, 1, 1).data].join(','); };
     const checked = node.getAttribute('aria-checked') === 'true';
-    return rgb(style.backgroundColor) === rgb(style.getPropertyValue(checked ? '--state-active-on' : '--control-fill').trim())
-      && rgb(getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor) === rgb(style.getPropertyValue(checked ? '--za-primary-control-ink' : '--graphite-base').trim());
+    return rgb(style.backgroundColor) === rgb(style.getPropertyValue(checked ? '--graphite-base' : '--paper-sunken').trim())
+      && rgb(getComputedStyle(node.querySelector('.peer-switch-thumb')).backgroundColor) === rgb(style.getPropertyValue(checked ? '--paper-sheet' : '--graphite-soft').trim());
   }, null, { polling: 50, timeout: 5000 });
 }
 

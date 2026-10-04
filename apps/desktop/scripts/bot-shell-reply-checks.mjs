@@ -8,13 +8,13 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await reply.scrollIntoViewIfNeeded();
   const quote = reply.locator('.bot-reply-bar');
   assert.ok((await quote.textContent()).includes('请帮我梳理项目现状'));
-  assert.equal(await quote.locator('svg').count(), 2);
+  assert.equal(await quote.locator('svg').count(), 1);
   assert.equal(await reply.getByRole('button', { name: /通知方式/ }).count(), 0);
   assert.equal(await reply.locator('.bot-reply-delivery').textContent(), '通知方式：即时提醒');
   checks.push('quote is a context button with SVG; delivery policy is explicitly readonly');
 
-  // Inspect actual theme output: undefined legacy tokens previously made these
-  // borders disappear. Restore the original attributes after every sample.
+  // The quote keeps a paper boundary; secondary actions stay quiet until hover
+  // or keyboard focus. Restore the original attributes after every sample.
   const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
   report.replyStyles = [];
   for (const theme of ['dark', 'light']) {
@@ -28,12 +28,12 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
       return { quote: read('.bot-reply-bar'), action: read('.bot-reply-marks button'), delivery: read('.bot-reply-delivery') };
     });
     report.replyStyles.push({ theme, ...sample });
-    for (const item of [sample.quote, sample.action]) {
-      assert.equal(item.border, '1px'); assert.equal(item.borderStyle, 'solid');
-      assert.notEqual(item.background, 'rgba(0, 0, 0, 0)');
-      assert.equal(item.shadow, 'none');
-    }
-    assert.ok(sample.action.height >= 32);
+    assert.equal(sample.quote.border, '1px'); assert.equal(sample.quote.borderStyle, 'solid');
+    assert.notEqual(sample.quote.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(sample.quote.shadow, 'none');
+    assert.equal(sample.action.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(sample.action.shadow, 'none');
+    assert.ok(sample.action.height >= 27);
     assert.equal(sample.delivery.border, '0px');
     if (captureDirectory) await reply.screenshot({ path: path.join(captureDirectory, `reply-${theme}.png`) });
   }
@@ -41,7 +41,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
   }, originalTheme);
   assert.notEqual(report.replyStyles[0].quote.background, report.replyStyles[1].quote.background);
-  checks.push('real dark/light context and action surfaces retain borders, readable hierarchy and no outer glow');
+  checks.push('real dark/light quotes retain paper boundaries; secondary actions stay compact and both surfaces have no outer glow');
 
   const process = reply.getByRole('button', { name: '查看过程', exact: true });
   await quote.focus();
