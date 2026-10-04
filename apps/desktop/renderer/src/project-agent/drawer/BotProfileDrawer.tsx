@@ -19,6 +19,7 @@ import {
 } from '../state/drawerState';
 import { HistorySheet, type HistoryConversation } from '../HistorySheet';
 import { AgentProcessView } from './AgentProcessView';
+import { BotDrawerSegments } from './BotDrawerSegments';
 import type { BotInspect } from './agentProcess';
 import { BotSettingsTab } from './BotSettingsTab';
 import { MemoryTab } from './MemoryTab';
@@ -206,34 +207,9 @@ export function BotProfileDrawer({
             {i18n.t('projectAgent.drawer.close')}
           </button>
         </header>
-        <div className="bot-drawer-tabs" role="tablist">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              id={`bot-tab-${workspaceId}-${tab.id}`}
-              aria-controls={`bot-pane-${workspaceId}`}
-              tabIndex={memory.tab === tab.id ? 0 : -1}
-              data-overlay-autofocus={memory.tab === tab.id ? true : undefined}
-              aria-selected={memory.tab === tab.id}
-              onKeyDown={(event) => {
-                const index = TABS.findIndex(item => item.id === tab.id);
-                const next = event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1
-                  : event.key === 'ArrowRight' ? (index + 1) % TABS.length
-                  : event.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length : null;
-                if (next === null) return;
-                event.preventDefault();
-                const target = TABS[next]!;
-                onMemory({ ...memory, tab: target.id, sessionId: null });
-                document.getElementById(`bot-tab-${workspaceId}-${target.id}`)?.focus();
-              }}
-              onClick={() => onMemory({ ...memory, open: true, tab: tab.id })}
-            >
-              {i18n.t(tab.key)}
-            </button>
-          ))}
-        </div>
+        <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
+          items={TABS.map(tab => ({ id: tab.id, label: i18n.t(tab.key) }))}
+          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} />
       </div>
       {inspect?.evidence ? (
         <section className="bot-inspect" aria-label={i18n.t('projectAgent.chat.evidence')}>

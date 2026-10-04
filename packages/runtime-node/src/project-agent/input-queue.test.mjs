@@ -190,3 +190,45 @@ test('delivered input remains executable after restart until a real reply or exp
     assert.deepEqual(box.queue.pendingExecution('ws-1').map(input => input.inputId), ['third']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('user uploads survive attachment-only submit, durable reopen and idempotent retry', () => {
+  const root = tempRoot();
+  try {
+    const { queue } = harness(root);
+    const uploads = [
+      { id: 'doc', name: 'brief.md', kind: 'text', mimeType: 'text/markdown', size: 7, sourceKind: 'user_upload', text: '事实材料' },
+      { id: 'img', name: 'shot.png', kind: 'image', mimeType: 'image/png', size: 1, sourceKind: 'user_upload', dataUrl: 'data:image/png;base64,AA==' },
+      { id: 'pdf', name: 'brief.pdf', kind: 'unsupported', mimeType: 'application/pdf', size: 20, sourceKind: 'user_upload', text: 'must not admit', filePath: '/not-authorized' },
+    ];
+    const request = input(randomUUID(), '', { attachments: uploads });
+    const saved = queue.submitInput(request);
+    assert.equal(saved.text, '');
+    assert.equal(saved.attachments.length, 3);
+    assert.equal(saved.attachments[2].text, undefined);
+    assert.equal(saved.attachments[2].filePath, undefined);
+    const reopened = harness(root);
+    const replay = reopened.queue.submitInput({ ...request, text: 'do not replace' });
+    assert.deepEqual(replay, saved);
+    reopened.queue.consume('ws-1');
+    assert.deepEqual(reopened.messages[0].attachments, saved.attachments);
+    assert.equal(reopened.messages[0].content, '');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('explicit upload validation rejects oversized content and cannot trust declared size', () => {
+  const root = tempRoot();
+  try {
+    const { queue } = harness(root);
+    const base = { id: 'a', name: 'brief.md', sourceKind: 'user_upload', kind: 'text', mimeType: 'text/plain', size: 0, text: 'ok' };
+    const submit = attachments => queue.submitInput(input(randomUUID(), 'read', { attachments }));
+    assert.throws(() => submit([{ ...base, text: '字'.repeat(180_000) }]), /512 KiB/);
+    assert.throws(() => submit(Array.from({ length: 9 }, () => base)), /8 attachments/);
+    assert.throws(() => submit([{ ...base, kind: 'image', mimeType: 'image/png', dataUrl: 'https://untrusted/image.png' }]), /image data/);
+    assert.throws(() => submit([{ ...base, kind: 'image', mimeType: 'image/png', dataUrl: `data:image/png;base64,${Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64')}` }]), /8 MiB/);
+    const large = submit([{ ...base, kind: 'image', mimeType: 'image/png', size: 600_000,
+      dataUrl: `data:image/png;base64,${Buffer.alloc(600_000).toString('base64')}`, filePath: '/not-authorized' }]);
+    assert.equal(large.attachments[0].dataUrl.length > 512 * 1024, true);
+    assert.equal(large.attachments[0].filePath, undefined);
+    assert.throws(() => queue.submitInput(input(randomUUID(), '', {})), /text or attachments/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

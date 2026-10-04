@@ -37,9 +37,11 @@ function messageKind(message) {
 }
 
 function messageText(message) {
-  if (typeof message?.content === 'string') return message.content;
-  if (typeof message?.text === 'string') return message.text;
-  return '';
+  const text = typeof message?.content === 'string' ? message.content
+    : typeof message?.text === 'string' ? message.text : '';
+  if (text.trim()) return text;
+  return (Array.isArray(message?.attachments) ? message.attachments : [])
+    .map(item => typeof item?.name === 'string' ? item.name : '').filter(Boolean).join(', ');
 }
 
 function messageAt(message) {

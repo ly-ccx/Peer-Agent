@@ -1060,3 +1060,41 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Sliding segmented selection: all five choices share the available width. */
+.bot-drawer-tabs.bot-drawer-segments {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: repeat(var(--segment-count), minmax(0, 1fr));
+  gap: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--chrome-canvas);
+  touch-action: pan-y;
+  user-select: none;
+  min-width: 0;
+}
+.bot-segment-thumb {
+  position: absolute;
+  z-index: -1;
+  inset: 3px auto 3px 3px;
+  width: calc((100% - 6px) / var(--segment-count));
+  background: var(--chrome-hover);
+  border-radius: 7px;
+  transform: translateX(calc(var(--segment-index) * 100%));
+  transition: transform var(--za-motion-fast) var(--za-ease-standard);
+  pointer-events: none;
+}
+.bot-drawer-segments button {
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bot-drawer-segments button[aria-selected='true'] { background: transparent; }
+.bot-drawer-segments button:focus-visible { outline: 2px solid var(--graphite-soft); outline-offset: -2px; }
+.bot-drawer-segments.is-sliding .bot-segment-thumb { transition: none; }
+@media (prefers-reduced-motion: reduce) { .bot-segment-thumb { transition: none; } }

@@ -207,6 +207,12 @@ export type TranslationKey =
   | 'projectAgent.chat.quote'
   | 'projectAgent.chat.quoteRemove'
   | 'projectAgent.chat.placeholder'
+  | 'projectAgent.chat.attach'
+  | 'projectAgent.chat.previewAttachment'
+  | 'projectAgent.chat.removeAttachment'
+  | 'projectAgent.chat.attachmentMetadataOnly'
+  | 'projectAgent.chat.readingAttachments'
+  | 'projectAgent.chat.dropAttachments'
   | 'projectAgent.chat.send'
   | 'projectAgent.chat.hint'
   | 'projectAgent.chat.source'
@@ -1498,6 +1504,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.quote': '引用',
     'projectAgent.chat.quoteRemove': '取消引用',
     'projectAgent.chat.placeholder': '跟这个机器人说',
+    'projectAgent.chat.attach': '添加文件或图片',
+    'projectAgent.chat.previewAttachment': '预览图片',
+    'projectAgent.chat.removeAttachment': '移除附件',
+    'projectAgent.chat.attachmentMetadataOnly': '仅文件信息 · 正文未读取',
+    'projectAgent.chat.readingAttachments': '正在读取附件…',
+    'projectAgent.chat.dropAttachments': '松开以添加文件或图片',
     'projectAgent.chat.send': '发送',
     'projectAgent.chat.hint': '回车发送，Shift+回车换行',
     'projectAgent.chat.source': '来源',
@@ -2587,6 +2599,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.quote': 'Quote',
     'projectAgent.chat.quoteRemove': 'Remove quote',
     'projectAgent.chat.placeholder': 'Message this bot',
+    'projectAgent.chat.attach': 'Attach files or images',
+    'projectAgent.chat.previewAttachment': 'Preview image',
+    'projectAgent.chat.removeAttachment': 'Remove attachment',
+    'projectAgent.chat.attachmentMetadataOnly': 'File information only · content not read',
+    'projectAgent.chat.readingAttachments': 'Reading attachments…',
+    'projectAgent.chat.dropAttachments': 'Drop to attach files or images',
     'projectAgent.chat.send': 'Send',
     'projectAgent.chat.hint': 'Enter to send, Shift+Enter for a new line',
     'projectAgent.chat.source': 'Source',

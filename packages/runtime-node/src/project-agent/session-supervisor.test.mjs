@@ -1945,3 +1945,34 @@ test('objective automatic dispatch persists one GoalPlan per fact across paraphr
 test('objective policy read failure cannot automatically accept a verified and reported task',async()=>{
  const env=await harness({resolveAcceptancePolicy:()=>{throw Error('authority read failed');},readSessionFacts:()=>({hostAuthority:{independentVerifier:'passed'}})});try{const opened=await completedSession(env),plan=env.goalPlanStore.getPlan(opened.planId);env.goalPlanStore.revisePlan(opened.planId,{delegationOrigin:{...plan.delegationOrigin,objectiveId:'actual-objective'}},{reason:'objective fixture',changedBy:'test'});env.conversationStore.appendMessage(env.parent.id,{id:'reported',role:'assistant',kind:'agent_reply',content:'Verified result',sources:[opened.sessionId]});const settled=await env.supervisor.settle(opened.sessionId);assert.equal(settled.accepted,false);assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance,undefined);}finally{await env.cleanup();}
 });
+
+test('a delegated task receives the full text upload on its anchor without inventing permission', async () => {
+  const env = await harness();
+  try {
+    const attachment = { id: 'doc', name: 'brief.md', mimeType: 'text/markdown', size: 4,
+      kind: 'text', sourceKind: 'user_upload', text: 'fact' };
+    env.conversationStore.appendMessage(env.parent.id, { id: 'file-anchor', kind: 'user_input', role: 'user',
+      content: 'read this brief', attachments: [attachment] });
+    const opened = await env.supervisor.spawn(spawnInput({ anchorMessageIds: ['file-anchor'] }), contextOf(env));
+    assert.equal(opened.status, 'running');
+    const children = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' });
+    assert.equal(children.length, 1);
+    const child = env.conversationStore.getConversation(children[0].id);
+    assert.deepEqual(child.messages[0].attachments, [attachment]);
+  } finally { await env.cleanup(); }
+});
+
+test('a new upload cannot waive missing unanchored history attachments', async () => {
+  const env = await harness();
+  try {
+    const attachment = { id: 'doc', name: 'brief.md', mimeType: 'text/plain', size: 4,
+      kind: 'text', sourceKind: 'user_upload', text: 'fact' };
+    env.conversationStore.appendMessage(env.parent.id, { id: 'earlier-file', kind: 'user_input', role: 'user',
+      content: 'previous brief', attachments: [attachment] });
+    env.conversationStore.appendMessage(env.parent.id, { id: 'new-file', kind: 'user_input', role: 'user',
+      content: 'new brief', attachments: [{ ...attachment, id: 'new' }] });
+    const opened = await env.supervisor.spawn(spawnInput({ anchorMessageIds: ['new-file'] }), contextOf(env));
+    assert.equal(opened.message, 'BACKGROUND_CONFIRMATION_REQUIRED');
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 0);
+  } finally { await env.cleanup(); }
+});

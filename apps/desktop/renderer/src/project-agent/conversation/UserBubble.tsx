@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotChatMessage } from '../state/botConversationState';
+import { BotAttachments } from './BotAttachments';
 
 export function UserBubble({
   message,
@@ -28,14 +29,14 @@ export function UserBubble({
       <span className="bot-message-role">{i18n.t('projectAgent.chat.you')}</span>
       <div className="bot-user-content">
       {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
-      {message.images?.length ? (
+      {message.attachments?.length ? <BotAttachments attachments={message.attachments} i18n={i18n} /> : message.images?.length ? (
         <div className="bot-user-images">
           {message.images.map((image) => (
             <img key={image.id} src={image.dataUrl} alt={image.name} />
           ))}
         </div>
       ) : null}
-      <p className="bot-user-text">{message.content}</p>
+      {message.content ? <p className="bot-user-text">{message.content}</p> : null}
       </div>
       <div className="bot-user-marks">
         {message.pending === 'received' || (!message.pending && message.inputId && !replied && message.dispositions.length === 0)

@@ -252,6 +252,7 @@ export function createProjectAgentApplicationService({
         anchorRefs: payload.anchorRefs,
         quoteRefs: payload.quoteRefs,
         attachmentRefs: payload.attachmentRefs,
+        attachments: payload.attachments,
         createdAt: payload.createdAt,
         ...(answerTo ? { answerTo } : {}),
       });

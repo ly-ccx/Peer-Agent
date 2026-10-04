@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { INPUT_ATTACHMENT_LIMIT, normalizeUserUpload } from './input-attachments.mjs';
 import { pathOf } from '../data-store.mjs';
 
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -281,7 +282,8 @@ function normalizeSubmission(input, workspaceId, createdAt) {
   if (!INPUT_ID.test(inputId)) throw new TypeError('inputId is invalid');
   if (!SURFACES.has(input?.surface)) throw new TypeError('surface is invalid');
   const text = typeof input?.text === 'string' ? input.text.trim() : '';
-  if (!text) throw new TypeError('text is required');
+  const attachments = normalizeInputAttachments(input?.attachments);
+  if (!text && attachments.length === 0) throw new TypeError('text or attachments are required');
   if (text.length > 100_000) throw new TypeError('text is too long');
   const suppliedAt = Date.parse(input?.createdAt);
   const normalized = {
@@ -292,7 +294,7 @@ function normalizeSubmission(input, workspaceId, createdAt) {
     anchorRefs: stringRefs(input?.anchorRefs),
     quoteRefs: stringRefs(input?.quoteRefs),
     attachmentRefs: stringRefs(input?.attachmentRefs),
-    ...imageAttachmentField(input?.attachments),
+    ...(attachments.length > 0 ? { attachments } : {}),
     createdAt: Number.isFinite(suppliedAt) ? new Date(suppliedAt).toISOString() : createdAt,
   };
   const answerTo = optionalAnswer(input?.answerTo);
@@ -358,9 +360,14 @@ export function boundedImageAttachments(value) {
   return images;
 }
 
-function imageAttachmentField(value) {
-  const attachments = boundedImageAttachments(value);
-  return attachments.length > 0 ? { attachments } : {};
+/** Preserve legacy screenshot refs while strictly admitting explicit uploads. */
+export function normalizeInputAttachments(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new TypeError('attachments must be an array');
+  if (!value.some(item => item?.sourceKind === 'user_upload')) return boundedImageAttachments(value);
+  if (value.length > INPUT_ATTACHMENT_LIMIT) throw new TypeError('at most 8 attachments are allowed');
+  return value.flatMap(item => item?.sourceKind === 'user_upload'
+    ? [normalizeUserUpload(item)] : boundedImageAttachments([item]));
 }
 
 function stringRefs(value) {

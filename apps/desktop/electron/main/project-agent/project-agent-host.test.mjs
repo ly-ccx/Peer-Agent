@@ -362,3 +362,18 @@ test('digest maintenance runs under recovery lease even with no inbox, and never
     owned=true;host.stop('ws');await host.sync();assert.equal(maintenance.length,count);
   } finally {host.dispose();rmSync(root,{recursive:true,force:true});}
 });
+
+test('uploaded text and images enter canonical user content; unsupported files admit metadata only', () => {
+  const projected = messagesFromUserInputs({ userInputs: [{ text: '', attachments: [
+    { id: 't', kind: 'text', name: 'brief.md', mimeType: 'text/markdown', size: 6, text: '用户文件事实' },
+    { id: 'p', kind: 'unsupported', name: 'brief.pdf', mimeType: 'application/pdf', size: 10, text: 'NOT_ADMITTED' },
+    { id: 'i', kind: 'image', name: 'shot.png', dataUrl: 'data:image/png;base64,AA==' },
+  ] }] });
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0].role, 'user');
+  assert.match(projected[0].content[0].text, /brief.md/);
+  assert.match(projected[0].content[0].text, /用户文件事实/);
+  assert.match(projected[0].content[0].text, /not supported yet/);
+  assert.doesNotMatch(projected[0].content[0].text, /NOT_ADMITTED/);
+  assert.equal(projected[0].content[1].type, 'image_url');
+});

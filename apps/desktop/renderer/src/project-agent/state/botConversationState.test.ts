@@ -288,3 +288,18 @@ test('引用和思考状态', () => {
   assert.equal(showAgentThinking([{ inputId: 'a', text: 'x', quoteRefs: [], createdAt: '', state: 'sending' }], true), false);
   assert.equal(showAgentThinking([], false), false);
 });
+
+test('optimistic, failed and acknowledged messages keep uploads until the durable echo', () => {
+  const attachments = [{ id: 'file', name: 'brief.md', mimeType: 'text/markdown', size: 3,
+    kind: 'text' as const, sourceKind: 'user_upload' as const, text: '正文' }];
+  const input = { inputId: 'with-file', text: '', attachments, quoteRefs: [], createdAt: 'now', state: 'failed' as const };
+  const pending = applyOptimistic([], [input])[0]!;
+  assert.equal(pending.attachments?.[0]?.name, 'brief.md');
+  assert.equal(pending.pending, 'failed');
+  const acknowledged = applyOptimistic([], acknowledgeInput([input], input.inputId))[0]!;
+  assert.deepEqual(acknowledged.attachments, attachments);
+  const echo = normalizeBotMessage({ id: pending.id, kind: 'user_input', role: 'user', inputId: input.inputId,
+    content: '', attachments })!;
+  assert.equal(applyOptimistic([echo], [input]).length, 1);
+  assert.equal(echo.attachments?.[0]?.name, 'brief.md');
+});

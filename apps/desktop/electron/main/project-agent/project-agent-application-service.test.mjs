@@ -834,3 +834,16 @@ test('response stopping validates workspace and exact turn, delegates host autho
   assert.deepEqual(calls, [{ workspaceId: 'w', turnId: 't' }]);
   assert.equal(service.readConversation({ workspaceId: 'w' }).activity, activity);
 });
+
+test('desktop forwards uploads on the existing input queue seam, including attachment-only input', async () => {
+  let submitted;
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    inputQueue: { submitInput(value) { submitted = value; return value; } },
+  });
+  const attachments = [{ id: 'file', name: 'brief.txt', mimeType: 'text/plain', size: 4,
+    kind: 'text', sourceKind: 'user_upload', text: 'fact' }];
+  const result = await service.submitInput({ workspaceId: 'w', inputId: 'i', text: '', attachments });
+  assert.equal(result.ok, true);
+  assert.deepEqual(submitted.attachments, attachments);
+  assert.equal(submitted.text, '');
+});
