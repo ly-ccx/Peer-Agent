@@ -134,6 +134,12 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   assert.equal(settings.projectAgent.quietHours.enabled, previous !== 'true');
   assert.equal(await page.locator('.general-bots-hours input').count(), 0);
   checks.push('custom quiet switch and HH:mm field use keyboard, save canonical values and expose independent labels');
+  await page.locator('.settings-nav').getByRole('button', { name: '外观', exact: true }).click();
+  await page.locator('.settings-nav').getByRole('button', { name: '通用', exact: true }).click();
+  await until(() => quiet.getAttribute('aria-checked'), value => value === String(previous !== 'true'));
+  await until(() => page.getByRole('button', { name: '免打扰开始时间：小时', exact: true }).textContent(), value => value?.trim() === '23');
+  assert.equal((await page.getByRole('button', { name: '免打扰开始时间：分钟', exact: true }).textContent()).trim(), '15');
+  checks.push('returning to General reads saved quiet hours instead of the initial bootstrap snapshot');
   await choose('语言', 'English'); await page.getByRole('button', { name: 'Interface', exact: true }).waitFor();
   await page.locator('.settings-nav').getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('.bot-shell').waitFor();

@@ -61,6 +61,7 @@ export interface GeneralPanelProps {
 }
 
 export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyLanguageChanged }: GeneralPanelProps) {
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [replyLanguage, setReplyLanguage] = useState(() => readReplyLanguage(clientApi.initialSettings));
@@ -71,12 +72,24 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
   const [quietEnd, setQuietEnd] = useState(initialBots.quietEnd);
   const [digestTime, setDigestTime] = useState(initialBots.digestTime);
   const [shell, setShell] = useState<ProjectAgentShell>(() => projectAgentShellOf(clientApi.initialSettings));
+  const controlsDisabled = isLoading || isSaving;
 
   useEffect(() => {
     let cancelled = false;
     void clientApi.getSettings().then((settings) => {
-      if (!cancelled) setShell(projectAgentShellOf(settings));
-    }).catch(() => {});
+      if (cancelled) return;
+      const bots = readBots(settings);
+      setShell(projectAgentShellOf(settings));
+      setReplyLanguage(readReplyLanguage(settings));
+      setProactivity(bots.proactivity);
+      setQuietEnabled(bots.quietEnabled);
+      setQuietStart(bots.quietStart);
+      setQuietEnd(bots.quietEnd);
+      setDigestTime(bots.digestTime);
+      setIsLoading(false);
+    }).catch((err: unknown) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : i18n.t('settings.general.loadFailed'));
+    });
     return () => {
       cancelled = true;
     };
@@ -102,7 +115,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
   );
 
   async function handleShellChange(next: ProjectAgentShell) {
-    if (next === shell || isSaving) return;
+    if (next === shell || controlsDisabled) return;
     const previous = shell;
     setShell(next);
     setIsSaving(true);
@@ -119,7 +132,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
   }
 
   async function handleLocaleChange(nextLocale: LocaleCode) {
-    if (nextLocale === i18n.locale || isSaving) return;
+    if (nextLocale === i18n.locale || controlsDisabled) return;
 
     setIsSaving(true);
     setError(null);
@@ -140,6 +153,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
     quietEnd?: string;
     digestTime?: string;
   }) {
+    if (controlsDisabled) return;
     const previous = { proactivity, quietEnabled, quietStart, quietEnd, digestTime };
     const merged = { ...previous, ...next };
     setProactivity(merged.proactivity);
@@ -174,7 +188,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
   }
 
   async function handleReplyLanguageChange(nextValue: string) {
-    if (nextValue === replyLanguage || isSaving) return;
+    if (nextValue === replyLanguage || controlsDisabled) return;
 
     // 'follow' 持久化为当前界面 locale，使指令具体、稳定，不随界面再切换而漂移。
     const persisted = nextValue === 'follow' ? i18n.locale : nextValue;
@@ -214,7 +228,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
                   { value: 'bots', label: i18n.t('settings.shell.bots') },
                   { value: 'classic', label: i18n.t('settings.shell.classic') },
                 ]}
-                disabled={isSaving}
+                disabled={controlsDisabled}
                 ariaLabel={i18n.t('settings.shell.title')}
                 onChange={(value) => void handleShellChange(value === 'classic' ? 'classic' : 'bots')}
               />
@@ -229,7 +243,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
               <Dropdown
                 value={i18n.locale}
                 options={localeOptions}
-                disabled={isSaving}
+                disabled={controlsDisabled}
                 ariaLabel={i18n.t('appearance.language')}
                 onChange={(value) => void handleLocaleChange(value as LocaleCode)}
               />
@@ -246,7 +260,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
                 options={replyLanguageOptions}
                 triggerLabel={replyLanguage === 'auto' ? i18n.t('settings.replyLanguage.autoShort') : undefined}
                 title={replyLanguageOptions.find(option => option.value === replyLanguage)?.label}
-                disabled={isSaving}
+                disabled={controlsDisabled}
                 ariaLabel={i18n.t('settings.replyLanguage')}
                 onChange={(value) => void handleReplyLanguageChange(value)}
               />
@@ -272,7 +286,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
                   value: level,
                   label: i18n.t(`settings.bots.proactivity.${level}`),
                 }))}
-                disabled={isSaving}
+                disabled={controlsDisabled}
                 ariaLabel={i18n.t('settings.bots.proactivity')}
                 onChange={(value) => { void saveBots({ proactivity: value as typeof proactivity }); }}
               />
@@ -284,18 +298,18 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
                 <h3>{i18n.t('settings.bots.quietHours')}</h3>
                 <p>{i18n.t('settings.bots.quietHours.description')}</p>
               </div>
-              <Switch checked={quietEnabled} disabled={isSaving} aria-label={i18n.t('settings.bots.quietHours')}
+              <Switch checked={quietEnabled} disabled={controlsDisabled} aria-label={i18n.t('settings.bots.quietHours')}
                 onCheckedChange={value => { void saveBots({ quietEnabled: value }); }} />
             </div>
             <div className="general-bots-hours">
               <div className="general-time-setting">
                 <span>{i18n.t('settings.bots.quietFrom')}</span>
-                <BotTimeField value={quietStart} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietStart')}
+                <BotTimeField value={quietStart} disabled={controlsDisabled} i18n={i18n} label={i18n.t('projectAgent.settings.quietStart')}
                   onChange={value => { void saveBots({ quietStart: value }); }} />
               </div>
               <div className="general-time-setting">
                 <span>{i18n.t('settings.bots.quietUntil')}</span>
-                <BotTimeField value={quietEnd} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietEnd')}
+                <BotTimeField value={quietEnd} disabled={controlsDisabled} i18n={i18n} label={i18n.t('projectAgent.settings.quietEnd')}
                   onChange={value => { void saveBots({ quietEnd: value }); }} />
               </div>
             </div>
@@ -305,7 +319,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
               <h3>{i18n.t('settings.bots.digestTime')}</h3>
               <p>{i18n.t('settings.bots.digestTime.description')}</p>
             </div>
-            <BotTimeField value={digestTime} disabled={isSaving} i18n={i18n} label={i18n.t('settings.bots.digestTime')}
+            <BotTimeField value={digestTime} disabled={controlsDisabled} i18n={i18n} label={i18n.t('settings.bots.digestTime')}
               onChange={value => { void saveBots({ digestTime: value }); }} />
           </div>
         </div>

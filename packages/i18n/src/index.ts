@@ -548,6 +548,7 @@ export type TranslationKey =
   | 'settings.appearance.description'
   | 'settings.language.description'
   | 'settings.general.description'
+  | 'settings.general.loadFailed'
   | 'settings.general.interfaceAndLanguage'
   | 'settings.replyLanguage'
   | 'settings.bots.title'
@@ -1244,6 +1245,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
     'settings.language.description': '选择界面显示语言。',
     'settings.general.description': '调整界面、语言和机器人的默认偏好。',
+    'settings.general.loadFailed': '无法读取当前设置，请重新打开设置页面。',
     'settings.general.interfaceAndLanguage': '界面与语言',
     'settings.replyLanguage': '回复语言',
     'settings.bots.title': '机器人',
@@ -2354,6 +2356,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',
     'settings.language.description': 'Choose the display language for the interface.',
     'settings.general.description': 'Set your interface, language and default bot preferences.',
+    'settings.general.loadFailed': 'Could not load current settings. Please reopen Settings.',
     'settings.general.interfaceAndLanguage': 'Interface & language',
     'settings.replyLanguage': 'Reply language',
     'settings.bots.title': 'Bots',
