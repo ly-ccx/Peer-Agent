@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useUpdater } from '../state/useUpdater';
 import { UpdateModal } from './UpdateModal';
 import { Dropdown } from './Dropdown';
+import { versionBadgeLabel } from './versionBadgeLabel';
 
 /**
  * VersionBadge —— 侧边栏品牌区右侧的版本徽标（表达层）。
@@ -20,9 +21,10 @@ import { Dropdown } from './Dropdown';
  *
  * 能力真相在主进程，本组件通过 useUpdater 消费状态与动作。
  */
-export function VersionBadge({ i18n, showChannel = false }: {
+export function VersionBadge({ i18n, showChannel = false, variant = 'classic' }: {
   readonly i18n: I18nRuntime;
   readonly showChannel?: boolean;
+  readonly variant?: 'classic' | 'bot-footer';
 }) {
   const { status, hasUpdate, check, download, install, openReleasePage, setChannel } = useUpdater();
   const [modalOpen, setModalOpen] = useState(false);
@@ -43,6 +45,9 @@ export function VersionBadge({ i18n, showChannel = false }: {
   }, [phase, pendingDownload]);
 
   if (!status) return null;
+
+  const compact = variant === 'bot-footer';
+  const label = compact ? versionBadgeLabel(status.currentVersion) : { version: `v${status.currentVersion}` };
 
   const isDownloading = phase === 'downloading';
   const isReady = phase === 'downloaded';
@@ -83,10 +88,11 @@ export function VersionBadge({ i18n, showChannel = false }: {
           type="button"
           className="sidebar-version-text-btn"
           title={title}
-          aria-label={hasUpdate ? i18n.t('updater.badge.ariaHasUpdate') : title}
+          aria-label={`${hasUpdate ? i18n.t('updater.badge.ariaHasUpdate') : title}${compact ? ` · v${status.currentVersion}` : ''}`}
           onClick={handleClick}
         >
-          <span className="sidebar-version-text">v{status.currentVersion}</span>
+          <span className="sidebar-version-text">{label.version}</span>
+          {label.stage ? <span className="sidebar-version-stage">{label.stage}</span> : null}
           {import.meta.env.DEV ? (
             <span className="sidebar-version-dev-tag" aria-label="开发版本">
               开发

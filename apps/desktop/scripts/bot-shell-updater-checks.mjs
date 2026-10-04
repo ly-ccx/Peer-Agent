@@ -6,28 +6,60 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
   const checks = report.updater = [];
   const badge = page.locator('.bot-column-footer .sidebar-version-badge');
   await badge.waitFor({ timeout: 5000 });
-  const accountMark = page.locator('.bot-column-footer .bot-me-mark');
-  assert.equal(await accountMark.locator('svg').count(), 1, 'the account mark must use an SVG icon');
-  assert.equal((await accountMark.textContent()).trim(), '', 'the account mark must not repeat the account name as a character icon');
+  const settingsMark = page.locator('.bot-column-footer .bot-app-menu-icon');
+  assert.equal(await page.locator('.bot-app-menu-button svg').count(), 1, 'the settings entry must use an SVG icon');
+  assert.equal((await settingsMark.textContent()).trim(), '', 'the settings icon must not contain a character glyph');
   const footer = page.locator('.bot-column-footer');
-  assert.equal(await page.locator('.bot-me-details .sidebar-version-badge').count(), 1);
+  assert.equal(await page.locator('.bot-app-menu-details .sidebar-version-badge').count(), 1);
   const initialFooter = await footer.boundingBox();
-  assert.ok(initialFooter.height <= 64, 'idle account and update controls should form a compact footer');
+  assert.ok(initialFooter.height <= 64, 'idle settings and update controls should form a compact footer');
   assert.equal(await badge.locator('.pa-dropdown-trigger').count(), 0, 'update channel belongs in settings only');
-  const accountBox = await page.locator('.bot-me-button').boundingBox();
+  const settingsBox = await page.locator('.bot-app-menu-button').boundingBox();
   const versionBox = await badge.boundingBox();
-  assert.ok(Math.abs(accountBox.y + accountBox.height / 2 - versionBox.y - versionBox.height / 2) <= 1,
-    'account and version must share one row while idle');
+  assert.ok(Math.abs(settingsBox.y + settingsBox.height / 2 - versionBox.y - versionBox.height / 2) <= 1,
+    'settings and version must share one row while idle');
   report.updaterFooterHeight = initialFooter.height;
-  checks.push('SVG account mark, account menu and update metadata form one compact group without a duplicate character icon');
-  await accountMark.click();
-  await page.getByRole('menuitem', { name: '设置', exact: true }).waitFor();
-  await page.keyboard.press('Escape');
-  await page.getByRole('menuitem', { name: '设置', exact: true }).waitFor({ state: 'detached' });
+  checks.push('SVG settings entry and right-aligned update metadata form a compact footer without a fake account avatar');
+  const settingsTrigger = page.locator('.bot-app-menu-button');
+  assert.equal((await settingsTrigger.textContent()).trim(), '设置');
+  await settingsTrigger.focus(); await settingsTrigger.press('Enter');
+  const menu = page.getByRole('menu', { name: '设置', exact: true });
+  await menu.waitFor();
+  assert.equal(await menu.getByRole('menuitem').count(), 4);
+  assert.equal(await menu.locator('button svg').count(), 4);
+  const focused = () => page.evaluate(() => document.activeElement?.textContent?.trim());
+  assert.equal(await focused(), '设置');
+  await page.keyboard.press('ArrowDown'); assert.equal(await focused(), '历史对话');
+  await page.keyboard.press('End'); assert.ok((await focused()).startsWith('能力'));
+  await page.keyboard.press('ArrowDown'); assert.equal(await focused(), '设置');
+  await page.keyboard.press('ArrowUp'); assert.ok((await focused()).startsWith('能力'));
+  await page.keyboard.press('Home'); assert.equal(await focused(), '设置');
+  if (captureDirectory) {
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await page.locator('.bot-app-menu').screenshot({ path: path.join(captureDirectory, 'bot-footer-settings-dark.png') });
+    const menuBox = await menu.boundingBox();
+    const footerBox = await footer.boundingBox();
+    await page.screenshot({ path: path.join(captureDirectory, 'bot-footer-menu-dark.png'),
+      clip: { x: footerBox.x, y: menuBox.y, width: footerBox.width, height: footerBox.y + footerBox.height - menuBox.y } });
+  }
+  await page.keyboard.press('Escape'); await menu.waitFor({ state: 'detached' });
+  report.footerEscapeFocus = await page.evaluate(() => ({ tag: document.activeElement?.tagName,
+    className: document.activeElement?.className, text: document.activeElement?.textContent?.trim().slice(0, 100) }));
+  assert.equal(await settingsTrigger.evaluate(node => node === document.activeElement), true);
+  await settingsTrigger.press('Enter'); await menu.waitFor();
+  await page.keyboard.press('Tab'); await menu.waitFor({ state: 'detached' });
+  assert.equal(await badge.locator('.sidebar-version-text-btn').evaluate(node => node === document.activeElement), true);
+  await settingsTrigger.focus(); await settingsTrigger.press('Enter'); await menu.waitFor();
+  await page.keyboard.press('Shift+Tab'); await menu.waitFor({ state: 'detached' });
+  assert.equal(await settingsTrigger.evaluate(node => node === document.activeElement), true);
+  checks.push('settings replaces the identity placeholder; all four SVG menu items support arrows, Home/End, Escape focus return and Tab to version');
   const initial = await page.evaluate(() => window.peerAgent.updaterGetStatus());
-  assert.equal(await badge.locator('.sidebar-version-text').textContent(), `v${initial.currentVersion}`);
+  const candidate = /^(\d+\.\d+\.\d+)-(alpha|beta|rc)\.(\d+)$/.exec(initial.currentVersion);
+  assert.equal(await badge.locator('.sidebar-version-text').textContent(), `v${candidate?.[1] ?? initial.currentVersion}`);
+  if (candidate) assert.equal(await badge.locator('.sidebar-version-stage').textContent(), `${candidate[2].toUpperCase()} ${candidate[3]}`);
+  assert.ok((await badge.locator('.sidebar-version-text-btn').getAttribute('aria-label')).includes(`v${initial.currentVersion}`));
   assert.equal(await badge.locator('select').count(), 0);
-  checks.push('current version aligns with the account in one row; update channel is absent from the footer');
+  checks.push('current version aligns with settings in one row; update channel is absent from the footer');
 
   await badge.locator('.sidebar-version-text-btn').click();
   const dialog = page.getByRole('dialog', { name: '发现新版本', exact: true });
@@ -38,7 +70,7 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
   for (const [preference, option] of [
     ['beta', 'Beta（尝鲜版）'], ['stable', '正式（稳定版）'], ['auto', '自动（跟随当前版本）'],
   ]) {
-    await page.locator('.bot-me-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page.getByRole('button', { name: '更新与关于', exact: true }).click();
     const settingsChannel = page.getByRole('button', { name: '更新通道', exact: true });
     assert.equal(await settingsChannel.locator('svg').count(), 1);
@@ -66,9 +98,9 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
           return { text: button.textContent, width: box.width, height: box.height, left: box.left, right: box.right,
             top: box.top, bottom: box.bottom, transform: getComputedStyle(button).transform };
         });
-        const account = footer.querySelector('.bot-me-button').getBoundingClientRect();
+        const settings = footer.querySelector('.bot-app-menu-button').getBoundingClientRect();
         const version = node.getBoundingClientRect();
-        return { controls, accountRight: account.right, versionLeft: version.left, versionRight: version.right,
+        return { controls, settingsRight: settings.right, versionLeft: version.left, versionRight: version.right,
           footerRight: footer.getBoundingClientRect().right, column: { left: column.left, right: column.right }, viewport: innerHeight,
           scrollWidth: footer.scrollWidth, clientWidth: footer.clientWidth };
       };
@@ -76,7 +108,7 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
       const version = node.querySelector('.sidebar-version-text');
       const original = version.textContent;
       try {
-        // Source Electron's version is short; also measure a long candidate label.
+        // Also measure a long candidate label independently of the current package.
         // Restore the text before capture and do not alter updater status or actions.
         version.textContent = 'v0.1.0-rc.999';
         return [normal, { ...measure(), longVersionLabel: true }];
@@ -89,8 +121,8 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
       assert.equal(layout.scrollWidth <= layout.clientWidth && layout.controls.every(box =>
         box.width > 0 && box.height >= 24 && box.left >= layout.column.left && box.right <= layout.column.right
         && box.top >= 0 && box.bottom <= layout.viewport), true, 'every footer control must remain visible inside the narrow column');
-      assert.ok(layout.versionLeft >= layout.accountRight && layout.versionRight <= layout.footerRight
-        && layout.footerRight - layout.versionRight <= 5, 'version group must stay on the right without overlapping the account');
+      assert.ok(layout.versionLeft >= layout.settingsRight && layout.versionRight <= layout.footerRight
+        && layout.footerRight - layout.versionRight <= 5, 'version group must stay on the right without overlapping settings');
     }
   };
   for (const locale of ['zh-CN', 'en-US']) {

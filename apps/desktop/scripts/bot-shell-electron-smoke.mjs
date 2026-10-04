@@ -94,6 +94,8 @@ import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(sour
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
 app.setPath('userData',${JSON.stringify(path.join(root, 'chromium'))});
+// A bare Electron entry otherwise reports Electron's version, not the product's.
+app.getVersion=()=>${JSON.stringify(JSON.parse(readFileSync(path.join(source, 'apps/desktop/package.json'), 'utf8')).version)};
 ${process.argv.includes('--diagnostics') ? `dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(diagnosticsFile)}});` : ''}
 const observations={reads:[],list:[],search:[],turns:[]};
 globalThis.rcBotShellRecord=(key,value)=>{
@@ -306,7 +308,7 @@ try {
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   report.checks.push('profile opens and settings tab works');
-  await page.locator('.bot-me-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '界面', exact: true }).click();
   await page.getByRole('option', { name: '经典界面', exact: true }).click();
   await page.locator('.bot-shell').waitFor({ state: 'detached' });
@@ -314,6 +316,9 @@ try {
   await page.locator('.app-sidebar').waitFor();
   assert.equal(await page.locator('.app-sidebar .sidebar-version-badge').count(), 1);
   assert.equal(await page.locator('.app-sidebar .sidebar-version-channel').count(), 0);
+  assert.equal(await page.locator('.app-sidebar .sidebar-version-stage').count(), 0);
+  const classicUpdater = await page.evaluate(() => window.peerAgent.updaterGetStatus());
+  assert.equal(await page.locator('.app-sidebar .sidebar-version-text').textContent(), `v${classicUpdater.currentVersion}`);
   assert.equal((await page.evaluate(() => window.peerAgent.updaterGetStatus())).preference, 'auto');
   report.checks.push('classic shell opens through settings');
   // Return through the same settings control, retaining persisted conversations.
