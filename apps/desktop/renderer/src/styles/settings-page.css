@@ -320,6 +320,12 @@
   background: var(--graphite-fade);
 }
 
+.general-panel .peer-switch[data-state='checked'],
+.general-panel .peer-switch[data-state='checked']:hover:not(:disabled) {
+  border-color: var(--state-active-on);
+  background: var(--state-active-on);
+}
+
 .general-panel .pa-dropdown-trigger {
   min-height: 36px;
   padding: 7px 10px;
