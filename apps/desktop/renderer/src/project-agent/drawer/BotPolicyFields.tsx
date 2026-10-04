@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotModelViews, BotProfile, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy } from '@peer-agent/protocol';
+import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotModelControls } from '../BotModelControls';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
@@ -46,9 +47,7 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
     <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} i18n={i18n}
       onChange={setPolicy} />
   </div>;
-  return <section className="bot-settings-section bot-policy-fields">
-    <h2>{i18n.t('projectAgent.policy.models')}</h2>
-    <p className="bot-drawer-note">{i18n.t('projectAgent.policy.modelsHint')}</p>
+  return <SettingsGroup className="bot-settings-section bot-policy-fields" title={i18n.t('projectAgent.policy.models')} description={i18n.t('projectAgent.policy.modelsHint')}>
     {ROLES.slice(0, 3).map(roleField)}
     <details className="bot-settings-disclosure bot-model-advanced">
       <summary>{i18n.t('projectAgent.drawer.settings.advancedModels')}<PeerIcon name="chevronDown" size={14} /></summary>
@@ -80,5 +79,5 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
         </div>
       </div>
     </details>
-  </section>;
+  </SettingsGroup>;
 }

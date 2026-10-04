@@ -13,7 +13,7 @@
   gap: 0;
   min-height: 0;
   overflow: auto;
-  padding: 18px 22px 8px;
+  padding: 20px 32px 28px;
 }
 
 .bot-thread-shell {
@@ -202,11 +202,14 @@
 }
 
 .bot-user {
-  align-self: flex-start;
+  align-self: flex-end;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 100%;
+  align-items: flex-end;
+  gap: 7px;
+  width: fit-content;
+  max-width: 80%;
+  margin-left: auto;
   padding: 0;
   background: transparent;
 }
@@ -214,9 +217,11 @@
 .bot-user-content {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0;
-  background: transparent;
+  min-width: 0;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--paper-hover);
 }
 
 .bot-message-role {
@@ -227,7 +232,8 @@
 }
 
 .bot-user-marks {
-  justify-content: flex-start;
+  justify-content: flex-end;
+  padding-inline: 3px;
 }
 
 .bot-user-marks:empty {
@@ -332,8 +338,8 @@
 .bot-quote-chip {
   margin: 0;
   color: var(--graphite-base);
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: var(--ui-font-body);
+  line-height: 1.75;
   white-space: pre-wrap;
 }
 
@@ -351,10 +357,10 @@
   gap: 12px;
   align-self: flex-start;
   width: 100%;
-  background: var(--za-message-bg, var(--paper-sheet));
-  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-panel, var(--radius-md));
-  padding: var(--space-4, 16px) var(--space-5, 20px);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
   overflow-wrap: anywhere;
 }
 
@@ -374,8 +380,8 @@
   width: fit-content;
   max-width: min(520px, 100%);
   min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--chrome-hairline);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--chrome-hairline) 45%, transparent);
   border-radius: 8px;
   background: var(--paper-sheet);
   color: var(--graphite-soft);
@@ -392,9 +398,9 @@
 .bot-reply-bar-copy {
   display: flex;
   flex: 1;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -409,9 +415,9 @@
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  color: var(--graphite-base);
-  font-size: 13px;
+  -webkit-line-clamp: 2;
+  color: var(--graphite-soft);
+  font-size: .75rem;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -459,7 +465,7 @@
 .bot-reply-body {
   color: var(--graphite-base);
   font-size: var(--ui-font-body, 14px);
-  line-height: var(--ui-line-body, 1.68);
+  line-height: 1.9;
 }
 
 .bot-card {
@@ -478,9 +484,11 @@
 }
 
 .bot-question {
-  gap: 8px;
-  padding: 4px 0 0;
+  gap: 11px;
+  margin-top: 7px;
+  padding: 15px 0 0;
   border: 0;
+  border-top: 1px solid var(--chrome-hairline);
   border-radius: 0;
   background: transparent;
 }
@@ -494,10 +502,10 @@
 .bot-question .bot-card-actions button:first-child {
   justify-content: flex-start;
   border: 1px solid var(--chrome-hairline);
-  background: var(--paper-sunken);
+  background: var(--paper-sheet);
   color: var(--graphite-base);
   border-radius: var(--ui-radius-control, 8px);
-  padding: 7px 10px;
+  padding: 8px 12px;
   max-width: 100%;
   text-align: left;
   opacity: 1;
@@ -512,14 +520,14 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 8px 16px 16px;
-  padding: 12px 12px 10px;
+  margin: 12px 28px 14px;
+  padding: 14px 15px 11px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 16px;
+  border-radius: 12px;
   background: var(--control-composer);
   box-shadow: none;
   transition: border-color var(--za-motion-fast) var(--za-ease-standard);
-  width: calc(100% - 32px);
+  width: calc(100% - 56px);
   max-width: 800px;
   align-self: center;
   box-sizing: border-box;
@@ -607,8 +615,8 @@
   background: transparent;
   color: var(--graphite-base);
   font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: .875rem;
+  line-height: 1.7;
 }
 
 .bot-composer-bar {
@@ -695,3 +703,21 @@
 .bot-attachment:has(.bot-attachment-remove) { margin-right: 3px; }
 .bot-attachment-error { margin: 0; font-size: 12px; color: var(--za-error); }
 .bot-attachment-status { margin: 0; font-size: 12px; color: var(--graphite-soft); }
+
+.bot-message-author {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  color: var(--graphite-soft);
+  font-size: .6875rem;
+}
+.bot-message-author .bot-avatar { width: 19px; height: 19px; flex-basis: 19px; }
+.bot-user-quote.bot-reply-bar { width: 100%; margin: 0; padding: 0 0 8px; border: 0; border-bottom: 1px solid var(--chrome-hairline); border-radius: 0; background: transparent; }
+.bot-reply-marks > button { min-height: 27px; padding: 5px 7px; border-color: transparent; background: transparent; font-size: .6875rem; }
+.bot-reply-marks > button:first-child { padding-left: 0; }
+.bot-reply-delivery { font-size: .6875rem; }
+@media (max-width: 1100px) {
+  .bot-thread { padding-inline: 24px; }
+  .bot-user { max-width: 88%; }
+}

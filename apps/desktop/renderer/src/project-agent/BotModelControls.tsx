@@ -39,11 +39,12 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
       if (next && view?.eligibleModelIds.includes(id)) onChange(botFixedModelPolicy(policy, role, next, effort));
     }
   };
+  const hasEffort = Boolean(model && effort && levels.includes(effort as typeof levels[number]));
   const source = !setting ? i18n.t('projectAgent.policy.inherit') : setting.mode === 'tier'
     ? i18n.t(`modelRouting.tier.${setting.tier}`) : setting.mode === 'auto'
       ? i18n.t('projectAgent.policy.autoPool') : i18n.t('projectAgent.model.botOnly');
   return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''}>
-    <div className="bot-model-control-row">
+    <div className={`bot-model-control-row${hasEffort ? ' has-effort' : ''}`}>
       <CascadingMenu className="bot-model-picker" value={model?.id ?? ''} groups={groups}
         triggerLabel={model?.label}
         onChange={changeModel} disabled={busy || models.length === 0} menuPlacement={compact ? 'up' : 'down'}
@@ -56,7 +57,10 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
           onFastModeChange={() => {}} onEffortChange={value => onChange(botFixedModelPolicy(policy, role, model, value))} />
       ) : null}
     </div>
-    {!compact ? <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
-      {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p> : null}
+    {!compact ? <div className={`bot-model-captions${hasEffort ? ' has-effort' : ''}`}>
+      <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
+        {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p>
+      {hasEffort ? <p className="bot-model-source">{isZh ? '推理强度' : 'Reasoning effort'}</p> : null}
+    </div> : null}
   </div>;
 }

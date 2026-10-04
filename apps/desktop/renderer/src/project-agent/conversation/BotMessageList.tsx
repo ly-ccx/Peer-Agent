@@ -112,6 +112,10 @@ export function BotMessageList({
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
         <div key={conversationRowKey(row)} className="bot-thread-row" data-conversation-row={conversationRowKey(row)}>
+        {row.type === 'activity' || row.type === 'message' && (row.message.kind === 'agent_reply'
+          || row.message.cards.some(card => card.kind === 'agent_stopped')) ? (
+          <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /><span>{label}</span></div>
+        ) : null}
         {row.type === 'activity' ? <LiveReply activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
@@ -119,6 +123,8 @@ export function BotMessageList({
             key={row.message.id}
             message={row.message}
             replied={replied.has(row.message.id)}
+            quoteAuthor={label}
+            onJump={onJump}
             highlighted={highlightedId === row.message.id}
             i18n={i18n}
             onRetry={onRetry}

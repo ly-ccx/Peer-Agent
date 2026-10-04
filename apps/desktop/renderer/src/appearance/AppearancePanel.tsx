@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { SettingsGroup } from '../ui/settings/SettingsGroup';
 import { useAppearance } from './AppearanceProvider';
 import { PALETTE_LABELS, PALETTE_SWATCHES } from './themePresets';
 import { AppearanceSlider } from './AppearanceSlider';
@@ -61,19 +62,18 @@ export function AppearancePanel({
         </header>
       ) : null}
 
+      {!onBack ? <header className="frost-page-heading"><h1>{i18n.t('appearance.title')}</h1><p>{i18n.t('appearance.subtitle')}</p></header> : null}
       {/* 1. 主题模式缩略图 */}
-      <section className="appearance-group">
-        <div className="appearance-field-label">{i18n.t('appearance.mode')}</div>
+      <SettingsGroup className="appearance-group" title={i18n.t('appearance.mode')}>
         <ThemeModeCards
           i18n={i18n}
           mode={settings.mode}
           onChange={setMode}
         />
-      </section>
+      </SettingsGroup>
 
       {/* 2. 实时双栏预览 */}
-      <section className="appearance-group">
-        <div className="appearance-field-label">{i18n.t('appearance.preview')}</div>
+      <SettingsGroup className="appearance-group" title={i18n.t('appearance.preview')}>
         <ThemeLivePreview
           i18n={i18n}
           activeScheme={activeScheme}
@@ -81,11 +81,10 @@ export function AppearancePanel({
           previewColors={previewColors}
           diffMarkerMode={settings.diffMarkerMode}
         />
-      </section>
+      </SettingsGroup>
 
       {/* 3. 统一 settings list：字号 / 代码字号 / 差异标记 */}
-      <section className="appearance-group">
-        <div className="appearance-field-label">{i18n.t('appearance.settingsList')}</div>
+      <SettingsGroup className="appearance-group" title={i18n.t('appearance.settingsList')}>
         <div className="appearance-settings-list appearance-settings-card">
           <div className="appearance-settings-row">
             <div className="appearance-settings-row-meta">
@@ -145,7 +144,7 @@ export function AppearancePanel({
             </div>
           </div>
         </div>
-      </section>
+      </SettingsGroup>
 
       <footer className="appearance-footer">
         <button type="button" className="appearance-reset" onClick={reset}>

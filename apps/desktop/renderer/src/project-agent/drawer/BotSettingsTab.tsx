@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
+import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotHostControl } from './BotHostControl';
 import type { BotModelsControlState } from '../state/useBotModels';
 import { BotApprovalFields, BotPolicyFields } from './BotPolicyFields';
@@ -183,8 +184,7 @@ export function BotSettingsTab({
       <BotPolicyFields profile={profile} models={modelControls.models} views={modelControls.views} busy={busy || modelControls.busy} i18n={i18n}
         onChange={patch => { if (patch.modelPolicy) void modelControls.save(patch.modelPolicy); }} />
       {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
-      <section className="bot-settings-section bot-settings-identity">
-        <h2>{i18n.t('projectAgent.drawer.settings.appearance')}</h2>
+      <SettingsGroup className="bot-settings-section bot-settings-identity" title={i18n.t('projectAgent.drawer.settings.appearance')}>
       <div className="bot-settings-field">
         <label htmlFor="bot-settings-name">{i18n.t('projectAgent.drawer.settings.name')}</label>
         <div className="bot-settings-name-row">
@@ -225,9 +225,8 @@ export function BotSettingsTab({
           {profile.avatar.kind === 'image' ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.avatarColorImageHint')}</p> : null}
         </div>
       </div>
-      </section>
-      <section className="bot-settings-section">
-        <h2>{i18n.t('projectAgent.drawer.settings.workflow')}</h2>
+      </SettingsGroup>
+      <SettingsGroup className="bot-settings-section bot-settings-workflow" title={i18n.t('projectAgent.drawer.settings.workflow')}>
       <div className="bot-settings-row">
         <span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span>
         <Dropdown
@@ -246,7 +245,7 @@ export function BotSettingsTab({
           onCheckedChange={value => { void savePolicy({ autoHandoffOnPolicyAccept: value }); }} />
       </div>
       <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
-      </section>
+      </SettingsGroup>
       <details className="bot-settings-disclosure bot-runtime-settings">
         <summary>{i18n.t('projectAgent.drawer.settings.runtime')}<PeerIcon name="chevronDown" size={14} /></summary>
         <div className="bot-settings-disclosure-body">

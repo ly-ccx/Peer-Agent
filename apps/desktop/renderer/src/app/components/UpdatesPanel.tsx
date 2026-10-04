@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdateChannelPreference } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { useUpdater } from '../state/useUpdater';
+import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { Dropdown } from './Dropdown';
 
 function ExternalLinkIcon() {
@@ -44,13 +45,8 @@ export function UpdatesPanel({ i18n }: { readonly i18n: I18nRuntime }) {
 
   return (
     <div className="general-panel">
-      <section className="llm-instructions-card general-card">
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('updater.settings.title')}</h3>
-            <p>{i18n.t('updater.settings.description')}</p>
-          </div>
-        </div>
+      <header className="frost-page-heading"><h1>{i18n.locale.startsWith('zh') ? '更新与关于' : 'Updates & about'}</h1></header>
+      <SettingsGroup title={i18n.t('updater.settings.title')} description={i18n.t('updater.settings.description')} className="general-card">
 
         <div className="general-setting-row">
           <div className="general-setting-copy">
@@ -111,13 +107,9 @@ export function UpdatesPanel({ i18n }: { readonly i18n: I18nRuntime }) {
         {!status?.enabled ? (
           <p className="general-setting-error">{i18n.t('updater.settings.disabledHint')}</p>
         ) : null}
-      </section>
+      </SettingsGroup>
 
-      <section className="llm-instructions-card general-card">
-        <div className="general-setting-copy">
-          <h3>{i18n.t('updater.settings.help.title')}</h3>
-          <p>{i18n.t('updater.settings.help.description')}</p>
-        </div>
+      <SettingsGroup title={i18n.t('updater.settings.help.title')} description={i18n.t('updater.settings.help.description')} className="general-card">
         <div className="settings-help-links">
           <button
             type="button"
@@ -144,7 +136,7 @@ export function UpdatesPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             {i18n.t('updater.settings.help.releaseNotes')}
           </button>
         </div>
-      </section>
+      </SettingsGroup>
     </div>
   );
 }

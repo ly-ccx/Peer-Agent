@@ -9,7 +9,6 @@ export function ReplyAnchors({ ids, anchors, i18n, onJump }: {
 }) {
   return ids.map(id => (
     <button key={id} type="button" className="bot-reply-bar" title={anchors.get(id) || id} onClick={() => onJump(id)}>
-      <PeerIcon name="back" size={15} />
       <span className="bot-reply-bar-copy">
         <span className="bot-reply-bar-label">{i18n.t('projectAgent.chat.replyTo')}</span>
         <span className="bot-reply-bar-excerpt">{anchors.get(id) || id}</span>

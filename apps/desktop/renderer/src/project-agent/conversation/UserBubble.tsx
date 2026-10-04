@@ -7,6 +7,8 @@ export function UserBubble({
   replied,
   highlighted = false,
   i18n,
+  quoteAuthor,
+  onJump,
   onRetry,
   onLocateSession,
 }: {
@@ -14,6 +16,8 @@ export function UserBubble({
   readonly replied: boolean;
   readonly highlighted?: boolean;
   readonly i18n: I18nRuntime;
+  readonly quoteAuthor: string;
+  readonly onJump: (messageId: string) => void;
   readonly onRetry: (inputId: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
 }) {
@@ -26,17 +30,23 @@ export function UserBubble({
   );
   return (
     <article className={`bot-user${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`} data-kind="user_input">
-      <span className="bot-message-role">{i18n.t('projectAgent.chat.you')}</span>
       <div className="bot-user-content">
-      {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
-      {message.attachments?.length ? <BotAttachments attachments={message.attachments} i18n={i18n} /> : message.images?.length ? (
-        <div className="bot-user-images">
-          {message.images.map((image) => (
-            <img key={image.id} src={image.dataUrl} alt={image.name} />
-          ))}
-        </div>
-      ) : null}
-      {message.content ? <p className="bot-user-text">{message.content}</p> : null}
+        {excerpt ? (
+          <button type="button" className="bot-user-quote bot-reply-bar" onClick={() => onJump(message.quoteRefs[0])}>
+            <span className="bot-reply-bar-copy">
+              <span className="bot-reply-bar-label">{quoteAuthor}</span>
+              <span className="bot-reply-bar-excerpt">{excerpt}</span>
+            </span>
+          </button>
+        ) : null}
+        {message.attachments?.length ? <BotAttachments attachments={message.attachments} i18n={i18n} /> : message.images?.length ? (
+          <div className="bot-user-images">
+            {message.images.map((image) => (
+              <img key={image.id} src={image.dataUrl} alt={image.name} />
+            ))}
+          </div>
+        ) : null}
+        {message.content ? <p className="bot-user-text">{message.content}</p> : null}
       </div>
       <div className="bot-user-marks">
         {message.pending === 'received' || (!message.pending && message.inputId && !replied && message.dispositions.length === 0)

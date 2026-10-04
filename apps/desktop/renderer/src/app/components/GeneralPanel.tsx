@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { projectAgentShellOf, publishProjectAgentShell, type ProjectAgentShell } from '../../project-agent/onboarding/botShell';
 import { Switch } from '../../ui/boolean-controls/Switch';
+import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotTimeField } from './BotTimeField';
 import { Dropdown } from './Dropdown';
 
@@ -213,9 +214,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
         <h1>{i18n.t('settings.general')}</h1>
         <p>{i18n.t('settings.general.description')}</p>
       </header>
-      <section className="general-section" aria-labelledby="general-interface-heading">
-        <h2 id="general-interface-heading">{i18n.t('settings.general.interfaceAndLanguage')}</h2>
-        <div className="general-card">
+      <SettingsGroup title={i18n.t('settings.general.interfaceAndLanguage')} description={i18n.t('settings.general.interfaceAndLanguage.description')} className="general-section">
           <div className="general-setting-row">
             <div className="general-setting-copy">
               <h3>{i18n.t('settings.shell.title')}</h3>
@@ -266,14 +265,8 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
               />
             </div>
           </div>
-        </div>
-      </section>
-      <section className="general-section" aria-labelledby="general-bots-heading">
-        <div className="general-section-heading">
-          <h2 id="general-bots-heading">{i18n.t('settings.bots.title')}</h2>
-          <p>{i18n.t('settings.bots.description')}</p>
-        </div>
-        <div className="general-card">
+      </SettingsGroup>
+      <SettingsGroup title={i18n.t('settings.bots.title')} description={i18n.t('settings.bots.description')} className="general-section">
           <div className="general-setting-row">
             <div className="general-setting-copy">
               <h3>{i18n.t('settings.bots.proactivity')}</h3>
@@ -292,24 +285,19 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
               />
             </div>
           </div>
-          <div className="general-quiet-setting">
-            <div className="general-setting-row">
-              <div className="general-setting-copy">
-                <h3>{i18n.t('settings.bots.quietHours')}</h3>
-                <p>{i18n.t('settings.bots.quietHours.description')}</p>
-              </div>
+          <div className="general-setting-row general-quiet-setting">
+            <div className="general-setting-copy">
+              <h3>{i18n.t('settings.bots.quietHours')}</h3>
+              <p>{i18n.t('settings.bots.quietHours.description')}</p>
+            </div>
+            <div className="general-quiet-controls">
               <Switch checked={quietEnabled} disabled={controlsDisabled} aria-label={i18n.t('settings.bots.quietHours')}
                 onCheckedChange={value => { void saveBots({ quietEnabled: value }); }} />
-            </div>
-            <div className="general-bots-hours">
-              <div className="general-time-setting">
-                <span>{i18n.t('settings.bots.quietFrom')}</span>
-                <BotTimeField value={quietStart} disabled={controlsDisabled} i18n={i18n} label={i18n.t('projectAgent.settings.quietStart')}
+              <div className="general-bots-hours">
+                <BotTimeField value={quietStart} disabled={controlsDisabled || !quietEnabled} i18n={i18n} label={i18n.t('projectAgent.settings.quietStart')}
                   onChange={value => { void saveBots({ quietStart: value }); }} />
-              </div>
-              <div className="general-time-setting">
-                <span>{i18n.t('settings.bots.quietUntil')}</span>
-                <BotTimeField value={quietEnd} disabled={controlsDisabled} i18n={i18n} label={i18n.t('projectAgent.settings.quietEnd')}
+                <span aria-hidden="true">–</span>
+                <BotTimeField value={quietEnd} disabled={controlsDisabled || !quietEnabled} i18n={i18n} label={i18n.t('projectAgent.settings.quietEnd')}
                   onChange={value => { void saveBots({ quietEnd: value }); }} />
               </div>
             </div>
@@ -322,8 +310,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
             <BotTimeField value={digestTime} disabled={controlsDisabled} i18n={i18n} label={i18n.t('settings.bots.digestTime')}
               onChange={value => { void saveBots({ digestTime: value }); }} />
           </div>
-        </div>
-      </section>
+      </SettingsGroup>
       {error ? <p className="general-setting-error" role="alert">{error}</p> : null}
     </div>
   );

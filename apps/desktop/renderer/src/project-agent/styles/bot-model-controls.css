@@ -1,5 +1,5 @@
 .bot-model-control { min-width: 0; }
-.bot-model-control-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.bot-model-control-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .bot-model-picker { flex: 1; min-width: 0; }
 .bot-model-picker > button { width: 100%; min-width: 0; font-size: 12px; }
 .bot-model-picker > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -26,3 +26,13 @@
 
 .bot-composer-bar .bot-model-picker > button { width: 100%; height: 30px; justify-content: flex-start; gap: 5px; background: transparent; color: var(--graphite-soft); font-size: 12px; border-radius: var(--radius-sm); }
 .bot-composer-bar .reasoning-effort-trigger { width: auto; height: 30px; padding: 4px 7px; background: transparent; color: var(--graphite-soft); font-size: 12px; border-radius: var(--radius-sm); }
+
+.bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-control-row,
+.bot-drawer-body .bot-model-captions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-control-row.has-effort,
+.bot-drawer-body .bot-model-captions.has-effort { grid-template-columns: minmax(0, 1fr) 80px; }
+.bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-picker > button,
+.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger { height: 35px; min-height: 35px; width: 100%; padding: 0 9px; border: 1px solid var(--chrome-hairline); border-radius: 8px; background: color-mix(in srgb, var(--control-fill) 40%, var(--paper-sheet)); color: var(--graphite-base); font-size: .75rem; }
+.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger:hover:not(:disabled) { background: var(--control-fill); }
+.bot-model-captions .bot-model-source { margin-top: 5px; font-size: .6875rem; }
+.bot-model-captions .bot-model-source:last-child:not(:first-child) { text-align: center; }

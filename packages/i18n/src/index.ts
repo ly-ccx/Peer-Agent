@@ -550,6 +550,7 @@ export type TranslationKey =
   | 'settings.general.description'
   | 'settings.general.loadFailed'
   | 'settings.general.interfaceAndLanguage'
+  | 'settings.general.interfaceAndLanguage.description'
   | 'settings.replyLanguage'
   | 'settings.bots.title'
   | 'settings.bots.description'
@@ -570,6 +571,7 @@ export type TranslationKey =
   | 'settings.replyLanguage.auto'
   | 'settings.replyLanguage.autoShort'
   | 'settings.git'
+  | 'settings.git.branchNaming'
   | 'settings.git.branchPrefix'
   | 'settings.git.branchPrefix.description'
   | 'settings.fallbackVision'
@@ -1243,13 +1245,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.archived.working': '处理中…',
     'settings.backToChat': '返回对话',
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
-    'settings.language.description': '选择界面显示语言。',
-    'settings.general.description': '调整界面、语言和机器人的默认偏好。',
+    'settings.language.description': '菜单、按钮和设置使用的语言。',
+    'settings.general.description': '让 Peer 按照你的习惯工作。',
     'settings.general.loadFailed': '无法读取当前设置，请重新打开设置页面。',
     'settings.general.interfaceAndLanguage': '界面与语言',
+    'settings.general.interfaceAndLanguage.description': '选择熟悉的入口和表达方式。',
     'settings.replyLanguage': '回复语言',
-    'settings.bots.title': '机器人',
-    'settings.bots.description': '通知节奏与默认主动性；主动性可在机器人设置中单独调整。',
+    'settings.bots.title': '通知与节奏',
+    'settings.bots.description': '需要你时提醒，其他时候安静推进。',
     'settings.bots.proactivity': '主动性',
     'settings.bots.proactivity.description': '设置机器人主动汇报与跟进的频率。',
     'settings.bots.proactivity.quiet': '安静',
@@ -1262,11 +1265,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.bots.quietUntil': '结束',
     'settings.bots.digestTime': '今日小结',
     'settings.bots.digestTime.description': '到这个时间，把暂存的消息收成一条。',
-    'settings.replyLanguage.description': '选择 AI 回复时使用的语言，避免回复语言混乱。',
+    'settings.replyLanguage.description': '机器人与你交流时使用的语言。',
     'settings.replyLanguage.followInterface': '跟随界面语言',
     'settings.replyLanguage.auto': '自动（跟随提问语言）',
     'settings.replyLanguage.autoShort': '跟随提问语言',
     'settings.git': 'Git',
+    'settings.git.branchNaming': '分支命名',
     'settings.git.branchPrefix': '分支前缀',
     'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
     'settings.fallbackVision': '兜底多模态模型',
@@ -2354,13 +2358,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.archived.working': 'Working…',
     'settings.backToChat': 'Back to chat',
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',
-    'settings.language.description': 'Choose the display language for the interface.',
-    'settings.general.description': 'Set your interface, language and default bot preferences.',
+    'settings.language.description': 'The language used in menus, buttons and settings.',
+    'settings.general.description': 'Make Peer work the way you do.',
     'settings.general.loadFailed': 'Could not load current settings. Please reopen Settings.',
     'settings.general.interfaceAndLanguage': 'Interface & language',
+    'settings.general.interfaceAndLanguage.description': 'Choose a familiar starting point and language.',
     'settings.replyLanguage': 'Reply language',
-    'settings.bots.title': 'Bots',
-    'settings.bots.description': 'Notification timing and default proactivity. Each bot can override proactivity.',
+    'settings.bots.title': 'Notifications & rhythm',
+    'settings.bots.description': 'Hear from Peer when you are needed; let it work quietly otherwise.',
     'settings.bots.proactivity': 'How often to speak up',
     'settings.bots.proactivity.description': 'Choose how often bots report progress and follow up.',
     'settings.bots.proactivity.quiet': 'Quiet',
@@ -2373,11 +2378,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.bots.quietUntil': 'Until',
     'settings.bots.digestTime': 'Daily summary',
     'settings.bots.digestTime.description': 'At this time, held notes become one message.',
-    'settings.replyLanguage.description': 'Choose the language the AI replies in, to avoid mixed-language responses.',
+    'settings.replyLanguage.description': 'The language bots use when talking with you.',
     'settings.replyLanguage.followInterface': 'Follow interface language',
     'settings.replyLanguage.auto': 'Auto (match the question)',
     'settings.replyLanguage.autoShort': 'Match the question',
     'settings.git': 'Git',
+    'settings.git.branchNaming': 'Branch naming',
     'settings.git.branchPrefix': 'Branch prefix',
     'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
     'settings.fallbackVision': 'Fallback vision model',
