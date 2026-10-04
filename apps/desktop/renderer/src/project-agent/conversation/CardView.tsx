@@ -44,12 +44,13 @@ function CardItem({
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const resolved = done || card.resolvedState === 'resolved';
+  if (card.kind === 'question' && resolved) return null;
   return (
-    <section className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
+    <section className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'question' ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
       {card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
-      </> : <p>{card.content}</p>}
+      </> : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved || !card.actions?.length ? null : (
         <div className="bot-card-actions">
           {card.actions.map((action, index) => (

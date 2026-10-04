@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import { isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
+import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
 import { createConversationPager } from './conversationPager.ts';
 import {
@@ -156,11 +157,11 @@ export function useBotConversation(workspaceId: string) {
     if (arrived) setAwaitingSince(null);
   }, [awaitingSince, messages]);
 
-  const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string) => {
+  const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string, answerTo?: string) => {
     const ticket = generationRef.current;
     setPending((current) => {
       const rest = current.filter((item) => item.inputId !== inputId);
-      return [...rest, { inputId, text, quoteRefs, createdAt, state: 'sending' }];
+      return [...rest, { inputId, text, quoteRefs, createdAt, state: 'sending', ...(answerTo ? { answerTo } : {}) }];
     });
     try {
       const result = await clientApi.projectAgentSubmitInput({
@@ -169,6 +170,7 @@ export function useBotConversation(workspaceId: string) {
         text,
         surface: 'desktop',
         ...(quoteRefs.length > 0 ? { quoteRefs } : {}),
+        ...(answerTo ? { answerTo } : {}),
       });
       if (generationRef.current !== ticket) return;
       if (!result?.ok) {
@@ -192,13 +194,14 @@ export function useBotConversation(workspaceId: string) {
     if (!trimmed) return;
     const inputId = crypto.randomUUID();
     setFollowRequestId(value => value + 1);
-    await submit(inputId, trimmed, quoteRefs, new Date().toISOString());
-  }, [submit]);
+    const answerTo = questionForInput(applyOptimistic(messages, pending), quoteRefs);
+    await submit(inputId, trimmed, quoteRefs, new Date().toISOString(), answerTo);
+  }, [submit, messages, pending]);
 
   const retry = useCallback(async (inputId: string) => {
     const item = pending.find((entry) => entry.inputId === inputId);
     if (!item) return;
-    await submit(item.inputId, item.text, item.quoteRefs, item.createdAt);
+    await submit(item.inputId, item.text, item.quoteRefs, item.createdAt, item.answerTo);
   }, [pending, submit]);
 
   useEffect(() => { if (!isActivityRunning(activity)) setStopping(false); }, [activity]);
@@ -206,7 +209,7 @@ export function useBotConversation(workspaceId: string) {
   const offered = familiarizeOffer && !messages.some(message => ['user_input', 'agent_reply'].includes(message.kind))
     ? [...messages, familiarizeMessage(familiarizeOffer, messages[messages.length - 1]?.createdAt || '')]
     : messages;
-  const shown = applyOptimistic(offered, pending);
+  const shown = hideAcknowledgedQuestions(applyOptimistic(offered, pending));
   const rows: ConversationDisplayRow[] = conversationRows(shown);
   const live = visibleBotActivity(activity, shown);
   if (live) rows.push({ type: 'activity', activity: live });

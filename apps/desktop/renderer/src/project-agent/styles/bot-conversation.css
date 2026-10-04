@@ -48,9 +48,9 @@
 .bot-thread-row {
   display: flex;
   flex-direction: column;
-  padding-bottom: 12px;
+  padding-bottom: var(--space-6, 24px);
   width: 100%;
-  max-width: 800px;
+  max-width: var(--chat-content-max, 800px);
   align-self: center;
 }
 
@@ -197,16 +197,16 @@
 .bot-user,
 .bot-reply,
 .bot-system {
-  max-width: min(720px, 100%);
+  max-width: 100%;
   min-width: 0;
 }
 
 .bot-user {
-  align-self: flex-end;
+  align-self: flex-start;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: min(560px, 80%);
+  width: 100%;
   padding: 0;
   background: transparent;
 }
@@ -215,14 +215,19 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--paper-sheet);
+  padding: 0;
+  background: transparent;
+}
+
+.bot-message-role {
+  color: var(--azure-seal);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption, 11px);
+  font-weight: 600;
 }
 
 .bot-user-marks {
-  justify-content: flex-end;
-  padding-inline: 4px;
+  justify-content: flex-start;
 }
 
 .bot-user-marks:empty {
@@ -345,7 +350,11 @@
   flex-direction: column;
   gap: 12px;
   align-self: flex-start;
-  width: fit-content;
+  width: 100%;
+  background: var(--za-message-bg, var(--paper-sheet));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+  border-radius: var(--ui-radius-panel, var(--radius-md));
+  padding: var(--space-4, 16px) var(--space-5, 20px);
   overflow-wrap: anywhere;
 }
 
@@ -359,13 +368,13 @@
 
 .bot-reply-bar {
   display: flex;
-  gap: 10px;
+  gap: 7px;
   align-items: center;
   align-self: flex-start;
   width: fit-content;
-  max-width: min(420px, 100%);
+  max-width: min(520px, 100%);
   min-width: 0;
-  padding: 9px 10px;
+  padding: 5px 8px;
   border: 1px solid var(--chrome-hairline);
   border-radius: 8px;
   background: var(--paper-sheet);
@@ -383,12 +392,14 @@
 .bot-reply-bar-copy {
   display: flex;
   flex: 1;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
 }
 
 .bot-reply-bar-label {
+  flex-shrink: 0;
   color: var(--graphite-soft);
   font-size: 11px;
   line-height: 1.4;
@@ -398,7 +409,7 @@
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   color: var(--graphite-base);
   font-size: 13px;
   line-height: 1.5;
@@ -447,8 +458,8 @@
 
 .bot-reply-body {
   color: var(--graphite-base);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--ui-font-body, 14px);
+  line-height: var(--ui-line-body, 1.68);
 }
 
 .bot-card {
@@ -464,6 +475,37 @@
 
 .bot-card.is-resolved {
   opacity: 0.72;
+}
+
+.bot-question {
+  gap: 8px;
+  padding: 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.bot-question > p {
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-caption, 11px);
+}
+
+.bot-question .bot-card-actions button,
+.bot-question .bot-card-actions button:first-child {
+  justify-content: flex-start;
+  border: 1px solid var(--chrome-hairline);
+  background: var(--paper-sunken);
+  color: var(--graphite-base);
+  border-radius: var(--ui-radius-control, 8px);
+  padding: 7px 10px;
+  max-width: 100%;
+  text-align: left;
+  opacity: 1;
+}
+
+.bot-question .bot-card-actions button:hover {
+  background: var(--paper-hover);
+  border-color: var(--graphite-soft);
 }
 
 .bot-composer {

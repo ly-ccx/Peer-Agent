@@ -3,6 +3,7 @@ import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { PeerIcon } from '../../ui/icons';
 import { ReplyAnchors } from './ReplyAnchors';
+import { toolPresentation } from '../drawer/agentProcess';
 
 export function LiveReply({ activity, i18n, anchors, onJump }: { readonly activity: ProjectAgentActivity; readonly i18n: I18nRuntime; readonly anchors: ReadonlyMap<string, string>; readonly onJump: (id: string) => void }) {
   const hasText = activity.replyText || activity.segments.some(segment => segment.kind === 'text' && segment.text);
@@ -14,8 +15,8 @@ export function LiveReply({ activity, i18n, anchors, onJump }: { readonly activi
         <div aria-live="off" className="bot-reply-body" key={segment.id}><MarkdownMessage content={segment.text} /></div>
       ) : (
         <div className="bot-live-tool" data-status={segment.status} key={segment.id}>
-          <PeerIcon name={segment.name.includes('read') || segment.name.includes('search') ? 'fileText' : 'terminal'} size={14} />
-          <span>{i18n.t(segment.status === 'running' ? 'projectAgent.chat.toolRunning' : segment.status === 'error' ? 'projectAgent.chat.toolFailed' : 'projectAgent.chat.toolDone', { tool: toolLabel(segment.name, i18n) })}</span>
+          <PeerIcon name={toolPresentation(segment.name).icon} size={14} />
+          <span>{i18n.t(segment.status === 'running' ? 'projectAgent.chat.toolRunning' : segment.status === 'error' ? 'projectAgent.chat.toolFailed' : 'projectAgent.chat.toolDone', { tool: i18n.t(toolPresentation(segment.name).labelKey) })}</span>
         </div>
       ))}
       {activity.replyText ? <div aria-live="off" className="bot-reply-body"><MarkdownMessage content={activity.replyText} /></div> : null}
@@ -23,12 +24,4 @@ export function LiveReply({ activity, i18n, anchors, onJump }: { readonly activi
       {hasText && !activeTool ? <span className="bot-live-indicator" aria-hidden="true" /> : null}
     </article>
   );
-}
-
-function toolLabel(name: string, i18n: I18nRuntime): string {
-  if (/^(read_file|read_files|list_directory)$/.test(name)) return i18n.t('projectAgent.chat.toolLabel.read');
-  if (/^(search_files|search_text|search|rg)$/.test(name)) return i18n.t('projectAgent.chat.toolLabel.search');
-  if (/^(write_file|edit_file|apply_patch)$/.test(name)) return i18n.t('projectAgent.chat.toolLabel.edit');
-  if (/^(bash|run_command|exec_command|shell)$/.test(name)) return i18n.t('projectAgent.chat.toolLabel.command');
-  return name;
 }
