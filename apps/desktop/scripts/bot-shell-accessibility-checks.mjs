@@ -122,7 +122,7 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   assert.ok(report.contrast.every(sample => sample.ratio >= 4.5), 'small readable list text contrast must reach 4.5:1');
   checks.push('actual list name/preview/time contrast reaches 4.5:1 in both light/dark and Frost/Catppuccin');
 
-  await page.locator('.bot-me-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const quiet = page.getByRole('switch', { name: '安静时段', exact: true }); await quiet.waitFor();
   const previous = await quiet.getAttribute('aria-checked'); await quiet.focus(); await quiet.press('Space');
   await until(() => quiet.getAttribute('aria-checked'), value => value !== previous);
@@ -147,7 +147,7 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   await quick.getByLabel('Quick Chat message', { exact: true }).waitFor();
   assert.equal(await quick.locator('select').count(), 0);
   checks.push('English settings/drawer/Quick Chat labels refresh from persisted locale; bot picker is custom');
-  await page.bringToFront(); await page.locator('.bot-me-button').click();
+  await page.bringToFront(); await page.locator('.bot-app-menu-button').click();
   await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
   await choose('Language', '简体中文');
   await page.locator('.settings-nav').getByRole('button', { name: '设置', exact: true }).click();

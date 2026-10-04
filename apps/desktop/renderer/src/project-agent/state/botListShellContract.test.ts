@@ -5,7 +5,7 @@ import { createI18n } from '@peer-agent/i18n';
 
 const appUrl = new URL('../../App.tsx', import.meta.url);
 const sidebarUrl = new URL('../../chat/components/Sidebar.tsx', import.meta.url);
-const menuUrl = new URL('../MeMenu.tsx', import.meta.url);
+const menuUrl = new URL('../AppMenu.tsx', import.meta.url);
 
 function lineCount(text: string): number {
   if (text.length === 0) return 0;
@@ -49,7 +49,7 @@ test('Sidebar.tsx 行数保持当前壳层', () => {
   assert.equal(lineCount(sidebar), 1152);
 });
 
-test('「我」菜单可以打开历史对话', () => {
+test('应用设置菜单可以打开历史对话', () => {
   const menu = readFileSync(menuUrl, 'utf8');
   assert.match(menu, /projectAgent\.list\.history/);
   assert.match(menu, /onOpenHistory/);

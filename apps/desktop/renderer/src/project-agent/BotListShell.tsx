@@ -9,7 +9,7 @@ import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
 import { botAvatarMood } from './state/botAvatarState';
 import { BotList } from './BotList';
-import { MeMenu } from './MeMenu';
+import { AppMenu } from './AppMenu';
 import { NewBotSheet } from './NewBotSheet';
 import { BotConversation } from './conversation/BotConversation';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
@@ -227,10 +227,7 @@ export function BotListShell({
       }
       const meta = event.metaKey || event.ctrlKey;
       if (list.sheetOpen) return;
-      if (list.menuOpen) {
-        if (event.key === 'Escape') list.setMenuOpen(false);
-        return;
-      }
+      if (list.menuOpen) return;
       if (pageOverride) return;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         if (event.target !== searchRef.current) return;
@@ -343,7 +340,7 @@ export function BotListShell({
           <p className="bot-list-hint">{i18n.t('projectAgent.list.emptyHint')}</p>
         ) : null}
         <footer className="bot-column-footer">
-          <MeMenu
+          <AppMenu
             open={list.menuOpen}
             i18n={i18n}
             onToggle={() => list.setMenuOpen(!list.menuOpen)}
@@ -364,7 +361,7 @@ export function BotListShell({
               list.setMenuOpen(false);
               onOpenCapabilities();
             }}
-            metadata={<VersionBadge i18n={i18n} />}
+            metadata={<VersionBadge i18n={i18n} variant="bot-footer" />}
           />
         </footer>
         <div

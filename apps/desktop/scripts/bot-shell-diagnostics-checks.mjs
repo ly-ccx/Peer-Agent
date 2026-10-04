@@ -8,7 +8,7 @@ export async function checkBotShellDiagnostics({ page, report, exportFile, fixtu
   assert.equal(before.ok, true); assert.equal(before.report.bots.length, fixture.bots.length);
   const invalid = await page.evaluate(() => window.peerAgent.projectAgentDiagnostics({ action: 'export', filePath: '/untrusted/destination' }));
   assert.deepEqual(invalid, { ok: false, code: 'INVALID_INPUT' }); assert.equal(existsSync(exportFile), false);
-  await page.locator('.bot-me-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page.locator('.settings-nav').getByRole('button', { name: '开发者', exact: true }).click();
   await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
   await page.locator('.project-diagnostics__summary').waitFor();
