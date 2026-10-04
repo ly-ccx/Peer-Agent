@@ -715,7 +715,7 @@
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
   border-radius: 10px;
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--graphite-base) 12%, transparent);
+  box-shadow: none;
 }
 
 .bot-app-menu-menu button {
