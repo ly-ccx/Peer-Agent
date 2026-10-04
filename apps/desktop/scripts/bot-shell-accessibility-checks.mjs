@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { modelMenuChannelName } from '@peer-agent/protocol';
 
 /** Actual production DOM, keyboard and persistence; no replacement of product results. */
 export async function checkBotShellAccessibility({ page, app, until, report, captureDirectory }) {
@@ -164,8 +165,8 @@ async function checkSettings({ page, until, report, captureDirectory }) {
   const runtime = form.locator('.bot-runtime-settings');
   assert.equal(await advanced.getAttribute('open'), null);
   assert.equal(await runtime.getAttribute('open'), null);
-  assert.equal(await form.getByRole('button', { name: '对话模型', exact: true }).isVisible(), true);
-  assert.equal(await form.getByRole('button', { name: '探索', exact: true }).count(), 0);
+  assert.equal(await form.locator('.bot-model-settings-row').first().locator('.pa-cascading-trigger').isVisible(), true);
+  assert.equal(await advanced.locator('.pa-cascading-trigger').first().isVisible(), false);
   await checkBotModels({ page, until, report, captureDirectory, workspaceId, original });
   const handoff = form.getByRole('switch', { name: '策略签收后自动合回', exact: true });
   const switchPaint = await handoff.evaluate(node => {
@@ -280,31 +281,45 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
   assert.ok(first && second, 'production model projection must expose both configured fixtures');
   assert.equal(await form.locator(':scope > section').first().getByRole('heading', { name: '机器人模型', exact: true }).count(), 1);
   await settingsFirstScreen(page);
-  const choose = async (role, label) => {
-    await form.getByRole('button', { name: role, exact: true }).click();
-    await page.getByRole('option', { name: label, exact: true }).click();
+  const row = role => form.locator('.bot-model-settings-row').filter({ has: page.getByText(role, { exact: true }) });
+  const picker = role => row(role).locator('.pa-cascading-trigger');
+  const choose = async (role, model) => {
+    await picker(role).click();
+    const group = model ? modelMenuChannelName(model.providerName, model.model, model.authMethod, true) : '默认与档位';
+    await page.getByRole('menuitem', { name: group, exact: true }).click();
+    await page.getByRole('menuitemradio', { name: model?.label || '跟随全局', exact: true }).click();
   };
-  await choose('任务执行', second.label);
+  await choose('任务执行', second);
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.session_worker?.modelProviderId === second.id);
-  await choose('对话模型', first.label);
+  await choose('对话模型', first);
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === first.id);
+  const strength = row('对话模型').locator('.reasoning-effort-trigger');
+  await until(() => strength.isEnabled(), Boolean);
+  await strength.click();
+  const slider = page.getByRole('slider'); await slider.focus(); await slider.press('End');
+  await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.reasoningEffort === 'high');
+  await page.keyboard.press('Escape');
+  assert.equal(await form.isVisible(), true, 'Escape from the strength popover keeps the drawer open');
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.locator('.bot-profile').click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
-  await until(() => form.getByRole('button', { name: '对话模型', exact: true }).textContent(), text => text.includes(first.label));
-  assert.equal(await form.getByRole('button', { name: '任务执行', exact: true }).textContent(), second.label);
+  await until(() => picker('对话模型').textContent(), text => text.includes(first.label));
+  assert.equal(await picker('任务执行').textContent(), second.label);
+  assert.equal(await row('对话模型').locator('.bot-model-control').getAttribute('data-effort'), 'high');
   if (captureDirectory) {
-    await form.getByRole('button', { name: '对话模型', exact: true }).click();
-    await page.getByRole('option', { name: second.label, exact: true }).waitFor();
+    await picker('对话模型').click();
+    await page.getByRole('menuitem', { name: modelMenuChannelName(second.providerName, second.model, second.authMethod, true), exact: true }).click();
+    await page.getByRole('menuitemradio', { name: second.label, exact: true }).waitFor();
     await page.screenshot({ path: path.join(captureDirectory, 'settings-model-picker.png') });
     await page.keyboard.press('Escape');
   }
-  await choose('对话模型', second.label);
+  await choose('对话模型', second);
   const switched = await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === second.id);
   assert.equal(switched.modelPolicy.overrides.project_agent.mode, 'fixed');
-  assert.deepEqual(switched.modelPolicy.overrides.session_worker, { mode: 'fixed', modelProviderId: second.id });
+  assert.equal(switched.modelPolicy.overrides.project_agent.reasoningEffort, 'high');
+  assert.deepEqual(switched.modelPolicy.overrides.session_worker, { mode: 'fixed', modelProviderId: second.id, reasoningEffort: 'low' });
   assert.deepEqual(switched.modelPolicy.overrides.verifier, original.modelPolicy?.overrides?.verifier);
-  await choose('对话模型', '跟随全局');
+  await choose('对话模型', null);
   const inherited = await until(() => getBot(workspaceId), profile => !profile.modelPolicy?.overrides?.project_agent);
   assert.deepEqual(inherited.modelPolicy.overrides.session_worker, switched.modelPolicy.overrides.session_worker);
   assert.deepEqual(await globalConfig(), globalBefore, 'bot model selection must not change the global catalogue or routing');
@@ -316,11 +331,13 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.locator('.bot-profile').click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
-  await until(() => form.getByRole('button', { name: '任务执行', exact: true }).textContent(), text => text === '跟随全局');
-  report.botModelSettings = { fixedSelectionSaved: true, reopenRetained: true, modelSwitchSaved: true, inheritanceRestored: true,
+  const restored = await page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).modelViews, workspaceId);
+  assert.equal(restored.session_worker.resolution.ok, true);
+  await until(() => row('任务执行').locator('.bot-model-control').getAttribute('data-model-id'), id => id === restored.session_worker.resolution.selection.modelProviderId);
+  report.botModelSettings = { fixedSelectionSaved: true, effortSaved: true, effortRetained: true, reopenRetained: true, modelSwitchSaved: true, inheritanceRestored: true,
     independentRoles: true, otherBotUnchanged: true, globalConfigUnchanged: true,
     scope: 'Production model catalogue projection, settings DOM, IPC validation and durable profile; no real model request' };
-  report.accessibility.push('bot model is first: configured choices save and survive reopen; fixed switch and inherit preserve other roles, bots and global routing');
+  report.accessibility.push('bot models and declared reasoning strength save and survive reopen; cascading switch and inherit preserve other roles, bots and global routing');
 }
 
 async function settingsFirstScreen(page) {

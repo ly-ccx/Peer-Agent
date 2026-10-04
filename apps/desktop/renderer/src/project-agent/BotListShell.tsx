@@ -423,7 +423,8 @@ export function BotListShell({
                   ));
                 }}
               >
-                {i18n.t('projectAgent.list.profile')}
+                <PeerIcon name="fileText" size={16} strokeWidth={1.75} />
+                <span>{i18n.t('projectAgent.list.profile')}</span>
               </button>
             </header>
             <BotConversation

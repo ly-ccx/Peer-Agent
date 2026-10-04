@@ -846,6 +846,32 @@
   background: var(--chrome-hover);
 }
 
+.bot-profile {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: var(--ui-radius-control, 6px);
+  background: var(--paper-sheet);
+  font-weight: 500;
+  line-height: 18px;
+  box-shadow: none;
+  user-select: none;
+}
+
+.bot-profile[aria-expanded='true'] {
+  background: var(--paper-sunken);
+  border-color: color-mix(in srgb, var(--graphite-soft) 26%, transparent);
+}
+
+.bot-profile:focus-visible {
+  outline: 2px solid var(--graphite-soft);
+  outline-offset: 2px;
+}
+
 .bot-main-placeholder,
 .bot-main-empty p {
   color: var(--graphite-soft);

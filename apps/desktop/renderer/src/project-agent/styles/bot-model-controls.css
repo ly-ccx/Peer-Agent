@@ -5,7 +5,8 @@
 .bot-model-picker > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bot-model-source { margin: 5px 0 0; color: var(--graphite-soft); font-size: 11px; line-height: 1.5; }
 .bot-model-control .reasoning-effort-trigger { color: var(--graphite-soft); font-size: 12px; flex-shrink: 0; }
-.bot-model-control:not(.is-compact) .bot-model-picker > button { border: 1px solid var(--ui-border-subtle, var(--za-line)); border-radius: var(--radius-md); padding: 9px 10px; background: var(--paper-sheet); }
+.bot-model-control:not(.is-compact) .bot-model-picker > button { max-width: none; justify-content: space-between; border: 1px solid var(--ui-border-subtle, var(--za-line)); border-radius: var(--radius-md); padding: 9px 10px; background: var(--paper-sheet); }
+.bot-model-control:not(.is-compact) .bot-model-picker .pa-cascading-value { flex: 1; text-align: left; }
 .bot-settings-row.bot-model-settings-row { align-items: start; grid-template-columns: 78px minmax(0, 1fr); }
 .bot-model-settings-row > span { padding-top: 9px; }
 .bot-model-toolbar { display: flex; min-width: 0; max-width: 100%; align-items: center; }
