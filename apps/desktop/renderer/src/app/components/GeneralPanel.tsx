@@ -195,99 +195,122 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
 
   return (
     <div className="general-panel">
-      <section className="llm-instructions-card general-card">
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('settings.shell.title')}</h3>
-            <p>{i18n.t('settings.shell.description')}</p>
+      <header className="general-panel-header">
+        <h1>{i18n.t('settings.general')}</h1>
+        <p>{i18n.t('settings.general.description')}</p>
+      </header>
+      <section className="general-section" aria-labelledby="general-interface-heading">
+        <h2 id="general-interface-heading">{i18n.t('settings.general.interfaceAndLanguage')}</h2>
+        <div className="general-card">
+          <div className="general-setting-row">
+            <div className="general-setting-copy">
+              <h3>{i18n.t('settings.shell.title')}</h3>
+              <p>{i18n.t('settings.shell.description')}</p>
+            </div>
+            <div className="general-language-select">
+              <Dropdown
+                value={shell}
+                options={[
+                  { value: 'bots', label: i18n.t('settings.shell.bots') },
+                  { value: 'classic', label: i18n.t('settings.shell.classic') },
+                ]}
+                disabled={isSaving}
+                ariaLabel={i18n.t('settings.shell.title')}
+                onChange={(value) => void handleShellChange(value === 'classic' ? 'classic' : 'bots')}
+              />
+            </div>
           </div>
-          <div className="general-language-select">
-            <Dropdown
-              value={shell}
-              options={[
-                { value: 'bots', label: i18n.t('settings.shell.bots') },
-                { value: 'classic', label: i18n.t('settings.shell.classic') },
-              ]}
-              disabled={isSaving}
-              ariaLabel={i18n.t('settings.shell.title')}
-              onChange={(value) => void handleShellChange(value === 'classic' ? 'classic' : 'bots')}
-            />
+          <div className="general-setting-row">
+            <div className="general-setting-copy">
+              <h3>{i18n.t('appearance.language')}</h3>
+              <p>{i18n.t('settings.language.description')}</p>
+            </div>
+            <div className="general-language-select">
+              <Dropdown
+                value={i18n.locale}
+                options={localeOptions}
+                disabled={isSaving}
+                ariaLabel={i18n.t('appearance.language')}
+                onChange={(value) => void handleLocaleChange(value as LocaleCode)}
+              />
+            </div>
           </div>
-        </div>
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('appearance.language')}</h3>
-            <p>{i18n.t('settings.language.description')}</p>
+          <div className="general-setting-row">
+            <div className="general-setting-copy">
+              <h3>{i18n.t('settings.replyLanguage')}</h3>
+              <p>{i18n.t('settings.replyLanguage.description')}</p>
+            </div>
+            <div className="general-language-select">
+              <Dropdown
+                value={replyLanguage}
+                options={replyLanguageOptions}
+                triggerLabel={replyLanguage === 'auto' ? i18n.t('settings.replyLanguage.autoShort') : undefined}
+                title={replyLanguageOptions.find(option => option.value === replyLanguage)?.label}
+                disabled={isSaving}
+                ariaLabel={i18n.t('settings.replyLanguage')}
+                onChange={(value) => void handleReplyLanguageChange(value)}
+              />
+            </div>
           </div>
-          <div className="general-language-select">
-            <Dropdown
-              value={i18n.locale}
-              options={localeOptions}
-              disabled={isSaving}
-              ariaLabel={i18n.t('appearance.language')}
-              onChange={(value) => void handleLocaleChange(value as LocaleCode)}
-            />
-          </div>
-        </div>
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('settings.replyLanguage')}</h3>
-            <p>{i18n.t('settings.replyLanguage.description')}</p>
-          </div>
-          <div className="general-language-select">
-            <Dropdown
-              value={replyLanguage}
-              options={replyLanguageOptions}
-              disabled={isSaving}
-              ariaLabel={i18n.t('settings.replyLanguage')}
-              onChange={(value) => void handleReplyLanguageChange(value)}
-            />
-          </div>
-        </div>
-        {error ? <p className="general-setting-error">{error}</p> : null}
-      </section>
-      <section className="llm-instructions-card general-card">
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('settings.bots.title')}</h3>
-            <p>{i18n.t('settings.bots.proactivity')}</p>
-          </div>
-          <div className="general-language-select">
-            <Dropdown
-              value={proactivity}
-              options={BOT_LEVELS.map((level) => ({
-                value: level,
-                label: i18n.t(`settings.bots.proactivity.${level}`),
-              }))}
-              disabled={isSaving}
-              ariaLabel={i18n.t('settings.bots.proactivity')}
-              onChange={(value) => { void saveBots({ proactivity: value as typeof proactivity }); }}
-            />
-          </div>
-        </div>
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('settings.bots.quietHours')}</h3>
-            <p>{i18n.t('settings.bots.quietHours.description')}</p>
-          </div>
-          <div className="general-bots-hours">
-            <Switch checked={quietEnabled} disabled={isSaving} aria-label={i18n.t('settings.bots.quietHours')}
-              onCheckedChange={value => { void saveBots({ quietEnabled: value }); }} />
-            <BotTimeField value={quietStart} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietStart')}
-              onChange={value => { void saveBots({ quietStart: value }); }} />
-            <BotTimeField value={quietEnd} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietEnd')}
-              onChange={value => { void saveBots({ quietEnd: value }); }} />
-          </div>
-        </div>
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('settings.bots.digestTime')}</h3>
-            <p>{i18n.t('settings.bots.digestTime.description')}</p>
-          </div>
-          <BotTimeField value={digestTime} disabled={isSaving} i18n={i18n} label={i18n.t('settings.bots.digestTime')}
-            onChange={value => { void saveBots({ digestTime: value }); }} />
         </div>
       </section>
+      <section className="general-section" aria-labelledby="general-bots-heading">
+        <div className="general-section-heading">
+          <h2 id="general-bots-heading">{i18n.t('settings.bots.title')}</h2>
+          <p>{i18n.t('settings.bots.description')}</p>
+        </div>
+        <div className="general-card">
+          <div className="general-setting-row">
+            <div className="general-setting-copy">
+              <h3>{i18n.t('settings.bots.proactivity')}</h3>
+              <p>{i18n.t('settings.bots.proactivity.description')}</p>
+            </div>
+            <div className="general-language-select">
+              <Dropdown
+                value={proactivity}
+                options={BOT_LEVELS.map((level) => ({
+                  value: level,
+                  label: i18n.t(`settings.bots.proactivity.${level}`),
+                }))}
+                disabled={isSaving}
+                ariaLabel={i18n.t('settings.bots.proactivity')}
+                onChange={(value) => { void saveBots({ proactivity: value as typeof proactivity }); }}
+              />
+            </div>
+          </div>
+          <div className="general-quiet-setting">
+            <div className="general-setting-row">
+              <div className="general-setting-copy">
+                <h3>{i18n.t('settings.bots.quietHours')}</h3>
+                <p>{i18n.t('settings.bots.quietHours.description')}</p>
+              </div>
+              <Switch checked={quietEnabled} disabled={isSaving} aria-label={i18n.t('settings.bots.quietHours')}
+                onCheckedChange={value => { void saveBots({ quietEnabled: value }); }} />
+            </div>
+            <div className="general-bots-hours">
+              <div className="general-time-setting">
+                <span>{i18n.t('settings.bots.quietFrom')}</span>
+                <BotTimeField value={quietStart} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietStart')}
+                  onChange={value => { void saveBots({ quietStart: value }); }} />
+              </div>
+              <div className="general-time-setting">
+                <span>{i18n.t('settings.bots.quietUntil')}</span>
+                <BotTimeField value={quietEnd} disabled={isSaving} i18n={i18n} label={i18n.t('projectAgent.settings.quietEnd')}
+                  onChange={value => { void saveBots({ quietEnd: value }); }} />
+              </div>
+            </div>
+          </div>
+          <div className="general-setting-row">
+            <div className="general-setting-copy">
+              <h3>{i18n.t('settings.bots.digestTime')}</h3>
+              <p>{i18n.t('settings.bots.digestTime.description')}</p>
+            </div>
+            <BotTimeField value={digestTime} disabled={isSaving} i18n={i18n} label={i18n.t('settings.bots.digestTime')}
+              onChange={value => { void saveBots({ digestTime: value }); }} />
+          </div>
+        </div>
+      </section>
+      {error ? <p className="general-setting-error" role="alert">{error}</p> : null}
     </div>
   );
 }
