@@ -2275,9 +2275,13 @@ export function createGoalPlanStore({
       }
     };
     const watcher = watch(changeFile, { persistent: false }, drain);
+    // Filesystem notifications can coalesce or arrive before an append is visible.
+    // Reuse the same incremental drain to recover a missed tail without replaying history.
+    const fallback = setInterval(drain, 250);
+    fallback.unref();
     // Close the size-snapshot → watch race without rereading historical journal bytes.
     drain();
-    return () => watcher.close();
+    return () => { clearInterval(fallback); watcher.close(); };
   }
 
   /** Runner 高频进度字段：仅计数/阶段跳动时走 runner-progress，避免无关会话全量 list。 */

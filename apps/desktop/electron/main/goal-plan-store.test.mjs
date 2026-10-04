@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test, beforeEach, afterEach } from 'node:test';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -1200,6 +1202,33 @@ test('onChange: 回调抛错不影响写盘事实（Evidence 已落盘）', () =
 test('onChange: 不传回调时所有写操作正常（向后兼容）', () => {
   const plan = store.createPlan(draftWithTasks());
   assert.equal(store.getPlan(plan.planId)?.version, 1);
+});
+
+test('subscribeChanges delivers complete tail records when filesystem notifications are lost and stops after unsubscribe', async (t) => {
+  let closed = false;
+  const stub = t.mock.method(fs, 'watch', () => ({ close() { closed = true; } }));
+  syncBuiltinESMExports();
+  const events = [];
+  let unsubscribe = () => {};
+  try {
+    unsubscribe = store.subscribeChanges(event => events.push(event));
+    const file = path.join(store.getStoreDir(), '.changes.jsonl');
+    const event = { revision: 'lost-notification', planId: 'external-plan' };
+    const row = `${JSON.stringify(event)}\n`, split = Math.floor(row.length / 2);
+    appendFileSync(file, row.slice(0, split));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(events, [], 'incomplete records never notify');
+    appendFileSync(file, row.slice(split));
+    await waitUntil(() => events.length === 1, { message: 'missed filesystem notification was not recovered' });
+    assert.deepEqual(events, [event]);
+    unsubscribe();
+    assert.equal(closed, true);
+    appendFileSync(file, `${JSON.stringify({ revision: 'after-close' })}\n`);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(events, [event], 'unsubscribe stops fallback delivery');
+  } finally {
+    unsubscribe(); stub.mock.restore(); syncBuiltinESMExports();
+  }
 });
 
 test('subscribeChanges 增量拼接半行并忽略订阅前历史记录', async () => {
@@ -3080,4 +3109,3 @@ test('revisePlan 无成功标准时允许验收（空标准集合）', () => {
   }, { reason: 'workbench_one_click_accept', changedBy: 'user' });
   assert.equal(accepted.resultAcceptance?.acceptedAt, '2026-08-22T00:00:00.000Z');
 });
-
