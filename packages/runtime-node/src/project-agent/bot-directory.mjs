@@ -18,6 +18,7 @@ import { projectBotListItem, sortBotList } from '@peer-agent/protocol';
 
 import { pathOf } from '../data-store.mjs';
 import { createBotProfileStore, isBotWorkspaceId } from './bot-profile-store.mjs';
+import { replyQuestionAnswered } from './card-projection.mjs';
 
 const VISIBLE_KINDS = new Set(['user_input', 'agent_reply', 'system_card']);
 const PREVIEW_MAX = 80;
@@ -70,8 +71,7 @@ function questionsIn(messages) {
   const found = [];
   for (const message of messages) {
     const question = message?.question;
-    if (!question || typeof question !== 'object' || question.answered === true) continue;
-    if (messages.some(answer => answer.answerTo === `card:question:reply:${message.id}`)) continue;
+    if (!question || typeof question !== 'object' || replyQuestionAnswered(messages, message)) continue;
     found.push(question);
   }
   return found;
@@ -271,6 +271,12 @@ export function createBotDirectory({
     if (latest) start = Math.max(0, end - size);
     const cards = readCards(workspaceId) || [];
     const byCard = new Map(cards.map((card) => [card.cardId, card]));
+    const byReply = new Map();
+    for (const card of cards) {
+      const replyId = card.refs?.replyMessageId;
+      if (typeof replyId !== 'string' || !replyId) continue;
+      byReply.set(replyId, [...(byReply.get(replyId) || []), card]);
+    }
     const bySession = new Map();
     const currentStates = message => {
       const sources = Array.isArray(message.sources) ? message.sources
@@ -284,13 +290,16 @@ export function createBotDirectory({
     const page = filtered.slice(start, latest ? end : start + size).map((message) => ({ ...message,
       ...(message.kind === 'agent_reply' && (message.sources?.length || message.meta?.sessionStates)
         ? { meta: { ...message.meta, sessionStates: currentStates(message) } } : {}),
-      ...(message.cards ? { cards: message.cards.map((card) => byCard.get(card.cardId) || card) } : {}),
+      ...(message.cards || byReply.has(message.id) ? { cards: [...new Map([
+        ...(message.cards || []).map(card => [card.cardId, byCard.get(card.cardId) || card]),
+        ...(message.kind === 'agent_reply' ? (byReply.get(message.id) || []).map(card => [card.cardId, card]) : []),
+      ]).values()] } : {}),
     }));
     const nextCursor = latest ? (start > 0 ? page[0]?.id ?? null : null)
       : (start + size < filtered.length ? page[page.length - 1]?.id ?? null : null);
     if (!before) {
       const present = new Set(filtered.flatMap((message) => (message.cards || []).map((card) => card.cardId)));
-      for (const card of cards) if (!present.has(card.cardId) && card.resolvedState !== 'resolved') {
+      for (const card of cards) if (!card.refs?.replyMessageId && !present.has(card.cardId) && card.resolvedState !== 'resolved') {
         page.push({ id: card.cardId, role: 'assistant', kind: 'system_card', content: '', cards: [card] });
       }
     }

@@ -5,6 +5,24 @@ import os from 'node:os';
 import path from 'node:path';
 import { createDesktopProjectFacts } from './project-facts.mjs';
 
+test('RC5 已保存的手输回答关闭对话选择，而引用其它消息和任务批准不会被推断', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-reply-question-'));
+  const messages = [{ id: 'r', kind: 'agent_reply', question: { options: ['A', 'B'] } }];
+  try {
+    const facts = createDesktopProjectFacts({ runtimeRoot: root,
+      supervisor: { sessionsForProject: () => [], acceptance: () => null }, approvalStore: { list: () => [{ approvalId: 'permission', state: 'open' }] },
+      profileStore: { read: () => ({ agentConversationId: 'parent' }) },
+      conversationStore: { getPersistedConversationHistory: () => ({ messages }) } });
+    const question = () => facts.cards('w').find(card => card.cardId === 'card:question:reply:r');
+    assert.equal(question().resolvedState, 'open');
+    messages.push({ kind: 'user_input', content: '手输答案', quoteRefs: ['other', '其它消息'] });
+    assert.equal(question().resolvedState, 'open');
+    messages.pop(); messages.push({ kind: 'user_input', content: '手输答案' });
+    assert.equal(question().resolvedState, 'resolved');
+    assert.equal(facts.cards('w').find(card => card.kind === 'approval').resolvedState, 'open');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a started-task reply does not count as delivery of its completed result', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-delivery-facts-'));
   let status = 'running';

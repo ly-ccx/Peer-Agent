@@ -214,6 +214,29 @@ export type TranslationKey =
   | 'projectAgent.chat.evidenceCollapse'
   | 'projectAgent.chat.evidence'
   | 'projectAgent.chat.process'
+  | 'projectAgent.chat.chooseAnswer'
+  | 'projectAgent.chat.you'
+  | 'projectAgent.process.reply'
+  | 'projectAgent.process.sessions'
+  | 'projectAgent.process.session'
+  | 'projectAgent.process.start'
+  | 'projectAgent.process.resume'
+  | 'projectAgent.process.cancel'
+  | 'projectAgent.process.update'
+  | 'projectAgent.process.verification'
+  | 'projectAgent.process.memory'
+  | 'projectAgent.process.objective'
+  | 'projectAgent.process.tool'
+  | 'projectAgent.process.done'
+  | 'projectAgent.process.failed'
+  | 'projectAgent.process.suppressed'
+  | 'projectAgent.process.unknown'
+  | 'projectAgent.process.sent'
+  | 'projectAgent.process.count'
+  | 'projectAgent.process.technical'
+  | 'projectAgent.process.input'
+  | 'projectAgent.process.result'
+  | 'projectAgent.process.empty'
   | 'projectAgent.chat.openProcess'
   | 'projectAgent.chat.memoryUsed'
   | 'projectAgent.chat.memoryLearned'
@@ -1482,6 +1505,29 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.evidenceMore': '还有 {count} 条证据',
     'projectAgent.chat.evidenceCollapse': '收起证据',
     'projectAgent.chat.process': '过程',
+    'projectAgent.chat.chooseAnswer': '选择一个回答，也可以直接输入',
+    'projectAgent.chat.you': '你',
+    'projectAgent.process.reply': '发送回复',
+    'projectAgent.process.sessions': '查询工作会话',
+    'projectAgent.process.session': '查看工作会话',
+    'projectAgent.process.start': '创建工作任务',
+    'projectAgent.process.resume': '恢复工作任务',
+    'projectAgent.process.cancel': '取消工作任务',
+    'projectAgent.process.update': '调整工作安排',
+    'projectAgent.process.verification': '检查验证结果',
+    'projectAgent.process.memory': '处理项目记忆',
+    'projectAgent.process.objective': '处理项目目标',
+    'projectAgent.process.tool': '调用工具',
+    'projectAgent.process.done': '已结束',
+    'projectAgent.process.failed': '未完成',
+    'projectAgent.process.suppressed': '未发送',
+    'projectAgent.process.unknown': '状态未记录',
+    'projectAgent.process.sent': '已发送',
+    'projectAgent.process.count': '返回 {count} 条记录',
+    'projectAgent.process.technical': '技术详情',
+    'projectAgent.process.input': '调用参数（最多显示 12,000 字符）',
+    'projectAgent.process.result': '返回记录（最多显示 12,000 字符）',
+    'projectAgent.process.empty': '本轮没有可用的过程记录',
     'projectAgent.chat.openProcess': '查看过程',
     'projectAgent.chat.memoryUsed': '参考了 {count} 条记忆',
     'projectAgent.chat.memoryLearned': '新记住 {count} 条',
@@ -2548,6 +2594,29 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.evidenceMore': '{count} more evidence records',
     'projectAgent.chat.evidenceCollapse': 'Collapse evidence',
     'projectAgent.chat.process': 'Process',
+    'projectAgent.chat.chooseAnswer': 'Choose an answer, or type your own',
+    'projectAgent.chat.you': 'You',
+    'projectAgent.process.reply': 'Send reply',
+    'projectAgent.process.sessions': 'Find work sessions',
+    'projectAgent.process.session': 'Read work session',
+    'projectAgent.process.start': 'Create work task',
+    'projectAgent.process.resume': 'Resume work task',
+    'projectAgent.process.cancel': 'Cancel work task',
+    'projectAgent.process.update': 'Update work settings',
+    'projectAgent.process.verification': 'Check verification',
+    'projectAgent.process.memory': 'Manage project memory',
+    'projectAgent.process.objective': 'Manage project objective',
+    'projectAgent.process.tool': 'Call tool',
+    'projectAgent.process.done': 'Finished',
+    'projectAgent.process.failed': 'Did not complete',
+    'projectAgent.process.suppressed': 'Not delivered',
+    'projectAgent.process.unknown': 'Status not recorded',
+    'projectAgent.process.sent': 'Sent',
+    'projectAgent.process.count': 'Returned {count} records',
+    'projectAgent.process.technical': 'Technical details',
+    'projectAgent.process.input': 'Arguments (up to 12,000 characters)',
+    'projectAgent.process.result': 'Returned record (up to 12,000 characters)',
+    'projectAgent.process.empty': 'No process record is available for this turn',
     'projectAgent.chat.openProcess': 'View process',
     'projectAgent.chat.memoryUsed': 'Used {count} memories',
     'projectAgent.chat.memoryLearned': 'Remembered {count} new',

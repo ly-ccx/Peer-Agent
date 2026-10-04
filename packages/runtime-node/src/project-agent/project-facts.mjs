@@ -1,4 +1,4 @@
-import { createCardProjection } from './card-projection.mjs';
+import { createCardProjection, replyQuestionAnswered } from './card-projection.mjs';
 import { verdictRefFor } from './acceptance.mjs';
 
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
@@ -31,7 +31,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     const replies = messages.filter((message) => message.kind === 'agent_reply').map((message) => ({
       ...message,
       ...(message.question ? { question: { ...message.question,
-        answered: messages.some((answer) => answer.answerTo === `card:question:reply:${message.id}`) } } : {}),
+        answered: replyQuestionAnswered(messages, message) } } : {}),
     }));
     const rows = sessions(workspaceId);
     const confirmations = rows.flatMap((row) => {

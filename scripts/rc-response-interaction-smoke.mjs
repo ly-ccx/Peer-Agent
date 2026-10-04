@@ -14,6 +14,17 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
     async sendMessage(input) {
       const text = input.messages?.findLast(message => message.role === 'user')?.content || '';
       record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId });
+      if (text === 'RC_DETAIL_QUESTION') {
+        const send = (channel, payload) => input.webContents.send(channel, { streamId: input.streamId, ...payload });
+        send('chat:stream:tool-call', { tool: 'list_sessions', toolCallId: 'sessions', args: {} });
+        send('chat:stream:tool-result', { toolCallId: 'sessions', result: JSON.stringify({ ok: true, sessions: [] }) });
+        send('chat:stream:tool-call', { tool: 'post_reply', toolCallId: 'question', args: {
+          text: '你希望统计哪类记录？', replyTo: input.turnProfile.context.inputAnchors.map(anchor => anchor.messageId),
+          question: { options: ['这个应用里的历史聊天', '其它工具里的工作记录'] },
+        } });
+        send('chat:stream:tool-result', { toolCallId: 'question', result: JSON.stringify({ ok: true }) });
+        return { terminalStatus: 'done' };
+      }
       if (!text.includes('RC_STREAM_')) {
         await new Promise(resolve => setTimeout(resolve, 120));
         return { terminalStatus: 'done', text: 'RC scripted reply: ' + text };

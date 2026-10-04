@@ -1,9 +1,16 @@
 import type { BotToolRound } from '../state/botConversationState';
+import type { TranslationKey } from '@peer-agent/i18n';
+import type { PeerIconName } from '../../ui/icons';
 
 export interface AgentProcessEntry {
   readonly name: string;
   readonly input: string;
   readonly result: string;
+  readonly labelKey: TranslationKey;
+  readonly icon: PeerIconName;
+  readonly status: 'done' | 'failed' | 'suppressed' | 'unknown';
+  readonly summary: string;
+  readonly count?: number;
 }
 
 export interface BotEvidenceInspect {
@@ -28,10 +35,67 @@ export function agentProcessEntries(rounds: readonly BotToolRound[]): AgentProce
     for (const call of round.toolCalls) {
       entries.push({
         name: call.name,
-        input: JSON.stringify(call.input ?? null),
-        result: JSON.stringify(call.result ?? null),
+        ...toolPresentation(call.name),
+        status: resultStatus(call.result),
+        summary: call.name === 'post_reply' ? '' : summaryOf(call.input),
+        ...countOf(call.name, call.result),
+        input: JSON.stringify(call.input ?? null, null, 2).slice(0, 12_000),
+        result: JSON.stringify(call.result ?? null, null, 2).slice(0, 12_000),
       });
     }
   }
   return entries;
+}
+
+const LABELS = {
+  post_reply: ['reply', 'send'], list_sessions: ['sessions', 'fileText'], get_session: ['session', 'fileText'],
+  spawn_session: ['start', 'plus'], resume_session: ['resume', 'arrowUpRight'], cancel_session: ['cancel', 'stop'],
+  message_session: ['update', 'send'], reprioritize_session: ['update', 'arrowUpRight'], set_proactivity: ['update', 'info'],
+  get_verification_detail: ['verification', 'fileText'], verify_session: ['verification', 'fileText'],
+  memory_search: ['memory', 'fileText'], memory_remember: ['memory', 'fileText'], memory_forget: ['memory', 'fileText'],
+  create_objective: ['objective', 'plus'], update_objective: ['objective', 'fileText'], pause_objective: ['objective', 'stop'],
+  resume_objective: ['objective', 'arrowUpRight'], list_objectives: ['objective', 'fileText'], get_objective: ['objective', 'fileText'], close_objective: ['objective', 'fileText'],
+} as const;
+
+/** One vocabulary for live activity and the historical process drawer. */
+export function toolPresentation(name: string): { labelKey: TranslationKey; icon: PeerIconName } {
+  if (Object.hasOwn(LABELS, name)) {
+    const [label, icon] = LABELS[name as keyof typeof LABELS];
+    return { labelKey: `projectAgent.process.${label}`, icon };
+  }
+  if (/^(read_file|read_files|list_directory)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.read', icon: 'fileText' };
+  if (/^(search_files|search_text|search|rg)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.search', icon: 'fileText' };
+  if (/^(write_file|edit_file|apply_patch)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.edit', icon: 'fileText' };
+  if (/^(bash|run_command|exec_command|shell)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.command', icon: 'terminal' };
+  return { labelKey: 'projectAgent.process.tool', icon: 'terminal' };
+}
+
+function piles(value: unknown, depth = 0): Record<string, unknown>[] {
+  if (depth > 6) return [];
+  if (typeof value === 'string') { try { return piles(JSON.parse(value), depth + 1); } catch { return []; } }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const row = value as Record<string, unknown>;
+  const preview = row.outputPreview as Record<string, unknown> | undefined;
+  return [row, ...piles(row.output ?? preview?.legacyResult ?? row.legacyResult, depth + 1)];
+}
+
+function resultStatus(result: unknown): AgentProcessEntry['status'] {
+  const rows = piles(result);
+  if (rows.some(row => row.ok === false || row.success === false || row.error || ['failed', 'denied', 'cancelled', 'aborted'].includes(String(row.status)))) return 'failed';
+  if (rows.some(row => row.suppressed === true || ['silent', 'digest'].includes(String(row.surfacing ?? (row.meta as Record<string, unknown> | undefined)?.surfacing)))) return 'suppressed';
+  return rows.some(row => row.ok === true || row.success === true) ? 'done' : 'unknown';
+}
+
+function summaryOf(input: Readonly<Record<string, unknown>> | null): string {
+  const text = input?.title ?? input?.path ?? input?.query;
+  return typeof text === 'string' ? Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 160).join('') : '';
+}
+
+function countOf(name: string, result: unknown): { count?: number } {
+  if (name !== 'list_sessions') return {};
+  for (const row of piles(result)) {
+    const items = row.sessions ?? row.items;
+    if (Array.isArray(items)) return { count: items.length };
+  }
+  return {};
 }

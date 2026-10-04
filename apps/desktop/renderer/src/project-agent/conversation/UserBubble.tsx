@@ -25,6 +25,7 @@ export function UserBubble({
   );
   return (
     <article className={`bot-user${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`} data-kind="user_input">
+      <span className="bot-message-role">{i18n.t('projectAgent.chat.you')}</span>
       <div className="bot-user-content">
       {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
       {message.images?.length ? (

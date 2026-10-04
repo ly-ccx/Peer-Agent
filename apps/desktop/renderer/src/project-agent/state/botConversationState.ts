@@ -78,6 +78,7 @@ export interface BotChatMessage {
   readonly createdAt: string;
   readonly inputId?: string;
   readonly turnId?: string;
+  readonly answerTo?: string;
   readonly replyTo: readonly string[];
   readonly sources: readonly string[];
   readonly marks: readonly BotChatMark[];
@@ -98,6 +99,7 @@ export interface PendingBotInput {
   readonly quoteRefs: readonly string[];
   readonly createdAt: string;
   readonly state: 'sending' | 'received' | 'failed';
+  readonly answerTo?: string;
 }
 
 /** A successful durable submit receipt acknowledges only this input, never a reply. */
@@ -134,6 +136,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     content: readString(raw.content) || readString(raw.text),
     createdAt: readString(raw.createdAt) || readString(raw.at),
     ...(readString(raw.turnId) ? { turnId: readString(raw.turnId) } : {}),
+    ...(readString(raw.answerTo) ? { answerTo: readString(raw.answerTo) } : {}),
     ...(readString(raw.inputId) ? { inputId: readString(raw.inputId) } : {}),
     replyTo,
     sources,
@@ -219,6 +222,7 @@ export function applyOptimistic(
       content: item.text,
       createdAt: item.createdAt,
       inputId: item.inputId,
+      ...(item.answerTo ? { answerTo: item.answerTo } : {}),
       replyTo: [],
       sources: [],
       marks: [],
@@ -452,8 +456,10 @@ export function formatConversationStamp(iso: string, now = Date.now()): { sameDa
 }
 
 /** 引用记成消息 id 和摘录两段字符串，输入队列只收字符串。 */
-/** 一条回复对应它前面最近一次代理回合的工具调用。只读，不执行。 */
+/** Canonical replies can be stored before their turn record; identity wins over order. */
 export function roundsForReply(messages: readonly BotChatMessage[], replyId: string): readonly BotToolRound[] {
+  const reply = messages.find(message => message.id === replyId);
+  if (reply?.turnId) return messages.find(turn => turn.kind === 'agent_turn' && turn.id === reply.turnId)?.rounds || [];
   let rounds: readonly BotToolRound[] = [];
   for (const message of messages) {
     if (message.kind === 'agent_turn') rounds = message.rounds;

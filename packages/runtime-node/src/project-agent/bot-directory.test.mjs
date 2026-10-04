@@ -14,6 +14,32 @@ function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
 }
 
+test('legacy freeform replies remove conversational needs-you while approval and confirmation remain', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 3);
+    conversationStore.appendMessage(conversationId, { id: 'legacy-answer', kind: 'user_input', role: 'user', content: '我的回答' });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    assert.equal(directory.list()[0].state.needsYou, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('回复选择卡跟随所属消息与历史页，不追加到最新消息末尾', () => {
+  const root = tempRoot();
+  try {
+    const question = { cardId: 'card:question:reply:reply-1', kind: 'question', resolvedState: 'open',
+      refs: { replyMessageId: 'reply-1' }, actions: [{ id: 'answer' }] };
+    const { entry, directory, conversationId, conversationStore } = harness(root, { readCards: () => [question] });
+    conversationStore.appendMessage(conversationId, { id: 'later', kind: 'user_input', role: 'user', content: '我的回答' });
+    const latest = directory.readConversation(entry.workspaceId, { latest: true, limit: 1 });
+    assert.deepEqual(latest.messages.map(message => message.id), ['later']);
+    const older = directory.readConversation(entry.workspaceId, { latest: true, limit: 1, before: 'later' });
+    assert.deepEqual(older.messages.map(message => message.id), ['reply-1']);
+    assert.deepEqual(older.messages[0].cards, [question]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 function harness(root, directoryOptions = {}) {
   const folder = path.join(root, 'demo-project');
   mkdirSync(folder, { recursive: true });

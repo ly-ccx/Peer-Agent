@@ -2,6 +2,7 @@ import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
+import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkResponseInteraction } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
@@ -69,6 +70,12 @@ const timingSeams = [
 for (const [before, after] of timingSeams) {
   assert.equal(observedService.split(before).length, 2, 'exact search observation seam required');
   observedService = observedService.replace(before, after);
+}
+if (process.argv.includes('--streaming')) {
+  const submitSeam = 'async function submitInput(payload = {}) {';
+  assert.equal(observedService.split(submitSeam).length, 2);
+  observedService = observedService.replace(submitSeam, `${submitSeam}
+    if (payload.text === 'RC_DETAIL_FAIL_ANSWER' && !globalThis.rcDetailFailedOnce) { globalThis.rcDetailFailedOnce = true; return {ok:false,code:'CONTROLLED_SUBMIT_FAILURE'}; }`);
 }
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
@@ -290,7 +297,10 @@ try {
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
   await checkBotShellReply({ page, until, report, captureDirectory: root });
-  if (process.argv.includes('--streaming')) await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand });
+  if (process.argv.includes('--streaming')) {
+    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand });
+    await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+  }
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
