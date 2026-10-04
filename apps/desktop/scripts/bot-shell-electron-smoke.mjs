@@ -30,7 +30,7 @@ if (process.argv.includes('--accessibility')) {
     credentialClient: { getSecret: () => null, deleteSecret() {}, setSecret() { throw Error('No fixture secrets allowed'); } },
     providerFetch: () => { throw Error('No fixture model network allowed'); },
   });
-  for (const suffix of ['A', 'B']) models.addProvider({ provider: 'openai', model: `rc-bot-model-${suffix.toLowerCase()}`,
+  for (const suffix of ['A', 'B']) models.addProvider({ provider: 'openai', groupId: 'rc-model-menu-fixture', model: `rc-bot-model-${suffix.toLowerCase()}`,
     modelLabel: `RC Bot model ${suffix}`, name: 'RC synthetic channel', baseUrl: 'http://127.0.0.1:1', metadataSource: 'custom' });
   // UI fixtures declare availability/capabilities at the existing catalogue seam. No secrets or network.
   botModelFixtures = models.listProviders().map(model => ({ ...model, enabled: true, apiKeyConfigured: true,
