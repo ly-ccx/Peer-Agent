@@ -360,10 +360,20 @@ try {
     const row = node.getBoundingClientRect(), thread = node.closest('.bot-thread').getBoundingClientRect();
     return row.top >= thread.top && row.bottom <= thread.bottom;
   }), Boolean);
-  await tracePaging('quoted old message located inside viewport');
+  const located = page.locator('#bot-msg-rc-message-9500');
+  assert.equal(await located.evaluate(node => getComputedStyle(node).outlineStyle), 'none');
+  assert.equal(await located.evaluate(node => getComputedStyle(node).borderTopWidth), '0px');
+  assert.equal(await located.evaluate(node => getComputedStyle(node).boxShadow), 'none');
+  await located.screenshot({ path: path.join(root, 'message-located-no-frame.png') });
+  await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor({ state: 'detached' });
+  await tracePaging('quoted old message located inside viewport with temporary fill and no outline');
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
-  report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
+  await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+  await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
+  await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
+  await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
+  report.checks.push('older reference loads across pages, locates without a frame, clears its highlight and supports a repeated jump');
   await checkBotShellReply({ page, until, report, captureDirectory: root });
   if (process.argv.includes('--streaming')) {
     await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null });

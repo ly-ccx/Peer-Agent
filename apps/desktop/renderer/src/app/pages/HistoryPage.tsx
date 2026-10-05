@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import { useMemo, useState } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useTaskOverview } from '../hooks/useTaskOverview';
@@ -54,16 +55,16 @@ function historyBadge(kind: Exclude<HistoryFilter, 'all'>): string {
   }
 }
 
-function historyIcon(kind: Exclude<HistoryFilter, 'all'>): string {
+function historyIcon(kind: Exclude<HistoryFilter, 'all'>) {
   switch (kind) {
     case 'accepted':
-      return '✓';
+      return <PeerIcon name="check" size={14} />;
     case 'archived':
-      return '□';
+      return <PeerIcon name="archive" size={14} />;
     case 'cancelled':
-      return '×';
+      return <PeerIcon name="close" size={14} />;
     case 'failed':
-      return '!';
+      return <PeerIcon name="warning" size={14} />;
   }
 }
 

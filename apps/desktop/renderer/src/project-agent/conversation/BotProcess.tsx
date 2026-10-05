@@ -75,7 +75,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
             <Preview label={i18n.t('projectAgent.process.output')} value={entry.result} i18n={i18n} disclosure={disclosure} slot={`result-${index}`} />
             <details className="bot-tool-metadata" open={disclosure?.open[`metadata-${index}`]}
               onToggle={event => { event.stopPropagation(); disclosure?.toggle(`metadata-${index}`, event.currentTarget.open); }}>
-              <summary>{i18n.t('projectAgent.process.technical')}</summary><code>{entry.name}</code>
+              <summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.process.technical')}</summary><code>{entry.name}</code>
             </details>
           </div>
         </details>;
@@ -86,7 +86,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
 
 function Preview({ label, value, i18n, disclosure, slot }: { readonly label: string; readonly value?: ProjectAgentToolPreview; readonly i18n: I18nRuntime; readonly disclosure?: ProcessDisclosure; readonly slot: string }) {
   if (!value) return null;
-  return <details className="bot-tool-preview" open={disclosure?.open[slot]} onToggle={event => { event.stopPropagation(); disclosure?.toggle(slot, event.currentTarget.open); }}><summary>{label}
+  return <details className="bot-tool-preview" open={disclosure?.open[slot]} onToggle={event => { event.stopPropagation(); disclosure?.toggle(slot, event.currentTarget.open); }}><summary><PeerIcon name="chevronRight" size={12} />{label}
     {value.truncated ? <span>{i18n.t('projectAgent.process.truncated')}</span> : null}
     {value.redacted ? <span>{i18n.t('projectAgent.process.redacted')}</span> : null}
   </summary><pre tabIndex={0}>{value.text || i18n.t('projectAgent.process.previewLimit')}</pre></details>;

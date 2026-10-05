@@ -110,19 +110,13 @@
     display: none;
   }
 
-  .timeline-tool-summary::before {
-    content: "";
+  .timeline-tool-summary > .disclosure-icon {
     flex: 0 0 auto;
-    width: 10px;
-    height: 10px;
     color: var(--ink-mute);
-    background-color: currentColor;
-    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
     transition: transform var(--za-motion-fast);
   }
 
-  .timeline-tool[open]>.timeline-tool-summary::before {
+  .timeline-tool[open] > .timeline-tool-summary > .disclosure-icon {
     transform: rotate(90deg);
   }
 
@@ -276,22 +270,15 @@
     text-overflow: ellipsis;
   }
 
-  .tool-result-details>.tool-result-summary::before {
-    content: "";
-    display: inline-block;
+  .tool-result-details > .tool-result-summary > .disclosure-icon {
+    flex: 0 0 auto;
     width: 9px;
     height: 9px;
-    margin-right: 4px;
-    vertical-align: middle;
-    background-color: currentColor;
-    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
-    transform: rotate(-90deg);
     transition: transform var(--za-motion-fast);
   }
 
-  .tool-result-details[open]>.tool-result-summary::before {
-    transform: rotate(0deg);
+  .tool-result-details[open] > .tool-result-summary > .disclosure-icon {
+    transform: rotate(90deg);
   }
 
   .tool-result-content {

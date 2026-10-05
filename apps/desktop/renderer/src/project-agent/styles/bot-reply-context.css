@@ -31,8 +31,9 @@
 .bot-work-detail button { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 0; padding: 4px 0; font: inherit; color: var(--graphite-base); cursor: pointer; }
 .bot-work-more > summary { padding: 5px 0; font-size: 11px; color: var(--graphite-mute); }
 .bot-background-work { margin: 0 28px 8px; font-size: 11px; color: var(--graphite-mute); }
-.bot-background-work > summary { padding: 5px 0; }
-.bot-background-work > summary::after { content: '⌄'; margin-left: 8px; }
+.bot-background-work > summary { display: flex; align-items: center; gap: 8px; width: fit-content; padding: 5px 0; }
+.bot-background-work > summary > svg { transition: transform 160ms ease; }
+.bot-background-work[open] > summary > svg { transform: rotate(180deg); }
 .bot-background-work .bot-delegated-work { max-height: 180px; overflow: auto; margin-top: 4px; }
 @media (max-width: 600px) { .bot-background-work { margin-inline: 16px; } .bot-work-title { flex: 1; } }
 @supports (corner-shape: superellipse(1.4)) { .bot-reply-context-body, .bot-work-detail { corner-shape: var(--control-corner); } }

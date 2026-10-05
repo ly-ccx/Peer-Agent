@@ -19,8 +19,8 @@
 .bot-process-note { margin: 4px 0; color: var(--graphite-soft); font-size: 12px; }
 .bot-tool-preview, .bot-tool-metadata { margin-top: 7px; font-size: 11px; }
 .bot-tool-preview > summary, .bot-tool-metadata > summary { display: flex; align-items: center; gap: 8px; width: fit-content; padding: 3px 0; }
-.bot-tool-preview > summary::before, .bot-tool-metadata > summary::before { content: '›'; display: inline-block; transition: transform 160ms ease; }
-.bot-tool-preview[open] > summary::before, .bot-tool-metadata[open] > summary::before { transform: rotate(90deg); }
+.bot-tool-preview > summary > svg, .bot-tool-metadata > summary > svg { transition: transform 160ms ease; }
+.bot-tool-preview[open] > summary > svg, .bot-tool-metadata[open] > summary > svg { transform: rotate(90deg); }
 .bot-tool-preview > summary > span { color: var(--graphite-fade); }
 .bot-tool-preview pre { margin: 6px 0; padding: 8px 10px; max-height: 220px; overflow: auto; font: 11px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--paper-sheet); border-radius: var(--control-radius-compact); color: var(--graphite-soft); }
 .bot-tool-metadata code { font: 11px/1.6 var(--font-mono); }

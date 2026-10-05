@@ -21,6 +21,8 @@ import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
 import { BotProcess, type ProcessDisclosure } from './BotProcess';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { replyReferencesForRows } from '../state/replyReferenceState';
+import { useMessageHighlight } from './useMessageHighlight';
 
 export function BotMessageList({
   workspaceId,
@@ -74,6 +76,8 @@ export function BotMessageList({
     });
   } });
   const scroll = useConversationWindow(rows, highlightedId, highlightRequestId, followRequestId);
+  const highlighted = useMessageHighlight(highlightedId, highlightRequestId, scroll.visibleRows.some(row => row.type === 'message' && row.message.id === highlightedId));
+  const references = replyReferencesForRows(rows);
   const messages = rows.flatMap((row) => (row.type === 'message' ? [row.message] : []));
   const anchors = new Map(messages.map((message) => [message.id, clip(message.content)]));
   const replied = repliedUserIds(messages);
@@ -128,7 +132,7 @@ export function BotMessageList({
           || row.message.cards.some(card => card.kind === 'agent_stopped')) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /><span>{label}</span></div>
         ) : null}
-        {row.type === 'activity' ? <LiveReply workRows={replyWork({ sources: [], marks: [], meta: {}, replyTo: row.activity.replyTo }, workIndex)} onOpenWork={onLocateSession} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} disclosure={disclosure(row.activity.turnId)} /> : row.type === 'separator' ? (
+        {row.type === 'activity' ? <LiveReply referenceIds={references.get(row) ?? []} workRows={replyWork({ sources: [], marks: [], meta: {}, replyTo: row.activity.replyTo }, workIndex)} onOpenWork={onLocateSession} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} disclosure={disclosure(row.activity.turnId)} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
@@ -137,7 +141,7 @@ export function BotMessageList({
             replied={replied.has(row.message.id)}
             quoteAuthor={label}
             onJump={onJump}
-            highlighted={highlightedId === row.message.id}
+            highlighted={highlighted === row.message.id}
             i18n={i18n}
             onRetry={onRetry}
             onLocateSession={onLocateSession}
@@ -147,7 +151,8 @@ export function BotMessageList({
             key={row.message.id}
             workspaceId={workspaceId}
             message={row.message}
-            highlighted={highlightedId === row.message.id}
+            highlighted={highlighted === row.message.id}
+            referenceIds={references.get(row) ?? []}
             activity={row.activity}
             processRounds={row.processRounds}
             disclosure={disclosure(row.message.turnId ?? row.message.id)}
@@ -170,7 +175,8 @@ export function BotMessageList({
             activity={row.activity}
             processRounds={row.processRounds}
             disclosure={disclosure(row.message.turnId ?? row.message.id)}
-            highlighted={highlightedId === row.message.id}
+            highlighted={highlighted === row.message.id}
+            referenceIds={references.get(row) ?? []}
             i18n={i18n}
             onJump={onJump}
             onQuote={(excerpt) => onQuote(row.message.id, excerpt)}
@@ -195,6 +201,7 @@ function SystemCard({
   workspaceId,
   message,
   highlighted,
+  referenceIds,
   welcome,
   anchors,
   onJump,
@@ -210,6 +217,7 @@ function SystemCard({
   readonly workspaceId: string;
   readonly message: BotChatMessage;
   readonly highlighted: boolean;
+  readonly referenceIds: readonly string[];
   readonly welcome: boolean;
   readonly onOpenProcess?: () => void;
   readonly activity?: ProjectAgentActivity;
@@ -228,7 +236,7 @@ function SystemCard({
   return (
     <div className={`bot-system${welcome ? ' bot-system-welcome' : ''}${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
       {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
-      <ReplyAnchors ids={message.replyTo} anchors={anchors} i18n={i18n} onJump={onJump} />
+      <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
       <BotProcess activity={activity} rounds={processRounds} i18n={i18n} disclosure={disclosure}
         outcome={cards.some(card => card.kind === 'agent_stopped') ? 'stopped' : cards.some(card => card.kind === 'agent_unavailable') ? 'error' : undefined} />
       <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />

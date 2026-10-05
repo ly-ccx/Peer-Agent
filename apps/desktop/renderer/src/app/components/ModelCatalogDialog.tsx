@@ -316,7 +316,7 @@ export function ModelCatalogDialog({
               {applyState === 'applying' ? (
                 <><span className="llm-catalog-apply-spinner motion-spin" aria-hidden="true" />{zh ? '正在应用…' : 'Applying…'}</>
               ) : applyState === 'success' ? (
-                <><span className="llm-catalog-apply-check" aria-hidden="true">✓</span>{zh ? '已应用' : 'Applied'}</>
+                <><PeerIcon name="check" size={14} className="llm-catalog-apply-check" />{zh ? '已应用' : 'Applied'}</>
               ) : (
                 zh ? `应用选择（${selectedModels.length} 个模型）` : `Apply selection (${selectedModels.length} models)`
               )}

@@ -125,6 +125,7 @@ Once a change is committed locally, push it to the tracked remote branch in the 
 
 ## Implementation Expectations
 
+- UI icons must use SVG components. Reuse the shared `PeerIcon` or an existing SVG icon; do not use text characters, emoji, icon fonts, or CSS-generated glyphs as icons, including arrows, checks, close buttons, and disclosure indicators.
 - Prefer existing protocol types, reducers, registries, providers, and stores.
 - Add a Provider adapter instead of adding `capabilityId` branches to central hosts.
 - Add reducer/kernel logic instead of growing a large React component.

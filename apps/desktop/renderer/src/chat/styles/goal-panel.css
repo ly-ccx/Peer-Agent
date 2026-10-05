@@ -1691,7 +1691,8 @@
   font-size: 12px;
 }
 
-.goal-runner-explorers > summary {
+.goal-runner-explorers > summary,
+.goal-runner-verifiers > summary {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1701,7 +1702,8 @@
   user-select: none;
 }
 
-.goal-runner-explorers > summary::-webkit-details-marker {
+.goal-runner-explorers > summary::-webkit-details-marker,
+.goal-runner-verifiers > summary::-webkit-details-marker {
   display: none;
 }
 
@@ -1710,7 +1712,8 @@
   transform: rotate(0deg);
 }
 
-.goal-runner-explorers[open] > summary .goal-runner-explorer-chevron {
+.goal-runner-explorers[open] > summary .goal-runner-explorer-chevron,
+.goal-runner-verifiers[open] > summary .goal-runner-explorer-chevron {
   transform: rotate(90deg);
 }
 

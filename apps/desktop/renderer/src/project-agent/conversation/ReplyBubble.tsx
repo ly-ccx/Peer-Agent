@@ -15,6 +15,7 @@ export function ReplyBubble({
   workspaceId,
   workIndex,
   message,
+  referenceIds,
   anchors,
   highlighted,
   i18n,
@@ -30,6 +31,7 @@ export function ReplyBubble({
   readonly workspaceId: string;
   readonly workIndex: BotWorkIndex;
   readonly message: BotChatMessage;
+  readonly referenceIds: readonly string[];
   readonly anchors: ReadonlyMap<string, string>;
   readonly highlighted: boolean;
   readonly i18n: I18nRuntime;
@@ -50,7 +52,7 @@ export function ReplyBubble({
       id={`bot-msg-${message.id}`}
       data-kind="agent_reply"
     >
-      <ReplyAnchors ids={message.replyTo} anchors={anchors} i18n={i18n} onJump={onJump} />
+      <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
       <BotProcess activity={activity} rounds={processRounds} i18n={i18n} disclosure={disclosure} />
       <div
         className="bot-reply-body"

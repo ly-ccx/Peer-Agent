@@ -99,7 +99,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const user = page.locator('.bot-user').filter({ hasText: 'RC_STREAM_TEXT' });
   const layout = await user.evaluate(node => ({ content: node.querySelector('.bot-user-content').getBoundingClientRect().bottom, receipt: node.querySelector('.bot-user-marks').getBoundingClientRect().top }));
   assert.ok(layout.receipt >= layout.content);
-  assert.equal(await live.locator('.bot-reply-bar svg').count(), 1);
+  assert.equal(await live.locator('.bot-reply-bar').count(), 0);
   await page.screenshot({ path: path.join(captureDirectory, 'stream-waiting.png') });
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
@@ -108,12 +108,14 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);
     assert.equal(await page.locator('.bot-stop-response svg').count(), 1);
-    assert.equal(await live.locator('.bot-reply-bar').evaluate(node => getComputedStyle(node).boxShadow), 'none');
+    assert.equal(await user.evaluate(node => getComputedStyle(node).outlineStyle), 'none');
+    assert.equal(await user.evaluate(node => getComputedStyle(node).borderTopWidth), '0px');
+    assert.equal(await live.locator('.bot-reply-bar').count(), 0);
     await page.screenshot({ path: path.join(captureDirectory, `stream-narrow-${theme}.png`) });
   }
   await page.evaluate(theme => { if (theme === undefined) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme; }, originalTheme);
   await page.setViewportSize(viewport);
-  checks.push('receipt below user body; anchored waiting state and SVG stop control');
+  checks.push('receipt below user body with no outer frame; ordinary pending reply has no repeated quote; SVG stop control');
   command('RC_STREAM_TEXT', 1);
   await live.getByText('首段文字已经到达。', { exact: true }).waitFor();
   assert.equal(await page.locator('.bot-stop-response').count(), 1);
@@ -148,6 +150,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await readingStep.locator('.bot-tool-preview > summary').click();
   await readingStep.getByText('调用正在进行，返回内容到达后会显示在这里。', { exact: true }).waitFor();
   assert.match(await readingStep.locator('pre').textContent(), /README.md/);
+  assert.equal(await readingStep.locator('.bot-tool-preview > summary > svg').count(), 1);
+  assert.equal(await readingStep.locator('.bot-tool-preview > summary').evaluate(node => getComputedStyle(node, '::before').content), 'none');
   assert.doesNotMatch(await readingStep.textContent(), /PRIVATE_/);
   await live.screenshot({ path: path.join(captureDirectory, 'stream-tool-running-expanded.png') });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -202,6 +206,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await completed.locator('.bot-tool-preview').first().evaluate(node => node.open), true);
   assert.equal(await completed.locator('.bot-tool-metadata').evaluate(node => node.open), true);
   assert.equal(await completed.locator('.is-running').count(), 0);
+  assert.equal(await completed.locator('.bot-reply-bar').count(), 0);
   if (workCommandFile) {
     assert.equal(await completed.locator('.bot-work-row').evaluate(node => node.open), true);
     checks.push('delegated work retains its expanded progress when the streamed reply becomes canonical');
@@ -217,7 +222,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.match(await completed.locator('.bot-tool-step').textContent(), /README fixture content/);
   assert.doesNotMatch(await completed.locator('.bot-turn-process').textContent(), /PRIVATE_/);
   if (workCommandFile) assert.equal(await completed.locator('.bot-work-row').evaluate(node => node.open), true);
-  checks.push('next turn hands completed process to persisted history with disclosure and bounded redacted details preserved');
+  assert.equal(await completed.locator('.bot-reply-bar').count(), 0);
+  checks.push('next turn hands completed process to persisted history with disclosure, bounded redacted details and no automatic quote');
   command('RC_STREAM_STOP', 2);
   await live.getByText('首段文字已经到达。', { exact: true }).waitFor();
   await live.locator('.bot-tool-step[data-status="running"]').waitFor({ state: 'attached' });
@@ -227,6 +233,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await stop.evaluate(node => getComputedStyle(node).outlineStyle), 'solid');
   await stop.press('Enter');
   await page.getByText('生成已停止，以上内容未完成', { exact: true }).waitFor();
+  assert.equal(await page.locator('.bot-system').filter({ has: page.locator('.bot-stopped-reply') }).locator('.bot-reply-bar').count(), 0);
   assert.equal(await composer.inputValue(), '停止之后继续保留我的草稿');
   assert.equal(await page.locator('.bot-stop-response').count(), 0);
   await page.locator('.bot-system .bot-tool-step[data-status="stopped"]').waitFor({ state: 'attached' });
@@ -243,6 +250,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   command('RC_STREAM_FAIL', 3); await live.waitFor({ state: 'detached' });
   const failed = page.locator('.bot-card').filter({ hasText: '受控连接失败' });
   await failed.waitFor();
+  assert.equal(await page.locator('.bot-system').filter({ has: failed }).locator('.bot-reply-bar').count(), 0);
   await page.locator('.bot-system').filter({ has: failed }).locator('.bot-tool-step[data-status="done"]').waitFor({ state: 'attached' });
   await failed.getByRole('button', { name: '重发', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '完成后只有一条正式回复' }).count(), count => count === 3);

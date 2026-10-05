@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView, LlmProviderTestResult } from '@peer-agent/protocol';
 import { LlmBrandIcon } from './LlmBrandIcon';
@@ -112,15 +113,16 @@ export function ConfiguredModelRow({
           {result ? (
             <div className={`llm-test-result ${result.success ? 'success' : 'fail'}`}>
               <small>
+                <PeerIcon name={result.success ? "check" : "close"} size={14} className="inline-icon" />
                 {result.success
-                  ? `✓ ${result.model || model.model}${result.latencyMs != null ? ` (${result.latencyMs}ms)` : ''}`
-                  : `✗ ${result.connectionStateReason || result.error || 'connection_failed'}`}
+                  ? `${result.model || model.model}${result.latencyMs != null ? ` (${result.latencyMs}ms)` : ''}`
+                  : `${result.connectionStateReason || result.error || 'connection_failed'}`}
               </small>
               {result.stages && result.stages.length > 0 ? (
                 <ul className="llm-test-stages">
                   {result.stages.map((stage) => (
                     <li key={stage.id} className={`stage-${stage.status}`}>
-                      {stage.status === 'passed' ? '✓' : stage.status === 'failed' ? '×' : '–'} {stage.title}
+                      <PeerIcon name={stage.status === 'passed' ? 'check' : stage.status === 'failed' ? 'close' : 'minus'} size={12} className="inline-icon" />{stage.title}
                     </li>
                   ))}
                 </ul>
@@ -135,8 +137,8 @@ export function ConfiguredModelRow({
 
         <div className="llm-configured-model-actions">
           {!model.isDefault ? <button type="button" onClick={onSetDefault} disabled={oauthNotConnected}>{zh ? '设为默认' : 'Set default'}</button> : null}
-          <button type="button" onClick={onTest} disabled={testing || duplicating}>{testing ? '…' : (zh ? '测试' : 'Test')}</button>
-          <button type="button" onClick={onDuplicate} disabled={testing || duplicating}>{duplicating ? '…' : (zh ? '复制' : 'Duplicate')}</button>
+          <button type="button" onClick={onTest} disabled={testing || duplicating}>{testing ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{testing ? (zh ? '测试中' : 'Testing') : (zh ? '测试' : 'Test')}</button>
+          <button type="button" onClick={onDuplicate} disabled={testing || duplicating}>{duplicating ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{duplicating ? (zh ? '复制中' : 'Duplicating') : (zh ? '复制' : 'Duplicate')}</button>
           <button type="button" onClick={onEdit} disabled={duplicating}>{zh ? '设置' : 'Settings'}</button>
           <button type="button" className="danger" onClick={onDelete} disabled={duplicating}>{zh ? '删除' : 'Delete'}</button>
         </div>

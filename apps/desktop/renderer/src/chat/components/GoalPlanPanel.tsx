@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactElement, ReactNode, Ref } from 'react';
@@ -1378,6 +1379,7 @@ function RunnerSection({
       {verifierRuns.length > 0 ? (
         <details className="goal-runner-verifiers">
           <summary>
+            <PeerIcon name="chevronRight" size={14} className="goal-runner-explorer-chevron" />
             {isZh ? `Verifier 复核 ×${verifierRuns.length}` : `Verifiers ×${verifierRuns.length}`}
           </summary>
           <ul className="goal-runner-verifier-list">
@@ -1809,7 +1811,7 @@ const PlanCard = memo(function PlanCard({
                 <span className="goal-plan-merge-v">{taskLineName}</span>
               </span>
               <span className="goal-plan-merge-arrow" aria-hidden="true">
-                {plan.deliveryHandoff?.status === 'stopped' ? '↛' : '→'}
+                <PeerIcon name={plan.deliveryHandoff?.status === 'stopped' ? 'arrowRightOff' : 'arrowRight'} size={16} />
               </span>
               <span className="goal-plan-merge-node">
                 <span className="goal-plan-merge-k">{isZh ? '发版线' : 'Source line'}</span>
@@ -2376,7 +2378,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                     aria-label={isZh ? '已完成' : 'Completed'}
                     role="img"
                   >
-                    ✓
+                    <PeerIcon name="check" size={12} />
                   </span>
                 ) : null}
                 <span className="goal-panel-toggle-summary">

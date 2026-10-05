@@ -223,6 +223,7 @@
   padding: 12px 16px;
   border-radius: 12px;
   background: var(--paper-hover);
+  transition: background var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-message-role {
@@ -365,12 +366,10 @@
   overflow-wrap: anywhere;
 }
 
-.bot-user.is-anchored,
-.bot-reply.is-anchored,
-.bot-system.is-anchored {
-  outline: 2px solid var(--chrome-hairline);
-  outline-offset: 4px;
-  border-radius: 8px;
+.bot-user.is-anchored > .bot-user-content,
+.bot-reply.is-anchored > .bot-reply-body,
+.bot-system.is-anchored > .bot-card {
+  background: var(--control-fill-hover);
 }
 
 .bot-reply-bar {

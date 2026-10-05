@@ -4,6 +4,12 @@
   pointer-events: none;
 }
 
+.peer-icon.inline-icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  margin-inline-end: 0.3em;
+}
+
 .action-label-arrow {
   width: 0.875rem;
   height: 0.875rem;

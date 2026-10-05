@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Overlay } from '../app/components/Overlay';
 import { clientApi } from '../clientApi';
 import { Switch } from '../ui/boolean-controls';
+import { PeerIcon } from '../ui/icons';
 import { getAutomationCopy, type AutomationCopy, type AutomationLocale } from './automationI18n';
 import {
   automationCounts, definitionSubtitle, formatDateTime, nextThreePreview,
@@ -271,7 +272,7 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
         <input aria-label={copy.search} placeholder={copy.search} value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
       {loading ? <div className="automation-empty modern">{copy.loading}</div> : visible.length === 0 ? <div className="automation-empty modern">
-        <div className="automation-empty-icon">⌁</div><h2>{items.length ? copy.noMatches : copy.emptyTitle}</h2>
+        <div className="automation-empty-icon"><PeerIcon name="repeat" size={22} /></div><h2>{items.length ? copy.noMatches : copy.emptyTitle}</h2>
         <p>{items.length ? copy.tryAnotherSearch : copy.emptyDetail}</p>
         {!items.length ? <button className="automation-button primary" onClick={() => (onCreateNew ? onCreateNew() : openEditor())}><Icon name="plus" />{copy.createAutomation}</button> : null}
       </div> : <div className="automation-list">{visible.map((summary) => <button key={summary.definition.automationId} className="automation-list-row" onClick={() => void openDefinition(summary.definition.automationId)}>
@@ -389,7 +390,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
         const list = providers ?? [];
         const options = list.map((provider) => ({
           id: provider.id,
-          label: `${provider.name || provider.provider || provider.id}${provider.model ? ` · ${provider.model}` : ''}${provider.isDefault ? ' ★' : ''}`,
+          label: `${provider.name || provider.provider || provider.id}${provider.model ? ` · ${provider.model}` : ''}${provider.isDefault ? (locale === 'zh' ? '（默认）' : ' (Default)') : ''}`,
         }));
         setModelOptions(options);
         const preferred = list.find((provider) => provider.isDefault)?.id || list[0]?.id || '';
@@ -401,7 +402,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locale]);
 
   const runDetection = async (force = true): Promise<Draft | null> => {
     const prompt = draft.prompt.trim();

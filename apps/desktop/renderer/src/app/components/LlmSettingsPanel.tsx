@@ -1656,7 +1656,7 @@ export function LlmSettingsPanel({
                   {head.oauthStatus?.status === 'connected'
                     ? (i18n.locale === 'zh-CN' ? `已登录${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}` : `Signed in${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}`)
                     : head.oauthStatus?.status === 'expired'
-                      ? (i18n.locale === 'zh-CN' ? '⚠ 登录已过期，请点击“重新登录”' : '⚠ Session expired — click “Re-login”')
+                      ? (<><PeerIcon name="warning" size={12} className="inline-icon" />{i18n.locale === 'zh-CN' ? '登录已过期，请点击“重新登录”' : 'Session expired — click “Re-login”'}</>)
                       : (i18n.locale === 'zh-CN' ? '未登录' : 'Not logged in')}
                 </small>
               ) : (
@@ -1683,7 +1683,7 @@ export function LlmSettingsPanel({
                 </button>
                 {isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected' ? (
                   <button type="button" onClick={() => void handleOAuthLogin({ id: head.id })} disabled={oauthBusyId === head.id}>
-                    {oauthBusyId === head.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
+                    {oauthBusyId === head.id ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{oauthBusyId === head.id ? (i18n.locale === 'zh-CN' ? '正在登录' : 'Logging in') : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
                   </button>
                 ) : null}
                 <OverflowMenu
@@ -2151,10 +2151,10 @@ export function LlmSettingsPanel({
               }}
               disabled={!canSubmit}
             >
-              {saving || oauthBusyId
+              {saving || oauthBusyId ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{saving || oauthBusyId
                 ? (isLocalCliAuth
                     ? (i18n.locale === 'zh-CN' ? '检测中…' : 'Detecting…')
-                    : '...')
+                    : (i18n.locale === 'zh-CN' ? '处理中…' : 'Working…'))
                 : (isLocalCliAuth && !editingId
                     ? (i18n.locale === 'zh-CN' ? '检测并连接' : 'Detect & connect')
                     : (isOAuthMethod(form.authMethod) && !editingId
