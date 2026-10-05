@@ -116,6 +116,11 @@ if (workSurfaces) {
   assert.equal(observedService.split(workSeam).length, 2);
   observedService = observedService.replace(workSeam, `${workSeam}
     if (payload.workspaceId === globalThis.rcBotWorkWorkspace) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,sessions:globalThis.rcBotWorkSessions};`);
+  const detailSeam = 'async function getSession(payload = {}) {';
+  assert.equal(observedService.split(detailSeam).length, 2);
+  observedService = observedService.replace(detailSeam, `${detailSeam}
+    const rcSession = globalThis.rcBotWorkSessions.find(session => session.sessionId === payload.sessionId);
+    if (rcSession) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,session:rcSession};`);
 }
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');

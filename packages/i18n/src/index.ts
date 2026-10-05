@@ -383,6 +383,37 @@ export type TranslationKey =
   | 'projectAgent.drawer.legacyAutomations'
   | 'projectAgent.drawer.legacyAutomationsEmpty'
   | 'projectAgent.drawer.anchor'
+  | 'projectAgent.drawer.taskDetail.back'
+  | 'projectAgent.drawer.taskDetail.untitled'
+  | 'projectAgent.drawer.taskDetail.created'
+  | 'projectAgent.drawer.taskDetail.createdAt'
+  | 'projectAgent.drawer.taskDetail.open'
+  | 'projectAgent.drawer.taskDetail.review'
+  | 'projectAgent.drawer.taskDetail.noScene'
+  | 'projectAgent.drawer.taskDetail.report'
+  | 'projectAgent.drawer.taskDetail.noReport'
+  | 'projectAgent.drawer.taskDetail.evidenceCount'
+  | 'projectAgent.drawer.taskDetail.info'
+  | 'projectAgent.drawer.taskDetail.model'
+  | 'projectAgent.drawer.taskDetail.id'
+  | 'projectAgent.drawer.taskDetail.sourceId'
+  | 'projectAgent.drawer.taskDetail.evidenceRefs'
+  | 'projectAgent.drawer.taskDetail.evidenceHint'
+  | 'projectAgent.drawer.taskDetail.status.starting'
+  | 'projectAgent.drawer.taskDetail.status.queued'
+  | 'projectAgent.drawer.taskDetail.status.paused'
+  | 'projectAgent.drawer.taskDetail.hint.starting'
+  | 'projectAgent.drawer.taskDetail.hint.running'
+  | 'projectAgent.drawer.taskDetail.hint.waiting_user'
+  | 'projectAgent.drawer.taskDetail.hint.verifying'
+  | 'projectAgent.drawer.taskDetail.hint.queued'
+  | 'projectAgent.drawer.taskDetail.hint.paused'
+  | 'projectAgent.drawer.taskDetail.hint.result_ready'
+  | 'projectAgent.drawer.taskDetail.hint.accepted'
+  | 'projectAgent.drawer.taskDetail.hint.failed'
+  | 'projectAgent.drawer.taskDetail.hint.cancelled'
+  | 'projectAgent.drawer.taskDetail.hint.superseded'
+  | 'projectAgent.drawer.taskDetail.hint.unavailable'
   | 'projectAgent.drawer.frozenModel'
   | 'projectAgent.drawer.conclusion'
   | 'projectAgent.drawer.evidence'
@@ -1743,6 +1774,37 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.legacyAutomations': '自动化（旧）',
     'projectAgent.drawer.legacyAutomationsEmpty': '这个项目没有旧的自动化',
     'projectAgent.drawer.anchor': '锚点',
+    'projectAgent.drawer.taskDetail.back': "任务列表",
+    'projectAgent.drawer.taskDetail.untitled': "未命名任务",
+    'projectAgent.drawer.taskDetail.created': "创建于 {time}",
+    'projectAgent.drawer.taskDetail.createdAt': "创建时间",
+    'projectAgent.drawer.taskDetail.open': "打开工作会话",
+    'projectAgent.drawer.taskDetail.review': "查看结果",
+    'projectAgent.drawer.taskDetail.noScene': "尚未建立可打开的工作会话。",
+    'projectAgent.drawer.taskDetail.report': "任务报告",
+    'projectAgent.drawer.taskDetail.noReport': "暂时没有任务报告。",
+    'projectAgent.drawer.taskDetail.evidenceCount': "{count} 条依据记录",
+    'projectAgent.drawer.taskDetail.info': "任务信息",
+    'projectAgent.drawer.taskDetail.model': "执行模型",
+    'projectAgent.drawer.taskDetail.id': "任务标识",
+    'projectAgent.drawer.taskDetail.sourceId': "来源消息",
+    'projectAgent.drawer.taskDetail.evidenceRefs': "依据引用",
+    'projectAgent.drawer.taskDetail.evidenceHint': "这里保留任务记录中的引用标识；内容可在工作会话中查看。",
+    'projectAgent.drawer.taskDetail.status.starting': "准备启动",
+    'projectAgent.drawer.taskDetail.status.queued': "等待执行",
+    'projectAgent.drawer.taskDetail.status.paused': "已暂停",
+    'projectAgent.drawer.taskDetail.hint.starting': "任务正在准备启动，可打开工作会话查看。",
+    'projectAgent.drawer.taskDetail.hint.running': "机器人正在推进任务，可打开工作会话查看过程。",
+    'projectAgent.drawer.taskDetail.hint.waiting_user': "打开工作会话，查看并处理需要你决定的事项。",
+    'projectAgent.drawer.taskDetail.hint.verifying': "正在核对任务结果与依据，可打开工作会话查看复核记录。",
+    'projectAgent.drawer.taskDetail.hint.queued': "任务正在等待执行，排队情况如上。",
+    'projectAgent.drawer.taskDetail.hint.paused': "任务已暂停。可返回任务列表恢复，或打开工作会话查看记录。",
+    'projectAgent.drawer.taskDetail.hint.result_ready': "打开工作会话查看结果，并完成确认。",
+    'projectAgent.drawer.taskDetail.hint.accepted': "本轮结果已签收，可以回到工作会话查看记录。",
+    'projectAgent.drawer.taskDetail.hint.failed': "任务未完成。打开工作会话查看失败记录。",
+    'projectAgent.drawer.taskDetail.hint.cancelled': "任务已取消，原工作会话仍可查看。",
+    'projectAgent.drawer.taskDetail.hint.superseded': "这条任务已被后续任务替代，历史记录仍可查看。",
+    'projectAgent.drawer.taskDetail.hint.unavailable': "暂时无法确认最新状态，已有记录仅供参考。",
     'projectAgent.drawer.frozenModel': '冻结的模型',
     'projectAgent.drawer.conclusion': '结论',
     'projectAgent.drawer.evidence': '证据',
@@ -2891,6 +2953,37 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.legacyAutomations': 'Automations (legacy)',
     'projectAgent.drawer.legacyAutomationsEmpty': 'This project has no legacy automations',
     'projectAgent.drawer.anchor': 'Anchor',
+    'projectAgent.drawer.taskDetail.back': "Task list",
+    'projectAgent.drawer.taskDetail.untitled': "Untitled task",
+    'projectAgent.drawer.taskDetail.created': "Created {time}",
+    'projectAgent.drawer.taskDetail.createdAt': "Created at",
+    'projectAgent.drawer.taskDetail.open': "Open work conversation",
+    'projectAgent.drawer.taskDetail.review': "View result",
+    'projectAgent.drawer.taskDetail.noScene': "No work conversation is available yet.",
+    'projectAgent.drawer.taskDetail.report': "Task report",
+    'projectAgent.drawer.taskDetail.noReport': "No task report yet.",
+    'projectAgent.drawer.taskDetail.evidenceCount': "{count} supporting records",
+    'projectAgent.drawer.taskDetail.info': "Task information",
+    'projectAgent.drawer.taskDetail.model': "Execution model",
+    'projectAgent.drawer.taskDetail.id': "Task ID",
+    'projectAgent.drawer.taskDetail.sourceId': "Source message ID",
+    'projectAgent.drawer.taskDetail.evidenceRefs': "Supporting references",
+    'projectAgent.drawer.taskDetail.evidenceHint': "These references come from the task record. View their contents in the work conversation.",
+    'projectAgent.drawer.taskDetail.status.starting': "Starting",
+    'projectAgent.drawer.taskDetail.status.queued': "Queued",
+    'projectAgent.drawer.taskDetail.status.paused': "Paused",
+    'projectAgent.drawer.taskDetail.hint.starting': "The task is preparing to start. Open its work conversation for details.",
+    'projectAgent.drawer.taskDetail.hint.running': "The bot is working on this task. Open its work conversation to follow progress.",
+    'projectAgent.drawer.taskDetail.hint.waiting_user': "Open the work conversation to review and respond to the pending decision.",
+    'projectAgent.drawer.taskDetail.hint.verifying': "The result and supporting records are being checked. Open the work conversation to view the review.",
+    'projectAgent.drawer.taskDetail.hint.queued': "The task is waiting to run. Its queue status is shown above.",
+    'projectAgent.drawer.taskDetail.hint.paused': "The task is paused. Resume it from the task list, or open its work conversation.",
+    'projectAgent.drawer.taskDetail.hint.result_ready': "Open the work conversation to review and confirm the result.",
+    'projectAgent.drawer.taskDetail.hint.accepted': "The result has been accepted. Its records remain in the work conversation.",
+    'projectAgent.drawer.taskDetail.hint.failed': "The task did not finish. Open the work conversation to review the failure.",
+    'projectAgent.drawer.taskDetail.hint.cancelled': "The task was cancelled. Its work conversation remains available.",
+    'projectAgent.drawer.taskDetail.hint.superseded': "This task was replaced by a later task. Its history remains available.",
+    'projectAgent.drawer.taskDetail.hint.unavailable': "The latest status cannot be confirmed. Existing records are for reference.",
     'projectAgent.drawer.frozenModel': 'Frozen model',
     'projectAgent.drawer.conclusion': 'Conclusion',
     'projectAgent.drawer.evidence': 'Evidence',

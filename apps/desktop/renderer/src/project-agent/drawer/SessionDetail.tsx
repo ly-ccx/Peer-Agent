@@ -6,7 +6,9 @@ import { ChatSurface } from '../../chat/components/ChatSurface';
 import { clientApi } from '../../clientApi';
 import { WorkbenchPanel } from '../../workbench/WorkbenchPanel';
 import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
+import { PeerIcon } from '../../ui/icons/PeerIcon';
 import type { DrawerSession } from '../state/drawerState';
+import { sessionDetailPresentation } from './sessionDetailPresentation';
 
 export function SessionDetail({
   workspaceId,
@@ -24,39 +26,64 @@ export function SessionDetail({
   readonly onBack: () => void;
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
+  const view = sessionDetailPresentation(session, i18n);
   return (
-    <div className="bot-drawer-detail">
-      <button type="button" onClick={onBack}>{i18n.t('projectAgent.drawer.back')}</button>
-      <h2>{session.title}</h2>
-      <dl>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.progress')}</dt>
-          <dd>{session.progress || session.statusLabel || session.status}</dd>
-        </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.anchor')}</dt>
-          <dd>{session.anchorMessageId || i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.frozenModel')}</dt>
-          <dd>{session.modelLabel || i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.conclusion')}</dt>
-          <dd>{session.summary || i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.evidence')}</dt>
-          <dd>{session.evidenceRefs.length > 0 ? session.evidenceRefs.join('、') : i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-      </dl>
-      <button
-        type="button"
-        disabled={!session.conversationId}
-        onClick={() => setSceneOpen(true)}
-      >
-        {session.conversationId ? i18n.t('projectAgent.drawer.openScene') : i18n.t('projectAgent.drawer.sceneMissing')}
+    <div className="bot-drawer-detail bot-session-detail" data-status={session.status}>
+      <button className="bot-session-back" type="button" onClick={onBack}>
+        <PeerIcon name="chevronLeft" />
+        {i18n.t('projectAgent.drawer.taskDetail.back')}
       </button>
+      <header className="bot-session-heading">
+        <h2>{view.title}</h2>
+        <div className="bot-session-meta">
+          <span className={`bot-session-status is-${view.tone}`}>{view.statusLabel}</span>
+          {view.createdLabel ? <time dateTime={session.spawnedAt}>
+            {i18n.t('projectAgent.drawer.taskDetail.created', { time: view.createdLabel })}
+          </time> : null}
+        </div>
+      </header>
+      <section className="bot-session-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
+        <h3>{i18n.t('projectAgent.drawer.progress')}</h3>
+        <p className="bot-session-progress-title">{view.progress}</p>
+        <p className="bot-session-hint">{session.conversationId ? view.hint : i18n.t('projectAgent.drawer.taskDetail.noScene')}</p>
+        {session.conversationId ? (
+          <button className="bot-session-open" type="button" onClick={() => setSceneOpen(true)}>
+            <PeerIcon name="terminal" />
+            {view.actionLabel}
+            <PeerIcon name="arrowUpRight" size={14} />
+          </button>
+        ) : null}
+      </section>
+      <section className="bot-session-report" aria-label={i18n.t('projectAgent.drawer.taskDetail.report')}>
+        <div className="bot-session-report-heading">
+          <h3>{i18n.t('projectAgent.drawer.taskDetail.report')}</h3>
+          {view.evidenceRefs.length ? <span>{i18n.t('projectAgent.drawer.taskDetail.evidenceCount', { count: view.evidenceRefs.length })}</span> : null}
+        </div>
+        {view.report ? <p className="bot-session-report-text">{view.report}</p> : (
+          <p className="bot-session-empty"><PeerIcon name="fileText" />{i18n.t('projectAgent.drawer.taskDetail.noReport')}</p>
+        )}
+      </section>
+      <details className="bot-session-info">
+        <summary><PeerIcon name="chevronRight" />{i18n.t('projectAgent.drawer.taskDetail.info')}</summary>
+        <dl>
+          {session.modelLabel ? <div>
+            <dt>{i18n.t('projectAgent.drawer.taskDetail.model')}</dt><dd>{session.modelLabel}</dd>
+          </div> : null}
+          {view.createdLabel ? <div>
+            <dt>{i18n.t('projectAgent.drawer.taskDetail.createdAt')}</dt>
+            <dd><time dateTime={session.spawnedAt}>{new Date(session.spawnedAt).toLocaleString(isZh ? 'zh-CN' : 'en-US')}</time></dd>
+          </div> : null}
+          <div><dt>{i18n.t('projectAgent.drawer.taskDetail.id')}</dt><dd><code>{session.sessionId}</code></dd></div>
+          {session.anchorMessageId ? <div>
+            <dt>{i18n.t('projectAgent.drawer.taskDetail.sourceId')}</dt><dd><code>{session.anchorMessageId}</code></dd>
+          </div> : null}
+        </dl>
+        {view.evidenceRefs.length ? <details className="bot-session-evidence">
+          <summary><PeerIcon name="chevronRight" />{i18n.t('projectAgent.drawer.taskDetail.evidenceRefs')}</summary>
+          <p>{i18n.t('projectAgent.drawer.taskDetail.evidenceHint')}</p>
+          <ul>{view.evidenceRefs.map(ref => <li key={ref}><code>{ref}</code></li>)}</ul>
+        </details> : null}
+      </details>
       {sceneOpen && session.conversationId ? (
         <ConversationSceneDrawer
           workspaceId={workspaceId}

@@ -3,6 +3,7 @@ import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, useRef, type RefObject } from 'react';
 import { useFocusScope } from '../../app/hooks/useFocusScope';
 import { Drawer } from '../../app/components/Drawer';
+import { OVERLAY_SELECTOR } from '../../app/components/overlayStack';
 import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
 import {
@@ -136,6 +137,7 @@ export function BotProfileDrawer({
     if (!memory.open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || layout === 'cover') return;
+      if (document.querySelector(OVERLAY_SELECTOR)) return;
       event.preventDefault();
       close();
     };
