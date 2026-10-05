@@ -175,19 +175,37 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
 }
 
 async function recordDisclosure(locator, open, reverse = false) {
-  const samplesPromise = locator.evaluate(node => new Promise(resolve => {
-    const samples = []; const start = performance.now();
-    const frame = now => {
-      const style = getComputedStyle(node, '::details-content');
-      samples.push({ at: Math.round(now - start), height: node.getBoundingClientRect().height,
-        opacity: style.opacity, visibility: style.contentVisibility, open: node.open,
-        arrow: getComputedStyle(node.querySelector(':scope > summary > svg:last-child')).transform });
-      if (now - start < 480) requestAnimationFrame(frame); else resolve(samples);
-    }; requestAnimationFrame(frame);
-  }));
+  const expectedClicks = reverse ? 2 : 1;
+  // Install before input, then sample a complete interval after the last real click.
+  // Remote Playwright dispatch time must not consume the closing observation window.
+  await locator.evaluate((node, expectedClicks) => {
+    node.__rcDisclosureCapture = new Promise(resolve => {
+      const samples = []; const start = performance.now(); const summary = node.querySelector(':scope > summary');
+      let lastClick = null, clicks = 0, raf = 0;
+      const mark = () => { lastClick = performance.now(); clicks += 1; };
+      const finish = timedOut => {
+        clearTimeout(timeout); cancelAnimationFrame(raf); summary.removeEventListener('click', mark);
+        resolve({ samples, clicks, timedOut });
+      };
+      const timeout = setTimeout(() => finish(true), 6000);
+      const frame = now => {
+        const style = getComputedStyle(node, '::details-content');
+        samples.push({ at: Math.round(now - start), height: node.getBoundingClientRect().height,
+          opacity: style.opacity, visibility: style.contentVisibility, open: node.open,
+          arrow: getComputedStyle(node.querySelector(':scope > summary > svg:last-child')).transform });
+        if (clicks >= expectedClicks && now - lastClick >= 480) finish(false);
+        else raf = requestAnimationFrame(frame);
+      };
+      summary.addEventListener('click', mark); raf = requestAnimationFrame(frame);
+    });
+  }, expectedClicks);
   const summary = locator.locator(':scope > summary'); await summary.click({ force: true });
   if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await summary.click({ force: true }); }
-  const samples = await samplesPromise;
+  const capture = await locator.evaluate(node => node.__rcDisclosureCapture);
+  await locator.evaluate(node => { delete node.__rcDisclosureCapture; });
+  assert.equal(capture.timedOut, false, 'real disclosure input and observation complete within the bound');
+  assert.equal(capture.clicks, expectedClicks, 'each intended native disclosure click occurred');
+  const samples = capture.samples;
   const heights = samples.map(sample => sample.height), min = Math.min(...heights), max = Math.max(...heights);
   assert.ok(max - min > 8, 'native disclosure has a real size change');
   assert.ok(heights.some(height => height > min + 1 && height < max - 1), 'height transition contains intermediate frames');
