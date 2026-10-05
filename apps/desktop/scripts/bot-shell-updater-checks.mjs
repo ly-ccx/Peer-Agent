@@ -100,8 +100,12 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
         });
         const settings = footer.querySelector('.bot-app-menu-button').getBoundingClientRect();
         const version = node.getBoundingClientRect();
+        const footerBox = footer.getBoundingClientRect();
+        const footerStyle = getComputedStyle(footer);
+        const contentRight = footerBox.right - parseFloat(footerStyle.paddingRight) - parseFloat(footerStyle.borderRightWidth);
         return { controls, settingsRight: settings.right, versionLeft: version.left, versionRight: version.right,
-          footerRight: footer.getBoundingClientRect().right, column: { left: column.left, right: column.right }, viewport: innerHeight,
+          footerLeft: footerBox.left, footerRight: footerBox.right, contentRight,
+          column: { left: column.left, right: column.right }, viewport: innerHeight,
           scrollWidth: footer.scrollWidth, clientWidth: footer.clientWidth };
       };
       const normal = measure();
@@ -121,8 +125,10 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
       assert.equal(layout.scrollWidth <= layout.clientWidth && layout.controls.every(box =>
         box.width > 0 && box.height >= 24 && box.left >= layout.column.left && box.right <= layout.column.right
         && box.top >= 0 && box.bottom <= layout.viewport), true, 'every footer control must remain visible inside the narrow column');
-      assert.ok(layout.versionLeft >= layout.settingsRight && layout.versionRight <= layout.footerRight
-        && layout.footerRight - layout.versionRight <= 5, 'version group must stay on the right without overlapping settings');
+      assert.ok(Math.abs(layout.footerLeft - layout.column.left) <= 1 && Math.abs(layout.footerRight - layout.column.right) <= 1,
+        'footer divider must span the column without inset gaps');
+      assert.ok(layout.versionLeft >= layout.settingsRight && layout.versionRight <= layout.contentRight
+        && layout.contentRight - layout.versionRight <= 5, 'version group must align to the right content edge without overlapping settings');
     }
   };
   for (const locale of ['zh-CN', 'en-US']) {
