@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import type { ProjectAgentActivity, ProjectInputAttachment } from '@peer-agent/protocol';
 import { isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
@@ -157,11 +157,11 @@ export function useBotConversation(workspaceId: string) {
     if (arrived) setAwaitingSince(null);
   }, [awaitingSince, messages]);
 
-  const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string, answerTo?: string) => {
+  const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string, answerTo?: string, attachments: readonly ProjectInputAttachment[] = []) => {
     const ticket = generationRef.current;
     setPending((current) => {
       const rest = current.filter((item) => item.inputId !== inputId);
-      return [...rest, { inputId, text, quoteRefs, createdAt, state: 'sending', ...(answerTo ? { answerTo } : {}) }];
+      return [...rest, { inputId, text, quoteRefs, attachments, createdAt, state: 'sending', ...(answerTo ? { answerTo } : {}) }];
     });
     try {
       const result = await clientApi.projectAgentSubmitInput({
@@ -169,6 +169,7 @@ export function useBotConversation(workspaceId: string) {
         inputId,
         text,
         surface: 'desktop',
+        ...(attachments.length ? { attachments } : {}),
         ...(quoteRefs.length > 0 ? { quoteRefs } : {}),
         ...(answerTo ? { answerTo } : {}),
       });
@@ -189,19 +190,19 @@ export function useBotConversation(workspaceId: string) {
     }
   }, [workspaceId]);
 
-  const send = useCallback(async (text: string, quoteRefs: readonly string[] = []) => {
+  const send = useCallback(async (text: string, quoteRefs: readonly string[] = [], attachments: readonly ProjectInputAttachment[] = []) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && !attachments.length) return;
     const inputId = crypto.randomUUID();
     setFollowRequestId(value => value + 1);
     const answerTo = questionForInput(applyOptimistic(messages, pending), quoteRefs);
-    await submit(inputId, trimmed, quoteRefs, new Date().toISOString(), answerTo);
+    await submit(inputId, trimmed, quoteRefs, new Date().toISOString(), answerTo, attachments);
   }, [submit, messages, pending]);
 
   const retry = useCallback(async (inputId: string) => {
     const item = pending.find((entry) => entry.inputId === inputId);
     if (!item) return;
-    await submit(item.inputId, item.text, item.quoteRefs, item.createdAt, item.answerTo);
+    await submit(item.inputId, item.text, item.quoteRefs, item.createdAt, item.answerTo, item.attachments);
   }, [pending, submit]);
 
   useEffect(() => { if (!isActivityRunning(activity)) setStopping(false); }, [activity]);
@@ -232,6 +233,7 @@ export function useBotConversation(workspaceId: string) {
     rows,
     thinking: !live && !isActivityRunning(activity) && showAgentThinking(pending, awaitingSince !== null),
     generating: isActivityRunning(activity),
+    activeModelSelection: isActivityRunning(activity) ? activity?.modelSelection : undefined,
     stopping, stopError, stop, followRequestId,
     hasOlder,
     olderError,

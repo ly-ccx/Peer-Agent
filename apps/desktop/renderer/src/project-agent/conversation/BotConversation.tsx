@@ -1,17 +1,21 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
+import type { BotProfile, BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
 import { quoteRefsFor, roundsForReply } from '../state/botConversationState';
 import { useBotConversation } from '../state/useBotConversation';
+import { BotModelControls } from '../BotModelControls';
+import type { BotModelsControlState } from '../state/useBotModels';
 import { BotComposer } from './BotComposer';
 import { BotMessageList } from './BotMessageList';
 import '../styles/bot-conversation.css';
 
 export function BotConversation({
   workspaceId,
+  profile,
+  modelControls,
   avatar,
   label,
   avatarMood,
@@ -23,6 +27,8 @@ export function BotConversation({
   focusRequestId = 0,
 }: {
   readonly workspaceId: string;
+  readonly profile: BotProfile;
+  readonly modelControls: BotModelsControlState;
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
@@ -115,17 +121,24 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
+      {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
       <BotComposer
+        key={workspaceId}
         i18n={i18n}
+        modelUpdating={modelControls.busy}
+        modelControls={<div className="bot-model-toolbar"><BotModelControls role="project_agent" compact
+          policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
+          activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
+          i18n={i18n} onChange={policy => { void modelControls.save(policy); }} /></div>}
         quote={quote?.text ?? ''}
         generating={conversation.generating}
         stopping={conversation.stopping}
         onStop={() => void conversation.stop()}
         onQuoteRemove={() => setQuote(null)}
-        onSend={(text) => {
+        onSend={(text, attachments) => {
           const refs = quote ? quoteRefsFor(quote.messageId, quote.text) : [];
           setQuote(null);
-          void conversation.send(text, refs);
+          void conversation.send(text, refs, attachments);
         }}
       />
     </div>

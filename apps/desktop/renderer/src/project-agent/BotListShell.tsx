@@ -11,6 +11,7 @@ import { botAvatarMood } from './state/botAvatarState';
 import { BotList } from './BotList';
 import { AppMenu } from './AppMenu';
 import { NewBotSheet } from './NewBotSheet';
+import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
@@ -102,6 +103,7 @@ export function BotListShell({
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  const modelControls = useBotModels(opened?.workspaceId ?? null, opened?.profile ?? null, list.updateProfile);
   const openedIdRef = useRef(list.openedId);
   const firstVisibleIdRef = useRef(list.visible[0]?.workspaceId ?? '');
   openedIdRef.current = list.openedId;
@@ -421,12 +423,15 @@ export function BotListShell({
                   ));
                 }}
               >
-                {i18n.t('projectAgent.list.profile')}
+                <PeerIcon name="fileText" size={16} strokeWidth={1.75} />
+                <span>{i18n.t('projectAgent.list.profile')}</span>
               </button>
             </header>
             <BotConversation
               key={opened.workspaceId}
               workspaceId={opened.workspaceId}
+              profile={opened.profile}
+              modelControls={modelControls}
               avatar={opened.profile.avatar}
               label={opened.profile.displayName}
               avatarMood={botAvatarMood(opened.state)}
@@ -486,6 +491,7 @@ export function BotListShell({
         <BotProfileDrawer
           workspaceId={opened.workspaceId}
           profile={opened.profile}
+          modelControls={modelControls}
           memory={drawerMemory}
           locateSessionId={locateSessionId}
           inspect={inspect}

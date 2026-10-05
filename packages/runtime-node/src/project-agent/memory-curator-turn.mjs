@@ -27,7 +27,7 @@ export async function runMemoryCuratorTurn({
   createSink = createCollectingSink,
 } = {}) {
   if (typeof runTurn !== 'function') return { text: '' };
-  let modelProviderId = null;
+  let modelProviderId = null, modelSelection = null;
   if (typeof resolveRoute === 'function') {
     let route = null;
     try {
@@ -37,7 +37,7 @@ export async function runMemoryCuratorTurn({
     }
     if (route && route.ok === false) return { text: '', skipped: route.reason || 'route_blocked' };
     const selected = route?.selection?.modelProviderId;
-    if (typeof selected === 'string' && selected) modelProviderId = selected;
+    if (typeof selected === 'string' && selected) { modelProviderId = selected; modelSelection = route.selection; }
   }
   if (!modelProviderId) {
     modelProviderId = curatorModelProviderId(typeof getSettings === 'function' ? getSettings() : null);
@@ -52,7 +52,7 @@ export async function runMemoryCuratorTurn({
       excludeCapabilityPrefixes: Array.isArray(request?.excludeCapabilityPrefixes)
         ? request.excludeCapabilityPrefixes
         : [],
-      ...(modelProviderId ? { modelSelection: { modelProviderId, source: 'routing' } } : {}),
+      ...(modelProviderId ? { modelSelection: { ...modelSelection, modelProviderId, source: 'routing' } } : {}),
     },
     sink,
     messages: Array.isArray(request?.messages) ? request.messages : [],

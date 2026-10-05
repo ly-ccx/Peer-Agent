@@ -74,3 +74,18 @@ test('tool results with textual output end normally; nested denial is never show
   }
   a.dispose();
 });
+
+
+test('active model is a copied turn snapshot and follows provider recovery', () => {
+  const activity = createTurnActivity({ workspaceId: 'w', conversationId: 'c' });
+  const selection = { modelProviderId: 'm', reasoningEffort: 'high' };
+  activity.begin({ turnId: 't', modelSelection: selection, visible: true });
+  selection.modelProviderId = 'next';
+  const snapshot = activity.snapshot();
+  assert.equal(snapshot.modelSelection.modelProviderId, 'm');
+  snapshot.modelSelection.reasoningEffort = 'low';
+  assert.equal(activity.snapshot().modelSelection.reasoningEffort, 'high');
+  activity.accept('chat:stream:provider-recovery', { streamId: 't', toProviderId: 'fallback' });
+  assert.equal(activity.snapshot().modelSelection.modelProviderId, 'fallback');
+  activity.dispose();
+});

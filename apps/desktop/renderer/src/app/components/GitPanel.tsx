@@ -5,6 +5,7 @@ import {
   readGitBranchPrefixFromSettings,
   resolveGitBranchPrefix,
 } from '../gitBranchPrefix';
+import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { clientApi } from '../../clientApi';
 
 export interface GitPanelProps {
@@ -53,7 +54,8 @@ export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitP
 
   return (
     <div className="general-panel">
-      <section className="llm-instructions-card general-card">
+      <header className="frost-page-heading"><h1>{i18n.t('settings.git')}</h1></header>
+      <SettingsGroup title={i18n.t('settings.git.branchNaming')} className="general-card">
         <div className="general-setting-row">
           <div className="general-setting-copy">
             <h3>{i18n.t('settings.git.branchPrefix')}</h3>
@@ -79,7 +81,7 @@ export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitP
           </div>
         </div>
         {error ? <p className="general-setting-error">{error}</p> : null}
-      </section>
+      </SettingsGroup>
     </div>
   );
 }

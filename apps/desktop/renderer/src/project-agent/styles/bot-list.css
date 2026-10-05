@@ -571,7 +571,9 @@
 .bot-column-footer {
   flex: none;
   margin-top: 12px;
-  padding: 8px 4px 0;
+  margin-inline: -10px;
+  padding: 12px 14px 0;
+  border-top: 1px solid var(--chrome-hairline);
 }
 
 .bot-column-footer .sidebar-version-badge {
@@ -714,8 +716,12 @@
   padding: 5px;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 10px;
-  box-shadow: none;
+  border-radius: var(--surface-radius);
+  box-shadow: var(--shadow-popover);
+}
+
+@supports (corner-shape: superellipse(1.4)) {
+  .bot-app-menu-menu { corner-shape: var(--control-corner); }
 }
 
 .bot-app-menu-menu button {
@@ -792,7 +798,9 @@
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 16px 22px;
+  flex: none;
+  min-height: 68px;
+  padding: 0 27px;
   background: var(--chrome-canvas);
   border-bottom: 1px solid var(--chrome-hairline);
   -webkit-app-region: drag;
@@ -805,12 +813,14 @@
   letter-spacing: -0.03em;
 }
 
+.bot-main-head > .bot-avatar { width: 32px; height: 32px; flex-basis: 32px; }
+
 .bot-main-title {
   flex: 1;
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 16px;
+  font-size: .875rem;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -844,6 +854,45 @@
 .bot-profile[aria-expanded='true'] {
   color: var(--graphite-base);
   background: var(--chrome-hover);
+}
+
+.bot-profile {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: var(--control-radius-compact);
+  border-color: transparent;
+  background: var(--control-fill);
+  font-weight: 500;
+  line-height: 18px;
+  box-shadow: none;
+  user-select: none;
+}
+
+.bot-profile:hover {
+  background: var(--control-fill-hover);
+}
+
+.bot-profile[aria-expanded='true'] {
+  background: var(--control-fill-active);
+  border-color: transparent;
+}
+
+.bot-profile:focus-visible {
+  outline: 2px solid var(--azure-seal);
+  outline-offset: 2px;
+}
+
+@supports (corner-shape: superellipse(1.4)) {
+  .bot-profile { corner-shape: var(--control-corner); }
+}
+
+@media (forced-colors: active) {
+  .bot-profile { border-color: ButtonText; }
 }
 
 .bot-main-placeholder,

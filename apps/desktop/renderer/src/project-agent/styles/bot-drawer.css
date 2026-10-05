@@ -1,6 +1,6 @@
 .bot-drawer-dock,
 .bot-drawer-panel {
-  --pa-drawer-width: 380px;
+  --pa-drawer-width: 414px;
 }
 
 .bot-drawer-dock {
@@ -33,7 +33,7 @@
 .bot-drawer-panel {
   display: flex;
   flex-direction: column;
-  width: 380px;
+  width: var(--pa-drawer-width);
   max-width: 92vw;
   height: 100%;
   background: var(--paper-sheet, var(--za-surface-0));
@@ -264,7 +264,7 @@
   height: 22px;
   border-radius: 50%;
   background: var(--bot-swatch-color);
-  box-shadow: inset 0 1px 2px rgb(255 255 255 / 35%), 0 2px 7px rgb(0 0 0 / 16%);
+  box-shadow: none;
 }
 
 .bot-drawer-tab .bot-avatar-color:hover:not(:disabled) {
@@ -915,9 +915,8 @@
 
 .bot-settings-tab { gap: 20px; min-width: 0; }
 .bot-settings-tab .bot-settings-section {
-  gap: 10px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--chrome-hairline);
+  gap: 0;
+  padding: 0;
 }
 .bot-settings-tab h2 { margin: 0; font-size: 13px; }
 .bot-settings-tab .bot-settings-field { font-weight: 400; }
@@ -956,22 +955,6 @@
   background: var(--chrome-canvas);
 }
 .bot-settings-tab .bot-settings-toggle-row { grid-template-columns: minmax(0, 1fr) auto; }
-.bot-settings-tab .peer-switch {
-  display: inline-flex;
-  width: 36px;
-  height: 20px;
-  min-height: 20px;
-  padding: 1px;
-  border-radius: 999px;
-  border-color: var(--graphite-hairline);
-  background: var(--control-fill);
-}
-.bot-settings-tab .peer-switch-thumb { background: var(--graphite-base, var(--za-text)); }
-.bot-settings-tab .peer-switch[data-state='checked'] {
-  border-color: var(--state-active-on);
-  background: var(--state-active-on);
-}
-.bot-settings-tab .peer-switch[data-state='checked'] .peer-switch-thumb { background: var(--za-primary-control-ink); }
 .bot-settings-disclosure { min-width: 0; }
 .bot-settings-disclosure > summary {
   display: flex;
@@ -1059,4 +1042,71 @@
 .bot-memory-pages button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Sliding segmented selection: all five choices share the available width. */
+.bot-drawer-tabs.bot-drawer-segments {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: repeat(var(--segment-count), minmax(0, 1fr));
+  gap: 0;
+  padding: 3px;
+  border-radius: var(--control-radius);
+  background: var(--chrome-sunken);
+  touch-action: pan-y;
+  user-select: none;
+  min-width: 0;
+}
+.bot-segment-thumb {
+  position: absolute;
+  z-index: -1;
+  inset: 3px auto 3px 3px;
+  width: calc((100% - 6px) / var(--segment-count));
+  background: var(--paper-sheet);
+  border: 1px solid transparent;
+  border-radius: calc(var(--control-radius) - 3px);
+  transform: translateX(calc(var(--segment-index) * 100%));
+  transition: transform var(--za-motion-fast) var(--za-ease-standard);
+  pointer-events: none;
+}
+.bot-drawer-segments button {
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bot-drawer-segments button[aria-selected='true'] { background: transparent; }
+.bot-drawer-segments button:focus-visible { outline: 2px solid var(--graphite-soft); outline-offset: -2px; }
+.bot-drawer-segments.is-sliding .bot-segment-thumb { transition: none; }
+@media (prefers-reduced-motion: reduce) { .bot-segment-thumb { transition: none; } }
+
+/* The drawer uses the same paper groups at a compact density. */
+.bot-drawer-body .frost-settings-group { gap: 0; }
+.bot-drawer-body .frost-settings-group > .frost-group-heading { padding: 15px; }
+.bot-drawer-body .frost-settings-group > .frost-group-heading h2 { font-size: .8125rem; font-weight: 400; }
+.bot-drawer-body .frost-settings-group > .frost-group-heading p { font-size: .75rem; line-height: 1.7; }
+.bot-drawer-body .frost-group-content > .bot-settings-row { padding: 15px; min-height: 64px; }
+.bot-drawer-body .frost-group-content > .bot-settings-row + .bot-settings-row { border-top: 1px solid var(--chrome-hairline); }
+.bot-drawer-body .bot-model-settings-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.bot-drawer-body .bot-model-settings-row > span { padding: 0; font-size: .75rem; font-weight: 600; }
+.bot-drawer-body .bot-settings-row { font-size: .75rem; }
+.bot-drawer-body .frost-settings-group .pa-dropdown-trigger { height: auto; min-height: 34px; padding: 6px 12px; border-radius: var(--control-radius-compact); font-size: .75rem; }
+.bot-drawer-body .bot-settings-identity .frost-group-content { display: flex; flex-direction: column; gap: 18px; padding: 15px; }
+.bot-drawer-body .bot-settings-name-row input { min-height: 34px; padding: 6px 12px; border-radius: var(--control-radius-compact); border: 1px solid transparent; background: var(--control-fill); font-size: .75rem; }
+.bot-drawer-body .bot-settings-name-row button { font-size: .75rem; }
+.bot-drawer-body .bot-settings-workflow .frost-group-content > .bot-drawer-note { padding: 0 15px 15px; font-size: .6875rem; }
+.bot-drawer-body .bot-model-advanced > summary { padding: 12px 15px; border-top: 1px solid var(--chrome-hairline); font-size: .6875rem; }
+.bot-drawer-body .bot-model-advanced .bot-settings-disclosure-body { padding: 0 15px 15px; gap: 15px; }
+.bot-drawer-body .bot-model-advanced .bot-model-settings-row { padding-block: 10px; }
+.bot-drawer-body .bot-settings-section .peer-switch { width: 40px; height: 23px; min-height: 23px; padding: 3px; border-radius: 16px; background: var(--paper-sunken); }
+.bot-drawer-body .bot-settings-section .peer-switch[data-state='checked'] { background: var(--graphite-base); border-color: var(--graphite-base); }
+.bot-drawer-head p { font-size: .9375rem; }
+
+.bot-drawer-body .bot-drawer-tab :is(.bot-settings-name-row, .bot-avatar-settings-actions) button { min-height: 34px; padding: 6px 12px; border-color: transparent; border-radius: var(--control-radius-compact); background: var(--control-fill); box-shadow: none; }
+.bot-drawer-body .bot-drawer-tab :is(.bot-settings-name-row, .bot-avatar-settings-actions) button:hover:not(:disabled) { background: var(--control-fill-hover); }
+@supports (corner-shape: superellipse(1.4)) {
+  :is(.bot-drawer-segments, .bot-segment-thumb, .bot-settings-name-row input, .bot-settings-name-row button, .bot-avatar-settings-actions button) { corner-shape: var(--control-corner); }
 }

@@ -1,10 +1,12 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { BOT_AVATAR_COLORS, type BotProfile, type ModelRoutingMenuOption } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, type BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
+import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotHostControl } from './BotHostControl';
+import type { BotModelsControlState } from '../state/useBotModels';
 import { BotApprovalFields, BotPolicyFields } from './BotPolicyFields';
 import { PeerIcon } from '../../ui/icons/PeerIcon';
 import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
@@ -33,15 +35,14 @@ function isProactivityLevel(value: string): value is ProactivityLevel {
 export function BotSettingsTab({
   workspaceId,
   profile,
-  modelOptions = [],
+  modelControls,
   i18n,
   onProfile,
   onDeleted,
 }: {
   readonly workspaceId: string;
   readonly profile: BotProfile;
-  readonly modelLabel: string;
-  readonly modelOptions?: readonly ModelRoutingMenuOption[];
+  readonly modelControls: BotModelsControlState;
   readonly i18n: I18nRuntime;
   readonly onProfile: (profile: BotProfile) => void;
   readonly onDeleted: () => void;
@@ -180,10 +181,10 @@ export function BotSettingsTab({
 
   return (
     <div className="bot-drawer-tab bot-settings-tab">
-      <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
-        onChange={patch => { void savePolicy(patch); }} />
-      <section className="bot-settings-section bot-settings-identity">
-        <h2>{i18n.t('projectAgent.drawer.settings.appearance')}</h2>
+      <BotPolicyFields profile={profile} models={modelControls.models} views={modelControls.views} busy={busy || modelControls.busy} i18n={i18n}
+        onChange={patch => { if (patch.modelPolicy) void modelControls.save(patch.modelPolicy); }} />
+      {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
+      <SettingsGroup className="bot-settings-section bot-settings-identity" title={i18n.t('projectAgent.drawer.settings.appearance')}>
       <div className="bot-settings-field">
         <label htmlFor="bot-settings-name">{i18n.t('projectAgent.drawer.settings.name')}</label>
         <div className="bot-settings-name-row">
@@ -224,9 +225,8 @@ export function BotSettingsTab({
           {profile.avatar.kind === 'image' ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.avatarColorImageHint')}</p> : null}
         </div>
       </div>
-      </section>
-      <section className="bot-settings-section">
-        <h2>{i18n.t('projectAgent.drawer.settings.workflow')}</h2>
+      </SettingsGroup>
+      <SettingsGroup className="bot-settings-section bot-settings-workflow" title={i18n.t('projectAgent.drawer.settings.workflow')}>
       <div className="bot-settings-row">
         <span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span>
         <Dropdown
@@ -245,7 +245,7 @@ export function BotSettingsTab({
           onCheckedChange={value => { void savePolicy({ autoHandoffOnPolicyAccept: value }); }} />
       </div>
       <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
-      </section>
+      </SettingsGroup>
       <details className="bot-settings-disclosure bot-runtime-settings">
         <summary>{i18n.t('projectAgent.drawer.settings.runtime')}<PeerIcon name="chevronDown" size={14} /></summary>
         <div className="bot-settings-disclosure-body">

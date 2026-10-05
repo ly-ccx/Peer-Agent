@@ -8,6 +8,7 @@ import type {
   ModelRoutingView,
 } from '../../../preload/contracts/bootstrapPreloadApi';
 import { Checkbox, Switch } from '../../../ui/boolean-controls';
+import { SettingsGroup } from '../../../ui/settings/SettingsGroup';
 import { CascadingMenu } from '../CascadingMenu';
 import { Dropdown } from '../Dropdown';
 import './model-routing.css';
@@ -136,8 +137,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
       {options.length === 0 ? <p className="model-routing-banner">{i18n.t('modelRouting.noModel')}</p> : null}
       {error ? <p className="settings-warning">{error}</p> : null}
 
-      <section className="settings-card model-routing-card">
-        <h3>{i18n.t('modelRouting.tiers')}</h3>
+      <SettingsGroup className="model-routing-card" title={i18n.t('modelRouting.tiers')}>
         <div className="model-routing-head model-routing-tier" aria-hidden="true">
           <span />
           <span>{i18n.t('modelRouting.primary')}</span>
@@ -208,10 +208,9 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             );
           })}
         </div>
-      </section>
+      </SettingsGroup>
 
-      <section className="settings-card model-routing-card">
-        <h3>{i18n.t('modelRouting.roles')}</h3>
+      <SettingsGroup className="model-routing-card" title={i18n.t('modelRouting.roles')}>
         <div className="model-routing-pref">
           <span id={preferLabelId}>{i18n.t('modelRouting.preferDifferentFamily')}</span>
           <Switch
@@ -349,7 +348,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             );
           })}
         </div>
-      </section>
+      </SettingsGroup>
     </div>
   );
 }

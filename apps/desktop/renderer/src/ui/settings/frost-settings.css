@@ -1,0 +1,151 @@
+/* Frost settings: paper groups and a shared type/control hierarchy. */
+.settings-page { --settings-panel-max-width: 1000px; grid-template-columns: 226px minmax(0, 1fr); }
+.settings-nav { background: var(--glass-chrome); backdrop-filter: blur(var(--blur-chrome)); padding-inline: 16px; }
+.settings-nav-list { gap: 21px; }
+.settings-nav-group h2 { color: var(--graphite-soft); font-weight: 400; letter-spacing: 0; text-transform: none; padding-bottom: 8px; }
+.settings-nav-item { min-height: 39px; border-radius: var(--control-radius); font-size: .8125rem; }
+.settings-nav-item.active { background: var(--chrome-active); }
+.settings-nav-search { height: 36px; margin-inline: 4px; border-radius: var(--control-radius); border-color: transparent; background: var(--chrome-sunken); box-shadow: none; }
+.settings-nav-search:focus-within { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
+.settings-content { container: settings / inline-size; background: var(--chrome-canvas); }
+.settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) {
+  width: 100%; max-width: var(--settings-panel-max-width); margin: 0 auto;
+  box-sizing: border-box; padding: 40px 44px 36px; gap: 24px;
+}
+.settings-content > .settings-panel { display: flex; flex-direction: column; }
+.settings-content .settings-panel__header { flex-wrap: wrap; }
+.settings-content .settings-panel__header > p { flex-basis: 100%; }
+.settings-content .shortcut-group + .shortcut-group { margin-top: 0; }
+.settings-content :is(.general-panel-header, .frost-page-heading, .model-routing-header, .settings-panel__header, .remote-access-panel > header) { margin: 0 0 4px; }
+.settings-content :is(.general-panel-header h1, .frost-page-heading h1, .model-routing-header h2, .settings-panel__header h2, .remote-access-panel > header h2) {
+  margin: 0; color: var(--graphite-base); font-family: var(--font-sans);
+  font-size: 1.875rem; font-weight: 600; line-height: 1.3; letter-spacing: -.04em;
+}
+.settings-content :is(.general-panel-header p, .frost-page-heading p, .model-routing-header p, .settings-panel__header p, .remote-access-panel > header p) {
+  margin: 8px 0 0; color: var(--graphite-soft); font-size: .8125rem; line-height: 1.6;
+}
+.frost-settings-group {
+  display: flex; flex-direction: column; min-width: 0; margin: 0;
+  border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius); background: var(--paper-sheet); box-shadow: none;
+}
+.frost-settings-group > .frost-group-heading {
+  display: block; padding: 18px 23px 16px; margin: 0; border-bottom: 1px solid var(--chrome-hairline);
+  border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; background: var(--paper-base);
+}
+.frost-settings-group > .frost-group-heading h2 {
+  margin: 0; color: var(--graphite-base); font-family: var(--font-sans);
+  font-size: .9375rem; font-weight: 400; line-height: 1.4;
+}
+.frost-settings-group > .frost-group-heading p { margin: 4px 0 0; color: var(--graphite-soft); font-size: .8125rem; line-height: 1.6; }
+.frost-group-content { min-width: 0; }
+.settings-content .general-card { margin: 0; padding: 0; }
+.settings-content .general-setting-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 236px; align-items: center; gap: 28px;
+  min-height: 76px; padding: 17px 23px;
+}
+.settings-content .general-setting-row + .general-setting-row { border-top: 1px solid color-mix(in srgb, var(--chrome-hairline) 65%, transparent); }
+.settings-content .general-setting-copy h3 { margin: 0; font-size: .875rem; font-weight: 600; line-height: 1.4; color: var(--graphite-base); }
+.settings-content .general-setting-copy p { margin: 4px 0 0; font-size: .8125rem; font-weight: 400; line-height: 1.6; color: var(--graphite-soft); }
+.settings-content .general-language-select { width: 100%; min-width: 0; }
+/* Shared selector geometry, including provider/routing and bot forms. */
+:is(.settings-content, .bot-drawer-body) .pa-dropdown-trigger,
+.settings-content .pa-cascading-trigger,
+.bot-drawer-body .pa-cascading-trigger {
+  position: relative; display: flex; align-items: center; justify-content: space-between;
+  width: 100%; max-width: none; min-width: 0; min-height: 40px; height: auto; gap: 12px;
+  padding: 8px 14px; border: 1px solid transparent; border-radius: var(--control-radius);
+  background: var(--control-fill); color: var(--graphite-base);
+  font-family: var(--font-sans); font-size: .8125rem; font-weight: 400; text-align: left; box-shadow: none;
+}
+:is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-value, .pa-cascading-value) { flex: 1; min-width: 0; text-align: left; }
+:is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-caret, .pa-cascading-trigger > svg) { flex: none; width: 14px; height: 14px; margin: 0; color: var(--graphite-soft); }
+:is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger):hover:not(:disabled) { background: var(--control-fill-hover); border-color: transparent; }
+:is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger):is(.open, :active):not(:disabled) { background: var(--control-fill-active); border-color: transparent; }
+:is(.settings-content, .bot-drawer-body) :is(button, input, textarea):focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
+.settings-content .general-language-select input { width: 100%; min-height: 40px; height: auto; padding: 8px 14px; border: 1px solid transparent; border-radius: var(--control-radius); background: var(--control-fill); font-size: .8125rem; }
+.settings-content .general-quiet-setting { grid-template-columns: minmax(0, 1fr) 272px; }
+.general-quiet-controls, .settings-content .general-bots-hours { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.settings-content .general-bots-hours { margin: 0; padding: 0; gap: 8px; }
+.settings-content .general-bots-hours > span { font-size: .75rem; color: var(--graphite-soft); }
+.settings-content .general-bot-time { display: flex; align-items: center; justify-content: center; justify-self: end; gap: 2px; min-width: 88px; padding: 3px 8px; min-height: 40px; border: 1px solid transparent; border-radius: var(--control-radius); background: var(--control-fill); }
+.settings-content .general-bot-time .pa-dropdown { width: 31px; }
+.settings-content .general-bot-time .pa-dropdown-trigger { justify-content: center; height: 32px; min-height: 32px; padding: 0; gap: 0; background: transparent; border: 0; font-variant-numeric: tabular-nums; }
+.settings-content .general-bot-time .pa-dropdown-caret { display: none; }
+.settings-content .general-bot-time .pa-dropdown-value { flex: none; }
+.settings-content .general-bot-time:has(button:disabled) { opacity: .52; }
+.settings-content .general-bot-time button:disabled { opacity: 1; }
+/* Off and on must both have a visible thumb on the snow surface. */
+:is(.settings-content, .bot-drawer-body) .peer-switch { width: 40px; height: 23px; min-height: 23px; padding: 3px; border-radius: 16px; border: 1px solid var(--chrome-hairline); background: var(--paper-sunken); }
+:is(.settings-content, .bot-drawer-body) .peer-switch-thumb { width: 15px; height: 15px; background: var(--graphite-soft); }
+:is(.settings-content, .bot-drawer-body) .peer-switch[data-state='checked'] { background: var(--graphite-base); border-color: var(--graphite-base); }
+:is(.settings-content, .bot-drawer-body) .peer-switch[data-state='checked'] .peer-switch-thumb { background: var(--paper-sheet); transform: translateX(17px); }
+/* Existing complex forms keep their controls, while using the same group surfaces. */
+.settings-content :is(.settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group) { border-radius: var(--surface-radius); border: 1px solid var(--chrome-hairline); background: var(--paper-sheet); box-shadow: none; }
+.settings-content :is(.shortcut-group, .llm-instructions-card) { padding: 0; gap: 0; }
+.settings-content :is(.shortcut-group-heading, .llm-instructions-header, .llm-group-header) { padding: 18px 23px 16px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
+.settings-content :is(.shortcut-group-heading h3, .llm-instructions-header strong, .llm-group-header strong) { font-size: .9375rem; font-weight: 400; color: var(--graphite-base); }
+.settings-content :is(.shortcut-group-heading p, .shortcut-description) { font-size: .8125rem; line-height: 1.6; color: var(--graphite-soft); }
+.settings-content .shortcut-row { padding: 17px 23px; }
+.settings-content .shortcut-title { font-size: .875rem; font-weight: 600; }
+.settings-content :is(.shortcut-status, .shortcut-reset, .shortcut-error) { font-size: .8125rem; }
+.settings-content .shortcut-recorder { min-height: 40px; border-radius: var(--control-radius); border-color: transparent; background: var(--control-fill); box-shadow: none; }
+.settings-content .shortcut-recorder:hover { background: var(--control-fill-hover); }
+.settings-content .shortcut-recorder:active { background: var(--control-fill-active); }
+.settings-content .shortcut-recorder.is-recording { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
+.settings-content .shortcut-recorder kbd { font-size: .875rem; }
+.settings-content .llm-instructions-card > :is(.llm-instructions-hint, textarea, .llm-instructions-actions) { margin: 16px 23px; width: auto; }
+.settings-content .settings-help-links { padding: 17px 23px; }
+.settings-content .appearance-group { padding: 0; gap: 0; }
+.settings-content .appearance-group .frost-group-content { padding: 23px; }
+.settings-content .appearance-settings-card { padding: 0; border: 0; background: transparent; border-radius: 0; box-shadow: none; }
+.settings-content .appearance-settings-row { padding: 17px 0; min-height: 76px; }
+.settings-content .appearance-settings-row:first-child { padding-top: 0; }
+.settings-content .appearance-settings-row:last-child { padding-bottom: 0; }
+.settings-content .appearance-settings-row-title { font-size: .875rem; font-weight: 600; }
+.settings-content .model-routing-card .frost-group-content { padding: 17px 23px; }
+.settings-content .model-routing-head { font-size: .75rem; font-weight: 400; padding-block: 10px; }
+.settings-content .model-routing-name { font-size: .875rem; }
+.settings-content .model-routing-row { padding-block: 17px; }
+.settings-content .model-routing-role { grid-template-columns: minmax(96px, 1fr) 130px 140px minmax(100px, 1fr) 120px; }
+.settings-content .remote-access-card { padding: 0 23px 17px; }
+.settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: 18px 23px 16px; margin: 0 -23px 17px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
+.settings-content .remote-access-card h3 { font-size: .9375rem; font-weight: 400; }
+.settings-content .remote-access-card p { font-size: .8125rem; line-height: 1.6; }
+.settings-content .remote-access-gateway input { min-height: 38px; border-radius: 8px; font-size: .8125rem; }
+.settings-content .llm-fallback-vision { padding: 17px 23px; border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius); background: var(--paper-sheet); }
+.settings-content .llm-fallback-vision-copy strong { font-size: .875rem; }
+.settings-content .llm-fallback-vision-copy p { font-size: .8125rem; line-height: 1.6; }
+@container settings (max-width: 920px) {
+  .settings-content .model-routing-role { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .settings-content .model-routing-head.model-routing-role { display: none; }
+  .settings-content .model-routing-role .model-routing-name { grid-column: 1 / -1; }
+  .settings-content .model-routing-resolved { line-height: 1.4; }
+  .settings-content :is(.model-routing-resolved, .model-routing-spend)::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--graphite-soft); font-size: .75rem; }
+}
+@container settings (max-width: 760px) {
+  .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) { padding: 32px 24px; }
+  .settings-content .general-setting-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .settings-content .general-language-select { max-width: 320px; }
+  .settings-content .general-quiet-controls { justify-content: flex-start; }
+  .settings-content .general-bot-time { justify-self: start; }
+  .settings-content .model-routing-tier { grid-template-columns: 78px minmax(0, 1fr); }
+  .settings-content .model-routing-tier > :last-child { grid-column: 2; }
+  .settings-content .model-routing-head.model-routing-tier { display: none; }
+}
+@media (prefers-reduced-transparency: reduce) { .settings-nav { background: var(--chrome-raised); backdrop-filter: none; } }
+
+.settings-content > .settings-provider-page .llm-settings-panel { padding: 0; max-width: none; margin: 28px 0 0; }
+
+.settings-content .appearance-mode-thumb { aspect-ratio: auto; height: 92px; }
+.settings-content .appearance-mode-card { padding: 8px; border-color: transparent; border-radius: var(--control-radius); background: var(--control-fill); }
+.settings-content .appearance-mode-card.is-active { border-color: transparent; background: var(--control-fill-hover); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--graphite-soft) 35%, transparent); }
+.settings-content .appearance-mode-card:hover { background: var(--control-fill-hover); }
+.settings-content .appearance-mode-card-label { font-size: .75rem; font-weight: 400; padding-top: 5px; }
+
+:is(.pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { border-radius: var(--surface-radius); box-shadow: var(--shadow-popover); }
+@supports (corner-shape: superellipse(1.4)) {
+  :is(.frost-settings-group, .frost-group-heading, .settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group, .shortcut-group-heading, .llm-instructions-header, .llm-group-header, .settings-nav-item, .settings-nav-search, .appearance-mode-card, .general-bot-time, .shortcut-recorder, .pa-dropdown-trigger, .pa-cascading-trigger, .pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { corner-shape: var(--control-corner); }
+}
+@media (forced-colors: active) {
+  :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger, .general-bot-time, .shortcut-recorder, input) { border-color: ButtonText; }
+}

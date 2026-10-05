@@ -8,7 +8,7 @@ import { readdirSync } from 'node:fs';
 import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
 import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
-import { boundedImageAttachments } from './input-queue.mjs';
+import { normalizeInputAttachments } from './input-queue.mjs';
 import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
 import { createSessionContinuity } from './session-continuity.mjs';
@@ -416,10 +416,12 @@ export function createSessionSupervisor({
       const anchorMessageId = anchorMessageIds[0];
       const workspacePath = text(context?.workspacePath);
       const presetSnapshotId = text(context?.backgroundSnapshotId);
-      // 行内缩略图会写进任务消息。背景快照仍标明附件未嵌入，但这不再挡住开任务。
-      // 工具结果、非图片附件，以及调用方预先指定的背景快照，仍走原确认。
-      const inlineImagesOnly = !presetSnapshotId
-        && inlineImageAttachmentsCoverOmissions(history.messages, anchorMessageId);
+      // Only fully carried anchor uploads cover snapshot omissions. Unresolved
+      // files, unanchored history, tool results and explicit snapshots still ask.
+      const attachments = attachmentsFromMessages(history.messages, anchorMessageIds);
+      const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
+      const completeInlineAttachments = !presetSnapshotId
+        && inlineAttachmentsCoverOmissions(history.messages, anchorMessageIds);
       child = conversationStore.createChildConversation({
         parentConversationId,
         role: 'work_session',
@@ -437,11 +439,9 @@ export function createSessionSupervisor({
         },
         capturedAt: now(),
         ...(presetSnapshotId ? { backgroundSnapshotId: presetSnapshotId } : {}),
-        ...(context?.confirmMissing === true || inlineImagesOnly ? { confirmMissing: true } : {}),
+        ...(context?.confirmMissing === true || completeInlineAttachments ? { confirmMissing: true } : {}),
       });
       const messageId = randomUUID();
-      const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
-      const images = imageAttachmentsFromMessages(history.messages, anchorMessageIds);
       const stored = conversationStore.appendMessage(child.id, {
         id: messageId,
         role: 'user',
@@ -452,7 +452,7 @@ export function createSessionSupervisor({
           readOnly: input.readOnly === true,
         }),
         ...(carried.length > 0 ? { attachmentRefs: carried } : {}),
-        ...(images.length > 0 ? { attachments: images } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       });
       if (!stored) throw new Error('delegation message was not stored');
 
@@ -1122,11 +1122,13 @@ function delegationMessage({ brief, successCriteria, quotes, readOnly }) {
   return ['委托说明', `目标：${brief}`, '完成标准：', criteria, '锚点原文：', anchors, constraint].join('\n');
 }
 
-function inlineImageAttachmentsCoverOmissions(messages, anchorMessageId) {
+function inlineAttachmentsCoverOmissions(messages, anchorMessageIds) {
   const rows = Array.isArray(messages) ? messages : [];
+  const wanted = new Set(anchorMessageIds);
+  const anchorMessageId = anchorMessageIds[0];
   const index = rows.findIndex((row) => row?.id === anchorMessageId);
   const slice = index >= 0 ? rows.slice(0, index + 1) : [];
-  let sawImage = false;
+  let sawAttachment = false;
   for (const row of slice) {
     if (!row || row.role === 'system' || row.role === 'developer') continue;
     if (row.role === 'tool') return false;
@@ -1137,25 +1139,32 @@ function inlineImageAttachmentsCoverOmissions(messages, anchorMessageId) {
     if (row.content != null && typeof row.content !== 'string') return false;
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
     if (attachments.length === 0) continue;
-    const carried = boundedImageAttachments(attachments);
-    if (carried.length !== attachments.length || carried.some((image) => !image.dataUrl)) return false;
-    sawImage = true;
+    if (!wanted.has(row.id)) return false;
+    const carried = normalizeInputAttachments(attachments);
+    if (carried.length !== attachments.length || carried.some(item => (
+      item.kind === 'image' ? !item.dataUrl : item.kind !== 'text' || typeof item.text !== 'string'
+    ))) return false;
+    sawAttachment = true;
   }
-  return sawImage;
+  return sawAttachment;
 }
 
 export function imageAttachmentsFromMessages(messages, anchorMessageIds) {
+  return attachmentsFromMessages(messages, anchorMessageIds).filter(item => item.kind === 'image');
+}
+
+export function attachmentsFromMessages(messages, anchorMessageIds) {
   const wanted = new Set(Array.isArray(anchorMessageIds) ? anchorMessageIds : []);
   const images = [];
   const seen = new Set();
   for (const message of Array.isArray(messages) ? messages : []) {
     if (!wanted.has(message?.id)) continue;
-    for (const image of boundedImageAttachments(message?.attachments)) {
-      const key = image.dataUrl || image.artifactRef;
+    for (const image of normalizeInputAttachments(message?.attachments)) {
+      const key = image.dataUrl || image.artifactRef || `${image.kind}:${image.id}`;
       if (!key || seen.has(key)) continue;
       seen.add(key);
       images.push(image);
-      if (images.length >= 4) return images;
+      if (images.length > 8) throw new TypeError('anchored messages contain more than 8 attachments');
     }
   }
   return images;

@@ -176,3 +176,14 @@ test('stored routing overrides a tier without persisting computed defaults', () 
   assert.equal(merged.tiers.economy.primary, 'text-default');
   assert.equal(merged.verifierPreferDifferentFamily, true);
 });
+
+
+test('stored fixed effort survives normalization and role resolution', () => {
+  const model = provider({ id: 'reasoning', model: 'r', supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' });
+  const routing = { roles: { session_worker: { mode: 'fixed', modelProviderId: 'reasoning', reasoningEffort: 'high' } } };
+  assert.equal(resolveStoredModelRouting(routing, [model]).roles.session_worker.reasoningEffort, 'high');
+  const route = resolveRoleRoute({ role: 'session_worker', providers: [model], routing });
+  assert.equal(route.selection.reasoningEffort, 'high');
+  const defaultRoute = resolveRoleRoute({ role: 'project_agent', providers: [model] });
+  assert.equal(defaultRoute.selection.reasoningEffort, 'low');
+});

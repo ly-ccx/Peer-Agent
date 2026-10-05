@@ -207,6 +207,12 @@ export type TranslationKey =
   | 'projectAgent.chat.quote'
   | 'projectAgent.chat.quoteRemove'
   | 'projectAgent.chat.placeholder'
+  | 'projectAgent.chat.attach'
+  | 'projectAgent.chat.previewAttachment'
+  | 'projectAgent.chat.removeAttachment'
+  | 'projectAgent.chat.attachmentMetadataOnly'
+  | 'projectAgent.chat.readingAttachments'
+  | 'projectAgent.chat.dropAttachments'
   | 'projectAgent.chat.send'
   | 'projectAgent.chat.hint'
   | 'projectAgent.chat.source'
@@ -277,6 +283,14 @@ export type TranslationKey =
   | 'projectAgent.policy.acceptance.auto'
   | 'projectAgent.policy.acceptance.confirm'
   | 'projectAgent.policy.models'
+  | 'projectAgent.model.defaults'
+  | 'projectAgent.model.botOnly'
+  | 'projectAgent.model.nextReply'
+  | 'projectAgent.model.runningReply'
+  | 'projectAgent.model.unavailable'
+  | 'projectAgent.model.select'
+  | 'projectAgent.model.noEffort'
+  | 'projectAgent.model.saveFailed'
   | 'projectAgent.policy.modelsHint'
   | 'projectAgent.policy.inherit'
   | 'projectAgent.policy.autoPool'
@@ -533,21 +547,31 @@ export type TranslationKey =
   | 'settings.backToChat'
   | 'settings.appearance.description'
   | 'settings.language.description'
+  | 'settings.general.description'
+  | 'settings.general.loadFailed'
+  | 'settings.general.interfaceAndLanguage'
+  | 'settings.general.interfaceAndLanguage.description'
   | 'settings.replyLanguage'
   | 'settings.bots.title'
+  | 'settings.bots.description'
   | 'settings.bots.proactivity'
+  | 'settings.bots.proactivity.description'
   | 'settings.bots.proactivity.quiet'
   | 'settings.bots.proactivity.low'
   | 'settings.bots.proactivity.standard'
   | 'settings.bots.proactivity.high'
   | 'settings.bots.quietHours'
   | 'settings.bots.quietHours.description'
+  | 'settings.bots.quietFrom'
+  | 'settings.bots.quietUntil'
   | 'settings.bots.digestTime'
   | 'settings.bots.digestTime.description'
   | 'settings.replyLanguage.description'
   | 'settings.replyLanguage.followInterface'
   | 'settings.replyLanguage.auto'
+  | 'settings.replyLanguage.autoShort'
   | 'settings.git'
+  | 'settings.git.branchNaming'
   | 'settings.git.branchPrefix'
   | 'settings.git.branchPrefix.description'
   | 'settings.fallbackVision'
@@ -1221,22 +1245,32 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.archived.working': '处理中…',
     'settings.backToChat': '返回对话',
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
-    'settings.language.description': '选择界面显示语言。',
+    'settings.language.description': '菜单、按钮和设置使用的语言。',
+    'settings.general.description': '让 Peer 按照你的习惯工作。',
+    'settings.general.loadFailed': '无法读取当前设置，请重新打开设置页面。',
+    'settings.general.interfaceAndLanguage': '界面与语言',
+    'settings.general.interfaceAndLanguage.description': '选择熟悉的入口和表达方式。',
     'settings.replyLanguage': '回复语言',
-    'settings.bots.title': '机器人',
+    'settings.bots.title': '通知与节奏',
+    'settings.bots.description': '需要你时提醒，其他时候安静推进。',
     'settings.bots.proactivity': '主动性',
+    'settings.bots.proactivity.description': '设置机器人主动汇报与跟进的频率。',
     'settings.bots.proactivity.quiet': '安静',
     'settings.bots.proactivity.low': '少',
     'settings.bots.proactivity.standard': '标准',
     'settings.bots.proactivity.high': '多',
     'settings.bots.quietHours': '安静时段',
-    'settings.bots.quietHours.description': '这段时间里，除了需要你处理的事，通知会改成未读消息。',
+    'settings.bots.quietHours.description': '普通通知收为未读，需要你处理的事项仍会提醒。',
+    'settings.bots.quietFrom': '开始',
+    'settings.bots.quietUntil': '结束',
     'settings.bots.digestTime': '今日小结',
     'settings.bots.digestTime.description': '到这个时间，把暂存的消息收成一条。',
-    'settings.replyLanguage.description': '选择 AI 回复时使用的语言，避免回复语言混乱。',
+    'settings.replyLanguage.description': '机器人与你交流时使用的语言。',
     'settings.replyLanguage.followInterface': '跟随界面语言',
     'settings.replyLanguage.auto': '自动（跟随提问语言）',
+    'settings.replyLanguage.autoShort': '跟随提问语言',
     'settings.git': 'Git',
+    'settings.git.branchNaming': '分支命名',
     'settings.git.branchPrefix': '分支前缀',
     'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
     'settings.fallbackVision': '兜底多模态模型',
@@ -1498,6 +1532,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.quote': '引用',
     'projectAgent.chat.quoteRemove': '取消引用',
     'projectAgent.chat.placeholder': '跟这个机器人说',
+    'projectAgent.chat.attach': '添加文件或图片',
+    'projectAgent.chat.previewAttachment': '预览图片',
+    'projectAgent.chat.removeAttachment': '移除附件',
+    'projectAgent.chat.attachmentMetadataOnly': '仅文件信息 · 正文未读取',
+    'projectAgent.chat.readingAttachments': '正在读取附件…',
+    'projectAgent.chat.dropAttachments': '松开以添加文件或图片',
     'projectAgent.chat.send': '发送',
     'projectAgent.chat.hint': '回车发送，Shift+回车换行',
     'projectAgent.chat.source': '来源',
@@ -1568,7 +1608,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.policy.acceptance.auto': '符合条件时自动签收',
     'projectAgent.policy.acceptance.confirm': '由我确认结果',
     'projectAgent.policy.models': '机器人模型',
-    'projectAgent.policy.modelsHint': '为当前机器人选择模型，或跟随全局配置。对话模型用于后续回复，任务模型用于新任务。',
+    'projectAgent.model.defaults': '默认与档位',
+    'projectAgent.model.botOnly': '本机器人',
+    'projectAgent.model.nextReply': '修改用于后续回复或新任务',
+    'projectAgent.model.runningReply': '本轮正在使用的模型',
+    'projectAgent.model.unavailable': '选择模型',
+    'projectAgent.model.select': '选择机器人模型',
+    'projectAgent.model.noEffort': '无可调推理强度',
+    'projectAgent.model.saveFailed': '模型设置未保存，请重试。',
+    'projectAgent.policy.modelsHint': '直接选择这个机器人的模型和推理强度。对话配置用于后续回复，任务配置用于新任务。',
     'projectAgent.policy.inherit': '跟随全局',
     'projectAgent.policy.autoPool': '已配置自动池',
     'projectAgent.policy.moreRoles': '更多角色',
@@ -2310,22 +2358,32 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.archived.working': 'Working…',
     'settings.backToChat': 'Back to chat',
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',
-    'settings.language.description': 'Choose the display language for the interface.',
+    'settings.language.description': 'The language used in menus, buttons and settings.',
+    'settings.general.description': 'Make Peer work the way you do.',
+    'settings.general.loadFailed': 'Could not load current settings. Please reopen Settings.',
+    'settings.general.interfaceAndLanguage': 'Interface & language',
+    'settings.general.interfaceAndLanguage.description': 'Choose a familiar starting point and language.',
     'settings.replyLanguage': 'Reply language',
-    'settings.bots.title': 'Bots',
+    'settings.bots.title': 'Notifications & rhythm',
+    'settings.bots.description': 'Hear from Peer when you are needed; let it work quietly otherwise.',
     'settings.bots.proactivity': 'How often to speak up',
+    'settings.bots.proactivity.description': 'Choose how often bots report progress and follow up.',
     'settings.bots.proactivity.quiet': 'Quiet',
     'settings.bots.proactivity.low': 'Low',
     'settings.bots.proactivity.standard': 'Standard',
     'settings.bots.proactivity.high': 'High',
     'settings.bots.quietHours': 'Quiet hours',
     'settings.bots.quietHours.description': 'During these hours, notifications become unread messages unless something needs you.',
+    'settings.bots.quietFrom': 'From',
+    'settings.bots.quietUntil': 'Until',
     'settings.bots.digestTime': 'Daily summary',
     'settings.bots.digestTime.description': 'At this time, held notes become one message.',
-    'settings.replyLanguage.description': 'Choose the language the AI replies in, to avoid mixed-language responses.',
+    'settings.replyLanguage.description': 'The language bots use when talking with you.',
     'settings.replyLanguage.followInterface': 'Follow interface language',
     'settings.replyLanguage.auto': 'Auto (match the question)',
+    'settings.replyLanguage.autoShort': 'Match the question',
     'settings.git': 'Git',
+    'settings.git.branchNaming': 'Branch naming',
     'settings.git.branchPrefix': 'Branch prefix',
     'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
     'settings.fallbackVision': 'Fallback vision model',
@@ -2587,6 +2645,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.quote': 'Quote',
     'projectAgent.chat.quoteRemove': 'Remove quote',
     'projectAgent.chat.placeholder': 'Message this bot',
+    'projectAgent.chat.attach': 'Attach files or images',
+    'projectAgent.chat.previewAttachment': 'Preview image',
+    'projectAgent.chat.removeAttachment': 'Remove attachment',
+    'projectAgent.chat.attachmentMetadataOnly': 'File information only · content not read',
+    'projectAgent.chat.readingAttachments': 'Reading attachments…',
+    'projectAgent.chat.dropAttachments': 'Drop to attach files or images',
     'projectAgent.chat.send': 'Send',
     'projectAgent.chat.hint': 'Enter to send, Shift+Enter for a new line',
     'projectAgent.chat.source': 'Source',
@@ -2657,7 +2721,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.policy.acceptance.auto': 'Accept eligible results automatically',
     'projectAgent.policy.acceptance.confirm': 'I confirm results',
     'projectAgent.policy.models': 'Bot models',
-    'projectAgent.policy.modelsHint': 'Choose models for this bot or use global routing. Conversation changes apply to future replies; task changes apply to new tasks.',
+    'projectAgent.model.defaults': 'Defaults and tiers',
+    'projectAgent.model.botOnly': 'This bot',
+    'projectAgent.model.nextReply': 'Applies to future replies or new tasks',
+    'projectAgent.model.runningReply': 'Model used by the current reply',
+    'projectAgent.model.unavailable': 'Choose model',
+    'projectAgent.model.select': 'Choose bot model',
+    'projectAgent.model.noEffort': 'No adjustable effort',
+    'projectAgent.model.saveFailed': 'Model settings were not saved. Please retry.',
+    'projectAgent.policy.modelsHint': 'Choose this bot’s model and reasoning effort directly. Conversation changes apply to future replies; task changes apply to new tasks.',
     'projectAgent.policy.inherit': 'Use global routing',
     'projectAgent.policy.autoPool': 'Configured automatic pool',
     'projectAgent.policy.moreRoles': 'More roles',

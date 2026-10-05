@@ -7,7 +7,6 @@ import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
 import {
   briefFromMemories,
-  conversationModelLabel,
   drawerLayout,
   groupDrawerSessions,
   readDrawerSession,
@@ -19,6 +18,8 @@ import {
 } from '../state/drawerState';
 import { HistorySheet, type HistoryConversation } from '../HistorySheet';
 import { AgentProcessView } from './AgentProcessView';
+import type { BotModelsControlState } from '../state/useBotModels';
+import { BotDrawerSegments } from './BotDrawerSegments';
 import type { BotInspect } from './agentProcess';
 import { BotSettingsTab } from './BotSettingsTab';
 import { MemoryTab } from './MemoryTab';
@@ -39,6 +40,7 @@ const TABS: readonly { id: DrawerTab; key: 'projectAgent.drawer.tab.overview' | 
 export function BotProfileDrawer({
   workspaceId,
   profile,
+  modelControls,
   memory,
   locateSessionId,
   inspect = null,
@@ -53,6 +55,7 @@ export function BotProfileDrawer({
 }: {
   readonly workspaceId: string;
   readonly profile: BotProfile;
+  readonly modelControls: BotModelsControlState;
   readonly memory: DrawerMemory;
   readonly locateSessionId: string | null;
   readonly inspect?: BotInspect | null;
@@ -69,8 +72,9 @@ export function BotProfileDrawer({
   const [path, setPath] = useState('');
   const [sessions, setSessions] = useState<readonly DrawerSession[]>([]);
   const [memories, setMemories] = useState<readonly DrawerMemoryItem[]>([]);
-  const [modelOptions, setModelOptions] = useState<readonly import('@peer-agent/protocol').ModelRoutingMenuOption[]>([]);
-  const [modelLabel, setModelLabel] = useState('');
+  const modelRoute = modelControls.views.project_agent?.resolution;
+  const modelLabel = modelRoute?.ok
+    ? modelControls.models.find(model => model.id === modelRoute.selection.modelProviderId)?.label || modelRoute.selection.modelId : '';
   const [detail, setDetail] = useState<DrawerSession | null>(null);
   const [history, setHistory] = useState<readonly HistoryConversation[]>([]);
   const [goals, setGoals] = useState<readonly ClassicGoalRow[]>([]);
@@ -131,13 +135,11 @@ export function BotProfileDrawer({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [got, listed, preview] = await Promise.all([
+      const [got, listed] = await Promise.all([
         clientApi.projectAgentGet({ workspaceId }),
         clientApi.projectAgentListSessions({ workspaceId }),
-        clientApi.modelRoutingPreview().catch(() => null),
       ]);
       if (cancelled) return;
-      setModelOptions(got?.modelOptions || []);
       setPath(got?.ok && typeof got.path === 'string' ? got.path : '');
       const nextSessions = (listed?.sessions ?? [])
         .map((item: unknown) => readDrawerSession(item))
@@ -146,7 +148,6 @@ export function BotProfileDrawer({
       const memories = await clientApi.projectMemoryList({ workspaceId });
       if (cancelled) return;
       setMemories(readMemoryItems(memories?.items));
-      setModelLabel(conversationModelLabel(preview));
     })();
     return () => {
       cancelled = true;
@@ -206,34 +207,9 @@ export function BotProfileDrawer({
             {i18n.t('projectAgent.drawer.close')}
           </button>
         </header>
-        <div className="bot-drawer-tabs" role="tablist">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              id={`bot-tab-${workspaceId}-${tab.id}`}
-              aria-controls={`bot-pane-${workspaceId}`}
-              tabIndex={memory.tab === tab.id ? 0 : -1}
-              data-overlay-autofocus={memory.tab === tab.id ? true : undefined}
-              aria-selected={memory.tab === tab.id}
-              onKeyDown={(event) => {
-                const index = TABS.findIndex(item => item.id === tab.id);
-                const next = event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1
-                  : event.key === 'ArrowRight' ? (index + 1) % TABS.length
-                  : event.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length : null;
-                if (next === null) return;
-                event.preventDefault();
-                const target = TABS[next]!;
-                onMemory({ ...memory, tab: target.id, sessionId: null });
-                document.getElementById(`bot-tab-${workspaceId}-${target.id}`)?.focus();
-              }}
-              onClick={() => onMemory({ ...memory, open: true, tab: tab.id })}
-            >
-              {i18n.t(tab.key)}
-            </button>
-          ))}
-        </div>
+        <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
+          items={TABS.map(tab => ({ id: tab.id, label: i18n.t(tab.key) }))}
+          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} />
       </div>
       {inspect?.evidence ? (
         <section className="bot-inspect" aria-label={i18n.t('projectAgent.chat.evidence')}>
@@ -306,8 +282,7 @@ export function BotProfileDrawer({
         <BotSettingsTab
           workspaceId={workspaceId}
           profile={profile}
-          modelLabel={modelLabel}
-          modelOptions={modelOptions}
+          modelControls={modelControls}
           i18n={i18n}
           onProfile={onProfile}
           onDeleted={onDeleted}

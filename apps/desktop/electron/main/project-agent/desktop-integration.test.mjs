@@ -21,7 +21,7 @@ const provider = { id: 'configured', provider: 'openai', model: 'test-model', en
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
 after(() => { if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome; rmSync(root, { recursive: true, force: true }); });
 
-function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, readRuntimePolicy = null, holdsLease = () => true, projectCount = 1 } = {}) {
+function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, modelProvider = provider, readRuntimePolicy = null, holdsLease = () => true, projectCount = 1 } = {}) {
   const home = dataHome || mkdtempSync(path.join(root, 'home-'));
   const project = folder || path.join(home, 'workspace');
   mkdirSync(project, { recursive: true });
@@ -34,7 +34,7 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
   const calls = []; const routes = []; const starts = []; const events = [];
   let api;
   const executor = createAgentTurnExecutor({ llmChatService: {
-    resolveGoalRole(input) { routes.push(input); return resolveRoleRoute({ ...input, providers: configured ? [provider] : [] }); },
+    resolveGoalRole(input) { routes.push(input); return resolveRoleRoute({ ...input, providers: configured ? [modelProvider] : [] }); },
     async sendMessage(input) { calls.push(input); return send ? send(input, { plans, conversations, api }) : { terminalStatus: 'done', text: 'hello' }; },
   } });
   const registrations = registerDesktopProjectAgent({ enabled: () => true, dataHome: home,
@@ -42,7 +42,7 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
       ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
     holdsLease, getSettings: () => { settingsReads++; return { ...settings, workspaces }; }, ...(readRuntimePolicy ? { readRuntimePolicy } : {}), mergeSettings() {},
-    listModels: () => configured ? [provider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
+    listModels: () => configured ? [modelProvider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
   });
   const handlers = new Map();
   for (const registration of registrations) registration.register({ handle(channel, fn) { handlers.set(channel, fn); } });
@@ -757,4 +757,53 @@ test('production LocalToolHost exposes resume and priority after a real superses
     assert.equal(changed.execution.grant.granted, true);
     assert.equal(env.plans.getPlan(before.planId).delegationOrigin.priority, 'low');
   } finally { env.dispose(); }
+});
+
+
+test('bot model and effort persist and reach the actual host request; an invalid patch is atomic', async () => {
+  const configured = { ...provider, supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' };
+  const env = harness({ modelProvider: configured });
+  try {
+    const policy = { overrides: { project_agent: { mode: 'fixed', modelProviderId: provider.id, reasoningEffort: 'high' } } };
+    assert.equal((await env.invoke('update-profile', { modelPolicy: policy })).ok, true);
+    const view = await env.invoke('get');
+    assert.equal(view.modelViews.project_agent.resolution.selection.reasoningEffort, 'high');
+    assert.deepEqual(view.modelOptions[0].reasoningEffortLevels, ['low', 'high']);
+    const before = view.item.profile.displayName;
+    const invalid = await env.invoke('update-profile', { displayName: 'should not save', modelPolicy: { overrides: { project_agent: { ...policy.overrides.project_agent, reasoningEffort: 'max' } } } });
+    assert.equal(invalid.code, 'INVALID_REASONING_EFFORT');
+    assert.equal((await env.invoke('get')).item.profile.displayName, before);
+    await env.submit('model-effort-test', 'Verify bot effort');
+    assert.equal(env.calls.at(-1).modelProviderId, provider.id);
+    assert.equal(env.calls.at(-1).effort, 'high');
+    assert.equal(env.calls.at(-1).turnProfile.modelSelection.reasoningEffort, 'high');
+    const restored = JSON.parse(readFileSync(path.join(env.home, 'projects', env.bot.workspaceId, 'profile.json'), 'utf8'));
+    assert.equal(restored.modelPolicy.overrides.project_agent.reasoningEffort, 'high');
+  } finally { env.dispose(); }
+});
+
+test('desktop memory curation resolves the saved bot role policy rather than global defaults', { timeout: 5000 }, async () => {
+  let receive;
+  const seen = new Promise(resolve => { receive = resolve; });
+  const env = harness({ settings: { memory: { enabled: true } },
+    modelProvider: { ...provider, supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' },
+    send: async input => {
+      if (input.turnProfile.role === 'memory_curator') {
+        receive(input);
+        return { terminalStatus: 'done', text: '{"candidates":[]}' };
+      }
+      return { terminalStatus: 'done', text: 'hello' };
+    } });
+  const timer = setTimeout(() => receive(null), 3000);
+  try {
+    assert.equal((await env.invoke('update-profile', { modelPolicy: { overrides: {
+      memory_curator: { mode: 'fixed', modelProviderId: provider.id, reasoningEffort: 'high' },
+    } } })).ok, true);
+    for (let index = 0; index < 8; index++) await env.submit(`curator-${index}`, `user preference ${index}`);
+    const input = await seen;
+    assert.ok(input, 'a real curator turn should start after eight inputs');
+    assert.equal(input.effort, 'high');
+    assert.equal(input.turnProfile.modelSelection.reasoningEffort, 'high');
+    assert.equal(input.ephemeral, true);
+  } finally { clearTimeout(timer); env.dispose(); }
 });

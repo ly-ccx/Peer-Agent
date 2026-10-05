@@ -376,3 +376,13 @@ test('latest conversation pages include new replies while default forward paging
     assert.equal(directory.readConversation(workspaceId,{limit:2}).messages[0].id,'user-1');
   }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('an attachment-only user message previews its filename instead of an empty conversation', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    conversationStore.appendMessage(conversationId, { id: 'upload-only', kind: 'user_input', role: 'user',
+      content: '', attachments: [{ id: 'img', kind: 'image', name: 'diagram.png', dataUrl: 'data:image/png;base64,AA==' }] });
+    assert.equal(directory.get(entry.workspaceId).item.preview, 'diagram.png');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

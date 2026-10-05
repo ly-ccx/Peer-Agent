@@ -58,6 +58,7 @@ export function CascadingMenu({
   ariaLabel,
   className,
   title,
+  triggerLabel: customTriggerLabel,
   menuPlacement = 'down',
 }: {
   readonly value: string;
@@ -68,6 +69,8 @@ export function CascadingMenu({
   readonly ariaLabel?: string;
   readonly className?: string;
   readonly title?: string;
+  /** Compact surfaces can show the model alone; menu grouping remains unchanged. */
+  readonly triggerLabel?: string;
   readonly menuPlacement?: 'down' | 'up';
 }) {
   const [open, setOpen] = useState(false);
@@ -91,9 +94,9 @@ export function CascadingMenu({
   const selectedGroupIndex = groups.findIndex((g) => g.items.some((item) => item.id === value));
   const selectedGroup = selectedGroupIndex >= 0 ? groups[selectedGroupIndex] : undefined;
   const selectedItem = selectedGroup?.items.find((item) => item.id === value);
-  const triggerLabel = selectedGroup && selectedItem
+  const triggerLabel = customTriggerLabel ?? (selectedGroup && selectedItem
     ? `${selectedGroup.label} · ${selectedItem.label}`
-    : placeholder ?? value;
+    : placeholder ?? value);
 
   const activeGroup = activeGroupIndex >= 0 ? groups[activeGroupIndex] : undefined;
   const submenuItems = activeGroup?.items ?? [];

@@ -108,6 +108,7 @@ export interface ProjectAgentActivity {
   readonly turnId: string;
   readonly revision: number;
   readonly startedAt: string;
+  readonly modelSelection?: Pick<import('./model-routing.ts').RuntimeModelSelection, 'modelProviderId' | 'reasoningEffort'>;
   readonly replyTo: readonly string[];
   readonly phase: 'waiting' | 'thinking' | 'responding' | 'tool' | 'settling' | 'done' | 'error' | 'stopped' | 'disposed';
   readonly replyText: string;

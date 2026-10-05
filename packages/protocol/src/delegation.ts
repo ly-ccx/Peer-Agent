@@ -234,6 +234,19 @@ export interface SurfacingEvent {
   readonly deadlineImminent?: boolean;
 }
 
+/** Explicit user uploads are factual user context, never execution authority. */
+export type ProjectInputAttachment = {
+  readonly id: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly sourceKind: 'user_upload';
+} & (
+  | { readonly kind: 'image'; readonly dataUrl: string }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'unsupported' }
+);
+
 export interface ProjectInput {
   readonly inputId: string;
   readonly workspaceId: string;
@@ -242,6 +255,7 @@ export interface ProjectInput {
   readonly anchorRefs: readonly string[];
   readonly quoteRefs: readonly string[];
   readonly attachmentRefs: readonly string[];
+  readonly attachments?: readonly ProjectInputAttachment[];
   readonly createdAt: string;
 }
 

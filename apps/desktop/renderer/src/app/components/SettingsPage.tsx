@@ -186,7 +186,10 @@ export function SettingsPage({
             onReplyLanguageChanged={onReplyLanguageChanged}
           />
         ) : section === 'providers' || section === 'model' ? (
-          <LlmSettingsPanel i18n={i18n} />
+          <div className="settings-provider-page">
+            <header className="frost-page-heading"><h1>{isZh ? '服务商' : 'Providers'}</h1></header>
+            <LlmSettingsPanel i18n={i18n} />
+          </div>
         ) : section === 'instructions' ? (
           <SystemInstructionsPanel
             i18n={i18n}

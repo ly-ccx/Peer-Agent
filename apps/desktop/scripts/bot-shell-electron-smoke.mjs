@@ -23,14 +23,19 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const fixture = seedBotShellHome({ home });
+let botModelFixtures = [];
 if (process.argv.includes('--accessibility')) {
   const models = createLlmConfigStore({
     configFile: path.join(home, 'llm-providers.json'),
     credentialClient: { getSecret: () => null, deleteSecret() {}, setSecret() { throw Error('No fixture secrets allowed'); } },
     providerFetch: () => { throw Error('No fixture model network allowed'); },
   });
-  for (const suffix of ['A', 'B']) models.addProvider({ provider: 'openai', model: `rc-bot-model-${suffix.toLowerCase()}`,
+  for (const suffix of ['A', 'B']) models.addProvider({ provider: 'openai', groupId: 'rc-model-menu-fixture', model: `rc-bot-model-${suffix.toLowerCase()}`,
     modelLabel: `RC Bot model ${suffix}`, name: 'RC synthetic channel', baseUrl: 'http://127.0.0.1:1', metadataSource: 'custom' });
+  // UI fixtures declare availability/capabilities at the existing catalogue seam. No secrets or network.
+  botModelFixtures = models.listProviders().map(model => ({ ...model, enabled: true, apiKeyConfigured: true,
+    supportsTools: true, supportsStructured: true, supportsVision: true, supportsReasoning: true,
+    reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' }));
 }
 const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
 const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
@@ -48,8 +53,14 @@ const main = path.join(isolation.launch.desktopDir, 'electron/main/main.mjs');
 const mainText = readFileSync(main, 'utf8');
 const seam = 'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });';
 assert.equal(mainText.split(seam).length, 2, 'exact production executor assembly seam required');
-writeFileSync(main, mainText.replace(seam,
-  'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: globalThis.rcBotShellService });'));
+let isolatedMain = mainText.replace(seam,
+  'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: globalThis.rcBotShellService });');
+if (botModelFixtures.length) {
+  const catalogueSeam = 'listModels: () => llmConfigStore.listProviders(),';
+  assert.equal(isolatedMain.split(catalogueSeam).length, 2, 'exact production catalogue assembly seam required');
+  isolatedMain = isolatedMain.replace(catalogueSeam, 'listModels: () => globalThis.rcBotModelFixtures,');
+}
+writeFileSync(main, isolatedMain);
 // Observe production pagination without changing its results or admitting a new IPC.
 const applicationService = path.join(isolation.launch.desktopDir, 'electron/main/project-agent/project-agent-application-service.mjs');
 const serviceText = readFileSync(applicationService, 'utf8');
@@ -97,6 +108,7 @@ app.setPath('userData',${JSON.stringify(path.join(root, 'chromium'))});
 // A bare Electron entry otherwise reports Electron's version, not the product's.
 app.getVersion=()=>${JSON.stringify(JSON.parse(readFileSync(path.join(source, 'apps/desktop/package.json'), 'utf8')).version)};
 ${process.argv.includes('--diagnostics') ? `dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(diagnosticsFile)}});` : ''}
+globalThis.rcBotModelFixtures=${JSON.stringify(botModelFixtures)};
 const observations={reads:[],list:[],search:[],turns:[]};
 globalThis.rcBotShellRecord=(key,value)=>{
   observations[key].push(value);

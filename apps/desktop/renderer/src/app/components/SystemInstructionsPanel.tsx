@@ -67,14 +67,15 @@ export function SystemInstructionsPanel({
         </header>
       ) : null}
 
+      {!onBack ? <header className="frost-page-heading"><h1>{isZh ? '个性化' : 'Personalization'}</h1></header> : null}
       <section className="llm-instructions-card">
         <header className="llm-instructions-header">
           <strong>{isZh ? '个性化设置' : 'Personalization'}</strong>
         </header>
         <p className="llm-instructions-hint">
           {isZh
-            ? '这些设置会作为 System Context 注入对话,影响模型的回答偏好与约束。'
-            : 'These settings enter the conversation as System Context, shaping the model’s response preferences and constraints.'}
+            ? '设置回答偏好、代码风格和项目约束，用于后续对话。'
+            : 'Set response preferences, code style, and project constraints for future conversations.'}
         </p>
         <textarea
           value={systemInstructionsDraft}

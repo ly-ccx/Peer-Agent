@@ -5,6 +5,8 @@
  * 模型不能直接写处置。
  */
 import type { TranslationKey } from '@peer-agent/i18n';
+import type { ChatAttachment } from '../../chat/state/types';
+import type { ProjectInputAttachment } from '@peer-agent/protocol';
 import {
   dispositionEventsFromToolCalls,
   WORK_SESSION_STATUSES,
@@ -90,10 +92,12 @@ export interface BotChatMessage {
   readonly quoteRefs: readonly string[];
   readonly separatorLabel: string;
   readonly pending?: 'sending' | 'received' | 'failed';
+  readonly attachments?: readonly ChatAttachment[];
   readonly images?: readonly { readonly id: string; readonly name: string; readonly dataUrl: string }[];
 }
 
 export interface PendingBotInput {
+  readonly attachments?: readonly ProjectInputAttachment[];
   readonly inputId: string;
   readonly text: string;
   readonly quoteRefs: readonly string[];
@@ -149,7 +153,18 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     quoteRefs: readStringList(raw.quoteRefs),
     separatorLabel: readString(raw.separatorLabel) || meta.separatorLabel || '',
     ...imageField(raw.attachments),
+    attachments: readAttachments(raw.attachments),
   };
+}
+
+function readAttachments(value: unknown): ChatAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => item && ['image', 'text', 'unsupported'].includes(item.kind)).slice(0, 8)
+    .map((item, index) => ({ id: readString(item.id) || `attachment-${index}`,
+      name: readString(item.name) || 'file', mimeType: readString(item.mimeType),
+      size: typeof item.size === 'number' ? item.size : 0, kind: item.kind,
+      ...(typeof item.dataUrl === 'string' && item.dataUrl.startsWith('data:image/') ? { dataUrl: item.dataUrl } : {}),
+    }));
 }
 
 function imageField(value: unknown): { images: { id: string; name: string; dataUrl: string }[] } | Record<string, never> {
@@ -170,7 +185,7 @@ function readImages(value: unknown): { id: string; name: string; dataUrl: string
       name: readString(record.name) || 'image',
       dataUrl,
     });
-    if (images.length >= 4) break;
+    if (images.length >= 8) break;
   }
   return images;
 }
@@ -234,6 +249,8 @@ export function applyOptimistic(
       quoteRefs: item.quoteRefs,
       separatorLabel: '',
       pending: item.state,
+      attachments: item.attachments,
+      ...imageField(item.attachments),
     }));
   return [...messages, ...extras];
 }

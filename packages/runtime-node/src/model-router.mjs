@@ -4,7 +4,7 @@
  * Defaults are computed on read. This module does not persist settings.
  */
 
-import { resolveRoleModel } from '@peer-agent/protocol';
+import { resolveRoleModel, isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort } from '@peer-agent/protocol';
 
 const ROLE_TIERS = {
   project_agent: 'fast',
@@ -52,6 +52,7 @@ function contextTokens(provider) {
 export function catalogFromProviders(providers = []) {
   return providers.filter(isRoutableProvider).map((provider) => {
     const modelProviderId = text(provider.id);
+    const reasoningEffort = modelDefaultReasoningEffort(provider) || text(provider.reasoningEffort);
     return {
       modelProviderId,
       providerId: text(provider.groupId) || modelProviderId,
@@ -62,7 +63,8 @@ export function catalogFromProviders(providers = []) {
       structured: provider.supportsStructured !== false,
       contextTokens: contextTokens(provider),
       local: provider.local === true,
-      ...(text(provider.reasoningEffort) ? { reasoningEffort: text(provider.reasoningEffort) } : {}),
+      reasoningEffortLevels: modelReasoningLevels(provider),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
     };
   });
 }
@@ -107,7 +109,8 @@ function cleanRole(value) {
   if (!isRecord(value)) return null;
   if (value.mode === 'tier' && TIERS.includes(value.tier)) return { mode: 'tier', tier: value.tier };
   if (value.mode === 'fixed' && text(value.modelProviderId)) {
-    return { mode: 'fixed', modelProviderId: text(value.modelProviderId) };
+    return { mode: 'fixed', modelProviderId: text(value.modelProviderId),
+      ...(isModelReasoningEffort(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {}) };
   }
   if (value.mode === 'auto' && Array.isArray(value.pool)) {
     return { mode: 'auto', pool: value.pool.map(text).filter(Boolean) };
