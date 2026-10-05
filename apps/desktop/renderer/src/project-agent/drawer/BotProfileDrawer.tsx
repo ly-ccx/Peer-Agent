@@ -26,6 +26,7 @@ import { MemoryTab } from './MemoryTab';
 import { ObjectivesTab } from './ObjectivesTab';
 import { OverviewTab } from './OverviewTab';
 import { ConversationSceneDrawer, SessionDetail } from './SessionDetail';
+import { selectSessionDetail } from './sessionDetailPresentation';
 import { TasksTab, type ClassicGoalRow } from './TasksTab';
 import '../styles/bot-drawer.css';
 
@@ -83,6 +84,7 @@ export function BotProfileDrawer({
   const modelLabel = modelRoute?.ok
     ? modelControls.models.find(model => model.id === modelRoute.selection.modelProviderId)?.label || modelRoute.selection.modelId : '';
   const [detail, setDetail] = useState<DrawerSession | null>(null);
+  const [reportRead, setReportRead] = useState<{ sessionId: string | null; state: 'loading' | 'ready' | 'unavailable' }>({ sessionId: null, state: 'loading' });
   const [history, setHistory] = useState<readonly HistoryConversation[]>([]);
   const [goals, setGoals] = useState<readonly ClassicGoalRow[]>([]);
   const [historyId, setHistoryId] = useState<string | null>(null);
@@ -101,6 +103,7 @@ export function BotProfileDrawer({
     triggerRef.current?.focus();
   };
   const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
+  const sessionDetail = selectSessionDetail(memory.sessionId, selected, detail, sessionsAvailable);
 
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
@@ -187,17 +190,27 @@ export function BotProfileDrawer({
       setDetail(null);
       return;
     }
+    const sessionId = memory.sessionId;
+    if (!sessionsAvailable) {
+      setReportRead({ sessionId, state: 'unavailable' });
+      return;
+    }
     let cancelled = false;
-    void clientApi.projectAgentGetSession({ sessionId: memory.sessionId, detail: 'report' }).then((result) => {
+    setReportRead({ sessionId, state: 'loading' });
+    void clientApi.projectAgentGetSession({ sessionId, detail: 'report' }).then((result) => {
       if (cancelled) return;
-      setDetail(result?.ok ? readDrawerSession(result.session) : null);
+      const next = result?.ok ? readDrawerSession(result.session) : null;
+      if (next?.sessionId === sessionId) setDetail(next);
+      else if (result?.code === 'NOT_FOUND') setDetail(null);
+      setReportRead({ sessionId, state: next?.sessionId === sessionId ? 'ready' : 'unavailable' });
     }).catch(() => {
-      if (!cancelled) setDetail(null);
+      // Keep a matching historical report on a transient read failure. Status still comes from the live list.
+      if (!cancelled) setReportRead({ sessionId, state: 'unavailable' });
     });
     return () => {
       cancelled = true;
     };
-  }, [memory.sessionId]);
+  }, [memory.sessionId, selected?.status, sessionsAvailable]);
 
   if (layout === 'cover' ? !memory.open : dockPhase === 'off') return null;
 
@@ -248,8 +261,8 @@ export function BotProfileDrawer({
           onOpenSession={(sessionId) => onMemory({ open: true, tab: 'tasks', sessionId })}
         />
       ) : null}
-      {memory.tab === 'tasks' && !sessionsAvailable ? <p role="status">{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : null}
-      {memory.tab === 'tasks' && sessionsAvailable && !(memory.sessionId && (detail || selected)) ? (
+      {memory.tab === 'tasks' && !sessionsAvailable && !sessionDetail ? <p role="status">{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : null}
+      {memory.tab === 'tasks' && sessionsAvailable && !sessionDetail ? (
         <TasksTab
           sessions={sessions}
           onOpenObjective={(objectiveId) => onMemory({...memory,tab:'objectives',sessionId:null,objectiveId})}
@@ -271,11 +284,12 @@ export function BotProfileDrawer({
           }}
         />
       ) : null}
-      {memory.tab === 'tasks' && memory.sessionId && (detail || selected) ? (
+      {memory.tab === 'tasks' && sessionDetail ? (
         <SessionDetail
           workspaceId={workspaceId}
           workspacePath={path}
-          session={sessionsAvailable ? (selected ?? detail)! : { ...(detail ?? selected)!, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable') }}
+          session={sessionDetail}
+          reportState={reportRead.sessionId === memory.sessionId ? reportRead.state : 'loading'}
           i18n={i18n}
           isZh={isZh}
           onBack={() => onMemory({ ...memory, sessionId: null })}

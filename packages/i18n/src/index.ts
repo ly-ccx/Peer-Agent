@@ -392,6 +392,9 @@ export type TranslationKey =
   | 'projectAgent.drawer.taskDetail.noScene'
   | 'projectAgent.drawer.taskDetail.report'
   | 'projectAgent.drawer.taskDetail.noReport'
+  | 'projectAgent.drawer.taskDetail.readingReport'
+  | 'projectAgent.drawer.taskDetail.reportUnavailable'
+  | 'projectAgent.drawer.taskDetail.reportStale'
   | 'projectAgent.drawer.taskDetail.evidenceCount'
   | 'projectAgent.drawer.taskDetail.info'
   | 'projectAgent.drawer.taskDetail.model'
@@ -1783,6 +1786,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.taskDetail.noScene': "尚未建立可打开的工作会话。",
     'projectAgent.drawer.taskDetail.report': "任务报告",
     'projectAgent.drawer.taskDetail.noReport': "暂时没有任务报告。",
+    'projectAgent.drawer.taskDetail.readingReport': '正在读取任务报告。',
+    'projectAgent.drawer.taskDetail.reportUnavailable': '暂时无法读取任务报告。',
+    'projectAgent.drawer.taskDetail.reportStale': '暂时无法刷新报告，保留此前的记录。',
     'projectAgent.drawer.taskDetail.evidenceCount': "{count} 条依据记录",
     'projectAgent.drawer.taskDetail.info': "任务信息",
     'projectAgent.drawer.taskDetail.model': "执行模型",
@@ -2962,6 +2968,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.taskDetail.noScene': "No work conversation is available yet.",
     'projectAgent.drawer.taskDetail.report': "Task report",
     'projectAgent.drawer.taskDetail.noReport': "No task report yet.",
+    'projectAgent.drawer.taskDetail.readingReport': 'Reading the task report.',
+    'projectAgent.drawer.taskDetail.reportUnavailable': 'The task report is temporarily unavailable.',
+    'projectAgent.drawer.taskDetail.reportStale': 'The report could not be refreshed. Earlier records are retained.',
     'projectAgent.drawer.taskDetail.evidenceCount': "{count} supporting records",
     'projectAgent.drawer.taskDetail.info': "Task information",
     'projectAgent.drawer.taskDetail.model': "Execution model",

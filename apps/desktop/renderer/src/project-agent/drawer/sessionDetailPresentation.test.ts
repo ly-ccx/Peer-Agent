@@ -3,13 +3,33 @@ import test from 'node:test';
 import { createI18n } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import type { DrawerSession } from '../state/drawerState.ts';
-import { sessionDetailPresentation } from './sessionDetailPresentation.ts';
+import { selectSessionDetail, sessionDetailPresentation } from './sessionDetailPresentation.ts';
 
 const base: DrawerSession = {
   sessionId: 'session-internal-id', title: '核查历史任务', status: 'running', statusLabel: '',
   progress: '', spawnedAt: '', conversationId: 'work-conversation', anchorMessageId: 'input-internal-id',
   modelLabel: 'gpt-6.1-sol', summary: '', evidenceRefs: [],
 };
+
+test('真实列表不含报告时仍展示详情报告，列表的实时状态不被旧详情覆盖', () => {
+  const detail = { ...base, status: 'accepted', summary: '详情报告', evidenceRefs: ['detail-evidence'] };
+  const view = selectSessionDetail(base.sessionId, base, detail, true);
+  assert.equal(view?.status, 'running');
+  assert.equal(view?.summary, '详情报告');
+  assert.deepEqual(view?.evidenceRefs, ['detail-evidence']);
+  assert.equal(selectSessionDetail(base.sessionId, base, { ...detail, summary: '', evidenceRefs: [] }, true)?.summary, '');
+});
+
+test('切换任务不混入上一任务报告，失效事实保留同一任务报告但不保留旧状态', () => {
+  const old = { ...base, sessionId: 'other-task', summary: '不属于当前任务' };
+  assert.equal(selectSessionDetail(base.sessionId, base, old, true)?.summary, '');
+  assert.equal(selectSessionDetail('other-task', base, null, true), null);
+  assert.equal(selectSessionDetail(null, base, base, false), null);
+  const unavailable = selectSessionDetail(base.sessionId, null, { ...base, summary: '此前报告' }, false);
+  assert.equal(unavailable?.status, 'unavailable');
+  assert.equal(unavailable?.summary, '此前报告');
+  assert.equal(selectSessionDetail(base.sessionId, null, base, true)?.status, 'running');
+});
 
 test('每个结构化任务状态都有中英文名称、说明和可读操作', () => {
   for (const locale of ['zh-CN', 'en-US'] as const) {

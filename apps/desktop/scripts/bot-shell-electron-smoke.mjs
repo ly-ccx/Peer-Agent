@@ -115,12 +115,18 @@ if (workSurfaces) {
   const workSeam = 'function listSessions(payload = {}) {';
   assert.equal(observedService.split(workSeam).length, 2);
   observedService = observedService.replace(workSeam, `${workSeam}
-    if (payload.workspaceId === globalThis.rcBotWorkWorkspace) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,sessions:globalThis.rcBotWorkSessions};`);
+    if (payload.workspaceId === globalThis.rcBotWorkWorkspace) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,sessions:globalThis.rcBotWorkSessions.map(session => {
+      if (!globalThis.rcBotDetailOnlyReports) return session;
+      const {report,...item} = session; return item;
+    })};`);
   const detailSeam = 'async function getSession(payload = {}) {';
   assert.equal(observedService.split(detailSeam).length, 2);
   observedService = observedService.replace(detailSeam, `${detailSeam}
     const rcSession = globalThis.rcBotWorkSessions.find(session => session.sessionId === payload.sessionId);
-    if (rcSession) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,session:rcSession};`);
+    if (rcSession) {
+      if (globalThis.rcBotDetailOnlyReports) await new Promise(resolve => setTimeout(resolve,350));
+      return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,session:rcSession};
+    }`);
 }
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
@@ -179,9 +185,11 @@ globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringif
 ${workSurfaces ? `const workFile=${JSON.stringify(workCommand)};
 let workCommand=JSON.parse(readFileSync(workFile,'utf8'));
 globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);
+globalThis.rcBotDetailOnlyReports=Boolean(workCommand.detailOnlyReports);
 const workTimer=setInterval(()=>{
   const next=JSON.parse(readFileSync(workFile,'utf8'));if(next.seq<=workCommand.seq)return;
   workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);
+  globalThis.rcBotDetailOnlyReports=Boolean(next.detailOnlyReports);
   for(const window of BrowserWindow.getAllWindows())window.webContents.send('project-agent:changed',{workspaceIds:[next.workspaceId]});
 },25);workTimer.unref();` : ''}
 // Keep synthetic updater delivery outside inspector Promise lifetime. Only this

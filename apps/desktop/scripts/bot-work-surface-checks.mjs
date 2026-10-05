@@ -25,8 +25,8 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
 
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   let seq = initial.seq;
-  const change = (sessions, unavailable = false) => {
-    writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, sessions, unavailable }));
+  const change = (sessions, unavailable = false, detailOnlyReports = false) => {
+    writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, sessions, unavailable, detailOnlyReports }));
     renameSync(commandFile + '.next', commandFile);
   };
   change([{ ...initial.sessions[0], status: 'waiting_user', report: { summary: '需要确认是否只使用可读取的历史记录。' } }]);
@@ -105,7 +105,8 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(viewport);
   await context.locator(':scope > summary').click();
   checks.push('classified reply and delegated work fit a 760px viewport in both themes');
-  await checkTaskDetail({ page, until, checks, captureDirectory, initial, change });
+  await checkTaskDetail({ page, until, checks, captureDirectory, initial, change: (sessions, unavailable) => change(sessions, unavailable, true) });
+  change(initial.sessions);
 }
 
 async function checkTaskDetail({ page, until, checks, captureDirectory, initial, change }) {
@@ -124,6 +125,9 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
   const detail = page.locator('.bot-session-detail');
   const drawer = page.locator('.bot-drawer-body');
   await until(() => detail.getAttribute('data-status'), value => value === 'waiting_user');
+  await detail.getByText('正在读取任务报告。', { exact: true }).waitFor();
+  assert.equal(await detail.locator('.bot-session-report').getAttribute('aria-busy'), 'true');
+  await detail.getByText('暂时没有任务报告。', { exact: true }).waitFor();
   assert.equal(await detail.locator('.bot-session-info').getAttribute('open'), null);
   assert.doesNotMatch(await detail.innerText(), /input-f82|gpt-6|还没有|冻结|锚点/);
   assert.equal(await detail.locator('.bot-session-empty').count(), 1);
@@ -169,10 +173,12 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
   assert.equal(await detail.locator('.bot-session-open').evaluate(node => node === document.activeElement), true);
   checks.push('task information expands with SVG by keyboard; the existing conversation opens and Escape restores focus');
 
-  for (const status of ['running', 'result_ready', 'accepted', 'failed', 'cancelled', 'paused', 'superseded', 'starting', 'queued']) {
-    change([{ ...task, status, statusLabel: '', report: { summary: '已整理可读取的记录，缺失材料对应事项仍无法确认。',
+  for (const [index, status] of ['running', 'result_ready', 'accepted', 'failed', 'cancelled', 'paused', 'superseded', 'starting', 'queued'].entries()) {
+    const summary = `第 ${index + 1} 次核查：已整理可读取的记录，缺失材料对应事项仍无法确认。`;
+    change([{ ...task, status, statusLabel: '', report: { summary,
       evidenceRefs: ['rc-detail-evidence-1', 'rc-detail-evidence-1', 'rc-detail-evidence-2'] } }]);
     await until(() => detail.getAttribute('data-status'), value => value === status);
+    await until(() => detail.locator('.bot-session-report').innerText(), text => text.includes('2 条依据记录') && text.includes(summary));
     assert.doesNotMatch(await detail.locator('.bot-session-progress').innerText(), /\brunning\b|result_ready|superseded|\bqueued\b/);
     assert.match(await detail.locator('.bot-session-report').innerText(), /2 条依据记录/);
     assert.equal(await detail.locator('.bot-session-empty').count(), 0);
@@ -187,6 +193,8 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
   change([{ ...task, status: 'running', statusLabel: '正在核查历史记录' }], true);
   await until(() => detail.getAttribute('data-status'), value => value === 'unavailable');
   assert.doesNotMatch(await detail.locator('.bot-session-progress').innerText(), /正在核查历史记录/);
+  assert.match(await detail.locator('.bot-session-report').innerText(), /已整理可读取的记录/);
+  await detail.getByText('暂时无法刷新报告，保留此前的记录。', { exact: true }).waitFor();
   checks.push('live task states preserve result/acceptance distinctions, deduplicate references and suppress stale progress when facts become unavailable');
 
   change([{ ...task, conversationId: '' }]);

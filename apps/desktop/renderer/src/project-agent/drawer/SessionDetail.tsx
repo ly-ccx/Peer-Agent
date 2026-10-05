@@ -14,6 +14,7 @@ export function SessionDetail({
   workspaceId,
   workspacePath,
   session,
+  reportState = 'ready',
   i18n,
   isZh,
   onBack,
@@ -21,6 +22,7 @@ export function SessionDetail({
   readonly workspaceId: string;
   readonly workspacePath: string;
   readonly session: DrawerSession;
+  readonly reportState?: 'loading' | 'ready' | 'unavailable';
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly onBack: () => void;
@@ -54,14 +56,17 @@ export function SessionDetail({
           </button>
         ) : null}
       </section>
-      <section className="bot-session-report" aria-label={i18n.t('projectAgent.drawer.taskDetail.report')}>
+      <section className="bot-session-report" aria-busy={reportState === 'loading'} aria-label={i18n.t('projectAgent.drawer.taskDetail.report')}>
         <div className="bot-session-report-heading">
           <h3>{i18n.t('projectAgent.drawer.taskDetail.report')}</h3>
           {view.evidenceRefs.length ? <span>{i18n.t('projectAgent.drawer.taskDetail.evidenceCount', { count: view.evidenceRefs.length })}</span> : null}
         </div>
         {view.report ? <p className="bot-session-report-text">{view.report}</p> : (
-          <p className="bot-session-empty"><PeerIcon name="fileText" />{i18n.t('projectAgent.drawer.taskDetail.noReport')}</p>
+          <p className="bot-session-empty" role={reportState === 'ready' ? undefined : 'status'}><PeerIcon name="fileText" />{i18n.t(reportState === 'loading'
+            ? 'projectAgent.drawer.taskDetail.readingReport' : reportState === 'unavailable'
+              ? 'projectAgent.drawer.taskDetail.reportUnavailable' : 'projectAgent.drawer.taskDetail.noReport')}</p>
         )}
+        {view.report && reportState === 'unavailable' ? <p className="bot-session-hint" role="status">{i18n.t('projectAgent.drawer.taskDetail.reportStale')}</p> : null}
       </section>
       <details className="bot-session-info">
         <summary><PeerIcon name="chevronRight" />{i18n.t('projectAgent.drawer.taskDetail.info')}</summary>

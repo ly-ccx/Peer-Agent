@@ -9,6 +9,21 @@ const TONES: Record<WorkSessionStatus, 'attention' | 'active' | 'quiet'> = {
   cancelled: 'quiet', superseded: 'quiet',
 };
 
+/** The list owns live status; only the matching detail read carries the task report. */
+export function selectSessionDetail(sessionId: string | null, selected: DrawerSession | null, detail: DrawerSession | null,
+  available: boolean): DrawerSession | null {
+  const live = selected?.sessionId === sessionId ? selected : null;
+  const snapshot = detail?.sessionId === sessionId ? detail : null;
+  const session = live ?? snapshot;
+  if (!session) return null;
+  return {
+    ...session,
+    summary: snapshot ? snapshot.summary : session.summary,
+    evidenceRefs: snapshot ? snapshot.evidenceRefs : session.evidenceRefs,
+    ...(!available ? { status: 'unavailable', statusLabel: '', progress: '' } : {}),
+  };
+}
+
 /** Reports are content, never a substitute for the host's status or acceptance facts. */
 export function sessionDetailPresentation(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>, now = Date.now()) {
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
