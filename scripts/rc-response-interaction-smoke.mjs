@@ -14,7 +14,8 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
     async sendMessage(input) {
       const text = input.messages?.findLast(message => message.role === 'user')?.content || '';
       record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId });
-      if (text === 'RC_DETAIL_QUESTION') {
+      const interactive = input.turnProfile?.role === 'project_agent';
+      if (interactive && text === 'RC_DETAIL_QUESTION') {
         const send = (channel, payload) => input.webContents.send(channel, { streamId: input.streamId, ...payload });
         send('chat:stream:tool-call', { tool: 'list_sessions', toolCallId: 'sessions', args: {} });
         send('chat:stream:tool-result', { toolCallId: 'sessions', result: JSON.stringify({ ok: true, sessions: [] }) });
@@ -25,7 +26,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         send('chat:stream:tool-result', { toolCallId: 'question', result: JSON.stringify({ ok: true }) });
         return { terminalStatus: 'done' };
       }
-      if (!text.includes('RC_STREAM_')) {
+      if (!interactive || !text.includes('RC_STREAM_')) {
         await new Promise(resolve => setTimeout(resolve, 120));
         return { terminalStatus: 'done', text: 'RC scripted reply: ' + text };
       }

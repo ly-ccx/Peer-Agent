@@ -4,7 +4,7 @@ import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
 import { checkBotWorkSurfaces } from './bot-work-surface-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
-import { checkResponseInteraction } from '../../../scripts/rc-response-interaction-smoke.mjs';
+import { checkResponseInteraction, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -123,6 +123,22 @@ writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], tu
 const entry = path.join(root, 'entry.mjs');
 const streamCommand = path.join(root, 'stream-command.json');
 writeFileSync(streamCommand, JSON.stringify({ scenario: '', phase: 0 }));
+if (process.argv.includes('--streaming')) {
+  const probeFile = streamCommand + '.role-probe';
+  writeFileSync(probeFile, JSON.stringify({ scenario: 'RC_STREAM_FAIL', phase: 3 }));
+  const events = [];
+  const probe = createStreamingFixture({ commandFile: probeFile, record() {} });
+  const input = { messages: [{ role: 'user', content: 'RC_STREAM_FAIL' }], streamId: 'role-probe',
+    webContents: { send: (...event) => events.push(event) } };
+  for (const role of ['memory_curator', 'objective_probe']) {
+    const result = await probe.sendMessage({ ...input, turnProfile: { role } });
+    assert.equal(result.terminalStatus, 'done', `${role} must not run the interactive failure scenario`);
+    assert.equal(events.length, 0, `${role} must not emit interactive stream events`);
+  }
+  const failed = await probe.sendMessage({ ...input, turnProfile: { role: 'project_agent', context: { inputAnchors: [] } } });
+  assert.equal(failed.terminalStatus, 'error', 'background cognition must not consume the first interactive failure');
+  assert.ok(events.some(([channel]) => channel === 'chat:stream:error'));
+}
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
 const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
@@ -190,6 +206,7 @@ const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse',
   sourceDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: source, encoding: 'utf8' }).trim()),
   synthetic: true, scale: fixture.scale, platform: process.platform, startedAt: new Date().toISOString(),
   checks: [], pageErrors: [], receiptSamples: [], scope: 'Real source Electron main/preload/renderer and durable input; scripted cognition only; not installed or real-model timing' };
+if (process.argv.includes('--streaming')) report.fixtureRoleIsolation = true;
 let app, handle, page, tracing = false; const logs = [];
 const interaction = async phase => {
   report.interactionBefore = await page.evaluate(phase => ({ phase, frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus() }), phase);
