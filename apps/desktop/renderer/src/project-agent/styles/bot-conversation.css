@@ -501,10 +501,10 @@
 .bot-question .bot-card-actions button,
 .bot-question .bot-card-actions button:first-child {
   justify-content: flex-start;
-  border: 1px solid var(--chrome-hairline);
-  background: var(--paper-sheet);
+  border: 1px solid transparent;
+  background: var(--control-fill);
   color: var(--graphite-base);
-  border-radius: var(--ui-radius-control, 8px);
+  border-radius: var(--control-radius-compact);
   padding: 8px 12px;
   max-width: 100%;
   text-align: left;
@@ -512,8 +512,7 @@
 }
 
 .bot-question .bot-card-actions button:hover {
-  background: var(--paper-hover);
-  border-color: var(--graphite-soft);
+  background: var(--control-fill-hover);
 }
 
 .bot-composer {
@@ -724,4 +723,9 @@
 
 @supports (corner-shape: superellipse(1.4)) {
   :is(.bot-composer, .bot-quote-chip, .bot-reply-bar):not(.bot-user-quote) { corner-shape: var(--control-corner); }
+  .bot-question .bot-card-actions button { corner-shape: var(--control-corner); }
+}
+
+@media (forced-colors: active) {
+  .bot-question .bot-card-actions button { border-color: ButtonText; }
 }
