@@ -864,22 +864,35 @@
   gap: 6px;
   min-height: 32px;
   padding: 6px 10px;
-  border-radius: var(--ui-radius-control, 6px);
-  background: var(--paper-sheet);
+  border-radius: var(--control-radius-compact);
+  border-color: transparent;
+  background: var(--control-fill);
   font-weight: 500;
   line-height: 18px;
   box-shadow: none;
   user-select: none;
 }
 
+.bot-profile:hover {
+  background: var(--control-fill-hover);
+}
+
 .bot-profile[aria-expanded='true'] {
-  background: var(--paper-sunken);
-  border-color: color-mix(in srgb, var(--graphite-soft) 26%, transparent);
+  background: var(--control-fill-active);
+  border-color: transparent;
 }
 
 .bot-profile:focus-visible {
-  outline: 2px solid var(--graphite-soft);
+  outline: 2px solid var(--azure-seal);
   outline-offset: 2px;
+}
+
+@supports (corner-shape: superellipse(1.4)) {
+  .bot-profile { corner-shape: var(--control-corner); }
+}
+
+@media (forced-colors: active) {
+  .bot-profile { border-color: ButtonText; }
 }
 
 .bot-main-placeholder,

@@ -1105,8 +1105,8 @@
 .bot-drawer-body .bot-settings-section .peer-switch[data-state='checked'] { background: var(--graphite-base); border-color: var(--graphite-base); }
 .bot-drawer-head p { font-size: .9375rem; }
 
-.bot-drawer-body .bot-drawer-tab .bot-settings-name-row button { border-color: transparent; border-radius: var(--control-radius-compact); background: var(--control-fill); box-shadow: none; }
-.bot-drawer-body .bot-drawer-tab .bot-settings-name-row button:hover:not(:disabled) { background: var(--control-fill-hover); }
+.bot-drawer-body .bot-drawer-tab :is(.bot-settings-name-row, .bot-avatar-settings-actions) button { min-height: 34px; padding: 6px 12px; border-color: transparent; border-radius: var(--control-radius-compact); background: var(--control-fill); box-shadow: none; }
+.bot-drawer-body .bot-drawer-tab :is(.bot-settings-name-row, .bot-avatar-settings-actions) button:hover:not(:disabled) { background: var(--control-fill-hover); }
 @supports (corner-shape: superellipse(1.4)) {
-  :is(.bot-drawer-segments, .bot-segment-thumb, .bot-settings-name-row input, .bot-settings-name-row button) { corner-shape: var(--control-corner); }
+  :is(.bot-drawer-segments, .bot-segment-thumb, .bot-settings-name-row input, .bot-settings-name-row button, .bot-avatar-settings-actions button) { corner-shape: var(--control-corner); }
 }
