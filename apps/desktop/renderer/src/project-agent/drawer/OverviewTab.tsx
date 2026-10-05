@@ -1,9 +1,14 @@
+import type { BotProfile } from '@peer-agent/protocol';
+import { BotAvatar } from '../BotAvatar';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import type { DrawerSession } from '../state/drawerState';
 
 export function OverviewTab({
   path,
+  profile,
+  sessionsAvailable,
+  onOpenTasks,
   brief,
   running,
   modelLabel,
@@ -12,6 +17,9 @@ export function OverviewTab({
   onOpenSession,
 }: {
   readonly path: string;
+  readonly profile: BotProfile;
+  readonly sessionsAvailable: boolean;
+  readonly onOpenTasks: () => void;
   readonly brief: string;
   readonly running: readonly DrawerSession[];
   readonly modelLabel: string;
@@ -26,6 +34,10 @@ export function OverviewTab({
 
   return (
     <div className="bot-drawer-tab bot-overview-tab">
+      <section className="bot-overview-identity">
+        <BotAvatar avatar={profile.avatar} label={profile.displayName} workspaceId={profile.workspaceId} mood={running.length ? 'working' : 'idle'} />
+        <div><h2>{profile.displayName}</h2><p>{brief || i18n.t('projectAgent.drawer.botDescription')}</p></div>
+      </section>
       <section className="bot-overview-section">
         <h2>{i18n.t('projectAgent.drawer.folder')}</h2>
         <div className="bot-overview-folder">
@@ -51,14 +63,14 @@ export function OverviewTab({
           <h2>{i18n.t('projectAgent.drawer.running')}</h2>
           {running.length > 0 && <span>{running.length}</span>}
         </div>
-        {running.length === 0 ? (
+        {!sessionsAvailable ? <p>{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : running.length === 0 ? (
           <div className="bot-overview-idle">
             <span className="bot-overview-idle-dot" aria-hidden="true" />
             <p>{i18n.t('projectAgent.drawer.runningEmpty')}</p>
           </div>
         ) : (
           <ul className="bot-overview-sessions">
-            {running.map((session) => (
+            {running.slice(0, 3).map((session) => (
               <li key={session.sessionId}>
                 <button type="button" onClick={() => onOpenSession(session.sessionId)}>
                   <span>{session.title}</span>
@@ -68,17 +80,13 @@ export function OverviewTab({
             ))}
           </ul>
         )}
+        {running.length > 3 ? <button type="button" onClick={onOpenTasks}>{i18n.t('projectAgent.chat.work.more', { count: running.length - 3 })}<PeerIcon name="chevronRight" size={14} /></button> : null}
       </section>
-      {brief && (
-        <section className="bot-overview-section">
-          <h2>{i18n.t('projectAgent.drawer.brief')}</h2>
-          <p className="bot-overview-brief">{brief}</p>
-        </section>
-      )}
       <section className="bot-overview-details">
+        <div><span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span><strong>{i18n.t(`projectAgent.drawer.settings.proactivity.${profile.proactivity ?? 'inherit'}`)}</strong></div>
         <div>
           <span>{i18n.t('projectAgent.drawer.acceptance')}</span>
-          <strong>{i18n.t('projectAgent.drawer.acceptance.auto')}</strong>
+          <strong>{i18n.t(profile.acceptancePolicy === 'confirm' ? 'projectAgent.drawer.acceptance.confirm' : 'projectAgent.drawer.acceptance.auto')}</strong>
         </div>
         <div>
           <span>{i18n.t('projectAgent.drawer.model')}</span>

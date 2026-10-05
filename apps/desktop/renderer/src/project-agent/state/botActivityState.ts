@@ -1,5 +1,5 @@
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import type { BotChatMessage } from './botConversationState';
+import type { BotChatMessage, BotToolRound, ConversationRow } from './botConversationState';
 
 const TERMINAL = new Set(['done', 'error', 'stopped', 'disposed']);
 export const isActivityRunning = (activity: ProjectAgentActivity | null) => Boolean(activity && !TERMINAL.has(activity.phase));
@@ -19,4 +19,19 @@ export function visibleBotActivity(activity: ProjectAgentActivity | null, messag
   if (messages.some(message => message.turnId === activity.turnId && ['agent_reply', 'system_card'].includes(message.kind))) return null;
   if (TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
   return activity;
+}
+
+/** Linear handoff projection: streaming updates must not scan history once per reply. */
+export function attachBotProcesses(rows: readonly ConversationRow[], messages: readonly BotChatMessage[], activity: ProjectAgentActivity | null): ConversationRow[] {
+  const byTurn = new Map(messages.filter(message => message.kind === 'agent_turn').map(message => [message.id, message.rounds]));
+  const legacy = new Map<string, readonly BotToolRound[]>();
+  let preceding: readonly BotToolRound[] = [];
+  for (const message of messages) {
+    if (message.kind === 'agent_turn') preceding = message.rounds;
+    else if (message.kind === 'agent_reply' && !message.turnId) legacy.set(message.id, preceding);
+  }
+  return rows.map(row => row.type === 'message' && row.message.kind !== 'user_input' ? {
+    ...row, processRounds: row.message.turnId ? byTurn.get(row.message.turnId) ?? [] : legacy.get(row.message.id) ?? [],
+    ...(activity && row.message.turnId === activity.turnId && activity.phase !== 'disposed' ? { activity } : {}),
+  } : row);
 }

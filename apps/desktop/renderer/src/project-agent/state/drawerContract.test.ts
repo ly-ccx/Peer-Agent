@@ -37,7 +37,7 @@ test('记忆页动作和回复芯片都经记忆 IPC', () => {
   ]);
   assert.equal(page.includes('localStorage'), false);
   assert.equal(page.includes('child_process'), false);
-  const bubble = source('project-agent/conversation/ReplyBubble.tsx');
+  const bubble = source('project-agent/conversation/ReplyContext.tsx');
   assert.match(bubble, /projectMemoryList/);
   assert.match(bubble, /aria-expanded/);
   assert.equal(bubble.includes('<span>{i18n.t(\'projectAgent.chat.memoryUsed\''), false);

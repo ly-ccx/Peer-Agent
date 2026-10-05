@@ -1,3 +1,4 @@
+export { toolActivityPreview, toolActivitySummary } from './tool-activity-preview.ts';
 export { isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort, type ModelReasoningEffort } from './model-reasoning.ts';
 export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
 

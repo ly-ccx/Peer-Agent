@@ -7,6 +7,7 @@
 }
 
 .bot-thread {
+  overflow-anchor: none;
   display: flex;
   flex: 1;
   flex-direction: column;

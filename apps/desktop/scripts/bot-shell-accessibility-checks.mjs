@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { writeFileSync } from 'node:fs';
+import { checkEffortStability } from './bot-effort-stability-checks.mjs';
 import { modelMenuChannelName } from '@peer-agent/protocol';
 
 /** Actual production DOM, keyboard and persistence; no replacement of product results. */
-export async function checkBotShellAccessibility({ page, app, until, report, captureDirectory }) {
+export async function checkBotShellAccessibility({ page, app, until, report, captureDirectory, effortCommandFile }) {
   const checks = report.accessibility = [];
   const focused = locator => locator.evaluate(node => node === document.activeElement);
   const list = page.getByRole('listbox', { name: 'Peer', exact: true });
@@ -25,7 +27,7 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   await until(() => focused(tabs.getByRole('tab', { selected: true })), Boolean);
   await page.keyboard.press('End');
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
-  await checkSettings({ page, until, report, captureDirectory });
+  await checkSettings({ page, until, report, captureDirectory, effortCommandFile });
   await tabs.getByRole('tab', { name: '设置', exact: true }).focus();
   await page.keyboard.press('Home'); await page.keyboard.press('ArrowRight');
   assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
@@ -161,7 +163,7 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 }
 
-async function checkSettings({ page, until, report, captureDirectory }) {
+async function checkSettings({ page, until, report, captureDirectory, effortCommandFile }) {
   const form = page.locator('.bot-settings-tab');
   await form.waitFor();
   const workspaceId = (await page.locator('.bot-row.is-open').getAttribute('id')).slice('bot-row-'.length);
@@ -173,7 +175,7 @@ async function checkSettings({ page, until, report, captureDirectory }) {
   assert.equal(await runtime.getAttribute('open'), null);
   assert.equal(await form.locator('.bot-model-settings-row').first().locator('.pa-cascading-trigger').isVisible(), true);
   assert.equal(await advanced.locator('.pa-cascading-trigger').first().isVisible(), false);
-  await checkBotModels({ page, until, report, captureDirectory, workspaceId, original });
+  await checkBotModels({ page, until, report, captureDirectory, effortCommandFile, workspaceId, original });
   const handoff = form.getByRole('switch', { name: '策略签收后自动合回', exact: true });
   const switchPaint = await handoff.evaluate(node => {
     const track = node.getBoundingClientRect(), thumb = node.querySelector('.peer-switch-thumb').getBoundingClientRect();
@@ -270,7 +272,7 @@ async function checkSettings({ page, until, report, captureDirectory }) {
   }, { workspaceId, original });
 }
 
-async function checkBotModels({ page, until, report, captureDirectory, workspaceId, original }) {
+async function checkBotModels({ page, until, report, captureDirectory, effortCommandFile, workspaceId, original }) {
   const form = page.locator('.bot-settings-tab');
   const getBot = id => page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).item.profile, id);
   const globalConfig = () => page.evaluate(async () => ({
@@ -299,11 +301,15 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.session_worker?.modelProviderId === second.id);
   await choose('对话模型', first);
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === first.id);
+  const highEffort = first.reasoningEffortLevels.at(-1);
   const strength = row('对话模型').locator('.reasoning-effort-trigger');
   await until(() => strength.isEnabled(), Boolean);
   await strength.click();
-  const slider = page.getByRole('slider'); await slider.focus(); await slider.press('End');
-  await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.reasoningEffort === 'high');
+  const slider = page.getByRole('slider');
+  if (effortCommandFile) await checkEffortStability({ page, slider, strength, until, getBot: () => getBot(workspaceId),
+    failNext: () => writeFileSync(effortCommandFile, JSON.stringify({ failNext: true })), report, captureDirectory, highEffort });
+  await slider.focus(); await slider.press('End');
+  await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.reasoningEffort === highEffort);
   await page.keyboard.press('Escape');
   assert.equal(await form.isVisible(), true, 'Escape from the strength popover keeps the drawer open');
   await page.getByRole('button', { name: '关闭', exact: true }).click();
@@ -311,7 +317,7 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await until(() => picker('对话模型').textContent(), text => text.includes(first.label));
   assert.equal(await picker('任务执行').textContent(), second.label);
-  assert.equal(await row('对话模型').locator('.bot-model-control').getAttribute('data-effort'), 'high');
+  assert.equal(await row('对话模型').locator('.bot-model-control').getAttribute('data-effort'), highEffort);
   if (captureDirectory) {
     await picker('对话模型').click();
     await page.getByRole('menuitem', { name: modelMenuChannelName(second.providerName, second.model, second.authMethod, true), exact: true }).click();
@@ -322,7 +328,7 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
   await choose('对话模型', second);
   const switched = await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === second.id);
   assert.equal(switched.modelPolicy.overrides.project_agent.mode, 'fixed');
-  assert.equal(switched.modelPolicy.overrides.project_agent.reasoningEffort, 'high');
+  assert.equal(switched.modelPolicy.overrides.project_agent.reasoningEffort, highEffort);
   assert.deepEqual(switched.modelPolicy.overrides.session_worker, { mode: 'fixed', modelProviderId: second.id, reasoningEffort: 'low' });
   assert.deepEqual(switched.modelPolicy.overrides.verifier, original.modelPolicy?.overrides?.verifier);
   await choose('对话模型', null);
@@ -340,6 +346,18 @@ async function checkBotModels({ page, until, report, captureDirectory, workspace
   const restored = await page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).modelViews, workspaceId);
   assert.equal(restored.session_worker.resolution.ok, true);
   await until(() => row('任务执行').locator('.bot-model-control').getAttribute('data-model-id'), id => id === restored.session_worker.resolution.selection.modelProviderId);
+  if (effortCommandFile) {
+    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    const compactStrength = page.locator('.bot-composer .reasoning-effort-trigger');
+    await until(() => compactStrength.isEnabled(), Boolean); await compactStrength.click();
+    await checkEffortStability({ page, slider: page.getByRole('slider'), strength: compactStrength, until,
+      getBot: () => getBot(workspaceId), failNext: () => writeFileSync(effortCommandFile, JSON.stringify({ failNext: true })),
+      report, captureDirectory, highEffort, scope: 'composer' });
+    await page.keyboard.press('Escape');
+    await page.evaluate(async ({workspaceId,policy}) => window.peerAgent.projectAgentUpdateProfile({workspaceId,modelPolicy:policy}),
+      {workspaceId,policy:original.modelPolicy||{}});
+    await page.locator('.bot-profile').click(); await page.getByRole('tab', { name: '设置', exact: true }).click();
+  }
   report.botModelSettings = { fixedSelectionSaved: true, effortSaved: true, effortRetained: true, reopenRetained: true, modelSwitchSaved: true, inheritanceRestored: true,
     independentRoles: true, otherBotUnchanged: true, globalConfigUnchanged: true,
     scope: 'Production model catalogue projection, settings DOM, IPC validation and durable profile; no real model request' };

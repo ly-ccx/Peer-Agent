@@ -54,13 +54,13 @@ Desktop, TUI and CLI share the same core runtime:
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 >
-> beta channel **`0.1.0-rc.6`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under each bot's profile → Tasks → History.
+> beta channel **`0.1.0-rc.7`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under each bot's profile → Tasks → History.
 
 ### The 0.1.0 candidate
 
 Bind a folder or create a managed bot, choose its avatar color, then give it a request. The bot handles read-only understanding and delegates writes to tasks with success criteria. Receipt, verification, acceptance and worktree integration remain visible as separate steps.
 
-The profile holds project history, memory, objectives and settings. Keyboard navigation, reduced motion, locale parity and diagnostics are part of the candidate checks. [Candidate release notes](release-notes/v0.1.0-rc.6.md) cover features, upgrade instructions and limits. Upgrade Desktop, CLI/TUI and Gateway together; older TUI versions do not understand the project lease.
+The profile holds project history, memory, objectives and settings. Keyboard navigation, reduced motion, locale parity and diagnostics are part of the candidate checks. [Candidate release notes](release-notes/v0.1.0-rc.7.md) cover features, upgrade instructions and limits. Upgrade Desktop, CLI/TUI and Gateway together; older TUI versions do not understand the project lease.
 
 Stable publication follows comprehensive owner testing and seven days of daily use. Remote input is text only; approvals stay on the computer. Remote device identity currently requires macOS Keychain. Uploaded avatar images remain static.
 

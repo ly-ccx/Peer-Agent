@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile, BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
@@ -8,12 +8,15 @@ import { quoteRefsFor, roundsForReply } from '../state/botConversationState';
 import { useBotConversation } from '../state/useBotConversation';
 import { BotModelControls } from '../BotModelControls';
 import type { BotModelsControlState } from '../state/useBotModels';
+import { DelegatedWork } from './DelegatedWork';
+import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
 import { BotComposer } from './BotComposer';
 import { BotMessageList } from './BotMessageList';
 import '../styles/bot-conversation.css';
 
 export function BotConversation({
   workspaceId,
+  workIndex,
   profile,
   modelControls,
   avatar,
@@ -27,6 +30,7 @@ export function BotConversation({
   focusRequestId = 0,
 }: {
   readonly workspaceId: string;
+  readonly workIndex: BotWorkIndex;
   readonly profile: BotProfile;
   readonly modelControls: BotModelsControlState;
   readonly avatar: BotAvatarModel;
@@ -60,6 +64,8 @@ export function BotConversation({
   }, [focusMessageId, focusRequestId]);
   const [quote, setQuote] = useState<{ messageId: string; text: string } | null>(null);
 
+  const background = useMemo(() => backgroundWork(workIndex), [workIndex]);
+
   return (
     <div className="bot-convo">
       {conversation.status === 'error' ? (
@@ -67,6 +73,7 @@ export function BotConversation({
       ) : (
         <BotMessageList
           workspaceId={workspaceId}
+          workIndex={workIndex}
           avatar={avatar}
           label={label}
           avatarMood={avatarMood}
@@ -122,6 +129,8 @@ export function BotConversation({
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
       {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
+      {background.count ? <details className="bot-background-work"><summary>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</summary>
+        <DelegatedWork rows={background.rows} i18n={i18n} onOpen={onLocateSession} /></details> : null}
       <BotComposer
         key={workspaceId}
         i18n={i18n}
@@ -129,7 +138,7 @@ export function BotConversation({
         modelControls={<div className="bot-model-toolbar"><BotModelControls role="project_agent" compact
           policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
           activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
-          i18n={i18n} onChange={policy => { void modelControls.save(policy); }} /></div>}
+          i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
         quote={quote?.text ?? ''}
         generating={conversation.generating}
         stopping={conversation.stopping}

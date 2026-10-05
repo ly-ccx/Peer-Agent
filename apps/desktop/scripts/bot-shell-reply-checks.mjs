@@ -16,16 +16,20 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   // The quote keeps a paper boundary; secondary actions stay quiet until hover
   // or keyboard focus. Restore the original attributes after every sample.
   const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
+  const context = reply.locator('.bot-reply-context');
+  assert.equal(await context.getAttribute('open'), null);
+  assert.equal(await reply.locator('.bot-reply-delivery').isVisible(), false);
+  await context.locator(':scope > summary').click();
   report.replyStyles = [];
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; document.documentElement.dataset.palette = 'frost'; }, theme);
-    await reply.evaluate(async node => { await Promise.all(node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))); });
+    await reply.evaluate(async node => { await Promise.race([Promise.all(node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))), new Promise(resolve => setTimeout(resolve, 500))]); });
     const sample = await reply.evaluate(node => {
       const read = selector => {
         const item = node.querySelector(selector), style = getComputedStyle(item);
         return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, borderStyle: style.borderTopStyle, shadow: style.boxShadow, height: item.getBoundingClientRect().height };
       };
-      return { quote: read('.bot-reply-bar'), action: read('.bot-reply-marks button'), delivery: read('.bot-reply-delivery') };
+      return { quote: read('.bot-reply-bar'), action: read('.bot-context-process'), delivery: read('.bot-reply-delivery') };
     });
     report.replyStyles.push({ theme, ...sample });
     assert.equal(sample.quote.border, '1px'); assert.equal(sample.quote.borderStyle, 'solid');
@@ -35,7 +39,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     assert.equal(sample.action.shadow, 'none');
     assert.ok(sample.action.height >= 27);
     assert.equal(sample.delivery.border, '0px');
-    if (captureDirectory) await reply.screenshot({ path: path.join(captureDirectory, `reply-${theme}.png`) });
+    if (captureDirectory) await reply.screenshot({ path: path.join(captureDirectory, `reply-${theme}.png`), animations: 'disabled' });
   }
   await page.evaluate(original => {
     for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
@@ -47,6 +51,8 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await quote.focus();
   assert.equal(await quote.evaluate(node => node === document.activeElement), true);
   await quote.press('Tab');
+  assert.equal(await reply.locator('.bot-work-row > summary, .bot-reply-context > summary').first().evaluate(node => node === document.activeElement), true);
+  await process.focus();
   report.replyFocus = await process.evaluate(node => ({ active: node === document.activeElement, visible: node.matches(':focus-visible'), outline: getComputedStyle(node).outlineStyle, width: getComputedStyle(node).outlineWidth, actualActive: document.activeElement?.outerHTML, documentFocused: document.hasFocus() }));
   assert.equal(report.replyFocus.active, true);
   assert.equal(report.replyFocus.outline, 'solid');

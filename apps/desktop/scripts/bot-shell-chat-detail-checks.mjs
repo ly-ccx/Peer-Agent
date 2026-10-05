@@ -17,6 +17,7 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     return { card, replyId };
   };
   const first = await ask();
+  await page.locator(`[id="bot-msg-${first.replyId}"] .bot-reply-context > summary`).click();
   await page.locator(`[id="bot-msg-${first.replyId}"]`).getByRole('button', { name: '查看过程', exact: true }).click();
   const process = page.locator('.bot-process'); await process.waitFor();
   const visible = await process.innerText();

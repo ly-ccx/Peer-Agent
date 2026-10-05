@@ -25,8 +25,8 @@ export function AgentProcessView({
           <details className="bot-process-technical">
             <summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.process.technical')}</summary>
             <p>{entry.name}</p>
-            <span>{i18n.t('projectAgent.process.input')}</span><pre tabIndex={0}>{entry.input}</pre>
-            <span>{i18n.t('projectAgent.process.result')}</span><pre tabIndex={0}>{entry.result}</pre>
+            <span>{i18n.t('projectAgent.process.input')}{entry.inputPreview.redacted ? ` · ${i18n.t('projectAgent.process.redacted')}` : ''}{entry.inputPreview.truncated ? ` · ${i18n.t('projectAgent.process.truncated')}` : ''}</span><pre tabIndex={0}>{entry.input || i18n.t('projectAgent.process.previewLimit')}</pre>
+            <span>{i18n.t('projectAgent.process.result')}{entry.resultPreview.redacted ? ` · ${i18n.t('projectAgent.process.redacted')}` : ''}{entry.resultPreview.truncated ? ` · ${i18n.t('projectAgent.process.truncated')}` : ''}</span><pre tabIndex={0}>{entry.result || i18n.t('projectAgent.process.previewLimit')}</pre>
           </details>
         </div>
       ))}

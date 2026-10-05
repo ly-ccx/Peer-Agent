@@ -44,3 +44,20 @@ test('代理过程只列出回复前面那一轮的工具调用和结果', () =>
   assert.deepEqual(JSON.parse(entry!.result), { outcome: 'passed' });
   assert.deepEqual(agentProcessEntries([]), []);
 });
+
+
+test('历史过程复用有界脱敏预览，保留事实状态且不泄露私有字段', () => {
+  const entries = agentProcessEntries([{ text: '', toolCalls: Array.from({ length: 110 }, (_, index) => ({
+    name: 'read_file', input: { path: 'README.md', token: 'PRIVATE_PARAMETER' },
+    result: { ok: true, output: 'read-' + index + 'x'.repeat(5000), nested: { reasoning: 'PRIVATE_REASONING', apiKey: 'PRIVATE_KEY' } },
+  })) }]);
+  assert.equal(entries.length, 100);
+  assert.ok(entries.reduce((sum, entry) => sum + entry.input.length + entry.result.length, 0) <= 32000);
+  assert.equal(entries[0]?.status, 'done');
+  assert.equal(entries[0]?.summary, 'README.md');
+  assert.equal(entries[0]?.inputPreview.redacted, true);
+  assert.equal(entries[0]?.resultPreview.redacted, true);
+  assert.equal(entries[0]?.resultPreview.truncated, true);
+  assert.doesNotMatch(JSON.stringify(entries), /PRIVATE_/);
+  assert.equal(entries.at(-1)?.resultPreview.truncated, true);
+});

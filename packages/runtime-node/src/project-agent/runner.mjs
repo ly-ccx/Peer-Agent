@@ -55,7 +55,7 @@ export function createProjectAgentRunner({
       .map((value) => (Number.isFinite(value) && value >= 0 ? value : 0)),
   );
   const turnSink = sink && typeof sink.send === 'function' ? sink : { send() {} };
-  const activity = createTurnActivity({ workspaceId: workspace, conversationId: conversation, publish: onActivity });
+  const activity = createTurnActivity({ workspaceId: workspace, conversationId: conversation, publish: onActivity, now: stamp });
   let stoppedJob = null;
 
   const userInputs = [];

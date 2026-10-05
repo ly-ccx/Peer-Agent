@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -14,7 +14,8 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
     async sendMessage(input) {
       const text = input.messages?.findLast(message => message.role === 'user')?.content || '';
       record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId });
-      if (text === 'RC_DETAIL_QUESTION') {
+      const interactive = input.turnProfile?.role === 'project_agent';
+      if (interactive && text === 'RC_DETAIL_QUESTION') {
         const send = (channel, payload) => input.webContents.send(channel, { streamId: input.streamId, ...payload });
         send('chat:stream:tool-call', { tool: 'list_sessions', toolCallId: 'sessions', args: {} });
         send('chat:stream:tool-result', { toolCallId: 'sessions', result: JSON.stringify({ ok: true, sessions: [] }) });
@@ -25,7 +26,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         send('chat:stream:tool-result', { toolCallId: 'question', result: JSON.stringify({ ok: true }) });
         return { terminalStatus: 'done' };
       }
-      if (!text.includes('RC_STREAM_')) {
+      if (!interactive || !text.includes('RC_STREAM_')) {
         await new Promise(resolve => setTimeout(resolve, 120));
         return { terminalStatus: 'done', text: 'RC scripted reply: ' + text };
       }
@@ -49,8 +50,9 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         if (!await wait(1)) return aborted();
         send('chat:stream:delta', { content: '首段文字已经到达。' });
         if (!await wait(2)) return aborted();
-        send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', args: { path: 'PRIVATE_PATH' } });
-        send('chat:stream:tool-result', { toolCallId: 'read', result: JSON.stringify({ ok: true, output: 'PRIVATE_RESULT' }) });
+        send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', args: { path: 'README.md', token: 'PRIVATE_PARAMETER_SECRET' } });
+        if (!await wait(2.5)) return aborted();
+        send('chat:stream:tool-result', { toolCallId: 'read', result: JSON.stringify({ ok: true, output: '# README fixture content', secret: 'PRIVATE_RESULT_SECRET' }) });
         const progress = {}, args = { text: '**流式回复**正在逐步生成。\n\n- 保留 Markdown\n- 完成后只有一条正式回复', replyTo: input.turnProfile.context.inputAnchors.map(anchor => anchor.messageId) };
         emitToolArgProgress(progress, { webContents: sink, streamId, toolCallId: 'reply', toolName: 'post_reply', argsJson: '{"text":"**流式回复**正在' });
         if (!await wait(3)) return aborted();
@@ -66,19 +68,38 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
   };
 }
 
-export async function checkResponseInteraction({ page, until, report, captureDirectory, commandFile }) {
+export async function checkResponseInteraction({ page, until, report, captureDirectory, commandFile, workCommandFile = null }) {
   const checks = report.streamingInteraction = [];
   const command = (scenario, phase) => writeFileSync(commandFile, JSON.stringify({ scenario, phase }));
   const composer = page.locator('.bot-composer textarea'), live = page.locator('.bot-live-reply');
   const start = async scenario => {
     command(scenario, 0); await composer.fill(scenario); await composer.press('Enter');
-    await live.waitFor(); await live.getByText('思考中…', { exact: true }).waitFor();
+    await live.waitFor(); await live.getByText('正在准备回复', { exact: true }).waitFor();
   };
   await start('RC_STREAM_TEXT');
+  const setDelegatedWork = status => {
+    if (!workCommandFile) return;
+    const snapshot = JSON.parse(readFileSync(workCommandFile, 'utf8'));
+    writeFileSync(workCommandFile + '.next', JSON.stringify({ ...snapshot, seq: snapshot.seq + 1, sessions: [
+      ...snapshot.sessions.filter(item => item.sessionId !== 'rc-work-stream'),
+      {sessionId:'rc-work-stream',title:'核对项目说明',status,origin:{anchorMessageId:delegatedAnchor},report:{summary:'核对项目说明中的功能和当前实现。'}},
+    ] }));
+    renameSync(workCommandFile + '.next', workCommandFile);
+  };
+  let delegatedAnchor = '';
+  if (workCommandFile) {
+    delegatedAnchor = await page.locator('.bot-user').filter({ hasText: 'RC_STREAM_TEXT' }).getAttribute('id');
+    delegatedAnchor = delegatedAnchor.slice('bot-msg-'.length);
+    setDelegatedWork('running');
+    const delegated = live.locator('.bot-work-row'); await delegated.waitFor();
+    await delegated.locator(':scope > summary').click();
+    assert.equal(await delegated.evaluate(node => node.open), true);
+  }
+
   const user = page.locator('.bot-user').filter({ hasText: 'RC_STREAM_TEXT' });
   const layout = await user.evaluate(node => ({ content: node.querySelector('.bot-user-content').getBoundingClientRect().bottom, receipt: node.querySelector('.bot-user-marks').getBoundingClientRect().top }));
   assert.ok(layout.receipt >= layout.content);
-  assert.equal(await live.locator('.bot-reply-bar svg').count(), 2);
+  assert.equal(await live.locator('.bot-reply-bar svg').count(), 1);
   await page.screenshot({ path: path.join(captureDirectory, 'stream-waiting.png') });
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
@@ -106,27 +127,100 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.locator('.bot-row').first().click();
   await live.getByText('首段文字已经到达。', { exact: true }).waitFor();
   checks.push('switching bots hides the other stream and restores the active snapshot');
+  if (workCommandFile) {
+    const delegated = live.locator('.bot-work-row'); await delegated.waitFor();
+    if (!(await delegated.evaluate(node => node.open))) await delegated.locator(':scope > summary').click();
+  }
   // Reading history holds its position while the draft grows.
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = Math.max(1, node.scrollTop - 350); });
   await page.locator('.bot-thread-latest').waitFor();
-  const readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
+  let readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 2);
+  await live.locator('.bot-turn-process > summary').click();
+  const readingStep = live.locator('.bot-tool-step[data-status="running"]');
+  await readingStep.waitFor();
+  const shine = readingStep.locator('.bot-tool-step-label');
+  assert.equal(await shine.evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
+  const position = await shine.evaluate(node => getComputedStyle(node).backgroundPosition);
+  await page.waitForTimeout(200);
+  assert.notEqual(await shine.evaluate(node => getComputedStyle(node).backgroundPosition), position);
+  await readingStep.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  await readingStep.locator('.bot-tool-preview > summary').click();
+  await readingStep.getByText('调用正在进行，返回内容到达后会显示在这里。', { exact: true }).waitFor();
+  assert.match(await readingStep.locator('pre').textContent(), /README.md/);
+  assert.doesNotMatch(await readingStep.textContent(), /PRIVATE_/);
+  await live.screenshot({ path: path.join(captureDirectory, 'stream-tool-running-expanded.png') });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(await shine.evaluate(node => getComputedStyle(node).animationName), 'none');
+  assert.notEqual(await shine.evaluate(node => getComputedStyle(node).opacity), '0');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  checks.push('running tool scans over actual target; keyboard opens step and parameters before result; reduced motion remains readable');
+  if (await page.locator('.bot-thread-latest').count()) await page.locator('.bot-thread-latest').click();
+  await until(() => page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
+  await page.locator('.bot-thread').evaluate(node => {
+    // Exercise a real DOM scroll whose event has not reached React when the delta arrives.
+    const hold = event => event.stopImmediatePropagation();
+    node.addEventListener('scroll', hold, true);
+    globalThis.rcReleaseReadingScroll = () => node.removeEventListener('scroll', hold, true);
+    node.scrollTop = Math.max(1, node.scrollTop - 350);
+  });
+  readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
+  command('RC_STREAM_TEXT', 2.5);
   await until(() => live.textContent(), text => text.includes('流式回复正在'));
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.ok(Math.abs((await page.locator('.bot-thread').evaluate(node => node.scrollTop)) - readingTop) < 2, 'new chunks must preserve the reading position');
+  const readingAfter = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
+  report.readingPosition = { before: readingTop, after: readingAfter, eventDeliveryDelayed: true };
+  await page.evaluate(() => { globalThis.rcReleaseReadingScroll?.(); delete globalThis.rcReleaseReadingScroll; });
+  assert.ok(Math.abs(readingAfter - readingTop) < 2, 'new chunks must preserve the reading position');
   await page.locator('.bot-thread-latest').click();
-  await live.getByText('文件读取已结束', { exact: true }).waitFor();
+  await live.locator('.bot-tool-step[data-status="done"]').waitFor();
+  await live.locator('.bot-tool-preview > summary').filter({ hasText: '返回内容' }).click();
+  assert.match(await live.locator('.bot-tool-step').textContent(), /README fixture content/);
   await live.getByText('流式回复正在', { exact: true }).waitFor();
   assert.doesNotMatch(await live.textContent(), /PRIVATE_/);
+  await live.locator('.bot-tool-metadata > summary').click();
+  assert.equal(await live.locator('.bot-tool-metadata').evaluate(node => node.open), true);
   await page.screenshot({ path: path.join(captureDirectory, 'stream-tool-and-draft.png') });
-  checks.push('root post_reply text streams via shared parser; tools use compact SVG; no reasoning, arguments or results leak; history holds');
+  for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width: 760, height: 780 });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    assert.equal(await live.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.screenshot({ path: path.join(captureDirectory, `stream-expanded-narrow-${theme}.png`) });
+  }
+  await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
+  await page.setViewportSize(viewport);
+
+  checks.push('root post_reply text streams; actual result expands after arrival; hidden reasoning and credentials stay redacted; history holds');
+  if (workCommandFile) {
+    setDelegatedWork('accepted');
+    await until(() => live.locator('.bot-work-row').getAttribute('data-status'), status => status === 'accepted');
+  }
   command('RC_STREAM_TEXT', 3); await live.waitFor({ state: 'detached' });
+  const completed = page.locator('.bot-reply').filter({ hasText: '完成后只有一条正式回复' });
+  assert.equal(await completed.locator('.bot-turn-process').evaluate(node => node.open), true);
+  assert.equal(await completed.locator('.bot-tool-step').evaluate(node => node.open), true);
+  assert.equal(await completed.locator('.bot-tool-preview').first().evaluate(node => node.open), true);
+  assert.equal(await completed.locator('.bot-tool-metadata').evaluate(node => node.open), true);
+  assert.equal(await completed.locator('.is-running').count(), 0);
+  if (workCommandFile) {
+    assert.equal(await completed.locator('.bot-work-row').evaluate(node => node.open), true);
+    checks.push('delegated work retains its expanded progress when the streamed reply becomes canonical');
+  }
+  checks.push('completion preserves expanded process, step and parameters without continuing animation');
   assert.equal(await page.locator('.bot-reply').filter({ hasText: '完成后只有一条正式回复' }).count(), 1);
   await until(() => page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
   await page.screenshot({ path: path.join(captureDirectory, 'stream-complete.png') });
   checks.push('completion replaces preview once, preserves Markdown and follows latest');
-  await start('RC_STREAM_STOP'); command('RC_STREAM_STOP', 1);
+  await start('RC_STREAM_STOP');
+  assert.equal(await completed.locator('.bot-turn-process').evaluate(node => node.open), true);
+  assert.equal(await completed.locator('.bot-tool-step').evaluate(node => node.open), true);
+  assert.match(await completed.locator('.bot-tool-step').textContent(), /README fixture content/);
+  assert.doesNotMatch(await completed.locator('.bot-turn-process').textContent(), /PRIVATE_/);
+  if (workCommandFile) assert.equal(await completed.locator('.bot-work-row').evaluate(node => node.open), true);
+  checks.push('next turn hands completed process to persisted history with disclosure and bounded redacted details preserved');
+  command('RC_STREAM_STOP', 2);
   await live.getByText('首段文字已经到达。', { exact: true }).waitFor();
+  await live.locator('.bot-tool-step[data-status="running"]').waitFor({ state: 'attached' });
   await composer.fill('停止之后继续保留我的草稿');
   const stop = page.getByRole('button', { name: '停止生成', exact: true });
   await stop.focus();
@@ -135,6 +229,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.getByText('生成已停止，以上内容未完成', { exact: true }).waitFor();
   assert.equal(await composer.inputValue(), '停止之后继续保留我的草稿');
   assert.equal(await page.locator('.bot-stop-response').count(), 0);
+  await page.locator('.bot-system .bot-tool-step[data-status="stopped"]').waitFor({ state: 'attached' });
   await page.screenshot({ path: path.join(captureDirectory, 'stream-stopped.png') });
   const stoppedProcess = page.locator('.bot-system').filter({ has: page.locator('.bot-stopped-reply') }).getByRole('button', { name: '查看过程', exact: true });
   await stoppedProcess.click(); await page.locator('.bot-process').waitFor();
@@ -142,12 +237,14 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await composer.fill(''); command('RC_STREAM_STOP', 3);
   await page.locator('.bot-stopped-reply').getByRole('button', { name: '重发', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '完成后只有一条正式回复' }).count(), count => count === 2);
-  checks.push('stop preserves incomplete text, exact-turn process and draft; explicit retry creates one new reply');
-  await start('RC_STREAM_FAIL'); command('RC_STREAM_FAIL', 2);
+  checks.push('stop preserves incomplete text, stopped running tool, exact-turn process and draft; explicit retry creates one new reply');
+  await start('RC_STREAM_FAIL'); command('RC_STREAM_FAIL', 2.5);
   await live.getByText('流式回复正在', { exact: true }).waitFor();
   command('RC_STREAM_FAIL', 3); await live.waitFor({ state: 'detached' });
   const failed = page.locator('.bot-card').filter({ hasText: '受控连接失败' });
-  await failed.waitFor(); await failed.getByRole('button', { name: '重发', exact: true }).click();
+  await failed.waitFor();
+  await page.locator('.bot-system').filter({ has: failed }).locator('.bot-tool-step[data-status="done"]').waitFor({ state: 'attached' });
+  await failed.getByRole('button', { name: '重发', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '完成后只有一条正式回复' }).count(), count => count === 3);
   checks.push('failure retracts unaccepted preview and offers explicit retry without duplicate replies');
 }

@@ -1705,10 +1705,14 @@
 
 .reasoning-effort-control {
   display: inline-flex;
+  flex-shrink: 0;
   min-width: 0;
 }
 
 .reasoning-effort-trigger {
+  display: inline-grid;
+  align-items: center;
+  text-align: start;
   height: var(--composer-addon-height);
   max-width: 112px;
   padding: 0 8px;
@@ -1724,15 +1728,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 160ms ease, color 160ms ease, max-width 200ms ease;
+  transition: background 160ms ease, color 160ms ease;
 }
 
+.reasoning-effort-trigger-size { display: grid; visibility: hidden; grid-area: 1 / 1; }
+.reasoning-effort-trigger-size > span { grid-area: 1 / 1; }
+.reasoning-effort-control[data-fast-available="true"] .reasoning-effort-trigger-size { padding-inline-start: 14px; }
+.reasoning-effort-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 .reasoning-effort-trigger-content {
+  grid-area: 1 / 1;
   display: inline-flex;
   align-items: center;
   gap: 3px;
   min-width: 16px;
-  animation: reasoning-effort-content-in 180ms cubic-bezier(0.2, 1, 0.4, 1);
 }
 
 .reasoning-effort-channel-badge {
@@ -1741,17 +1750,6 @@
   margin-right: 1px;
   color: color-mix(in srgb, var(--azure-seal) 88%, var(--composer-addon-color));
   opacity: 0.88;
-}
-
-@keyframes reasoning-effort-content-in {
-  from {
-    opacity: 0;
-    transform: translateX(-2px) scale(0.82) rotate(-5deg);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1) rotate(0);
-  }
 }
 
 .reasoning-effort-trigger:hover:not(:disabled),
@@ -1796,6 +1794,10 @@
 }
 
 .reasoning-effort-panel-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--graphite-base);
   font-weight: 600;
 }

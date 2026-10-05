@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { ProjectAgentActivity, ProjectInputAttachment } from '@peer-agent/protocol';
-import { isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
+import { attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
 import { createConversationPager } from './conversationPager.ts';
@@ -211,7 +211,7 @@ export function useBotConversation(workspaceId: string) {
     ? [...messages, familiarizeMessage(familiarizeOffer, messages[messages.length - 1]?.createdAt || '')]
     : messages;
   const shown = hideAcknowledgedQuestions(applyOptimistic(offered, pending));
-  const rows: ConversationDisplayRow[] = conversationRows(shown);
+  const rows: ConversationDisplayRow[] = attachBotProcesses(conversationRows(shown), shown, activity);
   const live = visibleBotActivity(activity, shown);
   if (live) rows.push({ type: 'activity', activity: live });
   const stop = async () => {

@@ -19,7 +19,7 @@ export function ReasoningEffortSlider({
   readonly fastMode: boolean;
   readonly isZh: boolean;
   readonly disabled: boolean;
-  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void | Promise<void>;
   readonly onFastModeChange: (enabled: boolean) => void;
 }) {
   const selectedIndex = effortIndexForLevel(effort, effortLevels);
@@ -27,6 +27,8 @@ export function ReasoningEffortSlider({
   const [open, setOpen] = useState(false);
   const [dragValue, setDragValue] = useState(selectedValue);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const committing = useRef(false);
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -34,6 +36,7 @@ export function ReasoningEffortSlider({
   const panelId = useId();
 
   useEffect(() => {
+    if (committing.current) return;
     setDragValue(selectedValue);
     setDirty(false);
   }, [selectedValue]);
@@ -69,12 +72,16 @@ export function ReasoningEffortSlider({
         Math.min(rect.left, viewportWidth - panelWidth - margin),
       );
 
-      setCoords({ left, top });
+      setCoords(current => current?.left === left && current.top === top ? current : { left, top });
     };
     updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    if (triggerRef.current) observer.observe(triggerRef.current);
+    if (panelRef.current) observer.observe(panelRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
+      observer.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
@@ -102,19 +109,27 @@ export function ReasoningEffortSlider({
     };
   }, [open]);
 
-  const commit = (value: number) => {
-    if (!dirty) return;
+  const commit = async (value: number) => {
+    if (!dirty || committing.current || disabled) return;
     const snapped = snapEffortValue(value, effortLevels.length);
     const next = effortLevels[effortIndexFromValue(snapped, effortLevels.length)];
     setDragValue(snapped);
-    setDirty(false);
-    if (next) onEffortChange(next);
+    if (!next) return;
+    committing.current = true;
+    setSaving(true);
+    try { await onEffortChange(next); }
+    catch { /* The owning preference editor reports save failures. */ }
+    finally {
+      committing.current = false;
+      setSaving(false);
+      setDirty(false);
+    }
   };
 
   const effectiveValue = dirty ? dragValue : selectedValue;
   const displayedLevel = effortLevelForDisplay(effort, effortLevels, effectiveValue, dirty);
   const displayLabel = effortLabel(displayedLevel, isZh);
-  const label = effortLabel(effort, isZh);
+  const label = displayLabel;
   const panel = open
     ? createPortal(
         <div
@@ -166,6 +181,8 @@ export function ReasoningEffortSlider({
               min="0"
               max="100"
               step="1"
+              disabled={disabled || saving}
+              aria-busy={saving}
               value={effectiveValue}
               aria-label={isZh ? '思考强度' : 'Reasoning effort'}
               aria-valuetext={displayLabel}
@@ -178,13 +195,13 @@ export function ReasoningEffortSlider({
                 setDirty(true);
                 setDragValue(Number(event.currentTarget.value));
               }}
-              onPointerUp={(event) => commit(Number(event.currentTarget.value))}
+              onPointerUp={(event) => { void commit(Number(event.currentTarget.value)); }}
               onKeyUp={(event) => {
                 if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
-                  commit(Number(event.currentTarget.value));
+                  void commit(Number(event.currentTarget.value));
                 }
               }}
-              onBlur={(event) => commit(Number(event.currentTarget.value))}
+              onBlur={(event) => { void commit(Number(event.currentTarget.value)); }}
             />
           </div>
           {fastAvailable ? (
@@ -233,18 +250,22 @@ export function ReasoningEffortSlider({
     : null;
 
   return (
-    <div ref={rootRef} className="reasoning-effort-control">
+    <div ref={rootRef} className="reasoning-effort-control" data-fast-available={fastAvailable}>
       <button
         ref={triggerRef}
         type="button"
         className={`reasoning-effort-trigger ${open ? 'open' : ''}`}
-        disabled={disabled}
-        title={isZh ? '思考强度' : 'Reasoning effort'}
+        disabled={disabled && !saving}
+        aria-busy={saving}
+        title={`${isZh ? '思考强度' : 'Reasoning effort'}：${label}`}
         aria-label={`${isZh ? '思考强度' : 'Reasoning effort'}：${label}`}
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((value) => !value)}
       >
+        <span className="reasoning-effort-trigger-size" aria-hidden="true">
+          {effortLevels.map(level => <span key={level}>{effortLabel(level, isZh)}</span>)}
+        </span>
         <span className="reasoning-effort-trigger-content" aria-hidden="true">
           {fastAvailable && fastMode ? (
             <svg className="reasoning-effort-channel-badge" viewBox="0 0 16 16" fill="none">
@@ -257,7 +278,7 @@ export function ReasoningEffortSlider({
               />
             </svg>
           ) : null}
-          {label}
+          <span className="reasoning-effort-label">{label}</span>
         </span>
       </button>
       {panel}

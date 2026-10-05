@@ -6,7 +6,6 @@ import { Drawer } from '../../app/components/Drawer';
 import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
 import {
-  briefFromMemories,
   drawerLayout,
   groupDrawerSessions,
   readDrawerSession,
@@ -44,6 +43,10 @@ export function BotProfileDrawer({
   memory,
   locateSessionId,
   inspect = null,
+  sessions,
+  sessionsAvailable,
+  onRefreshSessions,
+  onCloseInspect,
   triggerRef,
   i18n,
   isZh,
@@ -59,6 +62,10 @@ export function BotProfileDrawer({
   readonly memory: DrawerMemory;
   readonly locateSessionId: string | null;
   readonly inspect?: BotInspect | null;
+  readonly sessions: readonly DrawerSession[];
+  readonly sessionsAvailable: boolean;
+  readonly onRefreshSessions: () => Promise<void>;
+  readonly onCloseInspect: () => void;
   readonly triggerRef: RefObject<HTMLButtonElement | null>;
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
@@ -70,7 +77,6 @@ export function BotProfileDrawer({
 }) {
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const [path, setPath] = useState('');
-  const [sessions, setSessions] = useState<readonly DrawerSession[]>([]);
   const [memories, setMemories] = useState<readonly DrawerMemoryItem[]>([]);
   const modelRoute = modelControls.views.project_agent?.resolution;
   const modelLabel = modelRoute?.ok
@@ -83,6 +89,11 @@ export function BotProfileDrawer({
   const layout = drawerLayout(width);
   const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(memory.open ? 'in' : 'off');
   const bodyRef = useRef<HTMLDivElement>(null);
+  const previousInspect = useRef(inspect);
+  useEffect(() => {
+    if (previousInspect.current && !inspect && memory.open) bodyRef.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus();
+    previousInspect.current = inspect;
+  }, [inspect, memory.open]);
   useFocusScope(bodyRef, layout === 'push' && memory.open && dockPhase !== 'off', { restore: triggerRef });
   const close = () => {
     onMemory({ ...memory, open: false });
@@ -135,16 +146,9 @@ export function BotProfileDrawer({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [got, listed] = await Promise.all([
-        clientApi.projectAgentGet({ workspaceId }),
-        clientApi.projectAgentListSessions({ workspaceId }),
-      ]);
+      const got = await clientApi.projectAgentGet({ workspaceId });
       if (cancelled) return;
       setPath(got?.ok && typeof got.path === 'string' ? got.path : '');
-      const nextSessions = (listed?.sessions ?? [])
-        .map((item: unknown) => readDrawerSession(item))
-        .filter((item): item is DrawerSession => item !== null);
-      setSessions(nextSessions);
       const memories = await clientApi.projectMemoryList({ workspaceId });
       if (cancelled) return;
       setMemories(readMemoryItems(memories?.items));
@@ -199,7 +203,7 @@ export function BotProfileDrawer({
     <div className="bot-drawer-body" ref={bodyRef}>
       <div className="bot-drawer-chrome">
         <header className="bot-drawer-head">
-          <p>{profile.displayName}</p>
+          <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.chat.evidence' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
           <button
             type="button"
             onClick={close}
@@ -207,27 +211,31 @@ export function BotProfileDrawer({
             {i18n.t('projectAgent.drawer.close')}
           </button>
         </header>
-        <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
+        {inspect ? <button className="bot-inspect-back" type="button" onClick={onCloseInspect}>{i18n.t('projectAgent.drawer.inspectBack')}</button> : <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
           items={TABS.map(tab => ({ id: tab.id, label: i18n.t(tab.key) }))}
-          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} />
+          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} />}
       </div>
       {inspect?.evidence ? (
         <section className="bot-inspect" aria-label={i18n.t('projectAgent.chat.evidence')}>
           <h3>{i18n.t('projectAgent.chat.evidence')}</h3>
-          <p>{inspect.evidence.evidenceRef}</p>
           {inspect.evidence.ok ? (
             <pre>{inspect.evidence.summary}</pre>
           ) : (
-            <p>{inspect.evidence.code}</p>
+            <p>{i18n.t('projectAgent.drawer.evidenceUnavailable')}</p>
           )}
+          {inspect.evidence.truncated ? <p>{i18n.t('projectAgent.process.truncated')}</p> : null}
+          <details><summary>{i18n.t('projectAgent.process.technical')}</summary><code>{inspect.evidence.evidenceRef}</code>{inspect.evidence.code ? <p>{inspect.evidence.code}</p> : null}</details>
         </section>
       ) : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
-      <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className="bot-drawer-pane motion-enter-fade">
+      {!inspect ? <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className="bot-drawer-pane motion-enter-fade">
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}
-          brief={briefFromMemories(memories)}
+          profile={profile}
+          sessionsAvailable={sessionsAvailable}
+          onOpenTasks={() => onMemory({ open: true, tab: 'tasks', sessionId: null })}
+          brief={memories.find(item => item.kind === 'responsibility' && item.status === 'active')?.text ?? ''}
           running={groupDrawerSessions(sessions).running}
           modelLabel={modelLabel}
           i18n={i18n}
@@ -238,7 +246,8 @@ export function BotProfileDrawer({
           onOpenSession={(sessionId) => onMemory({ open: true, tab: 'tasks', sessionId })}
         />
       ) : null}
-      {memory.tab === 'tasks' && !(memory.sessionId && (detail || selected)) ? (
+      {memory.tab === 'tasks' && !sessionsAvailable ? <p role="status">{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : null}
+      {memory.tab === 'tasks' && sessionsAvailable && !(memory.sessionId && (detail || selected)) ? (
         <TasksTab
           sessions={sessions}
           onOpenObjective={(objectiveId) => onMemory({...memory,tab:'objectives',sessionId:null,objectiveId})}
@@ -247,8 +256,7 @@ export function BotProfileDrawer({
           onResume={async (sessionId) => {
             const result = await clientApi.projectAgentResumeSession({ workspaceId, sessionId, requestId: crypto.randomUUID() });
             if (!result.ok) throw new Error(result.code || 'resume failed');
-            const listed = await clientApi.projectAgentListSessions({ workspaceId });
-            setSessions((listed.sessions || []).map(readDrawerSession).filter((item): item is DrawerSession => item !== null));
+            await onRefreshSessions();
           }}
           selectedId={memory.sessionId}
           i18n={i18n}
@@ -265,7 +273,7 @@ export function BotProfileDrawer({
         <SessionDetail
           workspaceId={workspaceId}
           workspacePath={path}
-          session={(detail ?? selected)!}
+          session={sessionsAvailable ? (selected ?? detail)! : { ...(detail ?? selected)!, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable') }}
           i18n={i18n}
           isZh={isZh}
           onBack={() => onMemory({ ...memory, sessionId: null })}
@@ -288,7 +296,7 @@ export function BotProfileDrawer({
           onDeleted={onDeleted}
         />
       ) : null}
-      </div>
+      </div> : null}
       {locateSessionId ? <span className="bot-drawer-sr" data-locate-session={locateSessionId} /> : null}
       <HistorySheet
         open={historyId !== null}

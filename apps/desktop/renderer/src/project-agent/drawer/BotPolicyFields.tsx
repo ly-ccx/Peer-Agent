@@ -11,7 +11,7 @@ const ROLES: readonly ModelRole[] = ['project_agent', 'session_worker', 'verifie
 type Patch = Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy'>;
 type PolicyProps = {
   profile: BotProfile; busy: boolean; i18n: I18nRuntime;
-  onChange: (patch: Patch) => void;
+  onChange: (patch: Patch) => void | Promise<void>;
 };
 
 export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps) {
@@ -40,7 +40,7 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
 }) {
   const policy = profile.modelPolicy || {};
   const scopeIds = policy.scope?.modelProviderIds;
-  function setPolicy(next: ProjectModelPolicy) { onChange({ modelPolicy: next }); }
+  function setPolicy(next: ProjectModelPolicy) { return onChange({ modelPolicy: next }); }
   const roleLabel = (role: ModelRole) => i18n.t(role === 'project_agent' ? 'projectAgent.drawer.model' : `modelRouting.role.${role}`);
   const roleField = (role: ModelRole) => <div className="bot-settings-row bot-model-settings-row" key={role}>
     <span>{roleLabel(role)}</span>

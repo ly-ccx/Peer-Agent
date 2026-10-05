@@ -233,6 +233,24 @@ export type TranslationKey =
   | 'projectAgent.process.memory'
   | 'projectAgent.process.objective'
   | 'projectAgent.process.tool'
+  | 'projectAgent.process.runningTitle'
+  | 'projectAgent.process.preparingTitle'
+  | 'projectAgent.process.organizing'
+  | 'projectAgent.process.preparingReply'
+  | 'projectAgent.process.preparing'
+  | 'projectAgent.process.running'
+  | 'projectAgent.process.stopped'
+  | 'projectAgent.process.awaitingContent'
+  | 'projectAgent.process.receiving'
+  | 'projectAgent.process.preparingNote'
+  | 'projectAgent.process.runningNote'
+  | 'projectAgent.process.parameters'
+  | 'projectAgent.process.output'
+  | 'projectAgent.process.truncated'
+  | 'projectAgent.process.redacted'
+  | 'projectAgent.process.previewLimit'
+  | 'projectAgent.process.seconds'
+  | 'projectAgent.process.minutes'
   | 'projectAgent.process.done'
   | 'projectAgent.process.failed'
   | 'projectAgent.process.suppressed'
@@ -253,6 +271,23 @@ export type TranslationKey =
   | 'projectAgent.chat.sessionState.paused'
   | 'projectAgent.chat.sessionState.queued'
   | 'projectAgent.chat.sessionState.starting'
+  | 'projectAgent.chat.work.heading'
+  | 'projectAgent.chat.work.more'
+  | 'projectAgent.chat.work.related'
+  | 'projectAgent.chat.work.unavailable'
+  | 'projectAgent.chat.work.unavailableHint'
+  | 'projectAgent.chat.work.handle'
+  | 'projectAgent.chat.work.open'
+  | 'projectAgent.chat.work.background'
+  | 'projectAgent.chat.context.basis'
+  | 'projectAgent.chat.originalMessage'
+  | 'projectAgent.chat.context.details'
+  | 'projectAgent.chat.context.memoryUnavailable'
+  | 'projectAgent.drawer.inspectBack'
+  | 'projectAgent.drawer.evidenceUnavailable'
+  | 'projectAgent.drawer.botDescription'
+  | 'projectAgent.drawer.acceptance.confirm'
+  | 'projectAgent.drawer.memory.details'
   | 'projectAgent.chat.sessionState.running'
   | 'projectAgent.chat.sessionState.waiting_user'
   | 'projectAgent.chat.sessionState.verifying'
@@ -1501,10 +1536,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.thinking': '思考中…',
     'projectAgent.chat.waiting': '等待回复…',
     'projectAgent.chat.generating': '正在生成回复',
-    'projectAgent.chat.toolLabel.read': '文件读取',
+    'projectAgent.chat.toolLabel.read': '读取文件',
     'projectAgent.chat.toolLabel.search': '项目搜索',
-    'projectAgent.chat.toolLabel.edit': '文件编辑',
-    'projectAgent.chat.toolLabel.command': '命令执行',
+    'projectAgent.chat.toolLabel.edit': '编辑文件',
+    'projectAgent.chat.toolLabel.command': '执行命令',
     'projectAgent.chat.toolRunning': '正在进行{tool}',
     'projectAgent.chat.toolDone': '{tool}已结束',
     'projectAgent.chat.toolFailed': '{tool} 未完成',
@@ -1558,6 +1593,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.memory': '处理项目记忆',
     'projectAgent.process.objective': '处理项目目标',
     'projectAgent.process.tool': '调用工具',
+    'projectAgent.process.runningTitle': '正在{tool}',
+    'projectAgent.process.preparingTitle': '正在准备{tool}',
+    'projectAgent.process.organizing': '正在整理回复',
+    'projectAgent.process.preparingReply': '正在准备回复',
+    'projectAgent.process.preparing': '准备中',
+    'projectAgent.process.running': '进行中',
+    'projectAgent.process.stopped': '已停止',
+    'projectAgent.process.awaitingContent': '模型尚未返回可展示的内容；执行步骤会出现在这里。',
+    'projectAgent.process.receiving': '正在接收调用参数 · {count} 字符',
+    'projectAgent.process.preparingNote': '正在生成调用参数，尚未执行。',
+    'projectAgent.process.runningNote': '调用正在进行，返回内容到达后会显示在这里。',
+    'projectAgent.process.parameters': '调用参数',
+    'projectAgent.process.output': '返回内容',
+    'projectAgent.process.truncated': '已截断',
+    'projectAgent.process.redacted': '已脱敏',
+    'projectAgent.process.previewLimit': '内容超出预览上限。',
+    'projectAgent.process.seconds': '{seconds} 秒',
+    'projectAgent.process.minutes': '{minutes} 分 {seconds} 秒',
     'projectAgent.process.done': '已结束',
     'projectAgent.process.failed': '未完成',
     'projectAgent.process.suppressed': '未发送',
@@ -1578,7 +1631,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.sessionState.paused': '已暂停',
     'projectAgent.chat.sessionState.queued': '排队中',
     'projectAgent.chat.sessionState.starting': '正在启动',
-    'projectAgent.chat.sessionState.running': '进行中',
+    'projectAgent.chat.work.heading': '关联任务',
+    'projectAgent.chat.work.more': '另有 {count} 项任务',
+    'projectAgent.chat.work.related': '关联任务',
+    'projectAgent.chat.work.unavailable': '状态暂不可用',
+    'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
+    'projectAgent.chat.work.handle': '查看并处理',
+    'projectAgent.chat.work.open': '打开任务',
+    'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
+    'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
+    'projectAgent.chat.originalMessage': '查看原消息',
+    'projectAgent.chat.context.details': '回复详情',
+    'projectAgent.chat.context.memoryUnavailable': '相关记忆暂不可用。',
+    'projectAgent.drawer.inspectBack': '返回 Bot 档案',
+    'projectAgent.drawer.evidenceUnavailable': '这条证据暂时无法读取。',
+    'projectAgent.drawer.botDescription': '负责这个项目的工作协调，持续跟进任务并交还结果。',
+    'projectAgent.drawer.acceptance.confirm': '由你确认',
+    'projectAgent.drawer.memory.details': '记忆详情',
+    'projectAgent.chat.sessionState.running': '正在运行中',
     'projectAgent.chat.sessionState.waiting_user': '需要你处理',
     'projectAgent.chat.sessionState.verifying': '核验中',
     'projectAgent.chat.sessionState.result_ready': '待你确认',
@@ -2671,6 +2741,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.memory': 'Manage project memory',
     'projectAgent.process.objective': 'Manage project objective',
     'projectAgent.process.tool': 'Call tool',
+    'projectAgent.process.runningTitle': 'Running · {tool}',
+    'projectAgent.process.preparingTitle': 'Preparing · {tool}',
+    'projectAgent.process.organizing': 'Preparing the reply',
+    'projectAgent.process.preparingReply': 'Preparing a response',
+    'projectAgent.process.preparing': 'Preparing',
+    'projectAgent.process.running': 'Running',
+    'projectAgent.process.stopped': 'Stopped',
+    'projectAgent.process.awaitingContent': 'The model has not returned visible content yet. Execution steps will appear here.',
+    'projectAgent.process.receiving': 'Receiving arguments · {count} characters',
+    'projectAgent.process.preparingNote': 'Arguments are being generated. Execution has not started.',
+    'projectAgent.process.runningNote': 'The call is running. Its returned content will appear here when available.',
+    'projectAgent.process.parameters': 'Arguments',
+    'projectAgent.process.output': 'Returned content',
+    'projectAgent.process.truncated': 'Truncated',
+    'projectAgent.process.redacted': 'Redacted',
+    'projectAgent.process.previewLimit': 'Content exceeds the preview limit.',
+    'projectAgent.process.seconds': '{seconds}s',
+    'projectAgent.process.minutes': '{minutes}m {seconds}s',
     'projectAgent.process.done': 'Finished',
     'projectAgent.process.failed': 'Did not complete',
     'projectAgent.process.suppressed': 'Not delivered',
@@ -2691,6 +2779,23 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.sessionState.paused': 'Paused',
     'projectAgent.chat.sessionState.queued': 'Queued',
     'projectAgent.chat.sessionState.starting': 'Starting',
+    'projectAgent.chat.work.heading': 'Related work',
+    'projectAgent.chat.work.more': '{count} more tasks',
+    'projectAgent.chat.work.related': 'Related task',
+    'projectAgent.chat.work.unavailable': 'Status unavailable',
+    'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
+    'projectAgent.chat.work.handle': 'Review and respond',
+    'projectAgent.chat.work.open': 'Open task',
+    'projectAgent.chat.work.background': '{count} tasks to follow up',
+    'projectAgent.chat.context.basis': 'Result basis · {count} records',
+    'projectAgent.chat.originalMessage': 'View original message',
+    'projectAgent.chat.context.details': 'Reply details',
+    'projectAgent.chat.context.memoryUnavailable': 'The related memories are unavailable.',
+    'projectAgent.drawer.inspectBack': 'Back to bot profile',
+    'projectAgent.drawer.evidenceUnavailable': 'This evidence is unavailable.',
+    'projectAgent.drawer.botDescription': 'Coordinates work for this project, follows up on tasks and brings back results.',
+    'projectAgent.drawer.acceptance.confirm': 'Your confirmation',
+    'projectAgent.drawer.memory.details': 'Memory details',
     'projectAgent.chat.sessionState.running': 'Running',
     'projectAgent.chat.sessionState.waiting_user': 'Needs your input',
     'projectAgent.chat.sessionState.verifying': 'Verifying',

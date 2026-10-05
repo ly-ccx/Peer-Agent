@@ -1,4 +1,5 @@
 import type { BotToolRound } from '../state/botConversationState';
+import { toolActivityPreview, toolActivitySummary, type ProjectAgentToolPreview } from '@peer-agent/protocol';
 import type { TranslationKey } from '@peer-agent/i18n';
 import type { PeerIconName } from '../../ui/icons';
 
@@ -6,6 +7,8 @@ export interface AgentProcessEntry {
   readonly name: string;
   readonly input: string;
   readonly result: string;
+  readonly inputPreview: ProjectAgentToolPreview;
+  readonly resultPreview: ProjectAgentToolPreview;
   readonly labelKey: TranslationKey;
   readonly icon: PeerIconName;
   readonly status: 'done' | 'failed' | 'suppressed' | 'unknown';
@@ -31,16 +34,24 @@ export interface BotInspect {
 /** 把一轮代理回合收成只读条目。没有执行入口。 */
 export function agentProcessEntries(rounds: readonly BotToolRound[]): AgentProcessEntry[] {
   const entries: AgentProcessEntry[] = [];
+  let previewChars = 0;
+  const preview = (value: unknown, limit: number) => {
+    const projected = toolActivityPreview(value, Math.max(0, Math.min(limit, 32000 - previewChars)));
+    previewChars += projected.text.length;
+    return projected;
+  };
   for (const round of rounds) {
     for (const call of round.toolCalls) {
+      if (entries.length >= 100) return entries;
+      const inputPreview = preview(call.input ?? null, 2000);
+      const resultPreview = preview(call.result ?? null, 4000);
       entries.push({
         name: call.name,
         ...toolPresentation(call.name),
         status: resultStatus(call.result),
-        summary: call.name === 'post_reply' ? '' : summaryOf(call.input),
+        summary: call.name === 'post_reply' ? '' : toolActivitySummary(call.input),
         ...countOf(call.name, call.result),
-        input: JSON.stringify(call.input ?? null, null, 2).slice(0, 12_000),
-        result: JSON.stringify(call.result ?? null, null, 2).slice(0, 12_000),
+        input: inputPreview.text, result: resultPreview.text, inputPreview, resultPreview,
       });
     }
   }
@@ -84,11 +95,6 @@ function resultStatus(result: unknown): AgentProcessEntry['status'] {
   if (rows.some(row => row.ok === false || row.success === false || row.error || ['failed', 'denied', 'cancelled', 'aborted'].includes(String(row.status)))) return 'failed';
   if (rows.some(row => row.suppressed === true || ['silent', 'digest'].includes(String(row.surfacing ?? (row.meta as Record<string, unknown> | undefined)?.surfacing)))) return 'suppressed';
   return rows.some(row => row.ok === true || row.success === true) ? 'done' : 'unknown';
-}
-
-function summaryOf(input: Readonly<Record<string, unknown>> | null): string {
-  const text = input?.title ?? input?.path ?? input?.query;
-  return typeof text === 'string' ? Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 160).join('') : '';
 }
 
 function countOf(name: string, result: unknown): { count?: number } {
