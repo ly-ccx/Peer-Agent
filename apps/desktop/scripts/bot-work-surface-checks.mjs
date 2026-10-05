@@ -17,6 +17,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.match(await work.locator(':scope > summary').textContent(), /核查历史任务完成情况.*正在运行中/);
   assert.equal(await work.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  await until(() => work.innerText(), text => text.includes('逐条核对历史记录'));
   assert.match(await work.innerText(), /逐条核对历史记录/);
   await reply.locator('.bot-reply-body').click();
   assert.doesNotMatch(await reply.locator('.bot-reply-bar').innerText(), /rc-message-/);

@@ -4,7 +4,6 @@
 .bot-reply-context summary::-webkit-details-marker, .bot-delegated-work summary::-webkit-details-marker, .bot-background-work > summary::-webkit-details-marker { display: none; }
 .bot-reply-context > summary { display: flex; align-items: center; gap: 7px; width: fit-content; min-height: 27px; padding: 4px 0; }
 .bot-reply-context > summary:hover, .bot-work-row > summary:hover { color: var(--graphite-base); }
-.bot-reply-context > summary > svg:last-child, .bot-work-row > summary > svg:last-child { transition: transform 160ms ease; }
 .bot-reply-context[open] > summary > svg:last-child, .bot-work-row[open] > summary > svg:last-child { transform: rotate(180deg); }
 .bot-reply-context summary:focus-visible, .bot-work-row summary:focus-visible, .bot-work-detail button:focus-visible, .bot-background-work > summary:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; border-radius: var(--control-radius-compact); }
 .bot-reply-context-body { display: grid; gap: 12px; margin-top: 6px; padding: 12px 14px; max-width: 480px; border-radius: var(--control-radius); background: var(--control-fill); }
@@ -29,10 +28,14 @@
 .bot-work-detail { margin: 4px 0 8px 22px; padding: 10px 12px; background: var(--control-fill); border-radius: var(--control-radius); }
 .bot-work-detail p { margin: 0 0 7px; overflow-wrap: anywhere; }
 .bot-work-detail button { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 0; padding: 4px 0; font: inherit; color: var(--graphite-base); cursor: pointer; }
-.bot-work-more > summary { padding: 5px 0; font-size: 11px; color: var(--graphite-mute); }
+.bot-work-more > summary { display: flex; align-items: center; gap: 7px; width: fit-content; padding: 5px 0; font-size: 11px; color: var(--graphite-mute); }
 .bot-background-work { margin: 0 28px 8px; font-size: 11px; color: var(--graphite-mute); }
-.bot-background-work > summary { padding: 5px 0; }
-.bot-background-work > summary::after { content: '⌄'; margin-left: 8px; }
+.bot-background-work > summary { display: flex; align-items: center; gap: 8px; width: fit-content; padding: 5px 0; }
 .bot-background-work .bot-delegated-work { max-height: 180px; overflow: auto; margin-top: 4px; }
 @media (max-width: 600px) { .bot-background-work { margin-inline: 16px; } .bot-work-title { flex: 1; } }
 @supports (corner-shape: superellipse(1.4)) { .bot-reply-context-body, .bot-work-detail { corner-shape: var(--control-corner); } }
+.bot-reply-context > summary > svg:last-child, .bot-work-row > summary > svg:last-child,
+.bot-background-work > summary > svg:last-child, .bot-work-more > summary > svg:last-child {
+  transition: transform var(--za-motion-medium) var(--za-ease-standard);
+}
+.bot-background-work[open] > summary > svg:last-child, .bot-work-more[open] > summary > svg:last-child { transform: rotate(180deg); }

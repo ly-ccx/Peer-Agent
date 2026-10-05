@@ -3,6 +3,7 @@ import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
 import { checkBotWorkSurfaces } from './bot-work-surface-checks.mjs';
+import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } from './bot-history-motion-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkResponseInteraction, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
@@ -28,6 +29,7 @@ const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const fixture = seedBotShellHome({ home });
+const historyFixtures = workSurfaces ? seedHistoryFixtures({ home }) : [];
 let botModelFixtures = [];
 if (process.argv.includes('--accessibility')) {
   const models = createLlmConfigStore({
@@ -80,6 +82,7 @@ assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read sea
 let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
   globalThis.rcBotShellRecord('reads',{  before: payload.before ?? null, nextCursor: result.nextCursor,
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });`);
+if (workSurfaces) observedService = instrumentHistoryReads(observedService);
 const timingSeams = [
   ['function list(payload = {}) {', 'function list(payload = {}) { const rcListStart = performance.now();'],
   ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; globalThis.rcBotShellRecord(\'list\',{  count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
@@ -173,10 +176,10 @@ ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await i
 globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole});` : ''}
 ${workSurfaces ? `const workFile=${JSON.stringify(workCommand)};
 let workCommand=JSON.parse(readFileSync(workFile,'utf8'));
-globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);
+globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);globalThis.rcHistoryReadMode=workCommand.historyReadMode;
 const workTimer=setInterval(()=>{
   const next=JSON.parse(readFileSync(workFile,'utf8'));if(next.seq<=workCommand.seq)return;
-  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);
+  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);globalThis.rcHistoryReadMode=next.historyReadMode;
   for(const window of BrowserWindow.getAllWindows())window.webContents.send('project-agent:changed',{workspaceIds:[next.workspaceId]});
 },25);workTimer.unref();` : ''}
 // Keep synthetic updater delivery outside inspector Promise lifetime. Only this
@@ -370,6 +373,8 @@ try {
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
   if (workSurfaces) await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+  if (workSurfaces) await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
+    fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });

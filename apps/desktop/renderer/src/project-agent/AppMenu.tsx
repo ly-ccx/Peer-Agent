@@ -92,7 +92,7 @@ export function AppMenu({
             <PeerIcon name="settings" size={16} />
             {i18n.t('projectAgent.list.settings')}
           </button>
-          <button type="button" role="menuitem" tabIndex={-1} onClick={onOpenHistory}>
+          <button type="button" role="menuitem" tabIndex={-1} onClick={() => { returnFocus.current = 'trigger'; onOpenHistory(); }}>
             <PeerIcon name="history" size={16} />
             {i18n.t('projectAgent.list.history')}
           </button>

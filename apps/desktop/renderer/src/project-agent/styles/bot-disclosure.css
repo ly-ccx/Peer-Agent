@@ -1,0 +1,22 @@
+/* Native disclosure keeps focus/keyboard semantics while interpolating both directions. */
+.bot-background-work, .bot-work-row, .bot-work-more, .bot-reply-context {
+  interpolate-size: allow-keywords;
+}
+.bot-background-work::details-content, .bot-work-row::details-content,
+.bot-work-more::details-content, .bot-reply-context::details-content {
+  height: 0;
+  opacity: 0;
+  overflow: clip;
+  transition: height var(--za-motion-medium) var(--za-ease-standard),
+    opacity var(--za-motion-fast) var(--za-ease-out),
+    content-visibility var(--za-motion-medium) allow-discrete;
+}
+.bot-background-work[open]::details-content, .bot-work-row[open]::details-content,
+.bot-work-more[open]::details-content, .bot-reply-context[open]::details-content {
+  height: auto;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-background-work::details-content, .bot-work-row::details-content,
+  .bot-work-more::details-content, .bot-reply-context::details-content { transition: none; }
+}

@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile, BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
 import { quoteRefsFor, roundsForReply } from '../state/botConversationState';
@@ -129,7 +130,7 @@ export function BotConversation({
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
       {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
-      {background.count ? <details className="bot-background-work"><summary>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</summary>
+      {background.count ? <details className="bot-background-work"><summary><span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span><PeerIcon name="chevronDown" size={12} /></summary>
         <DelegatedWork rows={background.rows} i18n={i18n} onOpen={onLocateSession} /></details> : null}
       <BotComposer
         key={workspaceId}
