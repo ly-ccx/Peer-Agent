@@ -101,20 +101,41 @@ export interface BotListFilter {
   readonly needsYouOnly?: boolean;
 }
 
-/** Ephemeral user-turn presentation. No tool arguments, reasoning or Evidence. */
+/** Bounded, redacted display preview; never an execution or Evidence object. */
+export interface ProjectAgentToolPreview {
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly redacted: boolean;
+}
+
+export interface ProjectAgentToolActivity {
+  readonly kind: 'tool';
+  readonly id: string;
+  readonly name: string;
+  readonly status: 'preparing' | 'running' | 'done' | 'error' | 'stopped';
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+  readonly summary?: string;
+  readonly input?: ProjectAgentToolPreview;
+  readonly result?: ProjectAgentToolPreview;
+  readonly receivedChars?: number;
+}
+
+/** Ephemeral user-turn presentation. No hidden reasoning or Evidence. */
 export interface ProjectAgentActivity {
   readonly workspaceId: string;
   readonly conversationId: string;
   readonly turnId: string;
   readonly revision: number;
   readonly startedAt: string;
+  readonly finishedAt?: string;
   readonly modelSelection?: Pick<import('./model-routing.ts').RuntimeModelSelection, 'modelProviderId' | 'reasoningEffort'>;
   readonly replyTo: readonly string[];
   readonly phase: 'waiting' | 'thinking' | 'responding' | 'tool' | 'settling' | 'done' | 'error' | 'stopped' | 'disposed';
   readonly replyText: string;
   readonly segments: readonly (
     | { readonly kind: 'text'; readonly id: string; readonly text: string }
-    | { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly status: 'running' | 'done' | 'error' }
+    | ProjectAgentToolActivity
   )[];
 }
 

@@ -113,7 +113,7 @@ export function acknowledgeInput(pending: readonly PendingBotInput[], inputId: s
 
 export type ConversationRow =
   | { readonly type: 'separator'; readonly id: string; readonly at: string; readonly proactive: boolean; readonly label: string }
-  | { readonly type: 'message'; readonly message: BotChatMessage };
+  | { readonly type: 'message'; readonly message: BotChatMessage; readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity; readonly processRounds?: readonly BotToolRound[] };
 
 export type ConversationDisplayRow = ConversationRow | { readonly type: 'activity'; readonly activity: import('@peer-agent/protocol').ProjectAgentActivity };
 

@@ -15,7 +15,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   readonly compact?: boolean;
   readonly activeSelection?: ProjectAgentActivity['modelSelection'];
   readonly i18n: I18nRuntime;
-  readonly onChange: (policy: ProjectModelPolicy) => void;
+  readonly onChange: (policy: ProjectModelPolicy) => void | Promise<void>;
 }) {
   const isZh = i18n.locale.startsWith('zh');
   const selection = activeSelection ?? (view?.resolution.ok ? view.resolution.selection : undefined);

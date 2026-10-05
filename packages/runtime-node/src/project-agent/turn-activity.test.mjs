@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createTurnActivity } from './turn-activity.mjs';
+import { toolActivityPreview } from '@peer-agent/protocol';
 
 test('real deltas arrive before completion, with bounded tools and no private reasoning', () => {
   const pushed = [];
@@ -88,4 +89,61 @@ test('active model is a copied turn snapshot and follows provider recovery', () 
   activity.accept('chat:stream:provider-recovery', { streamId: 't', toProviderId: 'fallback' });
   assert.equal(activity.snapshot().modelSelection.modelProviderId, 'fallback');
   activity.dispose();
+});
+
+test('live tools expose actual targets and bounded parameters before results, with independent snapshots', () => {
+  let clock = '2026-10-05T00:00:01Z';
+  const a = createTurnActivity({ now: () => clock }); a.begin({ turnId: 't', visible: true });
+  a.accept('chat:stream:tool-progress', { streamId: 't', toolCallId: 'r', tool: 'read_file', path: 'README.md', receivedChars: 25 });
+  assert.equal(a.snapshot().segments[0].status, 'preparing');
+  assert.equal(a.snapshot().segments[0].input, undefined);
+  clock = '2026-10-05T00:00:02Z';
+  a.accept('chat:stream:tool-call', { streamId: 't', toolCallId: 'r', tool: 'read_file', args: { path: 'README.md', token: 'secret-value' } });
+  const snapshot = a.snapshot(), step = snapshot.segments[0];
+  assert.equal(step.status, 'running'); assert.equal(step.startedAt, clock);
+  assert.equal(step.summary, 'README.md'); assert.equal(step.result, undefined);
+  assert.equal(JSON.parse(step.input.text).path, 'README.md'); assert.equal(step.input.redacted, true);
+  step.input.text = 'mutated'; assert.notEqual(a.snapshot().segments[0].input.text, 'mutated');
+  clock = '2026-10-05T00:00:05Z';
+  a.accept('chat:stream:tool-result', { streamId: 't', toolCallId: 'r', result: { ok: true, output: 'file content' } });
+  assert.equal(a.snapshot().segments[0].finishedAt, clock);
+  assert.match(a.snapshot().segments[0].result.text, /file content/);
+  a.dispose();
+});
+
+test('display redaction handles nested credentials, textual tokens, reasoning, deep and large results', () => {
+  const value = { nested: { authorization: 'private', content: 'Bearer abcdefgh123 sk-abcdefghijklmnop12345 password=hidden' }, thinking: 'private thoughts', apiKey: 'key', data: 'x'.repeat(10000) };
+  const preview = toolActivityPreview(value, 4000);
+  assert.equal(preview.redacted, true); assert.equal(preview.truncated, true);
+  assert.ok(preview.text.length <= 4000); assert.doesNotMatch(preview.text, /private|hidden|abcdefgh123|abcdefghijklmnop12345/);
+  const cyclic = {}; cyclic.next = cyclic;
+  assert.equal(toolActivityPreview(cyclic, 2000).truncated, true);
+  assert.deepEqual(toolActivityPreview(JSON.stringify({ reasoning: 'x'.repeat(100000) }), 4000), { text: '', truncated: true, redacted: true });
+  const a = createTurnActivity(); a.begin({ turnId: 't', visible: true });
+  for (let i = 0; i < 110; i++) {
+    a.accept('chat:stream:tool-call', { streamId: 't', toolCallId: String(i), tool: 'read_file', args: { path: 'file', content: 'x'.repeat(3000) } });
+    a.accept('chat:stream:tool-result', { streamId: 't', toolCallId: String(i), result: { output: 'y'.repeat(5000) } });
+  }
+  assert.equal(a.snapshot().segments.length, 100);
+  assert.equal(a.snapshot().segments.reduce((n, s) => n + s.input.text.length + s.result.text.length, 0), 32000);
+  assert.equal(a.snapshot().segments.at(-1).result.truncated, true);
+  a.dispose();
+});
+
+test('stop and failure retain actual tool steps, end running states and reject late/stale events; recovery resets', () => {
+  for (const [phase, status] of [['stopped', 'stopped'], ['error', 'error']]) {
+    const a = createTurnActivity(); a.begin({ turnId: 't', visible: true });
+    a.accept('chat:stream:tool-call', { streamId: 't', toolCallId: 'r', tool: 'read_file', args: { path: 'file' } });
+    a.finish(phase);
+    assert.equal(a.snapshot().segments[0].status, status);
+    a.accept('chat:stream:tool-result', { streamId: 't', toolCallId: 'r', result: { output: 'late' } });
+    assert.equal(a.snapshot().segments[0].result, undefined);
+    a.begin({ turnId: 'new', visible: true });
+    a.accept('chat:stream:tool-call', { streamId: 't', toolCallId: 'r', tool: 'read_file' });
+    assert.equal(a.snapshot().segments.length, 0);
+    a.accept('chat:stream:tool-call', { streamId: 'new', toolCallId: 'r', tool: 'read_file' });
+    a.accept('chat:stream:connection-recovery', { streamId: 'new' });
+    assert.equal(a.snapshot().segments.length, 0);
+    a.dispose(); assert.equal(a.snapshot(), null);
+  }
 });

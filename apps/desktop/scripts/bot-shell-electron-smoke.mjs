@@ -22,6 +22,8 @@ import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
+const effortCommand = path.join(root, 'effort-command.json');
+writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const fixture = seedBotShellHome({ home });
 let botModelFixtures = [];
 if (process.argv.includes('--accessibility')) {
@@ -35,7 +37,7 @@ if (process.argv.includes('--accessibility')) {
   // UI fixtures declare availability/capabilities at the existing catalogue seam. No secrets or network.
   botModelFixtures = models.listProviders().map(model => ({ ...model, enabled: true, apiKeyConfigured: true,
     supportsTools: true, supportsStructured: true, supportsVision: true, supportsReasoning: true,
-    reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' }));
+    reasoningEffortLevels: process.argv.includes('--effort-stability') ? ['low', 'high', 'max'] : ['low', 'high'], defaultEffort: 'low' }));
 }
 const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
 const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
@@ -87,6 +89,18 @@ if (process.argv.includes('--streaming')) {
   assert.equal(observedService.split(submitSeam).length, 2);
   observedService = observedService.replace(submitSeam, `${submitSeam}
     if (payload.text === 'RC_DETAIL_FAIL_ANSWER' && !globalThis.rcDetailFailedOnce) { globalThis.rcDetailFailedOnce = true; return {ok:false,code:'CONTROLLED_SUBMIT_FAILURE'}; }`);
+}
+if (process.argv.includes('--effort-stability')) {
+  const updateSeam = 'async function updateProfile(payload = {}, sender = null) {';
+  assert.equal(observedService.split(updateSeam).length, 2);
+  observedService = observedService.replace(updateSeam, `${updateSeam}
+    if (payload.modelPolicy?.overrides?.project_agent?.reasoningEffort) {
+      const file=${JSON.stringify(effortCommand)};
+      const command=JSON.parse(readFileSync(file,'utf8'));
+      await new Promise(resolve=>setTimeout(resolve,650));
+      if(command.failNext){writeFileSync(file,JSON.stringify({failNext:false}));return {ok:false,code:'CONTROLLED_SAVE_FAILURE'};}
+    }`);
+  observedService = `import {readFileSync,writeFileSync} from 'node:fs';\n` + observedService;
 }
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
@@ -341,7 +355,7 @@ try {
   await page.locator('.bot-shell').waitFor();
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
-  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root });
+  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');

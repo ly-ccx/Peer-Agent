@@ -3,7 +3,9 @@ import { useRef, useState } from 'react';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
-import type { BotChatMessage } from '../state/botConversationState';
+import type { BotChatMessage, BotToolRound } from '../state/botConversationState';
+import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { BotProcess, type ProcessDisclosure } from './BotProcess';
 import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
 import { CardView } from './CardView';
 import { ReplyAnchors } from './ReplyAnchors';
@@ -33,6 +35,9 @@ export function ReplyBubble({
   onLocateSession,
   onOpenEvidence,
   onOpenProcess,
+  activity,
+  processRounds,
+  disclosure,
 }: {
   readonly workspaceId: string;
   readonly message: BotChatMessage;
@@ -44,6 +49,9 @@ export function ReplyBubble({
   readonly onLocateSession: (sessionId: string) => void;
   readonly onOpenEvidence?: (evidenceRef: string) => void;
   readonly onOpenProcess?: () => void;
+  readonly activity?: ProjectAgentActivity;
+  readonly processRounds?: readonly BotToolRound[];
+  readonly disclosure?: ProcessDisclosure;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [excerpt, setExcerpt] = useState('');
@@ -64,6 +72,7 @@ export function ReplyBubble({
       data-kind="agent_reply"
     >
       <ReplyAnchors ids={message.replyTo} anchors={anchors} i18n={i18n} onJump={onJump} />
+      <BotProcess activity={activity} rounds={processRounds} i18n={i18n} disclosure={disclosure} />
       <div
         className="bot-reply-body"
         ref={bodyRef}

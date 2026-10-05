@@ -233,6 +233,24 @@ export type TranslationKey =
   | 'projectAgent.process.memory'
   | 'projectAgent.process.objective'
   | 'projectAgent.process.tool'
+  | 'projectAgent.process.runningTitle'
+  | 'projectAgent.process.preparingTitle'
+  | 'projectAgent.process.organizing'
+  | 'projectAgent.process.preparingReply'
+  | 'projectAgent.process.preparing'
+  | 'projectAgent.process.running'
+  | 'projectAgent.process.stopped'
+  | 'projectAgent.process.awaitingContent'
+  | 'projectAgent.process.receiving'
+  | 'projectAgent.process.preparingNote'
+  | 'projectAgent.process.runningNote'
+  | 'projectAgent.process.parameters'
+  | 'projectAgent.process.output'
+  | 'projectAgent.process.truncated'
+  | 'projectAgent.process.redacted'
+  | 'projectAgent.process.previewLimit'
+  | 'projectAgent.process.seconds'
+  | 'projectAgent.process.minutes'
   | 'projectAgent.process.done'
   | 'projectAgent.process.failed'
   | 'projectAgent.process.suppressed'
@@ -1501,10 +1519,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.thinking': '思考中…',
     'projectAgent.chat.waiting': '等待回复…',
     'projectAgent.chat.generating': '正在生成回复',
-    'projectAgent.chat.toolLabel.read': '文件读取',
+    'projectAgent.chat.toolLabel.read': '读取文件',
     'projectAgent.chat.toolLabel.search': '项目搜索',
-    'projectAgent.chat.toolLabel.edit': '文件编辑',
-    'projectAgent.chat.toolLabel.command': '命令执行',
+    'projectAgent.chat.toolLabel.edit': '编辑文件',
+    'projectAgent.chat.toolLabel.command': '执行命令',
     'projectAgent.chat.toolRunning': '正在进行{tool}',
     'projectAgent.chat.toolDone': '{tool}已结束',
     'projectAgent.chat.toolFailed': '{tool} 未完成',
@@ -1558,6 +1576,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.memory': '处理项目记忆',
     'projectAgent.process.objective': '处理项目目标',
     'projectAgent.process.tool': '调用工具',
+    'projectAgent.process.runningTitle': '正在{tool}',
+    'projectAgent.process.preparingTitle': '正在准备{tool}',
+    'projectAgent.process.organizing': '正在整理回复',
+    'projectAgent.process.preparingReply': '正在准备回复',
+    'projectAgent.process.preparing': '准备中',
+    'projectAgent.process.running': '进行中',
+    'projectAgent.process.stopped': '已停止',
+    'projectAgent.process.awaitingContent': '模型尚未返回可展示的内容；执行步骤会出现在这里。',
+    'projectAgent.process.receiving': '正在接收调用参数 · {count} 字符',
+    'projectAgent.process.preparingNote': '正在生成调用参数，尚未执行。',
+    'projectAgent.process.runningNote': '调用正在进行，返回内容到达后会显示在这里。',
+    'projectAgent.process.parameters': '调用参数',
+    'projectAgent.process.output': '返回内容',
+    'projectAgent.process.truncated': '已截断',
+    'projectAgent.process.redacted': '已脱敏',
+    'projectAgent.process.previewLimit': '内容超出预览上限。',
+    'projectAgent.process.seconds': '{seconds} 秒',
+    'projectAgent.process.minutes': '{minutes} 分 {seconds} 秒',
     'projectAgent.process.done': '已结束',
     'projectAgent.process.failed': '未完成',
     'projectAgent.process.suppressed': '未发送',
@@ -2671,6 +2707,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.memory': 'Manage project memory',
     'projectAgent.process.objective': 'Manage project objective',
     'projectAgent.process.tool': 'Call tool',
+    'projectAgent.process.runningTitle': 'Running · {tool}',
+    'projectAgent.process.preparingTitle': 'Preparing · {tool}',
+    'projectAgent.process.organizing': 'Preparing the reply',
+    'projectAgent.process.preparingReply': 'Preparing a response',
+    'projectAgent.process.preparing': 'Preparing',
+    'projectAgent.process.running': 'Running',
+    'projectAgent.process.stopped': 'Stopped',
+    'projectAgent.process.awaitingContent': 'The model has not returned visible content yet. Execution steps will appear here.',
+    'projectAgent.process.receiving': 'Receiving arguments · {count} characters',
+    'projectAgent.process.preparingNote': 'Arguments are being generated. Execution has not started.',
+    'projectAgent.process.runningNote': 'The call is running. Its returned content will appear here when available.',
+    'projectAgent.process.parameters': 'Arguments',
+    'projectAgent.process.output': 'Returned content',
+    'projectAgent.process.truncated': 'Truncated',
+    'projectAgent.process.redacted': 'Redacted',
+    'projectAgent.process.previewLimit': 'Content exceeds the preview limit.',
+    'projectAgent.process.seconds': '{seconds}s',
+    'projectAgent.process.minutes': '{minutes}m {seconds}s',
     'projectAgent.process.done': 'Finished',
     'projectAgent.process.failed': 'Did not complete',
     'projectAgent.process.suppressed': 'Not delivered',

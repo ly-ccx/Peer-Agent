@@ -25,12 +25,13 @@
 }
 
 .bot-composer-bar .bot-model-picker > button { width: 100%; height: 30px; justify-content: flex-start; gap: 5px; background: transparent; color: var(--graphite-soft); font-size: 12px; border-radius: var(--radius-sm); }
-.bot-composer-bar .reasoning-effort-trigger { width: auto; height: 30px; padding: 4px 7px; background: transparent; color: var(--graphite-soft); font-size: 12px; border-radius: var(--radius-sm); }
+.bot-composer-bar .reasoning-effort-trigger { display: inline-grid; width: auto; height: 30px; padding: 4px 7px; background: transparent; color: var(--graphite-soft); font-size: 12px; border-radius: var(--radius-sm); }
+.bot-composer-bar .reasoning-effort-trigger:active:not(:disabled) { transform: none; }
 
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-control-row,
 .bot-drawer-body .bot-model-captions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-control-row.has-effort,
-.bot-drawer-body .bot-model-captions.has-effort { grid-template-columns: minmax(0, 1fr) 80px; }
+.bot-drawer-body .bot-model-captions.has-effort { grid-template-columns: minmax(0, 1fr) 112px; }
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-picker > button,
 .bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger { height: auto; min-height: 34px; width: 100%; padding: 6px 12px; border: 1px solid transparent; border-radius: var(--control-radius-compact); background: var(--control-fill); color: var(--graphite-base); font-size: .75rem; }
 .bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger:hover:not(:disabled) { background: var(--control-fill-hover); }

@@ -129,7 +129,7 @@ export function BotConversation({
         modelControls={<div className="bot-model-toolbar"><BotModelControls role="project_agent" compact
           policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
           activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
-          i18n={i18n} onChange={policy => { void modelControls.save(policy); }} /></div>}
+          i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
         quote={quote?.text ?? ''}
         generating={conversation.generating}
         stopping={conversation.stopping}

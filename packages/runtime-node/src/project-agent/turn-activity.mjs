@@ -1,12 +1,19 @@
 import { acceptedReplyResult } from './agent-turn-plan.mjs';
+import { toolActivityPreview, toolActivitySummary } from '@peer-agent/protocol';
 
 const LIMIT = 32_000;
 const INTERVAL = 50;
 
 /** Bounded presentation projection of an existing TurnSink, independent of persistence. */
-export function createTurnActivity({ workspaceId, conversationId, publish = null } = {}) {
-  let state = null, revision = 0, timer = null, round = 0, visible = false, replyCallId = null;
-  const snapshot = () => visible && state ? { ...state, replyTo: [...state.replyTo], ...(state.modelSelection ? { modelSelection: { ...state.modelSelection } } : {}), segments: state.segments.map(segment => ({ ...segment })) } : null;
+export function createTurnActivity({ workspaceId, conversationId, publish = null, now = () => new Date().toISOString() } = {}) {
+  let state = null, revision = 0, timer = null, round = 0, visible = false, replyCallId = null, previewChars = 0;
+  const snapshot = () => visible && state ? { ...state, replyTo: [...state.replyTo], ...(state.modelSelection ? { modelSelection: { ...state.modelSelection } } : {}), segments: state.segments.map(segment => ({ ...segment,
+    ...(segment.input ? { input: { ...segment.input } } : {}), ...(segment.result ? { result: { ...segment.result } } : {}) })) } : null;
+  const preview = (value, limit) => {
+    const projected = toolActivityPreview(value, Math.max(0, Math.min(limit, LIMIT - previewChars)));
+    previewChars += projected.text.length;
+    return projected;
+  };
   const flush = () => {
     if (timer) clearTimeout(timer);
     timer = null;
@@ -23,7 +30,7 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
     snapshot,
     begin({ turnId, modelSelection, replyTo = [], startedAt = '', visible: show = false }) {
       if (timer) clearTimeout(timer);
-      timer = null; visible = show; round = 0; replyCallId = null;
+      timer = null; visible = show; round = 0; replyCallId = null; previewChars = 0;
       state = { workspaceId, conversationId, turnId, replyTo: replyTo.slice(0, 32), startedAt, revision: ++revision,
         phase: 'waiting', segments: [], replyText: '',
         ...(modelSelection?.modelProviderId ? { modelSelection: { modelProviderId: modelSelection.modelProviderId, reasoningEffort: modelSelection.reasoningEffort } } : {}) };
@@ -45,14 +52,34 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
         replyCallId = payload.toolCallId;
         state.replyText = payload.replyText.slice(0, 2000);
         state.phase = 'responding'; changed();
+      } else if (channel === 'chat:stream:tool-progress' && payload.tool !== 'post_reply' && typeof payload.toolCallId === 'string' && payload.toolCallId) {
+        let segment = tool(payload.toolCallId);
+        if (!segment && state.segments.length < 100) {
+          segment = { kind: 'tool', id: payload.toolCallId, name: String(payload.tool || '').slice(0, 80), status: 'preparing', startedAt: now() };
+          state.segments.push(segment);
+        }
+        if (segment?.status === 'preparing') {
+          segment.summary = toolActivitySummary({ path: payload.path });
+          if (Number.isFinite(payload.receivedChars)) segment.receivedChars = Math.max(0, Math.min(1e9, payload.receivedChars));
+          state.phase = 'tool'; changed();
+        }
       } else if (channel === 'chat:stream:tool-call') {
         if (payload.tool === 'post_reply') {
           replyCallId = payload.toolCallId;
           state.replyText = typeof payload.args?.text === 'string' ? payload.args.text.slice(0, 2000) : '';
           state.phase = 'settling';
-        } else if (typeof payload.toolCallId === 'string' && !tool(payload.toolCallId) && state.segments.length < 100) {
-          state.segments.push({ kind: 'tool', id: payload.toolCallId, name: String(payload.tool || '').slice(0, 80), status: 'running' });
-          state.phase = 'tool';
+        } else if (typeof payload.toolCallId === 'string' && payload.toolCallId) {
+          let segment = tool(payload.toolCallId);
+          if (!segment && state.segments.length < 100) {
+            segment = { kind: 'tool', id: payload.toolCallId, name: String(payload.tool || '').slice(0, 80), status: 'preparing' };
+            state.segments.push(segment);
+          }
+          if (segment?.status === 'preparing') {
+            segment.status = 'running'; segment.startedAt = now();
+            segment.summary = toolActivitySummary(payload.args);
+            segment.input = preview(payload.args ?? null, 2000);
+            state.phase = 'tool';
+          }
         }
         changed();
       } else if (channel === 'chat:stream:tool-result') {
@@ -61,16 +88,26 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
           state.replyText = ''; state.phase = 'thinking'; changed(true);
         }
         const segment = tool(payload.toolCallId);
-        if (segment) { segment.status = failedResult(payload.result) ? 'error' : 'done'; changed(); }
+        if (segment && ['preparing', 'running'].includes(segment.status)) {
+          segment.status = failedResult(payload.result) ? 'error' : 'done';
+          segment.finishedAt = now(); segment.result = preview(payload.result ?? null, 4000); changed();
+        }
       } else if (channel === 'chat:stream:provider-recovery' || channel === 'chat:stream:connection-recovery') {
         if (channel === 'chat:stream:provider-recovery' && payload.toProviderId) state.modelSelection = { modelProviderId: payload.toProviderId };
-        state.replyText = ''; state.segments = []; state.phase = 'waiting'; changed(true);
+        state.replyText = ''; state.segments = []; previewChars = 0; state.phase = 'waiting'; changed(true);
       }
     },
     finish(phase) {
       if (!state) return;
       state.phase = phase;
-      if (phase === 'error' || phase === 'disposed') { state.replyText = ''; state.segments = []; }
+      state.finishedAt = now();
+      for (const segment of state.segments) {
+        if (segment.kind === 'tool' && ['running', 'preparing'].includes(segment.status)) {
+          segment.status = phase === 'stopped' ? 'stopped' : 'error'; segment.finishedAt = state.finishedAt;
+        }
+      }
+      if (phase === 'error') { state.replyText = ''; state.segments = state.segments.filter(segment => segment.kind === 'tool'); }
+      if (phase === 'disposed') { state.replyText = ''; state.segments = []; }
       changed(true);
     },
     dispose() { this.finish('disposed'); if (timer) clearTimeout(timer); timer = null; visible = false; state = null; },
