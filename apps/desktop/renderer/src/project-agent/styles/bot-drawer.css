@@ -1110,3 +1110,20 @@
 @supports (corner-shape: superellipse(1.4)) {
   :is(.bot-drawer-segments, .bot-segment-thumb, .bot-settings-name-row input, .bot-settings-name-row button, .bot-avatar-settings-actions button) { corner-shape: var(--control-corner); }
 }
+
+.bot-overview-tab .bot-overview-identity { display: flex; flex-direction: row; gap: 14px; align-items: flex-start; padding-bottom: 6px; }
+.bot-overview-identity .bot-avatar { width: 44px; height: 44px; flex-shrink: 0; }
+.bot-overview-identity > div { min-width: 0; }
+.bot-overview-identity h2 { margin: 2px 0 7px; font-size: 16px; color: var(--graphite-base); }
+.bot-overview-identity p { margin: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.75; }
+.bot-drawer-chrome .bot-inspect-back { align-self: flex-start; border: 0; background: transparent; font-size: 12px; color: var(--graphite-soft); padding: 4px 0; cursor: pointer; }
+.bot-inspect-back:focus-visible, .bot-memory-controls > summary:focus-visible, .bot-memory-provenance > summary:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
+.bot-memory-controls { border-top: 1px solid var(--chrome-hairline); padding-top: 14px; }
+.bot-memory-controls > summary, .bot-memory-provenance > summary { cursor: pointer; color: var(--graphite-mute); font-size: 12px; padding: 4px 0; }
+.bot-memory-controls .bot-memory-settings-card { margin-top: 12px; }
+.bot-memory-provenance { color: var(--graphite-soft); font-size: 11px; }
+.bot-memory-provenance > summary { font-size: 11px; }
+.bot-memory-provenance p { margin: 6px 0; overflow-wrap: anywhere; }
+.bot-memory-provenance code { font-size: 10px; }
+
+.bot-overview-tab .bot-overview-details > div:last-child { grid-column: 1 / -1; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--chrome-hairline); }

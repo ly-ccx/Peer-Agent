@@ -15,6 +15,7 @@ import { CardView } from './CardView';
 import { ReplyBubble } from './ReplyBubble';
 import { UserBubble } from './UserBubble';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
+import { replyWork, type BotWorkIndex } from '../state/botWorkState';
 import { LiveReply } from './LiveReply';
 import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
@@ -23,6 +24,7 @@ import type { ProjectAgentActivity } from '@peer-agent/protocol';
 
 export function BotMessageList({
   workspaceId,
+  workIndex,
   avatar,
   label,
   avatarMood,
@@ -43,6 +45,7 @@ export function BotMessageList({
   waiting = false,
 }: {
   readonly workspaceId: string;
+  readonly workIndex: BotWorkIndex;
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
@@ -125,7 +128,7 @@ export function BotMessageList({
           || row.message.cards.some(card => card.kind === 'agent_stopped')) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /><span>{label}</span></div>
         ) : null}
-        {row.type === 'activity' ? <LiveReply activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} disclosure={disclosure(row.activity.turnId)} /> : row.type === 'separator' ? (
+        {row.type === 'activity' ? <LiveReply workRows={replyWork({ sources: [], marks: [], meta: {}, replyTo: row.activity.replyTo }, workIndex)} onOpenWork={onLocateSession} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} disclosure={disclosure(row.activity.turnId)} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
@@ -159,6 +162,7 @@ export function BotMessageList({
           />
         ) : (
           <ReplyBubble
+            workIndex={workIndex}
             key={row.message.id}
             workspaceId={workspaceId}
             message={row.message}

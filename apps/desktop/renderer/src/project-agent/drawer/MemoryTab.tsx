@@ -97,42 +97,6 @@ export function MemoryTab({
   return (
     <div className="bot-drawer-tab bot-memory-tab">
       <section className="bot-memory-section">
-        <h2>{i18n.t('projectAgent.drawer.memory.controls')}</h2>
-        <div className="bot-memory-settings-card">
-          <div className="bot-memory-setting-group">
-            <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.project')}</span>
-            <div className="bot-memory-setting-row">
-              <span>{i18n.t('projectAgent.drawer.memory.projectSwitch')}</span>
-              <Switch
-                checked={switches.memoryEnabled}
-                aria-label={i18n.t('projectAgent.drawer.memory.projectSwitch')}
-                onCheckedChange={(checked) => updateSwitch({ memoryEnabled: checked })}
-              />
-            </div>
-          </div>
-          <div className="bot-memory-setting-group">
-            <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.global')}</span>
-            <div className="bot-memory-setting-row">
-              <span>{i18n.t('projectAgent.drawer.memory.useMemory')}</span>
-              <Switch
-                checked={switches.useMemory}
-                aria-label={i18n.t('projectAgent.drawer.memory.useMemory')}
-                onCheckedChange={(checked) => updateSwitch({ useMemory: checked })}
-              />
-            </div>
-            <div className="bot-memory-setting-row">
-              <span>{i18n.t('projectAgent.drawer.memory.learnPreferences')}</span>
-              <Switch
-                checked={switches.learnPreferences}
-                aria-label={i18n.t('projectAgent.drawer.memory.learnPreferences')}
-                onCheckedChange={(checked) => updateSwitch({ learnPreferences: checked })}
-              />
-            </div>
-            <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.learnLater')}</p>
-          </div>
-        </div>
-      </section>
-      <section className="bot-memory-section">
         <h2>{i18n.t('projectAgent.drawer.memory.saved')}</h2>
         {items.length === 0 ? (
           <div className="bot-memory-empty" role="status">
@@ -183,8 +147,7 @@ export function MemoryTab({
                 <li key={item.id}>
                   <div className="bot-memory-item-meta">
                     <span>{memoryLabel(i18n, item.kind, KINDS)}</span>
-                    <span>{memoryLabel(i18n, item.trust, TRUSTS)}</span>
-                    <span>{memoryLabel(i18n, item.status, STATUSES)}</span>
+                    {item.status !== 'active' ? <span>{memoryLabel(i18n, item.status, STATUSES)}</span> : null}
                     {item.needsReverify ? <span>{i18n.t('projectAgent.drawer.memory.needsReverify')}</span> : null}
                   </div>
                   {editingId === item.id ? (
@@ -192,7 +155,10 @@ export function MemoryTab({
                   ) : (
                     <p>{item.text}</p>
                   )}
-                  {item.sourceRefs?.length ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.sources')}: {item.sourceRefs.join(' · ')}</p> : null}
+                  <details className="bot-memory-provenance"><summary>{i18n.t('projectAgent.drawer.memory.details')}</summary>
+                    <p>{memoryLabel(i18n, item.trust, TRUSTS)}</p>
+                    {item.sourceRefs?.length ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.sources')}: <code>{item.sourceRefs.join(' · ')}</code></p> : null}
+                  </details>
                   <div className="bot-memory-item-actions">
                     {item.status === 'conflicted' ? <button type="button" onClick={() => {
                       void clientApi.projectMemoryRestore({ workspaceId, id: item.id, resolveConflict: true }).then(() => reload());
@@ -279,6 +245,42 @@ export function MemoryTab({
           </>
         )}
       </section>
+      <details className="bot-memory-controls">
+        <summary>{i18n.t('projectAgent.drawer.memory.controls')}</summary>
+        <div className="bot-memory-settings-card">
+          <div className="bot-memory-setting-group">
+            <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.project')}</span>
+            <div className="bot-memory-setting-row">
+              <span>{i18n.t('projectAgent.drawer.memory.projectSwitch')}</span>
+              <Switch
+                checked={switches.memoryEnabled}
+                aria-label={i18n.t('projectAgent.drawer.memory.projectSwitch')}
+                onCheckedChange={(checked) => updateSwitch({ memoryEnabled: checked })}
+              />
+            </div>
+          </div>
+          <div className="bot-memory-setting-group">
+            <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.global')}</span>
+            <div className="bot-memory-setting-row">
+              <span>{i18n.t('projectAgent.drawer.memory.useMemory')}</span>
+              <Switch
+                checked={switches.useMemory}
+                aria-label={i18n.t('projectAgent.drawer.memory.useMemory')}
+                onCheckedChange={(checked) => updateSwitch({ useMemory: checked })}
+              />
+            </div>
+            <div className="bot-memory-setting-row">
+              <span>{i18n.t('projectAgent.drawer.memory.learnPreferences')}</span>
+              <Switch
+                checked={switches.learnPreferences}
+                aria-label={i18n.t('projectAgent.drawer.memory.learnPreferences')}
+                onCheckedChange={(checked) => updateSwitch({ learnPreferences: checked })}
+              />
+            </div>
+            <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.learnLater')}</p>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

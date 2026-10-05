@@ -2,6 +2,7 @@ import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
+import { checkBotWorkSurfaces } from './bot-work-surface-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkResponseInteraction } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
@@ -22,6 +23,8 @@ import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
+const workSurfaces = process.argv.includes('--work-surfaces');
+const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const fixture = seedBotShellHome({ home });
@@ -45,6 +48,12 @@ seededMessages.at(-1).replyTo = ['rc-message-9500'];
 seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。';
 seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
 seededMessages.at(-1).meta = { surfacing: 'interrupt', memoryUsed: ['rc-memory-123'] };
+if (workSurfaces) {
+  seededMessages.at(-1).sources = ['rc-work-1'];
+  seededMessages.at(-1).meta.evidenceRefs = Array.from({length:20}, (_,i)=>'rc-evidence-'+i);
+  seededMessages.at(-1).meta.sessionStates = [{sessionId:'rc-work-1', status:'running'}];
+}
+writeFileSync(workCommand, JSON.stringify({seq:0,workspaceId:fixture.bots[0].workspaceId,sessions:[{sessionId:'rc-work-1', title:'核查历史任务完成情况', status:'running',statusLabel:'正在核查历史记录', origin:{anchorMessageId:'rc-message-9500'},report:{summary:'逐条核对历史记录中的目标、结果和依据。'}}]}));
 writeFileSync(fixtureConversation, seededMessages.map(row => JSON.stringify(row)).join('\n') + '\n');
 const settings = JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8'));
 settings.memory = { enabled: false };
@@ -102,6 +111,12 @@ if (process.argv.includes('--effort-stability')) {
     }`);
   observedService = `import {readFileSync,writeFileSync} from 'node:fs';\n` + observedService;
 }
+if (workSurfaces) {
+  const workSeam = 'function listSessions(payload = {}) {';
+  assert.equal(observedService.split(workSeam).length, 2);
+  observedService = observedService.replace(workSeam, `${workSeam}
+    if (payload.workspaceId === globalThis.rcBotWorkWorkspace) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,sessions:globalThis.rcBotWorkSessions};`);
+}
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
 writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
@@ -140,6 +155,14 @@ globalThis.rcBotShellService={
 };
 ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'scripts/rc-response-interaction-smoke.mjs')).href)});
 globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole});` : ''}
+${workSurfaces ? `const workFile=${JSON.stringify(workCommand)};
+let workCommand=JSON.parse(readFileSync(workFile,'utf8'));
+globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);
+const workTimer=setInterval(()=>{
+  const next=JSON.parse(readFileSync(workFile,'utf8'));if(next.seq<=workCommand.seq)return;
+  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);
+  for(const window of BrowserWindow.getAllWindows())window.webContents.send('project-agent:changed',{workspaceIds:[next.workspaceId]});
+},25);workTimer.unref();` : ''}
 // Keep synthetic updater delivery outside inspector Promise lifetime. Only this
 // isolated entry consumes the disposable command file; product IPC is unchanged.
 let updaterSequence=0;
@@ -326,9 +349,10 @@ try {
   report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
   await checkBotShellReply({ page, until, report, captureDirectory: root });
   if (process.argv.includes('--streaming')) {
-    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand });
+    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null });
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
+  if (workSurfaces) await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });

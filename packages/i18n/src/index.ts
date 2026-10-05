@@ -271,6 +271,23 @@ export type TranslationKey =
   | 'projectAgent.chat.sessionState.paused'
   | 'projectAgent.chat.sessionState.queued'
   | 'projectAgent.chat.sessionState.starting'
+  | 'projectAgent.chat.work.heading'
+  | 'projectAgent.chat.work.more'
+  | 'projectAgent.chat.work.related'
+  | 'projectAgent.chat.work.unavailable'
+  | 'projectAgent.chat.work.unavailableHint'
+  | 'projectAgent.chat.work.handle'
+  | 'projectAgent.chat.work.open'
+  | 'projectAgent.chat.work.background'
+  | 'projectAgent.chat.context.basis'
+  | 'projectAgent.chat.originalMessage'
+  | 'projectAgent.chat.context.details'
+  | 'projectAgent.chat.context.memoryUnavailable'
+  | 'projectAgent.drawer.inspectBack'
+  | 'projectAgent.drawer.evidenceUnavailable'
+  | 'projectAgent.drawer.botDescription'
+  | 'projectAgent.drawer.acceptance.confirm'
+  | 'projectAgent.drawer.memory.details'
   | 'projectAgent.chat.sessionState.running'
   | 'projectAgent.chat.sessionState.waiting_user'
   | 'projectAgent.chat.sessionState.verifying'
@@ -1614,7 +1631,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.sessionState.paused': '已暂停',
     'projectAgent.chat.sessionState.queued': '排队中',
     'projectAgent.chat.sessionState.starting': '正在启动',
-    'projectAgent.chat.sessionState.running': '进行中',
+    'projectAgent.chat.work.heading': '关联任务',
+    'projectAgent.chat.work.more': '另有 {count} 项任务',
+    'projectAgent.chat.work.related': '关联任务',
+    'projectAgent.chat.work.unavailable': '状态暂不可用',
+    'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
+    'projectAgent.chat.work.handle': '查看并处理',
+    'projectAgent.chat.work.open': '打开任务',
+    'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
+    'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
+    'projectAgent.chat.originalMessage': '查看原消息',
+    'projectAgent.chat.context.details': '回复详情',
+    'projectAgent.chat.context.memoryUnavailable': '相关记忆暂不可用。',
+    'projectAgent.drawer.inspectBack': '返回 Bot 档案',
+    'projectAgent.drawer.evidenceUnavailable': '这条证据暂时无法读取。',
+    'projectAgent.drawer.botDescription': '负责这个项目的工作协调，持续跟进任务并交还结果。',
+    'projectAgent.drawer.acceptance.confirm': '由你确认',
+    'projectAgent.drawer.memory.details': '记忆详情',
+    'projectAgent.chat.sessionState.running': '正在运行中',
     'projectAgent.chat.sessionState.waiting_user': '需要你处理',
     'projectAgent.chat.sessionState.verifying': '核验中',
     'projectAgent.chat.sessionState.result_ready': '待你确认',
@@ -2745,6 +2779,23 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.sessionState.paused': 'Paused',
     'projectAgent.chat.sessionState.queued': 'Queued',
     'projectAgent.chat.sessionState.starting': 'Starting',
+    'projectAgent.chat.work.heading': 'Related work',
+    'projectAgent.chat.work.more': '{count} more tasks',
+    'projectAgent.chat.work.related': 'Related task',
+    'projectAgent.chat.work.unavailable': 'Status unavailable',
+    'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
+    'projectAgent.chat.work.handle': 'Review and respond',
+    'projectAgent.chat.work.open': 'Open task',
+    'projectAgent.chat.work.background': '{count} tasks to follow up',
+    'projectAgent.chat.context.basis': 'Result basis · {count} records',
+    'projectAgent.chat.originalMessage': 'View original message',
+    'projectAgent.chat.context.details': 'Reply details',
+    'projectAgent.chat.context.memoryUnavailable': 'The related memories are unavailable.',
+    'projectAgent.drawer.inspectBack': 'Back to bot profile',
+    'projectAgent.drawer.evidenceUnavailable': 'This evidence is unavailable.',
+    'projectAgent.drawer.botDescription': 'Coordinates work for this project, follows up on tasks and brings back results.',
+    'projectAgent.drawer.acceptance.confirm': 'Your confirmation',
+    'projectAgent.drawer.memory.details': 'Memory details',
     'projectAgent.chat.sessionState.running': 'Running',
     'projectAgent.chat.sessionState.waiting_user': 'Needs your input',
     'projectAgent.chat.sessionState.verifying': 'Verifying',
