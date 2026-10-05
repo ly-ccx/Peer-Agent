@@ -381,9 +381,9 @@
   max-width: min(520px, 100%);
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--chrome-hairline) 45%, transparent);
-  border-radius: 8px;
-  background: var(--paper-sheet);
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: var(--control-fill);
   color: var(--graphite-soft);
   font: inherit;
   text-align: left;
@@ -392,7 +392,7 @@
 }
 
 .bot-reply-bar:hover {
-  background: var(--paper-hover);
+  background: var(--control-fill-hover);
 }
 
 .bot-reply-bar-copy {
@@ -522,8 +522,8 @@
   gap: 8px;
   margin: 12px 28px 14px;
   padding: 14px 15px 11px;
-  border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border: 1px solid transparent;
+  border-radius: var(--surface-radius);
   background: var(--control-composer);
   box-shadow: none;
   transition: border-color var(--za-motion-fast) var(--za-ease-standard);
@@ -720,4 +720,8 @@
 @media (max-width: 1100px) {
   .bot-thread { padding-inline: 24px; }
   .bot-user { max-width: 88%; }
+}
+
+@supports (corner-shape: superellipse(1.4)) {
+  :is(.bot-composer, .bot-quote-chip, .bot-reply-bar):not(.bot-user-quote) { corner-shape: var(--control-corner); }
 }

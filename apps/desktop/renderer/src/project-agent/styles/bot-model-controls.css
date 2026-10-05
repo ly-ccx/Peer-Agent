@@ -32,7 +32,13 @@
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-control-row.has-effort,
 .bot-drawer-body .bot-model-captions.has-effort { grid-template-columns: minmax(0, 1fr) 80px; }
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-picker > button,
-.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger { height: 35px; min-height: 35px; width: 100%; padding: 0 9px; border: 1px solid var(--chrome-hairline); border-radius: 8px; background: color-mix(in srgb, var(--control-fill) 40%, var(--paper-sheet)); color: var(--graphite-base); font-size: .75rem; }
-.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger:hover:not(:disabled) { background: var(--control-fill); }
+.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger { height: auto; min-height: 34px; width: 100%; padding: 6px 12px; border: 1px solid transparent; border-radius: var(--control-radius-compact); background: var(--control-fill); color: var(--graphite-base); font-size: .75rem; }
+.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger:hover:not(:disabled) { background: var(--control-fill-hover); }
 .bot-model-captions .bot-model-source { margin-top: 5px; font-size: .6875rem; }
 .bot-model-captions .bot-model-source:last-child:not(:first-child) { text-align: center; }
+
+.bot-composer-bar :is(.bot-model-picker > button, .reasoning-effort-trigger) { min-height: 32px; height: auto; padding: 6px; border-radius: var(--control-radius-compact); }
+.bot-composer-bar :is(.bot-model-picker > button, .reasoning-effort-trigger):is(:hover, .open):not(:disabled) { background: var(--control-fill); }
+@supports (corner-shape: superellipse(1.4)) {
+  .bot-model-control :is(.pa-cascading-trigger, .reasoning-effort-trigger) { corner-shape: var(--control-corner); }
+}

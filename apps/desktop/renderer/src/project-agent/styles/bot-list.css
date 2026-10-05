@@ -571,7 +571,9 @@
 .bot-column-footer {
   flex: none;
   margin-top: 12px;
-  padding: 8px 4px 0;
+  margin-inline: -10px;
+  padding: 12px 14px 0;
+  border-top: 1px solid var(--chrome-hairline);
 }
 
 .bot-column-footer .sidebar-version-badge {
@@ -714,8 +716,12 @@
   padding: 5px;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 10px;
-  box-shadow: none;
+  border-radius: var(--surface-radius);
+  box-shadow: var(--shadow-popover);
+}
+
+@supports (corner-shape: superellipse(1.4)) {
+  .bot-app-menu-menu { corner-shape: var(--control-corner); }
 }
 
 .bot-app-menu-menu button {

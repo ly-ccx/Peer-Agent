@@ -100,8 +100,9 @@
 
   /* ─── Control 控件层（冷感灰，hue 216-220 sat 16-19%）─── */
   --control-composer: #EFF2F6;
-  --control-fill: #EAEDF2;
-  --control-fill-hover: #DFE3EA;
+  --control-fill: #E9EDF2;
+  --control-fill-active: #DCE3EC;
+  --control-fill-hover: #E1E6EE;
 
   /* ─── Graphite 文字阶（冷石墨，hue 210-220 sat 5-14%）─── */
   --graphite-base: #1A1D21;
@@ -156,7 +157,7 @@
   --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.08), 0 10px 28px rgba(26, 29, 33, 0.10);
   --shadow-card-hover: 0 2px 4px rgba(26, 29, 33, 0.10), 0 16px 36px rgba(26, 29, 33, 0.14);
   --shadow-card-active: 0 1px 3px rgba(26, 29, 33, 0.10), 0 8px 22px rgba(26, 29, 33, 0.12);
-  --shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --shadow-popover: 0 6px 20px rgba(26, 29, 33, 0.07), 0 1px 3px rgba(26, 29, 33, 0.04);
   --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
   /* 弹窗专用磨砂：浅色主题不能整块发白，面板采样顶部浮条的 blur，但用更薄的冷灰玻璃和明确边界。 */
   --glass-modal-scrim: color-mix(in srgb, var(--chrome-sunken) 30%, transparent);
@@ -248,13 +249,13 @@
   --za-user-message-bg: #F7F9FC;
   --za-composer-bg: #EFF2F6;
   --za-composer-empty-bg: #EFF2F6;
-  --za-control-fill: #EAEDF2;
-  --za-control-fill-hover: #DFE3EA;
+  --za-control-fill: var(--control-fill);
+  --za-control-fill-hover: var(--control-fill-hover);
   --za-control-ink: #1A1D21;
   --za-primary-control-bg: #1A1D21;
   --za-primary-control-ink: #F7F9FC;
   --za-shadow-panel: 0 2px 12px rgba(26, 29, 33, 0.06);
-  --za-shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --za-shadow-popover: var(--shadow-popover);
   --za-radius: 12px;
   --za-radius-sm: 6px;
   --za-radius-md: 8px;
@@ -302,6 +303,11 @@
   --ui-line-tight: 1.25;
   --ui-line-control: 1.35;
   --ui-line-body: 1.68;
+
+  --control-radius: 12px;
+  --control-radius-compact: 8px;
+  --surface-radius: 16px;
+  --control-corner: superellipse(1.4);
 
   --ui-radius-chip: 4px;
   --ui-radius-control: 6px;
@@ -395,8 +401,9 @@
   --paper-active: #30374A;
 
   --control-composer: #0C0F14;
-  --control-fill: #1E232C;
-  --control-fill-hover: #262C37;
+  --control-fill: #2C3440;
+  --control-fill-active: #3B4757;
+  --control-fill-hover: #343E4B;
 
   --graphite-base: #EDF1F6;
   --graphite-base-hover: #D5DCE6;
@@ -420,7 +427,7 @@
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 12px 30px rgba(0, 0, 0, 0.34);
   --shadow-card-hover: 0 2px 5px rgba(0, 0, 0, 0.34), 0 18px 42px rgba(0, 0, 0, 0.44);
   --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
-  --shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --shadow-popover: 0 6px 20px rgba(0, 0, 0, 0.20), 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-drag: 0 4px 16px rgba(0, 0, 0, 0.55);
   /* 弹窗专用磨砂：深色主题保持顶部浮条的真实 blur，但用深色玻璃，避免浅色 token 把暗底洗灰。 */
   --glass-modal-scrim: color-mix(in srgb, var(--chrome-canvas) 62%, transparent);
@@ -499,13 +506,13 @@
   --za-user-message-bg: #1E232C;
   --za-composer-bg: #0C0F14;
   --za-composer-empty-bg: #0C0F14;
-  --za-control-fill: #1E232C;
-  --za-control-fill-hover: #262C37;
+  --za-control-fill: var(--control-fill);
+  --za-control-fill-hover: var(--control-fill-hover);
   --za-control-ink: #EDF1F6;
   --za-primary-control-bg: #EDF1F6;
   --za-primary-control-ink: #11141A;
   --za-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.40);
-  --za-shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --za-shadow-popover: var(--shadow-popover);
   --za-user-accent: #5D9CBF;
   --za-user-background: #11141A;
   --za-user-foreground: #EDF1F6;
@@ -538,6 +545,7 @@
   --paper-active: #CCD0DA;
   --control-composer: #E6E9EF;
   --control-fill: #DCE0E8;
+  --control-fill-active: #BCC0CC;
   --control-fill-hover: #CCD0DA;
   --graphite-base: #4C4F69;   /* text */
   --graphite-base-hover: #5C5F77; /* subtext0 */
@@ -626,6 +634,7 @@
   --paper-active: #45475A;
   --control-composer: #11111B;
   --control-fill: #313244;
+  --control-fill-active: #45475A;
   --control-fill-hover: #45475A;
   --graphite-base: #CDD6F4;   /* text */
   --graphite-base-hover: #BAC2DE; /* subtext1 */

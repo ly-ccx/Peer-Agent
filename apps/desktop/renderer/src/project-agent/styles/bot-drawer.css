@@ -1052,7 +1052,7 @@
   grid-template-columns: repeat(var(--segment-count), minmax(0, 1fr));
   gap: 0;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--control-radius);
   background: var(--chrome-sunken);
   touch-action: pan-y;
   user-select: none;
@@ -1064,8 +1064,8 @@
   inset: 3px auto 3px 3px;
   width: calc((100% - 6px) / var(--segment-count));
   background: var(--paper-sheet);
-  border: 1px solid var(--chrome-hairline);
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--control-radius) - 3px);
   transform: translateX(calc(var(--segment-index) * 100%));
   transition: transform var(--za-motion-fast) var(--za-ease-standard);
   pointer-events: none;
@@ -1093,9 +1093,9 @@
 .bot-drawer-body .bot-model-settings-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .bot-drawer-body .bot-model-settings-row > span { padding: 0; font-size: .75rem; font-weight: 600; }
 .bot-drawer-body .bot-settings-row { font-size: .75rem; }
-.bot-drawer-body .frost-settings-group .pa-dropdown-trigger { height: 35px; min-height: 35px; padding-inline: 9px; font-size: .75rem; }
+.bot-drawer-body .frost-settings-group .pa-dropdown-trigger { height: auto; min-height: 34px; padding: 6px 12px; border-radius: var(--control-radius-compact); font-size: .75rem; }
 .bot-drawer-body .bot-settings-identity .frost-group-content { display: flex; flex-direction: column; gap: 18px; padding: 15px; }
-.bot-drawer-body .bot-settings-name-row input { height: 35px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--chrome-hairline); background: var(--paper-sheet); font-size: .75rem; }
+.bot-drawer-body .bot-settings-name-row input { min-height: 34px; padding: 6px 12px; border-radius: var(--control-radius-compact); border: 1px solid transparent; background: var(--control-fill); font-size: .75rem; }
 .bot-drawer-body .bot-settings-name-row button { font-size: .75rem; }
 .bot-drawer-body .bot-settings-workflow .frost-group-content > .bot-drawer-note { padding: 0 15px 15px; font-size: .6875rem; }
 .bot-drawer-body .bot-model-advanced > summary { padding: 12px 15px; border-top: 1px solid var(--chrome-hairline); font-size: .6875rem; }
@@ -1104,3 +1104,9 @@
 .bot-drawer-body .bot-settings-section .peer-switch { width: 40px; height: 23px; min-height: 23px; padding: 3px; border-radius: 16px; background: var(--paper-sunken); }
 .bot-drawer-body .bot-settings-section .peer-switch[data-state='checked'] { background: var(--graphite-base); border-color: var(--graphite-base); }
 .bot-drawer-head p { font-size: .9375rem; }
+
+.bot-drawer-body .bot-drawer-tab .bot-settings-name-row button { border-color: transparent; border-radius: var(--control-radius-compact); background: var(--control-fill); box-shadow: none; }
+.bot-drawer-body .bot-drawer-tab .bot-settings-name-row button:hover:not(:disabled) { background: var(--control-fill-hover); }
+@supports (corner-shape: superellipse(1.4)) {
+  :is(.bot-drawer-segments, .bot-segment-thumb, .bot-settings-name-row input, .bot-settings-name-row button) { corner-shape: var(--control-corner); }
+}
