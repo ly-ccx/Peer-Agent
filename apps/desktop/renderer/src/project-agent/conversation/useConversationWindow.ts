@@ -10,6 +10,7 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
   const originRef = useRef<HTMLDivElement>(null);
   const heights = useRef(new Map<string, number>());
   const pinned = useRef(true);
+  const observedTop = useRef<number | null>(null);
   const reading = useRef<{ key: string; delta: number } | null>(null);
   const located = useRef<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -23,7 +24,7 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     return node && marker ? marker.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop : 0;
   };
   const view = conversationViewport(offsets, Math.max(0, top - origin()), height);
-  const updateTop = (value: number) => setTop(current => Math.abs(current - value) < 0.5 ? current : value);
+  const updateTop = (value: number) => { observedTop.current = value; setTop(current => Math.abs(current - value) < 0.5 ? current : value); };
   const followLatest = () => {
     const node = scrollerRef.current;
     pinned.current = true; reading.current = null; setFollowing(true);
@@ -51,6 +52,12 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
   useLayoutEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
+    // A provider update can reach layout before the browser delivers a user's scroll event.
+    // Read the actual movement first so an upward scroll cannot be overwritten by follow.
+    if (observedTop.current !== null && node.scrollTop < observedTop.current - 0.5
+      && node.scrollHeight - node.scrollTop - node.clientHeight >= 80) {
+      pinned.current = false; setFollowing(false); remember();
+    }
     if (pinned.current) node.scrollTop = node.scrollHeight;
     else if (reading.current) {
       const target = restoreConversationOffset(keys, offsets, reading.current, origin());

@@ -154,12 +154,23 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.notEqual(await shine.evaluate(node => getComputedStyle(node).opacity), '0');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   checks.push('running tool scans over actual target; keyboard opens step and parameters before result; reduced motion remains readable');
-  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = Math.max(1, node.scrollTop - 350); });
+  if (await page.locator('.bot-thread-latest').count()) await page.locator('.bot-thread-latest').click();
+  await until(() => page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
+  await page.locator('.bot-thread').evaluate(node => {
+    // Exercise a real DOM scroll whose event has not reached React when the delta arrives.
+    const hold = event => event.stopImmediatePropagation();
+    node.addEventListener('scroll', hold, true);
+    globalThis.rcReleaseReadingScroll = () => node.removeEventListener('scroll', hold, true);
+    node.scrollTop = Math.max(1, node.scrollTop - 350);
+  });
   readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 2.5);
   await until(() => live.textContent(), text => text.includes('流式回复正在'));
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.ok(Math.abs((await page.locator('.bot-thread').evaluate(node => node.scrollTop)) - readingTop) < 2, 'new chunks must preserve the reading position');
+  const readingAfter = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
+  report.readingPosition = { before: readingTop, after: readingAfter, eventDeliveryDelayed: true };
+  await page.evaluate(() => { globalThis.rcReleaseReadingScroll?.(); delete globalThis.rcReleaseReadingScroll; });
+  assert.ok(Math.abs(readingAfter - readingTop) < 2, 'new chunks must preserve the reading position');
   await page.locator('.bot-thread-latest').click();
   await live.locator('.bot-tool-step[data-status="done"]').waitFor();
   await live.locator('.bot-tool-preview > summary').filter({ hasText: '返回内容' }).click();
