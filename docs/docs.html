@@ -591,11 +591,19 @@ pnpm dist:linux
           <div class="crumb"><div class="crumb-left"><span data-i18n="group.getStarted">Get started</span><span>/</span><strong data-i18n="nav.desktop">Desktop</strong></div></div>
           <h1 data-i18n="desktop.title">Desktop workbench</h1>
           <p class="lede" data-i18n="desktop.lede">
-            Desktop is the Electron presentation shell over the same local Runtime as CLI. It is optimized for Thread reading,
-            permission decisions, and Evidence review — not for becoming an IM bubble wall.
+            Desktop lists one bot per project and shares the local Runtime with CLI. Read replies, follow delegated work,
+            handle decisions and inspect evidence from the conversation.
           </p>
 
-          <h2 id="desktop-layout" data-i18n="desktop.layoutTitle">Layout map</h2>
+          <h2 id="desktop-bots" data-i18n="desktop.botsTitle">Bot conversations and profiles</h2>
+          <ul>
+            <li data-i18n="desktop.botsStream">Replies stream incrementally. Active tools show their action, target and elapsed time; open a step to inspect parameters and returned content. Stop preserves partial text and your draft.</li>
+            <li data-i18n="desktop.botsWork">Delegated work shows its title and latest local status below the reply. Expand progress or open the task; work needing your attention has a direct action. Result basis groups evidence and related details in one entry.</li>
+            <li data-i18n="desktop.botsProfile">Profile Overview describes the bot and its current work. Memory starts with saved content; provenance and management settings expand on demand. Process and evidence open separately and return to the previous profile tab.</li>
+          </ul>
+          <p data-i18n="desktop.classic">Settings → General → Interface returns to classic chat. Its layout is described below.</p>
+
+          <h2 id="desktop-layout" data-i18n="desktop.layoutTitle">Classic screen layout</h2>
           <div class="table-wrap">
             <table>
               <thead><tr><th data-i18n="desktop.thRegion">Region</th><th data-i18n="desktop.thJob">Job</th></tr></thead>
@@ -614,7 +622,7 @@ pnpm dist:linux
           <ol class="steps">
             <li data-i18n="desktop.s1">Open Peer Agent → choose or create a workspace (repo/folder you trust).</li>
             <li data-i18n="desktop.s2">Settings → Models / Providers → add provider + key/endpoint → set default model.</li>
-            <li data-i18n="desktop.s3">Create a New Task. Prefer a low-risk prompt first (read-only inspect).</li>
+            <li data-i18n="desktop.s3">Select the project's bot and send a message. Start with a read-only project question; the bot can delegate work when needed.</li>
             <li data-i18n="desktop.s4">When PermissionGrant UI appears, read the capability scope before approving.</li>
             <li data-i18n="desktop.s5">After the turn, expand Evidence/tool results and confirm the local side effects.</li>
           </ol>
@@ -1447,8 +1455,13 @@ Evidence owns governance.</code></pre>
             "install.sourceTitle": "从源码（开发者）",
             "install.monoNote": "Monorepo 说明：@peer-agent/tui 是 TUI 源码；@peer-agent/cli 只是公开安装器。",
             "desktop.title": "Desktop 工作台",
-            "desktop.lede": "Desktop 是同一本地 Runtime 上的 Electron 呈现层。它为 Thread 阅读、权限决策与 Evidence 审查优化，而不是做成 IM 气泡墙。",
-            "desktop.layoutTitle": "布局地图",
+            "desktop.lede": "Desktop 为每个项目列出一个机器人，与 CLI 共用本地 Runtime。可以在对话中阅读回复、跟进委派工作、处理决策与查看依据。",
+            "desktop.botsTitle": "机器人对话与档案",
+            "desktop.botsStream": "回复逐段生成。进行中的工具显示动作、目标与耗时；打开步骤可继续查看参数和返回内容。停止生成保留部分正文与输入草稿。",
+            "desktop.botsWork": "委派工作在回复下方显示具体名称与最新本机状态。可展开进展、打开任务，需要你处理时有直接入口。结果依据将证据与相关详情收成一个入口。",
+            "desktop.botsProfile": "档案概况介绍机器人与当前工作。记忆先显示已保存内容，来源与管理设置按需展开。过程和证据单独打开，返回时恢复原档案页签。",
+            "desktop.classic": "设置 → 通用 → 界面可以返回经典对话，下面介绍经典界面的布局。",
+            "desktop.layoutTitle": "经典界面布局",
             "desktop.thRegion": "区域", "desktop.thJob": "职责",
             "desktop.r1a": "侧栏", "desktop.r1b": "工作区切换、新建任务、会话列表、设置入口",
             "desktop.r2a": "执行线程", "desktop.r2b": "当前任务的决策 + 执行流",
@@ -1459,7 +1472,7 @@ Evidence owns governance.</code></pre>
             "desktop.firstTitle": "首次使用清单",
             "desktop.s1": "打开 Peer Agent → 选择或创建你信任的工作区（仓库 / 文件夹）。",
             "desktop.s2": "设置 → 模型 / 提供商 → 添加 provider + key/endpoint → 设定默认模型。",
-            "desktop.s3": "新建任务。先用低风险提示（只读检查）。",
+            "desktop.s3": "选择项目机器人并发送消息。先问只读的项目问题，需要工作时由机器人委派任务。",
             "desktop.s4": "出现 PermissionGrant UI 时，先读能力作用域再批准。",
             "desktop.s5": "回合结束后展开 Evidence / 工具结果，确认本机副作用。",
             "desktop.modesTitle": "你会看到的模式",

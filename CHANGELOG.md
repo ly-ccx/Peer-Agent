@@ -8,6 +8,25 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.7] - 2026-10-05
+
+### Changed
+
+- Keep streamed replies and show actual tool actions, targets, elapsed time and active scanning highlights, with nested parameters, results and technical details.
+- Show delegated work by title and latest local status, prioritizing work needing user attention; group reply evidence under one result-basis entry.
+- Separate process/evidence inspection from Bot Overview and Memory. Overview describes the bot; Memory starts with saved content.
+- Synchronize bilingual release notes, user documentation and the generated site changelog; retain RC6 coverage and add RC7 to the upgrade matrix.
+
+### Fixed
+
+- Reasoning-effort selection and popup geometry remain stable during asynchronous saves and restore correctly on failure.
+- Streamed content preserves the reading position after scrolling up; expanded tool and delegated-work details survive canonical reply handoff and the next turn.
+- Interactive streaming test fixtures are isolated from background cognition.
+
+### Release scope
+
+- Candidate for owner evaluation, with stable 0.0.18 and npm beta 0.1.0-beta.5 retained. Complex-write Evidence verification remains a separate GA blocker.
+
 ## [0.1.0-beta.4] - 2026-10-01
 
 ### Added
