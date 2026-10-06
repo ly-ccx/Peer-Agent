@@ -68,7 +68,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal(await reply.locator('.bot-work-row > summary, .bot-reply-context > summary').first().evaluate(node => node === document.activeElement), true);
   // Source navigation can virtualize this reply out and remount its closed
   // disclosure. Reopen through the UI before testing the nested action.
-  if (await context.getAttribute('open') === null) await context.locator(':scope > summary').click();
+  if (await context.getAttribute('open') === null) await context.locator(':scope > summary').press('Enter');
   await process.focus();
   report.replyFocus = await process.evaluate(node => ({ active: node === document.activeElement, visible: node.matches(':focus-visible'), outline: getComputedStyle(node).outlineStyle, width: getComputedStyle(node).outlineWidth, actualActive: document.activeElement?.outerHTML, documentFocused: document.hasFocus() }));
   assert.equal(report.replyFocus.active, true);
