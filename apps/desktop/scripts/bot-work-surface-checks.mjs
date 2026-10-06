@@ -213,6 +213,10 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, conversa
   assert.equal(await detail.locator('.bot-session-open').evaluate(node => node === document.activeElement), true);
   checks.push('waiting returns to the main Bot with focus, no input or task operation; explicitly viewing a running work record still opens the same conversation and Escape restores focus');
 
+  change([task]);
+  await until(() => detail.getAttribute('data-status'), value => value === 'waiting_user');
+  await detail.getByText('暂时没有任务报告。', { exact: true }).waitFor();
+
   for (const [index, status] of ['running', 'result_ready', 'accepted', 'failed', 'cancelled', 'paused', 'superseded', 'starting', 'queued'].entries()) {
     const summary = `第 ${index + 1} 次核查：已整理可读取的记录，缺失材料对应事项仍无法确认。`;
     change([{ ...task, status, statusLabel: '', report: { summary,
