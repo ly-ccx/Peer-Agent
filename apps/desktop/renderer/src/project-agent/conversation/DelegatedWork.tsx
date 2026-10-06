@@ -22,7 +22,8 @@ function WorkRow({ row, i18n, onOpen, disclosure }: { readonly row: BotWorkRow; 
       <PeerIcon name="chevronDown" size={12} /></summary>
     <div className="bot-work-detail">
       {row.status && row.session ? <p>{row.session.summary || (formatDrawerSessionStatus(row.session, i18n) !== row.status ? formatDrawerSessionStatus(row.session, i18n) : i18n.t(`projectAgent.chat.sessionState.${row.status}`))}</p> : <p>{i18n.t('projectAgent.chat.work.unavailableHint')}</p>}
-      <button type="button" onClick={() => onOpen(row.id)}>{i18n.t(row.status === 'waiting_user' || row.status === 'result_ready' ? 'projectAgent.chat.work.handle' : 'projectAgent.chat.work.open')}<PeerIcon name="arrowUpRight" size={13} /></button>
+      {row.status === 'waiting_user' || row.status === 'result_ready' ? <p className="bot-work-hint">{i18n.t('projectAgent.chat.work.responseHint')}</p> : null}
+      <button type="button" onClick={() => onOpen(row.id)}>{i18n.t('projectAgent.chat.work.open')}<PeerIcon name="arrowUpRight" size={13} /></button>
     </div>
   </details>;
 }

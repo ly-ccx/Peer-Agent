@@ -279,6 +279,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.handle'
   | 'projectAgent.chat.work.open'
   | 'projectAgent.chat.work.background'
+  | 'projectAgent.chat.work.responseHint'
   | 'projectAgent.chat.context.basis'
   | 'projectAgent.chat.originalMessage'
   | 'projectAgent.chat.context.details'
@@ -389,6 +390,7 @@ export type TranslationKey =
   | 'projectAgent.drawer.taskDetail.createdAt'
   | 'projectAgent.drawer.taskDetail.open'
   | 'projectAgent.drawer.taskDetail.review'
+  | 'projectAgent.drawer.taskDetail.returnToBot'
   | 'projectAgent.drawer.taskDetail.noScene'
   | 'projectAgent.drawer.taskDetail.report'
   | 'projectAgent.drawer.taskDetail.noReport'
@@ -1671,8 +1673,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailable': '状态暂不可用',
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
     'projectAgent.chat.work.handle': '查看并处理',
-    'projectAgent.chat.work.open': '打开任务',
-    'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
+    'projectAgent.chat.work.open': '查看进展',
+    'projectAgent.chat.work.background': '任务动态 · {count} 项',
+    'projectAgent.chat.work.responseHint': '需要回应或确认的事项，会在对话中提出。',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
     'projectAgent.chat.context.details': '回复详情',
@@ -1683,7 +1686,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.acceptance.confirm': '由你确认',
     'projectAgent.drawer.memory.details': '记忆详情',
     'projectAgent.chat.sessionState.running': '正在运行中',
-    'projectAgent.chat.sessionState.waiting_user': '需要你处理',
+    'projectAgent.chat.sessionState.waiting_user': '等待回应',
     'projectAgent.chat.sessionState.verifying': '核验中',
     'projectAgent.chat.sessionState.result_ready': '待你确认',
     'projectAgent.chat.sessionState.accepted': '已签收',
@@ -1757,7 +1760,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tasksEmpty': '还没有任务',
     'projectAgent.drawer.showAll': '查看全部',
     'projectAgent.drawer.collapse': '收起',
-    'projectAgent.drawer.group.needsYou': '需要你',
+    'projectAgent.drawer.group.needsYou': '等待回应',
     'projectAgent.drawer.group.running': '进行中',
     'projectAgent.drawer.group.queued': '排队',
     'projectAgent.drawer.group.done': '已完成',
@@ -1781,8 +1784,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.taskDetail.untitled': "未命名任务",
     'projectAgent.drawer.taskDetail.created': "创建于 {time}",
     'projectAgent.drawer.taskDetail.createdAt': "创建时间",
-    'projectAgent.drawer.taskDetail.open': "打开工作会话",
+    'projectAgent.drawer.taskDetail.open': "查看工作记录",
     'projectAgent.drawer.taskDetail.review': "查看结果",
+    'projectAgent.drawer.taskDetail.returnToBot': '回到对话',
     'projectAgent.drawer.taskDetail.noScene': "尚未建立可打开的工作会话。",
     'projectAgent.drawer.taskDetail.report': "任务报告",
     'projectAgent.drawer.taskDetail.noReport': "暂时没有任务报告。",
@@ -1801,11 +1805,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.taskDetail.status.paused': "已暂停",
     'projectAgent.drawer.taskDetail.hint.starting': "任务正在准备启动，可打开工作会话查看。",
     'projectAgent.drawer.taskDetail.hint.running': "机器人正在推进任务，可打开工作会话查看过程。",
-    'projectAgent.drawer.taskDetail.hint.waiting_user': "打开工作会话，查看并处理需要你决定的事项。",
+    'projectAgent.drawer.taskDetail.hint.waiting_user': "如需补充信息或作决定，请在对话中回复。",
     'projectAgent.drawer.taskDetail.hint.verifying': "正在核对任务结果与依据，可打开工作会话查看复核记录。",
     'projectAgent.drawer.taskDetail.hint.queued': "任务正在等待执行，排队情况如上。",
     'projectAgent.drawer.taskDetail.hint.paused': "任务已暂停。可返回任务列表恢复，或打开工作会话查看记录。",
-    'projectAgent.drawer.taskDetail.hint.result_ready': "打开工作会话查看结果，并完成确认。",
+    'projectAgent.drawer.taskDetail.hint.result_ready': "机器人会在对话中汇总结果，并提出需要确认的事项。",
     'projectAgent.drawer.taskDetail.hint.accepted': "本轮结果已签收，可以回到工作会话查看记录。",
     'projectAgent.drawer.taskDetail.hint.failed': "任务未完成。打开工作会话查看失败记录。",
     'projectAgent.drawer.taskDetail.hint.cancelled': "任务已取消，原工作会话仍可查看。",
@@ -2853,8 +2857,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailable': 'Status unavailable',
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
     'projectAgent.chat.work.handle': 'Review and respond',
-    'projectAgent.chat.work.open': 'Open task',
-    'projectAgent.chat.work.background': '{count} tasks to follow up',
+    'projectAgent.chat.work.open': 'View progress',
+    'projectAgent.chat.work.background': 'Task updates · {count}',
+    'projectAgent.chat.work.responseHint': 'Requests for a response or confirmation appear in the conversation.',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',
     'projectAgent.chat.context.details': 'Reply details',
@@ -2865,7 +2870,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.acceptance.confirm': 'Your confirmation',
     'projectAgent.drawer.memory.details': 'Memory details',
     'projectAgent.chat.sessionState.running': 'Running',
-    'projectAgent.chat.sessionState.waiting_user': 'Needs your input',
+    'projectAgent.chat.sessionState.waiting_user': 'Awaiting a response',
     'projectAgent.chat.sessionState.verifying': 'Verifying',
     'projectAgent.chat.sessionState.result_ready': 'Awaiting your confirmation',
     'projectAgent.chat.sessionState.accepted': 'Accepted',
@@ -2939,7 +2944,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tasksEmpty': 'No tasks yet',
     'projectAgent.drawer.showAll': 'Show all',
     'projectAgent.drawer.collapse': 'Show less',
-    'projectAgent.drawer.group.needsYou': 'Needs you',
+    'projectAgent.drawer.group.needsYou': 'Awaiting a response',
     'projectAgent.drawer.group.running': 'In progress',
     'projectAgent.drawer.group.queued': 'Queued',
     'projectAgent.drawer.group.done': 'Done',
@@ -2963,8 +2968,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.taskDetail.untitled': "Untitled task",
     'projectAgent.drawer.taskDetail.created': "Created {time}",
     'projectAgent.drawer.taskDetail.createdAt': "Created at",
-    'projectAgent.drawer.taskDetail.open': "Open work conversation",
+    'projectAgent.drawer.taskDetail.open': "View work record",
     'projectAgent.drawer.taskDetail.review': "View result",
+    'projectAgent.drawer.taskDetail.returnToBot': 'Back to conversation',
     'projectAgent.drawer.taskDetail.noScene': "No work conversation is available yet.",
     'projectAgent.drawer.taskDetail.report': "Task report",
     'projectAgent.drawer.taskDetail.noReport': "No task report yet.",
@@ -2983,11 +2989,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.taskDetail.status.paused': "Paused",
     'projectAgent.drawer.taskDetail.hint.starting': "The task is preparing to start. Open its work conversation for details.",
     'projectAgent.drawer.taskDetail.hint.running': "The bot is working on this task. Open its work conversation to follow progress.",
-    'projectAgent.drawer.taskDetail.hint.waiting_user': "Open the work conversation to review and respond to the pending decision.",
+    'projectAgent.drawer.taskDetail.hint.waiting_user': "Provide missing information or decisions in the conversation.",
     'projectAgent.drawer.taskDetail.hint.verifying': "The result and supporting records are being checked. Open the work conversation to view the review.",
     'projectAgent.drawer.taskDetail.hint.queued': "The task is waiting to run. Its queue status is shown above.",
     'projectAgent.drawer.taskDetail.hint.paused': "The task is paused. Resume it from the task list, or open its work conversation.",
-    'projectAgent.drawer.taskDetail.hint.result_ready': "Open the work conversation to review and confirm the result.",
+    'projectAgent.drawer.taskDetail.hint.result_ready': "The bot summarizes results and presents any confirmation in the conversation.",
     'projectAgent.drawer.taskDetail.hint.accepted': "The result has been accepted. Its records remain in the work conversation.",
     'projectAgent.drawer.taskDetail.hint.failed': "The task did not finish. Open the work conversation to review the failure.",
     'projectAgent.drawer.taskDetail.hint.cancelled': "The task was cancelled. Its work conversation remains available.",

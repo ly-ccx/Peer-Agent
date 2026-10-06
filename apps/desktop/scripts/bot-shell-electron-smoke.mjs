@@ -382,7 +382,7 @@ try {
     await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null });
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
-  if (workSurfaces) await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+  if (workSurfaces) await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand, conversationFile: fixtureConversation });
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });

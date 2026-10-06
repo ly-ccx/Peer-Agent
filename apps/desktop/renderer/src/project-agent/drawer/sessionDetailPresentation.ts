@@ -36,6 +36,7 @@ export function sessionDetailPresentation(session: DrawerSession, i18n: Pick<I18
   const progress = status
     ? recordedProgress === status ? session.progress.trim() || statusLabel : recordedProgress || statusLabel
     : statusLabel;
+  const actionTarget = status === 'waiting_user' || status === 'result_ready' ? 'bot' : 'scene';
   return {
     title: session.title && session.title !== session.sessionId
       ? session.title : i18n.t('projectAgent.drawer.taskDetail.untitled'),
@@ -46,11 +47,10 @@ export function sessionDetailPresentation(session: DrawerSession, i18n: Pick<I18
     hint: i18n.t(status
       ? `projectAgent.drawer.taskDetail.hint.${status}`
       : 'projectAgent.drawer.taskDetail.hint.unavailable'),
-    actionLabel: i18n.t(status === 'waiting_user'
-      ? 'projectAgent.chat.work.handle'
-      : status === 'result_ready'
-        ? 'projectAgent.drawer.taskDetail.review'
-        : 'projectAgent.drawer.taskDetail.open'),
+    actionTarget,
+    actionLabel: i18n.t(actionTarget === 'bot'
+      ? 'projectAgent.drawer.taskDetail.returnToBot'
+      : 'projectAgent.drawer.taskDetail.open'),
     createdLabel: formatDrawerStamp(session.spawnedAt, now),
     report: session.summary.trim(),
     evidenceRefs: [...new Set(session.evidenceRefs.map(ref => ref.trim()).filter(Boolean))],

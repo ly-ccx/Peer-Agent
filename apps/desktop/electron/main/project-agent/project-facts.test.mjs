@@ -1,9 +1,53 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createDesktopProjectFacts } from './project-facts.mjs';
+import { createBotDirectory, createBotLifecycle, createBotProfileStore, createProjectRegistry } from '@peer-agent/runtime-node';
+import { createConversationStore } from '@peer-agent/conversation-store';
+
+test('子任务的提问、授权和签收出现在主 Bot 对话，查看投影不触发任何任务操作', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-main-bot-decisions-'));
+  try {
+    const folder = path.join(root, 'project');
+    mkdirSync(folder);
+    const registry = createProjectRegistry({ filePath: path.join(root, 'registry.json') });
+    const { workspaceId } = registry.ensureForPath(folder);
+    const conversationStore = createConversationStore({ storeDir: path.join(root, 'conversations') });
+    const profileStore = createBotProfileStore({ rootDir: root });
+    const parent = createBotLifecycle({ rootDir: root, registry, conversationStore, profileStore }).ensureBot(workspaceId);
+    assert.equal(parent.ok, true);
+    const child = conversationStore.createConversation({ title: '读取记录', workspacePath: folder, mode: 'chat' });
+    conversationStore.appendMessage(child.id, { id: 'child-question', role: 'assistant', segments: [{
+      tool: 'request_user_input', toolCallId: 'question-1', args: { question: '只使用可读取的记录吗？', options: ['只使用可读取的记录'] },
+    }] });
+    const sessions = [
+      { sessionId: 'waiting', workspaceId, conversationId: child.id, status: 'waiting_user', title: '读取记录' },
+      { sessionId: 'ready', workspaceId, status: 'result_ready', title: '统计结果' },
+    ];
+    const approval = { approvalId: 'permission-1', sessionId: 'waiting', state: 'open', summary: '读取本地文件' };
+    const facts = createDesktopProjectFacts({ runtimeRoot: root, profileStore, conversationStore,
+      supervisor: { sessionsForProject: () => sessions, acceptance: id => id === 'ready' ? { mode: 'confirm' } : null },
+      approvalStore: { list: () => [approval] } });
+    const directory = createBotDirectory({ rootDir: root, registry,
+      readMessages: id => conversationStore.getPersistedConversationHistory(id)?.messages || [],
+      readCards: facts.cards });
+    const cards = directory.readConversation(workspaceId, { latest: true }).messages.flatMap(message => message.cards || []);
+    const question = cards.find(card => card.kind === 'question');
+    assert.equal(question.content, '只使用可读取的记录吗？');
+    assert.deepEqual(question.refs, { sessionId: 'waiting', questionId: 'question-1' });
+    assert.equal(question.actions[0].channel, 'project-agent:submit-input');
+    assert.deepEqual(question.actions[0].payload, { answerTo: 'card:question:waiting:question-1', text: '只使用可读取的记录' });
+    assert.equal(cards.find(card => card.kind === 'approval').actions[0].channel, 'project-agent:decide-approval');
+    assert.equal(cards.find(card => card.kind === 'confirm_result').actions[0].payload.sessionId, 'ready');
+    assert.equal(sessions[0].status, 'waiting_user');
+    assert.equal(sessions[1].status, 'result_ready');
+    assert.equal(approval.state, 'open');
+    assert.equal(conversationStore.getPersistedConversationHistory(parent.profile.agentConversationId)?.messages.length || 0, 0);
+    assert.equal(conversationStore.getPersistedConversationHistory(child.id).messages.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('RC5 已保存的手输回答关闭对话选择，而引用其它消息和任务批准不会被推断', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-reply-question-'));

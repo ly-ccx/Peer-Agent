@@ -293,6 +293,7 @@ export function BotProfileDrawer({
           i18n={i18n}
           isZh={isZh}
           onBack={() => onMemory({ ...memory, sessionId: null })}
+          onReturnToBot={close}
         />
       ) : null}
       {memory.tab === 'objectives' ? (

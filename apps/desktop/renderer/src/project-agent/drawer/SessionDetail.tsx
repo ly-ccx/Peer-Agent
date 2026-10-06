@@ -18,6 +18,7 @@ export function SessionDetail({
   i18n,
   isZh,
   onBack,
+  onReturnToBot,
 }: {
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -26,6 +27,7 @@ export function SessionDetail({
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly onBack: () => void;
+  readonly onReturnToBot: () => void;
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
   const view = sessionDetailPresentation(session, i18n);
@@ -42,10 +44,10 @@ export function SessionDetail({
         <h3 className={`bot-session-status is-${view.tone}`}>{view.statusLabel}</h3>
         <p className="bot-session-hint">
           {view.progressDetail ? <span className="bot-session-progress-note">{view.progressDetail}<br /></span> : null}
-          <span>{session.conversationId ? view.hint : i18n.t('projectAgent.drawer.taskDetail.noScene')}</span>
+          <span>{view.actionTarget === 'bot' || session.conversationId ? view.hint : i18n.t('projectAgent.drawer.taskDetail.noScene')}</span>
         </p>
-        {session.conversationId ? (
-          <button className="bot-session-open" type="button" onClick={() => setSceneOpen(true)}>
+        {view.actionTarget === 'bot' || session.conversationId ? (
+          <button className="bot-session-open" type="button" onClick={view.actionTarget === 'bot' ? onReturnToBot : () => setSceneOpen(true)}>
             {view.actionLabel}
             <PeerIcon name="arrowUpRight" size={14} />
           </button>

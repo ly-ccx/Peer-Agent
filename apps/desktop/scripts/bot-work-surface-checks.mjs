@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 
 /** Disposable main-side session facts, delivered through the production read and notification IPC. */
-export async function checkBotWorkSurfaces({ page, until, report, captureDirectory, commandFile }) {
+export async function checkBotWorkSurfaces({ page, until, report, captureDirectory, commandFile, conversationFile }) {
   const checks = report.workSurfaces = [];
   const reply = page.locator('#bot-msg-rc-message-9999');
   await reply.scrollIntoViewIfNeeded();
@@ -31,10 +31,20 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   };
   change([{ ...initial.sessions[0], status: 'waiting_user', report: { summary: '需要确认是否只使用可读取的历史记录。' } }]);
   await until(() => work.getAttribute('data-status'), value => value === 'waiting_user');
-  assert.match(await work.innerText(), /需要你处理/);
+  assert.match(await work.innerText(), /等待回应/);
   assert.equal(await work.locator('.is-running').count(), 0);
-  assert.equal(await work.getByRole('button', { name: '查看并处理', exact: true }).isVisible(), true);
+  assert.equal(await work.getByRole('button', { name: '查看进展', exact: true }).isVisible(), true);
+  assert.match(await work.innerText(), /会在对话中提出/);
+  assert.doesNotMatch(await work.innerText(), /需要你处理|查看并处理/);
+  const background = page.locator('.bot-background-work');
+  assert.match(await background.locator(':scope > summary').innerText(), /任务动态 · 1 项/);
+  assert.equal(await background.locator(':scope > summary svg').count(), 1);
+  assert.equal(await background.locator(':scope > summary').evaluate(node => getComputedStyle(node, '::after').content), 'none');
   await reply.screenshot({ path: path.join(captureDirectory, 'work-waiting.png') });
+  await background.locator(':scope > summary').click();
+  await background.locator('.bot-work-row > summary').click();
+  await background.screenshot({ path: path.join(captureDirectory, 'bot-task-updates.png'), animations: 'disabled' });
+  await background.locator(':scope > summary').click();
   change([{ ...initial.sessions[0], status: 'accepted' }]);
   await until(() => work.getAttribute('data-status'), value => value === 'accepted');
   assert.match(await work.locator(':scope > summary').textContent(), /已签收/);
@@ -105,11 +115,11 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(viewport);
   await context.locator(':scope > summary').click();
   checks.push('classified reply and delegated work fit a 760px viewport in both themes');
-  await checkTaskDetail({ page, until, checks, captureDirectory, initial, change: (sessions, unavailable) => change(sessions, unavailable, true) });
+  await checkTaskDetail({ page, until, checks, captureDirectory, conversationFile, initial, change: (sessions, unavailable) => change(sessions, unavailable, true) });
   change(initial.sessions);
 }
 
-async function checkTaskDetail({ page, until, checks, captureDirectory, initial, change }) {
+async function checkTaskDetail({ page, until, checks, captureDirectory, conversationFile, initial, change }) {
   const project = await page.evaluate(workspaceId => window.peerAgent.projectAgentGet({ workspaceId }), initial.workspaceId);
   const conversation = await page.evaluate(workspacePath => window.peerAgent.conversationsCreate({
     title: '任务详情隔离验收', workspacePath, mode: 'chat',
@@ -133,7 +143,8 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
   assert.equal(await detail.locator('.bot-session-empty').count(), 1);
   assert.equal(await detail.locator('.bot-session-report h3').count(), 0);
   assert.equal(await detail.locator('.bot-session-heading time').count(), 0);
-  assert.match(await detail.locator('.bot-session-progress').innerText(), /执行受阻.*打开工作会话/s);
+  assert.match(await detail.locator('.bot-session-progress').innerText(), /执行受阻.*在对话中回复/s);
+  assert.equal(await detail.locator('.bot-session-open').innerText(), '回到对话');
   assert.equal(await detail.locator('.bot-session-open svg').count(), 1);
   const backSize = await detail.locator('.bot-session-back').boundingBox();
   const actionSize = await detail.locator('.bot-session-open').boundingBox();
@@ -176,13 +187,31 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
   await drawer.screenshot({ path: path.join(captureDirectory, 'task-detail-info.png') });
   await page.keyboard.press('Enter');
   assert.equal(await detail.locator('.bot-session-info').getAttribute('open'), null);
+  const parentRecord = readFileSync(conversationFile, 'utf8');
+  const childFile = path.join(path.dirname(conversationFile), conversation.id + '.jsonl');
+  const childRecord = existsSync(childFile) ? readFileSync(childFile, 'utf8') : '';
+  await detail.locator('.bot-session-open').click();
+  await detail.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.conversation-chat-drawer--nested').count(), 0);
+  assert.equal(await page.locator('.bot-profile').evaluate(node => node === document.activeElement), true);
+  assert.equal(readFileSync(conversationFile, 'utf8'), parentRecord);
+  assert.equal(existsSync(childFile) ? readFileSync(childFile, 'utf8') : '', childRecord);
+  const waitingRead = await page.evaluate(sessionId => window.peerAgent.projectAgentGetSession({ sessionId, detail: 'report' }), task.sessionId);
+  assert.equal(waitingRead.session.status, 'waiting_user');
+  await page.locator('.bot-profile').click();
+  await page.getByRole('tab', { name: '任务', exact: true }).click();
+  await page.locator('.bot-task-row', { hasText: task.title }).click();
+  await detail.waitFor();
+  change([{ ...task, status: 'running', statusLabel: '' }]);
+  await until(() => detail.getAttribute('data-status'), value => value === 'running');
+  assert.equal(await detail.locator('.bot-session-open').innerText(), '查看工作记录');
   await detail.locator('.bot-session-open').click();
   await page.locator('.conversation-chat-drawer--nested .chat-surface').waitFor();
   assert.equal((await page.evaluate(id => window.peerAgent.conversationsGet({ id }), conversation.id)).id, conversation.id);
   await page.keyboard.press('Escape');
   await page.locator('.conversation-chat-drawer--nested').waitFor({ state: 'detached' });
   assert.equal(await detail.locator('.bot-session-open').evaluate(node => node === document.activeElement), true);
-  checks.push('task information expands with SVG by keyboard; the existing conversation opens and Escape restores focus');
+  checks.push('waiting returns to the main Bot with focus, no input or task operation; explicitly viewing a running work record still opens the same conversation and Escape restores focus');
 
   for (const [index, status] of ['running', 'result_ready', 'accepted', 'failed', 'cancelled', 'paused', 'superseded', 'starting', 'queued'].entries()) {
     const summary = `第 ${index + 1} 次核查：已整理可读取的记录，缺失材料对应事项仍无法确认。`;
@@ -194,7 +223,20 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
     assert.match(await detail.locator('.bot-session-report').innerText(), /2 条依据记录/);
     assert.equal(await detail.locator('.bot-session-empty').count(), 0);
     if (status !== 'accepted') assert.doesNotMatch(await detail.locator('.bot-session-status').innerText(), /已签收/);
-    if (status === 'result_ready') assert.equal(await detail.locator('.bot-session-open').innerText(), '查看结果');
+    if (status === 'result_ready') {
+      assert.equal(await detail.locator('.bot-session-open').innerText(), '回到对话');
+      const beforeReturn = readFileSync(conversationFile, 'utf8');
+      await detail.locator('.bot-session-open').click();
+      await detail.waitFor({ state: 'detached' });
+      assert.equal(await page.locator('.conversation-chat-drawer--nested').count(), 0);
+      assert.equal(await page.locator('.bot-profile').evaluate(node => node === document.activeElement), true);
+      assert.equal((await page.evaluate(sessionId => window.peerAgent.projectAgentGetSession({ sessionId, detail: 'report' }), task.sessionId)).session.status, 'result_ready');
+      assert.equal(readFileSync(conversationFile, 'utf8'), beforeReturn);
+      await page.locator('.bot-profile').click();
+      await page.getByRole('tab', { name: '任务', exact: true }).click();
+      await page.locator('.bot-task-row', { hasText: task.title }).click();
+      await detail.waitFor();
+    }
     if (status === 'accepted') await drawer.screenshot({ path: path.join(captureDirectory, 'task-detail-accepted.png') });
   }
   await detail.locator('.bot-session-info > summary').click();
@@ -210,9 +252,13 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
 
   change([{ ...task, conversationId: '' }]);
   await until(() => detail.getAttribute('data-status'), value => value === 'waiting_user');
+  assert.equal(await detail.locator('.bot-session-open').innerText(), '回到对话');
+  assert.match(await detail.locator('.bot-session-hint').innerText(), /在对话中回复/);
+  change([{ ...task, conversationId: '', status: 'running', statusLabel: '' }]);
+  await until(() => detail.getAttribute('data-status'), value => value === 'running');
   await detail.getByText('尚未建立可打开的工作会话。', { exact: true }).waitFor();
   assert.equal(await detail.locator('.bot-session-open').count(), 0);
-  checks.push('missing conversation has an explanation instead of a dead disabled action');
+  checks.push('missing child conversation does not block returning to the main Bot; a missing optional work record still has an honest explanation');
 
   change([task]);
   await detail.locator('.bot-session-open').waitFor();

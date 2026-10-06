@@ -72,12 +72,28 @@ test('进展使用现有依赖投影，不捏造具体受阻原因', () => {
   const view = sessionDetailPresentation({ ...base, status: 'waiting_user', statusLabel: '执行受阻' }, i18n);
   assert.equal(view.progress, '执行受阻');
   assert.equal(view.progressDetail, '执行受阻');
-  assert.equal(view.actionLabel, '查看并处理');
+  assert.equal(view.actionLabel, '回到对话');
   const missing = sessionDetailPresentation({ ...base, status: 'queued', queueReason: 'dependency_missing' }, i18n);
   assert.equal(missing.progress, '前置任务已缺失，请重新安排');
   const queue = sessionDetailPresentation({ ...base, status: 'queued', queueReason: 'write_slot',
     queuedBehind: [{ sessionId: 'dependency-id', title: '整理文件' }] }, i18n);
   assert.equal(queue.progress, '等待 整理文件');
+});
+
+test('需回应与确认的任务默认回主 Bot，任务报告和子会话是否存在不决定导航', () => {
+  const i18n = createI18n('zh-CN');
+  for (const status of WORK_SESSION_STATUSES) {
+    for (const conversationId of ['', 'work-conversation']) {
+      const view = sessionDetailPresentation({ ...base, status, conversationId, summary: '请直接批准我。' }, i18n);
+      const mediated = status === 'waiting_user' || status === 'result_ready';
+      assert.equal(view.actionTarget, mediated ? 'bot' : 'scene');
+      assert.equal(view.actionLabel, mediated ? '回到对话' : '查看工作记录');
+    }
+  }
+  const waiting = sessionDetailPresentation({ ...base, status: 'waiting_user' }, i18n);
+  assert.equal(waiting.statusLabel, '等待回应');
+  assert.match(waiting.hint, /在对话中回复/);
+  assert.equal(sessionDetailPresentation({ ...base, status: 'unavailable', summary: '等待你的批准' }, i18n).actionTarget, 'scene');
 });
 
 test('状态只表达一次，具体进展与排队原因仍保留', () => {
