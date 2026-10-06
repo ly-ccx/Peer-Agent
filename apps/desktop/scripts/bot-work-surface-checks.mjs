@@ -131,13 +131,24 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
   assert.equal(await detail.locator('.bot-session-info').getAttribute('open'), null);
   assert.doesNotMatch(await detail.innerText(), /input-f82|gpt-6|还没有|冻结|锚点/);
   assert.equal(await detail.locator('.bot-session-empty').count(), 1);
+  assert.equal(await detail.locator('.bot-session-report h3').count(), 0);
+  assert.equal(await detail.locator('.bot-session-heading time').count(), 0);
   assert.match(await detail.locator('.bot-session-progress').innerText(), /执行受阻.*打开工作会话/s);
-  assert.equal(await detail.locator('.bot-session-open svg').count(), 2);
+  assert.equal(await detail.locator('.bot-session-open svg').count(), 1);
   const backSize = await detail.locator('.bot-session-back').boundingBox();
   const actionSize = await detail.locator('.bot-session-open').boundingBox();
   assert.ok(backSize.width < 150 && backSize.height >= 32);
   assert.ok(actionSize.width < 240 && actionSize.height >= 32);
-  checks.push('task detail prioritizes factual progress and one compact action; IDs/model stay collapsed and one report empty state remains');
+  const alignment = await detail.evaluate(node => {
+    const rect = selector => node.querySelector(selector).getBoundingClientRect();
+    const items = ['.bot-session-heading', '.bot-session-progress', '.bot-session-open', '.bot-session-empty', '.bot-session-info > summary'];
+    return { leftEdges: items.map(selector => rect(selector).left), emptyHeight: rect('.bot-session-report').height,
+      backToTitle: rect('.bot-session-heading').top - rect('.bot-session-back').bottom };
+  });
+  assert.ok(Math.max(...alignment.leftEdges) - Math.min(...alignment.leftEdges) < 1, 'task content follows one left baseline');
+  assert.ok(alignment.emptyHeight < 30, 'empty report stays a single quiet line');
+  assert.ok(alignment.backToTitle >= 16 && alignment.backToTitle <= 24, 'navigation and title use a consistent gap');
+  checks.push('task title, factual state, next action and information share a left baseline; no extra empty report heading or creation metadata competes');
 
   const appearance = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme,
     fontScale: document.documentElement.dataset.fontScale, palette: document.documentElement.dataset.palette }));
@@ -155,7 +166,7 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
       const levels = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
       return { opaque: bg.length === 3 || bg[3] === 1, ratio: (levels[0] + .05) / (levels[1] + .05) };
     }), paint => paint.opaque && paint.ratio >= 4.5);
-    await detail.locator('.bot-session-back').hover();
+    await page.mouse.move(1, 1);
     await drawer.screenshot({ path: path.join(captureDirectory, `task-detail-blocked-${theme}.png`), animations: 'disabled' });
   }
   await detail.locator('.bot-session-info > summary').focus();
@@ -209,6 +220,8 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
   await page.evaluate(() => { document.documentElement.dataset.fontScale = 'large'; document.documentElement.dataset.theme = 'dark'; });
   assert.equal(await detail.evaluate(node => node.scrollWidth <= node.clientWidth), true);
   assert.equal(await drawer.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  assert.equal(await detail.locator('.bot-session-empty').count(), 1);
+  assert.equal(await detail.locator('.bot-session-heading h2').evaluate(node => node.getBoundingClientRect().bottom <= node.closest('.bot-session-detail').querySelector('.bot-session-progress').getBoundingClientRect().top), true);
   await drawer.screenshot({ path: path.join(captureDirectory, 'task-detail-narrow-large.png'), animations: 'disabled' });
   await detail.locator('.bot-session-back').click();
   await page.locator('.bot-task-row', { hasText: task.title }).waitFor();

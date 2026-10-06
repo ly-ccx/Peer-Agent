@@ -37,32 +37,27 @@ export function SessionDetail({
       </button>
       <header className="bot-session-heading">
         <h2>{view.title}</h2>
-        <div className="bot-session-meta">
-          <span className={`bot-session-status is-${view.tone}`}>{view.statusLabel}</span>
-          {view.createdLabel ? <time dateTime={session.spawnedAt}>
-            {i18n.t('projectAgent.drawer.taskDetail.created', { time: view.createdLabel })}
-          </time> : null}
-        </div>
       </header>
       <section className="bot-session-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
-        <h3>{i18n.t('projectAgent.drawer.progress')}</h3>
-        <p className="bot-session-progress-title">{view.progress}</p>
-        <p className="bot-session-hint">{session.conversationId ? view.hint : i18n.t('projectAgent.drawer.taskDetail.noScene')}</p>
+        <h3 className={`bot-session-status is-${view.tone}`}>{view.statusLabel}</h3>
+        <p className="bot-session-hint">
+          {view.progressDetail ? <span className="bot-session-progress-note">{view.progressDetail}<br /></span> : null}
+          <span>{session.conversationId ? view.hint : i18n.t('projectAgent.drawer.taskDetail.noScene')}</span>
+        </p>
         {session.conversationId ? (
           <button className="bot-session-open" type="button" onClick={() => setSceneOpen(true)}>
-            <PeerIcon name="terminal" />
             {view.actionLabel}
             <PeerIcon name="arrowUpRight" size={14} />
           </button>
         ) : null}
       </section>
-      <section className="bot-session-report" aria-busy={reportState === 'loading'} aria-label={i18n.t('projectAgent.drawer.taskDetail.report')}>
-        <div className="bot-session-report-heading">
+      <section className={`bot-session-report${view.report ? '' : ' is-empty'}`} aria-busy={reportState === 'loading'} aria-label={i18n.t('projectAgent.drawer.taskDetail.report')}>
+        {view.report || view.evidenceRefs.length ? <div className="bot-session-report-heading">
           <h3>{i18n.t('projectAgent.drawer.taskDetail.report')}</h3>
           {view.evidenceRefs.length ? <span>{i18n.t('projectAgent.drawer.taskDetail.evidenceCount', { count: view.evidenceRefs.length })}</span> : null}
-        </div>
+        </div> : null}
         {view.report ? <p className="bot-session-report-text">{view.report}</p> : (
-          <p className="bot-session-empty" role={reportState === 'ready' ? undefined : 'status'}><PeerIcon name="fileText" />{i18n.t(reportState === 'loading'
+          <p className="bot-session-empty" role={reportState === 'ready' ? undefined : 'status'}>{i18n.t(reportState === 'loading'
             ? 'projectAgent.drawer.taskDetail.readingReport' : reportState === 'unavailable'
               ? 'projectAgent.drawer.taskDetail.reportUnavailable' : 'projectAgent.drawer.taskDetail.noReport')}</p>
         )}

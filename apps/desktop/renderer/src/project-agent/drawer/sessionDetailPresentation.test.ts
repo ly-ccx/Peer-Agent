@@ -71,12 +71,25 @@ test('进展使用现有依赖投影，不捏造具体受阻原因', () => {
   const i18n = createI18n('zh-CN');
   const view = sessionDetailPresentation({ ...base, status: 'waiting_user', statusLabel: '执行受阻' }, i18n);
   assert.equal(view.progress, '执行受阻');
+  assert.equal(view.progressDetail, '执行受阻');
   assert.equal(view.actionLabel, '查看并处理');
   const missing = sessionDetailPresentation({ ...base, status: 'queued', queueReason: 'dependency_missing' }, i18n);
   assert.equal(missing.progress, '前置任务已缺失，请重新安排');
   const queue = sessionDetailPresentation({ ...base, status: 'queued', queueReason: 'write_slot',
     queuedBehind: [{ sessionId: 'dependency-id', title: '整理文件' }] }, i18n);
   assert.equal(queue.progress, '等待 整理文件');
+});
+
+test('状态只表达一次，具体进展与排队原因仍保留', () => {
+  const i18n = createI18n('zh-CN');
+  for (const status of WORK_SESSION_STATUSES) {
+    const view = sessionDetailPresentation({ ...base, status }, i18n);
+    assert.equal(view.progressDetail, '');
+  }
+  assert.equal(sessionDetailPresentation({ ...base, statusLabel: '正在核对 12 条记录' }, i18n).progressDetail, '正在核对 12 条记录');
+  assert.equal(sessionDetailPresentation({ ...base, status: 'queued', queueReason: 'dependency_missing' }, i18n).progressDetail,
+    '前置任务已缺失，请重新安排');
+  assert.equal(sessionDetailPresentation({ ...base, status: 'unavailable', statusLabel: '正在核对 12 条记录' }, i18n).progressDetail, '');
 });
 
 test('缺失日期和标题用诚实空态；依据去重且原始引用保留', () => {

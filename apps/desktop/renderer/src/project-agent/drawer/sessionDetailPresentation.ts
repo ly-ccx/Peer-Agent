@@ -42,6 +42,7 @@ export function sessionDetailPresentation(session: DrawerSession, i18n: Pick<I18
     statusLabel,
     tone: status ? TONES[status] : 'quiet',
     progress,
+    progressDetail: progress === statusLabel ? '' : progress,
     hint: i18n.t(status
       ? `projectAgent.drawer.taskDetail.hint.${status}`
       : 'projectAgent.drawer.taskDetail.hint.unavailable'),

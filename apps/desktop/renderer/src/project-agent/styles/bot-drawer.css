@@ -984,34 +984,32 @@
 .bot-task-resume:hover { color: var(--ink-primary); background: var(--za-surface-2); }
 .bot-task-resume:disabled { opacity: .5; cursor: wait; }
 
-/* Task detail follows the same paper and compact control scale as the profile. */
-.bot-session-detail { display: flex; flex-direction: column; gap: 24px; min-width: 0; padding: 0 2px 16px; }
-.bot-session-detail button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; align-self: flex-start; min-height: 34px; padding: 7px 11px; border: 0; border-radius: var(--control-radius-compact); font: inherit; font-size: .8125rem; line-height: 1.4; cursor: pointer; transition: background var(--za-motion-fast) var(--za-ease-standard); }
-.bot-session-detail .bot-session-back { margin: -2px 0 -10px -7px; padding-inline: 5px 8px; background: transparent; color: var(--graphite-soft); font-size: .75rem; }
-.bot-session-detail .bot-session-back:hover { background: var(--control-fill); color: var(--graphite-base); }
-.bot-session-heading { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.bot-session-detail .bot-session-heading h2 { font-size: 1.125rem; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
-.bot-session-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: .6875rem; line-height: 1.5; color: var(--graphite-soft); }
-.bot-session-status { padding: 3px 7px; border-radius: var(--control-radius-compact); background: var(--control-fill); color: var(--graphite-soft); }
-.bot-session-status.is-attention { color: var(--graphite-base); font-weight: 600; }
-.bot-session-status.is-active { color: var(--graphite-base); }
-.bot-session-progress { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; border-radius: var(--surface-radius); background: var(--paper-base); }
-.bot-session-detail h3 { margin: 0; color: var(--graphite-soft); font-size: .75rem; line-height: 1.5; font-weight: 400; }
+/* Task detail uses one reading column; status and records keep separate factual roles. */
+.bot-session-detail { display: flex; flex-direction: column; min-width: 0; padding: 0 2px 16px; }
+.bot-session-detail button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; align-self: flex-start; min-height: 34px; padding: 7px 12px; border: 0; border-radius: var(--control-radius-compact); font: inherit; font-size: .8125rem; line-height: 1.4; cursor: pointer; transition: background var(--za-motion-fast) var(--za-ease-standard), color var(--za-motion-fast) var(--za-ease-standard); }
+.bot-session-detail .bot-session-back { gap: 4px; margin-bottom: 20px; padding: 4px 0; background: transparent; color: var(--graphite-soft); font-size: .75rem; }
+.bot-session-detail .bot-session-back:hover { background: transparent; color: var(--graphite-base); }
+.bot-session-heading { min-width: 0; }
+.bot-session-detail .bot-session-heading h2 { font-size: 1rem; font-weight: 600; line-height: 1.55; overflow-wrap: anywhere; }
+.bot-session-progress { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 16px; }
+.bot-session-detail h3 { margin: 0; color: var(--graphite-soft); font-size: .75rem; line-height: 1.5; font-weight: 500; }
+.bot-session-detail .bot-session-status { color: var(--graphite-base); font-size: .8125rem; font-weight: 500; line-height: 1.5; }
 .bot-session-detail p { margin: 0; overflow-wrap: anywhere; }
-.bot-session-progress-title { color: var(--graphite-base); font-size: .9375rem; font-weight: 600; line-height: 1.6; }
-.bot-session-hint { color: var(--graphite-soft); font-size: .8125rem; line-height: 1.65; }
-.bot-session-detail .bot-session-open { margin-top: 8px; background: var(--graphite-base); color: var(--paper-sheet); }
-.bot-session-detail .bot-session-open:hover { background: var(--graphite-base-hover); }
-.bot-session-report { display: flex; flex-direction: column; gap: 12px; }
+.bot-session-hint { color: var(--graphite-soft); font-size: .8125rem; line-height: 1.75; }
+.bot-session-progress-note { color: var(--graphite-soft); }
+.bot-session-detail .bot-session-open { margin-top: 4px; background: var(--control-fill); color: var(--graphite-base); }
+.bot-session-detail .bot-session-open:hover { background: var(--control-fill-hover); }
+.bot-session-report { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--chrome-hairline); }
+.bot-session-report.is-empty { gap: 8px; margin-top: 16px; padding-top: 0; border-top: 0; }
 .bot-session-report-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 .bot-session-report-heading > span { color: var(--graphite-soft); font-size: .6875rem; line-height: 1.5; }
 .bot-session-report-text { color: var(--graphite-base); font-size: .8125rem; line-height: 1.75; white-space: pre-wrap; }
-.bot-session-empty { display: flex; align-items: center; gap: 8px; color: var(--graphite-soft); font-size: .8125rem; line-height: 1.6; }
-.bot-session-info { min-width: 0; padding-top: 8px; border-top: 1px solid var(--chrome-hairline); }
-.bot-session-detail summary { display: flex; align-items: center; gap: 6px; width: fit-content; min-height: 34px; border-radius: var(--control-radius-compact); color: var(--graphite-soft); font-size: .75rem; line-height: 1.5; list-style: none; cursor: pointer; }
+.bot-session-empty { color: var(--graphite-soft); font-size: .75rem; line-height: 1.6; }
+.bot-session-info { min-width: 0; margin-top: 20px; padding-top: 10px; border-top: 1px solid var(--chrome-hairline); }
+.bot-session-detail summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; border-radius: var(--control-radius-compact); color: var(--graphite-soft); font-size: .75rem; line-height: 1.5; list-style: none; cursor: pointer; }
 .bot-session-detail summary::-webkit-details-marker { display: none; }
 .bot-session-detail summary:hover { color: var(--graphite-base); }
-.bot-session-detail summary > .peer-icon { flex: none; transition: transform var(--za-motion-fast) var(--za-ease-standard); }
+.bot-session-detail summary > .peer-icon { order: 1; flex: none; transition: transform var(--za-motion-fast) var(--za-ease-standard); }
 .bot-session-detail details[open] > summary > .peer-icon { transform: rotate(90deg); }
 .bot-session-detail dl { display: flex; flex-direction: column; gap: 12px; margin: 10px 0 6px; }
 .bot-session-detail dl > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: baseline; font-size: .75rem; line-height: 1.65; }
@@ -1023,13 +1021,13 @@
 .bot-session-evidence ul { display: flex; flex-direction: column; gap: 7px; margin: 10px 0; padding: 0; list-style: none; color: var(--graphite-soft); }
 .bot-session-detail :is(button, summary):focus-visible { outline: 2px solid var(--za-accent); outline-offset: 3px; }
 @supports (corner-shape: superellipse(1.4)) {
-  .bot-session-detail :is(button, summary, .bot-session-status, .bot-session-progress) { corner-shape: var(--control-corner); }
+  .bot-session-detail :is(button, summary) { corner-shape: var(--control-corner); }
 }
 @media (prefers-reduced-motion: reduce) {
   .bot-session-detail :is(button, summary > .peer-icon) { transition: none; }
 }
 @media (forced-colors: active) {
-  .bot-session-detail :is(.bot-session-status, .bot-session-progress, .bot-session-open) { border: 1px solid CanvasText; }
+  .bot-session-detail .bot-session-open { border: 1px solid CanvasText; }
 }
 
 .bot-objective { border-bottom: 1px solid var(--border-color, #2b3039); padding: 16px 0; scroll-margin-top: 12px; }
