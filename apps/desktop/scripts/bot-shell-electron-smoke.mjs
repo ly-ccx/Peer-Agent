@@ -382,7 +382,20 @@ try {
     await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null });
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
-  if (workSurfaces) await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+  if (workSurfaces) {
+    // The quote-send check adds a real exchange. Reach the older work reply
+    // through scrolling instead of assuming virtualization kept it mounted.
+    const thread = page.locator('.bot-thread'), workReply = page.locator('#bot-msg-rc-message-9999');
+    await thread.hover();
+    for (let step = 0; step < 40 && await workReply.count() === 0; step++) {
+      const before = await thread.evaluate(node => node.scrollTop);
+      await page.mouse.wheel(0, -300);
+      await until(async () => ({ top: await thread.evaluate(node => node.scrollTop), mounted: await workReply.count() }), state => state.mounted > 0 || state.top !== before);
+    }
+    await workReply.waitFor();
+    report.checks.push('real scrolling reaches the earlier work reply after quote, streaming and question exchanges');
+    await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+  }
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
