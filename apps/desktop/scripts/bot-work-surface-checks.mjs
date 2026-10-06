@@ -216,6 +216,7 @@ async function checkTaskDetail({ page, until, checks, captureDirectory, initial,
 
   change([task]);
   await detail.locator('.bot-session-open').waitFor();
+  await detail.getByText('暂时没有任务报告。', { exact: true }).waitFor();
   await page.setViewportSize({ width: 760, height: 780 });
   await page.evaluate(() => { document.documentElement.dataset.fontScale = 'large'; document.documentElement.dataset.theme = 'dark'; });
   assert.equal(await detail.evaluate(node => node.scrollWidth <= node.clientWidth), true);
