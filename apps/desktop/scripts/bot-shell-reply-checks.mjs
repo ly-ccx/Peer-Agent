@@ -8,13 +8,16 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await reply.scrollIntoViewIfNeeded();
   const quote = reply.locator('.bot-reply-bar');
   assert.ok((await quote.textContent()).includes('请帮我梳理项目现状'));
-  assert.equal(await quote.locator('svg').count(), 1);
+  assert.equal(await quote.locator('svg').count(), 0);
+  assert.equal(await quote.locator('.bot-reply-bar-label').textContent(), '你');
+  assert.ok((await quote.getAttribute('aria-label')).startsWith('查看原消息: 你'));
+  assert.ok((await quote.getAttribute('title')).endsWith('原文结束标记'));
   assert.equal(await reply.getByRole('button', { name: /通知方式/ }).count(), 0);
   assert.equal(await reply.locator('.bot-reply-delivery').textContent(), '通知方式：即时提醒');
-  checks.push('quote is a context button with SVG; delivery policy is explicitly readonly');
+  checks.push('loaded quote names its actual author, preserves full text in its accessible name and tooltip, and removes navigation chrome; delivery stays readonly');
 
-  // The quote keeps a paper boundary; secondary actions stay quiet until hover
-  // or keyboard focus. Restore the original attributes after every sample.
+  // The quote is attached context above the body, with no standalone card.
+  // Secondary actions stay quiet; restore theme and disclosure after samples.
   const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
   const context = reply.locator('.bot-reply-context');
   assert.equal(await context.getAttribute('open'), null);
@@ -27,29 +30,40 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     const sample = await reply.evaluate(node => {
       const read = selector => {
         const item = node.querySelector(selector), style = getComputedStyle(item);
-        return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, borderStyle: style.borderTopStyle, shadow: style.boxShadow, height: item.getBoundingClientRect().height };
+        return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, borderStyle: style.borderTopStyle, shadow: style.boxShadow, height: item.getBoundingClientRect().height, width: item.getBoundingClientRect().width, font: style.fontSize, clamp: style.webkitLineClamp };
       };
-      return { quote: read('.bot-reply-bar'), action: read('.bot-context-process'), delivery: read('.bot-reply-delivery') };
+      return { quote: read('.bot-reply-bar'), source: read('.bot-reply-bar-label'), excerpt: read('.bot-reply-bar-excerpt'), action: read('.bot-context-process'), delivery: read('.bot-reply-delivery') };
     });
     report.replyStyles.push({ theme, ...sample });
-    assert.equal(sample.quote.border, '1px'); assert.equal(sample.quote.borderStyle, 'solid');
-    assert.notEqual(sample.quote.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(sample.quote.border, '0px');
+    assert.equal(sample.quote.background, 'rgba(0, 0, 0, 0)');
     assert.equal(sample.quote.shadow, 'none');
+    assert.ok(sample.quote.height >= 44 && sample.quote.height <= 66);
+    assert.ok(sample.quote.width <= 360);
+    assert.equal(sample.source.font, '11px'); assert.equal(sample.excerpt.font, '13px');
+    assert.equal(sample.excerpt.clamp, '2');
     assert.equal(sample.action.background, 'rgba(0, 0, 0, 0)');
     assert.equal(sample.action.shadow, 'none');
     assert.ok(sample.action.height >= 27);
     assert.equal(sample.delivery.border, '0px');
-    if (captureDirectory) await reply.screenshot({ path: path.join(captureDirectory, `reply-${theme}.png`), animations: 'disabled' });
+    await context.locator(':scope > summary').click();
+    if (captureDirectory) await reply.locator('..').screenshot({ path: path.join(captureDirectory, `reply-${theme}.png`), animations: 'disabled' });
+    await context.locator(':scope > summary').click();
   }
   await page.evaluate(original => {
     for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
   }, originalTheme);
-  assert.notEqual(report.replyStyles[0].quote.background, report.replyStyles[1].quote.background);
-  checks.push('real dark/light quotes retain paper boundaries; secondary actions stay compact and both surfaces have no outer glow');
+  assert.notEqual(report.replyStyles[0].excerpt.color, report.replyStyles[1].excerpt.color);
+  checks.push('dark/light quotes use compact 11px source and 13px two-line excerpts, with a 44px hit area and no background, border or shadow');
 
   const process = reply.getByRole('button', { name: '查看过程', exact: true });
   await quote.focus();
   assert.equal(await quote.evaluate(node => node === document.activeElement), true);
+  await quote.press('Enter');
+  await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
+  await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
+  await reply.scrollIntoViewIfNeeded();
+  await quote.focus();
   await quote.press('Tab');
   assert.equal(await reply.locator('.bot-work-row > summary, .bot-reply-context > summary').first().evaluate(node => node === document.activeElement), true);
   await process.focus();
@@ -101,6 +115,27 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await cancel.press('Enter'); await composerQuote.waitFor({ state: 'detached' });
   assert.equal(await composer.inputValue(), '保留我的草稿');
   await composer.fill('');
+  // Submit a real explicit quote through the existing composer and durable IPC.
+  await reply.locator('.bot-reply-body').evaluate(node => {
+    const range = document.createRange(); range.selectNodeContents(node);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  await reply.getByRole('button', { name: '引用', exact: true }).click();
+  await composer.fill('针对这段原文补充说明'); await composer.press('Enter');
+  await composerQuote.waitFor({ state: 'detached' });
+  const explicit = page.locator('.bot-user').filter({ has: page.locator('.bot-user-text', { hasText: '针对这段原文补充说明' }) });
+  const explicitQuote = explicit.locator('.bot-user-quote');
+  await explicitQuote.waitFor();
+  assert.equal(await explicitQuote.locator('.bot-reply-bar-label').textContent(), 'project-000');
+  assert.equal(await explicitQuote.locator('.bot-reply-bar-excerpt').textContent(), selected);
+  assert.equal(await explicitQuote.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(0, 0, 0, 0)');
+  assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'reply-narrow-sent.png') });
+  await explicitQuote.press('Enter');
+  await page.locator('#bot-msg-rc-message-9999.is-anchored').waitFor();
+  await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   if (originalViewport) await page.setViewportSize(originalViewport);
   checks.push('selected quote uses the same context treatment, fits a 760px viewport and cancels by keyboard without losing the draft');
+  checks.push('explicit quote leaves the composer on send, names the real bot source inside the user bubble and navigates to that source by keyboard');
 }

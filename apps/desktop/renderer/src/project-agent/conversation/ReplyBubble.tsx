@@ -10,6 +10,7 @@ import { DelegatedWork } from './DelegatedWork';
 import { replyWork, type BotWorkIndex } from '../state/botWorkState';
 import { CardView } from './CardView';
 import { ReplyAnchors } from './ReplyAnchors';
+import type { ReplyAnchor } from '../state/replyReferenceState';
 
 export function ReplyBubble({
   workspaceId,
@@ -32,7 +33,7 @@ export function ReplyBubble({
   readonly workIndex: BotWorkIndex;
   readonly message: BotChatMessage;
   readonly referenceIds: readonly string[];
-  readonly anchors: ReadonlyMap<string, string>;
+  readonly anchors: ReadonlyMap<string, ReplyAnchor>;
   readonly highlighted: boolean;
   readonly i18n: I18nRuntime;
   readonly onJump: (messageId: string) => void;

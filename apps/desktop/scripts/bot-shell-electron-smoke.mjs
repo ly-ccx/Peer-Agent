@@ -45,7 +45,7 @@ if (process.argv.includes('--accessibility')) {
 const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
 const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 seededMessages.at(-1).replyTo = ['rc-message-9500'];
-seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。';
+seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。' + '需要逐项核对实际实现和依据。'.repeat(8) + '原文结束标记';
 seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
 seededMessages.at(-1).meta = { surfacing: 'interrupt', memoryUsed: ['rc-memory-123'] };
 if (workSurfaces) {
@@ -354,7 +354,10 @@ try {
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
-  await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+  const unloadedQuote = page.locator('#bot-msg-rc-message-9999 .bot-reply-bar');
+  assert.equal(await unloadedQuote.locator('.bot-reply-bar-label').textContent(), '引用');
+  assert.equal((await unloadedQuote.getAttribute('aria-label')).includes('rc-message-9500'), false);
+  await unloadedQuote.click();
   await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
   await until(() => page.locator('#bot-msg-rc-message-9500').evaluate(node => {
     const row = node.getBoundingClientRect(), thread = node.closest('.bot-thread').getBoundingClientRect();

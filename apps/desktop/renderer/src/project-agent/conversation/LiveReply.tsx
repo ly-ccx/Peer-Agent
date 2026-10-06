@@ -5,8 +5,9 @@ import { DelegatedWork } from './DelegatedWork';
 import type { BotWorkRow } from '../state/botWorkState';
 import { ReplyAnchors } from './ReplyAnchors';
 import { BotProcess, type ProcessDisclosure } from './BotProcess';
+import type { ReplyAnchor } from '../state/replyReferenceState';
 
-export function LiveReply({ activity, referenceIds, i18n, anchors, onJump, disclosure, workRows, onOpenWork }: { readonly activity: ProjectAgentActivity; readonly referenceIds: readonly string[]; readonly i18n: I18nRuntime; readonly anchors: ReadonlyMap<string, string>; readonly onJump: (id: string) => void; readonly disclosure?: ProcessDisclosure; readonly workRows: readonly BotWorkRow[]; readonly onOpenWork: (id: string) => void }) {
+export function LiveReply({ activity, referenceIds, i18n, anchors, onJump, disclosure, workRows, onOpenWork }: { readonly activity: ProjectAgentActivity; readonly referenceIds: readonly string[]; readonly i18n: I18nRuntime; readonly anchors: ReadonlyMap<string, ReplyAnchor>; readonly onJump: (id: string) => void; readonly disclosure?: ProcessDisclosure; readonly workRows: readonly BotWorkRow[]; readonly onOpenWork: (id: string) => void }) {
   return (
     <article className="bot-reply bot-live-reply" data-turn-id={activity.turnId} data-phase={activity.phase} aria-label={i18n.t('projectAgent.chat.generating')}>
       <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />

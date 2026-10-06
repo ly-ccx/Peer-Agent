@@ -21,7 +21,7 @@ import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
 import { BotProcess, type ProcessDisclosure } from './BotProcess';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import { replyReferencesForRows } from '../state/replyReferenceState';
+import { replyAnchorsForMessages, replyReferencesForRows, type ReplyAnchor } from '../state/replyReferenceState';
 import { useMessageHighlight } from './useMessageHighlight';
 
 export function BotMessageList({
@@ -79,7 +79,7 @@ export function BotMessageList({
   const highlighted = useMessageHighlight(highlightedId, highlightRequestId, scroll.visibleRows.some(row => row.type === 'message' && row.message.id === highlightedId));
   const references = replyReferencesForRows(rows);
   const messages = rows.flatMap((row) => (row.type === 'message' ? [row.message] : []));
-  const anchors = new Map(messages.map((message) => [message.id, clip(message.content)]));
+  const anchors = replyAnchorsForMessages(messages, { user: i18n.t('projectAgent.chat.you'), bot: label });
   const replied = repliedUserIds(messages);
   const loadOlder = async () => {
     if (!onLoadOlder || loadingOlderRef.current) return;
@@ -139,7 +139,7 @@ export function BotMessageList({
             key={row.message.id}
             message={row.message}
             replied={replied.has(row.message.id)}
-            quoteAuthor={label}
+            anchors={anchors}
             onJump={onJump}
             highlighted={highlighted === row.message.id}
             i18n={i18n}
@@ -223,7 +223,7 @@ function SystemCard({
   readonly activity?: ProjectAgentActivity;
   readonly processRounds?: readonly BotToolRound[];
   readonly disclosure?: ProcessDisclosure;
-  readonly anchors: ReadonlyMap<string, string>;
+  readonly anchors: ReadonlyMap<string, ReplyAnchor>;
   readonly onJump: (id: string) => void;
   readonly avatar: BotAvatarModel;
   readonly label: string;
@@ -260,9 +260,4 @@ function separatorText(
     : '';
   if (row.proactive && when) return `${when} · ${i18n.t('projectAgent.chat.digest')}`;
   return when;
-}
-
-function clip(value: string): string {
-  const text = value.replace(/\s+/g, ' ').trim();
-  return Array.from(text).slice(0, 42).join('');
 }
