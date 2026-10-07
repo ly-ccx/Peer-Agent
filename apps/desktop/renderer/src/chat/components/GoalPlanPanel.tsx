@@ -823,6 +823,7 @@ function criterionKindLabel(kind: GoalSuccessCriterion['kind'], isZh: boolean): 
     test: '测试',
     'file-contains': '文件内容',
     'file-exists': '文件存在',
+    model_review: '结果核查',
     manual: '人工确认',
   };
   const en: Record<GoalSuccessCriterion['kind'], string> = {
@@ -830,6 +831,7 @@ function criterionKindLabel(kind: GoalSuccessCriterion['kind'], isZh: boolean): 
     test: 'Test',
     'file-contains': 'File contains',
     'file-exists': 'File exists',
+    model_review: 'Result review',
     manual: 'Manual',
   };
   return isZh ? zh[kind] : en[kind];

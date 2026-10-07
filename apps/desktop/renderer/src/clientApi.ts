@@ -120,6 +120,7 @@ const unavailableApi: ClientApi = {
   projectAgentGet: unavailableMethod('projectAgentGet'),
   projectAgentReadAvatar: unavailableMethod('projectAgentReadAvatar'),
   projectAgentCreate: unavailableMethod('projectAgentCreate'),
+  projectAgentUpdateModelSelection: async () => ({ ok: false, code: 'UNAVAILABLE' }),
   projectAgentUpdateProfile: unavailableMethod('projectAgentUpdateProfile'),
   projectAgentDelete: unavailableMethod('projectAgentDelete'),
   projectAgentSubmitInput: unavailableMethod('projectAgentSubmitInput'),

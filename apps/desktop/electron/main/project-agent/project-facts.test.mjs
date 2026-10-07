@@ -5,6 +5,28 @@ import os from 'node:os';
 import path from 'node:path';
 import { createDesktopProjectFacts } from './project-facts.mjs';
 
+test('running and blocked tasks never get a result-signoff card; manual review has its own bound action', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-completion-cards-'));
+  let status = 'running', manual = false;
+  try {
+    const facts = createDesktopProjectFacts({ runtimeRoot: root,
+      supervisor: { sessionsForProject: () => [{ sessionId: 's', title: '核对目录', status }],
+        acceptance: () => ({ mode: 'confirm' }),
+        completionReview: () => manual ? { sessionId: 's', reviewToken: 'bound-token', criteria: [{ id: 'c', description: '报告含目录与脚本' }], report: '实际发现' } : null },
+      approvalStore: { list: () => [] }, profileStore: { read: () => ({ agentConversationId: 'parent' }) },
+      conversationStore: { getPersistedConversationHistory: () => ({ messages: [] }) } });
+    assert.equal(facts.cards('w').length, 0);
+    status = 'waiting_user'; manual = true;
+    const card = facts.cards('w')[0]; assert.equal(card.kind, 'completion_review');
+    assert.equal(card.completionReview.report, '实际发现');
+    assert.equal(card.actions[0].payload.stage, 'manual_completion');
+    assert.equal(card.actions[0].payload.reviewToken, 'bound-token');
+    status = 'result_ready'; manual = false;
+    assert.equal(facts.cards('w')[0].kind, 'confirm_result');
+    status = 'running'; assert.equal(facts.cards('w').length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('RC5 已保存的手输回答关闭对话选择，而引用其它消息和任务批准不会被推断', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-reply-question-'));
   const messages = [{ id: 'r', kind: 'agent_reply', question: { options: ['A', 'B'] } }];

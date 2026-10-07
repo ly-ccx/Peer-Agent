@@ -52,7 +52,7 @@ export function decideSessionAcceptance(facts = {}, options = {}) {
   const hostAuthority = facts.hostAuthority && typeof facts.hostAuthority === 'object' ? facts.hostAuthority : {};
   const verdict = computeVerificationVerdict(plan, evidenceIndex, hostAuthority);
   const verdictRef = verdictRefFor(sessionId, verdict.outcome);
-  const closeGatePassed = evaluateAcceptanceCloseGate(plan).ok === true;
+  const closeGatePassed = evaluateAcceptanceCloseGate(plan, { knownRefs: [...evidenceIndex] }).ok === true;
   const policy = facts.policy === 'confirm' ? 'confirm' : 'auto';
   const reported = facts.reported === true;
   const readOnly = facts.readOnly === true;

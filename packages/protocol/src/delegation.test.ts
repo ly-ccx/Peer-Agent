@@ -132,7 +132,7 @@ test('verifying, result_ready, starting, and superseded are delegation statuses'
   );
   assert.equal(
     projectWorkSession(plan({ runnerStatus: 'exploring' }), meta()).status,
-    'verifying',
+    'running',
   );
   const draftingReview = projectWorkSession(
     plan({ status: 'drafting' }),
@@ -148,6 +148,8 @@ test('verifying, result_ready, starting, and superseded are delegation statuses'
   assert.equal(superseded.status, 'superseded');
   assert.equal(superseded.supersededBy, 'plan-2');
   assert.equal(superseded.actionRight, 'peer_advancing');
+  assert.equal(projectWorkSession(plan({ status: 'completed', runnerStatus: 'blocked' }), meta({ acceptance: 'confirm' })).status, 'waiting_user');
+  assert.equal(projectWorkSession(plan({ status: 'completed' }), meta({ accepted: true, verifying: true })).status, 'accepted');
 });
 
 test('dispositions answer the last user message and keep quoted sessions in scope', () => {

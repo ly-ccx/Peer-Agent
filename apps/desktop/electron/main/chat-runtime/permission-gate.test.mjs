@@ -16,6 +16,25 @@ function createWebContents(events) {
 }
 
 describe('chat permission gate', () => {
+  it('keeps outside reads, lists and searches distinct from write permissions', async () => {
+    const activeStreams = new Map([['read-permissions', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    for (const [tool, action] of [['read_file', 'read'], ['list_files', 'list'], ['search_files', 'search']]) {
+      const pending = gate.createFilePermissionRequester({ webContents: createWebContents(events), streamId: 'read-permissions',
+        toolCallId: tool, conversationId: 'read-conversation' })({ tool, args: { path: '/outside' }, filePath: '/outside', workspacePath: '/project' });
+      const call = events.at(-1).payload.call;
+      assert.equal(call.capabilityId, `local.file.${action}`);
+      assert.equal(call.riskLevel, 'L1_local_read');
+      assert.equal(call.argumentsPreview.action, action);
+      assert.doesNotMatch(call.reason, /modify/);
+      gate.settlePermissionRequest(call.toolCallId, { grantId: `denied-${tool}`, toolCallId: call.toolCallId,
+        granted: false, duration: 'denied', decidedAt: new Date().toISOString() });
+      assert.equal((await pending).granted, false);
+    }
+    assert.equal(activeStreams.get('read-permissions').permissionIds.size, 0);
+  });
+
   it('stores scope grants in main runtime and reuses them for file writes', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];

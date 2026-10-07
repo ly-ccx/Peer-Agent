@@ -27,7 +27,7 @@ function factKeys(workspaceId, message) {
   const keys = (message?.meta?.sessionStates || []).flatMap(state => {
     if (!message.sources?.includes(state.sessionId)) return [];
     const mark = message.marks?.find(item => item.sessionId === state.sessionId);
-    return [key([workspaceId, 'session', state.sessionId, state.status, mark?.outcome || '', mark?.verdictRef || ''])];
+    return [key([workspaceId, 'session', state.sessionId, state.sourceRevision || '', state.status, mark?.outcome || '', mark?.verdictRef || ''])];
   });
   for (const ref of message?.meta?.evidenceRefs || []) {
     if (typeof ref === 'string' && ref.startsWith('objective-probe:')) keys.push(key([workspaceId, 'observation', ref]));

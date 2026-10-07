@@ -220,7 +220,7 @@ function spawnInput(extra = {}) {
     anchorMessageIds: ['anchor-1'],
     title: '修复登录',
     brief: '让登录流程重新可用',
-    successCriteria: ['登录请求返回成功'],
+    successCriteria: [{ id: 'c1', kind: 'manual', description: '登录请求返回成功' }],
     kind: 'ui',
     readOnly: false,
     ...extra,
@@ -233,6 +233,7 @@ function contextOf(env, extra = {}) {
     workspaceId: 'ws-1',
     workspacePath: env.root,
     surface: 'desktop',
+    manualCriterionAuthorities: [{ criterionId: 'c1', source: 'project_policy', sourceRef: 'test-policy' }],
     inputId: 'input-1',
     ...extra,
   };
@@ -395,8 +396,13 @@ test('开任务全链路：冻结模型、子会话、委托消息、计划、�
     assert.equal(plan.deliveryBinding.executionIsolation, 'none');
     assert.equal(plan.deliveryBinding.targetBranch, 'feature');
     assert.equal(plan.successCriteria[0].description, '登录请求返回成功');
-    assert.equal(session.report.summary, '让登录流程重新可用');
-    assert.deepEqual(session.report.keyFindings, ['登录请求返回成功']);
+    assert.equal(session.report.summary, '');
+    assert.deepEqual(session.report.keyFindings, []);
+    env.conversationStore.appendMessage(child.id, { id: 'actual-report', role: 'assistant', content: '实际发现：登录接口恢复，尚待验证。' });
+    const report = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' }).report;
+    assert.equal(report.summary, '实际发现：登录接口恢复，尚待验证。');
+    assert.equal(report.contentSource.messageId, 'actual-report');
+    assert.equal(report.contentSource.verification, 'unverified');
 
     const replied = await env.supervisor.message({
       sessionId: opened.sessionId,
@@ -488,7 +494,7 @@ test('未解析的附件和工具结果仍然挡住开任务', { timeout: 20_000
       }],
     });
     const blocked = await env.supervisor.spawn(
-      spawnInput({ anchorMessageIds: ['anchor-after-tool'], title: '看图', brief: '看这张截图' }),
+      spawnInput({ anchorMessageIds: ['anchor-after-tool', 'tool-row'], title: '看图', brief: '看这张截图' }),
       contextOf(env, { inputId: 'input-blocked' }),
     );
     assert.equal(blocked.error, 'spawn_failed');
@@ -730,8 +736,38 @@ async function completedSession(env) {
     evidenceRefs: ['ev-1'],
   });
   env.goalPlanStore.setPlanStatus(planId, 'completed');
+  env.goalPlanStore.setRunnerState(planId, { enabled: false, status: 'completed' });
   return { ...opened, planId };
 }
+
+test('main conversation can explicitly review a blocked manual report, never sign off an unfinished result', async () => {
+  let resumes = 0, env;
+  env = await harness({ goalRunner: { async start() {}, async resume(id, options) {
+    assert.equal(options.intent, 'verify'); resumes++;
+    env.goalPlanStore.setRunnerState(id, { status: 'verifying' });
+  } } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const session = env.supervisor.get({ sessionId: opened.sessionId });
+    env.goalPlanStore.revisePlan(session.planId, { status: 'executing', tasks: [{ taskId: 'leaf', status: 'completed', result: '四段实际报告' }],
+      successCriteria: [{ id: 'manual', kind: 'manual', description: '报告覆盖四项' }],
+      runner: { enabled: true, status: 'blocked', blockedReason: 'manual_dod_confirmation_required' } }, { reason: 'manual gate', changedBy: 'test' });
+    env.goalPlanStore.setPlanStatus(session.planId, 'executing');
+    env.goalPlanStore.setRunnerState(session.planId, { enabled: true, status: 'blocked', blockedReason: 'manual_dod_confirmation_required' });
+    assert.equal(env.supervisor.acceptance(opened.sessionId), null);
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).status, 'waiting_user');
+    assert.equal((await env.supervisor.confirmResult(opened.sessionId)).error, 'session_not_completed');
+    const review = env.supervisor.completionReview(opened.sessionId); assert.ok(review);
+    assert.equal((await env.supervisor.confirmCompletion({ sessionId: opened.sessionId, reviewToken: 'old' })).ok, false);
+    assert.equal(env.goalPlanStore.getPlan(session.planId).manualConfirmations.length, 0);
+    const result = await env.supervisor.confirmCompletion({ sessionId: opened.sessionId, reviewToken: review.reviewToken });
+    assert.equal(result.ok, true); assert.equal(resumes, 1);
+    assert.equal(env.goalPlanStore.getPlan(session.planId).manualConfirmations[0].decidedBy, 'local_ui');
+    assert.equal(env.goalPlanStore.getPlan(session.planId).resultAcceptance, undefined);
+    assert.equal((await env.supervisor.confirmCompletion({ sessionId: opened.sessionId, reviewToken: review.reviewToken })).alreadyConfirmed, true);
+    assert.equal(resumes, 1);
+  } finally { await env.cleanup(); }
+});
 
 test('missing independent verification cannot mint policy acceptance', async () => {
   const env = await harness();
@@ -1835,7 +1871,7 @@ test('new host resumes only a handoff suspension and preserves its verification 
   }}});
   try {
     const handoff = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true}),contextOf(env));
-    const manual = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true,successCriteria:['other outcome']}),contextOf(env));
+    const manual = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true,successCriteria:[{id:'c1',kind:'manual',description:'other outcome'}]}),contextOf(env));
     for (const [session, reason] of [[handoff,'host_handoff'],[manual,'user_pause']]) {
       const planId = env.supervisor.get({sessionId:session.sessionId}).planId;
       const plan = env.goalPlanStore.getPlan(planId);
@@ -1987,7 +2023,7 @@ test('a delegated task receives the full text upload on its anchor without inven
   } finally { await env.cleanup(); }
 });
 
-test('a new upload cannot waive missing unanchored history attachments', async () => {
+test('a delegation admits its chosen upload instead of unrelated history attachments', async () => {
   const env = await harness();
   try {
     const attachment = { id: 'doc', name: 'brief.md', mimeType: 'text/plain', size: 4,
@@ -1997,6 +2033,75 @@ test('a new upload cannot waive missing unanchored history attachments', async (
     env.conversationStore.appendMessage(env.parent.id, { id: 'new-file', kind: 'user_input', role: 'user',
       content: 'new brief', attachments: [{ ...attachment, id: 'new' }] });
     const opened = await env.supervisor.spawn(spawnInput({ anchorMessageIds: ['new-file'] }), contextOf(env));
+    assert.equal(opened.error, undefined);
+    const [child] = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' });
+    const snapshot = env.conversationStore.readInheritedBackground(child.backgroundSnapshotId);
+    assert.deepEqual(snapshot.scope.messageIds, ['new-file']);
+    assert.equal(snapshot.entries.some(entry => entry.sourceMessageId === 'earlier-file'), false);
+    assert.equal(env.conversationStore.getConversation(child.id).messages[0].attachments[0].text, 'fact');
+  } finally { await env.cleanup(); }
+});
+
+test('用户选择替换受阻调查：历史截图不阻塞，新任务一次启动，旧报告保留，重放不重复', async () => {
+  const env = await harness();
+  try {
+    const old = await env.supervisor.spawn(spawnInput({ kind: 'research', readOnly: true }), contextOf(env));
+    env.goalPlanStore.setRunnerState(planIdOf(env, old.sessionId), { status: 'blocked', phase: 'blocked', intent: 'verify',
+      blockedReason: 'Verification gate failed: ui-artifact:judgment-missing; c5:manual_confirmation_required' });
+    const oldChild = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' })[0];
+    env.conversationStore.appendMessage(oldChild.id, { id: 'old-report', role: 'assistant',
+      content: '只读报告：目录、AGENTS.md、scripts、最近提交已列出。', interrupted: true });
+    env.conversationStore.appendMessage(env.parent.id, { id: 'unrelated-ui', kind: 'user_input', role: 'user',
+      content: '记忆页箭头应使用 SVG', attachments: [{ id: 'old-image', kind: 'image', artifactRef: 'opaque-old-image' }] });
+    env.conversationStore.appendMessage(env.parent.id, { id: 'offer', role: 'assistant',
+      content: '继续旧任务，还是开新的只读熟悉任务替换它？' });
+    env.conversationStore.appendMessage(env.parent.id, { id: 'choice', kind: 'user_input', role: 'user',
+      content: '开一个新的只读熟悉任务替换它', answerTo: 'card:question:reply:offer' });
+    const before = env.conversationStore.getPersistedConversationHistory(env.parent.id);
+    const input = spawnInput({ anchorMessageIds: ['choice', 'offer'], title: '重新只读熟悉',
+      brief: '核对目录、AGENTS.md、scripts、最近提交（hash、主题），禁止写入。',
+      kind: 'research', readOnly: true, supersedes: old.sessionId,
+      successCriteria: [{ id: 'c1', kind: 'file-exists', path: 'AGENTS.md', description: '规则存在' },
+        { id: 'c2', kind: 'model_review', description: '核对报告结论' }] });
+    const context = contextOf(env, { inputId: 'replacement-choice' });
+    const opened = await env.supervisor.spawn(input, context);
+    assert.equal(opened.error, undefined);
+    assert.equal(opened.status, 'running');
+    assert.equal(env.supervisor.get({ sessionId: old.sessionId }).status, 'superseded');
+    assert.match(env.supervisor.get({ sessionId: old.sessionId, detail: 'report' }).report.summary, /只读报告/);
+    const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+    assert.equal(plan.delegationOrigin.readOnly, true);
+    assert.equal(plan.successCriteria[1].kind, 'model_review');
+    assert.equal(plan.resultAcceptance, undefined);
+    const child = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' })
+      .find(item => item.delegation.sessionId === opened.sessionId);
+    const snapshot = env.conversationStore.readInheritedBackground(child.backgroundSnapshotId);
+    assert.deepEqual(snapshot.scope.messageIds, ['offer', 'choice']);
+    assert.equal(snapshot.requiresMissingConfirmation, false);
+    const starts = env.turns.length;
+    const replay = await env.supervisor.spawn(input, context);
+    assert.equal(replay.sessionId, opened.sessionId);
+    assert.equal(replay.replayed, true);
+    assert.equal(env.turns.length, starts);
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 2);
+    assert.deepEqual(env.conversationStore.getPersistedConversationHistory(env.parent.id), before);
+  } finally { await env.cleanup(); }
+});
+
+test('委托锚点准入不能跳过指定历史快照的遗漏确认', async () => {
+  const env = await harness();
+  try {
+    const history = env.conversationStore.createConversation({ title: '历史' });
+    env.conversationStore.appendMessage(history.id, { id: 'old-picture', role: 'user', content: '旧图片',
+      attachments: [{ kind: 'image', artifactRef: 'unresolved' }] });
+    const persisted = env.conversationStore.getPersistedConversationHistory(history.id);
+    const snapshot = env.conversationStore.captureInheritedBackground(history.id, {
+      expectedRevision: persisted.contentRevision,
+      runtimeState: { conversationId: history.id, contentRevision: persisted.contentRevision, status: 'idle' },
+      capturedAt: '2026-10-06T00:00:00.000Z',
+    });
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env, { backgroundSnapshotId: snapshot.snapshotId }));
+    assert.equal(opened.error, 'spawn_failed');
     assert.equal(opened.message, 'BACKGROUND_CONFIRMATION_REQUIRED');
     assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 0);
   } finally { await env.cleanup(); }

@@ -52,7 +52,7 @@ host = createProjectAgentHost({ rootDir: runtimeRoot, holdsLease: id => lease.ho
     const recorded = [];
     const player = createScriptedTurnExecutor([
       { type: 'tool', name: 'spawn_session', input: {}, async executeTool() {
-        const args = { anchorMessageIds: ['input-input-one'], title: 'One task', brief: 'Read the project once', kind: 'research', readOnly: true, successCriteria: ['Read'] };
+        const args = { anchorMessageIds: ['input-input-one'], title: 'One task', brief: 'Read the project once', kind: 'research', readOnly: true, successCriteria: [{kind:'model_review',description:'Read'}] };
         const result = await provider.executeCapability({ call: { toolCallId: `spawn-${input.turnId}`, capabilityId: 'local.delegation.spawn_session', arguments: args } },
           { mode: 'project_agent', role: 'project_agent', workspaceId, workspacePath: setup.workspacePath, conversationId: setup.conversationId,
             messages: conversations.getPersistedConversationHistory(setup.conversationId).messages, currentInputAnchors: input.plan.turnProfile.context.inputAnchors.map(anchor => anchor.messageId), turnId: input.turnId, toolCallOrdinal: 1 });

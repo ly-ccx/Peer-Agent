@@ -9,7 +9,7 @@ import {createWatchProbeRuntime} from './watch-probe-provider.mjs';
 import {createObjectiveService} from './objective-service.mjs';
 import {projectCards} from './card-projection.mjs';
 import {createDelegationProvider} from './delegation-provider.mjs';
-const task=extra=>({title:'Fix CI',brief:'Fix the observed failure',anchorMessageIds:['u'],kind:'code',readOnly:false,successCriteria:['CI passes'],...extra});
+const task=extra=>({title:'Fix CI',brief:'Fix the observed failure',anchorMessageIds:['u'],kind:'code',readOnly:false,successCriteria:[{kind:'model_review',description:'CI passes'}],...extra});
 function world(autonomy='act'){
  const root=mkdtempSync(path.join(os.tmpdir(),'objective-actions-'));let clock='2026-10-01T10:00:00Z';
  const store=createObjectiveStore({rootDir:root});const item=store.create({workspaceId:'ws',projectAgentConversationId:'c',originMessageId:'u',title:'CI',outcome:'Stable CI',autonomy,createdBy:'user_request',watches:[{watchId:'w',kind:'event',source:{type:'git',ref:'HEAD',on:'new_commits'}}]}).item;

@@ -1,0 +1,54 @@
+.bot-drawer-detail.bot-task-detail { gap: 22px; padding: 4px 2px 16px; }
+.bot-task-detail .bot-task-back,
+.bot-task-detail .bot-task-scene {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  padding: 5px 0; border: 0; border-radius: 6px; background: transparent;
+  color: var(--graphite-secondary); font-size: 12px;
+}
+.bot-task-detail .bot-task-back:hover,
+.bot-task-detail .bot-task-scene:hover { color: var(--graphite-base); background: transparent; }
+.bot-task-detail-head { display: flex; flex-direction: column; gap: 10px; }
+.bot-task-detail .bot-task-detail-head h2 { font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
+.bot-task-detail-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--graphite-secondary); }
+.bot-task-status { padding: 3px 7px; border-radius: 6px; background: var(--chrome-hover); color: var(--graphite-soft); }
+.bot-task-detail section { display: flex; flex-direction: column; gap: 7px; }
+.bot-task-detail h3 { margin: 0; font-size: 11px; font-weight: 500; line-height: 1.5; color: var(--graphite-secondary); }
+.bot-task-progress { padding: 14px; border-radius: 12px; background: var(--chrome-canvas); }
+.bot-task-detail p { margin: 0; overflow-wrap: anywhere; }
+.bot-task-progress-text { font-size: 14px; line-height: 1.6; font-weight: 500; color: var(--graphite-base); }
+.bot-task-hint { font-size: 11px; line-height: 1.6; color: var(--graphite-secondary); }
+.bot-task-next { padding-bottom: 16px; border-bottom: 1px solid var(--chrome-hairline); }
+.bot-task-next h3 { font-size: 13px; color: var(--graphite-base); }
+.bot-task-next .bot-task-conversation { color: var(--graphite-base); }
+.bot-task-question { font-size: 13px; line-height: 1.65; color: var(--graphite-base); }
+.bot-task-action-note { font-size: 10px; line-height: 1.5; color: var(--graphite-soft); }
+.bot-task-update-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.bot-task-update-head time { font-size: 10px; color: var(--graphite-soft); }
+.bot-task-update-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.7; color: var(--graphite-soft); }
+.bot-task-instructions { margin-top: 14px; }
+.bot-task-instructions p { font-size: 11px; line-height: 1.7; white-space: pre-wrap; color: var(--graphite-soft); }
+.bot-task-detail .bot-task-conversation { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 4px; padding: 5px 0; border: 0; border-radius: 5px; font-size: 12px; font-weight: 500; }
+.bot-task-detail .bot-task-conversation:hover { background: transparent; color: var(--za-accent); }
+.bot-task-description p { font-size: 13px; line-height: 1.7; color: var(--graphite-soft); white-space: pre-wrap; }
+.bot-task-information { border-top: 1px solid var(--chrome-hairline); padding-top: 12px; }
+.bot-task-information > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-size: 12px; color: var(--graphite-secondary); }
+.bot-task-information > summary::-webkit-details-marker { display: none; }
+.bot-task-information > summary .peer-icon { transition: transform var(--za-motion-fast) var(--za-ease-standard); }
+.bot-task-information[open] > summary .peer-icon { transform: rotate(90deg); }
+.bot-task-detail .bot-task-information dl { gap: 12px; padding-top: 14px; }
+.bot-task-information dl > div { display: flex; flex-direction: column; gap: 3px; }
+.bot-task-detail .bot-task-information dd { font-size: 12px; overflow-wrap: anywhere; }
+.bot-task-information code { font-family: var(--font-mono, monospace); font-size: 11px; }
+.bot-task-information ul { list-style: none; padding: 0; margin: 0; }
+.bot-task-detail .bot-task-scene { margin-top: 12px; }
+.bot-task-detail button:focus-visible,
+.bot-task-information > summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 3px; }
+@supports (interpolate-size: allow-keywords) {
+  .bot-task-information { interpolate-size: allow-keywords; }
+  .bot-task-information::details-content { height: 0; overflow: hidden; transition: height var(--za-motion-medium) var(--za-ease-out), content-visibility var(--za-motion-medium) allow-discrete; }
+  .bot-task-information[open]::details-content { height: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-task-information::details-content,
+  .bot-task-information > summary .peer-icon { transition-duration: 1ms; }
+}

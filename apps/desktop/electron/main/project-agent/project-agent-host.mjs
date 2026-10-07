@@ -40,7 +40,7 @@ import { createProjectAgentApplicationService } from './project-agent-applicatio
 import { createClassicGoalProjection } from './classic-goal-projection.mjs';
 import { createDelegationFactsReader } from './delegation-facts-reader.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
-import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
+import { createEvidenceReader } from './evidence-reader.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 import { createProjectObjectivesIpcRegistrations } from '../ipc/register-project-objectives-ipc.mjs';
@@ -57,6 +57,7 @@ import { installDelegation } from './delegation-port.mjs';
 import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
+import { retryProjectAgentTurn } from './response-retry.mjs';
 
 /** Current user inputs become the model messages, including bounded image thumbnails. */
 export function messagesFromUserInputs(plan) {
@@ -109,6 +110,7 @@ export function registerDesktopProjectAgent({
   shell,
   listModels = () => [],
   readUiDelivery = null,
+  readLeaseEpoch = null,
   onReady = null,
   onAppendedMessage = null,
   onViewing = null,
@@ -120,14 +122,12 @@ export function registerDesktopProjectAgent({
   const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
   executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
-  function readEvidenceBody(evidenceRef) {
-    try {
-      const record = goalPlanStore.findEvidenceIndexRecords?.([evidenceRef])?.[0];
-      if (!record) return objectiveWatches?.readEvidenceBody(evidenceRef) || null;
-      const body = evidenceBodyFromRecord(record, ref => readRegisteredArtifact(dataHome, ref, record));
-      return body?.text ? body : null;
-    } catch { return null; }
-  }
+  const readEvidenceBody = createEvidenceReader({
+    findRecords: refs => goalPlanStore.findEvidenceIndexRecords?.(refs),
+    readMessages: id => conversationStore.getPersistedConversationHistory(id)?.messages ?? [],
+    readArtifact: (ref, record) => readRegisteredArtifact(dataHome, ref, record),
+    readExternal: ref => objectiveWatches?.readEvidenceBody(ref) || null,
+  });
   const registry = createProjectRegistry({
     filePath: path.join(dataHome, 'projects', 'registry.json'),
   });
@@ -144,6 +144,8 @@ export function registerDesktopProjectAgent({
   const verification = createSessionVerification({
     goalPlanStore,
     verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
+    readReport: plan => supervisor.get({ sessionId: plan.delegationOrigin.sessionId, detail: 'report' })?.report?.summary || '',
+    completeRecheck: input => goalRunner?.completeRecheck?.(input),
     appendMessage,
   });
   const objectiveStore = createObjectiveStore({rootDir:dataHome});
@@ -349,6 +351,7 @@ export function registerDesktopProjectAgent({
   });
   host = createProjectAgentHost({
     rootDir: runtimeRoot,
+    readLeaseEpoch,
     holdsLease: ownsProject,
     acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
     readMessages: conversationId => conversationStore.getPersistedConversationHistory(conversationId)?.messages || [],
@@ -367,6 +370,7 @@ export function registerDesktopProjectAgent({
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
     reconcileSessions: () => supervisor.reconcile(),
     ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
+      memoryEnabled: workspaceId => memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(workspaceId) }),
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),
     executeTurn: (input) => {
       const history = conversationStore.getPersistedConversationHistory(input.conversationId)?.messages || [];
@@ -450,33 +454,9 @@ export function registerDesktopProjectAgent({
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
       return host.runnerFor(workspaceId)?.stopResponse(turnId) || { ok: false, code: 'STALE_TURN' };
     },
-    retryTurn: async ({ workspaceId, turnId }) => {
-      if (holdsLease(workspaceId) !== true) return { ok: false, code: 'HOST_OFFLINE' };
-      const conversationId = resolveConversationId(workspaceId);
-      const messages = conversationStore.getPersistedConversationHistory(conversationId)?.messages || [];
-      const card = messages.find((message) => message.turnId === turnId && ['agent_unavailable', 'agent_stopped'].includes(message.card));
-      if (!card) return { ok: false, code: 'NOT_FOUND' };
-      if (projectFacts.cards(workspaceId).find((item) => item.cardId === `card:${card.card}:${turnId}`)?.resolvedState === 'resolved') return { ok: true, replayed: true };
-      const later = messages.slice(messages.indexOf(card) + 1);
-      if (later.some((message) => message.kind === 'agent_turn')) return { ok: false, code: 'STALE_TURN' };
-      const runner = host.runnerFor(workspaceId);
-      if (card.card === 'agent_stopped' && runner?.activity()?.turnId === turnId) {
-        if ((await runner.retryStopped(turnId))?.skipped) return { ok: false, code: 'STALE_TURN' };
-      }
-      else if (runner?.parked()) await runner.retry();
-      else {
-        const turn = messages.find((message) => message.id === turnId && message.kind === 'agent_turn');
-        await host.sync([workspaceId]);
-        const restored = host.runnerFor(workspaceId);
-        if (!restored) return { ok: false, code: 'RECOVERY_FAILED' };
-        if (restored.parked()) await restored.retry();
-        else if (turn?.userInputs?.length) await restored.enqueueUserInputs(turn.userInputs);
-        else await restored.retry();
-      }
-      if (host.runnerFor(workspaceId)?.status() === 'error') return { ok: false, code: 'TURN_FAILED' };
-      projectFacts.resolve(workspaceId, card.cards?.[0]?.cardId || `card:agent_unavailable:${turnId}`);
-      return { ok: true };
-    },
+    retryTurn: payload => retryProjectAgentTurn(payload, {
+      holdsLease, resolveConversationId, conversationStore, projectFacts, host,
+    }),
     approvals: approvalStore,
     readEvidenceBody,
     bindWorkspace: (sender) => workspace.addWorkspace(sender),

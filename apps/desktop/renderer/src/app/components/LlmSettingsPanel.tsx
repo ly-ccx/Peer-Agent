@@ -16,7 +16,10 @@ import { clientApi } from '../../clientApi';
 import { getProviderDisplayName } from '../../chat/state/providerDisplay';
 import { Switch } from '../../ui/boolean-controls';
 import { PeerIcon } from '../../ui/icons';
-import { CascadingMenu, type CascadingMenuGroup } from './CascadingMenu';
+import type { CascadingMenuGroup } from './CascadingMenu';
+import { FallbackVisionSetting } from './FallbackVisionSetting';
+import { SettingsDisclosureContent } from './SettingsDisclosureContent';
+import './provider-settings.css';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { useConfirm } from './ConfirmProvider';
 import { LlmBrandIcon } from './LlmBrandIcon';
@@ -595,6 +598,7 @@ export function LlmSettingsPanel({
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [fallbackVisionProviderId, setFallbackVisionProviderId] = useState<string>('');
   const [fallbackVisionSaving, setFallbackVisionSaving] = useState(false);
+  const fallbackVisionRevision = useRef(0);
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -666,23 +670,25 @@ export function LlmSettingsPanel({
   useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
-    const settings = (clientApi.initialSettings || {}) as Record<string, unknown>;
-    const raw = settings.fallbackVision;
-    if (typeof raw === 'string' && raw.trim()) {
-      setFallbackVisionProviderId(raw.trim());
-      return;
-    }
-    if (raw && typeof raw === 'object' && typeof (raw as { providerId?: unknown }).providerId === 'string') {
-      setFallbackVisionProviderId(String((raw as { providerId: string }).providerId).trim());
-    }
+    let active = true;
+    const revision = fallbackVisionRevision.current;
+    // initialSettings is a startup snapshot; revisit the host's persisted value on every mount.
+    void clientApi.getSettings().then(settings => {
+      if (!active || revision !== fallbackVisionRevision.current) return;
+      const raw = settings.fallbackVision;
+      setFallbackVisionProviderId(typeof raw === 'string' ? raw.trim()
+        : raw && typeof raw === 'object' && typeof (raw as { providerId?: unknown }).providerId === 'string'
+          ? String((raw as { providerId: string }).providerId).trim() : '');
+    }).catch(() => { /* Existing selection remains available when settings cannot be read. */ });
+    return () => { active = false; };
   }, []);
 
   // 与底部模型选择器一致：一级 provider（groupId），二级 vision 模型；未配 Key 的模型置灰。
   const fallbackVisionMenuGroups: readonly CascadingMenuGroup[] = useMemo(() => {
     const isZh = i18n.locale === 'zh-CN';
-    // CascadingMenu 触发器展示「分组 · 模型」；「不使用」拆成两级文案，避免重复。
+    // Model choices retain their service group; the empty choice uses a compact trigger label.
     const noneGroupLabel = isZh ? '不使用' : 'None';
-    const noneItemLabel = isZh ? '仅剥离图片' : 'Strip images only';
+    const noneItemLabel = i18n.t('settings.fallbackVision.none');
     const order: string[] = [];
     const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
     for (const prov of providers) {
@@ -720,6 +726,7 @@ export function LlmSettingsPanel({
   }, [providers, i18n]);
 
   const handleFallbackVisionChange = async (nextId: string) => {
+    fallbackVisionRevision.current += 1;
     const normalized = nextId === '__none__' ? '' : nextId;
     const previous = fallbackVisionProviderId;
     setFallbackVisionProviderId(normalized);
@@ -1466,35 +1473,23 @@ export function LlmSettingsPanel({
         </header>
       ) : null}
 
-      <div className="llm-list-toolbar">
+      <header className="frost-page-heading llm-page-heading">
+        <div>
+          <h1>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</h1>
+          <p>{i18n.locale === 'zh-CN' ? '管理机器人使用的服务与模型。' : 'Manage the services and models your bots use.'}</p>
+        </div>
+        {!catalogOpen ? <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
+          <PeerIcon name="plus" size={16} />
+          {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
+        </button> : null}
+      </header>
+
+      {!catalogOpen ? <div className="llm-list-toolbar">
         <div className="llm-list-summary">
           <strong>{i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}</strong>
-          <span>{groups.length} {i18n.locale === 'zh-CN' ? '个渠道' : 'channels'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+          <span>{groups.length} {i18n.locale === 'zh-CN' ? '个服务' : 'services'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
         </div>
-        <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
-          <PeerIcon name="plus" size={14} />
-          {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
-        </button>
-      </div>
-
-      <section className="llm-fallback-vision" aria-label={i18n.t('settings.fallbackVision')}>
-        <div className="llm-fallback-vision-copy">
-          <strong>{i18n.t('settings.fallbackVision')}</strong>
-          <p>{i18n.t('settings.fallbackVision.description')}</p>
-        </div>
-        <div className="llm-fallback-vision-select">
-          <CascadingMenu
-            className="llm-fallback-vision-menu"
-            value={fallbackVisionProviderId || '__none__'}
-            groups={fallbackVisionMenuGroups}
-            onChange={(nextId) => { void handleFallbackVisionChange(nextId); }}
-            disabled={fallbackVisionSaving}
-            ariaLabel={i18n.t('settings.fallbackVision')}
-            placeholder={i18n.t('settings.fallbackVision.none')}
-            menuPlacement="down"
-          />
-        </div>
-      </section>
+      </div> : null}
 
             {catalogOpen ? (
 
@@ -1613,97 +1608,47 @@ export function LlmSettingsPanel({
           const groupChannel = descriptorFor(head.channelId || (head.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
           const zh = i18n.locale === 'zh-CN';
           const quotaSummary = usageSummaryChip(currentAccountUsage(quotaResults[head.id], head), zh);
+          const groupState = aggregateGroupConnectionState(g.models);
+          const status = connectionStatusLabel(groupState ? { ...head, connectionState: groupState } : head, zh);
           return (
           <div key={g.groupId} data-llm-group-id={g.groupId} className={`llm-provider-group${highlightGroupId === g.groupId ? ' is-highlight' : ''}`}>
             <div className="llm-group-header">
-              <div className="llm-group-header-main">
-              <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)} aria-expanded={!collapsed}>
-                <LlmBrandIcon
-                  channelId={head.channelId}
-                  providerName={head.name}
-                  serviceTemplateId={head.serviceTemplateId}
-                />
-                <svg
-                  className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`}
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-                <strong>{head.name || head.provider}</strong>
-                <span className="llm-group-count">{g.models.length} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+              <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)}
+                aria-expanded={!collapsed} aria-controls={`llm-models-${g.groupId}`}>
+                <LlmBrandIcon channelId={head.channelId} providerName={head.name} serviceTemplateId={head.serviceTemplateId} />
+                <span className="llm-service-copy">
+                  <strong>{head.name || head.provider}</strong>
+                  <span className="llm-group-count">{g.models.length} {zh ? '个模型' : 'models'}</span>
+                </span>
+                <PeerIcon name="chevronDown" size={14} className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`} />
               </button>
-              <span className="llm-provider-meta">
-                <span className="llm-provider-chip">{groupChannel.label}</span>
-                <span className="llm-provider-chip">{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
-                {quotaSummary ? (
-                  <span className="llm-provider-chip llm-quota-chip" title={zh ? '最近一次查询的余额' : 'Balance from the last query'}>{quotaSummary}</span>
-                ) : null}
+              <span className={`llm-connection-status tone-${status.tone}`} title={head.connectionStateReason || head.lastErrorCategory || ''}>
+                <PeerIcon name="circle" size={8} className="llm-service-status-dot" />{status.text}
               </span>
-              {isLocalCliMethod(head.authMethod) ? (
-                <small className="llm-provider-key">
-                  {i18n.locale === 'zh-CN' ? '本机 Qoder 登录态' : 'Local Qoder Auth'}
-                </small>
-              ) : isOAuthMethod(head.authMethod) ? (
-                <small className={`llm-provider-key llm-oauth-status-${head.oauthStatus?.status ?? 'disconnected'}`}>
-                  {head.oauthStatus?.status === 'connected'
-                    ? (i18n.locale === 'zh-CN' ? `已登录${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}` : `Signed in${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}`)
-                    : head.oauthStatus?.status === 'expired'
-                      ? (<><PeerIcon name="warning" size={12} className="inline-icon" />{i18n.locale === 'zh-CN' ? '登录已过期，请点击“重新登录”' : 'Session expired — click “Re-login”'}</>)
-                      : (i18n.locale === 'zh-CN' ? '未登录' : 'Not logged in')}
-                </small>
-              ) : (
-                <small className="llm-provider-key">
-                  {(() => {
-                    const groupState = aggregateGroupConnectionState(g.models);
-                    const status = connectionStatusLabel(
-                      groupState ? { ...head, connectionState: groupState } : head,
-                      i18n.locale === 'zh-CN',
-                    );
-                    return (
-                      <span className={`llm-connection-status tone-${status.tone}`} title={head.connectionStateReason || head.lastErrorCategory || ''}>
-                        {status.text}
-                        <span className="llm-connection-method"> · {accessMethodLabel(head, i18n.locale === 'zh-CN')}</span>
-                        {head.apiKeyConfigured ? ` · ${head.apiKeyMasked || 'Key'}` : ''}
-                      </span>
-                    );
-                  })()}
-                </small>
-              )}
               <div className="llm-group-actions">
-                <button type="button" onClick={() => openEdit(head)}>
-                  {i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit connection'}
-                </button>
-                {isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected' ? (
-                  <button type="button" onClick={() => void handleOAuthLogin({ id: head.id })} disabled={oauthBusyId === head.id}>
-                    {oauthBusyId === head.id ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{oauthBusyId === head.id ? (i18n.locale === 'zh-CN' ? '正在登录' : 'Logging in') : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
-                  </button>
-                ) : null}
-                <OverflowMenu
-                  zh={zh}
+                <OverflowMenu zh={zh} label={zh ? `管理 ${head.name || head.provider}` : `Manage ${head.name || head.provider}`}
                   items={[
-                    {
-                      key: 'remove-group',
-                      label: i18n.locale === 'zh-CN' ? '删除渠道' : 'Remove provider',
-                      danger: true,
+                    { key: 'edit-group', label: zh ? '编辑连接' : 'Edit connection', onSelect: () => openEdit(head) },
+                    ...(isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected' ? [{
+                      key: 'login-group', label: zh ? '重新登录' : 'Re-login', disabled: oauthBusyId === head.id,
+                      onSelect: () => void handleOAuthLogin({ id: head.id }),
+                    }] : []),
+                    { key: 'remove-group', label: zh ? '删除服务' : 'Remove service', danger: true,
                       disabled: removingGroupId === g.groupId,
-                      onSelect: () => void handleRemoveGroup(g.groupId, head.name || head.provider),
-                    },
-                  ]}
-                />
-              </div>
-            
+                      onSelect: () => void handleRemoveGroup(g.groupId, head.name || head.provider) },
+                  ]} />
               </div>
             </div>
-            {!collapsed ? (
+            <SettingsDisclosureContent expanded={!collapsed} id={`llm-models-${g.groupId}`}>
               <div className="llm-group-body">
+                <div className="llm-service-connection-details">
+                  <span>{groupChannel.label}</span>
+                  <span>{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
+                  <span>{accessMethodLabel(head, zh)}</span>
+                  {head.apiKeyConfigured && head.apiKeyMasked ? <span>{head.apiKeyMasked}</span> : null}
+                  {isOAuthMethod(head.authMethod) && head.oauthStatus?.accountId ? <span>{head.oauthStatus.accountId}</span> : null}
+                  {quotaSummary ? <span>{quotaSummary}</span> : null}
+                </div>
                 <div className="llm-group-section">
                   <div className="llm-group-section-head">
                     <span className="llm-group-section-title">{i18n.locale === 'zh-CN' ? '模型' : 'Models'}</span>
@@ -1743,12 +1688,16 @@ export function LlmSettingsPanel({
                   onRefresh={() => void handleRefreshQuota(head.id)}
                 />
               </div>
-            ) : null}
+            </SettingsDisclosureContent>
           </div>
           );
         })}
         </div>
       )}
+
+      {!catalogOpen ? <FallbackVisionSetting i18n={i18n} value={fallbackVisionProviderId}
+        groups={fallbackVisionMenuGroups} saving={fallbackVisionSaving}
+        onChange={nextId => { void handleFallbackVisionChange(nextId); }} /> : null}
 
 {showForm ? (
         <Overlay

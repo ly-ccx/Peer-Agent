@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  resolveRoleRoute, readSnapshots, createExecutionScheduler,
+  resolveRoleRoute, readSnapshots, createExecutionScheduler, createWorkBudgetGuard,
   createFailedClientToolResult,
   createGoalPlanStore,
   loadSharedModelMetadataList,
@@ -22,9 +22,11 @@ export interface TuiTurnRequest {
   mode?: string;
   messages?: readonly ModelMessage[];
   turnProfile?: any;
+  budgetGuard?: any;
   plan?: any;
   limits?: { maxRounds: number; maxToolCalls: number };
   remainingToolCalls?: number;
+  hardRemainingToolCalls?: number;
   modelProviderId?: string | null;
   signal?: AbortSignal;
   ephemeral?: boolean;
@@ -88,9 +90,12 @@ export function createTuiTurnExecutor(options: {
     const unsubscribeApproval = runtime.host.subscribeApproval(approval => options.onApproval?.(approval, streamId));
     const calls: any[] = [];
     let toolReservations = 0, streamedText = '';
-    const messages = input.messages ?? projectConversationHistory(options.readMessages(input.conversationId ?? '')).messages;
+    if (profile.providerCheckpoint && (profile.providerCheckpoint.provider !== 'tui' || profile.providerCheckpoint.modelProviderId !== input.modelProviderId)) throw new Error('continuity_model_changed');
+    const saved = profile.role === 'project_agent' && profile.providerCheckpoint?.provider === 'tui'
+      && profile.providerCheckpoint.modelProviderId === input.modelProviderId ? profile.providerCheckpoint : null;
+    const messages = saved?.messages ?? input.messages ?? projectConversationHistory(options.readMessages(input.conversationId ?? '')).messages;
     const last = messages.at(-1);
-    const content = last?.role === 'user' && typeof last.content === 'string' ? last.content : '';
+    const content = !saved && last?.role === 'user' && typeof last.content === 'string' ? last.content : '';
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
@@ -98,21 +103,28 @@ export function createTuiTurnExecutor(options: {
       currentInputAnchors: (profile.context?.inputAnchors ?? []).map((row: any) => row.messageId),
       objectiveWakeIds: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId).map((row: any) => row.objectiveId),
       objectiveWakeEvents: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId),
-      sessionWakeIds: (profile.context?.events ?? []).filter((row: any) => ['result_ready','session_verified'].includes(row.kind) && row.workspaceId === workspaceId).map((row: any) => row.sessionId),
+      sessionWakeIds: (profile.context?.events ?? []).filter((row: any) => ['report_available','result_ready','session_verified'].includes(row.kind) && row.workspaceId === workspaceId).map((row: any) => row.sessionId),
       turnToolCalls: calls, quoteRefs: input.plan?.userInputs?.flatMap((row: any) => row.quoteRefs ?? []) ?? [],
     };
     const model = { ...runtime.model, runTurn(state: ChatModelState, context: any) {
+      input.budgetGuard?.beforeRequest();
       input.agentProgress?.onRound?.();
       return runtime.model.runTurn(state, context);
     } };
     const pipeline = createRuntimePipeline<ChatModelInput, ChatModelState, ChatModelToolCall, RuntimeSdkProviderExecution, string>({
       model, defaultMaxTurns: input.limits?.maxRounds ?? Number.POSITIVE_INFINITY,
+      lifecycle: { toolResultsApplied(state) { input.budgetGuard?.checkpoint({ provider: 'tui', modelProviderId: input.modelProviderId, messages: state.modelMessages }); } },
       events: { emit(event) {
         if (event.type === 'message.delta') { streamedText += event.content; input.sink.send('chat:stream:delta', { streamId, content: event.content }); }
         return null;
       } },
-      tools: { async execute(call, context) {
-        const budget = input.remainingToolCalls ?? input.limits?.maxToolCalls ?? Infinity;
+      tools: { notExecuted: (call, reason) => ({ call, result: { result: createFailedClientToolResult({ call, locale: 'zh-CN', reason, status: 'denied' }) }, terminal: true, terminalReason: reason }),
+        async execute(call, context) {
+        try { input.budgetGuard?.beforeTool(call); } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return { call, result: { result: createFailedClientToolResult({ call, locale: 'zh-CN', reason, status: 'denied' }) }, terminal: true, terminalReason: reason };
+        }
+        const budget = profile.role === 'project_agent' ? input.hardRemainingToolCalls ?? Infinity : input.remainingToolCalls ?? input.limits?.maxToolCalls ?? Infinity;
         const ordinal = toolReservations++;
         if (ordinal >= budget) return { call, result: { result: createFailedClientToolResult({
           call, locale: 'zh-CN', reason: 'project_agent_tool_limit', status: 'denied',
@@ -145,7 +157,10 @@ export function createTuiTurnExecutor(options: {
     });
     try {
       const result = await pipeline.run({ sessionId: `tui:${input.conversationId || streamId}`, conversationId: input.conversationId ?? undefined,
-        streamId, mode, input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
+        streamId, mode, ...(profile.role === 'project_agent' ? {
+          maxToolCalls: input.hardRemainingToolCalls, sliceToolCalls: input.remainingToolCalls ?? input.limits?.maxToolCalls,
+          yieldAtTurnLimit: true, maxToolBatchCalls: 32,
+        } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
           systemContextInput: { role: profile.role, workspaceId, sessionId: profile.sessionId, planId: profile.planId,
             turnContext: profile.context, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
@@ -158,12 +173,13 @@ export function createTuiTurnExecutor(options: {
         } }, { signal: controller.signal });
       const requestedUserInput = result.reason === 'requested_user_input';
       const replied = result.status === 'stopped' && result.reason === 'project_agent_reply';
-      const ok = result.status === 'completed' || requestedUserInput || replied;
+      const ok = result.status === 'completed' || result.status === 'yielded' || requestedUserInput || replied;
       const text = !ok && streamedText ? streamedText : result.output ?? '';
       input.sink.send(ok ? 'chat:stream:done' : 'chat:stream:error', { streamId, error: result.reason });
       if (!input.ephemeral) options.persistTurn?.(input, { text, calls, usage: result.state?.usage,
         interrupted: !ok });
       return { ok, text, toolCalls: calls, toolCallCount: calls.length,
+        ...(result.status === 'yielded' ? { turnEnd: 'yielded', providerCheckpoint: { provider: 'tui', modelProviderId: input.modelProviderId, messages: result.state?.modelMessages } } : {}),
         ...(requestedUserInput ? { requestedUserInput: true } : {}),
         continued: result.status === 'exhausted', terminalStatus: controller.signal.aborted ? 'aborted' : ok ? 'completed' : 'error',
         usage: result.state?.usage, ...(ok ? {} : { error: result.reason || result.status, failureReason: result.reason || result.status, retryable: false }) };
@@ -185,8 +201,10 @@ export function createTuiTurnExecutor(options: {
       const cancel = () => controller.abort(signal.reason);
       signal.addEventListener('abort', cancel, { once: true });
       if (signal.aborted) cancel();
-      try { return await execute({ ...input, signal }, controller); }
-      finally { signal.removeEventListener('abort', cancel); }
+      const budgetGuard = createWorkBudgetGuard(input.turnProfile);
+      let outcome: any;
+      try { outcome = await execute({ ...input, budgetGuard, signal }, controller); return outcome; }
+      finally { budgetGuard?.finish(outcome?.usage); signal.removeEventListener('abort', cancel); }
     }).finally(() => {
       input.signal?.removeEventListener('abort', abort); active.delete(key);
     });

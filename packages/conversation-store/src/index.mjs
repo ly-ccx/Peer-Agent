@@ -887,7 +887,13 @@ export function createConversationStore(options = {}) {
       const parent = index.find((row) => row.id === parentConversationId);
       if (!parent) fail('CHILD_PARENT_MISSING');
       const history = getPersistedConversationHistory(parentConversationId);
-      const source = historyThroughAnchor(history, anchorMessageId, fail);
+      const throughAnchor = historyThroughAnchor(history, anchorMessageId, fail);
+      const scoped = input.backgroundMessageIds !== undefined;
+      if (scoped && (input.role !== 'work_session' || !delegation
+        || delegation.anchorMessageId !== anchorMessageId
+        || !Array.isArray(input.backgroundMessageIds)
+        || !input.backgroundMessageIds.includes(anchorMessageId))) fail('BACKGROUND_SCOPE_INVALID');
+      const source = scoped ? history : throughAnchor;
       const presetSnapshotId = typeof input.backgroundSnapshotId === 'string'
         ? input.backgroundSnapshotId.trim()
         : '';
@@ -903,6 +909,7 @@ export function createConversationStore(options = {}) {
           expectedRevision: input.runtimeState?.contentRevision,
           runtimeState: input.runtimeState,
           capturedAt: input.capturedAt,
+          ...(scoped ? { messageIds: input.backgroundMessageIds } : {}),
         });
         if (snapshot.requiresMissingConfirmation && input.confirmMissing !== true) fail('BACKGROUND_CONFIRMATION_REQUIRED');
         backgroundSnapshotId = snapshots.put(snapshot);

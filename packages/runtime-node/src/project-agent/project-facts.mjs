@@ -12,11 +12,11 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     return {
       reportedMessages: messages.filter(message => message.kind === 'agent_reply'),
       sessionIds: rows.map((row) => row.sessionId),
-      sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status })),
+      sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status, sourceRevision: row.sourceRevision })),
       unreportedResults: rows.filter(row => row.status === 'result_ready'
         && !messages.some(message => message.kind === 'agent_reply' && message.sources?.includes(row.sessionId)
           && message.meta?.sessionStates?.some(state => state.sessionId === row.sessionId
-            && ['result_ready', 'accepted'].includes(state.status))))
+            && state.sourceRevision === row.sourceRevision && ['result_ready', 'accepted'].includes(state.status))))
         .map(row => ({sessionId:row.sessionId,anchorMessageId:row.origin?.anchorMessageId})),
       verdicts: rows.flatMap((row) => {
         const decision = supervisor.acceptance(row.sessionId);
@@ -36,8 +36,12 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     const rows = sessions(workspaceId);
     const confirmations = rows.flatMap((row) => {
       const decision = supervisor.acceptance(row.sessionId);
-      return decision && (decision.mode === 'confirm' || row.status === 'accepted')
+      return decision && (row.status === 'result_ready' && decision.mode === 'confirm' || row.status === 'accepted')
         ? [{ sessionId: row.sessionId, summary: row.title, accepted: row.status === 'accepted' }] : [];
+    });
+    const completionReviews = rows.flatMap(row => {
+      const review = supervisor.completionReview?.(row.sessionId);
+      return review ? [{ ...review, title: row.title }] : [];
     });
     const questions = rows.flatMap((row) => {
       if (row.status !== 'waiting_user') return [];
@@ -69,7 +73,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       superseded: messages.slice(messages.indexOf(message) + 1).some(later => later.kind === 'agent_turn'),
     }));
     return projection.project(workspaceId, { approvals: approvalStore.list({ workspaceId }),
-      objectiveProposals:objectiveProposals(workspaceId), confirmations, questions, replies, readmeOffer: profile?.readmeOffer, unavailable, stopped,
+      objectiveProposals:objectiveProposals(workspaceId), confirmations, completionReviews, questions, replies, readmeOffer: profile?.readmeOffer, unavailable, stopped,
       memories: memoryStore?.list({ workspaceId }) || [],
       handoffs: rows.flatMap(row => { const facts = supervisor.deliveryFacts?.(row.sessionId); return facts ? [facts] : []; }) });
   }

@@ -837,6 +837,7 @@ export type GoalSuccessCriterionKind =
   | 'test'
   | 'file-contains'
   | 'file-exists'
+  | 'model_review'
   | 'manual';
 
 export interface GoalSuccessCriterion {
@@ -846,6 +847,22 @@ export interface GoalSuccessCriterion {
   readonly command?: string;
   readonly path?: string;
   readonly expect?: string;
+  readonly authority?: {
+    readonly source: 'model' | 'user' | 'project_policy' | 'legacy_unknown';
+    readonly sourceRef?: string;
+    readonly version: number;
+    readonly verifier: 'mechanical' | 'host_model' | 'human';
+    readonly rationale: string;
+  };
+}
+
+export interface GoalModelReview {
+  readonly criterionId: string;
+  readonly sourceRevision: string;
+  readonly verifierRunId: string;
+  readonly passed: boolean;
+  readonly evidenceRefs: readonly string[];
+  readonly checkedAt: string;
 }
 
 export interface GoalCriterionResult {
@@ -1109,6 +1126,9 @@ export interface GoalPlan {
   readonly successCriteria: readonly GoalSuccessCriterion[];
   readonly criterionResults: readonly GoalCriterionResult[];
   readonly manualConfirmations?: readonly GoalManualConfirmation[];
+  readonly modelReviews?: readonly GoalModelReview[];
+  /** Host-derived current revision for checking semantic review freshness. */
+  readonly modelReviewSourceRevision?: string;
   readonly boundaries: GoalBoundaries;
   readonly exceptionPolicies: ExceptionPolicy[];
   /** 顶层汇总（来源于子任务） */

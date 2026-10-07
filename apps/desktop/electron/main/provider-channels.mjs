@@ -1,4 +1,4 @@
-import { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl } from '@peer-agent/runtime-node';
+import { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl, GROK_SUBSCRIPTION_BASE_URL, GROK_SUBSCRIPTION_HEADERS } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
 
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
@@ -6,7 +6,7 @@ import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli
 export const CHATGPT_SUBSCRIPTION_NAME = 'ChatGPT 订阅';
 export const CHATGPT_SUBSCRIPTION_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const GROK_OFFICIAL_NAME = 'Grok 官方';
-export const GROK_SUBSCRIPTION_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
+export { GROK_SUBSCRIPTION_BASE_URL };
 export const GEMINI_OAUTH_NAME = 'Gemini OAuth';
 export const GEMINI_CODE_ASSIST_BASE_URL = 'https://cloudcode-pa.googleapis.com';
 export const QODER_PRIVATE_NAME = 'Qoder（本机 CLI）';
@@ -609,11 +609,7 @@ const CHANNEL_DESCRIPTORS = {
     allowedWires: ['openai-responses'],
     authMethods: { oauth_grok: { wire: 'openai-responses' } },
     defaults: { baseUrl: GROK_SUBSCRIPTION_BASE_URL, model: 'grok-4.5' },
-    headers: {
-      'X-XAI-Token-Auth': 'xai-grok-cli',
-      'x-grok-client-surface': 'grok-build',
-      'x-grok-client-version': '0.1.202',
-    },
+    headers: GROK_SUBSCRIPTION_HEADERS,
     capabilities: {
       reasoning: {
         supported: true,

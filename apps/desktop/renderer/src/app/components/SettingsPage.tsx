@@ -187,7 +187,6 @@ export function SettingsPage({
           />
         ) : section === 'providers' || section === 'model' ? (
           <div className="settings-provider-page">
-            <header className="frost-page-heading"><h1>{isZh ? '服务商' : 'Providers'}</h1></header>
             <LlmSettingsPanel i18n={i18n} />
           </div>
         ) : section === 'instructions' ? (

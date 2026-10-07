@@ -2,6 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createConversationPager } from './conversationPager.ts';
 
+test('latest host refresh retires a disappeared confirmation while preserving loaded history and real system messages', async () => {
+  let shown = true;
+  let snapshot: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0];
+  const pager = createConversationPager({ read: async params => ({ ok: true, nextCursor: params.before ? null : 'new', messages: params.before
+    ? [{ id: 'old', role: 'user', content: '历史', createdAt: '1' }]
+    : [{ id: 'new', role: 'assistant', kind: 'system_card', content: '持久化记录', createdAt: '2' }, ...(shown ? [{
+      id: 'card:confirm_result:s', role: 'assistant', kind: 'system_card', cards: [{ cardId: 'card:confirm_result:s', kind: 'confirm_result', content: '结果', actions: [] }],
+    }] : [])] }), publish: value => { snapshot = value; } });
+  await pager.refresh(); await pager.older(); assert.equal(snapshot!.messages.length, 3);
+  shown = false; await pager.refresh();
+  assert.deepEqual(snapshot!.messages.map(message => message.id), ['old', 'new']);
+});
+
 test('10000-message conversation opens its tail, prepends older pages and keeps new replies', async () => {
   const history = Array.from({ length: 10000 }, (_, n) => ({ id: `m-${n}`, role: 'user', content: String(n), createdAt: new Date(0).toISOString() }));
   const requests: unknown[] = [];

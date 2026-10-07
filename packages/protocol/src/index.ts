@@ -1,3 +1,7 @@
+export type { ProjectWorkReceipt, ProjectWorkState, ProjectTurnEnd } from './work-coordination.ts';
+export { deriveSessionFacts, type SessionFactSnapshot } from './session-facts.ts';
+export { projectAgentFailureKind, type ProjectAgentTurnRecovery, type ReplyAnchorCandidate } from './project-agent-failure.ts';
+export type { EvidenceSourceDescription, ProjectAgentEvidenceReadRequest, ProjectAgentEvidenceReadResult } from './evidence-inspection.ts';
 export { toolActivityPreview, toolActivitySummary } from './tool-activity-preview.ts';
 export { isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort, type ModelReasoningEffort } from './model-reasoning.ts';
 export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
@@ -1082,3 +1086,5 @@ export * from './model-routing.ts';
 export * from './project.ts';
 export * from './objectives.ts';
 export * from './remote-access-settings.ts';
+
+export type { BotModelSelectionUpdateRequest, BotModelSelectionUpdateResult } from './bot-model-selection.ts';

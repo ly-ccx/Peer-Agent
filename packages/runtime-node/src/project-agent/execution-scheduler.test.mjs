@@ -155,7 +155,7 @@ test('repeated selection cannot admit a reserved task twice and user waits do no
 });
 
 test('spawn priority rejects arbitrary strings at the existing tool boundary', () => {
-  const input={anchorMessageIds:['u'],title:'任务',brief:'测试',kind:'code',readOnly:false,successCriteria:['测试']};
+  const input={anchorMessageIds:['u'],title:'任务',brief:'测试',kind:'code',readOnly:false,successCriteria:[{kind:'model_review',description:'测试'}]};
   for(const priority of ['high','normal','low']) assert.equal(validateDelegationInput('spawn_session',{...input,priority}).ok,true);
   assert.equal(validateDelegationInput('spawn_session',{...input,priority:'urgent'}).ok,false);
 });

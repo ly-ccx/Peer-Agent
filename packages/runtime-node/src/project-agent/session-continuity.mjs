@@ -34,7 +34,7 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
     if (!checked.ok) return checked;
     if (SUSPENDED.has(plan.delegationOrigin.phase) && plan.delegationOrigin.supersededBy === bySessionId) return { ok: true, plan };
     // Persist the admission gate before interrupting an asynchronous tool.
-    saveOrigin(plan, { phase: 'superseded', supersededBy: bySessionId, supersededAt: now(),
+    saveOrigin(plan, { phase: bySessionId ? 'superseded' : 'paused', supersededBy: bySessionId, supersededAt: now(),
       pausedFromPhase: plan.delegationOrigin.pausedFromPhase || plan.delegationOrigin.phase,
       pausedRunnerIntent: plan.delegationOrigin.pausedRunnerIntent || plan.runner?.intent || 'execute' }, 'session superseded');
     executionScheduler.cancelPlan(plan.planId);

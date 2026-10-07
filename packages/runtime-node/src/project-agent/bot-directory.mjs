@@ -286,7 +286,7 @@ export function createBotDirectory({
       return [...new Set(sources.filter(id => typeof id === 'string' && id))].slice(0, 20).flatMap(sessionId => {
         if (!bySession.has(sessionId)) bySession.set(sessionId, getSession(sessionId));
         const session = bySession.get(sessionId);
-        return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status }] : [];
+        return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status, ...(session.sourceRevision ? { sourceRevision: session.sourceRevision } : {}) }] : [];
       });
     };
     const page = filtered.slice(start, latest ? end : start + size).map((message) => ({ ...message,

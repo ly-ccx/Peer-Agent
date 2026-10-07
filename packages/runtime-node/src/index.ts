@@ -1,3 +1,12 @@
+export {
+  GROK_SUBSCRIPTION_BASE_URL,
+  GROK_STABLE_RELEASE_URL,
+  GROK_SUBSCRIPTION_HEADERS,
+  buildGrokSubscriptionHeaders,
+  createGrokSubscriptionTransport,
+  grokSubscriptionTransport,
+  formatGrokSubscriptionHttpError,
+} from './grok-subscription-transport.mjs';
 export type {
   CreateNodeRuntimeHostAdapterOptions,
   NodeRuntimeApprovalDecision,
@@ -604,7 +613,11 @@ export { presentEvidence, evidenceRefAllowed, evidenceBodyFromRecord } from './p
 export { instructionLinesFromText, readProjectInstructionLines } from './project-agent/project-instruction-lines.mjs';
 
 export { fileEvidencePreview } from './project-agent/file-evidence-preview.mjs';
+export { evidenceBodyFromHistory, evidenceSourceDescription } from './project-agent/evidence-presenter.mjs';
 export { toolResultEvidencePreview } from './project-agent/tool-result-evidence-preview.mjs';
 export { truncatePreview, redactShellOutput, outputRedactions } from './project-agent/output-redaction.mjs';
 export { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl } from './model-channel-wire.mjs';
 export { shouldPauseForHostHandoff, isHostHandoffPause } from './project-agent/session-host-handoff.mjs';
+
+export { createWorkBudgetGuard, registerWorkBudget, DEFAULT_WORK_BUDGET } from './project-agent/work-budget.mjs';
+export { createLegacyCriterionRecovery } from './project-agent/criterion-recovery.mjs';

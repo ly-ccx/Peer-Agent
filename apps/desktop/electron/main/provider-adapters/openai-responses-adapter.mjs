@@ -19,6 +19,7 @@ import { fetchWithConnectionRecovery } from '../provider-transports/recovering-f
 import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
+import { formatGrokSubscriptionHttpError } from '@peer-agent/runtime-node';
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
@@ -446,7 +447,7 @@ async function sendOpenAIResponsesStreamOnce({
     return {
       ok: false,
       status: res.status,
-      errorText,
+      errorText: formatGrokSubscriptionHttpError(res.status, errorText, headers),
       messages,
       providerTracePath: tracePath,
     };

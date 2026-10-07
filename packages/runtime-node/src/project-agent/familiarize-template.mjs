@@ -45,7 +45,8 @@ export function buildFamiliarizePlan({
     `只读熟悉「${name}」。`,
     '查看目录、AGENTS.md、脚本和最近提交。',
     '只使用文件读取工具。不要写入、修改或执行会改变工作区的操作。',
-    '确认过的事实交给宿主写入记忆，并带上证据引用。不确定的地方向用户提问。',
+    '交付带证据引用的阅读结果；记忆是否写入由宿主按用户设置决定。无法核实的内容标为未知，并说明原因。',
+    '本次目标是了解项目。发现缺陷或缺失文件也应先完成阅读报告，不要为新增修复、扩大检查或写入记忆要求用户选择。只有完成本次读取所必需且无法自行查明的决定才向用户提问。',
   ];
   if (git?.branch) lines.push(`当前分支：${git.branch}`);
   else lines.push('没有可读的 git 分支。');
@@ -59,8 +60,8 @@ export function buildFamiliarizePlan({
       title: '熟悉项目',
       brief: lines.join('\n'),
       successCriteria: [
-        '用文件读取工具看过项目结构',
-        '确认过的事实带有证据引用',
+        { id: 'c1', kind: 'model_review', description: '用文件读取工具看过项目结构' },
+        { id: 'c2', kind: 'model_review', description: '确认过的事实带有证据引用' },
       ],
       allowedCapabilities: [...FAMILIARIZE_READ_CAPABILITIES],
       git: git?.branch ? { branch: git.branch, commit: git.commit || null } : null,
@@ -79,7 +80,7 @@ export function buildReadmeTask({ displayName, responsibility } = {}) {
       `在「${name}」的文件夹里写一份 README，记录这个机器人的职责。`,
       duty ? `职责：${duty}` : '职责以用户刚刚说的为准。',
     ].join('\n'),
-    successCriteria: ['README 写明这个机器人主要负责什么'],
+    successCriteria: [{ id: 'c1', kind: 'model_review', description: 'README 写明这个机器人主要负责什么' }],
     allowedCapabilities: ['local.file.write', 'local.file.read', 'local.file.list'],
   };
 }

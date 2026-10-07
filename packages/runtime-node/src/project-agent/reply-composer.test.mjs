@@ -59,6 +59,17 @@ test('未知锚点和非用户消息都不能作为 replyTo', () => {
   assert.deepEqual(assistant.messageIds, ['reply-old']);
 });
 
+test('invalid anchors return only five recent real user IDs with bounded factual excerpts', () => {
+  const userMessages = Array.from({ length: 8 }, (_, i) => ({ id: `u-${i}`, kind: 'user_input', content: `问题 ${i} ` + '长'.repeat(200) }));
+  userMessages.push({ id: 'private', role: 'assistant', kind: 'agent_turn', content: 'PRIVATE' });
+  const result = reply({ replyTo: ['invented'], userMessages });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.availableReplyAnchors.map(row => row.messageId), ['u-3', 'u-4', 'u-5', 'u-6', 'u-7']);
+  assert.ok(result.availableReplyAnchors.every(row => row.text.length === 120));
+  assert.doesNotMatch(JSON.stringify(result.availableReplyAnchors), /PRIVATE/);
+  assert.equal(reply({ replyTo: ['u-7'], userMessages }).ok, true);
+});
+
 test('唤醒回合没有 replyTo 且不是主动开口时拒绝，不自动挂单一锚点', () => {
   const rejected = reply({
     kind: 'wake',

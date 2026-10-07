@@ -101,6 +101,7 @@ export function resolveWorkSessionProfile({ plan, kind = 'worker', fallback = nu
   const planId = text(plan.planId);
   return {
     role: 'work_session',
+    ...(text(origin.workId) ? { workId: text(origin.workId) } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(planId ? { planId } : {}),

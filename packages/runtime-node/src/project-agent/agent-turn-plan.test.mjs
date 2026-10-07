@@ -16,6 +16,33 @@ test('persisted objective reply retains its host observation refs alongside late
  assert.deepEqual(finished.messages[1].meta.evidenceRefs,[observation,'tool-result://actual-task']);
 });
 
+test('only explicit public updates persist; wake and legacy round text stay internal; updates are bounded', () => {
+  const updates = [{ id: 'one', text: '公开计划' }, { id: 'two', text: '公开发现' }];
+  const args = { turnId: 't', rounds: [{ text: 'INTERNAL_ROUND_TEXT', toolCalls: [] }], publicUpdates: updates };
+  const user = finishAgentTurn({ ...args, plan: planAgentTurn({ kind: 'user' }) });
+  assert.deepEqual(user.messages[0].publicUpdates, updates);
+  assert.equal(user.messages[0].rounds[0].text, 'INTERNAL_ROUND_TEXT');
+  assert.equal(user.messages[1].content, 'INTERNAL_ROUND_TEXT');
+  const wake = finishAgentTurn({ ...args, plan: planAgentTurn({ kind: 'wake' }) });
+  assert.equal(wake.messages[0].publicUpdates, undefined);
+  updates[0].text = 'changed';
+  assert.equal(user.messages[0].publicUpdates[0].text, '公开计划');
+  const bounded = finishAgentTurn({ ...args, plan: planAgentTurn({ kind: 'user' }),
+    publicUpdates: Array.from({ length: 200 }, (_, id) => ({ id: String(id), text: 'x'.repeat(1000) })) });
+  assert.equal(bounded.messages[0].publicUpdates.reduce((sum, update) => sum + update.text.length, 0), 32000);
+  const legacy = finishAgentTurn({ turnId: 'old', plan: planAgentTurn({ kind: 'user' }), rounds: args.rounds });
+  assert.deepEqual(legacy.messages[0].publicUpdates, []);
+});
+
+test('concatenated public fallback text displays the last update as the conclusion, without dropping unstreamed final content', () => {
+  const publicUpdates = [{ id: '1', text: '计划。' }, { id: '2', text: '结论。' }];
+  const run = text => finishAgentTurn({ turnId: 't', plan: planAgentTurn({ kind: 'user' }), publicUpdates,
+    rounds: [{ text, toolCalls: [] }] }).messages[1].content;
+  assert.equal(run('计划。结论。'), '结论。');
+  assert.equal(run('结论。'), '结论。');
+  assert.equal(run('结论和未流出的内容。'), '结论和未流出的内容。');
+});
+
 test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', () => {
   const event = { eventId: 'evt-1', seq: 1, kind: 'session_verified' };
   const user = planAgentTurn({
@@ -54,6 +81,9 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.equal(wake.reminder.layer, 'L6_MODE_REMINDER');
   assert.equal(wake.reminder.kind, 'project-agent-wake');
   assert.match(wake.reminder.content, /not a new user message/);
+  assert.match(wake.reminder.content, /only confirm acknowledged work need no tool queries or status reply/);
+  assert.match(wake.reminder.content, /Review a new result or exception for the affected session/);
+  assert.match(wake.reminder.content, /do not reopen unrelated past work or poll a running session/);
   assert.doesNotMatch(wake.reminder.content, /Roster:/);
   assert.deepEqual(wake.turnProfile.context, { events: [{eventId:'evt-1',seq:1,kind:'session_verified'}], roster: {sessions:['sess-1']} });
 });

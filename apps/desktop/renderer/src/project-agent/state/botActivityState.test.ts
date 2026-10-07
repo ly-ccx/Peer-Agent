@@ -5,6 +5,20 @@ import { attachBotProcesses, mergeBotActivity, visibleBotActivity, isActivityRun
 import { normalizeBotMessage, roundsForReply, conversationRows } from './botConversationState.ts';
 const activity: ProjectAgentActivity = { workspaceId: 'w', conversationId: 'c', turnId: 't', revision: 3,
   startedAt: '2026-10-04T01:00:00Z', phase: 'responding', replyTo: ['u'], segments: [], replyText: 'draft' };
+
+test('explicit wake retry keeps public paragraphs after persistence while automatic wake stays quiet', () => {
+  const turn = normalizeBotMessage({ id: 't', kind: 'agent_turn', turnKind: 'wake', publicUpdates: [{ id: 'text-1', text: '正在重试。' }] })!;
+  const reply = normalizeBotMessage({ id: 'r', kind: 'agent_reply', turnId: 't', content: '当前进展。' })!;
+  const messages = [turn, reply];
+  const row = attachBotProcesses(conversationRows(messages), messages, null).find(row => row.type === 'message');
+  if (row?.type !== 'message') throw Error('reply missing');
+  assert.equal(row.narration?.[0].text, '正在重试。');
+  const quiet = normalizeBotMessage({ id: 't', kind: 'agent_turn', turnKind: 'wake', rounds: [{ text: 'PRIVATE_INTERNAL_TEXT' }] })!;
+  const quietMessages = [quiet, reply];
+  const quietRow = attachBotProcesses(conversationRows(quietMessages), quietMessages, null).find(row => row.type === 'message');
+  if (quietRow?.type !== 'message') throw Error('reply missing');
+  assert.deepEqual(quietRow.narration, []);
+});
 test('late reattachment snapshots and other bots cannot rewind the live reply', () => {
   assert.equal(mergeBotActivity(activity, { ...activity, revision: 2 }, 'w'), activity);
   assert.equal(mergeBotActivity(activity, { ...activity, workspaceId: 'other', revision: 4 }, 'w'), activity);
@@ -41,4 +55,14 @@ test('inline history hands off to exact-turn tools before/after persistence with
   const historical = attachBotProcesses(conversationRows(saved), saved, null).find(row => row.type === 'message');
   if (historical?.type !== 'message') throw Error('reply missing');
   assert.equal(historical.activity, undefined); assert.deepEqual(historical.processRounds, current.rounds);
+  const complete = attachBotProcesses(conversationRows(saved), saved, { ...activity, phase: 'done' }).find(row => row.type === 'message');
+  if (complete?.type !== 'message') throw Error('reply missing');
+  assert.equal(complete.activity, undefined, 'canonical completed timing replaces ephemeral fallback clocks');
+  assert.deepEqual(complete.processRounds, current.rounds);
+  for (const phase of ['stopped', 'error'] as const) {
+    const interrupted = { ...activity, phase };
+    const interruptedRow = attachBotProcesses(conversationRows(saved), saved, interrupted).find(row => row.type === 'message');
+    if (interruptedRow?.type !== 'message') throw Error('reply missing');
+    assert.equal(interruptedRow.activity, interrupted, 'interrupted activity preserves preparing calls that never dispatched');
+  }
 });

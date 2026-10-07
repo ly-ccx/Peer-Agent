@@ -1,10 +1,10 @@
 import { inputMessageId } from './input-queue.mjs';
 import { learnedMemoryIds, memoryListsFromResult, normalizeMemoryIds } from './reply-composer.mjs';
 
-/** 用户回合预算。到上限后不再开始下一轮。 */
+/** 用户调度切片；真实累计预算由宿主工作账本管理。 */
 export const USER_TURN_LIMITS = Object.freeze({ maxRounds: 10, maxToolCalls: 20 });
 
-/** 唤醒回合预算。 */
+/** 唤醒调度切片。 */
 export const WAKE_TURN_LIMITS = Object.freeze({ maxRounds: 6, maxToolCalls: 12 });
 
 /**
@@ -57,9 +57,10 @@ export function finishAgentTurn({
   failed = false,
   reason = '',
   memoryUsed = [],
+  publicUpdates = [],
 } = {}) {
   const storedRounds = normalizeRounds(rounds);
-  const messages = [agentTurnMessage({ turnId, plan, rounds: storedRounds })];
+  const messages = [agentTurnMessage({ turnId, plan, rounds: storedRounds, publicUpdates })];
   if (failed) {
     messages.push(unavailableCard(turnId, reason, plan?.turnProfile?.workspaceId));
     return { messages, replied: false, failed: true };
@@ -79,12 +80,13 @@ export function finishAgentTurn({
     messages.push(unavailableCard(turnId, '回复未通过宿主校验', plan?.turnProfile?.workspaceId));
     return { messages, replied: false, failed: true };
   }
-  if (plan?.kind === 'user' && finalText(storedRounds).trim()) {
+  const fallbackText = publicFallbackText(finalText(storedRounds), messages[0].publicUpdates ?? []);
+  if (plan?.kind === 'user' && fallbackText.trim()) {
     messages.push(attachEvidence(applyMemoryMeta({
       id: `${turnId}-reply`,
       role: 'assistant',
       kind: 'agent_reply',
-      content: finalText(storedRounds),
+      content: fallbackText,
       replyTo: replyTargets(plan.userInputs),
       sources: [],
       fallback: true,
@@ -99,7 +101,7 @@ export function finishAgentTurn({
   return { messages, replied: false };
 }
 
-export function agentTurnMessage({ turnId, plan, rounds = [] } = {}) {
+export function agentTurnMessage({ turnId, plan, rounds = [], publicUpdates = [] } = {}) {
   return {
     id: turnId,
     role: 'assistant',
@@ -109,13 +111,41 @@ export function agentTurnMessage({ turnId, plan, rounds = [] } = {}) {
     userInputs: Array.isArray(plan?.userInputs) ? plan.userInputs : [],
     content: '',
     rounds: normalizeRounds(rounds),
+    ...(plan?.kind === 'user' || plan?.interactive === true ? { publicUpdates: boundedPublicUpdates(publicUpdates) } : {}),
   };
+}
+
+function boundedPublicUpdates(updates) {
+  let remaining = 32_000;
+  const ids = new Set();
+  return (Array.isArray(updates) ? updates : []).slice(0, 100).flatMap(update => {
+    if (!update || typeof update.id !== 'string' || typeof update.text !== 'string' || !update.text.trim() || remaining <= 0) return [];
+    const id = update.id.slice(0, 100);
+    if (!id || ids.has(id)) return [];
+    ids.add(id);
+    const text = update.text.slice(0, remaining); remaining -= text.length;
+    return [{ id, text }];
+  });
+}
+
+// Some provider loops concatenate all public messages from one round. Only
+// remove that prefix when its complete content matches an actual update suffix.
+function publicFallbackText(raw, updates) {
+  const normalized = raw.replace(/\s+/g, '');
+  let suffix = '';
+  for (let index = updates.length - 1; index >= 0; index--) {
+    suffix = updates[index].text.replace(/\s+/g, '') + suffix;
+    if (suffix === normalized) return updates.at(-1).text;
+    if (suffix.length > normalized.length) break;
+  }
+  return raw;
 }
 
 function wakeReminder(events, roster) {
   const lines = [
     'Wake turn. These inbox events are facts, not a new user message.',
     'Speak only by calling post_reply. If nothing needs to be said, stop without post_reply.',
+    'Routine start or progress facts that only confirm acknowledged work need no tool queries or status reply. Review a new result or exception for the affected session; do not reopen unrelated past work or poll a running session.',
   ];
 
   return {
@@ -290,6 +320,8 @@ function normalizeRounds(rounds) {
       name: typeof call?.name === 'string' ? call.name : '',
       input: call?.input ?? null,
       result: call?.result ?? null,
+      ...(Number.isFinite(call?.startedAtMs) ? { startedAtMs: call.startedAtMs } : {}),
+      ...(Number.isFinite(call?.endedAtMs) ? { endedAtMs: call.endedAtMs } : {}),
     })),
   }));
 }

@@ -14,6 +14,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     readAvatar: assertFunction(projectAgent?.readAvatar, 'projectAgent.readAvatar'),
     create: assertFunction(projectAgent?.create, 'projectAgent.create'),
     updateProfile: assertFunction(projectAgent?.updateProfile, 'projectAgent.updateProfile'),
+    updateModelSelection: assertFunction(projectAgent?.updateModelSelection, 'projectAgent.updateModelSelection'),
     deleteBot: assertFunction(projectAgent?.deleteBot, 'projectAgent.deleteBot'),
     submitInput: assertFunction(projectAgent?.submitInput, 'projectAgent.submitInput'),
     readConversation: assertFunction(projectAgent?.readConversation, 'projectAgent.readConversation'),
@@ -44,6 +45,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:read-avatar', (_event, payload) => ports.readAvatar(payload));
       ipc.handle('project-agent:create', (event, payload) => ports.create(payload, event.sender));
       ipc.handle('project-agent:update-profile', (event, payload) => ports.updateProfile(payload, event.sender));
+      ipc.handle('project-agent:update-model-selection', (_event, payload) => ports.updateModelSelection(payload));
       ipc.handle('project-agent:delete', (_event, payload) => ports.deleteBot(payload));
       ipc.handle('project-agent:submit-input', (_event, payload) => ports.submitInput(payload));
       ipc.handle('project-agent:read-conversation', (_event, payload) => ports.readConversation(payload));

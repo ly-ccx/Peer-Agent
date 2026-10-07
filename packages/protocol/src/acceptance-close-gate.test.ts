@@ -116,3 +116,16 @@ test('isAcceptanceClosePatch only fires when acceptance is newly written', () =>
   assert.equal(isAcceptanceClosePatch({ acceptedAt: '2026-08-22T00:00:00.000Z' }, { acceptedAt: '2026-08-22T00:00:00.000Z' }), false);
   assert.equal(isAcceptanceClosePatch({ acceptedAt: '2026-08-22T00:00:00.000Z' }, undefined), false);
 });
+
+
+test('semantic criteria require a current host verifier and indexed evidence; manual approvals cannot bypass them', () => {
+  const plan = { successCriteria: [criterion('c1', 'Report quality', 'model_review')],
+    modelReviewSourceRevision: 'current', modelReviews: [{ criterionId: 'c1', sourceRevision: 'current', verifierRunId: 'v1', passed: true, evidenceRefs: ['ev-real'], checkedAt: 'now' }],
+    runner: { verifierRuns: [{ verifierRunId: 'v1', status: 'passed' }] }, evidenceRefs: ['ev-real'],
+    manualConfirmations: [{ confirmationId: 'human', kind: 'manual_dod' as const, decision: 'approve' as const, criterionIds: ['c1'], decidedAt: 'now' }] };
+  assert.equal(evaluateAcceptanceCloseGate(plan).ok, true);
+  assert.equal(evaluateAcceptanceCloseGate({ ...plan, modelReviewSourceRevision: 'changed' }).ok, false);
+  assert.equal(evaluateAcceptanceCloseGate({ ...plan, runner: { verifierRuns: [] } }).ok, false);
+  assert.equal(evaluateAcceptanceCloseGate(plan, { knownRefs: [] }).ok, false);
+  assert.equal(evaluateAcceptanceCloseGate({ ...plan, modelReviews: [] }).ok, false);
+});

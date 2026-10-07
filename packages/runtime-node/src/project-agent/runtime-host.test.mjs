@@ -10,7 +10,7 @@ function harness(executeTurn = async () => ({ text: 'reply' })) {
   let ids = ['a', 'b'];
   const leased = new Set(ids), stopped = [], messages = [];
   const host = createProjectAgentHost({
-    rootDir,
+    rootDir, readLeaseEpoch: () => 'isolated-test-owner',
     listWorkspaceIds: () => ids, holdsLease: id => leased.has(id), resolveConversationId: id => `conv-${id}`,
     appendMessage: (conversationId, message) => messages.push({ ...message, conversationId }),
     readMessages: conversationId => messages.filter(message => message.conversationId === conversationId),

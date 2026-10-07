@@ -106,11 +106,11 @@ export function createDelegationProvider({
       return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
         output: { ok: false, error: 'current_user_required', message: 'Historical user messages cannot authorize new tasks during an ordinary wake.' } });
     }
-    if (['spawn_session', 'resume_session', 'message_session', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
+    if (['spawn_session', 'resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
       && onlyHandoffAnswers(view)) return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
       output: { ok: false, error: 'host_decision_already_handled', message: 'The host handles this merge decision. A separate current user instruction is required for new work.' } });
     if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
-    if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['resume_session','message_session','reprioritize_session','cancel_session','set_proactivity'].includes(item.name)){
+    if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['control_work','resume_session','message_session','reprioritize_session','cancel_session','set_proactivity'].includes(item.name)){
       return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     }
     if (item.name === 'verify_session' && view.objectiveWakeIds.length && !view.currentInputAnchors.length) {
@@ -120,7 +120,7 @@ export function createDelegationProvider({
         return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'objective_verification_out_of_scope' } });
       }
     }
-    if (['message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
+    if (['control_work', 'message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
       const scope = resolveAnchorScope({
         messages: view.messages,
         quoteRefs: view.quoteRefs,
@@ -273,6 +273,7 @@ export function createDelegationProvider({
       if (!rows.ok) return rows;
       return { ok: true, output: { ok: true, sessions: Array.isArray(rows.output) ? rows.output : [] } };
     }
+    if (name === 'control_work') return accepted(await callPort(supervisor?.controlWork, input, 'supervisor_unavailable', spawnContext(view)), 'supervisor_unavailable');
     if (name === 'resume_session') return sessionOrMissing(await callPort(supervisor?.resume, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'reprioritize_session') return sessionOrMissing(await callPort(supervisor?.reprioritize, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
@@ -316,38 +317,44 @@ export function createDelegationProvider({
     if (typeof verification.markVerifying === 'function') {
       await verification.markVerifying(input.sessionId);
     }
-    const reviewed = await verification.run({
-      sessionId: input.sessionId,
-      ...(input.focus ? { focus: input.focus } : {}),
-      role: 'verifier',
-      preferDifferentSource: true,
-    });
-    if (!reviewed || reviewed.ok === false || !reviewed.facts) {
-      return {
-        ok: false,
-        output: { ok: false, error: reviewed?.error || 'verifier_failed', message: reviewed?.error || 'verifier_failed' },
+    try {
+      const reviewed = await verification.run({
+        sessionId: input.sessionId,
+        ...(input.focus ? { focus: input.focus } : {}),
+        role: 'verifier',
+        preferDifferentSource: true,
+      });
+      if (!reviewed || reviewed.ok === false || !reviewed.facts) {
+        return {
+          ok: false,
+          output: { ok: false, error: reviewed?.error || 'verifier_failed', message: reviewed?.error || 'verifier_failed' },
+        };
+      }
+      const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });
+      const event = {
+        kind: 'verdict',
+        sessionId: input.sessionId,
+        outcome: detail.outcome,
+        verdictRef: verdictRefFor(input.sessionId, detail.outcome),
+        at: typeof reviewed.at === 'string' ? reviewed.at : new Date().toISOString(),
       };
+      const card = {
+        cardId: `card:verdict:${input.sessionId}`,
+        kind: 'verdict',
+        sessionId: input.sessionId,
+        content: detail.outcome,
+        verdictRef: event.verdictRef,
+        resolvedState: 'resolved',
+      };
+      if (typeof verification.record === 'function') {
+        const recorded = await verification.record({ event, card, detail, status: detail.outcome, contentHash: reviewed.contentHash });
+        if (recorded?.ok === false) return { ok: false,
+          output: { ok: false, error: recorded.error || 'verification_persistence_failed' } };
+      }
+      return { ok: true, output: { ok: true, status: detail.outcome, event, card, detail } };
+    } finally {
+      await verification.finish?.(input.sessionId);
     }
-    const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });
-    const event = {
-      kind: 'verdict',
-      sessionId: input.sessionId,
-      outcome: detail.outcome,
-      verdictRef: verdictRefFor(input.sessionId, detail.outcome),
-      at: typeof reviewed.at === 'string' ? reviewed.at : new Date().toISOString(),
-    };
-    const card = {
-      cardId: `card:verdict:${input.sessionId}`,
-      kind: 'verdict',
-      sessionId: input.sessionId,
-      content: detail.outcome,
-      verdictRef: event.verdictRef,
-      resolvedState: 'resolved',
-    };
-    if (typeof verification.record === 'function') {
-      await verification.record({ event, card, detail, status: 'verifying' });
-    }
-    return { ok: true, output: { ok: true, status: 'verifying', event, card, detail } };
   }
 
   async function setProactivity(input, view) {
@@ -393,6 +400,8 @@ function executionView(context) {
     ? context.toolContext
     : {};
   return {
+    workId: text(context?.turnProfile?.workId) || text(nested.turnProfile?.workId),
+    manualCriterionAuthorities: context?.manualCriterionAuthorities ?? nested.manualCriterionAuthorities,
     mode: context?.mode ?? nested.mode,
     role: context?.role ?? context?.turnProfile?.role ?? nested.role ?? nested.turnRole ?? nested.turnProfile?.role,
     messages: Array.isArray(context?.messages) ? context.messages : nested.messages,
@@ -520,6 +529,8 @@ async function callPort(fn, input, unavailable, context) {
       output: {
         ok: false,
         error: result.error,
+        ...(Array.isArray(result.messageIds) ? { messageIds: result.messageIds } : {}),
+        ...(Array.isArray(result.availableReplyAnchors) ? { availableReplyAnchors: result.availableReplyAnchors } : {}),
         ...(Array.isArray(result.sessionStates) ? { sessionStates: result.sessionStates } : {}),
         ...(result.missing ? { missing: result.missing, message: result.missing } : {}),
         ...(result.message ? { message: result.message } : {}),
@@ -533,6 +544,8 @@ async function callPort(fn, input, unavailable, context) {
 function spawnContext(view) {
   return {
     parentConversationId: text(view?.conversationId) || '',
+    workId: view.workId,
+    manualCriterionAuthorities: view.manualCriterionAuthorities,
     workspaceId: text(view?.workspaceId) || '',
     workspacePath: text(view?.workspacePath) || '',
     surface: view?.surface,

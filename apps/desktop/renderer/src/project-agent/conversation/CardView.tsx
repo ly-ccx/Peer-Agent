@@ -1,9 +1,12 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { projectAgentFailureKind } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { PeerIcon } from '../../ui/icons';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
+import { cardActionErrorKey } from '../state/cardActionError';
+import { CompletionReview } from './CompletionReview';
 
 /**
  * 所有动作通过应用服务，由宿主校验状态与项目归属。
@@ -29,6 +32,16 @@ export function CardView({
   );
 }
 
+/** Provider diagnostics are preserved for inspection, separate from actionable cards. */
+export function CardDiagnostics({ cards, i18n }: { readonly cards: readonly BotChatCard[]; readonly i18n: I18nRuntime }) {
+  return <>{cards.filter(card => card.kind === 'agent_unavailable' && card.content).map(card => (
+    <section className="bot-context-error" key={card.cardId}>
+      <h3>{i18n.t('projectAgent.chat.context.error')}</h3>
+      <pre>{card.content}</pre>
+    </section>
+  ))}</>;
+}
+
 function CardItem({
   workspaceId,
   card,
@@ -46,11 +59,13 @@ function CardItem({
   const resolved = done || card.resolvedState === 'resolved';
   if (card.kind === 'question' && resolved) return null;
   return (
-    <section className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'question' ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
-      {card.kind === 'agent_stopped' ? <>
+    <section className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${card.kind === 'question' ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
+      {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
-      </> : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
+      </> : card.kind === 'agent_unavailable' ? <p className="bot-reply-body">{i18n.t(projectAgentFailureKind(card.content) === 'budget_exhausted'
+        ? 'projectAgent.chat.budgetExhausted' : 'projectAgent.chat.unavailable')}</p>
+        : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved || !card.actions?.length ? null : (
         <div className="bot-card-actions">
           {card.actions.map((action, index) => (
@@ -62,7 +77,7 @@ function CardItem({
                 if (busy) return;
                 setBusy(true); setError('');
                 void runCardAction(workspaceId, action).then(result => {
-                  if (!result?.ok) { setError(result?.code || i18n.t('projectAgent.chat.actionFailed')); return; }
+                  if (!result?.ok) { setError(i18n.t(cardActionErrorKey(result?.code))); return; }
                   setDone(true); onDone?.();
                 }).catch(() => setError(i18n.t('projectAgent.chat.actionFailed'))).finally(() => setBusy(false));
               }}
@@ -87,6 +102,8 @@ function actionLabel(action: BotChatCardAction, i18n: I18nRuntime): string {
   if (action.id === 'reject') return i18n.t('projectAgent.chat.reject');
   if (action.id === 'answer') return i18n.t('projectAgent.chat.answer');
   if (action.id === 'confirm') return i18n.t('projectAgent.chat.confirmResult');
+  if (action.id === 'confirm_completion') return i18n.t('projectAgent.chat.confirmCompletion');
+  if (action.id === 'retry_completion') return i18n.t('projectAgent.chat.retryCompletion');
   if (action.id === 'accept_readme') return i18n.t('projectAgent.chat.acceptReadme');
   if (action.id === 'retry') return i18n.t('projectAgent.chat.retry');
   return action.id;
@@ -113,7 +130,11 @@ async function runCardAction(workspaceId: string, action: BotChatCardAction): Pr
   }
   if (action.channel === 'project-agent:start-familiarize') return clientApi.projectAgentStartFamiliarize({ workspaceId });
   if (action.channel === 'project-agent:confirm-result' && typeof payload.sessionId === 'string') {
-    return clientApi.projectAgentConfirmResult({ workspaceId, sessionId: payload.sessionId });
+    if (payload.stage === 'manual_completion' && (typeof payload.reviewToken !== 'string' || !payload.reviewToken)) return { ok: false, code: 'INVALID_INPUT' };
+    const confirmation = payload.stage === 'manual_completion' && typeof payload.reviewToken === 'string'
+      ? { workspaceId, sessionId: payload.sessionId, stage: 'manual_completion', reviewToken: payload.reviewToken } as const
+      : { workspaceId, sessionId: payload.sessionId };
+    return clientApi.projectAgentConfirmResult(confirmation);
   }
   if (action.channel === 'project-agent:accept-readme') return clientApi.projectAgentAcceptReadme({ workspaceId });
   if (action.channel === 'project-agent:retry' && typeof payload.turnId === 'string') return clientApi.projectAgentRetry({ workspaceId, turnId: payload.turnId });

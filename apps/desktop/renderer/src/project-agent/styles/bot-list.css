@@ -799,7 +799,7 @@
   gap: 10px;
   align-items: center;
   flex: none;
-  min-height: 68px;
+  min-height: 52px;
   padding: 0 27px;
   background: var(--chrome-canvas);
   border-bottom: 1px solid var(--chrome-hairline);

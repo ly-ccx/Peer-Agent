@@ -39,7 +39,11 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
   if (!session?.sessionId) return [];
   const events = [];
   if (!prior) {
-    events.push(event(session, { kind: 'session_started', version: session.version ?? 1, at, payload: { status: session.status ?? null } }));
+    events.push(event(session, { kind: 'session_started', version: session.startRevision || session.startedAt || session.sessionId, at, payload: { status: session.status ?? null } }));
+  }
+  if (session.reportRevision && session.reportRevision !== prior?.reportRevision) {
+    events.push(event(session, { kind: 'report_available', version: session.reportRevision, at,
+      payload: { reportRevision: session.reportRevision, verification: 'unverified' } }));
   }
   const progress = progressEvent(prior, session, { at, progressThrottleMs });
   if (progress) events.push(progress);

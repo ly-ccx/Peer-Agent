@@ -221,6 +221,25 @@ select.quick-chat-workspace-name {
   transform: rotate(180deg);
 }
 
+.quick-chat-shell--bots .quick-chat-bot {
+  max-width: 240px;
+  color: var(--quick-text);
+  font-weight: 500;
+}
+
+.quick-chat-shell--bots .quick-chat-model > span,
+.quick-chat-shell--bots .quick-chat-effort > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-chat-shell--bots .quick-chat-selectors button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .quick-chat-hint,
 .quick-chat-error {
   overflow: hidden;

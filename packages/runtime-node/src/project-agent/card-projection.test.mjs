@@ -21,6 +21,19 @@ function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-08-cards-'));
 }
 
+test('interrupted retry receipts cannot hide a failure without a subsequent canonical turn', () => {
+  for (const kind of ['agent_unavailable', 'agent_stopped']) {
+    const key = kind === 'agent_unavailable' ? 'unavailable' : 'stopped';
+    const receipt = { cardId: `card:${kind}:turn-1`, resolvedState: 'resolved', resolution: 'retried' };
+    const pending = projectCards('ws-1', { [key]: [{ turnId: 'turn-1', superseded: false }] }, [receipt])[0];
+    assert.equal(pending.resolvedState, 'open');
+    assert.equal(pending.actions[0].id, 'retry');
+    const advanced = projectCards('ws-1', { [key]: [{ turnId: 'turn-1', superseded: true }] }, [receipt])[0];
+    assert.equal(advanced.resolvedState, 'resolved');
+    assert.deepEqual(advanced.actions, []);
+  }
+});
+
 function facts() {
   return {
     approvals: [

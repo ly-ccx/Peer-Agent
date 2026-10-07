@@ -10,6 +10,8 @@ const ALL_APP_WINDOW_ROLES = Object.freeze([
   'permission-drag-float',
 ]);
 const QUICK_CHAT_CHANNELS = new Set([
+  'project-agent:get',
+  'project-agent:update-model-selection',
   'project-agent:list',
   'project-agent:submit-input',
   'chat:send',
@@ -247,6 +249,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'project-agent:stop-response',
   'project-agent:takeover-host',
   'project-agent:submit-input',
+  'project-agent:update-model-selection',
   'project-agent:update-profile',
   'project-objectives:list',
   'project-objectives:update',

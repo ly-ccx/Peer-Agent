@@ -46,11 +46,16 @@ export function buildProjectAgentModeDenial({
 
 /**
  * 共享 permission-gate 的 accessLevel 不能按回合切换。
- * 项目代理回合若收到 full/session 的自动授权，改成拒绝，避免用户的全局级别漏进这个回合。
+ * Provider 越界请求直接拒绝，避免进入没有人工 approver 的代理流。
+ * 其他请求若收到 full/session 自动授权，同样拒绝，避免全局级别漏进本回合。
  */
 export function restrictProjectAgentPermission(requestPermission) {
   if (typeof requestPermission !== 'function') return requestPermission;
   return async (request) => {
+    // File Provider only asks here after checking its admitted workspace scope.
+    if (typeof request?.filePath === 'string' && typeof request?.workspacePath === 'string') {
+      return { granted: false, reason: 'project_agent_capability_denied' };
+    }
     const decision = await requestPermission(request);
     if (
       decision?.reason === 'local_access_level_full'

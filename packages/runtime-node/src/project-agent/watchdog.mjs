@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { sessionFactsFromPlan } from './session-facts.mjs';
 /**
  * 停滞与失败的纯判断。不读盘，不发事件，不执行工具。
  * 事件映射只消费这里的结论；代理规则决定重试、换法、停掉或问用户。
@@ -119,18 +121,23 @@ export function watchFactsFromPlan(plan) {
   const lastProgressAt = latestCompletion(leaves);
   const startedAt = text(plan?.createdAt) || text(origin?.createdAt);
   const needsUser = needsFromPlan(plan, sessionId);
+  const facts = sessionFactsFromPlan(plan);
+  const reportStable = !facts.verificationActive
+    && !['running', 'starting', 'waiting_provider', 'resuming_after_compaction'].includes(plan.runner?.status);
   return {
     sessionId,
     workspaceId: text(origin?.workspaceId),
     ...(text(plan?.planId) ? { planId: text(plan.planId) } : {}),
     ...(text(plan?.runner?.currentTaskId) ? { taskId: text(plan.runner.currentTaskId) } : {}),
     version: text(plan?.updatedAt) || text(plan?.planId) || sessionId,
-    status: watchStatus(plan, needsUser.length > 0),
+    status: plan.status === 'interrupted' && plan.runner?.status === 'failed' ? 'interrupted' : sessionFactsFromPlan(plan).status,
     ...(plan.status === 'completed' ? { completedAt: text(plan.timing?.completedAt) || text(plan.updatedAt) } : {}),
     ...(terminalVerifierRevision(plan) ? { resultRevision: terminalVerifierRevision(plan) } : {}),
     ...(startedAt ? { startedAt } : {}),
     ...(lastProgressAt ? { lastProgressAt } : {}),
     leaves,
+    ...(reportStable && leaves.length && leaves.every(leaf => leaf.status === 'completed') ? { reportRevision:
+      createHash('sha256').update(JSON.stringify(reportMaterial(plan.tasks))).digest('hex') } : {}),
     ...(needsUser.length ? { needsUser } : {}),
     runner: {
       ...(text(plan?.runner?.lastError) ? { lastError: text(plan.runner.lastError) } : {}),
@@ -162,24 +169,12 @@ function terminalVerifierRevision(plan) {
   return JSON.stringify([text(latest.verifierRunId), latest.status, latest.completedAt]);
 }
 
-function watchStatus(plan, waiting) {
-  if (plan?.status === 'cancelled') return 'cancelled';
-  if (plan?.status === 'failed') return 'failed';
-  if (plan?.status === 'interrupted' && plan?.runner?.status === 'failed') return 'interrupted';
-  if (plan?.status === 'completed') return 'result_ready';
-  if (waiting) return 'waiting_user';
-  const phase = plan?.delegationOrigin?.phase;
-  if (phase === 'running' && plan?.status !== 'completed') return 'running';
-  if (plan?.status === 'executing') return 'running';
-  return 'queued';
-}
-
 function needsFromPlan(plan, sessionId) {
   const needs = [];
   if (plan?.delegationOrigin?.phase === 'awaiting_approval') {
     needs.push({ approvalId: `${sessionId}:plan_approval`, kind: 'plan_approval' });
   }
-  if (plan?.runner?.status === 'waiting_user') {
+  if (['waiting_user', 'blocked'].includes(plan?.runner?.status)) {
     needs.push({ approvalId: `${sessionId}:question`, kind: 'question' });
   }
   return needs;
@@ -274,4 +269,8 @@ function normalizeCause(value) {
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function reportMaterial(nodes) {
+  return (nodes || []).map(node => ({ result: node.result || '', status: node.status, children: reportMaterial(node.subtasks) }));
 }

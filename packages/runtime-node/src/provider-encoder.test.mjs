@@ -5,6 +5,36 @@ import { encodeAnthropicMessagesRequest, encodeOpenAIChatRequest } from './provi
 import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
 import { DELEGATION_TOOL_SPECS } from './project-agent/tool-specs.mjs';
 
+test('DeepSeek thinking admits text-only historical replies as labelled context, without inventing reasoning', () => {
+  const messages = [{ role: 'user', content: '先熟悉项目' }, { role: 'assistant', content: '已给出项目概述' }, { role: 'user', content: '继续' }];
+  const input = { model: 'deepseek-flash', messages, tools: [{ name: 'read_file' }], supportsReasoning: true,
+    reasoningParamStyle: 'anthropic-enabled-output-effort', effort: 'high', promptCaching: false };
+  const body = encodeAnthropicMessagesRequest(input);
+  assert.equal(body.messages[1].role, 'user');
+  assert.match(body.messages[1].content, /Historical assistant reply/);
+  assert.match(body.messages[1].content, /已给出项目概述/);
+  assert.equal(body.messages.some(message => message.role === 'assistant'), false);
+  assert.equal(messages[1].role, 'assistant', 'canonical history must stay unchanged');
+  for (const overrides of [{ effort: 'off' }, { supportsReasoning: false }, { tools: [] }, { reasoningParamStyle: 'anthropic-enabled-budget' }]) {
+    assert.equal(encodeAnthropicMessagesRequest({ ...input, ...overrides }).messages[1].role, 'assistant');
+  }
+});
+
+test('DeepSeek history admission preserves authentic thinking and structured tool pairs', () => {
+  const thinking = { type: 'thinking', thinking: 'original reasoning', signature: 'original-signature' };
+  const messages = [{ role: 'user', content: 'read' },
+    { role: 'assistant', content: [thinking, { type: 'tool_use', id: 'read-1', name: 'read_file', input: { path: 'README.md' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', content: 'result' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'old visible reply' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'unsigned-legacy', name: 'read_file', input: {} }] }];
+  const body = encodeAnthropicMessagesRequest({ model: 'deepseek-flash', messages, tools: [{ name: 'read_file' }], supportsReasoning: true,
+    reasoningParamStyle: 'anthropic-enabled-output-effort', effort: 'high', promptCaching: false });
+  assert.deepEqual(body.messages[1], messages[1]);
+  assert.deepEqual(body.messages[2], messages[2]);
+  assert.equal(body.messages[3].role, 'user');
+  assert.deepEqual(body.messages[4], messages[4], 'never reclassify a real tool call or fabricate missing reasoning');
+});
+
 test('portable Responses encoding preserves optional Manifest fields and explicit strict policy', () => {
   const spawn = DELEGATION_TOOL_SPECS.find(tool => tool.name === 'spawn_session');
   const schema = structuredClone(spawn.inputSchema);

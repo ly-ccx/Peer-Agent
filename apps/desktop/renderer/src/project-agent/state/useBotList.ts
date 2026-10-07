@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { filterBotList, type BotListItem, type BotProfile } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
+import { readBotDetails } from './botDetails';
 import { PROJECT_AGENT_SHELL_EVENT, projectAgentShellOf } from '../onboarding/botShell';
 import {
   applyBotRefresh,
@@ -114,7 +115,7 @@ export function useBotList() {
     }
     const updates = [];
     for (const workspaceId of workspaceIds) {
-      const result = await clientApi.projectAgentGet({ workspaceId });
+      const result = await readBotDetails(workspaceId);
       if (result?.ok && result.item) updates.push({ workspaceId, item: result.item });
       else if (result?.code === 'ARCHIVED' || result?.code === 'NOT_FOUND') updates.push({ workspaceId, item: null });
     }

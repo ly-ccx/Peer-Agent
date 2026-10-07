@@ -75,7 +75,7 @@ export interface MemoryFilter {
 }
 
 const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'memory', 'settings']);
-const NEEDS_YOU = new Set(['waiting_user']);
+const NEEDS_YOU = new Set(['waiting_user', 'result_ready']);
 const RUNNING = new Set(['starting', 'running', 'verifying']);
 const QUEUED = new Set(['queued']);
 
@@ -196,7 +196,9 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     anchorMessageId: readString(origin.anchorMessageId),
     ...(readString(origin.objectiveId) ? {objectiveId:readString(origin.objectiveId)} : {}),
     modelLabel: frozenModelLabel(origin.modelSelection),
-    summary: readString(report.summary),
+    // This drawer field is the task instruction disclosure. Worker output now
+    // has a distinct source; it must not be relabeled as task instructions.
+    summary: readString(report.taskBrief) || (report.contentSource ? '' : readString(report.summary)),
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
     queueReason: readString(record.queueReason),
