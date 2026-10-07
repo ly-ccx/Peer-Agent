@@ -1259,7 +1259,7 @@ function ResultCard({
       <div className="task-overview-work-top">
         <span className="task-overview-work-state result-card-state">
           <i className="result-card-seal" aria-hidden="true">
-            ✓
+            <PeerIcon name="check" size={14} />
           </i>
           {celebrating
             ? '验收完成，任务已圆满结束'
@@ -1305,7 +1305,7 @@ function ResultCard({
           </button>
         ) : celebrating ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
-            已归档 ✓
+            已归档 <PeerIcon name="check" size={14} />
           </button>
         ) : (
           <button

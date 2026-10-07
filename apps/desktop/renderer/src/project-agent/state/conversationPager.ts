@@ -49,8 +49,11 @@ export function createConversationPager({ read, publish }: {
     }
     // Direction comes from the cursor, not timestamps (which can be identical).
     const freshIds = new Set(fetched.map(message => message.id));
-    const byId = new Map([...messages, ...fetched].map(message => [message.id, message]));
-    const order = before ? [...fetched, ...messages] : [...messages.filter(message => !freshIds.has(message.id)), ...fetched];
+    // Unpersisted host cards are a snapshot, not paginated chat history.
+    const retained = before ? messages : messages.filter(message => !(message.kind === 'system_card'
+      && !message.createdAt && message.cards.some(card => card.cardId === message.id)));
+    const byId = new Map([...retained, ...fetched].map(message => [message.id, message]));
+    const order = before ? [...fetched, ...retained] : [...retained.filter(message => !freshIds.has(message.id)), ...fetched];
     messages = [...new Set(order.map(message => message.id))].map(id => byId.get(id)!);
     if (before || !initialized || !known.size) cursor = first!.nextCursor ?? null;
     initialized = true;

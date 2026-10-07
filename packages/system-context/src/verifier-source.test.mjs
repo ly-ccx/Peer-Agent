@@ -44,3 +44,18 @@ for (const stage of ['visual', 'evidence']) {
     });
   }
 }
+
+test('semantic criteria are assigned to this review, never presented as failed prerequisites', () => {
+  const source = createVerifierPromptSource();
+  const sections = source.render(source.observe({ mode: 'explorer', verifierContext: {
+    planId: 'p', verifierRunId: 'v', plan: { successCriteria: [
+      { id: 'semantic', kind: 'model_review', description: 'Facts have indexed evidence' },
+      { id: 'human', kind: 'manual', description: 'User review' },
+    ], criterionResults: [{ criterionId: 'semantic', passed: false }] },
+  } }));
+  const brief = sections.find(row => row.id === 'runtime.verifier.brief').content;
+  assert.match(brief, /semantic \(model_review\) review=pending_this_verifier/);
+  assert.doesNotMatch(brief, /semantic.*passed=false/);
+  assert.match(brief, /human \(manual\) passed=false/);
+  assert.match(sections.find(row => row.id === 'runtime.verifier.contract').content, /host records your version-bound judgment afterwards/);
+});

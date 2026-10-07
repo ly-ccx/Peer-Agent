@@ -11,6 +11,7 @@ const { createConversationStore } = await import('@peer-agent/conversation-store
 const { createGoalPlanStore, createMemoryStore,createObjectiveStore,mapObjectiveObservationEvent, resolveRoleRoute } = await import('@peer-agent/runtime-node');
 const { registerDesktopProjectAgent } = await import('./project-agent-host.mjs');
 const { projectTurnSystemContext } = await import('../llm-chat-service.mjs');
+const { createWorkCoordinationStore } = await import('../../../../../packages/runtime-node/src/project-agent/work-coordination-store.mjs');
 const { createAgentTurnExecutor } = await import('../agent-host/agent-turn-executor.mjs');
 const { executeProjectedModelTool } = await import('../chat-runtime/projected-tool-executor.mjs');
 const { createRuntimeToolProjection } = await import('../tools/index.mjs');
@@ -37,7 +38,7 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
     resolveGoalRole(input) { routes.push(input); return resolveRoleRoute({ ...input, providers: configured ? [modelProvider] : [] }); },
     async sendMessage(input) { calls.push(input); return send ? send(input, { plans, conversations, api }) : { terminalStatus: 'done', text: 'hello' }; },
   } });
-  const registrations = registerDesktopProjectAgent({ enabled: () => true, dataHome: home,
+  const registrations = registerDesktopProjectAgent({ readLeaseEpoch: () => 'test-owner', enabled: () => true, dataHome: home,
     conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
       ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
@@ -226,7 +227,7 @@ test('familiarize completion wakes, verifies, requires sources, persists accepta
   let env, sessionId, report = false;
   env = harness({verify:async()=>({passed:true,evidenceRefs:['ev-file'],verifierModel:provider.id}),send:async input=>{
     if (!report) return {terminalStatus:'done',text:'ready'};
-    assert.ok(input.turnProfile.context.events.some(event=>event.kind==='result_ready'));
+    assert.ok(input.turnProfile.context.events.some(event=>['result_ready','report_available'].includes(event.kind)));
     const verified=await tool({...env,turnId:input.streamId},'verify_session',{sessionId});
     assert.equal(JSON.parse(verified.output).ok,true,verified.output);
     const args={text:'README describes a test project.',replyTo:[`lifecycle-research-${env.bot.workspaceId}`]};
@@ -245,12 +246,12 @@ test('familiarize completion wakes, verifies, requires sources, persists accepta
     env.plans.recordEvidenceRefs({planId,evidenceRef:'ev-file',toolName:'read_file',capabilityId:'local.file.read',
       bodyPreview:{kind:'file',text:'test project',truncated:false}});
     env.plans.revisePlan(planId,{tasks:[{taskId:'read',title:'Read',status:'completed',evidenceRefs:['ev-file']}]},{reason:'read complete',changedBy:'test'});
-    env.plans.recordManualConfirmation(planId,{decision:'approve',criterionIds:['c1','c2'],decidedBy:'user'});
+    assert.equal(env.plans.getPlan(planId).successCriteria.every(row=>row.kind==='model_review'),true);
     env.plans.setPlanStatus(planId,'completed');report=true;
     await env.api.host.sync([env.bot.workspaceId]);
     assert.equal(env.plans.getPlan(planId).resultAcceptance?.acceptedBy,'policy',JSON.stringify(env.history().filter(item=>item.card)));
     const reply=env.history().find(message=>message.content==='README describes a test project.');
-    assert.deepEqual(reply.meta.sessionStates,[{sessionId,status:'accepted'}]);
+    assert.equal(reply.meta.sessionStates[0].sessionId,sessionId); assert.equal(reply.meta.sessionStates[0].status,'accepted'); assert.ok(reply.meta.sessionStates[0].sourceRevision);
     const store=createMemoryStore({rootDir:env.home});
     const item=store.list({workspaceId:env.bot.workspaceId}).find(item=>item.trust==='verified');
     assert.ok(item);assert.deepEqual(reply.meta.memoryLearned,[item.id]);
@@ -306,7 +307,7 @@ test('the default LocalToolHost dispatches through supervisor, Grant and Evidenc
   const env = harness();
   try {
     await env.submit('anchor', 'read project');
-    const opened = await tool({ ...env, currentInputAnchors: ['input-anchor'] }, 'spawn_session', { anchorMessageIds: ['input-anchor'], title: 'Read', brief: 'Read files', kind: 'research', readOnly: true, successCriteria: ['Read'] });
+    const opened = await tool({ ...env, currentInputAnchors: ['input-anchor'] }, 'spawn_session', { anchorMessageIds: ['input-anchor'], title: 'Read', brief: 'Read files', kind: 'research', readOnly: true, successCriteria: [{kind:'model_review',description:'Read'}] });
     assert.equal(opened.success, true, JSON.stringify(opened));
     assert.equal(opened.execution.grant.granted, true); assert.equal(opened.execution.result.status, 'success');
     const output = JSON.parse(opened.output);
@@ -450,7 +451,7 @@ for (const policy of ['auto', 'confirm', 'write-failed']) test(`desktop reportin
     const reply = env.history().find(message => message.content === 'Verified result');
     assert.ok(reply); assert.equal(env.history().some(message => message.content === 'unvalidated text'), false);
     assert.equal(reply.marks[0].outcome, 'passed');
-    assert.deepEqual(reply.meta.sessionStates, [{sessionId,status:policy === 'auto' ? 'accepted' : 'result_ready'}]);
+    assert.deepEqual(reply.meta.sessionStates, [{sessionId,status:policy === 'auto' ? 'accepted' : 'result_ready',sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision}]);
     const learned = createMemoryStore({ rootDir: env.home }).list({ workspaceId: env.bot.workspaceId }).find(item => item.text === 'Verified result');
     assert.equal(learned?.trust, 'verified');
     assert.deepEqual(learned.sourceRefs, ['ev-pass']);
@@ -465,7 +466,7 @@ for (const policy of ['auto', 'confirm', 'write-failed']) test(`desktop reportin
       const result = await env.invoke('confirm-result', { sessionId }); assert.equal(result.ok, true);
       assert.equal(env.plans.getPlan(planId).resultAcceptance.acceptedBy, 'user');
       const currentReply=(await env.invoke('read-conversation')).messages.find(message=>message.id===reply.id);
-      assert.deepEqual(currentReply.meta.sessionStates,[{sessionId,status:'accepted'}]);
+      assert.deepEqual(currentReply.meta.sessionStates,[{sessionId,status:'accepted',sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision}]);
       assert.equal((await env.invoke('confirm-result', { sessionId })).alreadyAccepted, true);
       assert.equal((await env.invoke('read-conversation')).messages.flatMap(message => message.cards || []).some(card => card.kind === 'confirm_result' && card.resolvedState === 'open'), false);
     }
@@ -489,7 +490,7 @@ test('host rejects acceptance claims on blocked tasks and returns authoritative 
     assert.equal(reply.success,false);
     const output=JSON.parse(reply.output);
     assert.equal(output.error,'status_claim_mismatch');
-    assert.deepEqual(output.sessionStates,[{sessionId,status:actual}]);
+    assert.deepEqual(output.sessionStates,[{sessionId,status:actual,sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision}]);
     assert.equal(env.plans.getPlan(planId).resultAcceptance,undefined);
     assert.equal(env.history().some(message=>message.content==='Already accepted'),false);
     assert.equal(reply.execution.result.status,'failed');
@@ -503,7 +504,7 @@ test('reply source ownership includes sessions beyond the model list page', asyn
     await env.submit('anchor', 'read files');
     let latest;
     for (let n = 0; n < 51; n++) {
-      latest = await env.api.supervisor.spawn({ anchorMessageIds: ['input-anchor'], title: `Read ${n}`, brief: 'Read files', kind: 'research', readOnly: true, successCriteria: ['Read'] },
+      latest = await env.api.supervisor.spawn({ anchorMessageIds: ['input-anchor'], title: `Read ${n}`, brief: 'Read files', kind: 'research', readOnly: true, successCriteria: [{kind:'model_review',description:'Read'}] },
         { parentConversationId: env.bot.profile.agentConversationId, workspaceId: env.bot.workspaceId, workspacePath: env.project });
       assert.ok(latest.sessionId);
     }
@@ -529,7 +530,7 @@ test('production registration shares executor scheduling with supervisor and rea
     const ids=[];
     for(let n=0;n<3;n++) {
       const result=JSON.parse((await tool(env,'spawn_session',{anchorMessageIds:['input-sched-anchor'],title:`读取任务${n}`,brief:`读取不同文件${n}`,
-        kind:'research',readOnly:true,successCriteria:['读取内容'],priority:n===2?'high':'normal'})).output);
+        kind:'research',readOnly:true,successCriteria:[{kind:'model_review',description:'读取内容'}],priority:n===2?'high':'normal'})).output);
       assert.ok(result.sessionId,result.error);ids.push(result.sessionId);
     }
     assert.equal(env.starts.length,2);
@@ -544,7 +545,7 @@ test('production failed dependency projects a question and an answer does not st
   const env=harness();
   try {
     await env.submit('dep-anchor','处理依赖');
-    const args={anchorMessageIds:['input-dep-anchor'],title:'前置任务',brief:'前置任务',kind:'research',readOnly:true,successCriteria:['读取内容']};
+    const args={anchorMessageIds:['input-dep-anchor'],title:'前置任务',brief:'前置任务',kind:'research',readOnly:true,successCriteria:[{kind:'model_review',description:'读取内容'}]};
     env.currentInputAnchors=args.anchorMessageIds;
     const dep=JSON.parse((await tool(env,'spawn_session',args)).output);
     const child=JSON.parse((await tool(env,'spawn_session',{...args,title:'后续任务',brief:'等待签收',dependsOn:[dep.sessionId]})).output);
@@ -663,7 +664,7 @@ test('production objective WatchRunner checks actual files through SDK and expos
   const view=env.api.objectives.list({workspaceId:env.bot.workspaceId}).items.find(objective=>objective.objectiveId===item.objectiveId);
   assert.equal(view.usage.probes,1);assert.ok(view.lastObservation.evidenceRefs[0].startsWith('objective-probe:'));
   const evidence=env.api.objectiveWatches.resolveEvidence(view.lastObservation.evidenceRefs[0]);assert.equal(evidence.execution.grant.preset,'observe');assert.equal(evidence.execution.result.status,'success');
-  const events=env.api.host.inbox.takeBatch(env.bot.workspaceId).events;const signal=events.find(event=>event.kind==='objective_signal');assert.ok(signal);assert.equal(signal.objectiveId,item.objectiveId);assert.equal(signal.sessionId,undefined);
+  const events=Object.values(createWorkCoordinationStore({rootDir:path.join(env.home,'project-runtime'),workspaceId:env.bot.workspaceId}).read().events).map(row=>row.event);const signal=events.find(event=>event.kind==='objective_signal');assert.ok(signal);assert.equal(signal.objectiveId,item.objectiveId);assert.equal(signal.sessionId,undefined);
   assert.equal(env.api.objectives.pause({workspaceId:env.bot.workspaceId,objectiveId:item.objectiveId,requestId:'stop-watch'}).ok,true);
   await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);assert.equal(env.api.objectiveWatches.runner.activeCount(),0);
  }finally{env.dispose();}
@@ -674,7 +675,7 @@ test('production file observation, proposal card approval, task quota and explic
  const env=harness();try{
   await env.submit('auto-monitor','持续盯着 README.md 的变化，发现问题直接修');const anchor='input-auto-monitor';env.currentInputAnchors=[anchor];
   const created=await tool(env,'create_objective',{title:'Readme',outcome:'Keep README consistent',autonomy:'act',anchorMessageId:anchor,watches:[{watchId:'readme',kind:'event',source:{type:'files',paths:['README.md'],debounceMs:5000}}]});const item=JSON.parse(created.output).item;assert.ok(item,created.output);
-  await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);const signal=env.api.host.inbox.takeBatch(env.bot.workspaceId).events.find(event=>event.objectiveId===item.objectiveId);assert.ok(signal);
+  await env.api.objectiveWatches.runner.reconcile(env.bot.workspaceId);const signal=Object.values(createWorkCoordinationStore({rootDir:path.join(env.home,'project-runtime'),workspaceId:env.bot.workspaceId}).read().events).map(row=>row.event).find(event=>event.objectiveId===item.objectiveId);assert.ok(signal);
   env.currentInputAnchors=[];env.objectiveWakeIds=[item.objectiveId];env.objectiveWakeEvents=[signal];
   const input={title:'Read README',brief:'Check the observed file',kind:'research',readOnly:true,anchorMessageIds:[anchor],successCriteria:[{kind:'file-exists',description:'README exists',path:'README.md'}]};
   const spawned=JSON.parse((await tool(env,'spawn_session',input)).output);assert.equal(spawned.ok,true,JSON.stringify(spawned));const session=env.api.supervisor.get({sessionId:spawned.sessionId});assert.equal(session.origin.objectiveId,item.objectiveId);assert.ok(session.origin.objectiveActionId);assert.equal(session.origin.priority,'low');
@@ -710,7 +711,7 @@ test('actual SDK reports survive restart and suppress repeated wake delivery whi
     sessionId=(await env.invoke('start-familiarize')).profile.familiarize.sessionId;
     const planId=env.api.supervisor.get({sessionId}).planId;
     env.plans.revisePlan(planId,{tasks:[{taskId:'read',title:'Read',status:'completed',evidenceRefs:['ev']}]},{reason:'read',changedBy:'test'});
-    env.plans.recordManualConfirmation(planId,{decision:'approve',criterionIds:['c1','c2'],decidedBy:'user'});
+    assert.equal(env.plans.getPlan(planId).successCriteria.every(row=>row.kind==='model_review'),true);
     env.plans.setPlanStatus(planId,'completed');
     await tool(env,'verify_session',{sessionId});
     const event={eventId:'wake-first',kind:'session_verified',sessionId,at:new Date().toISOString()};
@@ -729,7 +730,7 @@ test('actual SDK reports survive restart and suppress repeated wake delivery whi
 
 test('production LocalToolHost exposes resume and priority after a real supersession', async () => {
   const env = harness();
-  const args = { title: 'Original', brief: 'Read the original context', kind: 'research', readOnly: true, successCriteria: ['Read'] };
+  const args = { title: 'Original', brief: 'Read the original context', kind: 'research', readOnly: true, successCriteria: [{kind:'model_review',description:'Read'}] };
   try {
     await env.submit('continuity-start', 'Start original');
     const original = JSON.parse((await tool({ ...env, currentInputAnchors: ['input-continuity-start'] }, 'spawn_session', {

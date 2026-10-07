@@ -113,6 +113,34 @@ describe('project agent mode gate', () => {
     assert.match(result.output, /readable/);
   });
 
+  it('returns denied evidence for an outside project search without waiting for an invisible approver', async () => {
+    const dir = tempDir();
+    const outside = tempDir();
+    writeFileSync(path.join(outside, 'secret.txt'), 'private');
+    let asked = 0;
+    const registry = createRuntimeToolRegistry();
+    const result = await executeProjectedModelTool({
+      name: 'search_files', args: { path: outside, query: 'private' }, workspacePath: dir,
+      toolContext: { mode: 'project_agent', conversationId: 'agent', readFiles: new Map() },
+      registry, runtimeProjection: createRuntimeProjectionFromToolRegistry(registry, { mode: 'project_agent' }),
+      toolCallId: 'outside-search', requestPermission: async () => { asked++; throw new Error('must not ask'); },
+    });
+    assert.equal(asked, 0);
+    assert.equal(result.success, false);
+    assert.equal(result.execution.call.capabilityId, 'local.file.search');
+    assert.equal(result.execution.grant.granted, false);
+    assert.equal(result.execution.result.status, 'denied');
+    assert.ok(result.execution.result.evidence);
+  });
+
+  it('denies file read/list/search scope requests before the ordinary permission requester', async () => {
+    const wrapped = restrictProjectAgentPermission(() => { throw new Error('invisible approver'); });
+    for (const tool of ['read_file', 'list_files', 'search_files']) {
+      assert.deepEqual(await wrapped({ tool, filePath: '/outside', workspacePath: '/project' }),
+        { granted: false, reason: 'project_agent_capability_denied' });
+    }
+  });
+
   it('denies a whitelisted capability id when the permission kind is shell', () => {
     const decision = evaluateProjectAgentModeGate({
       mode: 'project_agent',
@@ -166,7 +194,7 @@ describe('project agent mode gate', () => {
     assert.deepEqual(agentNames, [
       'list_files', 'read_file', 'search_files', 'batch_search',
       'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
-      'spawn_session', 'resume_session', 'reprioritize_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'post_reply',
+      'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
     ]);
     const chatNames = chat.tools.map((tool) => tool.function?.name ?? tool.name);

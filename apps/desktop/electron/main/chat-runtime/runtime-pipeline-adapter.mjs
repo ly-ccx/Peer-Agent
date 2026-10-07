@@ -33,6 +33,11 @@ export async function runDesktopRuntimePipeline({
   providerId = null,
   modelId = null,
   maxTurns,
+  maxToolCalls,
+  sliceToolCalls,
+  yieldAtTurnLimit,
+  maxToolBatchCalls,
+  budgetGuard = null,
   signal,
   model,
   tools,
@@ -41,8 +46,14 @@ export async function runDesktopRuntimePipeline({
   eventState = undefined,
 }) {
   const pipeline = createRuntimePipeline({
-    model,
-    tools,
+    model: { ...model, runTurn(state, context) { budgetGuard?.beforeRequest(); return model.runTurn(state, context); } },
+    tools: { ...tools,
+      async execute(call, context) {
+        try { budgetGuard?.beforeTool(call); } catch (error) { return (tools.notExecuted || notExecuted)(call, error.message); }
+        return tools.execute(call, context);
+      },
+      notExecuted: tools.notExecuted || notExecuted,
+    },
     ...(lifecycle ? { lifecycle } : {}),
     events: createDesktopPipelineEventAdapter({
       emitRuntimeEvent,
@@ -59,6 +70,7 @@ export async function runDesktopRuntimePipeline({
     ...(modelId ? { model: modelId } : {}),
     input: null,
     maxTurns,
+    maxToolCalls, sliceToolCalls, yieldAtTurnLimit, maxToolBatchCalls,
   }, { signal });
 
   // Desktop 外层已经以异常驱动 chat:stream:error / aborted 与资源清理；公共
@@ -67,4 +79,15 @@ export async function runDesktopRuntimePipeline({
   if (result.status === 'cancelled') throw createDesktopAbortError();
   if (result.status === 'failed') throw new Error(result.reason || 'runtime_pipeline_failed');
   return result;
+}
+
+export function createNotExecutedToolCall({ call, reason, webContents, streamId }) {
+  const result = notExecuted(call, reason);
+  webContents?.send?.('chat:stream:tool-call', { streamId, toolCallId: call.toolCallId, tool: call.name, args: call.arguments });
+  webContents?.send?.('chat:stream:tool-result', { streamId, toolCallId: call.toolCallId, result: result.result.output });
+  return result;
+}
+function notExecuted(call, reason) {
+  return { call, result: { output: JSON.stringify({ ok: false, status: 'not_executed', error: reason }),
+    isError: true, error: reason }, terminal: true, terminalReason: reason };
 }

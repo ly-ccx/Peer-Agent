@@ -1,13 +1,15 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotChatMessage } from '../state/botConversationState';
 import { BotAttachments } from './BotAttachments';
+import { ReplyAnchorPreview } from './ReplyAnchors';
+import type { ReplyAnchor } from '../state/replyReferenceState';
 
 export function UserBubble({
   message,
   replied,
   highlighted = false,
   i18n,
-  quoteAuthor,
+  anchors,
   onJump,
   onRetry,
   onLocateSession,
@@ -16,7 +18,7 @@ export function UserBubble({
   readonly replied: boolean;
   readonly highlighted?: boolean;
   readonly i18n: I18nRuntime;
-  readonly quoteAuthor: string;
+  readonly anchors: ReadonlyMap<string, ReplyAnchor>;
   readonly onJump: (messageId: string) => void;
   readonly onRetry: (inputId: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
@@ -32,12 +34,8 @@ export function UserBubble({
     <article className={`bot-user${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`} data-kind="user_input">
       <div className="bot-user-content">
         {excerpt ? (
-          <button type="button" className="bot-user-quote bot-reply-bar" onClick={() => onJump(message.quoteRefs[0])}>
-            <span className="bot-reply-bar-copy">
-              <span className="bot-reply-bar-label">{quoteAuthor}</span>
-              <span className="bot-reply-bar-excerpt">{excerpt}</span>
-            </span>
-          </button>
+          <ReplyAnchorPreview id={message.quoteRefs[0]} anchor={anchors.get(message.quoteRefs[0])}
+            excerpt={excerpt} className="bot-user-quote" i18n={i18n} onJump={onJump} />
         ) : null}
         {message.attachments?.length ? <BotAttachments attachments={message.attachments} i18n={i18n} /> : message.images?.length ? (
           <div className="bot-user-images">

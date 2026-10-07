@@ -1,3 +1,4 @@
+import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
 /**
  * 项目代理应用服务。渲染层的数据和动作都从这里过。
  * 开关关闭时直接拒绝，不调用会写盘的依赖。
@@ -595,9 +596,12 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     const session = sessions?.get?.({ sessionId: payload.sessionId });
     if (!payload.workspaceId || session?.workspaceId !== payload.workspaceId) return { ok: false, code: 'NOT_FOUND' };
-    const result = await sessions.confirmResult(payload.sessionId);
-    if (!result?.ok) return { ok: false, code: result?.error || 'NOT_CONFIRMABLE' };
+    if (payload.stage && !['manual_completion', 'result_acceptance'].includes(payload.stage)) return { ok: false, code: 'INVALID_INPUT' };
+    const result = payload.stage === 'manual_completion'
+      ? await sessions.confirmCompletion({ sessionId: payload.sessionId, reviewToken: payload.reviewToken })
+      : await sessions.confirmResult(payload.sessionId);
     queueChanged(payload.workspaceId); queueConversation(payload.workspaceId);
+    if (!result?.ok) return { ok: false, code: result?.error || 'NOT_CONFIRMABLE' };
     return result;
   }
 
@@ -624,12 +628,22 @@ export function createProjectAgentApplicationService({
 
   function readEvidence(payload = {}) {
     if (!open()) return disabled();
+    if (Array.isArray(payload.evidenceRefs)) {
+      if (payload.evidenceRef !== undefined || payload.evidenceRefs.length > 100
+        || !payload.evidenceRefs.every(evidenceRefAllowed)) return { ok: false, code: 'INVALID_REF' };
+      const refs = [...new Set(payload.evidenceRefs.map(ref => ref.trim()))];
+      try {
+        return { ok: true, items: refs.map(evidenceRef => readEvidenceBody?.(evidenceRef, { metadataOnly: true })?.source ?? { evidenceRef }) };
+      } catch { return { ok: false, code: 'READ_FAILED' }; }
+    }
     const evidenceRef = typeof payload?.evidenceRef === 'string' ? payload.evidenceRef.trim() : '';
     if (!evidenceRefAllowed(evidenceRef)) return { ok: false, code: 'INVALID_REF' };
-    if (typeof readEvidenceBody !== 'function') return { ok: false, code: 'NOT_FOUND' };
-    const body = readEvidenceBody(evidenceRef);
-    if (!body) return { ok: false, code: 'NOT_FOUND' };
-    return presentEvidence({ ...body, evidenceRef });
+    if (typeof readEvidenceBody !== 'function') return { ok: false, evidenceRef, availability: 'unavailable', code: 'READ_FAILED' };
+    try {
+      const body = readEvidenceBody(evidenceRef);
+      if (!body) return { ok: false, evidenceRef, availability: 'not_found', code: 'NOT_FOUND' };
+      return presentEvidence({ ...body, evidenceRef });
+    } catch { return { ok: false, evidenceRef, availability: 'unavailable', code: 'READ_FAILED' }; }
   }
 
   async function takeoverHost(payload = {}) {
@@ -652,6 +666,7 @@ export function createProjectAgentApplicationService({
     readAvatar,
     create,
     updateProfile,
+    updateModelSelection: createBotModelSelectionUpdater({ get, updateProfile }),
     deleteBot,
     submitInput,
     readConversation,

@@ -38,7 +38,7 @@ test('Quick Chat may list bots and submit inputs, while administration and popov
     const sender = createWebContents();
     const registry = createTrustedWindowRegistry();
     registry.registerWindow({ window: { webContents: sender }, role, allowedLocations: ['https://app.local/index.html'] });
-    for (const channel of ['project-agent:list', 'project-agent:submit-input']) {
+    for (const channel of ['project-agent:list', 'project-agent:submit-input', 'project-agent:get', 'project-agent:update-model-selection']) {
       const entry = getDesktopIpcPolicy(channel);
       if (role === 'quick-chat') {
         assert.deepEqual(registry.authorize({ entry, event: createEvent(sender) }), { role });

@@ -1,3 +1,8 @@
+import { controlProjectWork } from './work-control.mjs';
+import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
+import { verificationContentHash } from './verification-completion.mjs';
+import { sessionFactsFromPlan } from './session-facts.mjs';
+import { admitDelegationCriteria } from './criterion-authority.mjs';
 import { isHostHandoffPause } from './session-host-handoff.mjs';
 import { hasCurrentUserUrgency } from './user-priority.mjs';
 import path from 'node:path';
@@ -16,6 +21,8 @@ import { createSessionHandoff } from './session-handoff.mjs';
 import { digestApprovalArgs } from './approval-store.mjs';
 import { readLocalPlanApproval } from './local-plan-approval.mjs';
 import { spawnIdentity, identityFromPlan } from './spawn-identity.mjs';
+import { buildSessionReport } from './session-report.mjs';
+import { resultCanBeAccepted, needsCompletionReview, projectCompletionReview, confirmCompletionReview } from './session-completion.mjs';
 
 /**
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
@@ -94,6 +101,8 @@ export function createSessionSupervisor({
   readSessionFacts = null,
   approvalStore = null,
   readPlanApproval = null,
+  readManualCriterionAuthorities = null,
+  readLegacyCriterionProvenance = () => null,
   now = () => new Date().toISOString(),
 } = {}) {
   if (!conversationStore || !goalPlanStore) {
@@ -104,6 +113,8 @@ export function createSessionSupervisor({
   const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, conversationStore, promote, now });
   const continuity = createSessionContinuity({ goalPlanStore, conversationStore, goalRunner, executionScheduler,
     findBySession, canManageWorkspace, abortStream, emit, now });
+  const legacyCriteria = createLegacyCriterionRecovery({ store: goalPlanStore, readProvenance: readLegacyCriterionProvenance,
+    holdsLease: planId => canManageWorkspace(goalPlanStore.getPlan(planId)?.delegationOrigin?.workspaceId), now });
   let tail = Promise.resolve();
   let depth = 0;
   function exclusive(task) {
@@ -190,7 +201,9 @@ export function createSessionSupervisor({
   function snapshotOf(plan) {
     return {
       planId: plan.planId,
-      status: plan.status,
+      // Completed leaves can briefly precede the manual completion gate.
+      status: plan.status === 'completed' && plan.runner?.status === 'blocked'
+        && plan.runner.blockedReason === 'manual_dod_confirmation_required' ? 'executing' : plan.status,
       title: typeof plan.title === 'string' ? plan.title : '',
       runnerStatus: plan.runner?.status,
       updatedAt: plan.updatedAt,
@@ -223,13 +236,14 @@ export function createSessionSupervisor({
       accepted: Boolean(plan.resultAcceptance?.acceptedAt),
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
-      ...(origin.verifying === true ? { verifying: true, phase: 'verifying' } : {}),
+      ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
       origin,
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
       ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
       ...(origin.phase === 'queued'
         ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
+    session.sourceRevision = verificationContentHash(plan, (({ status, ...report }) => report)(buildReport(plan, session)));
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;
   }
@@ -243,34 +257,8 @@ export function createSessionSupervisor({
   }
 
   function buildReport(plan, session) {
-    const findings = [];
-    for (const criterion of Array.isArray(plan.successCriteria) ? plan.successCriteria : []) {
-      const text = typeof criterion === 'string' ? criterion : criterion?.description;
-      if (typeof text === 'string' && text.trim()) findings.push(text.trim());
-    }
-    const changedFiles = [];
-    for (const item of Array.isArray(plan.involvedFiles) ? plan.involvedFiles : []) {
-      if (typeof item === 'string' && item.trim()) changedFiles.push({ path: item.trim(), summary: '' });
-      else if (typeof item?.path === 'string' && item.path.trim()) {
-        changedFiles.push({ path: item.path.trim(), summary: typeof item.summary === 'string' ? item.summary : '' });
-      }
-    }
-    const evidenceRefs = new Set();
-    for (const ref of Array.isArray(plan.evidenceRefs) ? plan.evidenceRefs : []) {
-      if (typeof ref === 'string' && ref.trim()) evidenceRefs.add(ref.trim());
-    }
-    for (const result of Array.isArray(plan.criterionResults) ? plan.criterionResults : []) {
-      if (typeof result?.evidenceRef === 'string' && result.evidenceRef.trim()) evidenceRefs.add(result.evidenceRef.trim());
-    }
-    return {
-      sessionId: session.sessionId,
-      planId: plan.planId,
-      status: session.status,
-      summary: typeof plan.goal === 'string' ? plan.goal : '',
-      keyFindings: findings,
-      changedFiles,
-      evidenceRefs: [...evidenceRefs],
-    };
+    const history = conversationStore.getPersistedConversationHistory?.(plan.conversationId);
+    return buildSessionReport(plan, session, history);
   }
 
   function freezeModels(input, workspaceId) {
@@ -350,6 +338,12 @@ export function createSessionSupervisor({
       objectiveActionId = authorized.objectiveActionId || null;
       anchorMessageIds = stringList(input.anchorMessageIds); title = text(input.title); brief = text(input.brief);
     }
+    const admitted = admitDelegationCriteria(input.successCriteria, {
+      anchorMessageIds,
+      manualAuthorities: typeof readManualCriterionAuthorities === 'function' ? readManualCriterionAuthorities({ workspaceId, anchorMessageIds }) : context?.manualCriterionAuthorities || [],
+    });
+    if (!admitted.ok) return admitted;
+    const admittedCriteria = admitted.criteria;
     const supersedes = text(input?.supersedes);
     const key = objectiveActionId ? spawnIdentity(parentConversationId, {objectiveActionId}) : spawnIdentity(parentConversationId, {
       anchorMessageIds,
@@ -416,8 +410,8 @@ export function createSessionSupervisor({
       const anchorMessageId = anchorMessageIds[0];
       const workspacePath = text(context?.workspacePath);
       const presetSnapshotId = text(context?.backgroundSnapshotId);
-      // Only fully carried anchor uploads cover snapshot omissions. Unresolved
-      // files, unanchored history, tool results and explicit snapshots still ask.
+      // A delegation admits its explicit anchors, not an implicit fork of all
+      // prior chat. Missing admitted material and explicit snapshots still ask.
       const attachments = attachmentsFromMessages(history.messages, anchorMessageIds);
       const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
       const completeInlineAttachments = !presetSnapshotId
@@ -439,6 +433,7 @@ export function createSessionSupervisor({
         },
         capturedAt: now(),
         ...(presetSnapshotId ? { backgroundSnapshotId: presetSnapshotId } : {}),
+        ...(!presetSnapshotId ? { backgroundMessageIds: anchorMessageIds } : {}),
         ...(context?.confirmMissing === true || completeInlineAttachments ? { confirmMissing: true } : {}),
       });
       const messageId = randomUUID();
@@ -470,7 +465,7 @@ export function createSessionSupervisor({
         conversationId: child.id,
         title,
         goal: brief,
-        successCriteria: Array.isArray(input.successCriteria) ? input.successCriteria : [],
+        successCriteria: admittedCriteria,
         status: phase === 'running' ? 'executing' : 'paused',
         ...(workspacePath ? { targetWorkspacePath: workspacePath, originWorkspacePath: workspacePath } : {}),
         createdBy: 'project_agent',
@@ -478,6 +473,7 @@ export function createSessionSupervisor({
         delegationOrigin: {
           anchorMessageId,
           inputId,
+          ...(text(context?.workId) ? { workId: text(context.workId) } : {}),
           surface: surfaceOf(context?.surface),
           memorySnapshotId: snapshot.snapshotId,
           modelSelection: frozen.snapshot,
@@ -768,7 +764,7 @@ export function createSessionSupervisor({
     if (plan.resultAcceptance?.acceptedAt) {
       return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
     }
-    if (plan.status !== 'completed') return { ok: false, error: 'session_not_completed' };
+    if (!resultCanBeAccepted(plan)) return { ok: false, error: 'session_not_completed' };
     const decision = decideSessionAcceptance(acceptanceFacts(plan));
     emit({
       kind: 'session_verified',
@@ -800,7 +796,7 @@ export function createSessionSupervisor({
     if (plan.resultAcceptance?.acceptedAt) {
       return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
     }
-    if (plan.status !== 'completed') return { ok: false, error: 'session_not_completed' };
+    if (!resultCanBeAccepted(plan)) return { ok: false, error: 'session_not_completed' };
     const decision = decideSessionAcceptance(acceptanceFacts(plan), { userConfirm: true });
     if (decision.acceptedBy !== 'user') return { ok: false, error: 'not_confirmable', ...decision };
     try {
@@ -884,7 +880,7 @@ export function createSessionSupervisor({
 
   function recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria }) {
     if (!approvalStore || typeof approvalStore.append !== 'function') return null;
-    const criteria = Array.isArray(successCriteria) ? successCriteria.filter((item) => typeof item === 'string') : [];
+    const criteria = Array.isArray(successCriteria) ? successCriteria.map(item => typeof item === 'string' ? item : item?.description).filter(Boolean) : [];
     return approvalStore.append({
       approvalId: `plan:${sessionId}`,
       workspaceId,
@@ -1004,6 +1000,15 @@ export function createSessionSupervisor({
 
   return {
     executionScheduler,
+    auditLegacyCriteria(planId, criterionIds) { return legacyCriteria.audit(planId, criterionIds); },
+    recoverLegacyCriteria(audit) {
+      return exclusive(async () => {
+        const revised = legacyCriteria.apply(audit);
+        // Recheck the retained report under the revised authority; never launch a replacement task.
+        if (typeof goalRunner?.start === 'function') await goalRunner.start(revised.planId, { awaitIdle: true });
+        return goalPlanStore.getPlan(revised.planId);
+      });
+    },
     recoverQueue(workspaceId) {
       return exclusive(() => {
         if (!canManageWorkspace(workspaceId)) throw new Error('lease_unavailable');
@@ -1059,6 +1064,23 @@ export function createSessionSupervisor({
         return project(goalPlanStore.getPlan(result.plan.planId));
       });
     },
+    controlWork(input, context = {}) {
+      return exclusive(async () => {
+        const plan = findBySession(input.sessionId);
+        const history = conversationStore.getPersistedConversationHistory?.(context.parentConversationId);
+        if (!plan || plan.delegationOrigin.workspaceId !== context.workspaceId
+          || plan.delegationOrigin.parentConversationId !== context.parentConversationId
+          || !context.currentInputAnchors?.includes(input.anchorMessageId)
+          || !history?.messages?.some(row => row.id === input.anchorMessageId && row.role === 'user')) return { error: 'current_user_required' };
+        const controlled = await controlProjectWork({ session: project(plan), action: input.action, anchorMessageId: input.anchorMessageId, context,
+          sessions: () => delegatedPlans().filter(row => row.delegationOrigin.workspaceId === context.workspaceId).map(project),
+          pause: id => continuity.suspend(id, null, context), cancel: id => cancelLocked({ sessionId: id, reason: 'user cancelled work' }),
+          resume: (sessionId, anchorMessageId) => continuity.resume({ sessionId, anchorMessageId }, context),
+        });
+        if (controlled.ok && input.action === 'resume') await promote();
+        return controlled;
+      });
+    },
     list,
     /** One fresh plan read for a presentation query; same default bound/order as list(). */
     listByWorkspaceIds(workspaceIds) {
@@ -1096,7 +1118,23 @@ export function createSessionSupervisor({
     },
     acceptance(sessionId) {
       const plan = findBySession(text(sessionId));
-      return plan?.status === 'completed' ? decideSessionAcceptance(acceptanceFacts(plan)) : null;
+      return resultCanBeAccepted(plan) ? decideSessionAcceptance(acceptanceFacts(plan)) : null;
+    },
+    completionReview(sessionId) {
+      const plan = findBySession(text(sessionId));
+      return needsCompletionReview(plan) ? projectCompletionReview(plan, buildSessionReport(plan, project(plan),
+        conversationStore.getPersistedConversationHistory(plan.conversationId))) : null;
+    },
+    confirmCompletion(input) {
+      return exclusive(async () => {
+        const plan = findBySession(text(input?.sessionId));
+        if (!plan || !canManageWorkspace(plan.delegationOrigin.workspaceId)) return { ok: false, error: 'not_found' };
+        try {
+          const report = buildSessionReport(plan, project(plan), conversationStore.getPersistedConversationHistory(plan.conversationId));
+          return await confirmCompletionReview({ plan, report, review: projectCompletionReview(plan, report),
+          reviewToken: input.reviewToken, store: goalPlanStore, runner: goalRunner, now });
+        } catch (error) { return { ok: false, error: error?.code || 'completion_confirmation_failed' }; }
+      });
     },
     confirmResult(sessionId) {
       return exclusive(() => confirmLocked(sessionId));
@@ -1112,8 +1150,9 @@ export function createSessionSupervisor({
 
 function delegationMessage({ brief, successCriteria, quotes, readOnly }) {
   const criteria = (Array.isArray(successCriteria) ? successCriteria : [])
-    .filter((item) => typeof item === 'string' && item.trim())
-    .map((item) => `- ${item.trim()}`)
+    .map(item => typeof item === 'string' ? item : item?.description)
+    .filter(item => typeof item === 'string' && item.trim())
+    .map(item => `- ${item.trim()}`)
     .join('\n');
   const anchors = quotes.filter(Boolean).map((quote) => `> ${quote}`).join('\n');
   const constraint = readOnly
@@ -1125,9 +1164,7 @@ function delegationMessage({ brief, successCriteria, quotes, readOnly }) {
 function inlineAttachmentsCoverOmissions(messages, anchorMessageIds) {
   const rows = Array.isArray(messages) ? messages : [];
   const wanted = new Set(anchorMessageIds);
-  const anchorMessageId = anchorMessageIds[0];
-  const index = rows.findIndex((row) => row?.id === anchorMessageId);
-  const slice = index >= 0 ? rows.slice(0, index + 1) : [];
+  const slice = rows.filter(row => wanted.has(row?.id));
   let sawAttachment = false;
   for (const row of slice) {
     if (!row || row.role === 'system' || row.role === 'developer') continue;
@@ -1139,7 +1176,6 @@ function inlineAttachmentsCoverOmissions(messages, anchorMessageIds) {
     if (row.content != null && typeof row.content !== 'string') return false;
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
     if (attachments.length === 0) continue;
-    if (!wanted.has(row.id)) return false;
     const carried = normalizeInputAttachments(attachments);
     if (carried.length !== attachments.length || carried.some(item => (
       item.kind === 'image' ? !item.dataUrl : item.kind !== 'text' || typeof item.text !== 'string'

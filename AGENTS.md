@@ -123,8 +123,19 @@ Before implementing a non-trivial change, classify it:
 
 Once a change is committed locally, push it to the tracked remote branch in the same turn. Multi-device work treats `origin` as the source of truth. Do not leave commits only on this machine.
 
+## Product Regression
+
+For user-facing UI changes, follow `peer-knowledge/playbook/product-regression.md` before handoff or an RC release:
+
+- Run `pnpm qa:product:capture --output <temporary-directory-outside-repo>` for the standard isolated desktop interaction and screenshot packet.
+- The AI doing the work must inspect every required screenshot against the user goal and product north star, then write the packet's `review.json` with concrete observations. Machine success alone is not product acceptance.
+- Run `pnpm qa:product:verify --output <same-directory>`. Missing review, changed source/screenshots, incomplete cases, or unresolved blocking findings prevent acceptance.
+- State whether review was independent; implementer self-review is never called independent. State real-model, installed-build and accessibility coverage limits.
+- Existing CI runs the deterministic scenarios. The AI review is agent-driven; do not claim a scheduled or unattended model reviewer exists.
+
 ## Implementation Expectations
 
+- UI icons must use SVG components. Reuse the shared `PeerIcon` or an existing SVG icon; do not use text characters, emoji, icon fonts, or CSS-generated glyphs as icons, including arrows, checks, close buttons, and disclosure indicators.
 - Prefer existing protocol types, reducers, registries, providers, and stores.
 - Add a Provider adapter instead of adding `capabilityId` branches to central hosts.
 - Add reducer/kernel logic instead of growing a large React component.

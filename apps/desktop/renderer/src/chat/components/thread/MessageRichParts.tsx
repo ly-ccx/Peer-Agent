@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { AssistantAction, ChatMessage } from '@peer-agent/protocol';
 import { isRecord } from '../../utils/records';
+import { PeerIcon } from '../../../ui/icons';
 
 function actionPrompt(action: AssistantAction): string | null {
   const data = action.payload.data;
@@ -36,7 +37,7 @@ export function MessageRichParts({ message, setDraft, i18n }: MessageRichPartsPr
       ) : null}
       {message.references && message.references.length > 0 ? (
         <details className="message-references">
-          <summary>{i18n.t('chat.message.references')}</summary>
+          <summary><PeerIcon name="chevronRight" size={10} className="disclosure-icon" />{i18n.t('chat.message.references')}</summary>
           {message.references.map((reference) => (
             <article key={`${reference.scopeId}-${reference.label}`}>
               <strong>{reference.label}</strong>

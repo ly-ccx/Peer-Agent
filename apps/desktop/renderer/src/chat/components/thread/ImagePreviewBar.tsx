@@ -26,7 +26,7 @@ export function ImagePreviewBar({
             onClick={() => onRemove(index)}
             aria-label="删除图片"
           >
-            ×
+            <PeerIcon name="close" size={14} />
           </button>
         </div>
       ))}

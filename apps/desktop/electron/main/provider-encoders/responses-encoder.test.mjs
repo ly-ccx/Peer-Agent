@@ -106,7 +106,7 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
       assert.deepEqual(tool.parameters, before);
       assert.equal(tool.parameters.required.includes('objectiveId'), false);
       assert.equal(tool.parameters.required.includes('supersedes'), false);
-      const criterion = tool.parameters.properties.successCriteria.items.anyOf[1];
+      const criterion = tool.parameters.properties.successCriteria.items;
       assert.deepEqual(criterion.required, ['kind', 'description']);
     }
     assert.deepEqual(schema, before, 'encoding must not mutate the projected Manifest schema');

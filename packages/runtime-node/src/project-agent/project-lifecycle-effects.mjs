@@ -1,6 +1,6 @@
 /** Persist project lifecycle facts and settle results only after a visible reply exists. */
 import { prepareReplyReport } from './reply-report-facts.mjs';
-export function createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast, resolveEvidence, objectiveService=null }) {
+export function createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast, resolveEvidence, objectiveService=null, memoryEnabled = () => true }) {
   return {
     onInputsConsumed: (workspaceId, inputs) => {
       objectiveService?.consumeAnswers(workspaceId,inputs.map(input=>`input-${input.inputId}`));
@@ -11,7 +11,7 @@ export function createProjectLifecycleEffects({ profileStore, lifecycle, supervi
     onReplied: async (workspaceId, message) => {
       let replyMeta = message.meta;
       const familiar = profileStore.read(workspaceId)?.familiarize;
-      if (familiar?.sessionId && !familiar.memoryRecorded && message.sources?.includes(familiar.sessionId)) {
+      if (memoryEnabled(workspaceId) === true && familiar?.sessionId && !familiar.memoryRecorded && message.sources?.includes(familiar.sessionId)) {
         const decision = supervisor.acceptance(familiar.sessionId);
         const sourceRefs = typeof resolveEvidence === 'function'
           ? (decision?.verdict.evidenceRefs || []).filter(ref => Boolean(resolveEvidence(ref))) : [];
@@ -34,7 +34,7 @@ export function createProjectLifecycleEffects({ profileStore, lifecycle, supervi
       if (message.sources?.length) {
         const sessionStates = message.sources.flatMap(sessionId => {
           const session = supervisor.get({ sessionId });
-          return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status }] : [];
+          return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status, sourceRevision: session.sourceRevision }] : [];
         });
         const settled = { ...replyMeta, sessionStates };
         if (Array.isArray(replyMeta?.reportFactKeys)) {

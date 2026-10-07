@@ -1,3 +1,4 @@
+import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -17,8 +18,32 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     return { card, replyId };
   };
   const first = await ask();
-  await page.locator(`[id="bot-msg-${first.replyId}"] .bot-reply-context > summary`).click();
-  await page.locator(`[id="bot-msg-${first.replyId}"]`).getByRole('button', { name: '查看过程', exact: true }).click();
+  await openReplyDetails(page, page.locator(`[id="bot-msg-${first.replyId}"]`));
+  const timed = page.locator('.bot-turn-process');
+  if (!await timed.evaluate(node => node.open)) await timed.locator(':scope > summary').click();
+  await timed.locator('.bot-tool-step > summary .bot-process-elapsed').first().waitFor({ state: 'visible' });
+  const times = await timed.locator('.bot-tool-step > summary .bot-process-elapsed').allTextContents();
+  assert.deepEqual(times, ['少于 1 秒', '2 秒']);
+  assert.doesNotMatch(await timed.innerText(), /(?:^|\s)0 秒/);
+  assert.equal(await timed.locator('.bot-tool-step').last().locator('.bot-process-elapsed').count(), 0);
+  const timingViewport = page.viewportSize();
+  const timingTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+  for (const [width, theme] of [[1280, 'dark'], [760, 'light']]) {
+    await page.setViewportSize({ width, height: 780 });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await until(() => page.locator('.bot-shell').evaluate(node => node.getAnimations({ subtree: true })
+      .filter(animation => animation.playState === 'running'
+        && Number.isFinite(animation.effect?.getComputedTiming().endTime)
+        && animation.effect?.target?.checkVisibility()).length), count => count === 0, 5000);
+    await timed.locator('.bot-tool-step > summary .bot-process-elapsed').first().waitFor({ state: 'visible' });
+    assert.equal(await timed.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `process-timing-${theme}.png`) });
+  }
+  await page.setViewportSize(timingViewport);
+  await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, timingTheme);
+  await timed.locator(':scope > summary').click();
+  report.processTiming = { subsecond: true, seconds: true, persisted: true, unknownHidden: true, narrowFits: true };
+  await page.locator('.bot-reply-rounds > summary').click();
   const process = page.locator('.bot-process'); await process.waitFor();
   const visible = await process.innerText();
   assert.match(visible, /查询工作会话/); assert.match(visible, /发送回复/);
@@ -36,10 +61,10 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     return dock.getBoundingClientRect().width >= parseFloat(getComputedStyle(dock).getPropertyValue('--pa-drawer-width'));
   }), Boolean);
   const states = await process.locator('.bot-process-status').allTextContents();
-  assert.deepEqual(states, ['已结束', '已发送']);
+  assert.deepEqual(states, ['已结束', '已结束', '已结束', '已发送']);
   assert.equal(await process.locator('.bot-process-status').last().evaluate(node => node.getBoundingClientRect().right <= innerWidth), true);
-  await page.screenshot({ path: path.join(captureDirectory, 'chat-process-summary.png') });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'chat-process-summary.png') });
+  await closeReplyDetails(page);
   checks.push('exact current-turn process uses localized operations; raw JSON is collapsed and keyboard accessible');
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -50,7 +75,7 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     const rect = await first.card.evaluate(node => ({ card: getComputedStyle(node).borderLeftWidth, shadow: getComputedStyle(node).boxShadow,
       user: getComputedStyle(document.querySelector('.bot-user')).backgroundColor }));
     assert.equal(rect.card, '0px'); assert.equal(rect.shadow, 'none'); assert.equal(rect.user, 'rgba(0, 0, 0, 0)');
-    await page.screenshot({ path: path.join(captureDirectory, `chat-question-${value}.png`) });
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `chat-question-${value}.png`) });
   }
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
   await page.setViewportSize(viewport);

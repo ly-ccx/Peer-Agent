@@ -63,6 +63,8 @@ export const DATA_STORE_ENTRIES = {
   // 跨项目用户偏好。条目真源是 memory/items.jsonl。
   userMemory:        { rel: 'memory',                  kind: 'dir',  scope: 'portable' },
   // 项目运行时事实（待批准、后续宿主租约）。设备本地，不随设置导出。
+  // Includes coordination.jsonl, coordination-snapshot.json and protected checkpoints/<id>.json;
+  // these retain local work/delivery receipts and must never enter portable exports.
   // Includes per-project circuit-breaker/recovery state, memory-maintenance checkpoints, objective watch-state/probe-evidence reservations and delivery/execution cursors (device only).
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
 };

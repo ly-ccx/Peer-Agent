@@ -257,7 +257,7 @@ export function ModelSettingsDialog({
 
           <footer className="llm-dialog-footer">
             <button type="button" onClick={requestClose}>{zh ? '取消' : 'Cancel'}</button>
-            <button type="button" className="primary" onClick={() => void save()} disabled={saving}>{saving ? '…' : (zh ? '保存模型设置' : 'Save model settings')}</button>
+            <button type="button" className="primary" onClick={() => void save()} disabled={saving}>{saving ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{saving ? (zh ? '正在保存' : 'Saving') : (zh ? '保存模型设置' : 'Save model settings')}</button>
           </footer>
         </>
       )}

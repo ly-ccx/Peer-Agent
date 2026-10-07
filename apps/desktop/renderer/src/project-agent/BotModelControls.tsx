@@ -2,7 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotRoleModelView, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy, ProjectAgentActivity } from '@peer-agent/protocol';
 import { CascadingMenu } from '../app/components/CascadingMenu';
 import { ReasoningEffortSlider } from '../chat/components/thread/ReasoningEffortSlider';
-import { botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './state/botModelControls';
+import { botConfiguredModelSelection, botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './state/botModelControls';
 import '../chat/styles/chat-surface.css';
 import './styles/bot-model-controls.css';
 
@@ -18,7 +18,8 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   readonly onChange: (policy: ProjectModelPolicy) => void | Promise<void>;
 }) {
   const isZh = i18n.locale.startsWith('zh');
-  const selection = activeSelection ?? (view?.resolution.ok ? view.resolution.selection : undefined);
+  const selection = activeSelection ?? botConfiguredModelSelection(policy, role, models, view)
+    ?? (view?.resolution.ok ? view.resolution.selection : undefined);
   const model = models.find(item => item.id === selection?.modelProviderId);
   const levels = model?.reasoningEffortLevels ?? [];
   const effort = selection?.reasoningEffort ?? model?.defaultReasoningEffort;

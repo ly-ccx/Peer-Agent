@@ -1,0 +1,16 @@
+.bot-selection-quote {
+  position: fixed;
+  z-index: 1200;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  margin: 0;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 9px;
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  box-shadow: var(--shadow-card);
+  user-select: none;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 12px;
+}

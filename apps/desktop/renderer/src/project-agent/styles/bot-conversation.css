@@ -1,4 +1,8 @@
 .bot-convo {
+  --bot-column-max: 800px;
+  --bot-column-gutter: 28px;
+  --bot-column-width: min(var(--bot-column-max), calc(100cqw - 2 * var(--bot-column-gutter)));
+  container-type: inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -14,7 +18,7 @@
   gap: 0;
   min-height: 0;
   overflow: auto;
-  padding: 20px 32px 28px;
+  padding: 20px 0 28px;
 }
 
 .bot-thread-shell {
@@ -50,9 +54,14 @@
   display: flex;
   flex-direction: column;
   padding-bottom: var(--space-6, 24px);
-  width: 100%;
-  max-width: var(--chat-content-max, 800px);
-  align-self: center;
+}
+
+/* Use the conversation's width, so a scroll bar cannot shift the message
+   column relative to the non-scrolling task strip and composer. */
+.bot-thread-row,
+.bot-thread > .bot-live-status {
+  align-self: flex-start;
+  margin-inline-start: calc((100cqw - var(--bot-column-width)) / 2);
 }
 
 .bot-thread-origin {
@@ -223,6 +232,7 @@
   padding: 12px 16px;
   border-radius: 12px;
   background: var(--paper-hover);
+  transition: background var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-message-role {
@@ -346,16 +356,19 @@
 
 .bot-user-quote {
   color: var(--graphite-soft);
-  padding: 6px 10px;
-  border-radius: 4px;
-  background: var(--paper-sunken);
+  overflow-wrap: anywhere;
+}
+
+.bot-card p {
+  min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
 }
 
 .bot-reply {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
   align-self: flex-start;
   width: 100%;
   background: transparent;
@@ -365,35 +378,39 @@
   overflow-wrap: anywhere;
 }
 
-.bot-user.is-anchored,
-.bot-reply.is-anchored,
-.bot-system.is-anchored {
-  outline: 2px solid var(--chrome-hairline);
-  outline-offset: 4px;
-  border-radius: 8px;
+.bot-user.is-anchored > .bot-user-content,
+.bot-reply.is-anchored > .bot-reply-body,
+.bot-system.is-anchored > .bot-card {
+  background: var(--control-fill-hover);
 }
 
 .bot-reply-bar {
   display: flex;
-  gap: 7px;
   align-items: center;
   align-self: flex-start;
   width: fit-content;
-  max-width: min(520px, 100%);
+  max-width: min(360px, 100%);
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--control-radius);
-  background: var(--control-fill);
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--graphite-base) 6%, transparent);
   color: var(--graphite-soft);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background var(--za-motion-fast) var(--za-ease-standard);
+  transition:
+    color var(--za-motion-fast) var(--za-ease-standard),
+    background var(--za-motion-fast) var(--za-ease-standard);
 }
 
-.bot-reply-bar:hover {
-  background: var(--control-fill-hover);
+.bot-reply-bar:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--graphite-base) 10%, transparent);
+}
+
+.bot-reply-bar:is(:hover, :focus-visible) .bot-reply-bar-excerpt {
+  color: var(--graphite-base);
 }
 
 .bot-reply-bar-copy {
@@ -401,14 +418,19 @@
   flex: 1;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
 .bot-reply-bar-label {
   flex-shrink: 0;
-  color: var(--graphite-soft);
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--graphite-base);
   font-size: 11px;
+  font-weight: 500;
   line-height: 1.4;
 }
 
@@ -418,9 +440,10 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   color: var(--graphite-soft);
-  font-size: .75rem;
+  font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+  transition: color var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-reply-marks {
@@ -466,12 +489,60 @@
 .bot-reply-body {
   color: var(--graphite-base);
   font-size: var(--ui-font-body, 14px);
-  line-height: 1.9;
+  line-height: 1.75;
+}
+
+.bot-reply > .bot-reply-body,
+.bot-stopped-reply > .bot-reply-body,
+.bot-unavailable-reply > .bot-reply-body,
+.bot-narration .markdown-content > * {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: min(680px, 100%);
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: var(--paper-hover);
+  overflow-wrap: anywhere;
+}
+
+.bot-reply > .bot-reply-body .markdown-content > :first-child { margin-top: 0; }
+.bot-reply > .bot-reply-body .markdown-content > :last-child { margin-bottom: 0; }
+
+.bot-narration {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bot-narration .markdown-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.bot-narration .markdown-content > * { margin: 0; }
+.bot-narration .markdown-content > :is(ul, ol) { padding-left: 32px; }
+.bot-reply > .bot-reply-body { align-self: flex-start; }
+
+/* New public paragraphs enter once; incoming characters have no artificial delay. */
+.bot-narration[data-live="true"] .markdown-content > *,
+.bot-streaming-conclusion .markdown-content > * {
+  animation: motion-enter-fade 160ms var(--za-ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-narration[data-live="true"] .markdown-content > *,
+  .bot-streaming-conclusion .markdown-content > * { animation: none; }
 }
 
 .bot-card {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   gap: 12px;
   padding: 16px 16px 14px;
   border: 1px solid var(--chrome-hairline);
@@ -483,6 +554,8 @@
 .bot-card.is-resolved {
   opacity: 0.72;
 }
+
+.bot-unavailable-reply { padding: 0; border: 0; background: transparent; gap: 6px; align-items: flex-start; }
 
 .bot-question {
   gap: 11px;
@@ -516,47 +589,49 @@
   background: var(--control-fill-hover);
 }
 
-.bot-composer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 12px 28px 14px;
-  padding: 14px 15px 11px;
-  border: 1px solid transparent;
-  border-radius: var(--surface-radius);
-  background: var(--control-composer);
-  box-shadow: none;
-  transition: border-color var(--za-motion-fast) var(--za-ease-standard);
-  width: calc(100% - 56px);
-  max-width: 800px;
-  align-self: center;
+/* Replies, background work and the composer share one conversation column. */
+.bot-thread-row,
+.bot-thread > .bot-live-status,
+.bot-composer,
+.bot-background-work {
+  width: var(--bot-column-width);
+  min-width: 0;
   box-sizing: border-box;
 }
 
+.bot-composer,
+.bot-background-work {
+  align-self: center;
+}
+
+.bot-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px var(--bot-column-gutter) 14px;
+  padding: 14px 14px 10px;
+  border: 1px solid var(--composer-edge);
+  border-radius: var(--composer-radius);
+  background: var(--composer-surface);
+  box-shadow: none;
+  transition: border-color var(--za-motion-fast) var(--za-ease-standard);
+}
+
 .bot-composer:focus-within {
-  border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--chrome-hairline));
+  border-color: var(--composer-focus-edge);
 }
 
 .bot-quote-chip {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 6px 8px;
-  border: 1px solid var(--chrome-hairline);
-  border-radius: 8px;
-  background: var(--paper-sheet);
-  color: var(--graphite-soft);
-  font-size: 13px;
-}
-
-.bot-quote-chip > span {
-  display: -webkit-box;
-  flex: 1;
   min-width: 0;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--graphite-base) 6%, transparent);
+  color: var(--graphite-soft);
+  font-size: 12px;
 }
 
 .bot-quote-chip button {
@@ -579,6 +654,7 @@
 }
 
 .bot-composer-bar button {
+  box-sizing: border-box;
   border: 0;
   border-radius: 999px;
   background: var(--graphite-base);
@@ -609,6 +685,12 @@
 
 .bot-composer textarea {
   width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  max-height: 200px;
+  box-sizing: border-box;
+  padding: 0 2px;
+  margin: 0;
   resize: none;
   border: 0;
   outline: none;
@@ -616,20 +698,32 @@
   color: var(--graphite-base);
   font: inherit;
   font-size: .875rem;
-  line-height: 1.7;
+  line-height: 1.6;
+}
+
+.bot-composer textarea::placeholder {
+  color: var(--graphite-soft);
+  opacity: 1;
 }
 
 .bot-composer-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .bot-composer-actions {
   display: flex;
-  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 6px;
   align-items: center;
+}
+
+.bot-composer-actions > button {
+  flex: none;
 }
 
 .bot-live-reply {
@@ -678,16 +772,17 @@
 }
 
 .bot-composer-bar button:disabled {
-  background: transparent;
-  color: var(--graphite-fade);
-  box-shadow: inset 0 0 0 1px var(--chrome-hairline);
+  background: color-mix(in srgb, var(--graphite-base) 12%, var(--composer-surface));
+  color: var(--graphite-soft);
+  box-shadow: none;
   cursor: default;
   opacity: 1;
 }
 
-.bot-composer-leading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bot-composer-leading { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; }
 .bot-composer-leading p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bot-composer-bar .bot-attach-button { color: var(--graphite-soft, var(--za-text-muted)); padding: 6px; border: 0; border-radius: 7px; background: transparent; flex: none; }
+.bot-composer-bar .bot-attach-button { color: var(--graphite-soft, var(--za-text-muted)); padding: 6px; border: 0; border-radius: 8px; background: transparent; flex: none; }
+.bot-composer-bar .bot-attach-button:hover:not(:disabled) { background: var(--control-fill); color: var(--graphite-base); }
 .bot-composer.is-file-drop { border-color: var(--graphite-soft); }
 .bot-file-drop-hint { position: absolute; inset: 0; border-radius: inherit; display: grid; place-items: center; background: var(--paper-base, var(--za-surface)); pointer-events: none; z-index: 2; }
 .bot-composer { position: relative; }
@@ -713,20 +808,26 @@
   font-size: .6875rem;
 }
 .bot-message-author .bot-avatar { width: 19px; height: 19px; flex-basis: 19px; }
-.bot-user-quote.bot-reply-bar { width: 100%; margin: 0; padding: 0 0 8px; border: 0; border-bottom: 1px solid var(--chrome-hairline); border-radius: 0; background: transparent; }
+.bot-user-quote.bot-reply-bar { width: 100%; max-width: 100%; margin: 0; }
 .bot-reply-marks > button { min-height: 27px; padding: 5px 7px; border-color: transparent; background: transparent; font-size: .6875rem; }
 .bot-reply-marks > button:first-child { padding-left: 0; }
 .bot-reply-delivery { font-size: .6875rem; }
 @media (max-width: 1100px) {
-  .bot-thread { padding-inline: 24px; }
   .bot-user { max-width: 88%; }
 }
 
 @supports (corner-shape: superellipse(1.4)) {
-  :is(.bot-composer, .bot-quote-chip, .bot-reply-bar):not(.bot-user-quote) { corner-shape: var(--control-corner); }
+  .bot-composer { corner-shape: var(--composer-corner); }
+  :is(.bot-quote-chip, .bot-reply-bar):not(.bot-user-quote) { corner-shape: var(--control-corner); }
   .bot-question .bot-card-actions button { corner-shape: var(--control-corner); }
 }
 
 @media (forced-colors: active) {
+  :is(.bot-reply-bar, .bot-quote-chip):not(:focus-visible) { outline: 1px solid ButtonText; outline-offset: -1px; }
+  .bot-composer:focus-within { border-color: Highlight; }
   .bot-question .bot-card-actions button { border-color: ButtonText; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-composer { transition-duration: 1ms; }
 }

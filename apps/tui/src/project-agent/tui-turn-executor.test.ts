@@ -109,9 +109,9 @@ test('delegated TUI turns receive their current plan admission and keep readonly
 test('a parallel readonly batch reserves tool budget before any provider starts', async()=>{
   const env=harness({async stream(){return {content:'',toolCalls:['one','two','three'].map(id=>({id,name:'read_file',arguments:JSON.stringify({path:'README.md'})}))};}});
   writeFileSync(path.join(env.home,'README.md'),'real file');
-  const outcome=await env.executor.runTurn({...env.input,remainingToolCalls:1});
-  expect(outcome.ok).toBe(false);expect(outcome.error).toBe('project_agent_tool_limit');
-  expect(outcome.toolCalls).toHaveLength(1);
+  const outcome=await env.executor.runTurn({...env.input,hardRemainingToolCalls:1});
+  expect(outcome.ok).toBe(false);expect(outcome.error).toBe('max_tool_calls_exceeded');
+  expect(outcome.toolCalls).toHaveLength(0);
 });
 
 test('an event wake does not append an invented empty user message',async()=>{
@@ -182,7 +182,8 @@ test('a failed project reply remains nonterminal in the TUI pipeline', async () 
     verification: {}, proactivity: {}, checkModel: () => ({ ok: true }), memoryEnabled: () => false });
   cleanup.push(() => projectProvider.dispose());
   const outcome = await env.executor.runTurn({ ...env.input, limits: { maxRounds: 2, maxToolCalls: 4 } });
-  expect(outcome.ok).toBe(false);
+  expect(outcome.ok).toBe(true);
+  expect(outcome.turnEnd).toBe('yielded');
   expect(env.requests).toHaveLength(2);
   expect(outcome.toolCalls.every((call: any) => call.execution.result.outputPreview.control === undefined)).toBe(true);
 });

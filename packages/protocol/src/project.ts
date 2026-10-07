@@ -121,7 +121,16 @@ export interface ProjectAgentToolActivity {
   readonly receivedChars?: number;
 }
 
-/** Ephemeral user-turn presentation. No hidden reasoning or Evidence. */
+/** Public conversation update, never hidden reasoning, Tool Result or Evidence.
+ * User agent_turn records may persist these as publicUpdates (100 / 32000 chars).
+ * Legacy rounds[].text is not a public-update source.
+ */
+export interface ProjectAgentPublicUpdate {
+  readonly id: string;
+  readonly text: string;
+}
+
+/** Ephemeral interactive-turn presentation, including explicit wake retries. No hidden reasoning or Evidence. */
 export interface ProjectAgentActivity {
   readonly workspaceId: string;
   readonly conversationId: string;
@@ -134,7 +143,7 @@ export interface ProjectAgentActivity {
   readonly phase: 'waiting' | 'thinking' | 'responding' | 'tool' | 'settling' | 'done' | 'error' | 'stopped' | 'disposed';
   readonly replyText: string;
   readonly segments: readonly (
-    | { readonly kind: 'text'; readonly id: string; readonly text: string }
+    | ({ readonly kind: 'text' } & ProjectAgentPublicUpdate)
     | ProjectAgentToolActivity
   )[];
 }

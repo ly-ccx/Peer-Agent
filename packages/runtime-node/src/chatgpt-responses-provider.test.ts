@@ -181,7 +181,7 @@ test('ChatGPT Responses provider forwards Grok channel identity headers', async 
     extraHeaders: {
       'X-XAI-Token-Auth': 'xai-grok-cli',
       'x-grok-client-surface': 'grok-build',
-      'x-grok-client-version': '0.1.202',
+      'x-grok-client-version': '1.0.46',
     },
     fetch: async (_input, init) => {
       captured = new Headers(init?.headers);
@@ -192,7 +192,7 @@ test('ChatGPT Responses provider forwards Grok channel identity headers', async 
   assert.equal(captured?.get('authorization'), 'Bearer grok-access');
   assert.equal(captured?.get('x-xai-token-auth'), 'xai-grok-cli');
   assert.equal(captured?.get('x-grok-client-surface'), 'grok-build');
-  assert.equal(captured?.get('x-grok-client-version'), '0.1.202');
+  assert.equal(captured?.get('x-grok-client-version'), '1.0.46');
   assert.equal(captured?.get('openai-beta'), 'responses=experimental');
 });
 

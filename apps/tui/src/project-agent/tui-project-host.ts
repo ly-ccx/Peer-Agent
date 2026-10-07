@@ -96,6 +96,8 @@ export function createTuiProjectHost(options: {
   const goalRunner = goalHost.goalRunner as typeof goalHost.goalRunner & { verifyDelegatedSession(input: object): Promise<any> };
   const verification = createSessionVerification({goalPlanStore: plans,
     verifySession: (plan: any, focus: string) => goalRunner.verifyDelegatedSession({plan, focus}),
+    readReport: (plan: any) => (supervisor.get({sessionId: plan.delegationOrigin.sessionId, detail: 'report'}) as any)?.report?.summary || '',
+    completeRecheck: (input: any) => goalRunner.completeRecheck(input),
     appendMessage: (id: string, message: any) => conversations.appendMessage(id, message)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
     executionScheduler: scheduler, deferRecovery: true, approvalStore: approvals, memoryStore: memory, canManageWorkspace: holds,
@@ -158,7 +160,7 @@ export function createTuiProjectHost(options: {
     readSettings:getSettings, inputQueue:inputs, inbox, onStatus:changed,
     onCurator:(input: any)=>curator.consider(input), onMaintenance:(input: any)=>{if(holds(input.workspaceId)&&memoryEnabled(input.workspaceId))maintenance.runDue(input);},
     readFacts:(id: string)=>delegationFactsForWorkspace(plans.listPlans().map((row: any)=>plans.getPlan(row.planId)),id),
-    ...createProjectLifecycleEffects({profileStore:profiles,lifecycle,supervisor,conversationStore:conversations,resolveConversationId,broadcast:changed,objectiveService:objectives,resolveEvidence:(ref: string)=>readEvidence(ref)?.text || ''} as never),
+    ...createProjectLifecycleEffects({profileStore:profiles,lifecycle,supervisor,conversationStore:conversations,resolveConversationId,broadcast:changed,objectiveService:objectives,memoryEnabled,resolveEvidence:(ref: string)=>readEvidence(ref)?.text || ''} as never),
   } as never);
   const running = new Set<Promise<unknown>>();
   let wakeStamp = '';

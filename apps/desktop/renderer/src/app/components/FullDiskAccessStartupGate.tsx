@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 /**
  * 应用启动时的 macOS 必需权限门（表达层）。
  *
@@ -271,9 +272,10 @@ export function FullDiskAccessStartupGate({
 
           <div className="fda-permission-card">
             <div className="fda-drag-banner">
+              <PeerIcon name="send" size={14} className="inline-icon" />
               {isZh
-                ? `↑ 将 ${displayName} 拖到系统设置「完全磁盘访问」列表（列表不会自动出现 App）`
-                : `↑ Drag ${displayName} into Full Disk Access list (apps never auto-appear)`}
+                ? `将 ${displayName} 拖到系统设置「完全磁盘访问」列表（列表不会自动出现 App）`
+                : `Drag ${displayName} into Full Disk Access list (apps never auto-appear)`}
             </div>
             <button
               type="button"

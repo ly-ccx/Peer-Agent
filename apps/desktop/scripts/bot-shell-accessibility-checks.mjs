@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { checkEffortStability } from './bot-effort-stability-checks.mjs';
+import { checkModelSwitch } from './bot-model-switch-checks.mjs';
 import { modelMenuChannelName } from '@peer-agent/protocol';
 
 /** Actual production DOM, keyboard and persistence; no replacement of product results. */
@@ -25,6 +26,15 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   const trigger = page.locator('.bot-profile'); await trigger.focus(); await trigger.press('Enter');
   const tabs = page.locator('.bot-drawer-tabs');
   await until(() => focused(tabs.getByRole('tab', { selected: true })), Boolean);
+  assert.equal(await trigger.textContent(), '机器人设置');
+  assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'Bot settings enters configuration directly');
+  const header = await page.locator('.bot-main-head').evaluate(node => {
+    const rect = node.getBoundingClientRect(), avatar = node.querySelector('.bot-avatar').getBoundingClientRect();
+    return { height: rect.height, avatarCenterOffset: Math.abs((rect.top + rect.bottom) / 2 - (avatar.top + avatar.bottom) / 2) };
+  });
+  assert.ok(header.height <= 53 && header.height >= 52, 'conversation header keeps a compact 52px content height');
+  assert.ok(header.avatarCenterOffset <= 1, 'avatar remains vertically centered');
+  checks.push('compact conversation header labels Bot settings and enters configuration directly');
   await page.keyboard.press('End');
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
   await checkSettings({ page, until, report, captureDirectory, effortCommandFile });
@@ -33,6 +43,8 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
   await page.keyboard.press('Enter');
   assert.equal(await page.locator('.bot-drawer-dock.is-open').count(), 1, 'tab Enter must not be intercepted by the shell');
+  await trigger.click();
+  assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'settings entry navigates from another drawer tab');
   await page.keyboard.press('Escape');
   await until(() => focused(trigger), Boolean);
   assert.equal(await page.locator('.bot-drawer-dock:not([inert])').count(), 0);
@@ -40,7 +52,7 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
 
   await page.setViewportSize({ width: 900, height: 780 });
   await trigger.focus(); await trigger.press('Enter');
-  const modal = page.getByRole('dialog', { name: '档案', exact: true });
+  const modal = page.getByRole('dialog', { name: '机器人设置', exact: true });
   await modal.waitFor();
   await modal.getByRole('tab', { name: '设置', exact: true }).click();
   const narrow = modal.locator('.bot-settings-tab');
@@ -331,6 +343,8 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   assert.equal(switched.modelPolicy.overrides.project_agent.reasoningEffort, highEffort);
   assert.deepEqual(switched.modelPolicy.overrides.session_worker, { mode: 'fixed', modelProviderId: second.id, reasoningEffort: 'low' });
   assert.deepEqual(switched.modelPolicy.overrides.verifier, original.modelPolicy?.overrides?.verifier);
+  if (effortCommandFile) await checkModelSwitch({ page, picker: picker('对话模型'), first, second,
+    getBot: () => getBot(workspaceId), failNext: () => writeFileSync(effortCommandFile, JSON.stringify({ failNext: true })), until, report });
   await choose('对话模型', null);
   const inherited = await until(() => getBot(workspaceId), profile => !profile.modelPolicy?.overrides?.project_agent);
   assert.deepEqual(inherited.modelPolicy.overrides.session_worker, switched.modelPolicy.overrides.session_worker);

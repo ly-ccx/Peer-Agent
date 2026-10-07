@@ -261,7 +261,7 @@
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
 
-  /* 思维链折叠开关：自定义三角符替换浏览器原生 marker */
+  /* 折叠开关：SVG 替换浏览器原生 marker */
   .cloud-chat-message details > summary {
     @apply inline-flex cursor-pointer select-none items-center gap-1.5;
     list-style: none;
@@ -276,16 +276,13 @@
     display: none;
   }
 
-  .cloud-chat-message details > summary::before {
-    content: "›";
-    display: inline-block;
-    width: 10px;
-    text-align: center;
+  .cloud-chat-message details > summary > .disclosure-icon {
+    flex: none;
     color: var(--ink-fade);
     transition: transform var(--za-motion-fast) var(--za-ease-standard);
   }
 
-  .cloud-chat-message details[open] > summary::before {
+  .cloud-chat-message details[open] > summary > .disclosure-icon {
     transform: rotate(90deg);
   }
 

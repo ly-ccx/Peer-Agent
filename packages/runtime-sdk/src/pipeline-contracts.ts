@@ -8,6 +8,7 @@ export type RuntimePipelineStatus =
   | 'completed'
   | 'stopped'
   | 'cancelled'
+  | 'yielded'
   | 'exhausted'
   | 'failed';
 
@@ -20,6 +21,11 @@ export interface RuntimePipelineRunInput<TInput = unknown> {
   readonly model?: string;
   readonly input: TInput;
   readonly maxTurns?: number;
+  readonly maxToolCalls?: number;
+  /** Scheduling allowance; unlike maxToolCalls this can end at a batch boundary. */
+  readonly sliceToolCalls?: number;
+  readonly yieldAtTurnLimit?: boolean;
+  readonly maxToolBatchCalls?: number;
 }
 
 export interface RuntimePipelineToolCall<TPayload = unknown> {
@@ -112,9 +118,11 @@ export interface RuntimePipelineModelAdapter<
     state: TState | undefined,
     context: RuntimePipelineTurnContext<TInput>,
   ): void | Promise<void>;
+  onYield?(state: TState, context: RuntimePipelineTurnContext<TInput>): void | Promise<void>;
   onExhausted?(
     state: TState,
     context: RuntimePipelineTurnContext<TInput>,
+    reason: 'max_turns_exceeded' | 'max_tool_calls_exceeded',
   ): void | Promise<void>;
 }
 
@@ -123,6 +131,9 @@ export interface RuntimePipelineToolExecutor<
   TCall extends RuntimePipelineToolCall = RuntimePipelineToolCall,
   TToolResult = RuntimeSdkToolResult,
 > {
+  /** Build a paired, explicit non-execution result without dispatching a capability. */
+  notExecuted?(call: TCall, reason: string): RuntimePipelineToolExecution<TCall, TToolResult>
+    | Promise<RuntimePipelineToolExecution<TCall, TToolResult>>;
   execute(
     call: TCall,
     context: RuntimePipelineTurnContext<TInput> & { readonly index: number },

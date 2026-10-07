@@ -11,6 +11,22 @@ const view = {
   messages: [{ id: 'u1', kind: 'user_input', role: 'user', content: '做一下' }],
 };
 
+test('post_reply returns recoverable anchor facts and requires a separately validated retry', () => {
+  const port = createDesktopReplyComposer({ readDelivery: () => ({ sessionIds: ['s1'],
+    sessionStates: [{ sessionId: 's1', status: 'waiting_user' }] }) });
+  const draft = { text: '等待跟进', replyTo: ['invented'], sources: ['s1'],
+    statusClaims: [{ sessionId: 's1', status: 'waiting_user' }] };
+  const rejected = port.postReply(draft, view);
+  assert.equal(rejected.error, 'anchor_not_found');
+  assert.deepEqual(rejected.messageIds, ['invented']);
+  assert.deepEqual(rejected.availableReplyAnchors, [{ messageId: 'u1', text: '做一下' }]);
+  assert.equal(rejected.messageId, undefined);
+  assert.equal(port.postReply({ ...draft, replyTo: ['u1'], statusClaims: [{ sessionId: 's1', status: 'accepted' }] }, view).error, 'status_claim_mismatch');
+  const corrected = port.postReply({ ...draft, replyTo: ['u1'] }, view);
+  assert.deepEqual(corrected.message.replyTo, ['u1']);
+  assert.deepEqual(corrected.message.meta.sessionStates, [{ sessionId: 's1', status: 'waiting_user' }]);
+});
+
 test('a completed result requires independent verification before delivery', () => {
   let independentVerifier = 'missing';
   const port = createDesktopReplyComposer({ readDelivery: () => ({ sessionIds: ['s1'],

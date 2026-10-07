@@ -48,7 +48,11 @@ const NEGATIVE_HINTS_EN = ['unit test', 'regression test', 'cli', 'backend', 'da
 // 签收 / 合回指的是操作任务卡片，不是交付物。只排除这个窄语句，
 // 保留其余实际界面、样式、组件线索；已经武装的视觉门不会在这里撤销。
 function deliveryText(value) {
-  return value.replace(/(?:在|通过)(?:应用)?(?:界面|任务卡片)(?:中|上)?(?:逐个|分别)?(?:确认(?:结果)?|签收(?:任务|结果)?|合回(?:改动)?|批准(?:权限|任务)?)/g, '');
+  return value
+    // Git subjects describe commits, not visual themes. Keep actual UI themes.
+    .replace(/((?:hash|哈希|提交)\s*[,，、/:：]\s*)主题/gi, '$1标题')
+    .replace(/提交主题/g, '提交标题')
+    .replace(/(?:在|通过)(?:应用)?(?:界面|任务卡片)(?:中|上)?(?:逐个|分别)?(?:确认(?:结果)?|签收(?:任务|结果)?|合回(?:改动)?|批准(?:权限|任务)?)/g, '');
 }
 
 function collectMatches(haystack, tokens, mode) {

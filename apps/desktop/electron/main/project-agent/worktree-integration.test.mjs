@@ -95,9 +95,9 @@ test('three real Git worktrees run concurrently through the production host and 
       capabilityId: 'local.file.read', toolName: 'read_file', bodyPreview: { kind: 'file', text: plan.title, truncated: false } });
     store.revisePlan(plan.planId, { tasks: plan.tasks.map(task => ({ ...task, status: 'completed', evidenceRefs: [ref] })),
       criterionResults: [{ criterionId: 'c', passed: true, evidenceRef: ref }], qualityReview: { status: 'passed', reviewedAt: new Date().toISOString() } });
-    store.setRunnerState(plan.planId, { status: 'idle', waitingOnUser: false });
+    store.setRunnerState(plan.planId, { enabled:false,status: 'completed', waitingOnUser: false });
     store.setPlanStatus(plan.planId, 'completed');
-    assert.equal((await supervisor.confirmResult(sessionId)).accepted, true);
+    const confirmation = await supervisor.confirmResult(sessionId); assert.equal(confirmation.accepted, true, JSON.stringify(confirmation));
     plan = store.getPlan(plan.planId);
     assert.notEqual(plan.deliveryHandoff?.status, 'delivered');
     const site = plan.deliveryBinding.worktreePath;
@@ -158,7 +158,7 @@ test('a superseded real worktree retains uncommitted edits and the restored prod
       roles: Object.fromEntries(['session_worker', 'explorer', 'verifier', 'visual_verifier'].map(role => [role, { mode: 'tier', tier: 'strong' }])) } });
   await supervisor.reconciled;
   const context = { parentConversationId: parent.id, workspaceId: 'w', workspacePath: repository };
-  const input = { anchorMessageIds: ['anchor'], title: 'original', brief: 'edit', kind: 'code', readOnly: false, isolation: 'worktree', successCriteria: ['review'] };
+  const input = { anchorMessageIds: ['anchor'], title: 'original', brief: 'edit', kind: 'code', readOnly: false, isolation: 'worktree', successCriteria: [{kind:'model_review',description:'review'}] };
   const a = await supervisor.spawn(input, context); assert.equal(a.error, undefined);
   const id = supervisor.get({ sessionId: a.sessionId }).planId;
   await host.goalRunner.waitForIdle(id);

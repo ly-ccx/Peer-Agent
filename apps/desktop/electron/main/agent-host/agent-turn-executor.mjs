@@ -1,4 +1,4 @@
-import { createExecutionScheduler } from '@peer-agent/runtime-node';
+import { createExecutionScheduler, USER_TURN_LIMITS, createWorkBudgetGuard } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -34,20 +34,26 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       const abort = () => controller.abort(input.signal?.reason);
       input.signal?.addEventListener('abort', abort, { once: true });
       if (input.signal?.aborted) abort();
-      const done = executionScheduler.withTurn({ planId: profile?.planId, priority, signal: controller.signal }, signal => runTurn({ ...input, signal }))
+      const done = executionScheduler.withTurn({ planId: profile?.planId, priority, signal: controller.signal }, async signal => {
+        const guard = createWorkBudgetGuard(profile);
+        let outcome;
+        try { outcome = await runTurn({ ...input, budgetGuard: guard, signal }); return outcome; }
+        finally { guard?.finish(outcome?.usage); }
+      })
         .finally(() => { input.signal?.removeEventListener('abort', abort); active.delete(id); });
       active.set(id, { workspaceId: profile?.workspaceId || input.workspaceId, controller, done });
       return done;
     },
   };
 
-  function runTurn({ turnProfile = null, sink, signal, ...sendMessageArgs } = {}) {
+  function runTurn({ turnProfile = null, sink, signal, budgetGuard = null, ...sendMessageArgs } = {}) {
     if (!sink || typeof sink.send !== 'function') {
       throw new Error('AgentTurnExecutor requires a sink with send()');
     }
     const effort = turnProfile?.modelSelection?.reasoningEffort ?? sendMessageArgs.effort;
     if (effort !== undefined) sendMessageArgs.effort = effort;
     const projectAgent = turnProfile?.role === 'project_agent' || sendMessageArgs.mode === 'project_agent';
+    if (budgetGuard) sendMessageArgs.executionBudget = { guard: budgetGuard };
     if (!projectAgent) {
       if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted' });
       const streamId = sendMessageArgs.streamId || randomUUID();
@@ -63,6 +69,19 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       })).finally(() => signal?.removeEventListener('abort', abort));
     }
     if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' });
+    // A project-agent call contains its own provider loop. Enforce the outer
+    // runner's remaining allowance there, before any capability is dispatched.
+    let yieldedCheckpoint = null;
+    sendMessageArgs.executionBudget = {
+      guard: budgetGuard,
+      maxTurns: Math.max(1, (sendMessageArgs.limits?.maxRounds ?? USER_TURN_LIMITS.maxRounds) - (sendMessageArgs.roundIndex ?? 0)),
+      maxToolCalls: sendMessageArgs.hardRemainingToolCalls ?? Infinity,
+      sliceToolCalls: Math.max(1, sendMessageArgs.remainingToolCalls ?? sendMessageArgs.limits?.maxToolCalls ?? USER_TURN_LIMITS.maxToolCalls),
+      yieldAtTurnLimit: true,
+      maxToolBatchCalls: 32,
+      providerCheckpoint: turnProfile?.providerCheckpoint,
+      onYield: checkpoint => { yieldedCheckpoint = checkpoint; },
+    };
     const collected = collectTurn(sink);
     const streamId = sendMessageArgs.streamId || randomUUID();
     const abort = () => llmChatService.abort?.(streamId);
@@ -74,6 +93,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       turnProfile,
     }).then((outcome) => ({
       ...outcome,
+      ...(yieldedCheckpoint ? { turnEnd: 'yielded', providerCheckpoint: yieldedCheckpoint } : {}),
       ...(collected.error() || ['error', 'aborted', 'interrupted'].includes(outcome?.terminalStatus)
         ? { ok: false, retryable: false, error: outcome?.error || collected.error() || outcome.terminalStatus }
         : {}),
@@ -103,13 +123,18 @@ function collectTurn(sink) {
           name: typeof payload?.tool === 'string' ? payload.tool : '',
           input: payload?.args ?? null,
           result: null,
+          ...(Number.isFinite(payload.startedAtMs) ? { startedAtMs: payload.startedAtMs } : {}),
         };
         calls.push(call);
         byId.set(id, call);
       } else if (channel === 'chat:stream:tool-result') {
         const id = typeof payload?.toolCallId === 'string' ? payload.toolCallId : '';
         const call = (id && byId.get(id)) || calls.find((item) => item.result == null) || null;
-        if (call) call.result = parseToolResult(payload?.result);
+        if (call) {
+          call.result = parseToolResult(payload?.result);
+          if (Number.isFinite(payload.startedAtMs)) call.startedAtMs = payload.startedAtMs;
+          if (Number.isFinite(payload.endedAtMs)) call.endedAtMs = payload.endedAtMs;
+        }
       }
     },
   };

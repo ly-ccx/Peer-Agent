@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createTurnActivity } from './turn-activity.mjs';
+
+test('tool duration uses host timestamps even when both events reach activity together', () => {
+  const a = createTurnActivity({ now: () => '2026-10-06T00:00:10Z' });
+  a.begin({ turnId: 't', visible: true });
+  a.accept('chat:stream:tool-call', { streamId: 't', toolCallId: 'r', tool: 'read_file', startedAtMs: 1791244800000 });
+  a.accept('chat:stream:tool-result', { streamId: 't', toolCallId: 'r', startedAtMs: 1791244800000, endedAtMs: 1791244802250, result: { ok: true } });
+  const step = a.snapshot().segments[0];
+  assert.equal(Date.parse(step.finishedAt) - Date.parse(step.startedAt), 2250);
+});
 import { toolActivityPreview } from '@peer-agent/protocol';
 
 test('real deltas arrive before completion, with bounded tools and no private reasoning', () => {
@@ -22,6 +31,33 @@ test('real deltas arrive before completion, with bounded tools and no private re
   assert.equal(pushed.at(-1).phase, 'done');
   assert.ok(pushed.at(-1).revision > pushed[0].revision);
   activity.dispose();
+});
+
+test('tool boundaries split public updates, token deltas append, failure keeps updates and recovery replaces them', () => {
+  const a = createTurnActivity({ workspaceId: 'w', conversationId: 'c' });
+  a.begin({ turnId: 't', visible: true }); a.round();
+  const send = (channel, payload) => a.accept(channel, { streamId: 't', ...payload });
+  send('chat:stream:thinking', { content: 'PRIVATE_THINKING' });
+  send('chat:stream:delta', { content: '我先核对' });
+  send('chat:stream:delta', { content: '说明。' });
+  send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', args: { path: 'README.md' } });
+  send('chat:stream:tool-result', { toolCallId: 'read', result: { ok: true } });
+  send('chat:stream:delta', { content: '说明已经读取。' });
+  const updates = a.snapshot().segments.filter(segment => segment.kind === 'text');
+  assert.deepEqual(updates.map(({ id, text }) => ({ id, text })), [
+    { id: 'text-1', text: '我先核对说明。' }, { id: 'text-2', text: '说明已经读取。' },
+  ]);
+  send('chat:stream:tool-progress', { tool: 'post_reply', toolCallId: 'reply', replyText: '未接受的结论' });
+  a.finish('error');
+  assert.equal(a.snapshot().replyText, '');
+  assert.deepEqual(a.snapshot().segments.filter(segment => segment.kind === 'text'), updates);
+  assert.doesNotMatch(JSON.stringify(a.snapshot()), /PRIVATE_THINKING/);
+  a.begin({ turnId: 'r', visible: true }); a.round();
+  a.accept('chat:stream:delta', { streamId: 'r', content: '废弃尝试' });
+  a.accept('chat:stream:provider-recovery', { streamId: 'r', toProviderId: 'new' });
+  a.accept('chat:stream:delta', { streamId: 'r', content: '重试后的公开说明' });
+  assert.deepEqual(a.snapshot().segments.filter(segment => segment.kind === 'text').map(segment => segment.text), ['重试后的公开说明']);
+  a.dispose();
 });
 
 test('post_reply preview is withdrawn on rejection or suppression; wake text stays private', () => {

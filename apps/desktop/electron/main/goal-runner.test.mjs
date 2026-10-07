@@ -1788,8 +1788,8 @@ test('start: 已完成计划不再被拉回 running，并补写 qualityReview', 
   assert.equal(turnCalls, 0);
   assert.equal(got.status, 'completed');
   assert.equal(got.qualityReview?.status, 'passed');
-  // The store settles a leftover active runner to idle once all leaves are complete.
-  assert.equal(got.runner.status, 'idle');
+  // The store settles a leftover active runner to the completed fact.
+  assert.equal(got.runner.status, 'completed');
 });
 
 test('start: 有交付绑定的 Goal 启动时会准备隔离环境', async () => {

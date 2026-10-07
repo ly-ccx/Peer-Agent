@@ -2,6 +2,8 @@ import type { RuntimeSdkEvent } from '@peer-agent/runtime-sdk';
 import type {
   CapabilityManifest,
   ProjectAgentActivity,
+  ProjectAgentEvidenceReadRequest,
+  ProjectAgentEvidenceReadResult,
   ProjectAgentStopResponseRequest,
   ProjectAgentStopResponseResult,
   ChatSendRequest,
@@ -1060,6 +1062,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentGet: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; item?: import('@peer-agent/protocol').BotListItem; path?: string; profile?: import('@peer-agent/protocol').BotProfile; modelOptions?: readonly import('@peer-agent/protocol').ModelRoutingMenuOption[]; modelViews?: import('@peer-agent/protocol').BotModelViews }>;
   readonly projectAgentReadAvatar: (params: { workspaceId: string }) => Promise<import('@peer-agent/protocol').BotAvatarReadResult>;
   readonly projectAgentCreate: (params: { kind: 'bind' } | { kind: 'managed'; name: string }) => Promise<{ ok: boolean; code?: string; workspaceId?: string; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentUpdateModelSelection: (params: import('@peer-agent/protocol').BotModelSelectionUpdateRequest) => Promise<import('@peer-agent/protocol').BotModelSelectionUpdateResult>;
   readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; regenerateAvatar?: boolean; avatarColor?: string; chooseAvatar?: boolean; planApproval?: 'never' | 'writes' | 'always'; acceptancePolicy?: 'auto' | 'confirm'; autoHandoffOnPolicyAccept?: boolean; modelPolicy?: import('@peer-agent/protocol').ProjectModelPolicy | null }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentDelete: (params: { workspaceId: string; confirmManaged?: boolean }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentSubmitInput: (params: {
@@ -1074,7 +1077,7 @@ export interface BootstrapPreloadApi {
     answerTo?: string;
   }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
-  readonly projectAgentReadEvidence: (params: { evidenceRef: string }) => Promise<{ ok: boolean; code?: string; evidenceRef?: string; kind?: string; summary?: string; truncated?: boolean }>;
+  readonly projectAgentReadEvidence: (params: ProjectAgentEvidenceReadRequest) => Promise<ProjectAgentEvidenceReadResult>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentCancelSession: (params: { sessionId: string; workspaceId?: string; reason?: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
@@ -1111,7 +1114,7 @@ export interface BootstrapPreloadApi {
   }>;
   readonly projectAgentContinueHistory: (params: { workspaceId: string; conversationId: string; inputId?: string; text?: string; confirmMissing?: boolean }) => Promise<{ ok: boolean; code?: string; input?: { inputId: string; text: string; historyRef?: string; historySnapshotId?: string; historyConfirmed?: boolean }; snapshot?: { snapshotId: string } }>;
   readonly projectAgentStartFamiliarize: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
-  readonly projectAgentConfirmResult: (params: { workspaceId: string; sessionId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentConfirmResult: (params: import('@peer-agent/protocol').SessionConfirmationInput) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentAcceptReadme: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentTakeoverHost: (params: import('@peer-agent/protocol').ProjectHostTakeoverRequest) => Promise<import('@peer-agent/protocol').ProjectHostTakeoverResult>;
   readonly projectAgentDiagnostics: (params: import('@peer-agent/protocol').ProjectDiagnosticsRequest) => Promise<import('@peer-agent/protocol').ProjectDiagnosticsResult>;

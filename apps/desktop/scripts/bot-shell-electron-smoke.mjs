@@ -2,13 +2,21 @@ import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
+import { checkBotSelectionQuote } from './bot-selection-quote-checks.mjs';
 import { checkBotWorkSurfaces } from './bot-work-surface-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
+import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
+import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
+import { checkBotMessageLayout } from './bot-message-layout-checks.mjs';
+import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
+import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
+import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
+import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { checkResponseInteraction, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, cpSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -29,14 +37,16 @@ const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const fixture = seedBotShellHome({ home });
 let botModelFixtures = [];
-if (process.argv.includes('--accessibility')) {
+{
+  const fixtureSecrets = new Map();
   const models = createLlmConfigStore({
     configFile: path.join(home, 'llm-providers.json'),
-    credentialClient: { getSecret: () => null, deleteSecret() {}, setSecret() { throw Error('No fixture secrets allowed'); } },
+    credentialClient: { getSecret: key => fixtureSecrets.get(key) ?? null,
+      deleteSecret: key => fixtureSecrets.delete(key), setSecret: (key, value) => fixtureSecrets.set(key, value) },
     providerFetch: () => { throw Error('No fixture model network allowed'); },
   });
   for (const suffix of ['A', 'B']) models.addProvider({ provider: 'openai', groupId: 'rc-model-menu-fixture', model: `rc-bot-model-${suffix.toLowerCase()}`,
-    modelLabel: `RC Bot model ${suffix}`, name: 'RC synthetic channel', baseUrl: 'http://127.0.0.1:1', metadataSource: 'custom' });
+    modelLabel: `RC Bot model ${suffix}`, name: 'RC synthetic channel', apiKey: 'rc-fixture-only-not-a-real-key', baseUrl: 'http://127.0.0.1:1', metadataSource: 'custom', supportsVision: true });
   // UI fixtures declare availability/capabilities at the existing catalogue seam. No secrets or network.
   botModelFixtures = models.listProviders().map(model => ({ ...model, enabled: true, apiKeyConfigured: true,
     supportsTools: true, supportsStructured: true, supportsVision: true, supportsReasoning: true,
@@ -44,19 +54,67 @@ if (process.argv.includes('--accessibility')) {
 }
 const fixtureConversation = path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl');
 const seededMessages = readFileSync(fixtureConversation, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+const longErrorText = '代理暂时不可用：HTTP 400: ' + JSON.stringify({ error: {
+  message: 'The `content[].thinking` in the thinking mode must be passed back to the API.',
+  type: 'invalid_request_error', request_id: 'c41b0061-ad0e-4e22-9c48-c0bf5568aa27',
+  long_id: 'abcdefghijklmnopqrstuvwxyz0123456789'.repeat(10),
+  endpoint: 'https://example.invalid/api/messages?request=' + '0123456789abcdef'.repeat(10),
+  code: 'invalid_request_error', marker: 'RC_LONG_ERROR_END',
+} });
+seededMessages[9998] = { ...seededMessages[9998], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
+  content: longErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-long-error', kind: 'agent_unavailable', content: longErrorText, actions: [] }] };
+const budgetErrorText = '代理暂时不可用：agent_tool_budget_exhausted: 本轮工具调用额度已用完，回复尚未完成，已停止继续执行。';
+seededMessages[9997] = { ...seededMessages[9997], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
+  content: budgetErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-budget', kind: 'agent_unavailable', content: budgetErrorText,
+    actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId: 'rc-budget' } }] }] };
 seededMessages.at(-1).replyTo = ['rc-message-9500'];
-seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。';
+seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。' + '需要逐项核对实际实现和依据。'.repeat(8) + '原文结束标记';
 seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
 seededMessages.at(-1).meta = { surfacing: 'interrupt', memoryUsed: ['rc-memory-123'] };
+if (process.argv.includes('--selection-quote-only')) seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agent_reply',
+  content: '仓库只读熟悉已经完成，工作区没有改动。叶子证据和独立校验都通过了；项目记忆里目前还没有对应条目。\n\n'
+    + Array.from({ length: 8 }, (_, i) => `${i + 1}. 项目核对：检查应用、运行时、脚本与规则，整理已核实的事实和未覆盖的范围。`).join('\n')
+    + '\n\n要把这些确认过的事实写入项目记忆吗？',
+  cards: [{ cardId: 'card:question:reply:rc-selection', kind: 'question', content: '要写入项目记忆吗？', actions: [] }] };
 if (workSurfaces) {
   seededMessages.at(-1).sources = ['rc-work-1'];
   seededMessages.at(-1).meta.evidenceRefs = Array.from({length:20}, (_,i)=>'rc-evidence-'+i);
   seededMessages.at(-1).meta.sessionStates = [{sessionId:'rc-work-1', status:'running'}];
+  const sourceAt = '2026-10-07T03:12:39.953Z';
+  const evidenceRows = Array.from({length:20}, (_,i) => ({ evidenceRef: `rc-evidence-${i}`, createdAt: sourceAt,
+    toolName: 'read_file', capabilityId: 'local.file.read' }));
+  evidenceRows[0].bodyPreview = {kind:'file', text:'README.md\n\nPeer 是本机任务委托系统。代理负责持续推进，并在交还前验证结果。', truncated:false};
+  evidenceRows[1] = {...evidenceRows[1], toolName:'get_session', capabilityId:'local.delegation.get_session',
+    conversationId:fixture.bots[2].conversationId, streamId:'rc-evidence-history'};
+  evidenceRows[2] = {...evidenceRows[1], evidenceRef:'rc-evidence-2', streamId:'missing-historical-turn'};
+  evidenceRows[4] = {...evidenceRows[4], toolName:'bash', capabilityId:'local.shell.exec',
+    bodyPreview:{kind:'command',text:JSON.stringify({exitCode:0,stdout:'回归通过：5 项检查完成。',stderr:''}),truncated:false}};
+  const evidenceHistory={id:'rc-evidence-history',kind:'agent_turn',role:'assistant',turnId:'rc-evidence-history',
+    content:'',createdAt:sourceAt,rounds:[{text:'',toolCalls:[{name:'get_session',input:{sessionId:'historical-session'},
+      result:{ok:true,title:'只读熟悉 Peer-Agent',statusLabel:'执行受阻',evidenceRefs:['rc-evidence-1']}}]}]};
+  const evidenceHistoryFile=path.join(home,'conversations',evidenceRows[1].conversationId+'.jsonl');
+  const existingEvidenceHistory=existsSync(evidenceHistoryFile)?readFileSync(evidenceHistoryFile,'utf8').trim():'';
+  writeFileSync(evidenceHistoryFile,(existingEvidenceHistory?existingEvidenceHistory+'\n':'')+JSON.stringify(evidenceHistory)+'\n');
+  mkdirSync(path.join(home,'goal-plans'),{recursive:true});
+  writeFileSync(path.join(home,'goal-plans','evidence-index.jsonl'),evidenceRows.filter((_,i)=>i!==3).map(row=>JSON.stringify(row)).join('\n')+'\n');
 }
 writeFileSync(workCommand, JSON.stringify({seq:0,workspaceId:fixture.bots[0].workspaceId,sessions:[{sessionId:'rc-work-1', title:'核查历史任务完成情况', status:'running',statusLabel:'正在核查历史记录', origin:{anchorMessageId:'rc-message-9500'},report:{summary:'逐条核对历史记录中的目标、结果和依据。'}}]}));
 writeFileSync(fixtureConversation, seededMessages.map(row => JSON.stringify(row)).join('\n') + '\n');
+if (process.argv.includes('--streaming')) {
+  const bot = fixture.bots[1], file = path.join(home, 'conversations', bot.conversationId + '.jsonl');
+  const rows = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+  const turnId = 'rc-manual-wake-retry';
+  rows.push({ id: turnId, turnId, role: 'assistant', kind: 'agent_turn', turnKind: 'wake', userInputs: [], content: '',
+    createdAt: new Date().toISOString(), rounds: [], meta: { recovery: { throughSeq: 0,
+      events: [{ eventId: 'rc-manual-retry-event', kind: 'session_verified', workspaceId: bot.workspaceId, sessionId: 'rc-retry-session', at: new Date().toISOString(), payload: {} }] } } });
+  rows.push({ id: turnId + '-card', turnId, role: 'assistant', kind: 'system_card', card: 'agent_unavailable', content: budgetErrorText,
+    createdAt: new Date().toISOString(), cards: [{ cardId: 'card:agent_unavailable:' + turnId, kind: 'agent_unavailable', content: budgetErrorText,
+      actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: bot.workspaceId, turnId } }] }] });
+  writeFileSync(file, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+}
 const settings = JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8'));
 settings.memory = { enabled: false };
+if (botModelFixtures.length) settings.fallbackVision = { providerId: botModelFixtures[0].id };
 const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
 cpSync(path.join(source, 'apps/desktop/dist'), isolation.launch.distDir, { recursive: true });
 writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
@@ -78,6 +136,9 @@ const serviceText = readFileSync(applicationService, 'utf8');
 const readSeam = 'const result = directory.readConversation(payload.workspaceId, payload);';
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
 let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
+  if (globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
+    result.messages = [...result.messages, ...globalThis.rcBotWorkMessages];
+  }
   globalThis.rcBotShellRecord('reads',{  before: payload.before ?? null, nextCursor: result.nextCursor,
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });`);
 const timingSeams = [
@@ -112,10 +173,25 @@ if (process.argv.includes('--effort-stability')) {
   observedService = `import {readFileSync,writeFileSync} from 'node:fs';\n` + observedService;
 }
 if (workSurfaces) {
+  const confirmationSeam = 'async function confirmResult(payload = {}) {';
+  assert.equal(observedService.split(confirmationSeam).length, 2);
+  observedService = observedService.replace(confirmationSeam, `${confirmationSeam}
+    if (payload.sessionId === 'completion-fixture') {
+      if (payload.stage !== 'manual_completion') return {ok:false,code:'session_not_completed'};
+      const file=${JSON.stringify(workCommand)}, state=JSON.parse(readFileSync(file,'utf8'));
+      writeFileSync(file,JSON.stringify({...state,confirmationPayload:payload}));
+      if(state.failCompletionResume)return {ok:false,code:'completion_confirmation_failed'};
+      return {ok:true};
+    }`);
   const workSeam = 'function listSessions(payload = {}) {';
   assert.equal(observedService.split(workSeam).length, 2);
   observedService = observedService.replace(workSeam, `${workSeam}
     if (payload.workspaceId === globalThis.rcBotWorkWorkspace) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,sessions:globalThis.rcBotWorkSessions};`);
+  const detailSeam = 'async function getSession(payload = {}) {';
+  assert.equal(observedService.split(detailSeam).length, 2);
+  observedService = observedService.replace(detailSeam, `${detailSeam}
+    const fixtureSession=globalThis.rcBotWorkSessions?.find(item=>item.sessionId===payload.sessionId);
+    if(fixtureSession) return {ok:true,session:{...fixtureSession,report:globalThis.rcBotWorkReports?.[payload.sessionId]??fixtureSession.report}};`);
 }
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
@@ -161,7 +237,7 @@ globalThis.rcBotShellRecord=(key,value)=>{
   writeFileSync(file+'.next',JSON.stringify(observations));renameSync(file+'.next',file);
 };
 globalThis.rcBotShellService={
-  resolveGoalRole(input){return resolveRoleRoute({...input,providers:[{id:'rc-scripted',model:'scripted-fixture',enabled:true,apiKeyConfigured:true,supportsTools:true,supportsStructured:true,supportsVision:false,isDefault:true}]});},
+  resolveGoalRole(input){return resolveRoleRoute({...input,providers:[...globalThis.rcBotModelFixtures,{id:'rc-scripted',model:'scripted-fixture',enabled:true,apiKeyConfigured:true,supportsTools:true,supportsStructured:true,supportsVision:false,isDefault:true}]});},
   async sendMessage(input){
     globalThis.rcBotShellRecord('turns',{role:input.turnProfile?.role,workspaceId:input.turnProfile?.workspaceId});
     await new Promise(resolve=>setTimeout(resolve,120));
@@ -171,12 +247,19 @@ globalThis.rcBotShellService={
 };
 ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'scripts/rc-response-interaction-smoke.mjs')).href)});
 globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole});` : ''}
+const fixtureSend=globalThis.rcBotShellService.sendMessage.bind(globalThis.rcBotShellService);
+globalThis.rcBotShellService.sendMessage=input=>{
+  if(input.messages?.findLast(message=>message.role==='user')?.content==='RC_QUICK_INPUT') {
+    globalThis.rcQuickExecution={modelProviderId:input.modelProviderId,effort:input.effort};
+  }
+  return fixtureSend(input);
+};
 ${workSurfaces ? `const workFile=${JSON.stringify(workCommand)};
 let workCommand=JSON.parse(readFileSync(workFile,'utf8'));
-globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);
+globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);globalThis.rcBotWorkReports=workCommand.detailReports;globalThis.rcBotWorkMessages=workCommand.conversationMessages;
 const workTimer=setInterval(()=>{
   const next=JSON.parse(readFileSync(workFile,'utf8'));if(next.seq<=workCommand.seq)return;
-  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);
+  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);globalThis.rcBotWorkReports=next.detailReports;globalThis.rcBotWorkMessages=next.conversationMessages;
   for(const window of BrowserWindow.getAllWindows())window.webContents.send('project-agent:changed',{workspaceIds:[next.workspaceId]});
 },25);workTimer.unref();` : ''}
 // Keep synthetic updater delivery outside inspector Promise lifetime. Only this
@@ -246,6 +329,22 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
+  if (process.argv.includes('--selection-quote-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotSelectionQuote({ page, until, report, captureDirectory: root });
+  } else if (process.argv.includes('--message-layout-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  } else if (process.argv.includes('--composer-layout-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotComposerLayout({ page, until, report, captureDirectory: root });
+  } else if (process.argv.includes('--model-switch-only')) {
+    await checkModelSwitchOnly({ page, fixture, until, report, captureDirectory: root,
+      failNext: () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) });
+  } else {
   await checkBotShellUpdater({ page, emitUpdaterEvent, until, report, home, captureDirectory: root });
   assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
   report.avatarAnimation = await page.evaluate(() => ({ avatars: document.querySelectorAll('.bot-avatar').length, activeAvatars: document.querySelectorAll('[data-avatar-animated="true"]').length, animations: document.getAnimations().length }));
@@ -291,8 +390,14 @@ try {
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   report.checks.push('five input-to-visible searches across the real message corpus under budget');
   await interaction('open-bot');
+  await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-001' }) }).click();
+  await until(() => page.locator('.bot-composer textarea').getAttribute('placeholder'), text => text === '给 project-001 发消息');
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
   await page.locator('.bot-composer textarea').waitFor();
+  await until(() => page.locator('.bot-composer textarea').getAttribute('placeholder'), text => text === '给 project-000 发消息');
+  assert.equal(await page.locator('.bot-composer textarea').getAttribute('aria-label'), '给 project-000 发消息');
+  report.checks.push('composer prompt and accessible name follow the selected bot name');
+  await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
   for (let i = 0; i < 5; i++) {
     const text = `RC_UI_RECEIPT_${i}`;
     await page.locator('.bot-composer textarea').fill(text);
@@ -330,11 +435,15 @@ try {
     const window = BrowserWindow.getAllWindows().find(window => new URL(window.webContents.getURL()).searchParams.get('window') === 'quick-chat');
     window.show(); window.webContents.send('quick-chat:shown');
   });
-  await quick.getByRole('button', { name: '选择机器人', exact: true }).click();
-  await quick.getByRole('option', { name: 'project-000', exact: true }).click();
+  await checkQuickChatBots({ app, quick, fixture, until, report, captureDirectory: root,
+    failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
   await quick.getByLabel('快速会话内容', { exact: true }).fill('RC_QUICK_INPUT');
   await quick.getByRole('button', { name: '发送', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
+  const quickExecution = await app.evaluate(() => globalThis.rcQuickExecution);
+  assert.equal(quickExecution.modelProviderId, botModelFixtures[1].id);
+  assert.equal(quickExecution.effort, botModelFixtures[1].reasoningEffortLevels.at(-1));
+  report.quickChatBots.sentSelection = true;
   const canonical = readFileSync(path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
   const quickInputs = canonical.filter(row => row.kind === 'user_input' && row.content === 'RC_QUICK_INPUT');
   assert.equal(quickInputs.length, 1); assert.equal(quickInputs[0].surface, 'quick_chat');
@@ -354,28 +463,58 @@ try {
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
-  await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+  const unloadedQuote = page.locator('#bot-msg-rc-message-9999 .bot-reply-bar');
+  assert.equal(await unloadedQuote.locator('.bot-reply-bar-label').textContent(), '引用');
+  assert.equal((await unloadedQuote.getAttribute('aria-label')).includes('rc-message-9500'), false);
+  await unloadedQuote.click();
   await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
   await until(() => page.locator('#bot-msg-rc-message-9500').evaluate(node => {
     const row = node.getBoundingClientRect(), thread = node.closest('.bot-thread').getBoundingClientRect();
     return row.top >= thread.top && row.bottom <= thread.bottom;
   }), Boolean);
-  await tracePaging('quoted old message located inside viewport');
+  const located = page.locator('#bot-msg-rc-message-9500');
+  assert.equal(await located.evaluate(node => getComputedStyle(node).outlineStyle), 'none');
+  assert.equal(await located.evaluate(node => getComputedStyle(node).borderTopWidth), '0px');
+  assert.equal(await located.evaluate(node => getComputedStyle(node).boxShadow), 'none');
+  await located.screenshot({ path: path.join(root, 'message-located-no-frame.png') });
+  await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor({ state: 'detached' });
+  await tracePaging('quoted old message located inside viewport with temporary fill and no outline');
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
-  report.checks.push('a quoted older message loads across pages, enters viewport, then returns to latest');
+  await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+  await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
+  await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
+  await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
+  report.checks.push('older reference loads across pages, locates without a frame, clears its highlight and supports a repeated jump');
   await checkBotShellReply({ page, until, report, captureDirectory: root });
   if (process.argv.includes('--streaming')) {
     await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null });
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
-  if (workSurfaces) await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+  if (workSurfaces) {
+    // The quote-send check adds a real exchange. Reach the older work reply
+    // through scrolling instead of assuming virtualization kept it mounted.
+    const thread = page.locator('.bot-thread'), workReply = page.locator('#bot-msg-rc-message-9999');
+    await thread.hover();
+    for (let step = 0; step < 40 && await workReply.count() === 0; step++) {
+      const before = await thread.evaluate(node => node.scrollTop);
+      await page.mouse.wheel(0, -300);
+      await until(async () => ({ top: await thread.evaluate(node => node.scrollTop), mounted: await workReply.count() }), state => state.mounted > 0 || state.top !== before);
+    }
+    await workReply.waitFor();
+    report.checks.push('real scrolling reaches the earlier work reply after quote, streaming and question exchanges');
+    await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+    await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
+    await checkBotComposerLayout({ page, until, report, captureDirectory: root });
+    await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
+  }
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
-  await page.getByRole('tab', { name: '设置', exact: true }).click();
+  assert.equal(await page.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
   await page.getByRole('button', { name: '关闭', exact: true }).click();
-  report.checks.push('profile opens and settings tab works');
+  report.checks.push('Bot settings opens configuration directly');
   await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  if (process.argv.includes('--accessibility')) await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });
   await page.getByRole('button', { name: '界面', exact: true }).click();
   await page.getByRole('option', { name: '经典界面', exact: true }).click();
   await page.locator('.bot-shell').waitFor({ state: 'detached' });
@@ -397,6 +536,7 @@ try {
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
+  }
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');

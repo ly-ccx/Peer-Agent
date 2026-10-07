@@ -9,7 +9,9 @@ import { BotAttachments } from './BotAttachments';
 
 export function BotComposer({
   i18n,
+  botName,
   quote,
+  quoteSource,
   onQuoteRemove,
   onSend,
   generating = false,
@@ -17,9 +19,13 @@ export function BotComposer({
   onStop,
   modelControls,
   modelUpdating = false,
+  draftRequest = null,
+  onDraftPrepared,
 }: {
   readonly i18n: I18nRuntime;
+  readonly botName: string;
   readonly quote: string;
+  readonly quoteSource?: string | null;
   readonly onQuoteRemove: () => void;
   readonly onSend: (text: string, attachments: readonly ProjectInputAttachment[]) => void;
   readonly generating?: boolean;
@@ -27,6 +33,8 @@ export function BotComposer({
   readonly onStop?: () => void;
   readonly modelControls?: ReactNode;
   readonly modelUpdating?: boolean;
+  readonly draftRequest?: { readonly id: number; readonly text: string } | null;
+  readonly onDraftPrepared?: (id: number) => void;
 }) {
   const [text, setText] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -35,14 +43,34 @@ export function BotComposer({
   const trimmed = text.trim();
   const hasContent = Boolean(trimmed) || uploads.attachments.length > 0;
   const tooLong = trimmed.length > 100_000;
+  const prompt = i18n.t('projectAgent.chat.placeholder', { name: botName });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    if (!draftRequest) return;
+    // Preparing a follow-up never sends it, discards attachments or replaces an existing draft.
+    if (!text.trim() && uploads.attachments.length === 0) {
+      setText(draftRequest.text);
+      onDraftPrepared?.(draftRequest.id);
+    }
+    textareaRef.current?.focus();
+  }, [draftRequest?.id]);
   useLayoutEffect(() => {
     const node = textareaRef.current;
     if (!node) return;
-    node.style.height = 'auto';
-    node.style.height = `${Math.min(160, Math.max(44, node.scrollHeight))}px`;
-    node.style.overflowY = node.scrollHeight > 160 ? 'auto' : 'hidden';
+    resizeComposerInput(node);
   }, [text]);
+  useLayoutEffect(() => {
+    const node = textareaRef.current;
+    if (!node) return;
+    let width = node.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (node.clientWidth === width) return;
+      width = node.clientWidth;
+      resizeComposerInput(node);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   function send() {
     if (!hasContent || tooLong || uploads.isReading() || modelUpdating) return;
@@ -76,7 +104,8 @@ export function BotComposer({
       }}
     >
       {quote ? (
-        <QuoteChip text={quote} removeLabel={i18n.t('projectAgent.chat.quoteRemove')} onRemove={onQuoteRemove} />
+        <QuoteChip text={quote} source={quoteSource || i18n.t('projectAgent.chat.quote')}
+          removeLabel={i18n.t('projectAgent.chat.quoteRemove')} onRemove={onQuoteRemove} />
       ) : null}
       <input ref={fileInput} type="file" multiple hidden onChange={event => {
         uploads.add(Array.from(event.target.files ?? []));
@@ -88,9 +117,9 @@ export function BotComposer({
       <textarea
         ref={textareaRef}
         value={text}
-        rows={2}
-        placeholder={i18n.t('projectAgent.chat.placeholder')}
-        aria-label={i18n.t('projectAgent.chat.placeholder')}
+        rows={1}
+        placeholder={prompt}
+        aria-label={prompt}
         title={i18n.t('projectAgent.chat.hint')}
         aria-invalid={tooLong}
         aria-describedby={tooLong ? 'bot-input-error' : undefined}
@@ -116,13 +145,21 @@ export function BotComposer({
         <div className="bot-composer-leading">
           <button type="button" className="bot-attach-button" aria-label={i18n.t('projectAgent.chat.attach')}
             title={i18n.t('projectAgent.chat.attach')} onClick={() => fileInput.current?.click()}><PeerIcon name="plus" size={18} /></button>
-          {modelControls ?? <p>{i18n.t('projectAgent.chat.hint')}</p>}
+          {!modelControls ? <p>{i18n.t('projectAgent.chat.hint')}</p> : null}
         </div>
         <div className="bot-composer-actions">
+          {modelControls}
           {generating ? <button type="button" className="bot-stop-response" disabled={stopping} title={i18n.t('projectAgent.chat.stopHint')} aria-label={i18n.t(stopping ? 'projectAgent.chat.stopping' : 'projectAgent.chat.stop')} onClick={onStop}><PeerIcon name="stop" size={15} /></button> : null}
           {!generating || hasContent ? <button type="submit" disabled={!hasContent || tooLong || uploads.reading || modelUpdating} aria-label={i18n.t('projectAgent.chat.send')} title={i18n.t('projectAgent.chat.send')}><PeerIcon name="send" size={17} /></button> : null}
         </div>
       </div>
     </form>
   );
+}
+
+function resizeComposerInput(node: HTMLTextAreaElement) {
+  node.style.height = '0px';
+  const height = node.scrollHeight;
+  node.style.height = `${Math.min(200, Math.max(36, height))}px`;
+  node.style.overflowY = height > 200 ? 'auto' : 'hidden';
 }

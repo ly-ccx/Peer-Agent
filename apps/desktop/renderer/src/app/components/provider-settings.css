@@ -1,0 +1,83 @@
+/* Connected services: one aligned list, with technical controls disclosed on demand. */
+.settings-content > .settings-provider-page .llm-settings-panel { margin: 0; gap: 0; }
+.settings-content .settings-provider-page .llm-page-heading {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 32px;
+}
+.settings-content .settings-provider-page .llm-add-channel-btn {
+  flex: none; min-height: 34px; padding: 7px 12px; gap: 8px; border-radius: 8px; font-size: .8125rem;
+}
+.settings-content .settings-provider-page .llm-list-toolbar { padding: 0 0 8px; }
+.settings-content .settings-provider-page .llm-list-summary { gap: 12px; flex-wrap: wrap; }
+.settings-content .settings-provider-page .llm-list-summary strong { font-size: 1rem; font-weight: 500; }
+.settings-content .settings-provider-page .llm-list-summary > span { font-size: .75rem; color: var(--graphite-soft); }
+.settings-content .settings-provider-page .llm-provider-list { gap: 0; }
+.settings-content .settings-provider-page .llm-provider-group {
+  border: 0; border-bottom: 1px solid var(--chrome-hairline); border-radius: 0; background: transparent;
+  box-shadow: none; overflow: visible;
+}
+.settings-content .settings-provider-page .llm-provider-group.is-highlight { background: var(--chrome-hover); animation: none; }
+.settings-content .settings-provider-page .llm-group-header {
+  display: flex; flex-direction: row; align-items: center; gap: 18px; min-height: 78px;
+  padding: 12px 0; border: 0; border-radius: 0; background: transparent;
+}
+.settings-content .settings-provider-page .llm-group-toggle { flex: 1; align-self: stretch; gap: 18px; text-align: left; }
+.settings-content .settings-provider-page .llm-group-toggle > .llm-brand-icon { width: 32px; height: 32px; border: 0; border-radius: 8px; box-shadow: none; }
+.settings-content .settings-provider-page .llm-service-copy { display: grid; gap: 4px; min-width: 0; }
+.settings-content .settings-provider-page .llm-service-copy strong {
+  font-size: 1rem; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere;
+}
+.settings-content .settings-provider-page .llm-group-count { font-size: .75rem; line-height: 1.4; color: var(--graphite-soft); }
+.settings-content .settings-provider-page .llm-group-caret { opacity: 0; transition: transform var(--za-motion-medium), opacity var(--za-motion-fast); }
+.settings-content .settings-provider-page .llm-group-toggle:is(:hover, :focus-visible) .llm-group-caret,
+.settings-content .settings-provider-page .llm-group-toggle[aria-expanded='true'] .llm-group-caret { opacity: 1; }
+.settings-content .settings-provider-page .llm-group-header > .llm-connection-status {
+  display: inline-flex; align-items: center; gap: 8px; flex: none; font-size: .8125rem;
+  color: var(--graphite-soft); white-space: nowrap;
+}
+.llm-service-status-dot { fill: currentColor; }
+.settings-provider-page .tone-ok .llm-service-status-dot { color: var(--state-success); }
+.settings-provider-page .tone-warn .llm-service-status-dot { color: var(--state-warning); }
+.settings-provider-page .tone-bad .llm-service-status-dot { color: var(--state-danger); }
+.settings-content .settings-provider-page .llm-group-actions { margin: 0; }
+.settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0;
+  border-radius: 8px; background: transparent; color: var(--graphite-soft);
+}
+.settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger:hover { background: var(--chrome-hover); color: var(--graphite-base); }
+.settings-content .settings-provider-page .llm-group-body { padding: 4px 0 18px 50px; border: 0; }
+.llm-service-connection-details { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .75rem; color: var(--graphite-soft); overflow-wrap: anywhere; }
+.llm-settings-disclosure { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden;
+  transition: grid-template-rows var(--za-motion-medium) var(--za-ease-standard, ease), opacity var(--za-motion-medium), visibility 0s var(--za-motion-medium); }
+.llm-settings-disclosure[data-expanded='true'] { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }
+.llm-settings-disclosure-inner { min-height: 0; overflow: hidden; }
+.llm-settings-disclosure[data-settled='true'] > .llm-settings-disclosure-inner { overflow: visible; }
+.settings-content .settings-provider-page .llm-fallback-vision {
+  display: block; padding: 0; margin-top: 16px; border: 0; border-radius: 0; background: transparent;
+}
+.llm-fallback-vision-toggle {
+  display: flex; align-items: center; gap: 20px; width: 100%; min-height: 76px; padding: 12px 0;
+  border: 0; border-radius: 8px; background: transparent; color: var(--graphite-base); text-align: left; cursor: pointer;
+}
+.llm-fallback-vision-toggle:hover { background: var(--chrome-hover); }
+.settings-content .settings-provider-page .llm-fallback-vision-copy { flex: 1; min-width: 0; }
+.settings-content .settings-provider-page .llm-fallback-vision-copy strong { font-size: .9375rem; font-weight: 500; line-height: 1.4; }
+.llm-fallback-vision-help { display: block; margin-top: 4px; font-size: .75rem; font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
+.llm-fallback-vision-summary { display: grid; gap: 4px; flex: 0 1 auto; min-width: 0; max-width: 45%; }
+.llm-fallback-vision-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; line-height: 1.4; }
+.llm-fallback-vision-service { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; line-height: 1.4; color: var(--graphite-soft); }
+.llm-fallback-vision-caret { flex: none; color: var(--graphite-soft); transition: transform var(--za-motion-medium); }
+.llm-fallback-vision-toggle[aria-expanded='true'] .llm-fallback-vision-caret { transform: rotate(90deg); }
+.settings-content .settings-provider-page .llm-fallback-vision-select { display: block; width: 280px; max-width: 100%; min-width: 0; padding: 0 0 16px; margin-left: auto; }
+@container settings (max-width: 560px) {
+  .settings-content .settings-provider-page .llm-page-heading { gap: 14px; }
+  .settings-content .settings-provider-page .llm-page-heading h1 { font-size: 1.625rem; }
+  .settings-content .settings-provider-page .llm-group-header { gap: 12px; }
+  .settings-content .settings-provider-page .llm-group-toggle { gap: 12px; }
+  .settings-content .settings-provider-page .llm-group-body { padding-left: 0; }
+  .llm-fallback-vision-toggle { gap: 12px; }
+  .llm-fallback-vision-summary { max-width: 40%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .llm-settings-disclosure, .llm-fallback-vision-caret,
+  .settings-content .settings-provider-page .llm-group-caret { transition: none; }
+}

@@ -273,7 +273,7 @@ export interface ChatCompactResult {
 }
 
 export interface ChatSendResult {
-  readonly status: 'completed' | 'stopped' | 'cancelled' | 'exhausted' | 'failed' | 'skipped';
+  readonly status: 'completed' | 'stopped' | 'cancelled' | 'exhausted' | 'yielded' | 'failed' | 'skipped';
   readonly turns: number;
   readonly output?: string;
   readonly reason?: string;

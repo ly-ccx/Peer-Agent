@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { TaskConversationRequest } from '../state/taskConversationState';
 import {
   formatConversationStamp,
   repliedUserIds,
@@ -15,16 +16,18 @@ import { CardView } from './CardView';
 import { ReplyBubble } from './ReplyBubble';
 import { UserBubble } from './UserBubble';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
-import { replyWork, type BotWorkIndex } from '../state/botWorkState';
 import { LiveReply } from './LiveReply';
 import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
-import { BotProcess, type ProcessDisclosure } from './BotProcess';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { replyAnchorsForMessages, replyReferencesForRows, type ReplyAnchor } from '../state/replyReferenceState';
+import { useMessageHighlight } from './useMessageHighlight';
+import { BotNarration } from './BotNarration';
+import type { BotNarrationSegment } from '../state/botNarrationState';
+import { ReplyContext } from './ReplyContext';
 
 export function BotMessageList({
   workspaceId,
-  workIndex,
   avatar,
   label,
   avatarMood,
@@ -39,13 +42,12 @@ export function BotMessageList({
   onQuote,
   onRetry,
   onLocateSession,
-  onOpenEvidence,
-  onOpenProcess,
+  onOpenDetails,
   followRequestId = 0,
   waiting = false,
+  focusTaskRequest = null,
 }: {
   readonly workspaceId: string;
-  readonly workIndex: BotWorkIndex;
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
@@ -62,20 +64,27 @@ export function BotMessageList({
   readonly onQuote: (messageId: string, excerpt: string) => void;
   readonly onRetry: (inputId: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
-  readonly onOpenEvidence?: (evidenceRef: string) => void;
-  readonly onOpenProcess?: (replyId: string) => void;
+  readonly onOpenDetails?: (replyId: string) => void;
+  readonly focusTaskRequest?: TaskConversationRequest | null;
 }) {
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [processOpen, setProcessOpen] = useState<Record<string, Record<string, boolean>>>({});
-  const disclosure = (turn: string) => ({ open: processOpen[turn] ?? {}, toggle: (key: string, open: boolean) => {
-    setProcessOpen(current => current[turn]?.[key] === open ? current : {
-      ...Object.fromEntries(Object.entries(current).slice(-31)), [turn]: { ...current[turn], [key]: open },
-    });
-  } });
   const scroll = useConversationWindow(rows, highlightedId, highlightRequestId, followRequestId);
+  const taskMessageVisible = scroll.visibleRows.some(row => row.type === 'message' && row.message.id === focusTaskRequest?.messageId);
+  useEffect(() => {
+    if (!focusTaskRequest?.messageId || !taskMessageVisible) return;
+    const root = scroll.scrollerRef.current;
+    const message = root?.querySelector<HTMLElement>(`#${CSS.escape(`bot-msg-${focusTaskRequest.messageId}`)}`);
+    const card = focusTaskRequest.cardId
+      ? message?.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(focusTaskRequest.cardId)}"] button:not(:disabled)`)
+      : null;
+    const target = card ?? message;
+    if (target) { if (!card) target.tabIndex = -1; target.focus({ preventScroll: true }); }
+  }, [focusTaskRequest, taskMessageVisible, scroll.scrollerRef]);
+  const highlighted = useMessageHighlight(highlightedId, highlightRequestId, scroll.visibleRows.some(row => row.type === 'message' && row.message.id === highlightedId));
+  const references = replyReferencesForRows(rows);
   const messages = rows.flatMap((row) => (row.type === 'message' ? [row.message] : []));
-  const anchors = new Map(messages.map((message) => [message.id, clip(message.content)]));
+  const anchors = replyAnchorsForMessages(messages, { user: i18n.t('projectAgent.chat.you'), bot: label });
   const replied = repliedUserIds(messages);
   const loadOlder = async () => {
     if (!onLoadOlder || loadingOlderRef.current) return;
@@ -125,19 +134,19 @@ export function BotMessageList({
       {scroll.visibleRows.map((row) => (
         <div key={conversationRowKey(row)} className="bot-thread-row" data-conversation-row={conversationRowKey(row)}>
         {row.type === 'activity' || row.type === 'message' && (row.message.kind === 'agent_reply'
-          || row.message.cards.some(card => card.kind === 'agent_stopped')) ? (
+          || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /><span>{label}</span></div>
         ) : null}
-        {row.type === 'activity' ? <LiveReply workRows={replyWork({ sources: [], marks: [], meta: {}, replyTo: row.activity.replyTo }, workIndex)} onOpenWork={onLocateSession} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} disclosure={disclosure(row.activity.turnId)} /> : row.type === 'separator' ? (
+        {row.type === 'activity' ? <LiveReply referenceIds={references.get(row) ?? []} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} onOpenDetails={onOpenDetails ? () => onOpenDetails(row.activity.turnId) : undefined} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
             key={row.message.id}
             message={row.message}
             replied={replied.has(row.message.id)}
-            quoteAuthor={label}
+            anchors={anchors}
             onJump={onJump}
-            highlighted={highlightedId === row.message.id}
+            highlighted={highlighted === row.message.id}
             i18n={i18n}
             onRetry={onRetry}
             onLocateSession={onLocateSession}
@@ -147,13 +156,14 @@ export function BotMessageList({
             key={row.message.id}
             workspaceId={workspaceId}
             message={row.message}
-            highlighted={highlightedId === row.message.id}
+            highlighted={highlighted === row.message.id}
+            referenceIds={references.get(row) ?? []}
             activity={row.activity}
             processRounds={row.processRounds}
-            disclosure={disclosure(row.message.turnId ?? row.message.id)}
+            narration={row.narration}
             anchors={anchors}
             onJump={onJump}
-            onOpenProcess={onOpenProcess ? () => onOpenProcess(row.message.id) : undefined}
+            onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined}
             welcome={rows.length === 1 && row.message.cards.some((card) => card.kind === 'familiarize')}
             avatar={avatar}
             label={label}
@@ -162,21 +172,17 @@ export function BotMessageList({
           />
         ) : (
           <ReplyBubble
-            workIndex={workIndex}
             key={row.message.id}
             workspaceId={workspaceId}
             message={row.message}
             anchors={anchors}
-            activity={row.activity}
-            processRounds={row.processRounds}
-            disclosure={disclosure(row.message.turnId ?? row.message.id)}
-            highlighted={highlightedId === row.message.id}
+            narration={row.narration}
+            highlighted={highlighted === row.message.id}
+            referenceIds={references.get(row) ?? []}
             i18n={i18n}
             onJump={onJump}
             onQuote={(excerpt) => onQuote(row.message.id, excerpt)}
-            onLocateSession={onLocateSession}
-            onOpenEvidence={onOpenEvidence}
-            onOpenProcess={onOpenProcess ? () => onOpenProcess(row.message.id) : undefined}
+            onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined}
           />
         )}
         </div>
@@ -195,13 +201,14 @@ function SystemCard({
   workspaceId,
   message,
   highlighted,
+  referenceIds,
   welcome,
   anchors,
   onJump,
-  onOpenProcess,
+  onOpenDetails,
   activity,
   processRounds,
-  disclosure,
+  narration = [],
   avatar,
   label,
   avatarMood,
@@ -210,12 +217,13 @@ function SystemCard({
   readonly workspaceId: string;
   readonly message: BotChatMessage;
   readonly highlighted: boolean;
+  readonly referenceIds: readonly string[];
   readonly welcome: boolean;
-  readonly onOpenProcess?: () => void;
+  readonly onOpenDetails?: () => void;
   readonly activity?: ProjectAgentActivity;
   readonly processRounds?: readonly BotToolRound[];
-  readonly disclosure?: ProcessDisclosure;
-  readonly anchors: ReadonlyMap<string, string>;
+  readonly narration?: readonly BotNarrationSegment[];
+  readonly anchors: ReadonlyMap<string, ReplyAnchor>;
   readonly onJump: (id: string) => void;
   readonly avatar: BotAvatarModel;
   readonly label: string;
@@ -228,13 +236,11 @@ function SystemCard({
   return (
     <div className={`bot-system${welcome ? ' bot-system-welcome' : ''}${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
       {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
-      <ReplyAnchors ids={message.replyTo} anchors={anchors} i18n={i18n} onJump={onJump} />
-      <BotProcess activity={activity} rounds={processRounds} i18n={i18n} disclosure={disclosure}
-        outcome={cards.some(card => card.kind === 'agent_stopped') ? 'stopped' : cards.some(card => card.kind === 'agent_unavailable') ? 'error' : undefined} />
+      <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
+      <BotNarration segments={narration} />
       <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
-      {onOpenProcess && cards.some(card => card.kind === 'agent_stopped') ? <div className="bot-reply-marks">
-        <button type="button" onClick={onOpenProcess}><PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.chat.openProcess')}</button>
-      </div> : null}
+      {!welcome && (activity || processRounds?.length || cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ?
+        <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} /> : null}
     </div>
   );
 }
@@ -252,9 +258,4 @@ function separatorText(
     : '';
   if (row.proactive && when) return `${when} · ${i18n.t('projectAgent.chat.digest')}`;
   return when;
-}
-
-function clip(value: string): string {
-  const text = value.replace(/\s+/g, ' ').trim();
-  return Array.from(text).slice(0, 42).join('');
 }

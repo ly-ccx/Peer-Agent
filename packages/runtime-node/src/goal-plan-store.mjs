@@ -1,3 +1,4 @@
+import { criterionSourceRevision } from './project-agent/criterion-review.mjs';
 import {
   appendFileSync,
   closeSync,
@@ -970,7 +971,7 @@ function makeDefaultGoalTask(goal) {
 
 // 成功标准（DoD）的可选类型。command/test/file-contains/file-exists 可被机器自动
 // 验证；manual 需人工确认。见 goal-mode-ultrathink-workflow 设计文档「DoD-as-Code」。
-const CRITERION_KINDS = new Set(['command', 'test', 'file-contains', 'file-exists', 'manual']);
+const CRITERION_KINDS = new Set(['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual']);
 // 可自动验证的标准类型（完成门要求带 passed=true 的 CriterionResult）。
 const AUTO_CRITERION_KINDS = new Set(['command', 'test', 'file-contains', 'file-exists']);
 
@@ -1002,6 +1003,9 @@ function normalizeSuccessCriterion(value, index = 0) {
   if (command) criterion.command = command;
   if (targetPath) criterion.path = targetPath;
   if (expect) criterion.expect = expect;
+  if (value.authority && ['model', 'user', 'project_policy', 'legacy_unknown'].includes(value.authority.source)) {
+    criterion.authority = { ...value.authority };
+  }
   return criterion;
 }
 
@@ -1785,7 +1789,7 @@ function normalizeDelegationOrigin(value) {
     depth: Number.isInteger(value.depth) && value.depth >= 0 ? value.depth : 1,
   };
   for (const key of [
-    'workspaceId', 'sessionId', 'parentSessionId', 'objectiveId', 'objectiveActionId',
+    'workspaceId', 'sessionId', 'workId', 'parentSessionId', 'objectiveId', 'objectiveActionId',
     'idempotencyKey', 'parentConversationId', 'supersededBy', 'lastResumeAnchorMessageId',
   ]) {
     const text = normalizeOptionalString(value[key]);
@@ -1894,7 +1898,7 @@ function normalizePlan(plan) {
     || runTrace.lastCheckpointNodeId
     ? { ...withTiming, runTrace }
     : withTiming;
-  return runner ? { ...withRunTrace, runner } : withRunTrace;
+  return { ...withRunTrace, ...(runner ? { runner } : {}), modelReviewSourceRevision: criterionSourceRevision(withRunTrace) };
 }
 
 function withRunTraceEvent(plan, event = {}) {
@@ -2119,6 +2123,7 @@ export function createGoalPlanStore({
   const evidenceRecordCache = new Map();
   const missingEvidenceRefCache = new Set();
   let evidenceCacheVersion = null;
+  let evidenceIndexReadCache = null;
   function fileVersion(file) {
     try {
       const stat = statSync(file);
@@ -2411,7 +2416,18 @@ export function createGoalPlanStore({
   }
 
   function readEvidenceIndex() {
-    return readJsonl(evidenceIndexFile)
+    // Completion and artifact projections can read the same large index many times
+    // in one refresh. Reuse parsing only while the durable file identity is unchanged;
+    // normalization returns fresh nested records, so callers cannot mutate this cache.
+    const version = fileVersion(evidenceIndexFile);
+    if (version === null) {
+      evidenceIndexReadCache = null;
+      return [];
+    }
+    if (evidenceIndexReadCache?.version !== version) {
+      evidenceIndexReadCache = { version, records: readJsonl(evidenceIndexFile) };
+    }
+    return evidenceIndexReadCache.records
       .map(normalizeEvidenceIndexRecord)
       .filter(Boolean);
   }
@@ -2687,11 +2703,12 @@ export function createGoalPlanStore({
         : derivedStatus;
     const nextStatus = guardUiCompletion({ ...normalized, status: candidateStatus }).status;
     const nowIso = normalized.updatedAt || new Date().toISOString();
-    // 叶子已全部成功时，活跃 runner 不得继续显示 running（38.17：计划 completed、磁盘 runner 仍 running）。
-    // 可恢复中断仍由 interruption 持有，不在这里清掉。
+    // Delegated leaf completion does not end its host-owned verification pump.
+    // Legacy standalone plans retain their terminal runner correction.
     const nextRunner = PLAN_TERMINAL_STATUSES.has(nextStatus)
       && RUNNER_ACTIVE_STATUSES.has(normalized.runner?.status)
       && !normalized.runner?.interruption
+      && !(normalized.delegationOrigin && nextStatus === TERMINAL_OK)
       ? {
         ...normalized.runner,
         status: nextStatus === TERMINAL_FAIL ? 'failed' : 'idle',
@@ -3402,7 +3419,7 @@ export function createGoalPlanStore({
   function revisePlan(planId, patch = {}, { reason, changedBy, changeKind = 'persist' } = {}) {
     const plan = getPlan(planId);
     if (!plan) return null;
-    const { progress: _ignore, version: _v, revisionHistory: _rh, ...safePatch } = patch;
+    const { progress: _ignore, version: _v, revisionHistory: _rh, modelReviews: _reviews, modelReviewSourceRevision: _reviewSource, ...safePatch } = patch;
     // 修订若携带成功标准/验证结果，同样走结构化规范化（与 createPlan 一致，
     // 避免修订路径把结构化 DoD 退化成未校验的裸对象）。
     if ('successCriteria' in safePatch) {
@@ -3451,7 +3468,7 @@ export function createGoalPlanStore({
           knownRefs.add(record.evidenceRef);
         }
       }
-      assertAcceptanceCloseGate(next, { knownRefs: [...knownRefs] });
+      assertAcceptanceCloseGate({ ...next, modelReviewSourceRevision: criterionSourceRevision(next) }, { knownRefs: [...knownRefs] });
     }
     return persist(withRunTraceEvent(next, {
       type: 'plan_revised',
@@ -4213,6 +4230,7 @@ export function createGoalPlanStore({
     for (const r of incoming) {
       const criterion = knownCriteria.get(r.criterionId);
       if (!criterion) continue;
+      if (criterion.kind === 'model_review') throw new Error('model_review_requires_host_verifier');
       if (r.passed && AUTO_CRITERION_KINDS.has(criterion.kind) && !r.evidenceRef) {
         throw new Error(
           `[goal-plan-store] criterion ${r.criterionId} cannot be passed without evidenceRef`,
@@ -4224,6 +4242,23 @@ export function createGoalPlanStore({
       byId.set(r.criterionId, { ...r, checkedAt: r.checkedAt || now });
     }
     return persist({ ...plan, criterionResults: [...byId.values()], updatedAt: now });
+  }
+
+  function recordModelReviews(planId, { sourceRevision, verifierRunId, passed, evidenceRefs = [] } = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    if (!sourceRevision || sourceRevision !== criterionSourceRevision(plan)) throw new Error('model_review_source_changed');
+    const run = plan.runner?.verifierRuns?.find(row => row.verifierRunId === verifierRunId);
+    if (!run || !['passed', 'failed'].includes(run.status) || (passed === true && run.status !== 'passed')) {
+      throw new Error('model_review_requires_host_verifier');
+    }
+    if (passed === true && !evidenceRefs.length) throw new Error('model_review_missing_evidence');
+    for (const ref of evidenceRefs) assertEvidenceRefIndexed(plan, ref, 'model review');
+    const rows = (plan.successCriteria || []).filter(item => item.kind === 'model_review').map(item => ({
+      criterionId: item.id, sourceRevision, verifierRunId, passed: passed === true,
+      evidenceRefs, checkedAt: new Date().toISOString(),
+    }));
+    return persist({ ...plan, modelReviews: [...(plan.modelReviews || []), ...rows].slice(-64) });
   }
 
   function recordQualityReview(planId, review = {}) {
@@ -4829,6 +4864,7 @@ export function createGoalPlanStore({
     recordTaskEvidence,
     cancelOpenTasks,
     recordCriterionResults,
+    recordModelReviews,
     recordQualityReview,
     recordDeliveryHandoff,
     recordDeliveryIsolation,

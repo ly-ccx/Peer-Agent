@@ -8,6 +8,7 @@ import {
   type ModelProviderRequest,
   createGoalPlanStore,
   resolveOpenCodeGoBaseUrl,
+  GROK_SUBSCRIPTION_HEADERS,
 } from '@peer-agent/runtime-node';
 
 import {
@@ -135,16 +136,8 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
           return createChatGptResponsesProvider({
             baseUrl,
             fetch: providerFetch,
-            // Match desktop provider-channels Grok identity so CLI does not hit HTTP 426
-            // "Grok CLI version (none) is outdated" without requiring a local grok CLI.
             ...(metadata.authMethod === 'oauth_grok'
-              ? {
-                  extraHeaders: {
-                    'X-XAI-Token-Auth': 'xai-grok-cli',
-                    'x-grok-client-surface': 'grok-build',
-                    'x-grok-client-version': '0.1.202',
-                  },
-                }
+              ? { extraHeaders: GROK_SUBSCRIPTION_HEADERS }
               : {}),
             resolveTokens() {
               const current = modelConfig.resolveSharedSelection?.(credentialId);

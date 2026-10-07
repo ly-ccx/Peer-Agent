@@ -3,6 +3,7 @@ export { createOneTimeApprovalBook } from '@peer-agent/runtime-node';
 import { evaluateObjectiveProbeCall } from './objective-probe-gate.mjs';
 import { randomUUID } from 'node:crypto';
 import { digestApprovalArgs } from '@peer-agent/runtime-node';
+import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
 
 export const sharedOneTimeApprovals = createOneTimeApprovalBook();
 let activeGate = null;
@@ -38,12 +39,15 @@ function compareShellRisk(left, right) {
 }
 
 function buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCallId }) {
-  const action = tool === 'edit_file' ? 'edit' : 'write';
+  const contract = Object.values(SHARED_LOCAL_TOOL_CONTRACTS).find(item => item.toolName === tool && item.capabilityId.startsWith('local.file.'));
+  const capabilityId = contract?.capabilityId ?? 'local.file.write';
+  const action = capabilityId.slice('local.file.'.length);
+  const readOnly = ['read', 'list', 'search'].includes(action);
   return {
     toolCallId: `chat-permission:${toolCallId || randomUUID()}`,
-    capabilityId: `local.file.${action}`,
+    capabilityId,
     displayName: tool,
-    reason: `The ${tool} tool wants to modify a file outside the active workspace.`,
+    reason: `The ${tool} tool wants to ${readOnly ? action : 'modify'} outside the active workspace.`,
     arguments: {
       tool,
       path: filePath,
@@ -56,7 +60,7 @@ function buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCall
       path: filePath,
       workspacePath,
     },
-    riskLevel: 'L2_local_write',
+    riskLevel: readOnly ? 'L1_local_read' : 'L2_local_write',
     dataLevel: 'D2_sensitive',
     requestedAt: new Date().toISOString(),
   };

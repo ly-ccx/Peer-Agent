@@ -41,6 +41,7 @@ function normalizeCriterion(criterion, resultById) {
     kind: asString(criterion.kind) || 'manual',
     description: asString(criterion.description) || asString(criterion.command) || asString(criterion.path) || '(unnamed)',
     passed: result?.passed === true,
+    reviewPending: criterion.kind === 'model_review',
     evidenceRef: asString(result?.evidenceRef) || null,
   };
 }
@@ -108,7 +109,9 @@ function formatBrief(ctx) {
   if (ctx.successCriteria.length) {
     lines.push('success criteria:');
     for (const criterion of ctx.successCriteria) {
-      lines.push(`- ${criterion.id} (${criterion.kind}) passed=${criterion.passed} evidenceRef=${criterion.evidenceRef || '(none)'} ${criterion.description}`);
+      lines.push(criterion.reviewPending
+        ? `- ${criterion.id} (${criterion.kind}) review=pending_this_verifier ${criterion.description}`
+        : `- ${criterion.id} (${criterion.kind}) passed=${criterion.passed} evidenceRef=${criterion.evidenceRef || '(none)'} ${criterion.description}`);
     }
   }
   if (ctx.explorerReports.length) {
@@ -137,6 +140,7 @@ function formatContract(stage) {
     '- Use only read-only tools exposed to this verifier context.',
     '- Do not modify files, do not update the goal plan, and do not create completion evidence.',
     '- Check whether existing task evidence, criterion results, and explorer reports support completion.',
+    '- model_review criteria are judgments assigned to this verifier. Their absent criterionResults or prior review verdict are not a failed prerequisite. Decide them from the current report and indexed execution evidence; the host records your version-bound judgment afterwards.',
     '- If evidence is missing or criteria are not proven, report failure and recommend repair.',
     'Return a concise JSON object only with:',
     '  passed, failedCriteria[{criterionId,reason,evidenceRefs}], missingEvidence[{taskId,reason}], risks[], evidenceRefs[], recommendedNextAction.',

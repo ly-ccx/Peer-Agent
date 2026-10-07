@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { rootCertificates } from 'node:tls';
+import { grokSubscriptionTransport } from '@peer-agent/runtime-node';
 
 import { loadMacosTrustedCertificates } from './macos-trusted-certificates.ts';
 import { readMacosSystemProxy, type SystemProxyConfig } from './macos-system-proxy.ts';
@@ -182,5 +183,8 @@ export function createTuiProviderFetch(
       ? underlyingFetch.preconnect.bind(underlyingFetch)
       : () => {};
 
-  return Object.assign(providerFetch, { preconnect });
+  return Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit) => grokSubscriptionTransport.fetch(providerFetch, input, init),
+    { preconnect },
+  );
 }

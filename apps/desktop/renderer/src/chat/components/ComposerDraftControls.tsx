@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import type React from 'react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
@@ -613,7 +614,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => onRemoveQuote(quote.id)}
                 >
-                  ×
+                  <PeerIcon name="close" size={12} />
                 </button>
               ) : null}
             </span>

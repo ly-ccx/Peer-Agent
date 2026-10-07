@@ -58,6 +58,10 @@ export function createRuntimePipeline<
 
       const signal = context.signal;
       const maxTurns = normalizeMaxTurns(input.maxTurns, defaultMaxTurns);
+      const maxToolCalls = Number.isFinite(input.maxToolCalls)
+        ? Math.max(0, Math.floor(input.maxToolCalls!)) : Number.POSITIVE_INFINITY;
+      const sliceToolCalls = Number.isFinite(input.sliceToolCalls) ? Math.max(1, input.sliceToolCalls!) : Infinity;
+      const maxBatch = Number.isFinite(input.maxToolBatchCalls) ? Math.max(1, input.maxToolBatchCalls!) : Infinity;
       let state: TState | undefined;
       let turns = 0;
       let toolCalls = 0;
@@ -81,7 +85,16 @@ export function createRuntimePipeline<
         signal,
         emit,
       });
+      const exhaust = async (reason: 'max_turns_exceeded' | 'max_tool_calls_exceeded') => {
+        await options.model.onExhausted?.(state as TState, turnContext(turns), reason);
+        emit({ type: 'runtime.error', ...eventBase, code: reason, message: reason });
+        return { status: 'exhausted' as const, state, turns, toolCalls, reason };
+      };
 
+      const yieldRun = async () => {
+        await options.model.onYield?.(state as TState, turnContext(turns));
+        return { status: 'yielded' as const, state, turns, toolCalls, reason: 'scheduling_slice' };
+      };
       try {
         throwIfAborted(signal);
         emit({
@@ -122,30 +135,46 @@ export function createRuntimePipeline<
             };
           }
 
+          // Reserve the whole batch before dispatch. Never execute a partial
+          // write batch or exceed a caller's remaining budget inside one turn.
+          if (outcome.calls.length > maxBatch) throw new Error('tool_batch_too_large');
+          if (toolCalls + outcome.calls.length > maxToolCalls) {
+            if (options.tools.notExecuted) {
+              const denied = await Promise.all(outcome.calls.map(call => options.tools.notExecuted!(call, 'max_tool_calls_exceeded')));
+              state = await options.model.applyToolResults(state, denied, currentContext);
+            }
+            return await exhaust('max_tool_calls_exceeded');
+          }
           const executions: RuntimePipelineToolExecution<TCall, TToolResult>[] = [];
           if (isParallelSafeLocalToolBatch(outcome.calls)) {
             const batch = await Promise.all(outcome.calls.map(async (call, index) => {
+              if (signal?.aborted && options.tools.notExecuted) return options.tools.notExecuted(call, 'cancelled');
               throwIfAborted(signal);
-              return options.tools.execute(call, {
-                ...currentContext,
-                index,
-              });
+              try { return await options.tools.execute(call, { ...currentContext, index }); }
+              catch (error) { if (!options.tools.notExecuted) throw error; return options.tools.notExecuted(call, isAbortError(error) ? 'cancelled_outcome_unknown' : 'execution_outcome_unknown'); }
             }));
             executions.push(...batch);
             toolCalls += batch.length;
           } else {
             for (const [index, call] of outcome.calls.entries()) {
-              throwIfAborted(signal);
-              const execution = await options.tools.execute(call, {
-                ...currentContext,
-                index,
-              });
+              let execution;
+              if (signal?.aborted && options.tools.notExecuted) execution = await options.tools.notExecuted(call, 'cancelled');
+              else {
+                throwIfAborted(signal);
+                try { execution = await options.tools.execute(call, { ...currentContext, index }); }
+                catch (error) { if (!options.tools.notExecuted) throw error; execution = await options.tools.notExecuted(call, isAbortError(error) ? 'cancelled_outcome_unknown' : 'execution_outcome_unknown'); }
+              }
               executions.push(execution);
               toolCalls += 1;
+              if (execution.terminal && options.tools.notExecuted) {
+                for (const remaining of outcome.calls.slice(index + 1)) executions.push(await options.tools.notExecuted(remaining, 'batch_stopped'));
+                break;
+              }
             }
           }
 
           state = await options.model.applyToolResults(state, executions, currentContext);
+          throwIfAborted(signal);
           try {
             await options.lifecycle?.toolResultsApplied?.(state, executions, currentContext);
           } catch {
@@ -171,24 +200,10 @@ export function createRuntimePipeline<
               reason: terminalExecution.terminalReason || 'tool_requested_stop',
             };
           }
+          if (toolCalls >= sliceToolCalls) return await yieldRun();
         }
 
-        const exhaustedContext = turnContext(turns);
-        await options.model.onExhausted?.(state as TState, exhaustedContext);
-        const exhaustedReason = 'max_turns_exceeded';
-        emit({
-          type: 'runtime.error',
-          ...eventBase,
-          code: exhaustedReason,
-          message: exhaustedReason,
-        });
-        return {
-          status: 'exhausted',
-          state,
-          turns,
-          toolCalls,
-          reason: exhaustedReason,
-        };
+        return input.yieldAtTurnLimit ? await yieldRun() : await exhaust('max_turns_exceeded');
       } catch (error) {
         if (signal?.aborted || isAbortError(error)) {
           const cancelledContext = turnContext(turns);

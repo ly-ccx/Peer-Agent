@@ -1382,6 +1382,7 @@ export function createLlmChatService({
     // Goal Runner 进度 sink：{ onRound, onToolCall }。onRound 经各 provider loop 透传，
     // onToolCall 经 toolContext 透传，分别用于实时轮次/工具计数。普通 chat 不传。
     agentProgress = null,
+    executionBudget = null,
     // Request-scoped policy for governed background runs (for example Automation).
     // It is copied into this turn's Tool Context and never mutates the shared chat access level.
     permissionPolicy = null,
@@ -1945,6 +1946,7 @@ export function createLlmChatService({
               automationProposalService,
               ensureBrowserReady,
               agentProgress,
+              executionBudget,
               resolvedChannel,
               // qoder 与其他 loop 同权:压缩必须持久化、携带连续性上下文、支持压缩后 system 重建。
               persistCompaction,
@@ -1980,6 +1982,7 @@ export function createLlmChatService({
               rebuildSystemPrompt,
               toolContext,
               agentProgress,
+              executionBudget,
               workspacePath: runWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,
@@ -2019,6 +2022,7 @@ export function createLlmChatService({
               rebuildSystemPrompt,
               toolContext,
               agentProgress,
+              executionBudget,
               workspacePath: runWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,
@@ -2059,6 +2063,7 @@ export function createLlmChatService({
               rebuildSystemPrompt,
               toolContext,
               agentProgress,
+              executionBudget,
               workspacePath: runWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,

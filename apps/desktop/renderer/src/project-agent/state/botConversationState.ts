@@ -39,8 +39,10 @@ export interface BotChatCard {
   readonly cardId: string;
   readonly kind: string;
   readonly content: string;
+  readonly completionReview?: import('@peer-agent/protocol').SessionCompletionReview;
   readonly resolvedState?: 'open' | 'resolved';
   readonly actions?: readonly BotChatCardAction[];
+  readonly refs?: { readonly sessionId: string };
 }
 
 export interface BotChatMeta {
@@ -58,6 +60,8 @@ export interface BotToolCall {
   readonly name: string;
   readonly input: Readonly<Record<string, unknown>> | null;
   readonly result: Readonly<Record<string, unknown>> | null;
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
 }
 
 export interface BotToolRound {
@@ -80,6 +84,8 @@ export interface BotChatMessage {
   readonly createdAt: string;
   readonly inputId?: string;
   readonly turnId?: string;
+  readonly turnKind?: 'user' | 'wake';
+  readonly publicUpdates?: readonly import('@peer-agent/protocol').ProjectAgentPublicUpdate[];
   readonly answerTo?: string;
   readonly replyTo: readonly string[];
   readonly sources: readonly string[];
@@ -113,7 +119,7 @@ export function acknowledgeInput(pending: readonly PendingBotInput[], inputId: s
 
 export type ConversationRow =
   | { readonly type: 'separator'; readonly id: string; readonly at: string; readonly proactive: boolean; readonly label: string }
-  | { readonly type: 'message'; readonly message: BotChatMessage; readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity; readonly processRounds?: readonly BotToolRound[] };
+  | { readonly type: 'message'; readonly message: BotChatMessage; readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity; readonly processRounds?: readonly BotToolRound[]; readonly narration?: readonly import('./botNarrationState').BotNarrationSegment[] };
 
 export type ConversationDisplayRow = ConversationRow | { readonly type: 'activity'; readonly activity: import('@peer-agent/protocol').ProjectAgentActivity };
 
@@ -140,6 +146,8 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     content: readString(raw.content) || readString(raw.text),
     createdAt: readString(raw.createdAt) || readString(raw.at),
     ...(readString(raw.turnId) ? { turnId: readString(raw.turnId) } : {}),
+    ...(raw.turnKind === 'user' || raw.turnKind === 'wake' ? { turnKind: raw.turnKind } : {}),
+    ...(Array.isArray(raw.publicUpdates) ? { publicUpdates: readPublicUpdates(raw.publicUpdates) } : {}),
     ...(readString(raw.answerTo) ? { answerTo: readString(raw.answerTo) } : {}),
     ...(readString(raw.inputId) ? { inputId: readString(raw.inputId) } : {}),
     replyTo,
@@ -577,11 +585,24 @@ function readCards(value: unknown): BotChatCard[] {
       cardId,
       kind: readString(record.kind) || 'card',
       content: readString(record.content),
+      ...(readCompletionReview(record.completionReview) ? { completionReview: readCompletionReview(record.completionReview)! } : {}),
       ...(resolved ? { resolvedState: resolved } : {}),
       actions: readActions(record.actions),
+      ...(record.refs && typeof record.refs === 'object' && readString((record.refs as Record<string, unknown>).sessionId)
+        ? { refs: { sessionId: readString((record.refs as Record<string, unknown>).sessionId) } } : {}),
     });
   }
   return cards;
+}
+
+function readCompletionReview(value: unknown): import('@peer-agent/protocol').SessionCompletionReview | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  if (!readString(row.sessionId) || !readString(row.reviewToken) || !readString(row.report) || !Array.isArray(row.criteria)) return null;
+  const criteria = row.criteria.flatMap(item => item && typeof item.id === 'string' && typeof item.description === 'string'
+    ? [{ id: item.id, description: item.description }] : []);
+  return criteria.length ? { sessionId: readString(row.sessionId), reviewToken: readString(row.reviewToken), report: readString(row.report), criteria,
+    ...(row.confirmed === true ? { confirmed: true } : {}) } : null;
 }
 
 function readActions(value: unknown): BotChatCardAction[] {
@@ -607,6 +628,20 @@ function readActions(value: unknown): BotChatCardAction[] {
   return actions;
 }
 
+function readPublicUpdates(value: readonly unknown[]): import('@peer-agent/protocol').ProjectAgentPublicUpdate[] {
+  let remaining = 32_000;
+  const ids = new Set<string>();
+  return value.slice(0, 100).flatMap(item => {
+    if (!item || typeof item !== 'object' || remaining <= 0) return [];
+    const raw = item as Record<string, unknown>;
+    const id = readString(raw.id).slice(0, 100);
+    if (!id || ids.has(id) || typeof raw.text !== 'string' || !raw.text.trim()) return [];
+    ids.add(id);
+    const text = raw.text.slice(0, remaining); remaining -= text.length;
+    return [{ id, text }];
+  });
+}
+
 function readRounds(value: unknown): BotToolRound[] {
   if (!Array.isArray(value)) return [];
   const rounds: BotToolRound[] = [];
@@ -626,7 +661,10 @@ function readRounds(value: unknown): BotToolRound[] {
         const result = raw.result && typeof raw.result === 'object' && !Array.isArray(raw.result)
           ? raw.result as Record<string, unknown>
           : null;
-        toolCalls.push({ name, input, result });
+        toolCalls.push({ name, input, result,
+          ...(typeof raw.startedAtMs === 'number' && Number.isFinite(raw.startedAtMs) && raw.startedAtMs >= 0 && raw.startedAtMs <= 8.64e15 ? { startedAtMs: raw.startedAtMs } : {}),
+          ...(typeof raw.endedAtMs === 'number' && Number.isFinite(raw.endedAtMs) && raw.endedAtMs >= 0 && raw.endedAtMs <= 8.64e15 ? { endedAtMs: raw.endedAtMs } : {}),
+        });
       }
     }
     rounds.push({ text: readString(record.text), toolCalls });

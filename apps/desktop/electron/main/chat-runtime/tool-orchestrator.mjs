@@ -513,6 +513,7 @@ export async function executeModelToolCall({
         : [];
       const bodyPreview = toolResultEvidencePreview(result.execution);
       goalPlanStore.recordEvidenceRefs({
+        ...(goalPlan?.planId ? { planId: goalPlan.planId } : {}),
         conversationId,
         streamId,
         toolCallId,

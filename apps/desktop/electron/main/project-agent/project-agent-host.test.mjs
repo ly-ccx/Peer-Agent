@@ -28,7 +28,7 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
   const statuses = [];
   let hold = true;
   try {
-    const host = createProjectAgentHost({
+    const host = createProjectAgentHost({ readLeaseEpoch: () => 'test-owner',
       rootDir: root,
       holdsLease: (workspaceId) => hold && workspaceId === 'ws-leased',
       listWorkspaceIds: () => ['ws-leased', 'ws-client'],
@@ -108,7 +108,7 @@ test('到了小结时间即使没有新输入也会写入分隔消息', async ()
   const digests = createDigestQueue();
   digests.hold('ws-leased', { id: 'a', text: '登录修好了' });
   let pending = null;
-  const host = createProjectAgentHost({
+  const host = createProjectAgentHost({ readLeaseEpoch: () => 'test-owner',
     rootDir: root,
     holdsLease: (workspaceId) => workspaceId === 'ws-leased',
     listWorkspaceIds: () => ['ws-leased'],
@@ -164,7 +164,7 @@ test('安静满 10 分钟会唤醒代理，同一原因第三次失败要求问�
       version: 1,
     }],
   };
-  const host = createProjectAgentHost({
+  const host = createProjectAgentHost({ readLeaseEpoch: () => 'test-owner',
     rootDir: root,
     holdsLease: (workspaceId) => workspaceId === 'ws-leased',
     listWorkspaceIds: () => ['ws-leased'],
@@ -262,7 +262,7 @@ test('后台巡检在取得租约后恢复提前入队的输入，并且不重�
   const turns = [];
   const consumedInputs = [];
   let leased = false;
-  const host = createProjectAgentHost({
+  const host = createProjectAgentHost({ readLeaseEpoch: () => 'test-owner',
     rootDir: root,
     holdsLease: () => leased,
     listWorkspaceIds: () => ['ws-recovery'],
@@ -315,7 +315,7 @@ test('periodic lease recovery drains an existing inbox once without fresh watch 
   const inbox = createProjectInbox({ rootDir: root, mergeWindowMs: 0 });
   inbox.append('ws-leased', [{ eventId: 'persisted-verified', kind: 'session_verified',
     sessionId: 'session-old', workspaceId: 'ws-leased', payload: { summary: 'Verified' } }]);
-  const host = createProjectAgentHost({
+  const host = createProjectAgentHost({ readLeaseEpoch: () => 'test-owner',
     rootDir: root, inbox, holdsLease: () => hold,
     listWorkspaceIds: () => ['ws-leased'], resolveConversationId: () => 'conv-leased',
     hasMessage: () => false, appendMessage() {}, getWindows: () => [],
@@ -340,7 +340,7 @@ test('periodic lease recovery drains an existing inbox once without fresh watch 
 
 test('one project recovery failure never runs its model or blocks another owned project', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b4-host-recovery-')); const messages = [], calls = [], phases = [];
-  const host = createProjectAgentHost({ rootDir: root, holdsLease: () => true, listWorkspaceIds: () => ['bad', 'good'], resolveConversationId: id => `c-${id}`,
+  const host = createProjectAgentHost({ readLeaseEpoch: () => 'test-owner', rootDir: root, holdsLease: () => true, listWorkspaceIds: () => ['bad', 'good'], resolveConversationId: id => `c-${id}`,
     hasMessage: (_id, messageId) => messages.some(message => message.id === messageId), appendMessage: (_id, message) => messages.push(message),
     recoverTasks: id => { if (id === 'bad') throw new Error('broken checkpoint'); }, onRecoveryPhase: item => phases.push(`${item.workspaceId}:${item.phase}`),
     resolveModel: () => ({ modelProviderId: 'model' }), executeTurn: async input => { calls.push(input.workspaceId); return { text: 'done' }; } });
@@ -355,7 +355,7 @@ test('one project recovery failure never runs its model or blocks another owned 
 
 test('digest maintenance runs under recovery lease even with no inbox, and never runs for an unowned or stopped project', async () => {
   const root=mkdtempSync(path.join(os.tmpdir(),'memory-clock-'));const maintenance=[];let modelCalls=0;let owned=true;
-  const host=createProjectAgentHost({rootDir:root,holdsLease:()=>owned,listWorkspaceIds:()=>['ws'],resolveConversationId:()=> 'conv',executeTurn:async()=>{modelCalls++;return {text:'unexpected'};},readSettings:()=>({projectAgent:{digestTime:'00:00'}}),now:()=>new Date(),onMaintenance:info=>maintenance.push(info),schedule:()=>null});
+  const host=createProjectAgentHost({ readLeaseEpoch: () => 'test-owner',rootDir:root,holdsLease:()=>owned,listWorkspaceIds:()=>['ws'],resolveConversationId:()=> 'conv',executeTurn:async()=>{modelCalls++;return {text:'unexpected'};},readSettings:()=>({projectAgent:{digestTime:'00:00'}}),now:()=>new Date(),onMaintenance:info=>maintenance.push(info),schedule:()=>null});
   try {
     await host.sync();assert.ok(maintenance.length>=1);assert.equal(modelCalls,0);
     const count=maintenance.length;owned=false;await host.sync();assert.equal(maintenance.length,count);

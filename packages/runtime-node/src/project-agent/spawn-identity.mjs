@@ -35,7 +35,7 @@ export function identityFromPlan(plan, parentConversationId, request) {
     anchorMessageIds: request.anchorMessageIds,
     title: plan.title, brief: plan.goal,
     kind: request.kind, readOnly: origin.readOnly === true,
-    successCriteria: plan.successCriteria,
+    successCriteria: (plan.successCriteria || []).map(({ authority, ...criterion }) => criterion),
   };
   // Old plans did not persist kind or all anchors separately. The original
   // request hash must prove those values before deriving a new identity.
