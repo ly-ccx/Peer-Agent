@@ -8,6 +8,28 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.8] - 2026-10-07
+
+### Fixed
+
+- Persist work coordination across scheduling yields and restarts; deliver returned results once and avoid repeated dispatch or no-progress polling.
+- Verify ordinary quality criteria without accidental manual gates, preserve explicit human authority and close results under the configured policy.
+- Unify verification facts, clear stale verifying states and resume retries from retained work.
+- Preserve provider-required reasoning history and dynamically resolve Grok request version information.
+- Stabilize model and effort controls, long-error wrapping, task follow-up and evidence inspection.
+
+### Changed
+
+- Present complete message bubbles with technical details in the right sidebar; align messages, work and composer spacing.
+- Use named-bot placeholders, compact quotes and a selected-text quote toolbar anchored to the selection.
+- Rename the compact header entry to Bot settings and open configuration directly.
+- Refresh bilingual notes and user guidance, retain RC7 upgrade coverage and add RC8.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; complex-write Evidence and GA acceptance remain separate gates.
+- Rollback requires the complete pre-upgrade backup; older writers may discard RC8 criterion authority and coordination fields.
+
 ## [0.1.0-rc.7] - 2026-10-05
 
 ### Changed

@@ -5,6 +5,8 @@ import { useFocusScope } from '../../app/hooks/useFocusScope';
 import { Drawer } from '../../app/components/Drawer';
 import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
+import { EvidenceView } from './EvidenceView';
+import { PeerIcon } from '../../ui/icons';
 import {
   drawerLayout,
   groupDrawerSessions,
@@ -24,6 +26,8 @@ import { BotSettingsTab } from './BotSettingsTab';
 import { MemoryTab } from './MemoryTab';
 import { ObjectivesTab } from './ObjectivesTab';
 import { OverviewTab } from './OverviewTab';
+import { mergeTaskDetail } from '../state/taskDetailState';
+import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
 import { ConversationSceneDrawer, SessionDetail } from './SessionDetail';
 import { TasksTab, type ClassicGoalRow } from './TasksTab';
 import '../styles/bot-drawer.css';
@@ -43,6 +47,7 @@ export function BotProfileDrawer({
   memory,
   locateSessionId,
   inspect = null,
+  onReplyDetailsTarget,
   sessions,
   sessionsAvailable,
   onRefreshSessions,
@@ -55,6 +60,8 @@ export function BotProfileDrawer({
   onDeleted,
   onOpenConversation,
   onOpenAutomations,
+  taskContext,
+  onTaskConversation,
 }: {
   readonly workspaceId: string;
   readonly profile: BotProfile;
@@ -62,11 +69,12 @@ export function BotProfileDrawer({
   readonly memory: DrawerMemory;
   readonly locateSessionId: string | null;
   readonly inspect?: BotInspect | null;
+  readonly onReplyDetailsTarget?: (node: HTMLDivElement | null) => void;
   readonly sessions: readonly DrawerSession[];
   readonly sessionsAvailable: boolean;
   readonly onRefreshSessions: () => Promise<void>;
   readonly onCloseInspect: () => void;
-  readonly triggerRef: RefObject<HTMLButtonElement | null>;
+  readonly triggerRef: RefObject<HTMLElement | null>;
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly onMemory: (memory: DrawerMemory) => void;
@@ -74,6 +82,8 @@ export function BotProfileDrawer({
   readonly onDeleted: () => void;
   readonly onOpenConversation?: (conversationId: string) => void;
   readonly onOpenAutomations?: () => void;
+  readonly taskContext: TaskConversationContext | null;
+  readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
 }) {
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const [path, setPath] = useState('');
@@ -91,15 +101,35 @@ export function BotProfileDrawer({
   const bodyRef = useRef<HTMLDivElement>(null);
   const previousInspect = useRef(inspect);
   useEffect(() => {
-    if (previousInspect.current && !inspect && memory.open) bodyRef.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus();
+    if (memory.open && previousInspect.current !== inspect) {
+      if (previousInspect.current?.evidence && inspect?.replyId && !inspect.evidence) {
+        (bodyRef.current?.querySelector<HTMLElement>('.bot-reply-details summary, .bot-reply-details button')
+          ?? bodyRef.current?.querySelector<HTMLElement>('.bot-drawer-head button'))?.focus({ preventScroll: true });
+      } else if (inspect) {
+        bodyRef.current?.querySelector<HTMLElement>('.bot-drawer-head button')?.focus({ preventScroll: true });
+      } else if (previousInspect.current) {
+        bodyRef.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus({ preventScroll: true });
+      }
+    }
     previousInspect.current = inspect;
   }, [inspect, memory.open]);
   useFocusScope(bodyRef, layout === 'push' && memory.open && dockPhase !== 'off', { restore: triggerRef });
   const close = () => {
+    // A live reply can become a durable message while the drawer is open.
+    // Restore its current footer, rather than a detached streaming button.
+    if (inspect?.replyId && !triggerRef.current?.isConnected) {
+      const replyId = bodyRef.current?.querySelector<HTMLElement>('[data-reply-id]')?.dataset.replyId;
+      if (replyId) triggerRef.current = document.querySelector<HTMLButtonElement>(`#${CSS.escape(`bot-msg-${replyId}`)} .bot-reply-context > button`);
+      if (!triggerRef.current) {
+        triggerRef.current = document.querySelector<HTMLElement>('.bot-thread');
+        if (triggerRef.current) triggerRef.current.tabIndex = -1;
+      }
+    }
     onMemory({ ...memory, open: false });
-    triggerRef.current?.focus();
+    triggerRef.current?.focus({ preventScroll: true });
   };
   const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
+  const taskDetail = mergeTaskDetail(selected, detail?.sessionId === memory.sessionId ? detail : null);
 
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
@@ -181,8 +211,8 @@ export function BotProfileDrawer({
   }, [memory.open, path, workspaceId]);
 
   useEffect(() => {
-    if (!memory.sessionId) {
-      setDetail(null);
+    setDetail(null);
+    if (!memory.open || !memory.sessionId) {
       return;
     }
     let cancelled = false;
@@ -195,7 +225,7 @@ export function BotProfileDrawer({
     return () => {
       cancelled = true;
     };
-  }, [memory.sessionId]);
+  }, [workspaceId, memory.open, memory.sessionId, selected?.status]);
 
   if (layout === 'cover' ? !memory.open : dockPhase === 'off') return null;
 
@@ -203,7 +233,7 @@ export function BotProfileDrawer({
     <div className="bot-drawer-body" ref={bodyRef}>
       <div className="bot-drawer-chrome">
         <header className="bot-drawer-head">
-          <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.chat.evidence' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
+          <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
           <button
             type="button"
             onClick={close}
@@ -211,23 +241,13 @@ export function BotProfileDrawer({
             {i18n.t('projectAgent.drawer.close')}
           </button>
         </header>
-        {inspect ? <button className="bot-inspect-back" type="button" onClick={onCloseInspect}>{i18n.t('projectAgent.drawer.inspectBack')}</button> : <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
+        {inspect && (inspect.evidence || !inspect.replyId) ? <button className="bot-inspect-back" type="button" onClick={onCloseInspect}>{i18n.t(inspect.replyId ? 'projectAgent.chat.context.back' : 'projectAgent.drawer.inspectBack')}</button> : !inspect ? <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
           items={TABS.map(tab => ({ id: tab.id, label: i18n.t(tab.key) }))}
-          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} />}
+          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} /> : null}
       </div>
-      {inspect?.evidence ? (
-        <section className="bot-inspect" aria-label={i18n.t('projectAgent.chat.evidence')}>
-          <h3>{i18n.t('projectAgent.chat.evidence')}</h3>
-          {inspect.evidence.ok ? (
-            <pre>{inspect.evidence.summary}</pre>
-          ) : (
-            <p>{i18n.t('projectAgent.drawer.evidenceUnavailable')}</p>
-          )}
-          {inspect.evidence.truncated ? <p>{i18n.t('projectAgent.process.truncated')}</p> : null}
-          <details><summary>{i18n.t('projectAgent.process.technical')}</summary><code>{inspect.evidence.evidenceRef}</code>{inspect.evidence.code ? <p>{inspect.evidence.code}</p> : null}</details>
-        </section>
-      ) : null}
+      {inspect?.evidence ? <EvidenceView evidence={inspect.evidence} i18n={i18n} /> : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
+      {inspect?.replyId ? <div className="bot-reply-details-slot" hidden={Boolean(inspect.evidence)} ref={onReplyDetailsTarget} /> : null}
       {!inspect ? <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className="bot-drawer-pane motion-enter-fade">
       {memory.tab === 'overview' ? (
         <OverviewTab
@@ -273,10 +293,13 @@ export function BotProfileDrawer({
         <SessionDetail
           workspaceId={workspaceId}
           workspacePath={path}
-          session={sessionsAvailable ? (selected ?? detail)! : { ...(detail ?? selected)!, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable') }}
+          session={sessionsAvailable ? taskDetail! : { ...taskDetail!, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable') }}
           i18n={i18n}
           isZh={isZh}
+          botName={profile.displayName}
+          context={taskContext?.sessionId === memory.sessionId ? taskContext : null}
           onBack={() => onMemory({ ...memory, sessionId: null })}
+          onConversation={onTaskConversation}
         />
       ) : null}
       {memory.tab === 'objectives' ? (
@@ -324,7 +347,7 @@ export function BotProfileDrawer({
     return (
       <Drawer
         onClose={close}
-        ariaLabel={i18n.t('projectAgent.drawer.title')}
+        ariaLabel={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
         panelClassName="bot-drawer-panel"
       >
         {body}
@@ -335,7 +358,7 @@ export function BotProfileDrawer({
   return (
     <aside
       className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
-      aria-label={i18n.t('projectAgent.drawer.title')}
+      aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
       inert={!memory.open}
       aria-hidden={!memory.open}
     >

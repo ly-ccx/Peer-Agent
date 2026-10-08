@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { Switch } from '../../ui/boolean-controls';
+import { PeerIcon } from '../../ui/icons';
 import { memoryPage } from '../state/memoryPage';
 import {
   readMemoryItems,
@@ -155,7 +156,7 @@ export function MemoryTab({
                   ) : (
                     <p>{item.text}</p>
                   )}
-                  <details className="bot-memory-provenance"><summary>{i18n.t('projectAgent.drawer.memory.details')}</summary>
+                  <details className="bot-memory-provenance"><summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.drawer.memory.details')}</summary>
                     <p>{memoryLabel(i18n, item.trust, TRUSTS)}</p>
                     {item.sourceRefs?.length ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.sources')}: <code>{item.sourceRefs.join(' · ')}</code></p> : null}
                   </details>
@@ -246,7 +247,7 @@ export function MemoryTab({
         )}
       </section>
       <details className="bot-memory-controls">
-        <summary>{i18n.t('projectAgent.drawer.memory.controls')}</summary>
+        <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.memory.controls')}</summary>
         <div className="bot-memory-settings-card">
           <div className="bot-memory-setting-group">
             <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.project')}</span>

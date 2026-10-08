@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './botModelControls.ts';
+import { botConfiguredModelSelection, botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './botModelControls.ts';
 import type { ModelRoutingMenuOption, ProjectModelPolicy } from '@peer-agent/protocol';
 const model: ModelRoutingMenuOption = { id: 'm', label: 'Model', providerName: 'Channel', groupId: 'p', model: 'model', authMethod: 'api_key', supportsVision: false, supportsTools: true, supportsStructured: true, contextTokens: 1000, available: true, reasoningEffortLevels: ['low', 'high'], defaultReasoningEffort: 'low' };
 
@@ -18,4 +18,13 @@ test('menu shares channel grouping and disables models outside role eligibility'
   assert.equal(groups[0].label, 'Channel');
   assert.equal(groups[0].items[0].disabled, false);
   assert.equal(groups[0].items[1].disabled, true);
+});
+
+test('committed fixed model and effort display immediately while eligibility stays authoritative', () => {
+  const policy = botFixedModelPolicy(null, 'project_agent', model, 'high');
+  const view = { resolution: { ok: false as const, reason: 'empty' as const, missing: '' }, eligibleModelIds: ['m'] };
+  assert.deepEqual(botConfiguredModelSelection(policy, 'project_agent', [model], view), { modelProviderId: 'm', reasoningEffort: 'high' });
+  assert.equal(botConfiguredModelSelection(policy, 'project_agent', [model], { ...view, eligibleModelIds: [] }), undefined);
+  assert.equal(botConfiguredModelSelection(policy, 'project_agent', [{ ...model, available: false }], view), undefined);
+  assert.equal(botConfiguredModelSelection({ overrides: { project_agent: { mode: 'fixed', modelProviderId: 'm', reasoningEffort: 'max' } } }, 'project_agent', [model], view), undefined);
 });

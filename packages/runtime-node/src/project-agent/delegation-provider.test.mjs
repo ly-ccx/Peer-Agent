@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { createDelegationProvider } from './delegation-provider.mjs';
+import { createDesktopReplyComposer } from './reply-composer-port.mjs';
 import { computeVerificationVerdict } from './verification-verdict.mjs';
 import {
   PROJECT_AGENT_ALLOWED_CAPABILITIES,
@@ -20,7 +21,7 @@ function spawnInput(overrides = {}) {
     anchorMessageIds: ['u1'],
     title: 'Fix the gate',
     brief: 'Keep the project agent read-only.',
-    successCriteria: ['The gate denies writes'],
+    successCriteria: [{ kind: 'model_review', description: 'The gate denies writes' }],
     kind: 'code',
     readOnly: true,
     ...overrides,
@@ -66,6 +67,24 @@ test('successful post_reply ends the provider loop, including suppression and id
     }
     assert.equal(calls, 1, 'replay must retain the receipt without repeating delivery');
   }
+});
+
+test('real composer anchor recovery reaches the model-facing Tool Result and corrected reply can terminate', async () => {
+  const provider = createDelegationProvider({ replyComposer: createDesktopReplyComposer() });
+  const context = agentContext({ messages: [{ ...USER, content: '说明当前进展' }, ASSISTANT], currentInputAnchors: [] });
+  const failed = await provider.executeCapability(call('local.delegation.post_reply', { text: '当前仍在跟进。', replyTo: ['invented-input'] }, 'bad-anchor'), context);
+  const output = outputOf(failed);
+  assert.equal(output.error, 'anchor_not_found');
+  assert.deepEqual(output.messageIds, ['invented-input']);
+  assert.deepEqual(output.availableReplyAnchors, [{ messageId: 'u1', text: '说明当前进展' }]);
+  assert.equal(failed.grant.granted, false);
+  assert.equal(failed.result.outputPreview.control, undefined);
+  assert.equal(failed.result.evidence.toolCallId, 'bad-anchor');
+  const fixed = await provider.executeCapability(call('local.delegation.post_reply', { text: '当前仍在跟进。', replyTo: [output.availableReplyAnchors[0].messageId] }, 'real-anchor'), { ...context, toolCallOrdinal: 1 });
+  assert.equal(fixed.grant.granted, true);
+  assert.equal(fixed.result.output.status, undefined);
+  assert.deepEqual(fixed.result.outputPreview.control, { terminal: true, reason: 'project_agent_reply' });
+  assert.deepEqual(outputOf(fixed).message.replyTo, ['u1']);
 });
 
 test('failed, denied, invalid and unconfigured post_reply cannot terminate a provider loop', async () => {
@@ -514,7 +533,7 @@ test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying
     call('local.delegation.verify_session', { sessionId: 's-keep', focus: '测试' }, 'verify-1'),
     agentContext(),
   ));
-  assert.equal(first.status, 'verifying');
+  assert.equal(first.status, first.event.outcome);
   assert.notEqual(first.event.outcome, 'passed');
   assert.equal(first.card.content, first.event.outcome);
   assert.equal(first.card.cardId, 'card:verdict:s-keep');
@@ -683,9 +702,9 @@ test('spawn preserves structured Goal criteria and rejects incomplete or forged 
   const seen = [];
   const provider = createDelegationProvider({ supervisor: { spawn(input) { seen.push(input); return { sessionId: 's-criteria', status: 'running' }; } } });
   const criterion = { id: 'source-check', kind: 'file-contains', description: 'Source declares BotProfile', path: 'project.ts', expect: 'BotProfile' };
-  const result = await provider.executeCapability(call('local.delegation.spawn_session', spawnInput({ successCriteria: [criterion, 'Human review remains manual'] })), agentContext());
+  const result = await provider.executeCapability(call('local.delegation.spawn_session', spawnInput({ successCriteria: [criterion, { kind: 'model_review', description: 'Report explains source check' }] })), agentContext());
   assert.equal(outputOf(result).ok, true);
-  assert.deepEqual(seen[0].successCriteria, [criterion, 'Human review remains manual']);
+  assert.deepEqual(seen[0].successCriteria, [criterion, { kind: 'model_review', description: 'Report explains source check' }]);
   for (const criteria of [
     [{ kind: 'file-contains', description: 'Missing expect', path: 'project.ts' }],
     [{ kind: 'command', description: 'Missing command' }],

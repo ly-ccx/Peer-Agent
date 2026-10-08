@@ -146,6 +146,7 @@ function emitConnectionRecovery(webContents, payload) {
 }
 
 import { observeVisualTransportAttempt } from './visual-request-context.mjs';
+import { grokSubscriptionTransport } from '@peer-agent/runtime-node';
 
 export async function fetchWithConnectionRecovery(url, init = {}, {
   webContents = null,
@@ -230,7 +231,10 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
 
     try {
       const response = await observeVisualTransportAttempt(attemptInit, { provider, model, streamId },
-        () => callWithConnectTimeout(transport.fetch, attemptInit));
+        () => grokSubscriptionTransport.fetch(
+          (target, options) => target === url
+            ? callWithConnectTimeout(transport.fetch, options) : transport.fetch(target, options),
+          url, attemptInit));
       if (round > 0) {
         emitConnectionRecovery(webContents, {
           streamId,

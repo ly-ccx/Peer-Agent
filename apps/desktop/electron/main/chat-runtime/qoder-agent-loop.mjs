@@ -14,7 +14,7 @@ import { executeDesktopProviderRequest } from './provider-request-coordinator.mj
 import * as responseGuard from './response-guard.mjs';
 import {
   createDesktopAbortError,
-  runDesktopRuntimePipeline,
+  runDesktopRuntimePipeline, createNotExecutedToolCall,
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 import { createOpenAIVisualObservationMessage } from './visual-observation-projection.mjs';
@@ -69,6 +69,7 @@ export async function agentLoopQoder({
   automationProposalService = null,
   ensureBrowserReady = null,
   agentProgress = null,
+  executionBudget = null,
   maxOutputTokens = 0,
   resolvedChannel = null,
   persistCompaction = null,
@@ -83,6 +84,11 @@ export async function agentLoopQoder({
   initialContextAccounting = null,
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  const saved = executionBudget?.providerCheckpoint;
+  if (saved && (saved.provider !== 'qoder' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
+  if (saved && saved.provider === 'qoder' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
+    apiMessages = structuredClone(saved.messages);
+  }
   const providerConfig = buildCompactionProviderConfig({
     provider: 'qoder',
     baseUrl,
@@ -92,6 +98,7 @@ export async function agentLoopQoder({
     resolvedChannel,
   });
   const loop = createAgentLoopKernel({
+    executionBudget,
     webContents,
     streamId,
     conversationId,
@@ -115,11 +122,16 @@ export async function agentLoopQoder({
     providerId,
     modelId: model,
     maxTurns: loop.maxTurns,
+    maxToolCalls: executionBudget?.maxToolCalls,
+    sliceToolCalls: executionBudget?.sliceToolCalls,
+    yieldAtTurnLimit: executionBudget?.yieldAtTurnLimit,
+    maxToolBatchCalls: executionBudget?.maxToolBatchCalls,
+    budgetGuard: executionBudget?.guard,
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
     lifecycle: {
-      toolResultsApplied: () => loop.publishToolResultProjection(),
+      toolResultsApplied: () => { loop.publishToolResultProjection(); executionBudget?.guard?.checkpoint?.({ provider: 'qoder', providerId, model, messages: structuredClone(apiMessages) }); },
     },
     model: {
       initialize: () => ({ provider: 'qoder-private' }),
@@ -141,6 +153,7 @@ export async function agentLoopQoder({
             runtimeUsageAccounting: loop.usageAccounting,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
+              executionBudget?.guard?.observeUsage?.(usage, requestFingerprint);
             },
             rebuildSystemPrompt,
             accountingIdentity: accountingIdentity ?? {
@@ -255,10 +268,20 @@ export async function agentLoopQoder({
         if (visualObservation) apiMessages.push(visualObservation);
         return state;
       },
-      onStopped: () => loop.sendDone(),
-      onExhausted: () => loop.sendLoopExhausted(),
+      onYield: (_state, context) => {
+        executionBudget?.onYield?.({ provider: 'qoder', providerId, model, messages: structuredClone(apiMessages),
+          turns: context.turn, usage: loop.usage });
+        loop.sendDone();
+      },
+      onStopped: (_state, executions) => {
+        const reason = executions.find(item => item.terminal)?.terminalReason || '';
+        if (/^(work_budget_limited|work_execution_stopped|.*outcome_unknown|batch_stopped|max_tool_calls_exceeded)$/.test(reason)) loop.sendError(reason);
+        else loop.sendDone();
+      },
+      onExhausted: (_state, _context, reason) => loop.sendLoopExhausted({ reason }),
     },
     tools: {
+      notExecuted: (call, reason) => createNotExecutedToolCall({ call, reason, webContents, streamId }),
       execute: async (call) => {
         const toolExecution = await executeModelToolCall({
           name: call.name,

@@ -89,7 +89,7 @@ function LiveToolProgress({
   if (progress) return <ToolProgressInline progress={progress} isZh={isZh} />;
   // 压缩进行中由顶部压缩进度条表达「正在工作」，消息内的 ▍ 会误导为仍在输出正文。
   if (shouldHideStreamingCursorDuringCompaction(compactionState)) return null;
-  return showCursor ? <span className="streaming-cursor">▍</span> : null;
+  return showCursor ? <svg className="streaming-cursor" width="6" height="16" viewBox="0 0 6 16" aria-hidden="true" focusable="false"><rect x="1" y="1" width="4" height="14" fill="currentColor" /></svg> : null;
 }
 
 function useAutoCollapsingExpanded(isActive: boolean) {

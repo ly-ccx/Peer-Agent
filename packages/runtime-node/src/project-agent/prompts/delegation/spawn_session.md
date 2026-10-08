@@ -4,4 +4,8 @@ Scheduling is host-owned: each project admits one in-place write and two readonl
 
 isolation is auto (default), none, or worktree. Read-only and non-Git sessions run in place. Auto isolates Git writes when the workspace is dirty or another writer is running. Explicit none waits for the in-place write slot; worktree creation failure or insufficient disk keeps the task queued. Only the host's verified worktree proves isolation. Acceptance and merge-back are separate host facts: policy acceptance does not authorize a merge unless the user enabled that project policy. Merge-back never pushes a remote.
 
+Without an explicitly continued history snapshot, the child background contains only anchorMessageIds. Include the current canonical user input and any earlier messages needed for this task. Unrelated chat attachments are not automatically inherited. Missing material in admitted anchors or an explicit history snapshot still requires the host's existing confirmation; a generic question answer cannot grant it.
+
 When supersedes is set, the previous task is paused and its work is retained. Only active tasks in this project can be replaced; result-ready or accepted tasks cannot. Use resume_session to restore an old task.
+
+Success criteria must be structured objects. Use model_review for report completeness, conclusions, relevance or quality. Use command/test/file checks for mechanical assertions. Manual requires a trusted human or project-policy requirement admitted by the host; ordinary model-generated quality must not invent a manual gate. Strings and unknown kinds are invalid. Do not supply authority metadata.

@@ -58,6 +58,8 @@ export type TranslationKey =
   | "projectAgent.quick.content"
   | "projectAgent.quick.placeholder"
   | "projectAgent.quick.chooseBot"
+  | "projectAgent.quick.effort"
+  | "projectAgent.quick.loadFailed"
   | "projectAgent.quick.noBots"
   | "projectAgent.quick.textOnly"
   | "projectAgent.quick.empty"
@@ -220,6 +222,9 @@ export type TranslationKey =
   | 'projectAgent.chat.sending'
   | 'projectAgent.chat.failed'
   | 'projectAgent.chat.retry'
+  | 'projectAgent.chat.unavailable'
+  | 'projectAgent.chat.budgetExhausted'
+  | 'projectAgent.chat.context.error'
   | 'projectAgent.chat.replied'
   | 'projectAgent.chat.disposition.answered'
   | 'projectAgent.chat.disposition.merged'
@@ -274,6 +279,7 @@ export type TranslationKey =
   | 'projectAgent.process.redacted'
   | 'projectAgent.process.previewLimit'
   | 'projectAgent.process.seconds'
+  | 'projectAgent.process.lessThanSecond'
   | 'projectAgent.process.minutes'
   | 'projectAgent.process.done'
   | 'projectAgent.process.failed'
@@ -300,15 +306,31 @@ export type TranslationKey =
   | 'projectAgent.chat.work.related'
   | 'projectAgent.chat.work.unavailable'
   | 'projectAgent.chat.work.unavailableHint'
-  | 'projectAgent.chat.work.handle'
+  | 'projectAgent.chat.work.waiting'
+  | 'projectAgent.chat.work.resultReady'
+  | 'projectAgent.chat.work.handoff'
   | 'projectAgent.chat.work.open'
   | 'projectAgent.chat.work.background'
   | 'projectAgent.chat.context.basis'
   | 'projectAgent.chat.originalMessage'
   | 'projectAgent.chat.context.details'
+  | 'projectAgent.chat.context.title'
+  | 'projectAgent.chat.context.back'
+  | 'projectAgent.chat.context.rounds'
+  | 'projectAgent.chat.context.unavailable'
   | 'projectAgent.chat.context.memoryUnavailable'
   | 'projectAgent.drawer.inspectBack'
   | 'projectAgent.drawer.evidenceUnavailable'
+  | 'projectAgent.evidence.title'
+  | 'projectAgent.evidence.record'
+  | 'projectAgent.evidence.listHelp'
+  | 'projectAgent.evidence.historical'
+  | 'projectAgent.evidence.bodyMissing'
+  | 'projectAgent.evidence.notFound'
+  | 'projectAgent.evidence.readFailed'
+  | 'projectAgent.evidence.cannotVerify'
+  | 'projectAgent.evidence.tryLater'
+  | 'projectAgent.evidence.emptyOutput'
   | 'projectAgent.drawer.botDescription'
   | 'projectAgent.drawer.acceptance.confirm'
   | 'projectAgent.drawer.memory.details'
@@ -360,6 +382,12 @@ export type TranslationKey =
   | 'projectAgent.policy.scope.restricted'
   | 'projectAgent.policy.localOnly'
   | 'projectAgent.chat.confirmResult'
+  | 'projectAgent.chat.confirmCompletion'
+  | 'projectAgent.chat.reviewReport'
+  | 'projectAgent.chat.completionHint'
+  | 'projectAgent.chat.retryCompletion'
+  | 'projectAgent.chat.completionRetryHint'
+  | 'projectAgent.chat.resultChanged'
   | 'projectAgent.chat.acceptReadme'
   | 'projectAgent.chat.actionFailed'
   | 'projectAgent.drawer.title'
@@ -414,6 +442,31 @@ export type TranslationKey =
   | 'projectAgent.drawer.openScene'
   | 'projectAgent.drawer.scene'
   | 'projectAgent.drawer.sceneMissing'
+  | 'projectAgent.drawer.task.created'
+  | 'projectAgent.drawer.task.conversation'
+  | 'projectAgent.drawer.task.question'
+  | 'projectAgent.drawer.task.followUp'
+  | 'projectAgent.drawer.task.followUpEnded'
+  | 'projectAgent.drawer.task.endedQuestion'
+  | 'projectAgent.drawer.task.askEnded'
+  | 'projectAgent.drawer.task.askEndedDraft'
+  | 'projectAgent.drawer.task.noQuestion'
+  | 'projectAgent.drawer.task.answer'
+  | 'projectAgent.drawer.task.ask'
+  | 'projectAgent.drawer.task.askDraft'
+  | 'projectAgent.drawer.task.draftHint'
+  | 'projectAgent.drawer.task.update'
+  | 'projectAgent.drawer.task.viewUpdate'
+  | 'projectAgent.drawer.task.instructions'
+  | 'projectAgent.drawer.task.description'
+  | 'projectAgent.drawer.task.descriptionMissing'
+  | 'projectAgent.drawer.task.information'
+  | 'projectAgent.drawer.task.id'
+  | 'projectAgent.drawer.task.records'
+  | 'projectAgent.drawer.task.hint.confirm'
+  | 'projectAgent.drawer.task.hint.failed'
+  | 'projectAgent.drawer.task.hint.ended'
+  | 'projectAgent.drawer.task.hint.working'
   | 'projectAgent.drawer.objective.source'
   | 'projectAgent.drawer.objective.empty'
   | 'projectAgent.drawer.objective.hint'
@@ -1187,6 +1240,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.quick.content": "快速会话内容",
     "projectAgent.quick.placeholder": "向 Peer Agent 发起任务…",
     "projectAgent.quick.chooseBot": "选择机器人",
+    "projectAgent.quick.effort": "思考强度",
+    "projectAgent.quick.loadFailed": "暂时无法读取机器人配置，请重新打开。",
     "projectAgent.quick.noBots": "还没有机器人",
     "projectAgent.quick.textOnly": "机器人快捷对话先只发送文字",
     "projectAgent.quick.empty": "先写一句话",
@@ -1332,10 +1387,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git.branchNaming': '分支命名',
     'settings.git.branchPrefix': '分支前缀',
     'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
-    'settings.fallbackVision': '兜底多模态模型',
-    'settings.fallbackVision.description': '当主模型不支持图像时，先用此模型识别本轮新图，再把文字结果静默交给主模型。未配置则剥离图片并给出弱提示。',
-    'settings.fallbackVision.none': '不使用（仅剥离图片）',
-    'settings.fallbackVision.strippedHint': '当前模型不支持图像，已剥离本轮图片。可在设置 → 模型中配置兜底多模态模型。',
+    'settings.fallbackVision': '图像识别设置',
+    'settings.fallbackVision.description': '主模型无法识别图片时使用。',
+    'settings.fallbackVision.none': '不使用备用模型',
+    'settings.fallbackVision.strippedHint': '当前模型不支持图片，本次仅发送文字。可在服务商设置中选择图像识别备用模型。',
     'settings.config': '配置管理',
     'settings.config.description': '导出技能、授权规则与界面设置，便于在其它设备恢复；登录态与设备身份不会被导出。',
     'settings.config.export': '导出配置',
@@ -1560,7 +1615,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.recentBots': '最近的机器人',
     'projectAgent.list.openBot': '打开对话',
     'projectAgent.list.mainPlaceholder': '和这个机器人的对话会显示在这里。',
-    'projectAgent.list.profile': '档案',
+    'projectAgent.list.profile': '机器人设置',
     'projectAgent.list.unread': '未读',
     'projectAgent.list.running': '进行中',
     'projectAgent.list.needsYouBadge': '需要你 {count}',
@@ -1583,7 +1638,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.loadFailed': '对话没有加载出来',
     'projectAgent.chat.thinking': '思考中…',
     'projectAgent.chat.waiting': '等待回复…',
-    'projectAgent.chat.generating': '正在生成回复',
+    'projectAgent.chat.generating': '正在回复',
     'projectAgent.chat.toolLabel.read': '读取文件',
     'projectAgent.chat.toolLabel.search': '项目搜索',
     'projectAgent.chat.toolLabel.edit': '编辑文件',
@@ -1604,6 +1659,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.sending': '发送中',
     'projectAgent.chat.failed': '没有发出去',
     'projectAgent.chat.retry': '重发',
+    'projectAgent.chat.unavailable': '暂时无法完成回复。',
+    'projectAgent.chat.budgetExhausted': '本轮检查已达到上限，回复尚未完成。已有进展已保留，你可以重试或发送新消息。',
+    'projectAgent.chat.context.error': '原始报错',
     'projectAgent.chat.replied': '已回复',
     'projectAgent.chat.disposition.answered': '已回答',
     'projectAgent.chat.disposition.merged': '已并入',
@@ -1614,7 +1672,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.disposition.outOfScope': '这句话针对的是『{title}』，没有影响其他任务',
     'projectAgent.chat.quote': '引用',
     'projectAgent.chat.quoteRemove': '取消引用',
-    'projectAgent.chat.placeholder': '跟这个机器人说',
+    'projectAgent.chat.placeholder': '给 {name} 发消息',
     'projectAgent.chat.attach': '添加文件或图片',
     'projectAgent.chat.previewAttachment': '预览图片',
     'projectAgent.chat.removeAttachment': '移除附件',
@@ -1658,6 +1716,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.redacted': '已脱敏',
     'projectAgent.process.previewLimit': '内容超出预览上限。',
     'projectAgent.process.seconds': '{seconds} 秒',
+    'projectAgent.process.lessThanSecond': '少于 1 秒',
     'projectAgent.process.minutes': '{minutes} 分 {seconds} 秒',
     'projectAgent.process.done': '已结束',
     'projectAgent.process.failed': '未完成',
@@ -1684,15 +1743,31 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.related': '关联任务',
     'projectAgent.chat.work.unavailable': '状态暂不可用',
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
-    'projectAgent.chat.work.handle': '查看并处理',
-    'projectAgent.chat.work.open': '打开任务',
+    'projectAgent.chat.work.waiting': '等待跟进',
+    'projectAgent.chat.work.resultReady': '结果待确认',
+    'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
+    'projectAgent.chat.work.open': '查看任务详情',
     'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
-    'projectAgent.chat.context.details': '回复详情',
+    'projectAgent.chat.context.details': '查看详情',
+    'projectAgent.chat.context.title': '回复详情',
+    'projectAgent.chat.context.back': '返回回复详情',
+    'projectAgent.chat.context.rounds': '完整调用记录',
+    'projectAgent.chat.context.unavailable': '这条回复的详情暂时无法读取。',
     'projectAgent.chat.context.memoryUnavailable': '相关记忆暂不可用。',
     'projectAgent.drawer.inspectBack': '返回 Bot 档案',
     'projectAgent.drawer.evidenceUnavailable': '这条证据暂时无法读取。',
+    'projectAgent.evidence.title': '回复依据',
+    'projectAgent.evidence.record': '操作记录',
+    'projectAgent.evidence.listHelp': '查看这条回复参考的操作记录。',
+    'projectAgent.evidence.historical': '这是当时保存的操作内容。',
+    'projectAgent.evidence.bodyMissing': '保留了来源，未保存详细内容',
+    'projectAgent.evidence.notFound': '这条来源记录未找到',
+    'projectAgent.evidence.readFailed': '暂时无法加载这条记录',
+    'projectAgent.evidence.cannotVerify': '这条记录无法用于核对结论。可返回回复详情，查看其他依据。',
+    'projectAgent.evidence.tryLater': '可返回回复详情后再打开。持续无法读取时，这条记录不能用于核对结论。',
+    'projectAgent.evidence.emptyOutput': '这次操作没有文本输出。',
     'projectAgent.drawer.botDescription': '负责这个项目的工作协调，持续跟进任务并交还结果。',
     'projectAgent.drawer.acceptance.confirm': '由你确认',
     'projectAgent.drawer.memory.details': '记忆详情',
@@ -1744,11 +1819,17 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.policy.scope.restricted': '仅所选模型',
     'projectAgent.policy.localOnly': '只使用本地模型',
     'projectAgent.chat.confirmResult': '确认结果',
+    'projectAgent.chat.confirmCompletion': '确认已达成',
+    'projectAgent.chat.reviewReport': '查看报告',
+    'projectAgent.chat.completionHint': '报告已生成，请核对以下内容。确认后继续检查；需要调整可以直接告诉我。',
+    'projectAgent.chat.retryCompletion': '重试检查',
+    'projectAgent.chat.completionRetryHint': '已保存你的核对结果，后续检查未能启动。可以重试检查。',
+    'projectAgent.chat.resultChanged': '任务状态已变化，暂时不能确认。已刷新，请查看最新进展。',
     'projectAgent.chat.acceptReadme': '写 README',
     'projectAgent.chat.actionFailed': '操作失败，请重试',
-    'projectAgent.drawer.title': '档案',
+    'projectAgent.drawer.title': '机器人设置',
     'projectAgent.drawer.close': '关闭',
-    'projectAgent.drawer.back': '返回任务',
+    'projectAgent.drawer.back': '任务列表',
     'projectAgent.drawer.missing': '还没有',
     'projectAgent.drawer.tab.overview': '概况',
     'projectAgent.drawer.tab.tasks': '任务',
@@ -1774,7 +1855,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.needsYou': '需要你',
     'projectAgent.drawer.group.running': '进行中',
     'projectAgent.drawer.group.queued': '排队',
-    'projectAgent.drawer.group.done': '已完成',
+    'projectAgent.drawer.group.done': '已结束',
     'projectAgent.drawer.group.paused': '已暂停',
     'projectAgent.drawer.supersededBy': '被「{task}」取代',
     'projectAgent.drawer.resume': '恢复',
@@ -1790,14 +1871,39 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.classicOpen': '打开原来的会话',
     'projectAgent.drawer.legacyAutomations': '自动化（旧）',
     'projectAgent.drawer.legacyAutomationsEmpty': '这个项目没有旧的自动化',
-    'projectAgent.drawer.anchor': '锚点',
-    'projectAgent.drawer.frozenModel': '冻结的模型',
+    'projectAgent.drawer.anchor': '来源消息标识',
+    'projectAgent.drawer.frozenModel': '执行模型',
     'projectAgent.drawer.conclusion': '结论',
     'projectAgent.drawer.evidence': '证据',
     'projectAgent.drawer.progress': '最近进展',
-    'projectAgent.drawer.openScene': '打开现场',
-    'projectAgent.drawer.scene': '任务现场',
-    'projectAgent.drawer.sceneMissing': '现场还没有会话',
+    'projectAgent.drawer.openScene': '查看工作会话',
+    'projectAgent.drawer.scene': '工作会话',
+    'projectAgent.drawer.sceneMissing': '尚无工作会话',
+    'projectAgent.drawer.task.created': '创建于 {time}',
+    'projectAgent.drawer.task.conversation': '回到对话',
+    'projectAgent.drawer.task.question': "需要你回答的问题",
+    'projectAgent.drawer.task.followUp': "下一步由 {name} 跟进",
+    'projectAgent.drawer.task.followUpEnded': "继续追问",
+    'projectAgent.drawer.task.endedQuestion': "可以在主对话中询问结果，或补充新的要求。",
+    'projectAgent.drawer.task.askEnded': "向 {name} 追问",
+    'projectAgent.drawer.task.askEndedDraft': "关于「{title}」，请说明结果和判断依据。",
+    'projectAgent.drawer.task.noQuestion': "需要你的决定时，{name} 会在对话中提出具体问题。这里可以查看情况，也可以询问进展。",
+    'projectAgent.drawer.task.answer': "在对话中回答",
+    'projectAgent.drawer.task.ask': "询问 {name} 进展",
+    'projectAgent.drawer.task.askDraft': "「{title}」现在进展如何？请说明卡住的原因和下一步；如果需要我决定，请提出具体问题。",
+    'projectAgent.drawer.task.draftHint': "点击后准备消息，由你确认发送。",
+    'projectAgent.drawer.task.update': "{name} 最近的说明",
+    'projectAgent.drawer.task.viewUpdate': "查看对话中的完整说明",
+    'projectAgent.drawer.task.instructions': "内部任务指令",
+    'projectAgent.drawer.task.description': '任务说明',
+    'projectAgent.drawer.task.descriptionMissing': '暂未读取到任务说明，可回到对话查看原始要求。',
+    'projectAgent.drawer.task.information': '任务信息',
+    'projectAgent.drawer.task.id': '任务标识',
+    'projectAgent.drawer.task.records': '执行记录 · {count} 条',
+    'projectAgent.drawer.task.hint.confirm': '{name} 在主对话中跟进这项工作。',
+    'projectAgent.drawer.task.hint.failed': '任务未能完成。后续安排由 {name} 在主对话中说明。',
+    'projectAgent.drawer.task.hint.ended': '可查看 {name} 的交付说明，或在主对话中继续追问。',
+    'projectAgent.drawer.task.hint.working': '进展和结果由 {name} 在主对话中汇报。',
     'projectAgent.drawer.objective.source': '所属目标',
     'projectAgent.drawer.objective.empty': '还没有持续目标',
     'projectAgent.drawer.objective.hint': '告诉机器人你想持续推进或关注什么。',
@@ -2359,6 +2465,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.quick.content": "Quick Chat message",
     "projectAgent.quick.placeholder": "Ask Peer Agent to help…",
     "projectAgent.quick.chooseBot": "Choose bot",
+    "projectAgent.quick.effort": "Reasoning effort",
+    "projectAgent.quick.loadFailed": "Could not load bot settings. Please reopen Quick Chat.",
     "projectAgent.quick.noBots": "No bots yet",
     "projectAgent.quick.textOnly": "Bot Quick Chat currently supports text only",
     "projectAgent.quick.empty": "Write a message first",
@@ -2504,10 +2612,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git.branchNaming': 'Branch naming',
     'settings.git.branchPrefix': 'Branch prefix',
     'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
-    'settings.fallbackVision': 'Fallback vision model',
-    'settings.fallbackVision.description': 'When the main model cannot read images, use this model to recognize new images in the current turn and silently pass text to the main model. If unset, images are stripped with a light notice.',
-    'settings.fallbackVision.none': 'None (strip images only)',
-    'settings.fallbackVision.strippedHint': 'Current model does not support images; new images were stripped. Configure a fallback vision model in Settings → Models.',
+    'settings.fallbackVision': 'Image recognition settings',
+    'settings.fallbackVision.description': 'Used when the main model cannot read images.',
+    'settings.fallbackVision.none': 'No fallback model',
+    'settings.fallbackVision.strippedHint': 'This model cannot read images; only text was sent. Choose an image fallback model in Providers settings.',
     'settings.config': 'Configuration',
     'settings.config.description': 'Export your skills, permission rules and UI settings to restore on another device. Login state and device identity are not exported.',
     'settings.config.export': 'Export',
@@ -2732,7 +2840,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.recentBots': 'Recent bots',
     'projectAgent.list.openBot': 'Open conversation',
     'projectAgent.list.mainPlaceholder': 'The conversation with this bot will show up here.',
-    'projectAgent.list.profile': 'Profile',
+    'projectAgent.list.profile': 'Bot settings',
     'projectAgent.list.unread': 'Unread',
     'projectAgent.list.running': 'In progress',
     'projectAgent.list.needsYouBadge': 'Needs you {count}',
@@ -2755,7 +2863,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.loadFailed': 'The conversation did not load',
     'projectAgent.chat.thinking': 'Thinking…',
     'projectAgent.chat.waiting': 'Waiting for a response…',
-    'projectAgent.chat.generating': 'Generating a response',
+    'projectAgent.chat.generating': 'Replying',
     'projectAgent.chat.toolLabel.read': 'file reading',
     'projectAgent.chat.toolLabel.search': 'project search',
     'projectAgent.chat.toolLabel.edit': 'file editing',
@@ -2776,6 +2884,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.sending': 'Sending',
     'projectAgent.chat.failed': 'Not sent',
     'projectAgent.chat.retry': 'Retry',
+    'projectAgent.chat.unavailable': 'This reply could not be completed.',
+    'projectAgent.chat.budgetExhausted': 'This check reached its limit before the reply was finished. Progress was saved. Retry or send a new message.',
+    'projectAgent.chat.context.error': 'Original error',
     'projectAgent.chat.replied': 'Replied',
     'projectAgent.chat.disposition.answered': 'Answered',
     'projectAgent.chat.disposition.merged': 'Merged',
@@ -2786,7 +2897,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.disposition.outOfScope': 'This message was about “{title}” and did not affect the others',
     'projectAgent.chat.quote': 'Quote',
     'projectAgent.chat.quoteRemove': 'Remove quote',
-    'projectAgent.chat.placeholder': 'Message this bot',
+    'projectAgent.chat.placeholder': 'Message {name}',
     'projectAgent.chat.attach': 'Attach files or images',
     'projectAgent.chat.previewAttachment': 'Preview image',
     'projectAgent.chat.removeAttachment': 'Remove attachment',
@@ -2830,6 +2941,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.redacted': 'Redacted',
     'projectAgent.process.previewLimit': 'Content exceeds the preview limit.',
     'projectAgent.process.seconds': '{seconds}s',
+    'projectAgent.process.lessThanSecond': 'Less than 1s',
     'projectAgent.process.minutes': '{minutes}m {seconds}s',
     'projectAgent.process.done': 'Finished',
     'projectAgent.process.failed': 'Did not complete',
@@ -2856,15 +2968,31 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.related': 'Related task',
     'projectAgent.chat.work.unavailable': 'Status unavailable',
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
-    'projectAgent.chat.work.handle': 'Review and respond',
-    'projectAgent.chat.work.open': 'Open task',
+    'projectAgent.chat.work.waiting': 'Awaiting follow-up',
+    'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
+    'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
+    'projectAgent.chat.work.open': 'View task details',
     'projectAgent.chat.work.background': '{count} tasks to follow up',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',
-    'projectAgent.chat.context.details': 'Reply details',
+    'projectAgent.chat.context.details': 'View details',
+    'projectAgent.chat.context.title': 'Reply details',
+    'projectAgent.chat.context.back': 'Back to reply details',
+    'projectAgent.chat.context.rounds': 'Full call record',
+    'projectAgent.chat.context.unavailable': 'Details for this reply are currently unavailable.',
     'projectAgent.chat.context.memoryUnavailable': 'The related memories are unavailable.',
     'projectAgent.drawer.inspectBack': 'Back to bot profile',
     'projectAgent.drawer.evidenceUnavailable': 'This evidence is unavailable.',
+    'projectAgent.evidence.title': 'Reply sources',
+    'projectAgent.evidence.record': 'Operation record',
+    'projectAgent.evidence.listHelp': 'Browse the saved operations referenced by this reply.',
+    'projectAgent.evidence.historical': 'This is the content saved at the time of the operation.',
+    'projectAgent.evidence.bodyMissing': 'Source recorded; detailed content was not saved',
+    'projectAgent.evidence.notFound': 'This source record was not found',
+    'projectAgent.evidence.readFailed': 'This record could not be loaded',
+    'projectAgent.evidence.cannotVerify': 'This record cannot be used to check the conclusion. Return to reply details to view other sources.',
+    'projectAgent.evidence.tryLater': 'Return to reply details and open it again. If it remains unavailable, it cannot be used to check the conclusion.',
+    'projectAgent.evidence.emptyOutput': 'This operation produced no text output.',
     'projectAgent.drawer.botDescription': 'Coordinates work for this project, follows up on tasks and brings back results.',
     'projectAgent.drawer.acceptance.confirm': 'Your confirmation',
     'projectAgent.drawer.memory.details': 'Memory details',
@@ -2916,9 +3044,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.policy.scope.restricted': 'Selected models only',
     'projectAgent.policy.localOnly': 'Use local models only',
     'projectAgent.chat.confirmResult': 'Confirm result',
+    'projectAgent.chat.confirmCompletion': 'Confirm criteria met',
+    'projectAgent.chat.reviewReport': 'View report',
+    'projectAgent.chat.completionHint': 'The report is ready. Review these items before continuing checks. Tell me if changes are needed.',
+    'projectAgent.chat.retryCompletion': 'Retry checks',
+    'projectAgent.chat.completionRetryHint': 'Your review was saved, but checks could not start. You can retry.',
+    'projectAgent.chat.resultChanged': 'The task state changed and cannot be confirmed yet. The latest progress has been refreshed.',
     'projectAgent.chat.acceptReadme': 'Write README',
     'projectAgent.chat.actionFailed': 'Action failed. Please try again',
-    'projectAgent.drawer.title': 'Profile',
+    'projectAgent.drawer.title': 'Bot settings',
     'projectAgent.drawer.close': 'Close',
     'projectAgent.drawer.back': 'Back to tasks',
     'projectAgent.drawer.missing': 'None yet',
@@ -2946,7 +3080,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.needsYou': 'Needs you',
     'projectAgent.drawer.group.running': 'In progress',
     'projectAgent.drawer.group.queued': 'Queued',
-    'projectAgent.drawer.group.done': 'Done',
+    'projectAgent.drawer.group.done': 'Ended',
     'projectAgent.drawer.group.paused': 'Paused',
     'projectAgent.drawer.supersededBy': 'Replaced by “{task}”',
     'projectAgent.drawer.resume': 'Resume',
@@ -2962,14 +3096,39 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.classicOpen': 'Open the original conversation',
     'projectAgent.drawer.legacyAutomations': 'Automations (legacy)',
     'projectAgent.drawer.legacyAutomationsEmpty': 'This project has no legacy automations',
-    'projectAgent.drawer.anchor': 'Anchor',
-    'projectAgent.drawer.frozenModel': 'Frozen model',
+    'projectAgent.drawer.anchor': 'Source message ID',
+    'projectAgent.drawer.frozenModel': 'Execution model',
     'projectAgent.drawer.conclusion': 'Conclusion',
     'projectAgent.drawer.evidence': 'Evidence',
     'projectAgent.drawer.progress': 'Latest progress',
-    'projectAgent.drawer.openScene': 'Open the scene',
-    'projectAgent.drawer.scene': 'Task scene',
-    'projectAgent.drawer.sceneMissing': 'This task has no scene yet',
+    'projectAgent.drawer.openScene': 'View work conversation',
+    'projectAgent.drawer.scene': 'Work conversation',
+    'projectAgent.drawer.sceneMissing': 'No work conversation yet',
+    'projectAgent.drawer.task.created': 'Created {time}',
+    'projectAgent.drawer.task.conversation': 'Back to conversation',
+    'projectAgent.drawer.task.question': "A question for you",
+    'projectAgent.drawer.task.followUp': "{name} handles the next step",
+    'projectAgent.drawer.task.followUpEnded': "Ask a follow-up",
+    'projectAgent.drawer.task.endedQuestion': "Ask about the result or add a new requirement in the main conversation.",
+    'projectAgent.drawer.task.askEnded': "Follow up with {name}",
+    'projectAgent.drawer.task.askEndedDraft': "Please explain the result and supporting evidence for “{title}”.",
+    'projectAgent.drawer.task.noQuestion': "When your decision is needed, {name} will ask a specific question in the conversation. You can review the task or ask for an update here.",
+    'projectAgent.drawer.task.answer': "Answer in the conversation",
+    'projectAgent.drawer.task.ask': "Ask {name} for an update",
+    'projectAgent.drawer.task.askDraft': "How is “{title}” progressing? Please explain any blocker and the next step. If you need my decision, ask a specific question.",
+    'projectAgent.drawer.task.draftHint': "Prepares a message for you to review and send.",
+    'projectAgent.drawer.task.update': "Latest note from {name}",
+    'projectAgent.drawer.task.viewUpdate': "View the full note in the conversation",
+    'projectAgent.drawer.task.instructions': "Internal task instructions",
+    'projectAgent.drawer.task.description': 'Task description',
+    'projectAgent.drawer.task.descriptionMissing': 'The task description is unavailable. Return to the conversation to see the original request.',
+    'projectAgent.drawer.task.information': 'Task information',
+    'projectAgent.drawer.task.id': 'Task ID',
+    'projectAgent.drawer.task.records': 'Execution records · {count}',
+    'projectAgent.drawer.task.hint.confirm': '{name} follows up on this task in the main conversation.',
+    'projectAgent.drawer.task.hint.failed': 'The task could not finish. {name} explains the next steps in the main conversation.',
+    'projectAgent.drawer.task.hint.ended': 'Review {name}’s delivery or ask a follow-up in the main conversation.',
+    'projectAgent.drawer.task.hint.working': '{name} reports progress and results in the main conversation.',
     'projectAgent.drawer.objective.source': 'Objective',
     'projectAgent.drawer.objective.empty': 'No ongoing objectives',
     'projectAgent.drawer.objective.hint': 'Tell this bot what to work on or watch over time.',

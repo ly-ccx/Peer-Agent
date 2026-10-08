@@ -245,6 +245,15 @@ describe('agent loop kernel', () => {
     assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
   });
 
+  it('request scoped budgets bound an otherwise unbounded provider loop', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 'bounded', executionBudget: { maxTurns: 6 } });
+    assert.equal(loop.maxTurns, 6);
+    assert.equal(createAgentLoopKernel({ maxTurns: 2, executionBudget: { maxTurns: 6 } }).maxTurns, 2);
+    loop.sendLoopExhausted({ reason: 'max_tool_calls_exceeded' });
+    assert.match(webContents.events[0].payload.error, /agent_tool_budget_exhausted/);
+  });
+
   it('appends the terminal assistant reply before emitting the done snapshot', () => {
     const webContents = makeWebContents();
     const apiMessages = [{ role: 'user', content: 'question' }];

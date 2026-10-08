@@ -595,11 +595,11 @@ pnpm dist:linux
             handle decisions and inspect evidence from the conversation.
           </p>
 
-          <h2 id="desktop-bots" data-i18n="desktop.botsTitle">Bot conversations and profiles</h2>
+          <h2 id="desktop-bots" data-i18n="desktop.botsTitle">Bot conversations and settings</h2>
           <ul>
-            <li data-i18n="desktop.botsStream">Replies stream incrementally. Active tools show their action, target and elapsed time; open a step to inspect parameters and returned content. Stop preserves partial text and your draft.</li>
-            <li data-i18n="desktop.botsWork">Delegated work shows its title and latest local status below the reply. Expand progress or open the task; work needing your attention has a direct action. Result basis groups evidence and related details in one entry.</li>
-            <li data-i18n="desktop.botsProfile">Profile Overview describes the bot and its current work. Memory starts with saved content; provenance and management settings expand on demand. Process and evidence open separately and return to the previous profile tab.</li>
+            <li data-i18n="desktop.botsStream">Replies arrive in complete paragraph bubbles. Details opens process, supporting records and technical diagnostics in the right sidebar. Stop preserves partial text and your draft; selected-text quoting appears beside the selection.</li>
+            <li data-i18n="desktop.botsWork">The bot follows background work and delivers results in the main conversation. Task details show current progress and next steps; genuine decisions ask a specific question. Scheduling yields and restart preserve associated work.</li>
+            <li data-i18n="desktop.botsProfile">Bot settings opens configuration directly, with Overview, Tasks, Objectives and Memory in adjacent tabs. Back up the complete data root before upgrading to RC8; rollback requires the pre-upgrade backup because older writers can discard new authority and coordination fields.</li>
           </ul>
           <p data-i18n="desktop.classic">Settings → General → Interface returns to classic chat. Its layout is described below.</p>
 
@@ -1456,10 +1456,10 @@ Evidence owns governance.</code></pre>
             "install.monoNote": "Monorepo 说明：@peer-agent/tui 是 TUI 源码；@peer-agent/cli 只是公开安装器。",
             "desktop.title": "Desktop 工作台",
             "desktop.lede": "Desktop 为每个项目列出一个机器人，与 CLI 共用本地 Runtime。可以在对话中阅读回复、跟进委派工作、处理决策与查看依据。",
-            "desktop.botsTitle": "机器人对话与档案",
-            "desktop.botsStream": "回复逐段生成。进行中的工具显示动作、目标与耗时；打开步骤可继续查看参数和返回内容。停止生成保留部分正文与输入草稿。",
-            "desktop.botsWork": "委派工作在回复下方显示具体名称与最新本机状态。可展开进展、打开任务，需要你处理时有直接入口。结果依据将证据与相关详情收成一个入口。",
-            "desktop.botsProfile": "档案概况介绍机器人与当前工作。记忆先显示已保存内容，来源与管理设置按需展开。过程和证据单独打开，返回时恢复原档案页签。",
+            "desktop.botsTitle": "机器人对话与设置",
+            "desktop.botsStream": "回复以完整段落气泡逐条到达。“查看详情”在右侧栏展示过程、依据与技术诊断。停止生成保留部分正文与草稿；选中文字后的引用按钮紧贴选区。",
+            "desktop.botsWork": "机器人在后台跟进工作，在主对话交付结果。任务详情说明当前进展与下一步，真正需要决定时提出具体问题。调度让出和重启保留关联工作。",
+            "desktop.botsProfile": "“机器人设置”直接打开配置，相邻页签保留概况、任务、目标和记忆。升级 RC8 前备份完整数据根；回退需恢复升级前备份，旧版本写入可能丢失新的验证权限与协调字段。",
             "desktop.classic": "设置 → 通用 → 界面可以返回经典对话，下面介绍经典界面的布局。",
             "desktop.layoutTitle": "经典界面布局",
             "desktop.thRegion": "区域", "desktop.thJob": "职责",

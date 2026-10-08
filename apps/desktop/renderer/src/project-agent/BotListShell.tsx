@@ -16,6 +16,7 @@ import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
+import type { TaskConversationContext, TaskConversationRequest } from './state/taskConversationState';
 import {
   BOT_LIST_WIDTH_DEFAULT,
   BOT_LIST_WIDTH_MAX,
@@ -93,11 +94,15 @@ export function BotListShell({
   const list = useBotList();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
+  const [replyDetailsTarget, setReplyDetailsTarget] = useState<HTMLDivElement | null>(null);
   const drawerLoadedFor = useRef<string | null>(null);
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
   const [inspect, setInspect] = useState<BotInspect | null>(null);
+  const [taskContext, setTaskContext] = useState<TaskConversationContext | null>(null);
+  const [taskRequest, setTaskRequest] = useState<(TaskConversationRequest & { readonly workspaceId: string }) | null>(null);
   const [replyFlash, setReplyFlash] = useState<string | null>(null);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [meHistoryOpen, setMeHistoryOpen] = useState(false);
@@ -120,6 +125,8 @@ export function BotListShell({
   useEffect(() => {
     setLocateSessionId(null);
     setInspect(null);
+    setTaskContext(null);
+    setTaskRequest(null);
     setReplyFlash(null);
     drawerLoadedFor.current = null;
   }, [opened?.workspaceId]);
@@ -421,15 +428,17 @@ export function BotListShell({
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
                 data-session-id={locateSessionId ?? drawerMemory.sessionId ?? undefined}
-                aria-expanded={drawerMemory.open}
+                aria-expanded={drawerMemory.open && drawerMemory.tab === 'settings' && !inspect}
                 onClick={() => {
+                  drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
                   setDrawerMemory((current) => (
-                    current.open ? closeDrawer(current) : openDrawer(current, 'overview')
+                    current.open && current.tab === 'settings' && !inspect
+                      ? closeDrawer(current) : openDrawer(current, 'settings')
                   ));
                 }}
               >
-                <PeerIcon name="fileText" size={16} strokeWidth={1.75} />
+                <PeerIcon name="settings" size={16} strokeWidth={1.75} />
                 <span>{i18n.t('projectAgent.list.profile')}</span>
               </button>
             </header>
@@ -445,7 +454,14 @@ export function BotListShell({
               i18n={i18n}
               onReplyArrived={announceReply}
               onLocateSession={setLocateSessionId}
+              contextSessionId={drawerMemory.open && drawerMemory.tab === 'tasks' ? drawerMemory.sessionId : null}
+              onTaskContext={setTaskContext}
+              taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}
+              replyDetailsId={inspect?.replyId ?? null}
+              replyDetailsTarget={replyDetailsTarget}
               onInspect={(next) => {
+                const trigger = document.activeElement;
+                if (trigger instanceof HTMLButtonElement && !trigger.closest('.bot-drawer-body')) drawerTriggerRef.current = trigger;
                 setInspect(next);
                 setDrawerMemory((current) => openDrawer(current));
               }}
@@ -502,14 +518,22 @@ export function BotListShell({
           memory={drawerMemory}
           locateSessionId={locateSessionId}
           inspect={inspect}
+          onReplyDetailsTarget={setReplyDetailsTarget}
           sessions={work.available ? work.sessions : []}
           sessionsAvailable={work.available}
+          taskContext={taskContext?.workspaceId === opened.workspaceId ? taskContext : null}
+          onTaskConversation={request => {
+            setInspect(null);
+            setDrawerMemory(current => closeDrawer(current));
+            setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
+          }}
           onRefreshSessions={work.reload}
-          onCloseInspect={() => setInspect(null)}
-          triggerRef={profileButtonRef}
+          onCloseInspect={() => setInspect(current => current?.evidence && current.replyId
+            ? { replyId: current.replyId, evidence: null, rounds: null } : null)}
+          triggerRef={drawerTriggerRef}
           i18n={i18n}
           isZh={isZh}
-          onMemory={next => { setInspect(null); setDrawerMemory(next); }}
+          onMemory={next => { if (next.open) setInspect(null); setDrawerMemory(next); }}
           onProfile={list.updateProfile}
           onOpenConversation={onOpenConversation}
           onOpenAutomations={onOpenAutomations}

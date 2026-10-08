@@ -468,3 +468,27 @@ describe('formatToolResultForStream', () => {
     assert.equal(result, output);
   });
 });
+
+it('ephemeral verifier Tool Result is indexed under the trusted plan with no conversation', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verifier-evidence-scope-'));
+  try {
+    writeFileSync(path.join(root, 'README.md'), 'Observed verifier fact');
+    const store = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
+    const plan = store.createGoalContract({ conversationId: 'child', goal: 'Review facts',
+      successCriteria: [{ id: 'facts', kind: 'model_review', description: 'Evidence supports facts' }], tasks: [] });
+    const { registry, projection } = createRuntimeToolProjection({ projectionOptions: { mode: 'explorer' } });
+    const permissionGate = {
+      createFilePermissionRequester: () => async () => ({ approved: true, granted: true }),
+      createLocalCapabilityPermissionRequester: () => async () => ({ approved: true, granted: true }),
+      createShellApprovalDecider: () => async () => ({ approved: true }),
+    };
+    await executeModelToolCall({ name: 'read_file', rawArguments: JSON.stringify({ path: path.join(root, 'README.md') }),
+      toolCallId: 'ephemeral-verifier-read', workspacePath: root, conversationId: null,
+      toolContext: { ...createToolContext({ conversationId: null, mode: 'explorer' }), planId: plan.planId, turnRole: 'work_session' },
+      permissionGate, webContents: { send() {} }, streamId: 'verifier-stream', registry, runtimeProjection: projection, goalPlanStore: store });
+    const [record] = createGoalPlanStore({ storeDir: path.join(root, 'plans') }).findEvidenceIndexRecords(['tool-result://ephemeral-verifier-read']);
+    assert.equal(record.planId, plan.planId);
+    assert.equal(record.conversationId, undefined);
+    assert.match(record.bodyPreview.text, /Observed verifier fact/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

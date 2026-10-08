@@ -392,6 +392,7 @@ function formatContract() {
     '- Continue advancing the current goal; do not re-plan unrelated goals.',
     '- When uncertain, prefer reading authoritative state via goal_get_plan.',
     '- After completing a subtask, write evidence back through goal_update_task; do not mark completion without evidenceRefs.',
+    '- A model_review criterion belongs to the host verifier. Record the completed step with its real evidence; do not put model_review self-assessments in criterionResults. Pending host review does not mean the step is still running.',
     '- Verify against the Definition of Done: for each auto-verifiable success criterion '
       + '(command/test/file-contains/file-exists), actually run its check after acting, then record '
       + 'the outcome via goal_update_task.criterionResults (criterionId + passed + evidenceRef, '

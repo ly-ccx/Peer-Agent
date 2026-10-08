@@ -3,6 +3,28 @@ import test from 'node:test';
 import { createAgentTurnExecutor } from './agent-turn-executor.mjs';
 import { createBroadcastSink } from './turn-sinks.mjs';
 
+test('project agent separates its scheduling slice from hard budget and preserves host tool timing', async () => {
+  let request;
+  const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage(input) {
+    request = input;
+    input.webContents.send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', startedAtMs: 1000, args: { path: 'report' } });
+    input.webContents.send('chat:stream:tool-result', { toolCallId: 'read', startedAtMs: 1000, endedAtMs: 1250, result: '{"ok":true}' });
+    input.webContents.send('chat:stream:error', { error: 'agent_tool_budget_exhausted' });
+    return { terminalStatus: 'error', toolCallCount: 1 };
+  } } });
+  const result = await executor.runTurn({ mode: 'project_agent', limits: { maxRounds: 6, maxToolCalls: 12 }, remainingToolCalls: 2,
+    roundIndex: 3, sink: { send() {} } });
+  assert.equal(request.executionBudget.maxTurns, 3);
+  assert.equal(request.executionBudget.sliceToolCalls, 2);
+  assert.equal(request.executionBudget.maxToolCalls, Infinity);
+  assert.equal(request.executionBudget.yieldAtTurnLimit, true);
+  assert.equal(request.executionBudget.maxToolBatchCalls, 32);
+  assert.equal(result.retryable, false);
+  assert.equal(result.toolCalls[0].startedAtMs, 1000);
+  assert.equal(result.toolCalls[0].endedAtMs, 1250);
+  assert.deepEqual(result.toolCalls[0].result, { ok: true });
+});
+
 test('runTurn forwards the sink and turn profile and returns the service outcome', async () => {
   const seen = [];
   const executor = createAgentTurnExecutor({

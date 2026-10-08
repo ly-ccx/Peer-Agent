@@ -42,6 +42,8 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         },
       });
       if (!composed.ok) return { error: composed.error, message: composed.message,
+        ...(composed.messageIds ? { messageIds: composed.messageIds } : {}),
+        ...(composed.availableReplyAnchors ? { availableReplyAnchors: composed.availableReplyAnchors } : {}),
         ...(composed.sessionStates ? { sessionStates: composed.sessionStates } : {}) };
       const report = prepareReplyReport({ workspaceId: view?.workspaceId, message: composed.message,
         currentInputAnchors: view?.currentInputAnchors || [],

@@ -485,3 +485,61 @@ test('bounds runaway adapters and reports exhaustion', async () => {
     'runtime.error',
   ]);
 });
+
+test('tool allowance stops repeated reads before an excess batch and retains prior results', async () => {
+  const dispatched: string[] = [], applied: string[] = [];
+  let reason = '';
+  const pipeline = createRuntimePipeline({
+    defaultMaxTurns: Infinity,
+    model: {
+      initialize: () => 0,
+      runTurn: (state: number) => ({ kind: 'tool_calls' as const, state, calls: [0, 1].map(i => ({ toolCallId: `${state}-${i}`, capabilityId: 'local.file.read' })) }),
+      applyToolResults: (state: number, executions) => { applied.push(...executions.map(e => e.call.toolCallId)); return state + 1; },
+      onExhausted: (_state, _context, code) => { reason = code; },
+    },
+    tools: { execute: call => { dispatched.push(call.toolCallId); return { call, result: { output: 'same file' } }; } },
+  });
+  const result = await pipeline.run({ sessionId: 'bounded', input: null, maxToolCalls: 3 });
+  assert.equal(result.status, 'exhausted');
+  assert.equal(reason, 'max_tool_calls_exceeded');
+  assert.equal(result.toolCalls, 2);
+  assert.equal(result.state, 1);
+  assert.deepEqual(dispatched, ['0-0', '0-1']);
+  assert.deepEqual(applied, dispatched);
+});
+
+test('zero tool allowance permits a final answer and exact allowance preserves terminal tools', async () => {
+  for (const finalAnswer of [true, false]) {
+    let dispatched = 0;
+    const pipeline = createRuntimePipeline({
+      model: {
+        initialize: () => 0,
+        runTurn: (state: number) => finalAnswer ? { kind: 'completed' as const, state, output: 'answer' }
+          : { kind: 'tool_calls' as const, state, calls: [{ toolCallId: 'reply' }] },
+        applyToolResults: state => state,
+      },
+      tools: { execute: call => { dispatched++; return { call, result: null, terminal: true }; } },
+    });
+    const result = await pipeline.run({ sessionId: 'final', input: null, maxToolCalls: finalAnswer ? 0 : 1 });
+    assert.equal(result.status, finalAnswer ? 'completed' : 'stopped');
+    assert.equal(dispatched, finalAnswer ? 0 : 1);
+  }
+});
+
+
+test('a finite batch beyond the soft slice applies every result before yielding; the hard limit still prevents dispatch', async () => {
+  const executed: string[] = []; let applied: string[] = []; let yielded = 0;
+  const pipeline = createRuntimePipeline<string, State, ToolCall, ToolResult>({
+    model: { initialize: () => ({ phase: 0, transcript: [] }),
+      runTurn: state => ({ kind: 'tool_calls', state, calls: [1, 2, 3].map(id => ({ toolCallId: String(id), name: 'write' })) }),
+      applyToolResults: (state, rows) => { applied = rows.map(row => row.call.toolCallId); return state; },
+      onYield: () => { yielded++; },
+    },
+    tools: { execute: call => { executed.push(call.toolCallId); return { call, result: { output: 'ok' } }; } },
+  });
+  const result = await pipeline.run({ sessionId: 'slice', input: '', maxTurns: 2, sliceToolCalls: 1, maxToolCalls: 10, maxToolBatchCalls: 4 });
+  assert.equal(result.status, 'yielded'); assert.equal(result.toolCalls, 3);
+  assert.deepEqual(applied, ['1', '2', '3']); assert.equal(yielded, 1);
+  const blocked = await pipeline.run({ sessionId: 'hard', input: '', maxTurns: 2, sliceToolCalls: 1, maxToolCalls: 2 });
+  assert.equal(blocked.status, 'exhausted'); assert.equal(executed.length, 3);
+});

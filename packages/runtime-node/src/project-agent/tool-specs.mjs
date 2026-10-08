@@ -22,18 +22,15 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
         type: 'array',
         minItems: 1,
         maxItems: 8,
-        description: 'Use structured Goal criteria for machine checks. Plain strings and manual criteria require human confirmation even under auto acceptance.',
-        items: { anyOf: [
-          { type: 'string', maxLength: 500 },
-          { type: 'object', properties: {
+        description: 'Use structured criteria. Report quality uses model_review. Manual review requires a trusted human/policy source; never invent human review for ordinary work.',
+        items: { type: 'object', properties: {
             id: { type: 'string', maxLength: 200 },
-            kind: { type: 'string', enum: ['command', 'test', 'file-contains', 'file-exists', 'manual'] },
+            kind: { type: 'string', enum: ['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'] },
             description: { type: 'string', maxLength: 500 },
             command: { type: 'string', maxLength: 2000 },
             path: { type: 'string', maxLength: 1000 },
             expect: { type: 'string', maxLength: 2000 },
           }, required: ['kind', 'description'], additionalProperties: false },
-        ] },
       },
       kind: { type: 'string', enum: ['code', 'research', 'docs', 'ui', 'ops', 'other'] },
       readOnly: { type: 'boolean' },
@@ -61,6 +58,10 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
   spec('reprioritize_session', 'local.delegation.reprioritize_session', {
     type: 'object', properties: { sessionId: { type: 'string' }, priority: { type: 'string', enum: ['high', 'normal', 'low'] }, anchorMessageId: { type: 'string' } },
     required: ['sessionId', 'priority'], additionalProperties: false,
+  }),
+  spec('control_work', 'local.delegation.control_work', {
+    type: 'object', properties: { sessionId: { type: 'string' }, action: { type: 'string', enum: ['pause', 'cancel', 'resume'] }, anchorMessageId: { type: 'string' } },
+    required: ['sessionId', 'action', 'anchorMessageId'], additionalProperties: false,
   }),
   spec('list_sessions', 'local.delegation.list_sessions', {
     type: 'object',
@@ -168,6 +169,11 @@ export function validateDelegationInput(name, raw) {
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'spawn_session') return validateSpawn(input);
+  if (name === 'control_work') {
+    const sessionId = text(input.sessionId, 200), anchorMessageId = text(input.anchorMessageId, 200);
+    return sessionId && anchorMessageId && ['pause', 'cancel', 'resume'].includes(input.action)
+      ? { ok: true, value: { sessionId, anchorMessageId, action: input.action } } : invalid('A work scope, action and current user anchor are required.');
+  }
   if (name === 'resume_session') {
     const sessionId = text(input.sessionId, 200), anchorMessageId = text(input.anchorMessageId, 200);
     return sessionId && anchorMessageId ? { ok: true, value: { sessionId, anchorMessageId } } : invalid('sessionId and anchorMessageId are required.');
@@ -285,18 +291,9 @@ function validatedCriteria(items) {
   const criteria = [];
   const ids = new Set();
   for (const item of items) {
-    if (typeof item === 'string') {
-      const description = text(item, 500);
-      if (!description) return null;
-      const id = `c${criteria.length + 1}`;
-      if (ids.has(id)) return null;
-      ids.add(id);
-      criteria.push(description);
-      continue;
-    }
     if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
     if (Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect'].includes(key))) return null;
-    if (!['command', 'test', 'file-contains', 'file-exists', 'manual'].includes(item.kind)) return null;
+    if (!['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'].includes(item.kind)) return null;
     const description = text(item.description, 500);
     if (!description) return null;
     const criterion = { kind: item.kind, description };

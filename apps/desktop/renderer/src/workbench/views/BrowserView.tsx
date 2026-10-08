@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import {
   useCallback,
   useEffect,
@@ -744,7 +745,7 @@ export function BrowserView({
 
         {activeRuntime.failure ? (
           <div className="browser-error">
-            <div className="browser-error-icon">⚠️</div>
+            <div className="browser-error-icon"><PeerIcon name="warning" size={32} /></div>
             <div className="browser-error-title">{t.failTitle}</div>
             <div className="browser-error-desc">
               {activeRuntime.failure.desc} ({activeRuntime.failure.code})

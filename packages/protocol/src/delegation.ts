@@ -1,3 +1,4 @@
+import { deriveSessionFacts } from './session-facts.ts';
 /**
  * Project-agent delegation contracts. Pure projections only; nothing here runs a tool.
  * The user-visible conclusion of a work session is projectGoalPlan's conclusion.
@@ -29,6 +30,7 @@ export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running',
 export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
 
 export interface DelegationOrigin {
+  readonly workId?: string;
   readonly anchorMessageId: string;
   readonly inputId: string;
   readonly surface: InputSurface;
@@ -88,15 +90,24 @@ export interface SessionReport {
   readonly planId: string | null;
   readonly status: WorkSessionStatus;
   readonly summary: string;
+  readonly taskBrief?: string;
   readonly keyFindings: readonly string[];
   readonly changedFiles: readonly { readonly path: string; readonly summary: string }[];
   readonly evidenceRefs: readonly string[];
+  /** Persisted worker output is a claim; verification still comes from host Evidence. */
+  readonly contentSource?: {
+    readonly kind: 'worker_message' | 'task_results';
+    readonly conversationId?: string;
+    readonly messageId?: string;
+    readonly verification: 'unverified';
+  };
 }
 
 export type DelegationEventKind =
   | 'session_spawned'
   | 'session_progress'
   | 'session_needs_user'
+  | 'report_available'
   | 'session_verified'
   | 'session_ended'
   | 'user_intervened'
@@ -137,6 +148,7 @@ export interface AgentReplyMeta {
 }
 
 export interface ReplySessionState {
+  readonly sourceRevision?: string;
   readonly sessionId: string;
   readonly status: WorkSessionStatus;
 }
@@ -170,6 +182,20 @@ export interface DispositionEvent {
 }
 
 export type VerificationOutcome = 'passed' | 'failed' | 'partial' | 'unverifiable';
+
+/** Host-bound manual completion review; distinct from acceptance of a completed result. */
+export interface SessionCompletionReview {
+  readonly sessionId: string;
+  readonly reviewToken: string;
+  readonly criteria: readonly { readonly id: string; readonly description: string }[];
+  readonly report: string;
+  readonly confirmed?: boolean;
+}
+
+export type SessionConfirmationInput = { readonly workspaceId: string; readonly sessionId: string } & (
+  | { readonly stage?: 'result_acceptance' }
+  | { readonly stage: 'manual_completion'; readonly reviewToken: string }
+);
 
 export type IndependentVerifierState = 'passed' | 'failed' | 'not_required' | 'missing';
 
@@ -343,30 +369,12 @@ function delegationStatus(
   meta: WorkSessionConversationMeta,
   projected: TaskOverviewItem,
 ): WorkSessionStatus {
-  if (snapshot.status === 'failed') return 'failed';
-  if (snapshot.status === 'cancelled') return 'cancelled';
-  if (snapshot.status === 'completed') {
-    if (meta.verifying || meta.phase === 'verifying') return 'verifying';
-    if (meta.acceptance === 'confirm' && meta.accepted !== true) return 'result_ready';
-    return 'accepted';
-  }
-  if (meta.supersededBy) return 'superseded';
-  if (meta.phase === 'paused') return 'paused';
-  // 复核进行中盖过「需要你」。草稿、待批准、等回答的计划在独立复核时都显示 verifying。
-  if (meta.verifying || meta.phase === 'verifying') return 'verifying';
-  if (projected.actionRight === 'needs_you') return 'waiting_user';
-  if (snapshot.runnerStatus === 'exploring') return 'verifying';
-  if (meta.phase === 'starting') return 'starting';
-  if (
-    snapshot.status === 'approved'
-    || snapshot.status === 'accepted'
-    || snapshot.status === 'paused'
-    || snapshot.status === 'interrupted'
-    || projected.actionRight === 'paused'
-  ) {
-    return 'queued';
-  }
-  return 'running';
+  return deriveSessionFacts({ status: snapshot.status, runnerStatus: snapshot.runnerStatus,
+    accepted: meta.accepted === true || (snapshot.status === 'completed' && meta.acceptance !== 'confirm'
+      && meta.accepted === undefined && !meta.verifying && !snapshot.runnerStatus),
+    superseded: Boolean(meta.supersededBy), phase: meta.phase,
+    needsUser: snapshot.status === 'awaiting_approval', verificationActive: meta.verifying === true,
+  }).status;
 }
 
 /**

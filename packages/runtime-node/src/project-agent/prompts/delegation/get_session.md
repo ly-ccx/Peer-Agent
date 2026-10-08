@@ -1,1 +1,1 @@
-Read one work session. detail "summary" returns the projection. detail "report" also returns the session report. Read-only.
+Read one work session. detail "summary" returns the projection. detail "report" also returns the persisted worker output and completed leaf task results, not task instructions or acceptance criteria. contentSource marks these as unverified worker claims; use the host verification and Evidence facts to judge completion. An empty summary means no worker result is available. Read-only.

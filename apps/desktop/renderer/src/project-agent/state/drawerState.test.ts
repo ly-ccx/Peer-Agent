@@ -87,13 +87,14 @@ test('宽窗口推开对话，窄窗口覆盖', () => {
 test('任务按需要你、进行中、排队、已完成分组', () => {
   const groups = groupDrawerSessions([
     session({ sessionId: 'need', status: 'waiting_user' }),
+    session({ sessionId: 'confirm', status: 'result_ready' }),
     session({ sessionId: 'run', status: 'running' }),
     session({ sessionId: 'start', status: 'starting' }),
     session({ sessionId: 'queue', status: 'queued' }),
     session({ sessionId: 'done', status: 'accepted' }),
     session({ sessionId: 'fail', status: 'failed' }),
   ]);
-  assert.deepEqual(groups.needsYou.map((item) => item.sessionId), ['need']);
+  assert.deepEqual(groups.needsYou.map((item) => item.sessionId), ['need', 'confirm']);
   assert.deepEqual(groups.running.map((item) => item.sessionId), ['run', 'start']);
   assert.deepEqual(groups.queued.map((item) => item.sessionId), ['queue']);
   assert.deepEqual(groups.done.map((item) => item.sessionId), ['done', 'fail']);
@@ -127,6 +128,18 @@ test('档案时间不展示原始 ISO', () => {
   assert.equal(formatDrawerStamp(new Date(2026, 8, 25, 15, 40, 37).toISOString(), now), '9/25 15:40');
   assert.equal(formatDrawerStamp(new Date(2025, 10, 2, 3, 52, 19).toISOString(), now), '2025/11/2 03:52');
   assert.equal(formatDrawerStamp('not-a-time', now), '');
+});
+
+test('任务说明使用 taskBrief，不能把工作报告正文重新命名为说明', () => {
+  const detail = readDrawerSession({ sessionId: 's', report: {
+    summary: '实际报告：发现了三项结果', taskBrief: '只读调查仓库',
+    contentSource: { kind: 'worker_message', verification: 'unverified' },
+  } });
+  assert.equal(detail?.summary, '只读调查仓库');
+  const missing = readDrawerSession({ sessionId: 's', report: {
+    summary: '实际报告', contentSource: { kind: 'worker_message', verification: 'unverified' },
+  } });
+  assert.equal(missing?.summary, '');
 });
 
 test('记忆只读投影和对话模型标签', () => {

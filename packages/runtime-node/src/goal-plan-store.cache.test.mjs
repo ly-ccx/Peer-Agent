@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
+import fs, { mkdtempSync, writeFileSync, rmSync, utimesSync, statSync, renameSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
@@ -10,6 +11,73 @@ function createTempStore() {
   const store = createGoalPlanStore({ storeDir: dir });
   return { dir, store };
 }
+
+test('evidence projection parses an unchanged index once and isolates nested caller mutations', t => {
+  const { dir, store } = createTempStore();
+  const file = path.join(dir, 'evidence-index.jsonl');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  store.recordEvidenceRefs({ evidenceRef: 'capture', capabilityId: 'local.file.read', toolName: 'read_file',
+    bodyPreview: { kind: 'file', text: 'actual content' }, artifactRefs: ['file-ref'],
+    userArtifacts: [{ ref: 'file-ref', kind: 'file', label: 'file',
+      preview: { kind: 'code', additions: 1, deletions: 0, diffLines: ['+actual'] } }] });
+  const original = fs.readFileSync;
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (...args) => {
+    if (args[0] === file) reads++;
+    return original(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const first = store.listEvidenceIndex();
+  first[0].evidenceRef = 'forged';
+  first[0].artifactRefs.push('forged');
+  first[0].bodyPreview.text = 'forged';
+  first[0].userArtifacts[0].preview.diffLines[0] = '+forged';
+  first.splice(0);
+  for (let i = 0; i < 5; i++) {
+    const current = store.listEvidenceIndex();
+    assert.equal(current[0].evidenceRef, 'capture');
+    assert.deepEqual(current[0].artifactRefs, ['file-ref']);
+    assert.equal(current[0].bodyPreview.text, 'actual content');
+    assert.deepEqual(current[0].userArtifacts[0].preview.diffLines, ['+actual']);
+  }
+  assert.equal(reads, 1, 'completion projections must share parsing, not mutable evidence records');
+});
+
+test('evidence projection sees same-size rewrites, replacements, deletion and corruption', t => {
+  const { dir, store } = createTempStore();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'evidence-index.jsonl');
+  const row = ref => JSON.stringify({ evidenceRef: ref, createdAt: '2026-01-01T00:00:00Z' }) + '\n';
+  writeFileSync(file, row('old'));
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'old');
+  const originalStat = statSync(file);
+  writeFileSync(file, row('new'));
+  utimesSync(file, originalStat.atime, originalStat.mtime);
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'new', 'ctime invalidates an mtime-restored rewrite');
+  const replacement = path.join(dir, 'replacement.jsonl');
+  writeFileSync(replacement, row('alt'));
+  utimesSync(replacement, originalStat.atime, originalStat.mtime);
+  renameSync(replacement, file);
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'alt', 'file identity invalidates a same-size replacement');
+  writeFileSync(file, '{invalid\n');
+  assert.deepEqual(store.listEvidenceIndex(), [], 'corrupt records cannot retain an earlier valid snapshot');
+  rmSync(file);
+  assert.deepEqual(store.listEvidenceIndex(), []);
+  writeFileSync(file, row('end'));
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'end');
+});
+
+test('evidence projection sees local and cross-process appends immediately', t => {
+  const { dir, store } = createTempStore();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  assert.deepEqual(store.listEvidenceIndex(), []);
+  store.recordEvidenceRefs({ evidenceRef: 'local' });
+  assert.deepEqual(store.listEvidenceIndex().map(row => row.evidenceRef), ['local']);
+  const nextHost = createGoalPlanStore({ storeDir: dir });
+  nextHost.recordEvidenceRefs({ evidenceRef: 'remote' });
+  assert.deepEqual(store.listEvidenceIndex().map(row => row.evidenceRef), ['local', 'remote']);
+});
 
 test('listPlans 缓存命中：index 未变化时复用结果（不重复 normalize 全量索引）', async () => {
   const { dir, store } = createTempStore();

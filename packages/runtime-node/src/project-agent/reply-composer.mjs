@@ -80,10 +80,12 @@ export function composeReply(input = {}) {
   }
 
   const anchors = fallback ? turnInputIds.ids : replyTo.ids;
-  if (anchors.length === 0 && !proactive) {
-    return fail('reply_to_required', 'replyTo is required unless proactive is true.');
-  }
   const indexed = indexUserMessages(input.userMessages);
+  if (anchors.length === 0 && !proactive) {
+    return fail('reply_to_required', 'replyTo is required unless proactive is true.', {
+      availableReplyAnchors: replyAnchorCandidates(indexed),
+    });
+  }
   const membership = checkAnchors(anchors, indexed);
   if (!membership.ok) return membership;
   const forged = sources.ids.filter((id) => !sessionIds.ids.has(id));
@@ -93,7 +95,7 @@ export function composeReply(input = {}) {
 
   const actualStates = new Map((Array.isArray(input.sessionStates) ? input.sessionStates : [])
     .filter(item => item && typeof item.sessionId === 'string' && SESSION_STATUSES.has(item.status))
-    .map(item => [item.sessionId, { sessionId: item.sessionId, status: item.status }]));
+    .map(item => [item.sessionId, { sessionId: item.sessionId, status: item.status, ...(item.sourceRevision ? { sourceRevision: item.sourceRevision } : {}) }]));
   const missingSources = (Array.isArray(input.unreportedResults) ? input.unreportedResults : [])
     .filter(item => anchors.includes(item?.anchorMessageId) && !sources.ids.includes(item.sessionId));
   if (missingSources.length) {
@@ -330,15 +332,25 @@ function checkAnchors(ids, byId) {
   if (missing.length > 0) {
     return fail('anchor_not_found', 'replyTo message was not found in this conversation.', {
       messageIds: missing,
+      availableReplyAnchors: replyAnchorCandidates(byId),
     });
   }
   const rejected = ids.filter((id) => !isUserInput(byId.get(id)));
   if (rejected.length > 0) {
     return fail('anchor_not_user_input', 'replyTo must be a user_input message.', {
       messageIds: rejected,
+      availableReplyAnchors: replyAnchorCandidates(byId),
     });
   }
   return { ok: true };
+}
+
+/** Recent conversation facts only. The caller must explicitly choose and validate an anchor again. */
+function replyAnchorCandidates(byId) {
+  return [...byId].filter(([, message]) => isUserInput(message)).slice(-5).map(([messageId, message]) => ({
+    messageId,
+    text: typeof message.content === 'string' ? message.content.slice(0, 120) : '',
+  }));
 }
 
 function readSurfacing(value) {

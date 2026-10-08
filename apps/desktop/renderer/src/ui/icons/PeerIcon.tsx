@@ -20,7 +20,16 @@ export type PeerIconName =
   | 'history'
   | 'search'
   | 'repeat'
-  | 'blocks';
+  | 'blocks'
+  | 'check'
+  | 'minus'
+  | 'circle'
+  | 'pause'
+  | 'warning'
+  | 'ellipsis'
+  | 'archive'
+  | 'arrowRight'
+  | 'arrowRightOff';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
   back: (
@@ -46,6 +55,15 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   search: <><circle cx="10.5" cy="10.5" r="7.5" /><path d="m16 16 5 5" /></>,
   repeat: <><path d="m17 2 4 4-4 4M3 11V8a2 2 0 0 1 2-2h16M7 22l-4-4 4-4m14-1v3a2 2 0 0 1-2 2H3" /></>,
   blocks: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 17.5h7m-3.5-3.5v7" /></>,
+  check: <path d="m5 12 4 4L19 6" />,
+  minus: <path d="M5 12h14" />,
+  circle: <circle cx="12" cy="12" r="8" />,
+  pause: <><path d="M8 5v14M16 5v14" /></>,
+  warning: <><path d="m12 3 10 18H2Z" /><path d="M12 9v4m0 4h.01" /></>,
+  ellipsis: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
+  archive: <><rect x="3" y="3" width="18" height="4" rx="1" /><path d="M5 7v14h14V7m-10 5h6" /></>,
+  arrowRight: <path d="M4 12h16m-6-6 6 6-6 6" />,
+  arrowRightOff: <><path d="M4 12h10m2 0h4m-6-6 6 6-3 3M3 3l18 18" /></>,
   stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   chevronUp: <path d="m6 15 6-6 6 6" />,

@@ -1,16 +1,16 @@
 /* Frost settings: paper groups and a shared type/control hierarchy. */
-.settings-page { --settings-panel-max-width: 1000px; grid-template-columns: 226px minmax(0, 1fr); }
+.settings-page { --settings-panel-max-width: 920px; --settings-group-inset: 18px; --settings-row-padding: 10px var(--settings-group-inset); --settings-heading-padding: 12px var(--settings-group-inset); grid-template-columns: 226px minmax(0, 1fr); }
 .settings-nav { background: var(--glass-chrome); backdrop-filter: blur(var(--blur-chrome)); padding-inline: 16px; }
-.settings-nav-list { gap: 21px; }
+.settings-nav-list { gap: 14px; }
 .settings-nav-group h2 { color: var(--graphite-soft); font-weight: 400; letter-spacing: 0; text-transform: none; padding-bottom: 8px; }
-.settings-nav-item { min-height: 39px; border-radius: var(--control-radius); font-size: .8125rem; }
+.settings-nav-item { min-height: 34px; padding-block: 6px; border-radius: var(--control-radius); font-size: .8125rem; }
 .settings-nav-item.active { background: var(--chrome-active); }
-.settings-nav-search { height: 36px; margin-inline: 4px; border-radius: var(--control-radius); border-color: transparent; background: var(--chrome-sunken); box-shadow: none; }
+.settings-nav-search { height: 32px; margin-inline: 4px; border-radius: var(--control-radius); border-color: transparent; background: var(--chrome-sunken); box-shadow: none; }
 .settings-nav-search:focus-within { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
-.settings-content { container: settings / inline-size; background: var(--chrome-canvas); }
+.settings-content { --settings-help-size: .75rem; --settings-help-color: color-mix(in srgb, var(--graphite-soft) 84%, var(--paper-sheet)); container: settings / inline-size; background: var(--chrome-canvas); }
 .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) {
   width: 100%; max-width: var(--settings-panel-max-width); margin: 0 auto;
-  box-sizing: border-box; padding: 40px 44px 36px; gap: 24px;
+  box-sizing: border-box; padding: 32px 32px 28px; gap: 18px;
 }
 .settings-content > .settings-panel { display: flex; flex-direction: column; }
 .settings-content .settings-panel__header { flex-wrap: wrap; }
@@ -22,30 +22,30 @@
   font-size: 1.875rem; font-weight: 600; line-height: 1.3; letter-spacing: -.04em;
 }
 .settings-content :is(.general-panel-header p, .frost-page-heading p, .model-routing-header p, .settings-panel__header p, .remote-access-panel > header p) {
-  margin: 8px 0 0; color: var(--graphite-soft); font-size: .8125rem; line-height: 1.6;
+  margin: 6px 0 0; color: var(--settings-help-color); font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55;
 }
 .frost-settings-group {
   display: flex; flex-direction: column; min-width: 0; margin: 0;
   border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius); background: var(--paper-sheet); box-shadow: none;
 }
 .frost-settings-group > .frost-group-heading {
-  display: block; padding: 18px 23px 16px; margin: 0; border-bottom: 1px solid var(--chrome-hairline);
+  display: block; padding: var(--settings-heading-padding, 18px 23px 16px); margin: 0; border-bottom: 1px solid var(--chrome-hairline);
   border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; background: var(--paper-base);
 }
 .frost-settings-group > .frost-group-heading h2 {
   margin: 0; color: var(--graphite-base); font-family: var(--font-sans);
   font-size: .9375rem; font-weight: 400; line-height: 1.4;
 }
-.frost-settings-group > .frost-group-heading p { margin: 4px 0 0; color: var(--graphite-soft); font-size: .8125rem; line-height: 1.6; }
+.frost-settings-group > .frost-group-heading p { margin: 4px 0 0; color: var(--settings-help-color, var(--graphite-soft)); font-size: var(--settings-help-size, .8125rem); font-weight: 400; line-height: 1.55; }
 .frost-group-content { min-width: 0; }
 .settings-content .general-card { margin: 0; padding: 0; }
 .settings-content .general-setting-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 236px; align-items: center; gap: 28px;
-  min-height: 76px; padding: 17px 23px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 224px; align-items: center; gap: 24px;
+  min-height: 64px; padding: var(--settings-row-padding);
 }
 .settings-content .general-setting-row + .general-setting-row { border-top: 1px solid color-mix(in srgb, var(--chrome-hairline) 65%, transparent); }
 .settings-content .general-setting-copy h3 { margin: 0; font-size: .875rem; font-weight: 600; line-height: 1.4; color: var(--graphite-base); }
-.settings-content .general-setting-copy p { margin: 4px 0 0; font-size: .8125rem; font-weight: 400; line-height: 1.6; color: var(--graphite-soft); }
+.settings-content .general-setting-copy p { margin: 3px 0 0; font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
 .settings-content .general-language-select { width: 100%; min-width: 0; }
 /* Shared selector geometry, including provider/routing and bot forms. */
 :is(.settings-content, .bot-drawer-body) .pa-dropdown-trigger,
@@ -82,10 +82,10 @@
 /* Existing complex forms keep their controls, while using the same group surfaces. */
 .settings-content :is(.settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group) { border-radius: var(--surface-radius); border: 1px solid var(--chrome-hairline); background: var(--paper-sheet); box-shadow: none; }
 .settings-content :is(.shortcut-group, .llm-instructions-card) { padding: 0; gap: 0; }
-.settings-content :is(.shortcut-group-heading, .llm-instructions-header, .llm-group-header) { padding: 18px 23px 16px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
+.settings-content :is(.shortcut-group-heading, .llm-instructions-header, .llm-group-header) { padding: var(--settings-heading-padding); background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
 .settings-content :is(.shortcut-group-heading h3, .llm-instructions-header strong, .llm-group-header strong) { font-size: .9375rem; font-weight: 400; color: var(--graphite-base); }
-.settings-content :is(.shortcut-group-heading p, .shortcut-description) { font-size: .8125rem; line-height: 1.6; color: var(--graphite-soft); }
-.settings-content .shortcut-row { padding: 17px 23px; }
+.settings-content :is(.shortcut-group-heading p, .shortcut-description, .llm-instructions-hint) { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
+.settings-content .shortcut-row { padding: var(--settings-row-padding); }
 .settings-content .shortcut-title { font-size: .875rem; font-weight: 600; }
 .settings-content :is(.shortcut-status, .shortcut-reset, .shortcut-error) { font-size: .8125rem; }
 .settings-content .shortcut-recorder { min-height: 40px; border-radius: var(--control-radius); border-color: transparent; background: var(--control-fill); box-shadow: none; }
@@ -93,28 +93,28 @@
 .settings-content .shortcut-recorder:active { background: var(--control-fill-active); }
 .settings-content .shortcut-recorder.is-recording { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
 .settings-content .shortcut-recorder kbd { font-size: .875rem; }
-.settings-content .llm-instructions-card > :is(.llm-instructions-hint, textarea, .llm-instructions-actions) { margin: 16px 23px; width: auto; }
-.settings-content .settings-help-links { padding: 17px 23px; }
+.settings-content .llm-instructions-card > :is(.llm-instructions-hint, textarea, .llm-instructions-actions) { margin: 12px var(--settings-group-inset); width: auto; }
+.settings-content .settings-help-links { padding: var(--settings-row-padding); }
 .settings-content .appearance-group { padding: 0; gap: 0; }
-.settings-content .appearance-group .frost-group-content { padding: 23px; }
+.settings-content .appearance-group .frost-group-content { padding: var(--settings-group-inset); }
 .settings-content .appearance-settings-card { padding: 0; border: 0; background: transparent; border-radius: 0; box-shadow: none; }
-.settings-content .appearance-settings-row { padding: 17px 0; min-height: 76px; }
+.settings-content .appearance-settings-row { padding: 10px 0; min-height: 64px; }
 .settings-content .appearance-settings-row:first-child { padding-top: 0; }
 .settings-content .appearance-settings-row:last-child { padding-bottom: 0; }
 .settings-content .appearance-settings-row-title { font-size: .875rem; font-weight: 600; }
-.settings-content .model-routing-card .frost-group-content { padding: 17px 23px; }
+.settings-content .model-routing-card .frost-group-content { padding: var(--settings-row-padding); }
 .settings-content .model-routing-head { font-size: .75rem; font-weight: 400; padding-block: 10px; }
 .settings-content .model-routing-name { font-size: .875rem; }
-.settings-content .model-routing-row { padding-block: 17px; }
+.settings-content .model-routing-row { padding-block: 10px; }
 .settings-content .model-routing-role { grid-template-columns: minmax(96px, 1fr) 130px 140px minmax(100px, 1fr) 120px; }
-.settings-content .remote-access-card { padding: 0 23px 17px; }
-.settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: 18px 23px 16px; margin: 0 -23px 17px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
+.settings-content .remote-access-card { padding: 0 var(--settings-group-inset) 10px; }
+.settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: var(--settings-heading-padding); margin: 0 calc(-1 * var(--settings-group-inset)) 12px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
 .settings-content .remote-access-card h3 { font-size: .9375rem; font-weight: 400; }
 .settings-content .remote-access-card p { font-size: .8125rem; line-height: 1.6; }
 .settings-content .remote-access-gateway input { min-height: 38px; border-radius: 8px; font-size: .8125rem; }
-.settings-content .llm-fallback-vision { padding: 17px 23px; border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius); background: var(--paper-sheet); }
-.settings-content .llm-fallback-vision-copy strong { font-size: .875rem; }
-.settings-content .llm-fallback-vision-copy p { font-size: .8125rem; line-height: 1.6; }
+.settings-content .llm-fallback-vision { padding: var(--settings-row-padding); border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius); background: var(--paper-sheet); }
+.settings-content .llm-fallback-vision-copy strong { font-size: .875rem; font-weight: 500; }
+.settings-content .llm-fallback-vision-copy p { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
 @container settings (max-width: 920px) {
   .settings-content .model-routing-role { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .settings-content .model-routing-head.model-routing-role { display: none; }
@@ -123,7 +123,7 @@
   .settings-content :is(.model-routing-resolved, .model-routing-spend)::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--graphite-soft); font-size: .75rem; }
 }
 @container settings (max-width: 760px) {
-  .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) { padding: 32px 24px; }
+  .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) { padding: 24px 20px; }
   .settings-content .general-setting-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .settings-content .general-language-select { max-width: 320px; }
   .settings-content .general-quiet-controls { justify-content: flex-start; }
@@ -134,7 +134,7 @@
 }
 @media (prefers-reduced-transparency: reduce) { .settings-nav { background: var(--chrome-raised); backdrop-filter: none; } }
 
-.settings-content > .settings-provider-page .llm-settings-panel { padding: 0; max-width: none; margin: 28px 0 0; }
+.settings-content > .settings-provider-page .llm-settings-panel { padding: 0; max-width: none; margin: 18px 0 0; }
 
 .settings-content .appearance-mode-thumb { aspect-ratio: auto; height: 92px; }
 .settings-content .appearance-mode-card { padding: 8px; border-color: transparent; border-radius: var(--control-radius); background: var(--control-fill); }

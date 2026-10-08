@@ -131,8 +131,8 @@ test('model routing copy exists in both locales', () => {
   assert.notEqual(en.t('modelRouting.singleModel'), zh.t('modelRouting.singleModel'));
 });
 
-test('LlmSettingsPanel.tsx keeps its line count', () => {
+test('LlmSettingsPanel.tsx keeps its smaller extracted baseline', () => {
   const source = readFileSync(new URL('../LlmSettingsPanel.tsx', import.meta.url), 'utf8');
   const lines = source.endsWith('\n') ? source.split('\n').length - 1 : source.split('\n').length;
-  assert.equal(lines, 2265);
+  assert.equal(lines, 2214);
 });

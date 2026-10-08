@@ -43,7 +43,7 @@ export async function checkEffortStability({ page, slider, strength, until, getB
       delete globalThis.rcEffortFrames;
       return frames;
     });
-    const expected = key === 'End' ? '100' : '0';
+  const expected = key === 'End' ? '100' : '0';
     assert.ok(frames.length >= 5);
     assert.ok(frames.every(frame => frame.value === expected), 'selected effort must stay put throughout the delayed save');
     for (const frame of frames) for (const node of ['trigger', 'panel']) for (const axis of ['x', 'y', 'width', 'height']) {
@@ -51,6 +51,26 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     }
     return frames.length;
   };
+  if (scope === 'composer') {
+    // A click can return before the first frame of the active-color transition.
+    // Assert the painted open state after the browser has begun painting it.
+    await until(() => strength.evaluate(node => {
+      const content = node.querySelector('.reasoning-effort-trigger-content');
+      return node.getAttribute('aria-expanded') === 'true'
+        && getComputedStyle(content).backgroundColor !== 'rgba(0, 0, 0, 0)';
+    }), Boolean);
+    const paint = await strength.evaluate(node => {
+      const content = node.querySelector('.reasoning-effort-trigger-content');
+      const label = node.querySelector('.reasoning-effort-label');
+      const c = content.getBoundingClientRect(), l = label.getBoundingClientRect();
+      return { outerBackground: getComputedStyle(node).backgroundColor,
+        innerBackground: getComputedStyle(content).backgroundColor,
+        left: l.left - c.left, right: c.right - l.right };
+    });
+    assert.equal(paint.outerBackground, 'rgba(0, 0, 0, 0)', 'stable sizing slot must not paint excess active background');
+    assert.notEqual(paint.innerBackground, 'rgba(0, 0, 0, 0)', 'active label must retain visible background');
+    assert.ok(Math.abs(paint.left - paint.right) < 0.5, 'active background padding must match on both sides of the label');
+  }
   const successFrames = await sample('End');
   await page.keyboard.press('Escape');
   assert.equal(await strength.evaluate(node => node === document.activeElement), true, 'Escape must return focus even while the save is pending');

@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import { useEffect, useId, useRef, useState } from 'react';
 
 export interface OverflowMenuItem {
@@ -42,7 +43,7 @@ export function OverflowMenu({ items, zh, label }: { items: readonly OverflowMen
         title={label ?? (zh ? '更多操作' : 'More actions')}
         onClick={() => setOpen((value) => !value)}
       >
-        <span aria-hidden="true">⋯</span>
+        <PeerIcon name="ellipsis" size={16} />
       </button>
       {open ? (
         <div className="pa-overflow-menu" role="menu" id={menuId}>

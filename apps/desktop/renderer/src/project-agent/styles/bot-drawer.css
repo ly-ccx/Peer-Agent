@@ -79,6 +79,7 @@
 }
 
 .bot-drawer-head button {
+  -webkit-app-region: no-drag;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -801,8 +802,8 @@
   grid-column: 1 / -1;
 }
 
-.bot-memory-filter-dropdown,
-.bot-memory-filter-dropdown .pa-dropdown-trigger {
+.bot-memory-filters .bot-memory-filter-dropdown,
+.bot-memory-filters .bot-memory-filter-dropdown .pa-dropdown-trigger {
   display: flex;
   width: 100%;
   min-width: 0;
@@ -891,6 +892,18 @@
 }
 
 .bot-process { gap: 16px; }
+.bot-evidence-view { gap: 12px; min-width: 0; }
+.bot-evidence-heading { display: flex; align-items: center; gap: 9px; }
+.bot-evidence-heading svg { color: var(--graphite-soft); flex-shrink: 0; }
+.bot-evidence-time { margin-top: -7px; font-size: 11px; color: var(--graphite-soft); }
+.bot-evidence-help { margin: 0 0 6px; font-size: 11px; line-height: 1.65; color: var(--graphite-soft); }
+.bot-evidence-content { padding: 14px; border: 1px solid var(--chrome-hairline); border-radius: var(--control-radius); background: var(--control-fill); color: var(--graphite-base); font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bot-evidence-empty { display: flex; align-items: flex-start; gap: 10px; padding: 16px 14px; border-radius: var(--control-radius); background: var(--control-fill); }
+.bot-evidence-empty > svg { flex-shrink: 0; margin-top: 2px; color: var(--graphite-soft); }
+.bot-evidence-empty h4 { margin: 0; color: var(--graphite-base); font-size: 13px; font-weight: 500; line-height: 1.6; }
+.bot-evidence-empty p { margin: 7px 0 0; color: var(--graphite-soft); font-size: 11px; line-height: 1.75; }
+.bot-evidence-view .bot-inspect-technical { margin-top: 6px; font-size: 11px; color: var(--graphite-soft); overflow-wrap: anywhere; }
+.bot-evidence-view .bot-inspect-technical code { display: block; margin-top: 8px; font-size: 11px; }
 .bot-process-entry { min-width: 0; padding: 12px 0; border-bottom: 1px solid var(--chrome-hairline); }
 .bot-process-entry:last-child { border-bottom: 0; }
 .bot-process-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--graphite-base); }
@@ -1119,7 +1132,11 @@
 .bot-drawer-chrome .bot-inspect-back { align-self: flex-start; border: 0; background: transparent; font-size: 12px; color: var(--graphite-soft); padding: 4px 0; cursor: pointer; }
 .bot-inspect-back:focus-visible, .bot-memory-controls > summary:focus-visible, .bot-memory-provenance > summary:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
 .bot-memory-controls { border-top: 1px solid var(--chrome-hairline); padding-top: 14px; }
-.bot-memory-controls > summary, .bot-memory-provenance > summary { cursor: pointer; color: var(--graphite-mute); font-size: 12px; padding: 4px 0; }
+.bot-memory-controls > summary, .bot-memory-provenance > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; color: var(--graphite-soft); font-size: 12px; padding: 4px 0; }
+.bot-memory-controls > summary::-webkit-details-marker, .bot-memory-provenance > summary::-webkit-details-marker { display: none; }
+.bot-memory-controls > summary::marker, .bot-memory-provenance > summary::marker { content: ''; }
+.bot-memory-controls > summary > svg, .bot-memory-provenance > summary > svg { flex-shrink: 0; transition: transform 160ms ease; }
+.bot-memory-controls[open] > summary > svg, .bot-memory-provenance[open] > summary > svg { transform: rotate(90deg); }
 .bot-memory-controls .bot-memory-settings-card { margin-top: 12px; }
 .bot-memory-provenance { color: var(--graphite-soft); font-size: 11px; }
 .bot-memory-provenance > summary { font-size: 11px; }
@@ -1127,3 +1144,8 @@
 .bot-memory-provenance code { font-size: 10px; }
 
 .bot-overview-tab .bot-overview-details > div:last-child { grid-column: 1 / -1; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--chrome-hairline); }
+
+.bot-inspect-technical > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
+.bot-inspect-technical > summary::-webkit-details-marker { display: none; }
+.bot-inspect-technical > summary > svg { transition: transform 160ms ease; }
+.bot-inspect-technical[open] > summary > svg { transform: rotate(90deg); }

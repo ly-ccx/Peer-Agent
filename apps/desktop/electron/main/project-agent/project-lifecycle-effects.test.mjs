@@ -42,3 +42,13 @@ test('settling a new reply records its accepted facts for the next wake', async 
   assert.equal(saved.meta.sessionStates[0].status,'accepted');
   assert.equal(prepareReplyReport({workspaceId:'w1',message:{...message,meta:{sessionStates:saved.meta.sessionStates}},reportedMessages:[saved]}).suppressed,true);
 });
+
+test('disabled memory still settles the verified result without writing familiarity findings', async () => {
+  let settled=0;
+  const effects=createProjectLifecycleEffects({profileStore:{read:()=>({familiarize:{sessionId:'s1'}})},
+    memoryEnabled:()=>false,lifecycle:{recordVerifiedFindings:()=>assert.fail('memory disabled')},
+    supervisor:{get:()=>({workspaceId:'w1',status:'accepted'}),settle:async()=>{settled++;}},
+    conversationStore:{updateMessageById(){}},resolveConversationId:()=> 'parent'});
+  await effects.onReplied('w1',{id:'r',kind:'agent_reply',content:'Done',sources:['s1']});
+  assert.equal(settled,1);
+});

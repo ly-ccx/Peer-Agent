@@ -1,12 +1,15 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { LlmProviderConfigView } from '@peer-agent/protocol';
+import { WORK_SESSION_STATUSES, type LlmProviderConfigView } from '@peer-agent/protocol';
 import { useEffect, useState } from 'react';
 import { Drawer } from '../../app/components/Drawer';
 import { ChatSurface } from '../../chat/components/ChatSurface';
 import { clientApi } from '../../clientApi';
 import { WorkbenchPanel } from '../../workbench/WorkbenchPanel';
 import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
-import type { DrawerSession } from '../state/drawerState';
+import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
+import { PeerIcon } from '../../ui/icons';
+import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
+import '../styles/bot-task-detail.css';
 
 export function SessionDetail({
   workspaceId,
@@ -15,6 +18,9 @@ export function SessionDetail({
   i18n,
   isZh,
   onBack,
+  onConversation,
+  botName,
+  context,
 }: {
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -22,41 +28,74 @@ export function SessionDetail({
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly onBack: () => void;
+  readonly onConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
+  readonly botName: string;
+  readonly context: TaskConversationContext | null;
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
+  const status = WORK_SESSION_STATUSES.find(value => value === session.status);
+  const label = status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
+    : status === 'result_ready' ? i18n.t('projectAgent.chat.work.resultReady')
+    : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable');
+  const progress = formatDrawerSessionStatus(session, i18n);
+  const stamp = formatDrawerStamp(session.spawnedAt);
+  const hint = session.status === 'waiting_user' || session.status === 'result_ready' ? 'confirm'
+    : session.status === 'failed' || session.status === 'unavailable' ? 'failed'
+    : session.status === 'accepted' || session.status === 'cancelled' ? 'ended' : 'working';
+  const question = ['waiting_user', 'result_ready'].includes(session.status) ? context?.question : null;
+  const ended = session.status === 'accepted' || session.status === 'cancelled';
+  const title = session.title && session.title !== session.sessionId ? session.title : i18n.t('projectAgent.chat.work.related');
+  const messageId = context?.messageId || session.anchorMessageId || undefined;
+  const updateText = context?.content.replace(/\s+/g, ' ').trim() ?? '';
+  const updatePreview = updateText.length > 240 ? `${updateText.slice(0, 240)}…` : updateText;
   return (
-    <div className="bot-drawer-detail">
-      <button type="button" onClick={onBack}>{i18n.t('projectAgent.drawer.back')}</button>
-      <h2>{session.title}</h2>
-      <dl>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.progress')}</dt>
-          <dd>{session.progress || session.statusLabel || session.status}</dd>
+    <div className="bot-drawer-detail bot-task-detail" data-status={session.status}>
+      <button type="button" className="bot-task-back" onClick={onBack}><PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.back')}</button>
+      <header className="bot-task-detail-head">
+        <h2>{title}</h2>
+        <div className="bot-task-detail-meta"><span className="bot-task-status">{label}</span>
+          {stamp && <time dateTime={session.spawnedAt}>{i18n.t('projectAgent.drawer.task.created', { time: stamp })}</time>}
         </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.anchor')}</dt>
-          <dd>{session.anchorMessageId || i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.frozenModel')}</dt>
-          <dd>{session.modelLabel || i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.conclusion')}</dt>
-          <dd>{session.summary || i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-        <div>
-          <dt>{i18n.t('projectAgent.drawer.evidence')}</dt>
-          <dd>{session.evidenceRefs.length > 0 ? session.evidenceRefs.join('、') : i18n.t('projectAgent.drawer.missing')}</dd>
-        </div>
-      </dl>
-      <button
-        type="button"
-        disabled={!session.conversationId}
-        onClick={() => setSceneOpen(true)}
-      >
-        {session.conversationId ? i18n.t('projectAgent.drawer.openScene') : i18n.t('projectAgent.drawer.sceneMissing')}
-      </button>
+      </header>
+      <section className="bot-task-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
+        <h3>{i18n.t('projectAgent.drawer.progress')}</h3>
+        <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
+        <p className="bot-task-hint">{i18n.t(`projectAgent.drawer.task.hint.${hint}`, { name: botName })}</p>
+      </section>
+      <section className="bot-task-next">
+        <h3>{i18n.t(question ? 'projectAgent.drawer.task.question' : ended ? 'projectAgent.drawer.task.followUpEnded' : 'projectAgent.drawer.task.followUp', { name: botName })}</h3>
+        {question ? <p className="bot-task-question">{question.content}</p>
+          : <p className="bot-task-hint">{i18n.t(ended ? 'projectAgent.drawer.task.endedQuestion' : 'projectAgent.drawer.task.noQuestion', { name: botName })}</p>}
+        <button type="button" className="bot-task-conversation" onClick={() => onConversation(question
+          ? { messageId, cardId: question.cardId }
+          : { messageId, taskTitle: title, draft: i18n.t(ended ? 'projectAgent.drawer.task.askEndedDraft' : 'projectAgent.drawer.task.askDraft', { title }) })}>
+          {i18n.t(question ? 'projectAgent.drawer.task.answer' : ended ? 'projectAgent.drawer.task.askEnded' : 'projectAgent.drawer.task.ask', { name: botName })}
+          <PeerIcon name="arrowUpRight" size={13} />
+        </button>
+        {!question && <p className="bot-task-action-note">{i18n.t('projectAgent.drawer.task.draftHint')}</p>}
+      </section>
+      {!question && context?.content ? <section className="bot-task-update">
+        <div className="bot-task-update-head"><h3>{i18n.t('projectAgent.drawer.task.update', { name: botName })}</h3>
+          <time dateTime={context.createdAt}>{formatDrawerStamp(context.createdAt)}</time></div>
+        <p className="bot-task-update-preview">{updatePreview}</p>
+        <button type="button" className="bot-task-conversation" onClick={() => onConversation({ messageId: context.messageId })}>
+          {i18n.t('projectAgent.drawer.task.viewUpdate')}<PeerIcon name="arrowUpRight" size={13} />
+        </button>
+      </section> : null}
+      <details className="bot-task-information" key={session.sessionId}>
+        <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.task.information')}</summary>
+        {session.summary && <section className="bot-task-instructions"><h3>{i18n.t('projectAgent.drawer.task.instructions')}</h3><p>{session.summary}</p></section>}
+        <dl>
+          {session.modelLabel && <div><dt>{i18n.t('projectAgent.drawer.frozenModel')}</dt><dd>{session.modelLabel}</dd></div>}
+          <div><dt>{i18n.t('projectAgent.drawer.task.id')}</dt><dd><code>{session.sessionId}</code></dd></div>
+          {session.anchorMessageId && <div><dt>{i18n.t('projectAgent.drawer.anchor')}</dt><dd><code>{session.anchorMessageId}</code></dd></div>}
+          {session.evidenceRefs.length > 0 && <div><dt>{i18n.t('projectAgent.drawer.task.records', { count: session.evidenceRefs.length })}</dt>
+            <dd><ul>{session.evidenceRefs.map(ref => <li key={ref}><code>{ref}</code></li>)}</ul></dd></div>}
+        </dl>
+        {session.conversationId && <button type="button" className="bot-task-scene" onClick={() => setSceneOpen(true)}>
+          <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}
+        </button>}
+      </details>
       {sceneOpen && session.conversationId ? (
         <ConversationSceneDrawer
           workspaceId={workspaceId}

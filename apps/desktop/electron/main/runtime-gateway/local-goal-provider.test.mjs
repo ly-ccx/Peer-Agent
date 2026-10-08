@@ -73,6 +73,26 @@ describe('local goal provider', () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
+  it('records completed worker evidence while explicitly deferring semantic self-review to the host', async () => {
+    const plan = store.createPlan({ title: '只读报告', goal: '核查目录',
+      successCriteria: [{ id: 'quality', kind: 'model_review', description: '报告完整' }],
+      tasks: [{ taskId: 'inspect', title: '读取目录', status: 'pending', evidenceRefs: [] }] });
+    store.recordApproval(plan.planId, { decision: 'approve' });
+    registerEvidenceRefs(plan.planId, ['tool-result://actual-read']);
+    const execution = await provider.executeCapability({ call: createCall({ planId: plan.planId, taskId: 'inspect',
+      status: 'completed', result: '目录已经读取', evidenceRefs: ['tool-result://actual-read'],
+      criterionResults: [{ criterionId: 'quality', passed: true, evidenceRef: 'tool-result://actual-read' }] }) });
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, true);
+    assert.deepEqual(payload.hostVerificationPending, ['quality']);
+    const fresh = store.getPlan(plan.planId);
+    assert.equal(fresh.tasks[0].status, 'completed');
+    assert.deepEqual(fresh.criterionResults, []);
+    assert.equal(fresh.modelReviews?.length || 0, 0);
+    assert.throws(() => store.recordCriterionResults(plan.planId, [{ criterionId: 'quality', passed: true,
+      evidenceRef: 'tool-result://actual-read' }]), /model_review_requires_host_verifier/);
+  });
+
   it('declares canonical goal capability ids plus inbound legacy aliases', () => {
     assert.equal(
       provider.providerId,

@@ -6,8 +6,25 @@ import {
   buildGrokBuildHeaders,
   listGrokBuildModels,
 } from './grok-build-model-catalog.mjs';
+import { fetchGrokWithConnectionRecovery } from '../provider-transports/grok-fetch.mjs';
 
 describe('Grok Build model catalog', () => {
+  it('uses the official stable compatibility release for authenticated catalog requests', async () => {
+    const requests = [];
+    const fetchImpl = async (url, init = {}) => {
+      requests.push({ url: String(url), headers: new Headers(init.headers) });
+      if (String(url) === 'https://x.ai/cli/stable') return new Response('1.0.46');
+      return Response.json({ data: [{ id: 'grok-4.6' }] });
+    };
+    const result = await listGrokBuildModels('fixture-access', {
+      fetchImpl: (url, init) => fetchGrokWithConnectionRecovery(url, init, {
+        fetchImpl, electronFetchImpl: fetchImpl, retryDelaysMs: [],
+      }),
+    });
+    assert.equal(result.source, 'remote');
+    assert.equal(requests.find(request => request.url.endsWith('/models')).headers.get('x-grok-client-version'), '1.0.46');
+    assert.equal(requests.find(request => request.url === 'https://x.ai/cli/stable').headers.has('authorization'), false);
+  });
   it('loads models with Grok CLI subscription headers', async () => {
     let request = null;
     const result = await listGrokBuildModels('access-token', {
@@ -66,6 +83,6 @@ describe('Grok Build model catalog', () => {
     const headers = buildGrokBuildHeaders('token');
     assert.equal(headers.Authorization, 'Bearer token');
     assert.equal(headers['X-XAI-Token-Auth'], 'xai-grok-cli');
-    assert.ok(headers['x-grok-client-version']);
+    assert.equal(headers['x-grok-client-version'], undefined, 'transport discovers compatibility; catalog must not pin it');
   });
 });

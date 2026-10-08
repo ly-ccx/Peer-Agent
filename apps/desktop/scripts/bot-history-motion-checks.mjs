@@ -116,7 +116,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   await page.evaluate(({ theme, palette }) => { document.documentElement.dataset.theme = theme; document.documentElement.dataset.palette = palette; }, { theme, palette });
   const background = page.locator('.bot-background-work');
   await background.waitFor();
-  assert.equal(await background.locator(':scope > summary > svg').count(), 1);
+  assert.equal(await background.locator(':scope > summary > svg:last-child').count(), 1);
   assert.equal(await background.locator(':scope > summary').evaluate(node => getComputedStyle(node, '::after').content), 'none');
   const samples = report.disclosureFrames = {};
   const cast = await page.context().newCDPSession(page);
@@ -172,6 +172,8 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   assert.deepEqual(retained.messages, original.messages);
   assert.equal(retained.contentRevision, original.contentRevision);
   checks.push('preview bot picker uses SVG and the existing continuation IPC persists a canonical historical input in the selected bot; background confirmation remains governed');
+  report.historyRegression = { grouping: true, search: true, preview: true, keyboard: true,
+    errorRecovery: true, continuation: true, animations: true, reducedMotion: true };
 }
 
 async function recordDisclosure(locator, open, reverse = false) {

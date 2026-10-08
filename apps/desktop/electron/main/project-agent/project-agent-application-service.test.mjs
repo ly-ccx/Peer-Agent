@@ -34,6 +34,26 @@ const METHODS = [
   ['startFamiliarize', { workspaceId: 'ws-1' }],
 ];
 
+test('completion review dispatch is local, workspace scoped, and failures refresh obsolete cards', async () => {
+  const calls = [], events = [], scheduled = [];
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    sessions: { get: () => ({ workspaceId: 'w' }), async confirmCompletion(input) {
+      calls.push(['manual', input]); return { ok: false, error: 'stale_completion_review' };
+    }, async confirmResult(id) { calls.push(['result', id]); return { ok: true }; } },
+    directory: { list: () => [] }, broadcast: (channel, payload) => events.push({ channel, payload }),
+    schedule: fn => { scheduled.push(fn); return 1; },
+  });
+  assert.equal((await service.confirmResult({ workspaceId: 'other', sessionId: 's', stage: 'manual_completion', reviewToken: 't' })).code, 'NOT_FOUND');
+  assert.equal((await service.confirmResult({ workspaceId: 'w', sessionId: 's', stage: 'unknown' })).code, 'INVALID_INPUT');
+  assert.equal(calls.length, 0);
+  assert.equal((await service.confirmResult({ workspaceId: 'w', sessionId: 's', stage: 'manual_completion', reviewToken: 't' })).code, 'stale_completion_review');
+  assert.deepEqual(calls[0], ['manual', { sessionId: 's', reviewToken: 't' }]);
+  scheduled.forEach(fn => fn());
+  assert.ok(events.some(event => event.channel === 'project-agent:conversation-changed'));
+  assert.equal((await service.confirmResult({ workspaceId: 'w', sessionId: 's' })).ok, true);
+  assert.deepEqual(calls[1], ['result', 's']);
+});
+
 test('desktop persists the local plan decision before resuming its task', async () => {
   let record = { approvalId: 'plan:s', workspaceId: 'w', sessionId: 's', planId: 'p',
     kind: 'plan_approval', capabilityId: 'goal.plan', state: 'open' };

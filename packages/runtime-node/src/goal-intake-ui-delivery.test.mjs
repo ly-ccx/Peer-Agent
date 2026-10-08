@@ -60,6 +60,20 @@ test('intake-ui/判定为纯函数-同输入同输出', () => {
   assert.deepEqual(classifyUiDeliveryIntake(input), classifyUiDeliveryIntake(input));
 });
 
+test('intake-ui/Git提交主题不会武装只读调查，但实际界面主题仍会', () => {
+  const goal = '只读熟悉仓库，列出目录、AGENTS.md规则、scripts和最近提交（hash、主题）。';
+  assert.equal(classifyUiDeliveryIntake({ title: '只读熟悉 Peer-Agent', goal }).required, false);
+  assert.equal(classifyUiDeliveryIntake({ goal: '报告最近的提交主题' }).required, false);
+  assert.equal(classifyUiDeliveryIntake({ goal: `${goal} 修复深色主题的按钮颜色。` }).required, true);
+  assert.equal(classifyUiDeliveryIntake({ goal: '调整界面主题' }).required, true);
+  const armed = [];
+  const { store, cleanup } = withTempStore({ onUiDeliveryRequired: plan => armed.push(plan.planId) });
+  try {
+    store.createGoalContract({ goal, conversationId: 'readonly-research' });
+    assert.equal(armed.length, 0);
+  } finally { cleanup(); }
+});
+
 // ── store 接线：契约建立/修订/intake 升级时武装回调 ───────────────────────
 
 function withTempStore(extraOptions = {}) {

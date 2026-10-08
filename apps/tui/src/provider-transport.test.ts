@@ -17,6 +17,26 @@ function connectionError(message: string, code?: string): Error {
 }
 
 describe('TUI provider transport', () => {
+  test('Grok discovery and inference share the host proxy and trust configuration', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetch = createTuiProviderFetch({ env: { HTTPS_PROXY: 'http://host-proxy:8080' },
+      systemRootCertificates: ['fixture-ca'], macosTrustedCertificates: [], systemProxy: {}, connectionRecovery: false,
+      fetch: Object.assign(async (url: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return new Response(String(url) === 'https://x.ai/cli/stable' ? '1.0.46' : 'ok');
+      }, { preconnect() {} }),
+    });
+    await fetch('https://cli-chat-proxy.grok.com/v1/responses', { headers: {
+      Authorization: 'Bearer fixture-token', 'X-XAI-Token-Auth': 'xai-grok-cli', 'x-grok-client-surface': 'grok-build',
+    } });
+    expect(calls.length).toBe(2);
+    expect(new Headers(calls[0]!.init.headers).has('authorization')).toBe(false);
+    expect(new Headers(calls[1]!.init.headers).get('x-grok-client-version')).toBe('1.0.46');
+    for (const call of calls) {
+      expect((call.init as RequestInit & { proxy: string }).proxy).toBe('http://host-proxy:8080');
+      expect((call.init as RequestInit & { tls: { ca: string[] } }).tls.ca).toEqual(['fixture-ca']);
+    }
+  });
   test('selects standard proxy variables by URL scheme', () => {
     const env = {
       HTTP_PROXY: 'http://http-proxy.example:8080',

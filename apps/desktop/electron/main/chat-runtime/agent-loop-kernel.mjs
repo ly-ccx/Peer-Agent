@@ -47,6 +47,7 @@ export function createAgentLoopKernel({
   streamId,
   conversationId = null,
   maxTurns = defaultAgentLoopMaxTurns(),
+  executionBudget = null,
   maxUnsupportedToolRetries = 1,
   maxEmptyResponseRetries = 1,
   maxThinkingOnlyRetries = 1,
@@ -59,7 +60,9 @@ export function createAgentLoopKernel({
   contextWindow = null,
   countCapability = { kind: 'observed_usage_only' },
 } = {}) {
-  const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
+  const requestedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
+  const normalizedMaxTurns = Number.isFinite(executionBudget?.maxTurns)
+    ? Math.min(requestedMaxTurns, Math.max(1, Math.floor(executionBudget.maxTurns))) : requestedMaxTurns;
   const normalizedIdentity = {
     conversationId: String(
       accountingIdentity?.conversationId || conversationId || streamId || 'desktop',
@@ -184,7 +187,11 @@ export function createAgentLoopKernel({
     sendError(`HTTP ${status}: ${String(text || '').slice(0, 300)}`);
   }
 
-  function sendLoopExhausted({ turns = normalizedMaxTurns } = {}) {
+  function sendLoopExhausted({ turns = normalizedMaxTurns, reason = 'max_turns_exceeded' } = {}) {
+    if (reason === 'max_tool_calls_exceeded') {
+      sendError('agent_tool_budget_exhausted: 本轮工具调用额度已用完，回复尚未完成，已停止继续执行。');
+      return;
+    }
     const budget = Number.isFinite(turns) ? String(turns) : 'unbounded';
     sendError(
       `agent_loop_exhausted: configured agent loop turn budget (${budget}) was reached before the model returned a terminal response. The task is not complete; continue the conversation to resume.`

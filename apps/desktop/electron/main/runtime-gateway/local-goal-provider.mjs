@@ -357,11 +357,19 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
         if (args.failureReason !== undefined) change.failureReason = args.failureReason;
         if (args.blockedReason !== undefined) change.blockedReason = args.blockedReason;
         let plan = goalPlanStore.recordTaskEvidence(planId, taskId, change);
+        const hostReviewIds = new Set((plan?.successCriteria || [])
+          .filter(row => row.kind === 'model_review').map(row => row.id));
+        const submittedResults = Array.isArray(args.criterionResults) ? args.criterionResults : [];
+        const hostVerificationPending = submittedResults
+          .filter(row => hostReviewIds.has(row?.criterionId)).map(row => row.criterionId);
         // DoD-as-Code：若本次回写附带成功标准的验证结果，路由到 store 落盘。
         // 与任务证据回写同调用完成，让模型 post-act 验证后一步回写（不新开旁路）。
         if (plan && args.criterionResults !== undefined
           && typeof goalPlanStore.recordCriterionResults === 'function') {
-          const afterCriteria = goalPlanStore.recordCriterionResults(planId, args.criterionResults);
+          // Worker self-review cannot enter the host review store. A rejected self-review
+          // must not misreport an already committed task update as a failed task update.
+          const afterCriteria = goalPlanStore.recordCriterionResults(planId,
+            submittedResults.filter(row => !hostReviewIds.has(row?.criterionId)));
           if (afterCriteria) plan = afterCriteria;
         }
         if (!plan) {
@@ -382,6 +390,8 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
             progress: plan.progress ?? null,
             planStatus: plan.status ?? null,
             criterionResults: Array.isArray(plan.criterionResults) ? plan.criterionResults : [],
+            ...(hostVerificationPending.length ? { hostVerificationPending,
+              note: 'Task evidence was recorded. Model-review claims were not accepted; the host verifier will review them. Keep completed steps completed.' } : {}),
           };
         }
       } catch (err) {

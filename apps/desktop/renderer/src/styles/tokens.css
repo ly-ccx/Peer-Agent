@@ -308,6 +308,11 @@
   --control-radius-compact: 8px;
   --surface-radius: 16px;
   --control-corner: superellipse(1.4);
+  --composer-radius: 18px;
+  --composer-corner: superellipse(1.4);
+  --composer-surface: color-mix(in srgb, var(--paper-sheet) 72%, var(--control-fill) 28%);
+  --composer-edge: color-mix(in srgb, var(--graphite-base) 7%, transparent);
+  --composer-focus-edge: color-mix(in srgb, var(--graphite-base) 18%, transparent);
 
   --ui-radius-chip: 4px;
   --ui-radius-control: 6px;

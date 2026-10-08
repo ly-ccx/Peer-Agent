@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { ThinkingOrb } from 'thinking-orbs';
@@ -405,7 +406,7 @@ function InboxRow({
       ? submitting
         ? '正在合进源头…'
         : celebrating
-          ? '已归档 ✓'
+          ? '已归档'
           : '查看进度'
       : sourceBlock
         ? '去对话'
@@ -475,7 +476,7 @@ function InboxRow({
             disabled={kind === 'accept' && acceptBusy}
           >
             {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
-            <ActionLabel label={cta} />
+            <ActionLabel label={cta} />{kind === 'accept' && celebrating ? <PeerIcon name="check" size={14} /> : null}
             {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
           </button>
         </div>

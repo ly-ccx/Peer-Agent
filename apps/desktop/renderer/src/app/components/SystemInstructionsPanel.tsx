@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 
 function readSystemInstructions(settings: Record<string, unknown> | null | undefined): string {
   return typeof settings?.systemInstructions === 'string' ? settings.systemInstructions : '';
@@ -97,7 +98,7 @@ export function SystemInstructionsPanel({
             onClick={handleSave}
             disabled={savingInstructions || systemInstructionsDraft === systemInstructions}
           >
-            {savingInstructions ? '...' : (isZh ? '保存设置' : 'Save Settings')}
+            {savingInstructions ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{savingInstructions ? (isZh ? '正在保存' : 'Saving') : (isZh ? '保存设置' : 'Save Settings')}
           </button>
         </div>
       </section>

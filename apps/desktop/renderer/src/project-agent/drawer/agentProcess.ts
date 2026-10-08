@@ -1,5 +1,5 @@
 import type { BotToolRound } from '../state/botConversationState';
-import { toolActivityPreview, toolActivitySummary, type ProjectAgentToolPreview } from '@peer-agent/protocol';
+import { toolActivityPreview, toolActivitySummary, type ProjectAgentToolPreview, type ProjectAgentEvidenceReadResult } from '@peer-agent/protocol';
 import type { TranslationKey } from '@peer-agent/i18n';
 import type { PeerIconName } from '../../ui/icons';
 
@@ -14,12 +14,14 @@ export interface AgentProcessEntry {
   readonly status: 'done' | 'failed' | 'suppressed' | 'unknown';
   readonly summary: string;
   readonly count?: number;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
 }
 
-export interface BotEvidenceInspect {
+export interface BotEvidenceInspect extends ProjectAgentEvidenceReadResult {
   readonly ok: boolean;
   readonly evidenceRef: string;
-  readonly kind: string;
+  readonly kind: NonNullable<ProjectAgentEvidenceReadResult['kind']>;
   readonly summary: string;
   readonly truncated: boolean;
   readonly code: string;
@@ -27,6 +29,7 @@ export interface BotEvidenceInspect {
 
 /** 档案里打开的证据摘要，或某条回复对应的只读过程。 */
 export interface BotInspect {
+  readonly replyId?: string;
   readonly evidence: BotEvidenceInspect | null;
   readonly rounds: readonly BotToolRound[] | null;
 }
@@ -52,6 +55,8 @@ export function agentProcessEntries(rounds: readonly BotToolRound[]): AgentProce
         summary: call.name === 'post_reply' ? '' : toolActivitySummary(call.input),
         ...countOf(call.name, call.result),
         input: inputPreview.text, result: resultPreview.text, inputPreview, resultPreview,
+        ...(call.startedAtMs !== undefined ? { startedAt: new Date(call.startedAtMs).toISOString() } : {}),
+        ...(call.endedAtMs !== undefined ? { finishedAt: new Date(call.endedAtMs).toISOString() } : {}),
       });
     }
   }

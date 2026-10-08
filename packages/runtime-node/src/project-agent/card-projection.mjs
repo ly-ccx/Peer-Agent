@@ -42,6 +42,7 @@ export function projectCards(workspaceId, facts = {}, resolutions = []) {
     ...taskQuestionCards(facts),
     ...replyQuestionCards(facts),
     ...confirmCards(facts),
+    ...completionReviewCards(facts),
     ...readmeCards(workspaceId, facts),
     ...unavailableCards(facts),
     ...stoppedCards(facts),
@@ -286,6 +287,17 @@ function confirmCards(facts) {
   return cards;
 }
 
+function completionReviewCards(facts) {
+  return asList(facts.completionReviews).filter(review => review?.reviewToken && review.report && review.criteria?.length).map(review => draft({
+    cardId: cardIdOf('completion_review', `${review.sessionId}:${review.reviewToken}`),
+    kind: 'completion_review', content: clip(review.title, '核对报告'), completionReview: review,
+    factResolved: false, factState: '', refs: refs({ sessionId: review.sessionId }),
+    actions: [ipcAction(review.confirmed ? 'retry_completion' : 'confirm_completion', 'project-agent:confirm-result', {
+      sessionId: review.sessionId, stage: 'manual_completion', reviewToken: review.reviewToken,
+    })],
+  }));
+}
+
 function readmeCards(workspaceId, facts) {
   const offer = readmeFact(facts.readmeOffer);
   if (!offer) return [];
@@ -378,7 +390,11 @@ function draft(card) {
 }
 
 function applyResolution(card, stored) {
-  const storeResolved = stored?.resolvedState === 'resolved';
+  // Older hosts could resolve a retry when disposal merely ended its wait.
+  // Keep that receipt, but require the subsequent canonical turn to back it.
+  const unsupportedRetry = stored?.resolution === 'retried' && !card.factResolved
+    && ['agent_unavailable', 'agent_stopped'].includes(card.kind);
+  const storeResolved = stored?.resolvedState === 'resolved' && !unsupportedRetry;
   const resolved = card.factResolved || storeResolved;
   const resolution = card.factResolved
     ? { source: 'fact', state: card.factState }
@@ -391,6 +407,7 @@ function applyResolution(card, stored) {
     resolvedState: resolved ? 'resolved' : 'open',
     ...(resolution ? { resolution } : {}),
     content: card.content,
+    ...(card.completionReview ? { completionReview: card.completionReview } : {}),
     actions: resolved ? [] : card.actions,
     refs: card.refs,
   };

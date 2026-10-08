@@ -4,6 +4,7 @@ import { parseInteractionToolViewFromCandidates } from '../../state/interactionT
 import { parseSkillToolView } from '../../state/skillToolView';
 import { InteractionToolCard } from './InteractionToolCard';
 import { SkillCapsuleCard } from './SkillCapsuleCard';
+import { PeerIcon } from '../../../ui/icons';
 
 function parseToolCardInteractionView(tool: ToolCard) {
   return parseInteractionToolViewFromCandidates(
@@ -35,6 +36,7 @@ function renderToolResult(tool: ToolCard) {
     return (
       <details className="tool-result-details">
         <summary className="tool-result-summary">
+          <PeerIcon name="chevronRight" size={10} className="disclosure-icon" />
           {summary.slice(0, 60)}…
           {badge ? ` · ${badge}` : ''}
         </summary>
@@ -46,6 +48,7 @@ function renderToolResult(tool: ToolCard) {
   return (
     <details className="tool-result-details">
       <summary className="tool-result-summary">
+        <PeerIcon name="chevronRight" size={10} className="disclosure-icon" />
         {summary || (content.length > 60 ? `${content.slice(0, 60)}…` : content)}
         {badge ? ` · ${badge}` : ''}
       </summary>
@@ -123,7 +126,7 @@ function renderToolStream(label: string, content: string | undefined, kind: 'std
   const preview = content.length > 80 ? `${content.slice(0, 80)}…` : content;
   return (
     <details className={`timeline-tool-${kind}`}>
-      <summary className="timeline-tool-stream-label">{label} · {preview.split('\n')[0]}</summary>
+      <summary className="timeline-tool-stream-label"><PeerIcon name="chevronRight" size={10} className="disclosure-icon" />{label} · {preview.split('\n')[0]}</summary>
       <pre>{content}</pre>
     </details>
   );
@@ -198,6 +201,7 @@ export function ThinkingTimeline({
               return (
                 <details key={toolId} className={`timeline-tool ${toolStatus}`}>
                   <summary className="timeline-tool-summary">
+                    <PeerIcon name="chevronRight" size={10} className="disclosure-icon" />
                     <strong>{resolveToolTitle(tool, i18n)}</strong>
                     <span>{renderToolStatusBadge(tool, toolStatus)}</span>
                   </summary>

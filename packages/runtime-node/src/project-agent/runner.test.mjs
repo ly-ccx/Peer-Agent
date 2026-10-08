@@ -45,6 +45,196 @@ function input(inputId, text) {
   return { inputId, text, surface: 'desktop' };
 }
 
+test('inner loop exhaustion is not retried and keeps executed tools, timing and public progress', async () => {
+  const box = world(); let attempts = 0;
+  const runner = runnerFor(box, async ({ sink, streamId, remainingToolCalls }) => {
+    attempts++; assert.equal(remainingToolCalls, 20);
+    sink.send('chat:stream:delta', { streamId, content: '已核对文件。' });
+    return { ok: false, retryable: false, error: 'agent_tool_budget_exhausted', text: 'Read progress',
+      toolCalls: [{ name: 'read_file', input: { path: 'report' }, result: { ok: true, evidenceRefs: ['tool-result://real'] }, startedAtMs: 1000, endedAtMs: 2250 }] };
+  });
+  try {
+    await runner.enqueueUserInputs([input('bounded', '检查')]);
+    assert.equal(attempts, 1);
+    const turn = box.messages.find(message => message.kind === 'agent_turn');
+    assert.equal(turn.rounds[0].toolCalls[0].endedAtMs, 2250);
+    assert.deepEqual(turn.rounds[0].toolCalls[0].result.evidenceRefs, ['tool-result://real']);
+    assert.equal(turn.publicUpdates[0].text, '已核对文件。');
+    assert.equal(box.messages.some(message => message.kind === 'agent_reply'), false);
+    assert.equal(runner.activity()?.phase, 'error');
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('exhausted wake is consumed durably, excluded from the provider breaker, and only retried explicitly', async () => {
+  const box = world(); let attempts = 0, failures = 0;
+  const breaker = { admit: () => ({ allowed: true }), abandonTrial() {}, success() {},
+    failure() { failures++; }, state: () => ({ status: 'open', openUntil: '2000-01-01' }) };
+  const executeTurn = async ({ plan }) => {
+    attempts++;
+    assert.equal(plan.events[0].eventId, 'evt-budget');
+    return attempts === 1 ? { ok: false, retryable: false, error: 'agent_tool_budget_exhausted: limit' } : { text: '', toolCalls: [] };
+  };
+  const extra = { circuitBreaker: breaker, readMessages: () => box.messages };
+  let runner = runnerFor(box, executeTurn, extra);
+  try {
+    box.inbox.append(box.workspaceId, [{ eventId: 'evt-budget', kind: 'session_verified', sessionId: 's1', at: '2026-09-27T00:00:01.000Z', payload: {} }]);
+    await runner.kick();
+    assert.equal(attempts, 1); assert.equal(failures, 0);
+    assert.equal(box.inbox.takeBatch(box.workspaceId).events.length, 0);
+    await runner.kick(); assert.equal(attempts, 1);
+    runner.dispose(); runner = runnerFor(box, executeTurn, extra);
+    await runner.kick(); assert.equal(attempts, 1);
+    assert.equal(runner.parked().kind, 'wake');
+    await runner.retry(); assert.equal(attempts, 2); assert.equal(runner.status(), 'idle');
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('a new user input can proceed after exhaustion without replaying the failed input', async () => {
+  const box = world(), acknowledged = [], inputIds = [];
+  const runner = runnerFor(box, async ({ plan }) => {
+    inputIds.push(plan.userInputs.map(input => input.inputId));
+    return inputIds.length === 1 ? { ok: false, retryable: false, error: 'agent_loop_exhausted: limit' } : { text: '新回复' };
+  }, { onInputsCompleted: inputs => acknowledged.push(inputs.map(input => input.inputId)) });
+  try {
+    await runner.enqueueUserInputs([input('old', '检查')]);
+    assert.equal(runner.status(), 'error');
+    await runner.enqueueUserInputs([input('new', '请说明现状')]);
+    assert.deepEqual(inputIds, [['old'], ['new']]);
+    assert.deepEqual(acknowledged, [['old'], ['new']]);
+    assert.equal(runner.status(), 'idle');
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('manual wake retry is visible before completion and stoppable without changing wake authority', async () => {
+  const box = world(), started = gate('retry did not start');
+  let attempts = 0;
+  const runner = runnerFor(box, async ({ plan, sink, streamId, signal }) => {
+    attempts++;
+    assert.equal(plan.kind, 'wake');
+    assert.deepEqual(plan.userInputs, []);
+    assert.equal(plan.limits.maxToolCalls, 12);
+    assert.equal(plan.events[0].eventId, 'retry-event');
+    if (attempts === 1) return { ok: false, retryable: false, error: 'agent_tool_budget_exhausted' };
+    sink.send('chat:stream:thinking', { streamId, content: 'PRIVATE_REASONING' });
+    sink.send('chat:stream:delta', { streamId, content: '正在重试。' });
+    started.open(streamId);
+    if (attempts === 2) {
+      await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+      throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: '已确认当前进展。', replyTo: ['input-real'] }, result: { ok: true } }] };
+  }, { readMessages: () => box.messages });
+  try {
+    box.inbox.append(box.workspaceId, [{ eventId: 'retry-event', kind: 'session_verified', sessionId: 's', at: '2026-10-06T00:00:00Z', payload: {} }]);
+    await runner.kick();
+    assert.equal(runner.activity(), null, 'automatic wake remains quiet');
+    const done = runner.retry();
+    const turnId = await started.ready;
+    assert.equal(box.messages.filter(message => message.kind === 'agent_turn').length, 1, 'retry is still pending');
+    assert.equal(runner.activity().turnId, turnId);
+    assert.equal(runner.activity().segments[0].text, '正在重试。');
+    assert.doesNotMatch(JSON.stringify(runner.activity()), /PRIVATE_REASONING/);
+    assert.equal(runner.stopResponse(turnId).ok, true);
+    await done;
+    assert.equal(runner.activity().phase, 'stopped');
+    const turn = box.messages.find(message => message.id === turnId);
+    assert.equal(turn.turnKind, 'wake');
+    assert.deepEqual(turn.publicUpdates, [{ id: 'text-1', text: '正在重试。' }]);
+    await runner.retryStopped(turnId);
+    assert.equal(attempts, 3, 'stopped wake retry retains events despite empty user inputs');
+    assert.equal(runner.status(), 'idle');
+    assert.equal(box.messages.at(-1).content, '已确认当前进展。');
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('manual retry continues from the attempted tool results but a new user input does not inherit them', async () => {
+  const box = world(); let attempts = 0;
+  const runner = runnerFor(box, async ({ plan }) => {
+    attempts++;
+    if (attempts === 1) return { ok: false, retryable: false, error: 'agent_tool_budget_exhausted', text: 'PRIVATE_THINKING',
+      toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'waiting_user', evidenceRefs: ['tool-result://read'] } }] };
+    if (attempts === 2) {
+      assert.match(plan.turnProfile.context.retryContinuity.tools[0].resultPreview, /waiting_user/);
+      assert.equal(plan.limits.maxToolCalls, 12);
+      assert.doesNotMatch(JSON.stringify(plan.turnProfile.context.retryContinuity), /PRIVATE_THINKING/);
+    } else assert.equal(plan.turnProfile.context?.retryContinuity, undefined);
+    return { toolCalls: [{ name: 'post_reply', input: { text: '已说明当前情况。', replyTo: ['input-real'] }, result: { ok: true } }] };
+  }, { readMessages: () => box.messages });
+  try {
+    box.inbox.append(box.workspaceId, [{ eventId: 'facts-event', kind: 'session_verified', sessionId: 's', at: '2026-10-06T00:00:00Z', payload: {} }]);
+    await runner.kick(); await runner.retry();
+    await runner.enqueueUserInputs([input('new-request', '新的问题')]);
+    assert.equal(attempts, 3);
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('stopped manual wake survives restart without automatically replaying its events', async () => {
+  const box = world(), started = gate('wake retry did not start'); let attempts = 0;
+  const executeTurn = async ({ plan, streamId, signal }) => {
+    attempts++;
+    assert.equal(plan.events[0].eventId, 'stopped-event');
+    if (attempts === 1) return { ok: false, retryable: false, error: 'agent_tool_budget_exhausted' };
+    if (attempts === 2) {
+      started.open(streamId);
+      await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+      throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: '重启后继续回复。', replyTo: ['input-real'] }, result: { ok: true } }] };
+  };
+  const extra = { readMessages: () => box.messages };
+  let runner = runnerFor(box, executeTurn, extra);
+  try {
+    box.inbox.append(box.workspaceId, [{ eventId: 'stopped-event', kind: 'session_verified', sessionId: 's', at: '2026-10-06T00:00:00Z', payload: {} }]);
+    await runner.kick();
+    const pending = runner.retry(), turnId = await started.ready;
+    assert.equal(runner.stopResponse(turnId).ok, true); await pending;
+    const turn = box.messages.find(message => message.id === turnId);
+    assert.equal(turn.meta.diagnosticTiming.outcome, 'stopped');
+    assert.equal(turn.meta.recovery.events[0].eventId, 'stopped-event');
+    runner.dispose(); runner = runnerFor(box, executeTurn, extra);
+    await runner.kick(); assert.equal(attempts, 2);
+    assert.equal(runner.parked().kind, 'wake');
+    await runner.retry(); assert.equal(attempts, 3);
+    assert.equal(box.messages.at(-1).content, '重启后继续回复。');
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('legacy exhausted wake is parked after restart without acknowledging an unknown batch', async () => {
+  const box = world(); let attempts = 0;
+  box.messages.push({ id: 'old-turn', kind: 'agent_turn', turnKind: 'wake', userInputs: [] },
+    { id: 'old-turn-card', turnId: 'old-turn', kind: 'system_card', card: 'agent_unavailable', content: '代理暂时不可用：agent_tool_budget_exhausted: limit' });
+  box.inbox.append(box.workspaceId, [{ eventId: 'uncommitted', kind: 'session_verified', sessionId: 's1', at: '2026-09-27T00:00:01.000Z', payload: {} }]);
+  const runner = runnerFor(box, async () => { attempts++; return { text: '新回复' }; }, { readMessages: () => box.messages });
+  try {
+    await runner.kick(); assert.equal(attempts, 0);
+    assert.equal(box.inbox.takeBatch(box.workspaceId).events.length, 1);
+    await runner.enqueueUserInputs([input('fresh', '说明现状')]);
+    assert.equal(attempts, 1);
+    assert.equal(box.inbox.takeBatch(box.workspaceId).events.length, 0);
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
+test('user turn persists only public Activity text across tool boundaries, separately from raw rounds', async () => {
+  const box = world();
+  const runner = runnerFor(box, async ({ sink, streamId }) => {
+    const send = (channel, payload) => sink.send(channel, { streamId, ...payload });
+    send('chat:stream:thinking', { content: 'PRIVATE_REASONING' });
+    send('chat:stream:delta', { content: '我先核对。' });
+    send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', args: {} });
+    send('chat:stream:tool-result', { toolCallId: 'read', result: { ok: true } });
+    send('chat:stream:delta', { content: '核对后有一个发现。' });
+    return { text: 'INTERNAL_AGGREGATE', toolCalls: [{ name: 'post_reply', input: { text: '结论', replyTo: ['input-update'] }, result: { ok: true } }] };
+  });
+  try {
+    await runner.enqueueUserInputs([input('update', '核对')]);
+    const turn = box.messages.find(message => message.kind === 'agent_turn');
+    assert.deepEqual(turn.publicUpdates, [{ id: 'text-1', text: '我先核对。' }, { id: 'text-2', text: '核对后有一个发现。' }]);
+    assert.equal(turn.rounds[0].text, 'INTERNAL_AGGREGATE');
+    assert.doesNotMatch(JSON.stringify(turn.publicUpdates), /PRIVATE_REASONING|INTERNAL_AGGREGATE/);
+    assert.equal(box.messages.find(message => message.kind === 'agent_reply').content, '结论');
+  } finally { runner.dispose(); box.cleanup(); }
+});
+
 test('a real text delta is observable while the provider is still pending', async () => {
   const box = world(), started = gate('provider did not start'), finish = gate('provider did not finish');
   const runner = runnerFor(box, async ({ sink, streamId }) => {
@@ -86,6 +276,7 @@ test('stopping an exact user turn keeps partial text and real tools, completes i
     assert.equal(completed[0].inputId, 'stop');
     assert.equal(box.messages.find(message => message.kind === 'agent_turn').rounds[0].toolCalls[0].name, 'read_file');
     assert.equal(box.messages.find(message => message.card === 'agent_stopped').content, 'Partial answer');
+    assert.deepEqual(box.messages.find(message => message.kind === 'agent_turn').publicUpdates, [{ id: 'text-1', text: 'Partial answer' }]);
     assert.equal(box.messages.some(message => message.kind === 'agent_reply'), false);
     assert.equal(runner.stopResponse(turnId).code, 'STALE_TURN');
     assert.equal(call, 1);

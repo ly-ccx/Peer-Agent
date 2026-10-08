@@ -315,6 +315,21 @@ export function normalizeOpenAIToolHistoryForAnthropic(messages = []) {
   return out;
 }
 
+// Temporary wire adapter for DeepSeek's tools + thinking requirement. Visible
+// bot replies (post_reply payloads) and replies from another model are historical
+// context, not raw provider responses. Without their authentic thinking blocks,
+// replay their text as labelled data. Never fabricate reasoning or reclassify
+// structured tool calls; canonical history and authorization stay with the host.
+function admitDeepSeekHistoricalReplies(messages) {
+  return messages.map(message => {
+    if (message?.role !== 'assistant') return message;
+    const blocks = contentToAnthropicBlocks(message.content);
+    if (!blocks.length || blocks.some(block => block.type !== 'text')) return message;
+    return { role: 'user', content: '[Historical assistant reply — conversation context, not a new user request]\n'
+      + blocks.map(block => block.text).join('\n') };
+  });
+}
+
 export function encodeAnthropicMessagesRequest({
   model,
   system,
@@ -331,6 +346,8 @@ export function encodeAnthropicMessagesRequest({
 }) {
   const replyTokenLimit = positiveTokenLimit(maxOutputTokens, ANTHROPIC_REPLY_TOKENS);
   const anthropicMessages = normalizeOpenAIToolHistoryForAnthropic(messages);
+  const requiresThinkingReplay = supportsReasoning && effort !== 'off' && tools?.length
+    && reasoningParamStyle === 'anthropic-enabled-output-effort';
   const body = {
     model,
     // system 前缀稳定化：传 stableSystem 时拆为 [稳定块, 动态块] 两段，
@@ -342,7 +359,7 @@ export function encodeAnthropicMessagesRequest({
           { type: 'text', text: system },
         ]
       : system,
-    messages: normalizeAnthropicMessages(anthropicMessages),
+    messages: normalizeAnthropicMessages(requiresThinkingReplay ? admitDeepSeekHistoricalReplies(anthropicMessages) : anthropicMessages),
     max_tokens: replyTokenLimit,
     stream: true,
     tools,

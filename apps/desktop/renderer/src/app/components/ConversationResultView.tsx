@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import { useEffect, useMemo, useState } from 'react';
 import {
   collectHeldEvidenceRefs,
@@ -227,7 +228,7 @@ export function ConversationResultView({
                   className={`conversation-result-view__criterion is-${state}`}
                 >
                   <span className="conversation-result-view__mark" aria-hidden="true">
-                    {state === 'passed' ? '✓' : state === 'failed' ? '✗' : '·'}
+                    <PeerIcon name={state === 'passed' ? 'check' : state === 'failed' ? 'close' : 'circle'} size={14} />
                   </span>
                   <div className="conversation-result-view__criterion-body">
                     <span className="conversation-result-view__criterion-title">{criterion.description}</span>
@@ -249,7 +250,7 @@ export function ConversationResultView({
           <ul className="conversation-result-view__criteria">
             {leftoverEvidence.map((ref) => (
               <li key={ref} className="conversation-result-view__criterion is-passed">
-                <span className="conversation-result-view__mark" aria-hidden="true">✓</span>
+                <span className="conversation-result-view__mark" aria-hidden="true"><PeerIcon name="check" size={14} /></span>
                 <div className="conversation-result-view__criterion-body">
                   <span className="conversation-result-view__criterion-title">
                     {resolveEvidenceLabel(ref, evidenceSources, isZh) ?? (isZh ? '证据' : 'Evidence')}

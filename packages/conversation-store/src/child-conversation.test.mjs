@@ -115,6 +115,24 @@ test('list and search hide task and bot rows unless roles are explicit', (t) => 
   assert.equal(ids(legacy.listChildren(parent.id, { role: 'work_session' })).includes(child.id), true);
 });
 
+test('delegation background scope requires work session origin and keeps parent unchanged', (t) => {
+  const { store, parent, runtimeState, capturedAt } = setup(t);
+  const before = store.getPersistedConversationHistory(parent.id);
+  const input = { parentConversationId: parent.id, role: 'work_session', anchorMessageId: 'a',
+    backgroundMessageIds: ['a', 'c'], runtimeState, capturedAt,
+    delegation: { sessionId: 's', anchorMessageId: 'a', inputId: 'input' } };
+  const child = store.createChildConversation(input);
+  const snapshot = store.readInheritedBackground(child.backgroundSnapshotId);
+  assert.deepEqual(snapshot.entries.map(entry => entry.sourceMessageId), ['a', 'c']);
+  assert.deepEqual(snapshot.scope, { kind: 'delegation', messageIds: ['a', 'c'] });
+  assert.deepEqual(store.getPersistedConversationHistory(parent.id), before);
+  for (const patch of [{ role: 'project_agent' }, { delegation: null }, { backgroundMessageIds: ['c'] },
+    { delegation: { ...input.delegation, anchorMessageId: 'b' } }]) {
+    assert.throws(() => store.createChildConversation({ ...input, ...patch }), { code: 'BACKGROUND_SCOPE_INVALID' });
+  }
+  assert.throws(() => store.createChildConversation({ ...input, backgroundMessageIds: ['a', 'absent'] }), { code: 'BACKGROUND_SCOPE_MISSING' });
+});
+
 test('selection children stay ordinary and remain discoverable as children', (t) => {
   const { dir, store, parent } = setup(t);
   const revision = store.getPersistedConversationHistory(parent.id).contentRevision;

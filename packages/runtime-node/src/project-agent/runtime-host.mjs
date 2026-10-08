@@ -1,3 +1,7 @@
+import { registerWorkBudget } from './work-budget.mjs';
+import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { pathOf } from '../data-store.mjs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createProjectInbox } from './project-inbox.mjs';
 import { createInputQueue } from './input-queue.mjs';
@@ -47,6 +51,8 @@ export function createProjectAgentHost({
   activateSessions = null,
   acquireLease = null,
   readMessages = null,
+  continuityVersion = 1,
+  readLeaseEpoch = null,
   onRecoveryPhase = null,
 } = {}) {
   if (typeof executeTurn !== 'function') {
@@ -110,10 +116,23 @@ export function createProjectAgentHost({
     const existing = runners.get(workspaceId);
     if (existing && existing.conversationId === conversationId) return existing;
     if (existing) drop(workspaceId);
+    const coordinationStore = createWorkCoordinationStore({ rootDir, workspaceId,
+      holdsLease: () => holdsLease(workspaceId),
+      leaseEpoch: () => {
+        if (readLeaseEpoch) return readLeaseEpoch(workspaceId);
+        const lease = JSON.parse(readFileSync(path.join(rootDir || pathOf('projectRuntime'), workspaceId, 'host.lease'), 'utf8'));
+        if (!lease.hostId || !lease.acquiredAt) throw new Error('coordination_lease_invalid');
+        return `${lease.hostId}:${lease.acquiredAt}`;
+      },
+    });
+    coordinationStore.recover();
+    if (continuityVersion !== 1 && Object.values(coordinationStore.read().works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
+    const unregisterBudget = registerWorkBudget(workspaceId, coordinationStore, readSettings?.()?.projectAgent?.executionBudget);
     const runner = createProjectAgentRunner({
       workspaceId,
       conversationId,
       inbox: inboxStore,
+      coordinationStore: continuityVersion === 1 ? coordinationStore : null,
       holdsLease: () => recovery.isReady(workspaceId),
       circuitBreaker: createCircuitBreaker({ rootDir, workspaceId, ...(now ? { now } : {}) }),
       onInputsCompleted: inputs => queue.completeExecution?.(workspaceId, inputs.map(input => input.inputId)),
@@ -144,6 +163,8 @@ export function createProjectAgentHost({
         : null,
       onActivity,
     });
+    const disposeRunner = runner.dispose;
+    runner.dispose = () => { unregisterBudget(); disposeRunner(); };
     runners.set(workspaceId, runner);
     return runner;
   }
@@ -209,7 +230,8 @@ export function createProjectAgentHost({
         const due = armDigest(runner, workspaceId);
         publishWatch(workspaceId);
         if (pending.length) await runner.enqueueUserInputs(pending);
-        else if (due || runner.parked() || inboxStore.takeBatch(workspaceId).events.length > 0) await runner.kick();
+        else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) await runner.kick();
+        if (runner.hasContinuation()) scheduleSweepSoon();
         return { workspaceId, ok: true };
       } catch (error) { drop(workspaceId); try { recovery.fail(workspaceId, error); } catch { /* Returned failure still identifies the project. */ } return { workspaceId, ok: false, error: error?.message || String(error) }; }
     }));
@@ -325,7 +347,7 @@ export function createProjectAgentHost({
     watchHandle = useSchedule(() => {
       watchHandle = null;
       return Promise.resolve()
-        .then(() => sweepWatch())
+        .then(() => watch ? sweepWatch() : sync().then(() => 30_000))
         .then((next) => {
           if (!hostDisposed) planWatchClock(next);
         })
@@ -336,11 +358,11 @@ export function createProjectAgentHost({
   }
 
   function scheduleSweepSoon() {
-    if (hostDisposed || !watch || watchSoonHandle != null) return;
+    if (hostDisposed || watchSoonHandle != null) return;
     watchSoonHandle = useSchedule(() => {
       watchSoonHandle = null;
       return Promise.resolve()
-        .then(() => sweepWatch())
+        .then(() => watch ? sweepWatch() : sync().then(() => 30_000))
         .then((next) => {
           if (!hostDisposed) planWatchClock(next);
         })

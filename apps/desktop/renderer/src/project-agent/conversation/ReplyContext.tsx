@@ -1,9 +1,10 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import type { BotChatMessage } from '../state/botConversationState';
 import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
+import { EvidenceList } from './EvidenceList';
 import '../styles/bot-reply-context.css';
 
 const VERDICTS = {
@@ -16,31 +17,36 @@ const SURFACING = {
 } as const;
 
 /** Reply metadata stays discoverable without competing with the answer or pending work. */
-export function ReplyContext({ workspaceId, message, i18n, onOpenEvidence, onOpenProcess }: {
-  readonly workspaceId: string; readonly message: BotChatMessage; readonly i18n: I18nRuntime;
-  readonly onOpenEvidence?: (id: string) => void; readonly onOpenProcess?: () => void;
+export function ReplyContext({ i18n, onOpenDetails, running = false }: {
+  readonly i18n: I18nRuntime; readonly onOpenDetails?: () => void; readonly running?: boolean;
 }) {
-  const refs = [...new Set(message.meta.evidenceRefs ?? [])];
-  const surfacing = message.meta.surfacing;
-  return <details className="bot-reply-context">
-    <summary><PeerIcon name="fileText" size={13} /><span>{i18n.t(refs.length ? 'projectAgent.chat.context.basis' : 'projectAgent.chat.context.details', { count: refs.length })}</span><PeerIcon name="chevronDown" size={12} /></summary>
-    <div className="bot-reply-context-body">
-      {refs.length ? <section aria-label={i18n.t('projectAgent.chat.evidence')}>
-        <h3>{i18n.t('projectAgent.chat.evidence')}</h3>
-        <ol className="bot-evidence-list">{refs.map((ref, index) => <li key={ref}><button type="button" onClick={() => onOpenEvidence?.(ref)}>
-          <PeerIcon name="fileText" size={13} /><span>{i18n.t('projectAgent.chat.evidence')} {index + 1}</span><PeerIcon name="arrowUpRight" size={12} />
-        </button></li>)}</ol>
-      </section> : null}
-      <MemoryContext workspaceId={workspaceId} ids={message.meta.memoryUsed ?? []} i18n={i18n} learned={false} />
-      <MemoryContext workspaceId={workspaceId} ids={message.meta.memoryLearned ?? []} i18n={i18n} learned />
-      {onOpenProcess ? <button className="bot-context-process" type="button" onClick={onOpenProcess}><PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.chat.openProcess')}</button> : null}
+  return <div className="bot-reply-context" data-running={running}>
+    {running ? <span className="bot-context-running">{i18n.t('projectAgent.chat.generating')}</span> : null}
+    <button type="button" onClick={event => {
+      event.currentTarget.focus({ preventScroll: true });
+      onOpenDetails?.();
+    }}>{i18n.t('projectAgent.chat.context.details')}<PeerIcon name="arrowUpRight" size={12} /></button>
+  </div>;
+}
+
+/** Read-only metadata, rendered exclusively inside the reply detail drawer. */
+export function ReplyDetailsContext({ workspaceId, message, i18n, onOpenEvidence, children }: {
+  readonly workspaceId: string; readonly message?: BotChatMessage; readonly i18n: I18nRuntime;
+  readonly onOpenEvidence?: (id: string) => void; readonly children?: ReactNode;
+}) {
+  const refs = [...new Set(message?.meta.evidenceRefs ?? [])];
+  const surfacing = message?.meta.surfacing;
+  return <div className="bot-reply-context-body">
+      {children}
+      {refs.length ? <EvidenceList refs={refs} i18n={i18n} onOpen={onOpenEvidence} /> : null}
+      <MemoryContext workspaceId={workspaceId} ids={message?.meta.memoryUsed ?? []} i18n={i18n} learned={false} />
+      <MemoryContext workspaceId={workspaceId} ids={message?.meta.memoryLearned ?? []} i18n={i18n} learned />
       <div className="bot-context-metadata">
-        {message.marks.map((mark, index) => mark.outcome && mark.outcome in VERDICTS ?
+        {message?.marks.map((mark, index) => mark.outcome && mark.outcome in VERDICTS ?
           <span key={index}>{i18n.t(VERDICTS[mark.outcome as keyof typeof VERDICTS])}</span> : null)}
         {surfacing && surfacing in SURFACING ? <span className="bot-reply-delivery"><PeerIcon name="info" size={13} />{i18n.t('projectAgent.chat.surfacingLabel')}{i18n.t(SURFACING[surfacing as keyof typeof SURFACING])}</span> : null}
       </div>
-    </div>
-  </details>;
+  </div>;
 }
 
 function MemoryContext({ workspaceId, ids, i18n, learned }: { readonly workspaceId: string; readonly ids: readonly string[]; readonly i18n: I18nRuntime; readonly learned: boolean }) {

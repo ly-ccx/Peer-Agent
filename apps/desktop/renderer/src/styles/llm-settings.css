@@ -65,7 +65,7 @@
 
 .llm-fallback-vision {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);

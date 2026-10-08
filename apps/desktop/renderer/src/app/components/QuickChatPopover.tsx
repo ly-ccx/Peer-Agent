@@ -257,7 +257,7 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
                     <strong>{item.label}</strong>
                     {item.detail ? <span>{item.detail}</span> : null}
                   </span>
-                  {selected ? <span className="quick-chat-popover-check" aria-hidden="true">✓</span> : null}
+                  {selected ? <PeerIcon name="check" size={14} className="quick-chat-popover-check" /> : null}
                 </button>
               );
             })}
@@ -281,7 +281,7 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
                   <strong>{item.label}</strong>
                   {item.detail ? <span>{item.detail}</span> : null}
                 </span>
-                {selected ? <span className="quick-chat-popover-check" aria-hidden="true">✓</span> : null}
+                {selected ? <PeerIcon name="check" size={14} className="quick-chat-popover-check" /> : null}
               </button>
             );
           })}

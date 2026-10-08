@@ -117,6 +117,7 @@ export interface InheritedBackgroundSnapshot {
   status: 'full' | 'compacted' | 'partial';
   requiresMissingConfirmation: boolean;
   contentHash: string;
+  scope?: { kind: 'delegation'; messageIds: string[] };
 }
 
 export interface SelectionChildRequest {
@@ -152,6 +153,9 @@ export interface ConversationStore {
     delegation?: { sessionId: string; anchorMessageId: string; inputId: string };
     runtimeState?: SelectionChildRequest['runtimeState'];
     capturedAt?: string;
+    /** Work sessions only: admit these persisted anchors instead of the whole history. */
+    backgroundMessageIds?: string[];
+    backgroundSnapshotId?: string;
     confirmMissing?: boolean;
     requestId?: string;
     selection?: SelectionChildRequest['selection'];

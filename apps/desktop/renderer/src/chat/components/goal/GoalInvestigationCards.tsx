@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../../ui/icons';
 import { useEffect, useState } from 'react';
 import type { GoalPlan } from '@peer-agent/protocol';
 import { goalInvestigation, investigationHidden } from './goalInvestigation';
@@ -23,7 +24,7 @@ export function GoalInvestigation({ plan, isZh }: { plan: GoalPlan; isZh: boolea
       <div className="goal-investigation-cards" key={view.key} role="status" aria-label={description} title={description}>
         {view.items.slice(0, 2).map(item => (
           <span className="goal-investigation-card" data-status={item.status} key={item.id} title={`${item.question}\n${item.detail}`}>
-            <span className="goal-investigation-signal" aria-hidden="true">{item.status === 'completed' ? '✓' : item.status === 'failed' ? '!' : item.status === 'paused' ? 'Ⅱ' : item.status === 'cancelled' ? '−' : '•'}</span>
+            <span className="goal-investigation-signal" aria-hidden="true"><PeerIcon name={item.status === 'completed' ? 'check' : item.status === 'failed' ? 'warning' : item.status === 'paused' ? 'pause' : item.status === 'cancelled' ? 'minus' : 'circle'} size={12} /></span>
             <span className="goal-investigation-question">{item.question}</span>
             <small>{labels[item.status]}</small>
           </span>

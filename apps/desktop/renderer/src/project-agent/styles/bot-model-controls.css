@@ -14,11 +14,10 @@
 .bot-model-toolbar .bot-model-picker > button:hover { background: var(--composer-addon-hover-bg); color: var(--graphite-base); }
 .bot-model-toolbar .bot-model-control-row { gap: 3px; }
 .bot-model-error { margin: 4px 0; color: var(--graphite-soft); font-size: 12px; }
-.bot-composer-bar { flex-wrap: wrap; row-gap: 4px; }
-.bot-composer-leading { flex: 1; flex-wrap: wrap; min-width: 0; }
-.bot-composer-leading .bot-model-toolbar { max-width: calc(100% - 38px); }
+.bot-composer-actions .bot-model-toolbar { flex: 0 1 auto; min-width: 0; }
+.bot-composer-actions .bot-model-control { min-width: 0; max-width: 100%; }
+.bot-composer-bar .bot-model-control-row { gap: 2px; }
 .bot-composer-leading > p { display: none; }
-.bot-composer-actions { margin-left: auto; }
 @media (max-width: 600px) {
   .bot-model-settings-row { grid-template-columns: 68px minmax(0, 1fr); }
   .bot-model-control-row { gap: 2px; }
@@ -38,8 +37,21 @@
 .bot-model-captions .bot-model-source { margin-top: 5px; font-size: .6875rem; }
 .bot-model-captions .bot-model-source:last-child:not(:first-child) { text-align: center; }
 
-.bot-composer-bar :is(.bot-model-picker > button, .reasoning-effort-trigger) { min-height: 32px; height: auto; padding: 6px; border-radius: var(--control-radius-compact); }
-.bot-composer-bar :is(.bot-model-picker > button, .reasoning-effort-trigger):is(:hover, .open):not(:disabled) { background: var(--control-fill); }
+.bot-composer-bar .bot-model-picker > button { min-height: 32px; height: 32px; padding: 6px; border-radius: var(--control-radius-compact); }
+.bot-composer-bar .bot-model-picker > button:is(:hover, .open):not(:disabled) { background: var(--control-fill); }
+.bot-composer-bar :is(.bot-model-picker > button, .reasoning-effort-trigger):disabled { background: transparent; box-shadow: none; }
+.bot-composer-bar .reasoning-effort-trigger { min-height: 32px; height: 32px; padding: 0; border-radius: var(--control-radius-compact); }
+.bot-composer-bar .reasoning-effort-trigger:is(:hover, .open):not(:disabled) { background: transparent; }
+.bot-composer-bar .reasoning-effort-trigger-size { padding: 6px; }
+.bot-composer-bar .reasoning-effort-trigger-content {
+  justify-self: start; max-width: 100%; min-height: 32px; box-sizing: border-box;
+  padding: 6px; border-radius: var(--control-radius-compact);
+  transition: background 160ms ease, color 160ms ease;
+}
+.bot-composer-bar .reasoning-effort-trigger:is(:hover, .open):not(:disabled) .reasoning-effort-trigger-content { background: var(--control-fill); }
+@media (prefers-reduced-motion: reduce) {
+  .bot-composer-bar .reasoning-effort-trigger-content { transition-duration: 1ms; }
+}
 @supports (corner-shape: superellipse(1.4)) {
-  .bot-model-control :is(.pa-cascading-trigger, .reasoning-effort-trigger) { corner-shape: var(--control-corner); }
+  .bot-model-control :is(.pa-cascading-trigger, .reasoning-effort-trigger, .reasoning-effort-trigger-content) { corner-shape: var(--control-corner); }
 }

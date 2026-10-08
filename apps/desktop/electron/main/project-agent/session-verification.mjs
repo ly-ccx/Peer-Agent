@@ -12,6 +12,7 @@ export function liveSessionVerification() {
     facts: (sessionId) => current.facts(sessionId),
     run: (input) => current.run(input),
     markVerifying: (sessionId) => current.markVerifying?.(sessionId),
+    finish: (sessionId) => current.finish?.(sessionId),
     record: (input) => current.record?.(input),
   };
 }
