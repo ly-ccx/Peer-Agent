@@ -6,7 +6,7 @@ import path from 'node:path';
 export async function checkBotTaskDetails({ page, until, report, captureDirectory, commandFile, readTurns }) {
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   let seq = initial.seq;
-  const task = { ...initial.sessions[0], report: undefined, origin: { anchorMessageId: 'internal-source-message-id',
+  const task = { ...initial.sessions[0], sessionId: initial.sessions[0].sessionId + '-report-read', conversationId: 'rc-task-scene-empty', report: undefined, origin: { anchorMessageId: 'internal-source-message-id',
     modelSelection: { worker: { modelId: 'internal-execution-model-id' } } } };
   const instructions = '只读核对历史任务的目标、完成结果和判断依据。\n只使用 list_files / read_file，禁止 bash / write_file。\n分支：internal-branch，提交：' + 'a'.repeat(40);
   const noteHeadline = '核查未通过：部分历史记录缺少可核对的结果依据。我会整理已有记录，并将无法确认的部分单独标明。';
@@ -17,22 +17,56 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
       actions: [{ id: 'answer', channel: 'project-agent:submit-input', payload: { text: '只核对可读取的记录', answerTo: 'card:question:reply:rc-task-question' } }] }] };
   let conversationMessages = [note];
   const states = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled'];
-  const change = (status, unavailable = false) => {
-    const command = { ...initial, seq: ++seq, unavailable, sessions: [{ ...task, status, statusLabel: '' }], conversationMessages,
+  const change = (status, unavailable = false, reportReadMode = 'ready') => {
+    const command = { ...initial, seq: ++seq, unavailable, reportReadMode, sessions: [{ ...task, status, statusLabel: '' }], conversationMessages,
       detailReports: { [task.sessionId]: { summary: instructions, evidenceRefs: ['tool-result://actual-record'] } } };
     writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
   };
-  const open = async () => {
+  const open = async (reset = false) => {
     await page.locator('.bot-profile').click();
     await page.getByRole('tab', { name: '任务', exact: true }).click();
+    if (reset && await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
     if (!await page.locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
     const pendingQuestion = conversationMessages.at(-1).cards?.find(card => card.kind === 'question' && card.resolvedState !== 'resolved');
     if (pendingQuestion) await until(() => page.locator('.bot-task-question').innerText(), text => text === pendingQuestion.content);
     else await until(() => page.locator('.bot-task-update-preview').innerText(), text => text.includes(noteHeadline));
   };
-  change('running'); await open();
+  change('running', false, 'unavailable'); await open(true);
   const detail = page.locator('.bot-task-detail');
+  const reportFeedback = detail.locator('.bot-task-report-read');
+  const reportInfo = detail.locator('.bot-task-information');
+  const captureReport = async name => {
+    await reportFeedback.scrollIntoViewIfNeeded();
+    assert.equal(await reportInfo.getAttribute('open'), '', 'report feedback remains expanded before capture');
+    // A tall element capture can resize the native viewport and remount the
+    // responsive drawer. Capture the real window without changing its layout.
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, name) });
+    assert.equal(await reportInfo.getAttribute('open'), '', 'capture never changes the report disclosure');
+  };
+  await reportInfo.locator(':scope > summary').click();
+  await reportFeedback.getByText('任务资料暂时无法读取，请重试。', { exact: true }).waitFor();
+  await captureReport('task-report-unavailable.png');
+  const turnsBeforeReportRetry = readTurns();
+  change('running', false, 'waiting');
+  await reportFeedback.getByRole('button', { name: '重试', exact: true }).click();
+  await until(() => reportFeedback.getAttribute('aria-busy'), value => value === 'true');
+  await reportFeedback.getByText('正在读取任务资料…', { exact: true }).waitFor();
+  await captureReport('task-report-loading.png');
+  change('running');
   await until(() => detail.locator('.bot-task-instructions').textContent(), text => text.includes(instructions));
+  await until(() => reportFeedback.locator('p').count(), count => count === 0);
+  change('queued', false, 'unavailable');
+  await reportFeedback.getByText('任务资料暂时无法更新，以下为上次读取的内容。', { exact: true }).waitFor();
+  assert.ok((await detail.locator('.bot-task-instructions').textContent()).includes(instructions));
+  assert.equal(await detail.getAttribute('data-status'), 'queued', 'a cached report cannot rewind live status');
+  await captureReport('task-report-stale.png');
+  change('queued');
+  await reportFeedback.getByRole('button', { name: '重试', exact: true }).click();
+  await until(() => reportFeedback.locator('p').count(), count => count === 0);
+  assert.equal(readTurns(), turnsBeforeReportRetry, 'reading or retrying task information never opens a model turn');
+  await reportInfo.locator(':scope > summary').click();
+  change('running');
+  await until(() => detail.getAttribute('data-status'), value => value === 'running');
   const botName = await page.locator('.bot-convo-header .bot-convo-title').count()
     ? await page.locator('.bot-convo-header .bot-convo-title').innerText() : await page.locator('.bot-message-author span').last().innerText();
   const dimensions = [];
@@ -92,6 +126,14 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.match(await information.innerText(), /internal-source-message-id|tool-result:\/\/actual-record/);
   assert.equal(await information.locator('summary svg').count(), 1);
   await page.keyboard.press('Enter'); assert.equal(await information.getAttribute('open'), null);
+  await information.locator(':scope > summary').click();
+  await detail.locator('.bot-task-scene').click();
+  const nestedScene = page.locator('.conversation-chat-drawer--nested');
+  await nestedScene.waitFor();
+  await page.keyboard.press('Escape');
+  await nestedScene.waitFor({ state: 'detached' });
+  assert.equal(await detail.isVisible(), true, 'Escape dismisses the nested scene and keeps the task detail open');
+  await information.locator(':scope > summary').click();
   task.title = '逐条核对本项目跨月份的历史 AI 任务、交付结果与验证依据，并整理可追溯的完成情况';
   change('waiting_user'); await until(() => detail.locator('h2').innerText(), title => title === task.title);
   for (const width of [1280, 760]) {
@@ -151,6 +193,8 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages })); renameSync(commandFile + '.next', commandFile);
   report.taskDetails = { states: [...states, 'unavailable'], dimensions, reportFromDetail: true, metadataCollapsed: true,
+    reportReadFailureExplained: true, reportLoadingVisible: true, staleReportPreserved: true, reportRetryRecovers: true,
+    nestedEscapeRetainsTask: true,
     primaryActionReturnsToBot: true, listClassification: true, internalInstructionsHidden: true, relatedNoteLocated: true,
     followUpDraftFocused: true, existingDraftPreserved: true, concreteQuestionLocated: true, noAutomaticExecution: true,
     scope: 'Production renderer and IPC with isolated session and main-conversation fixtures; no real model or task approval' };

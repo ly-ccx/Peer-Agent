@@ -9,6 +9,7 @@ import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
 import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
 import { PeerIcon } from '../../ui/icons';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
+import type { TaskReportState } from '../state/taskDetailState';
 import '../styles/bot-task-detail.css';
 
 export function SessionDetail({
@@ -21,6 +22,9 @@ export function SessionDetail({
   onConversation,
   botName,
   context,
+  reportState,
+  hasReadReport,
+  onRetryReport,
 }: {
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -31,6 +35,9 @@ export function SessionDetail({
   readonly onConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
   readonly botName: string;
   readonly context: TaskConversationContext | null;
+  readonly reportState: TaskReportState;
+  readonly hasReadReport: boolean;
+  readonly onRetryReport: () => void;
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
@@ -84,6 +91,13 @@ export function SessionDetail({
       </section> : null}
       <details className="bot-task-information" key={session.sessionId}>
         <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.task.information')}</summary>
+        <div className="bot-task-report-read" aria-busy={reportState === 'loading'}>
+          {reportState !== 'ready' || !session.summary ? <p role="status">{i18n.t(reportState === 'loading'
+            ? 'projectAgent.drawer.task.readingReport' : reportState === 'unavailable'
+              ? hasReadReport ? 'projectAgent.drawer.task.reportStale' : 'projectAgent.drawer.task.reportUnavailable'
+              : 'projectAgent.drawer.task.noReport')}</p> : null}
+          {reportState === 'unavailable' && <button type="button" onClick={onRetryReport}>{i18n.t('projectAgent.background.retry')}</button>}
+        </div>
         {session.summary && <section className="bot-task-instructions"><h3>{i18n.t('projectAgent.drawer.task.instructions')}</h3><p>{session.summary}</p></section>}
         <dl>
           {session.modelLabel && <div><dt>{i18n.t('projectAgent.drawer.frozenModel')}</dt><dd>{session.modelLabel}</dd></div>}

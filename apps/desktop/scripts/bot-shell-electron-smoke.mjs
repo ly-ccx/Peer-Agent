@@ -170,6 +170,9 @@ if (process.argv.includes('--streaming')) {
   observedService = observedService.replace(submitSeam, `${submitSeam}
     if (payload.text === 'RC_DETAIL_FAIL_ANSWER' && !globalThis.rcDetailFailedOnce) { globalThis.rcDetailFailedOnce = true; return {ok:false,code:'CONTROLLED_SUBMIT_FAILURE'}; }`);
 }
+if (process.argv.includes('--effort-stability') || workSurfaces) {
+  observedService = `import {readFileSync,writeFileSync} from 'node:fs';\n` + observedService;
+}
 if (process.argv.includes('--effort-stability')) {
   const updateSeam = 'async function updateProfile(payload = {}, sender = null) {';
   assert.equal(observedService.split(updateSeam).length, 2);
@@ -180,7 +183,6 @@ if (process.argv.includes('--effort-stability')) {
       await new Promise(resolve=>setTimeout(resolve,650));
       if(command.failNext){writeFileSync(file,JSON.stringify({failNext:false}));return {ok:false,code:'CONTROLLED_SAVE_FAILURE'};}
     }`);
-  observedService = `import {readFileSync,writeFileSync} from 'node:fs';\n` + observedService;
 }
 if (workSurfaces) {
   const confirmationSeam = 'async function confirmResult(payload = {}) {';
@@ -201,7 +203,15 @@ if (workSurfaces) {
   assert.equal(observedService.split(detailSeam).length, 2);
   observedService = observedService.replace(detailSeam, `${detailSeam}
     const fixtureSession=globalThis.rcBotWorkSessions?.find(item=>item.sessionId===payload.sessionId);
-    if(fixtureSession) return {ok:true,session:{...fixtureSession,report:globalThis.rcBotWorkReports?.[payload.sessionId]??fixtureSession.report}};`);
+    if(fixtureSession) {
+      const controlFile=${JSON.stringify(workCommand)};
+      const reportMode=()=>JSON.parse(readFileSync(controlFile,'utf8')).reportReadMode;
+      if(reportMode()==='unavailable') return {ok:false,code:'CONTROLLED_REPORT_FAILURE'};
+      const deadline=Date.now()+10000;
+      while(reportMode()==='waiting' && Date.now()<deadline) await new Promise(resolve=>setTimeout(resolve,25));
+      if(reportMode()==='waiting') throw Error('Controlled report was not released');
+      return {ok:true,session:{...fixtureSession,report:globalThis.rcBotWorkReports?.[payload.sessionId]??fixtureSession.report}};
+    }`);
 }
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');

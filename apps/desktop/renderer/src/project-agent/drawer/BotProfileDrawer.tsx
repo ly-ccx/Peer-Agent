@@ -3,6 +3,7 @@ import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, useRef, type RefObject } from 'react';
 import { useFocusScope } from '../../app/hooks/useFocusScope';
 import { Drawer } from '../../app/components/Drawer';
+import { OVERLAY_SELECTOR } from '../../app/components/overlayStack';
 import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
 import { EvidenceView } from './EvidenceView';
@@ -10,7 +11,6 @@ import { PeerIcon } from '../../ui/icons';
 import {
   drawerLayout,
   groupDrawerSessions,
-  readDrawerSession,
   readMemoryItems,
   type DrawerMemory,
   type DrawerMemoryItem,
@@ -27,6 +27,7 @@ import { MemoryTab } from './MemoryTab';
 import { ObjectivesTab } from './ObjectivesTab';
 import { OverviewTab } from './OverviewTab';
 import { mergeTaskDetail } from '../state/taskDetailState';
+import { useTaskReport } from '../state/useTaskReport';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
 import { ConversationSceneDrawer, SessionDetail } from './SessionDetail';
 import { TasksTab, type ClassicGoalRow } from './TasksTab';
@@ -91,7 +92,6 @@ export function BotProfileDrawer({
   const modelRoute = modelControls.views.project_agent?.resolution;
   const modelLabel = modelRoute?.ok
     ? modelControls.models.find(model => model.id === modelRoute.selection.modelProviderId)?.label || modelRoute.selection.modelId : '';
-  const [detail, setDetail] = useState<DrawerSession | null>(null);
   const [history, setHistory] = useState<readonly HistoryConversation[]>([]);
   const [goals, setGoals] = useState<readonly ClassicGoalRow[]>([]);
   const [historyId, setHistoryId] = useState<string | null>(null);
@@ -129,7 +129,8 @@ export function BotProfileDrawer({
     triggerRef.current?.focus({ preventScroll: true });
   };
   const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
-  const taskDetail = mergeTaskDetail(selected, detail?.sessionId === memory.sessionId ? detail : null);
+  const reportRead = useTaskReport(workspaceId, memory.sessionId, memory.open, selected?.status, sessionsAvailable);
+  const taskDetail = mergeTaskDetail(selected, reportRead.detail);
 
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
@@ -166,6 +167,7 @@ export function BotProfileDrawer({
     if (!memory.open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || layout === 'cover') return;
+      if (document.querySelector(OVERLAY_SELECTOR)) return;
       event.preventDefault();
       close();
     };
@@ -210,23 +212,6 @@ export function BotProfileDrawer({
     };
   }, [memory.open, path, workspaceId]);
 
-  useEffect(() => {
-    setDetail(null);
-    if (!memory.open || !memory.sessionId) {
-      return;
-    }
-    let cancelled = false;
-    void clientApi.projectAgentGetSession({ sessionId: memory.sessionId, detail: 'report' }).then((result) => {
-      if (cancelled) return;
-      setDetail(result?.ok ? readDrawerSession(result.session) : null);
-    }).catch(() => {
-      if (!cancelled) setDetail(null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, memory.open, memory.sessionId, selected?.status]);
-
   if (layout === 'cover' ? !memory.open : dockPhase === 'off') return null;
 
   const body = (
@@ -267,7 +252,7 @@ export function BotProfileDrawer({
         />
       ) : null}
       {memory.tab === 'tasks' && !sessionsAvailable ? <p role="status">{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : null}
-      {memory.tab === 'tasks' && sessionsAvailable && !(memory.sessionId && (detail || selected)) ? (
+      {memory.tab === 'tasks' && sessionsAvailable && !taskDetail ? (
         <TasksTab
           sessions={sessions}
           onOpenObjective={(objectiveId) => onMemory({...memory,tab:'objectives',sessionId:null,objectiveId})}
@@ -289,11 +274,14 @@ export function BotProfileDrawer({
           }}
         />
       ) : null}
-      {memory.tab === 'tasks' && memory.sessionId && (detail || selected) ? (
+      {memory.tab === 'tasks' && memory.sessionId && taskDetail ? (
         <SessionDetail
           workspaceId={workspaceId}
           workspacePath={path}
           session={sessionsAvailable ? taskDetail! : { ...taskDetail!, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable') }}
+          reportState={reportRead.state}
+          hasReadReport={Boolean(reportRead.detail)}
+          onRetryReport={reportRead.refresh}
           i18n={i18n}
           isZh={isZh}
           botName={profile.displayName}

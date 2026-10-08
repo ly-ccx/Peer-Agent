@@ -461,6 +461,10 @@ export type TranslationKey =
   | 'projectAgent.drawer.task.description'
   | 'projectAgent.drawer.task.descriptionMissing'
   | 'projectAgent.drawer.task.information'
+  | 'projectAgent.drawer.task.readingReport'
+  | 'projectAgent.drawer.task.reportUnavailable'
+  | 'projectAgent.drawer.task.reportStale'
+  | 'projectAgent.drawer.task.noReport'
   | 'projectAgent.drawer.task.id'
   | 'projectAgent.drawer.task.records'
   | 'projectAgent.drawer.task.hint.confirm'
@@ -1898,6 +1902,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.description': '任务说明',
     'projectAgent.drawer.task.descriptionMissing': '暂未读取到任务说明，可回到对话查看原始要求。',
     'projectAgent.drawer.task.information': '任务信息',
+    'projectAgent.drawer.task.readingReport': '正在读取任务资料…',
+    'projectAgent.drawer.task.reportUnavailable': '任务资料暂时无法读取，请重试。',
+    'projectAgent.drawer.task.reportStale': '任务资料暂时无法更新，以下为上次读取的内容。',
+    'projectAgent.drawer.task.noReport': '暂无补充任务资料。',
     'projectAgent.drawer.task.id': '任务标识',
     'projectAgent.drawer.task.records': '执行记录 · {count} 条',
     'projectAgent.drawer.task.hint.confirm': '{name} 在主对话中跟进这项工作。',
@@ -3123,6 +3131,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.description': 'Task description',
     'projectAgent.drawer.task.descriptionMissing': 'The task description is unavailable. Return to the conversation to see the original request.',
     'projectAgent.drawer.task.information': 'Task information',
+    'projectAgent.drawer.task.readingReport': 'Reading task information…',
+    'projectAgent.drawer.task.reportUnavailable': 'Task information is unavailable. Please retry.',
+    'projectAgent.drawer.task.reportStale': 'Task information could not be refreshed. The last read is shown below.',
+    'projectAgent.drawer.task.noReport': 'No additional task information yet.',
     'projectAgent.drawer.task.id': 'Task ID',
     'projectAgent.drawer.task.records': 'Execution records · {count}',
     'projectAgent.drawer.task.hint.confirm': '{name} follows up on this task in the main conversation.',
