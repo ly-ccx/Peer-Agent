@@ -115,12 +115,19 @@ async function buildLegacyComponentFixture({ captureDirectory, classicFixture })
 /** Production components and isolated stores; no real scheduling or model requests. */
 export async function checkSharedUiConventions({ page, app, report, captureDirectory, classicFixture }) {
   const cases = [];
+  // Establish the viewport before focusing an offscreen disclosure. Otherwise
+  // Chromium may retain a document scroll from the initial, shorter window.
+  await page.setViewportSize({ width: 1280, height: 900 });
   async function layouts(scene, check) {
     for (const [width, theme] of [[1280, 'dark'], [760, 'light']]) {
       await page.setViewportSize({ width, height: 900 });
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       if (check) await check();
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await page.evaluate(() => document.documentElement.getBoundingClientRect().top === 0
+        && document.getElementById('root')?.scrollTop === 0
+        && (document.querySelector('.app-shell')?.scrollTop ?? 0) === 0), true,
+        'the capture must not crop a scrolled root document');
       await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `ui-${scene}-${width}-${theme}.png`) });
       cases.push({ scene, width, theme });
     }

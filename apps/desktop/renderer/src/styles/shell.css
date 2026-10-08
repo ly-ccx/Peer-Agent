@@ -1,6 +1,7 @@
 @layer components {
   .app-shell {
-    @apply grid h-screen min-h-0 w-screen overflow-hidden;
+    /* Child panes own scrolling; focus must not scroll the whole app shell. */
+    @apply grid h-screen min-h-0 w-screen overflow-clip;
     grid-template-columns: minmax(0, 1fr);
     /* Chrome 壳层透明：macOS vibrancy 从下方透出，勿用纯不透明 --za-app-bg 盖死。 */
     background: transparent;
