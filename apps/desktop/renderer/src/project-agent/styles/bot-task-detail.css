@@ -27,6 +27,9 @@
 .bot-task-update-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.7; color: var(--graphite-soft); }
 .bot-task-instructions { margin-top: 14px; }
 .bot-task-instructions p { font-size: 11px; line-height: 1.7; white-space: pre-wrap; color: var(--graphite-soft); }
+.bot-task-report-read { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--graphite-secondary); }
+.bot-task-report-read:has(p) { margin-top: 12px; }
+.bot-task-report-read p { margin: 0; }
 .bot-task-detail .bot-task-conversation { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 4px; padding: 5px 0; border: 0; border-radius: 5px; font-size: 12px; font-weight: 500; }
 .bot-task-detail .bot-task-conversation:hover { background: transparent; color: var(--za-accent); }
 .bot-task-description p { font-size: 13px; line-height: 1.7; color: var(--graphite-soft); white-space: pre-wrap; }

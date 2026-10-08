@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeTaskDetail } from './taskDetailState.ts';
+import { mergeTaskDetail, settleTaskReport } from './taskDetailState.ts';
 import { readDrawerSession } from './drawerState.ts';
 
 test('a compact list cannot hide a fetched report or overwrite its evidence', () => {
@@ -17,4 +17,11 @@ test('another task report never leaks into a newly selected task', () => {
   assert.equal(mergeTaskDetail(selected, detail), selected);
   assert.equal(mergeTaskDetail(null, detail), detail);
   assert.equal(mergeTaskDetail(null, null), null);
+});
+test('read failures preserve a matching report, while deletion and foreign replies cannot restore it', () => {
+  const old = readDrawerSession({ sessionId: 'old', report: { summary: 'Previous report' } })!;
+  assert.deepEqual(settleTaskReport('old', null, old), { detail: old, state: 'unavailable' });
+  assert.deepEqual(settleTaskReport('old', { ok: false, code: 'NOT_FOUND' }, old), { detail: null, state: 'unavailable' });
+  assert.equal(settleTaskReport('new', { ok: true, session: old }, old).detail, null);
+  assert.equal(settleTaskReport('old', { ok: true, session: { sessionId: 'old', status: 'running' } }, old).state, 'ready');
 });
