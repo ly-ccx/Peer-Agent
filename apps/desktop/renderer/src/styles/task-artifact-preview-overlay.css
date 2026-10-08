@@ -7,7 +7,7 @@
   pointer-events: none;
   isolation: auto;
   filter: none;
-  border-radius: 0.75rem;
+  border-radius: var(--ui-radius-detail);
   box-shadow: var(--glass-modal-shadow, 0 24px 64px rgb(0 0 0 / 36%));
 }
 
@@ -67,7 +67,7 @@
   isolation: auto;
   filter: none;
   pointer-events: auto;
-  border-radius: 0.75rem;
+  border-radius: var(--ui-radius-detail);
   box-shadow: var(--glass-modal-shadow, 0 24px 64px rgb(0 0 0 / 36%));
 }
 

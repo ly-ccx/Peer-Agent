@@ -72,6 +72,6 @@
   .running-note {
     @apply m-0 px-2 py-1.5 text-[12px] leading-5;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-panel);
   }
 }

@@ -30,7 +30,7 @@ for (const selector of ['.pa-overlay-backdrop', '.pa-overlay-panel:before']) {
 const anchored = ruleBody('.pa-overlay--anchored>.pa-overlay-panel:before');
 assert.match(anchored, /(?:^|;)backdrop-filter:var\(--blur-popover\)(?:;|$)/);
 const surface = ruleBody('.pa-overlay--anchored>.pa-overlay-panel');
-assert.match(surface, /(?:^|;)border-radius:var\(--radius-xl\)(?:;|$)/);
+assert.match(surface, /(?:^|;)border-radius:var\(--ui-radius-modal\)(?:;|$)/);
 assert.match(surface, /(?:^|;)pointer-events:auto(?:;|$)/);
 const nonModal = ruleBody('.pa-overlay-backdrop.pa-overlay--anchored');
 assert.match(nonModal, /(?:^|;)pointer-events:none(?:;|$)/);

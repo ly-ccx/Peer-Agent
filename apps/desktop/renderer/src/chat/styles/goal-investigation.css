@@ -73,7 +73,7 @@
   max-width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--za-line);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   /* 毛玻璃三件套：材质 + 模糊 + 浮起阴影。
      1) --glass-popover 是 hsla(...,0.88) 的近白，压在被 blur(24px) 糊成灰雾的正文上
         只产生约 1.9%/255 的信号（≈5 个灰阶），低于人眼阈值 —— 看着就是实心白。

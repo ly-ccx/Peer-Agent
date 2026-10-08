@@ -7,7 +7,7 @@
   .sidebar-brand-seal {
     @apply grid h-8 w-8 place-items-center;
     flex-shrink: 0;
-    border-radius: var(--radius-xs);
+    border-radius: var(--ui-radius-detail);
     background: var(--cinnabar-seal);
     color: var(--surface-vellum-base);
     font-family: var(--font-serif-zh);
@@ -70,7 +70,7 @@
     grid-template-columns: 18px minmax(0, 1fr) auto;
     font-size: var(--ui-font-control, 13px);
     border: 1px solid transparent;
-    border-radius: var(--ui-radius-row, 8px);
+    border-radius: var(--ui-radius-control);
     color: var(--za-text-soft);
     background: transparent;
     outline: none;
@@ -91,7 +91,7 @@
     grid-template-columns: minmax(0, 1fr) auto;
     font-size: var(--ui-font-control, 13px);
     border: 1px solid transparent;
-    border-radius: var(--ui-radius-row, 8px);
+    border-radius: var(--ui-radius-row);
     color: var(--za-text-soft);
     background: transparent;
   }
@@ -122,7 +122,7 @@
     margin: 0 1px var(--space-1);
     padding: 0 var(--space-3);
     border: 1px solid var(--ui-border-subtle, transparent);
-    border-radius: var(--ui-radius-panel, var(--radius-lg, 12px));
+    border-radius: var(--ui-radius-panel);
     color: var(--za-text);
     background: var(--ui-surface-selected, var(--za-sidebar-active-bg));
     font: inherit;
@@ -173,7 +173,7 @@
     padding: 0 var(--space-3);
     border: 1px solid transparent;
     /* Align selected outline with sidebar-new-chat / conversation-row panel radius. */
-    border-radius: var(--ui-radius-panel, var(--radius-lg, 12px));
+    border-radius: var(--ui-radius-panel);
     color: var(--za-text);
     background: transparent;
     font: inherit;
@@ -235,8 +235,8 @@
     @apply grid min-h-8 w-full items-center gap-2 px-1.5 py-0.5 text-left;
     grid-template-columns: 22px minmax(0, 1fr) 22px;
     border: 1px solid transparent;
-    /* List row, not a capsule: 8px radius on ~28px height stays a rounded rect. */
-    border-radius: var(--ui-radius-row, 8px);
+    /* List row, not a capsule: 8px radius on ~28px height stays a rounded-[var(--ui-radius-row)] rect. */
+    border-radius: var(--ui-radius-row);
     background: transparent;
     box-shadow: var(--ui-surface-float-shadow, none);
     transform-origin: center;
@@ -269,14 +269,14 @@
 
   .conversation-main {
     @apply grid min-w-0 gap-0.5 px-0.5 py-1 text-left;
-    border-radius: var(--ui-radius-row, 8px);
+    border-radius: var(--ui-radius-row);
     color: inherit;
     background: transparent;
   }
 
   .conversation-action {
     @apply grid h-[22px] w-[22px] place-items-center p-0;
-    border-radius: var(--ui-radius-control, 6px);
+    border-radius: var(--ui-radius-control);
     color: var(--za-text-faint);
     background: transparent;
     border: none;
@@ -342,7 +342,7 @@
     grid-template-columns: 26px minmax(0, 1fr) 18px;
     font-size: var(--ui-font-control, 13px);
     border: 1px solid transparent;
-    border-radius: var(--ui-radius-row, 8px);
+    border-radius: var(--ui-radius-control);
     color: var(--za-text-soft);
     background: transparent;
   }
@@ -358,7 +358,7 @@
     @apply grid h-6 w-6 place-items-center font-medium;
     font-size: var(--ui-font-caption, 11px);
     border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-round, 999px);
+    border-radius: var(--ui-radius-pill);
     color: var(--za-text);
     background: var(--za-surface-1);
   }
@@ -374,7 +374,7 @@
     max-height: calc(100vh - 96px);
     overflow-y: auto;
     border: 1px solid var(--ui-border-strong, var(--za-line-strong));
-    border-radius: var(--ui-radius-panel, var(--za-radius-lg));
+    border-radius: var(--ui-radius-panel);
     color: var(--za-text-soft);
     background: var(--za-popover-bg);
     box-shadow: var(--za-shadow-popover);
@@ -387,7 +387,7 @@
     @apply grid min-h-9 w-full min-w-0 items-center gap-2 px-2 text-left font-normal;
     grid-template-columns: 18px minmax(0, 1fr) auto;
     font-size: var(--ui-font-control, 13px);
-    border-radius: var(--ui-radius-row, 8px);
+    border-radius: var(--ui-radius-control);
     color: var(--za-text-soft);
     background: transparent;
   }
@@ -400,7 +400,7 @@
   .sidebar-appearance-quick {
     @apply grid gap-1 p-1;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    border-radius: var(--ui-radius-panel, 12px);
+    border-radius: var(--ui-radius-panel);
     background: var(--za-surface-1);
   }
 
@@ -412,7 +412,7 @@
     @apply min-h-7 place-items-center px-1 text-center;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    border-radius: var(--ui-radius-control, 6px);
+    border-radius: var(--ui-radius-control);
     font-size: var(--ui-font-meta, 12px);
   }
 

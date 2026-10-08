@@ -100,7 +100,7 @@
   }
 
   .markdown-content code {
-    @apply rounded-md px-1.5 py-0.5 text-[12px];
+    @apply rounded-[var(--ui-radius-control-compact)] px-1.5 py-0.5 text-[12px];
     box-sizing: border-box;
     color: var(--za-text-soft);
     background: var(--za-surface-1);
@@ -138,7 +138,7 @@
     width: 100%;
     max-height: 260px;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-sm);
+    border-radius: var(--ui-radius-control-compact);
     color: var(--za-text-muted);
     background: var(--za-bg-1);
   }
@@ -160,7 +160,7 @@
     @apply mt-0;
   }
   .markdown-content .code-copy-btn {
-    @apply absolute right-1.5 top-1.5 flex items-center justify-center rounded-md p-1;
+    @apply absolute right-1.5 top-1.5 flex items-center justify-center rounded-[var(--ui-radius-control)] p-1;
     opacity: 0;
     transition: opacity 0.15s;
     color: var(--za-text-muted);
@@ -201,7 +201,7 @@
     width: 100%;
     padding: var(--space-1) var(--space-2);
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: var(--ui-radius-control-compact);
     background: transparent;
     cursor: pointer;
     text-align: left;
@@ -252,7 +252,7 @@
     min-width: 0;
     width: 100%;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-md);
+    border-radius: var(--ui-radius-control);
     background: var(--za-surface-0);
     scrollbar-gutter: stable;
   }
@@ -309,7 +309,7 @@
     display: block;
     padding: 0;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-sm, 8px);
+    border-radius: var(--ui-radius-circle);
     background: var(--za-bg-1);
     cursor: zoom-in;
     overflow: hidden;
@@ -339,7 +339,7 @@
     height: auto;
     object-fit: contain;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-sm, 8px);
+    border-radius: var(--ui-radius-control-compact);
     background: var(--za-bg-1);
   }
 }
@@ -404,7 +404,7 @@
   justify-content: center;
   color: var(--graphite-soft, #9aa0a6);
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
 }
 
 .markdown-local-image-lightbox-panel.is-zoomed .markdown-local-image-lightbox-stage {
@@ -426,7 +426,7 @@
   gap: 16px;
   max-width: min(92vw, 760px);
   padding: 8px 10px 8px 14px;
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(22, 25, 32, 0.66);
   backdrop-filter: blur(20px) saturate(1.4);
@@ -499,7 +499,7 @@
   height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: rgba(237, 241, 246, 0.82);
   cursor: pointer;

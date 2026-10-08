@@ -7,7 +7,7 @@
  *   1. Azure 不上 CTA       2. H1 字号 ≥ 30px
  *   3. 标题与正文统一 sans  4. 单屏 azure ≤ 3
  *   5. 纯黑禁 / 纯白仅环境层 6. 状态不只靠颜色
- *   7. 阴影限定 2 场景      8. 圆角 ≤ 16px
+ *   7. 阴影限定 2 场景      8. 表面圆角 ≤ 16px（输入框、胶囊及圆形按用途）
  *
  * 本文件提供三套变量：
  *   1. Frost 正名 token（--chrome-*, --paper-*, --control-*, --graphite-*, --azure-*, --state-*）—— 新代码必须用
@@ -41,8 +41,8 @@
   --color-paper-base: #EDF1F6;
   --color-graphite-base: #1A1D21;
   --color-azure-seal: #3B7FAB;
-  --radius-frost: 12px;
-  --radius-frost-sm: 6px;
+  --radius-frost: var(--ui-radius-panel);
+  --radius-frost-sm: var(--ui-radius-control-compact);
   --glass-chrome: hsla(215, 16%, 98%, 0.52);
   --glass-chrome-hover: hsla(215, 16%, 96%, 0.62);
   --glass-control: hsla(218, 18%, 96%, 0.56);
@@ -148,11 +148,11 @@
    *   上限 1080px（避免超宽屏行宽过长影响阅读）
    */
   --chat-content-max: clamp(740px, 64vw, 1080px);
-  --radius-xs: 2px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-xs: var(--ui-radius-detail);
+  --radius-sm: var(--ui-radius-control-compact);
+  --radius-md: var(--ui-radius-control);
+  --radius-lg: var(--ui-radius-panel);
+  --radius-xl: var(--ui-radius-modal);
   /* 悬浮内容卡片：明显高于页面，仍低于 popover / drag 浮层。 */
   --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.08), 0 10px 28px rgba(26, 29, 33, 0.10);
   --shadow-card-hover: 0 2px 4px rgba(26, 29, 33, 0.10), 0 16px 36px rgba(26, 29, 33, 0.14);
@@ -256,10 +256,10 @@
   --za-primary-control-ink: #F7F9FC;
   --za-shadow-panel: 0 2px 12px rgba(26, 29, 33, 0.06);
   --za-shadow-popover: var(--shadow-popover);
-  --za-radius: 12px;
-  --za-radius-sm: 6px;
-  --za-radius-md: 8px;
-  --za-radius-lg: 16px;
+  --za-radius: var(--ui-radius-panel);
+  --za-radius-sm: var(--ui-radius-control-compact);
+  --za-radius-md: var(--ui-radius-control);
+  --za-radius-lg: var(--ui-radius-modal);
   --za-ease-out: cubic-bezier(0.0, 0.0, 0.2, 1);
   --za-ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
   --za-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -304,22 +304,32 @@
   --ui-line-control: 1.35;
   --ui-line-body: 1.68;
 
-  --control-radius: 12px;
-  --control-radius-compact: 8px;
-  --surface-radius: 16px;
+  --control-radius: var(--ui-radius-control);
+  --control-radius-compact: var(--ui-radius-control-compact);
+  --surface-radius: var(--ui-radius-modal);
   --control-corner: superellipse(1.4);
-  --composer-radius: 18px;
+  --composer-radius: var(--ui-radius-composer);
   --composer-corner: superellipse(1.4);
   --composer-surface: color-mix(in srgb, var(--paper-sheet) 72%, var(--control-fill) 28%);
   --composer-edge: color-mix(in srgb, var(--graphite-base) 7%, transparent);
   --composer-focus-edge: color-mix(in srgb, var(--graphite-base) 18%, transparent);
 
+  /* One radius scale, chosen by role. Insets stay smaller than their parent;
+   * joined edges use 0/inherit. Pill/circle/avatar describe geometry, not size. */
+  --ui-radius-detail: 2px;
   --ui-radius-chip: 4px;
-  --ui-radius-control: 6px;
+  --ui-radius-control-compact: 6px;
+  --ui-radius-control: 8px;
   --ui-radius-row: 8px;
   --ui-radius-panel: 12px;
   --ui-radius-modal: 16px;
-  --ui-radius-round: 999px;
+  --ui-radius-inset: 8px;
+  --ui-radius-message: 16px;
+  --ui-radius-composer: 18px;
+  --ui-radius-pill: 999px;
+  --ui-radius-circle: 50%;
+  --ui-radius-avatar: 25%;
+  --ui-radius-round: var(--ui-radius-pill);
 
   --ui-accent: var(--za-user-accent, var(--za-accent));
   --ui-accent-hover: color-mix(in srgb, var(--ui-accent) 86%, var(--za-text));

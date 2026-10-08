@@ -21,7 +21,7 @@
   }
 
   .appearance-panel-header button {
-    @apply grid h-7 w-7 place-items-center rounded-full p-0 text-[15px];
+    @apply grid h-7 w-7 place-items-center rounded-[var(--ui-radius-circle)] p-0 text-[15px];
     color: var(--za-text-muted);
     background: var(--za-control-fill);
   }
@@ -60,7 +60,7 @@
   }
 
   .appearance-mode-card {
-    @apply grid gap-1.5 rounded-[12px] p-1.5 text-left;
+    @apply grid gap-1.5 rounded-[var(--ui-radius-panel)] p-1.5 text-left;
     border: 1px solid var(--za-line);
     background: color-mix(in srgb, var(--za-surface-1) 88%, transparent);
     color: var(--za-text-soft);
@@ -93,7 +93,7 @@
   }
 
   .appearance-mode-thumb {
-    @apply relative block overflow-hidden rounded-[8px];
+    @apply relative block overflow-hidden rounded-[var(--ui-radius-circle)];
     aspect-ratio: 16 / 11;
     border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
   }
@@ -124,7 +124,7 @@
   }
 
   .appearance-mode-thumb-line {
-    @apply block h-[3px] w-full rounded-full;
+    @apply block h-[3px] w-full rounded-[var(--ui-radius-circle)];
     background: color-mix(in srgb, currentColor 22%, transparent);
     color: #1a1d21;
   }
@@ -139,14 +139,14 @@
   }
 
   .appearance-mode-thumb-chip {
-    @apply mt-0.5 block h-[7px] w-[34%] rounded-full;
+    @apply mt-0.5 block h-[7px] w-[34%] rounded-[var(--ui-radius-circle)];
     background: #5d9cbf;
     opacity: 0.9;
   }
 
   /* —— 双栏实时预览 —— */
   .appearance-live-preview {
-    @apply grid gap-2 rounded-[14px] p-2;
+    @apply grid gap-2 rounded-[var(--ui-radius-panel)] p-2;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
     border: 1px solid var(--za-line);
@@ -163,7 +163,7 @@
 
   .appearance-live-code,
   .appearance-live-diff {
-    @apply min-h-[88px] overflow-hidden rounded-[10px] p-2.5 text-[11px] leading-relaxed;
+    @apply min-h-[88px] overflow-hidden rounded-[var(--ui-radius-control)] p-2.5 text-[11px] leading-relaxed;
     background: var(--preview-bg, var(--za-bg));
     color: var(--preview-fg, var(--za-text));
     border: 1px solid color-mix(in srgb, var(--preview-fg, var(--za-text)) 10%, transparent);
@@ -209,7 +209,7 @@
   }
 
   .appearance-live-diff-row {
-    @apply grid items-center gap-1 rounded-[6px] px-1.5 py-1;
+    @apply grid items-center gap-1 rounded-[var(--ui-radius-row)] px-1.5 py-1;
     grid-template-columns: auto minmax(0, 1fr);
     background: color-mix(in srgb, var(--preview-fg, var(--za-text)) 5%, transparent);
   }
@@ -249,7 +249,7 @@
   }
 
   .palette-select-trigger {
-    @apply grid w-full items-center rounded-[var(--ui-radius-row)] px-2.5 text-left;
+    @apply grid w-full items-center rounded-[var(--ui-radius-control)] px-2.5 text-left;
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.5rem;
     min-height: 2.25rem;
@@ -291,7 +291,7 @@
     @apply absolute left-0 right-0 z-50 m-0 mt-1 list-none overflow-auto p-1;
     top: 100%;
     max-height: 16rem;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-control);
     background: color-mix(in srgb, var(--za-surface-1) 96%, transparent);
     border: 1px solid var(--za-line);
     box-shadow: 0 12px 28px color-mix(in srgb, #000 18%, transparent);
@@ -345,7 +345,7 @@
   }
 
   .palette-dot {
-    @apply h-2.5 w-2.5 shrink-0 rounded-full;
+    @apply h-2.5 w-2.5 shrink-0 rounded-[var(--ui-radius-circle)];
     border: 1px solid color-mix(in srgb, var(--za-line) 70%, transparent);
   }
 
@@ -361,7 +361,7 @@
   }
 
   .appearance-action-btn {
-    @apply rounded-[10px] px-2 py-1.5 text-[11px] font-medium;
+    @apply rounded-[var(--ui-radius-control)] px-2 py-1.5 text-[11px] font-medium;
     color: var(--za-text-soft);
     background: color-mix(in srgb, var(--za-surface-1) 90%, transparent);
     border: 1px solid var(--za-line);
@@ -384,7 +384,7 @@
   }
 
   .appearance-swatch-dot {
-    @apply h-5 w-5 rounded-full;
+    @apply h-5 w-5 rounded-[var(--ui-radius-circle)];
     border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 8%, transparent);
   }
@@ -396,7 +396,7 @@
   }
 
   .appearance-scheme-card {
-    @apply grid gap-2 rounded-[12px] p-2.5;
+    @apply grid gap-2 rounded-[var(--ui-radius-panel)] p-2.5;
     background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
     border: 1px solid var(--za-line);
   }
@@ -438,7 +438,7 @@
   }
 
   .appearance-color-picker {
-    @apply h-[22px] w-[22px] cursor-pointer appearance-none rounded-full p-0;
+    @apply h-[22px] w-[22px] cursor-pointer appearance-none rounded-[var(--ui-radius-circle)] p-0;
     border: 1px solid var(--za-line);
     background: transparent;
   }
@@ -449,11 +449,11 @@
 
   .appearance-color-picker::-webkit-color-swatch {
     border: none;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-circle);
   }
 
   .appearance-color-hex {
-    @apply w-full rounded-[8px] px-1.5 py-1 text-[11px];
+    @apply w-full rounded-[var(--ui-radius-control)] px-1.5 py-1 text-[11px];
     color: var(--za-text);
     background: var(--za-surface-2);
     border: 1px solid var(--za-line);
@@ -468,7 +468,7 @@
   /* 统一 settings list 卡 */
   .appearance-settings-list,
   .appearance-settings-card {
-    @apply grid overflow-hidden rounded-[14px];
+    @apply grid overflow-hidden rounded-[var(--ui-radius-panel)];
     background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
     border: 1px solid var(--za-line);
   }
@@ -500,7 +500,7 @@
 
   /* 行内分段控件：去掉旧 segmented 白条噪音，改为轻描边选中 */
   .appearance-segmented {
-    @apply grid gap-1 rounded-[10px] p-0.5;
+    @apply grid gap-1 rounded-[var(--ui-radius-control)] p-0.5;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     background: color-mix(in srgb, var(--za-surface-2) 70%, transparent);
     border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
@@ -515,7 +515,7 @@
   }
 
   .appearance-segmented button {
-    @apply rounded-[8px] px-2 py-1 text-[11px] font-medium;
+    @apply rounded-[var(--ui-radius-control)] px-2 py-1 text-[11px] font-medium;
     color: var(--za-text-muted);
     background: transparent;
     border: 1px solid transparent;
@@ -543,7 +543,7 @@
   }
 
   .appearance-code-font input[type='number'] {
-    @apply w-12 rounded-[8px] px-1.5 py-1 text-center text-[11px];
+    @apply w-12 rounded-[var(--ui-radius-control)] px-1.5 py-1 text-center text-[11px];
     color: var(--za-text);
     background: var(--za-surface-2);
     border: 1px solid var(--za-line);
@@ -569,7 +569,7 @@
   .appearance-slider input[type='range']::-webkit-slider-runnable-track,
   .appearance-slider-input::-webkit-slider-runnable-track {
     height: 4px;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: linear-gradient(
       90deg,
       var(--za-accent) 0 var(--slider-pct),
@@ -583,7 +583,7 @@
     margin-top: -5px;
     width: 14px;
     height: 14px;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-circle);
     background: var(--za-surface-1);
     border: 2px solid var(--za-accent);
     box-shadow: 0 1px 3px color-mix(in srgb, #000 18%, transparent);
@@ -592,14 +592,14 @@
   .appearance-slider input[type='range']::-moz-range-track,
   .appearance-slider-input::-moz-range-track {
     height: 4px;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: color-mix(in srgb, var(--za-line) 90%, transparent);
   }
 
   .appearance-slider input[type='range']::-moz-range-progress,
   .appearance-slider-input::-moz-range-progress {
     height: 4px;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: var(--za-accent);
   }
 
@@ -607,7 +607,7 @@
   .appearance-slider-input::-moz-range-thumb {
     width: 14px;
     height: 14px;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-circle);
     background: var(--za-surface-1);
     border: 2px solid var(--za-accent);
   }
@@ -617,7 +617,7 @@
   }
 
   .appearance-reset {
-    @apply rounded-[10px] px-3 py-1.5 text-[12px] font-medium;
+    @apply rounded-[var(--ui-radius-control)] px-3 py-1.5 text-[12px] font-medium;
     color: var(--za-text-muted);
     background: transparent;
     border: 1px solid transparent;

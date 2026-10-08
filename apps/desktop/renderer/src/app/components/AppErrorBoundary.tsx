@@ -53,7 +53,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             style={{
               margin: 0,
               padding: 12,
-              borderRadius: 12,
+              borderRadius: 'var(--ui-radius-panel)',
               background: 'rgba(0,0,0,0.06)',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
@@ -69,7 +69,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             style={{
               justifySelf: 'start',
               padding: '8px 12px',
-              borderRadius: 10,
+              borderRadius: 'var(--ui-radius-control)',
               border: '1px solid var(--graphite-base, #1A1D21)',
               background: 'var(--graphite-base, #1A1D21)',
               color: 'var(--za-accent-ink, #F7F9FC)',

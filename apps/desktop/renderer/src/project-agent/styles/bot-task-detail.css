@@ -2,7 +2,7 @@
 .bot-task-detail .bot-task-back,
 .bot-task-detail .bot-task-scene {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
-  padding: 5px 0; border: 0; border-radius: 6px; background: transparent;
+  padding: 5px 0; border: 0; border-radius: var(--ui-radius-control-compact); background: transparent;
   color: var(--graphite-secondary); font-size: 12px;
 }
 .bot-task-detail .bot-task-back:hover,
@@ -10,10 +10,10 @@
 .bot-task-detail-head { display: flex; flex-direction: column; gap: 10px; }
 .bot-task-detail .bot-task-detail-head h2 { font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
 .bot-task-detail-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--graphite-secondary); }
-.bot-task-status { padding: 3px 7px; border-radius: 6px; background: var(--chrome-hover); color: var(--graphite-soft); }
+.bot-task-status { padding: 3px 7px; border-radius: var(--ui-radius-control-compact); background: var(--chrome-hover); color: var(--graphite-soft); }
 .bot-task-detail section { display: flex; flex-direction: column; gap: 7px; }
 .bot-task-detail h3 { margin: 0; font-size: 11px; font-weight: 500; line-height: 1.5; color: var(--graphite-secondary); }
-.bot-task-progress { padding: 14px; border-radius: 12px; background: var(--chrome-canvas); }
+.bot-task-progress { padding: 14px; border-radius: var(--ui-radius-panel); background: var(--chrome-canvas); }
 .bot-task-detail p { margin: 0; overflow-wrap: anywhere; }
 .bot-task-progress-text { font-size: 14px; line-height: 1.6; font-weight: 500; color: var(--graphite-base); }
 .bot-task-hint { font-size: 11px; line-height: 1.6; color: var(--graphite-secondary); }
@@ -30,7 +30,7 @@
 .bot-task-report-read { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--graphite-secondary); }
 .bot-task-report-read:has(p) { margin-top: 12px; }
 .bot-task-report-read p { margin: 0; }
-.bot-task-detail .bot-task-conversation { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 4px; padding: 5px 0; border: 0; border-radius: 5px; font-size: 12px; font-weight: 500; }
+.bot-task-detail .bot-task-conversation { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 4px; padding: 5px 0; border: 0; border-radius: var(--ui-radius-chip); font-size: 12px; font-weight: 500; }
 .bot-task-detail .bot-task-conversation:hover { background: transparent; color: var(--za-accent); }
 .bot-task-description p { font-size: 13px; line-height: 1.7; color: var(--graphite-soft); white-space: pre-wrap; }
 .bot-task-information { border-top: 1px solid var(--chrome-hairline); padding-top: 12px; }

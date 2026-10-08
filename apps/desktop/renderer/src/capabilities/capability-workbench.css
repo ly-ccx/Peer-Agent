@@ -57,7 +57,7 @@
 
   .capability-tabs {
     @apply grid h-10 w-full max-w-[420px] auto-cols-fr grid-flow-col gap-1 p-1;
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-panel);
     background: var(--za-surface-1);
   }
 
@@ -92,7 +92,7 @@
   .capability-empty-state {
     @apply grid max-w-[520px] gap-2 px-5 py-6;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-panel);
     background: var(--za-panel-1);
   }
 
@@ -120,7 +120,7 @@
   .capability-card {
     @apply relative grid min-h-[104px] min-w-0 content-start gap-2 px-5 py-4 text-left;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-panel);
     color: var(--za-text);
     background: var(--za-panel-1);
   }
@@ -163,7 +163,7 @@
   .capability-state i {
     width: 6px;
     height: 6px;
-    border-radius: var(--ui-radius-round);
+    border-radius: var(--ui-radius-circle);
     background: currentColor;
   }
 
@@ -192,7 +192,7 @@
   }
 
   .capability-card-meta code {
-    @apply inline-flex min-h-6 items-center rounded-[var(--radius-xs)] px-1.5 text-[12px];
+    @apply inline-flex min-h-6 items-center rounded-[var(--ui-radius-detail)] px-1.5 text-[12px];
     border: 1px solid var(--za-line);
     color: var(--za-text-soft);
     background: transparent;
@@ -232,7 +232,7 @@
 
   .capability-detail-seal {
     @apply grid h-7 w-7 shrink-0 place-items-center;
-    border-radius: var(--radius-xs);
+    border-radius: var(--ui-radius-detail);
     color: var(--surface-vellum-base);
     background: var(--cinnabar-seal);
     font-family: var(--font-serif-zh);
@@ -374,13 +374,13 @@
   }
 
   .skill-scope-header > span {
-    @apply rounded-full px-2 py-0.5 text-[11px] font-medium;
+    @apply rounded-[var(--ui-radius-pill)] px-2 py-0.5 text-[11px] font-medium;
     color: var(--za-text-muted);
     background: color-mix(in srgb, var(--za-text) 8%, transparent);
   }
 
   .skill-scope-empty {
-    @apply rounded-[10px] px-4 py-8 text-center text-[13px];
+    @apply rounded-[var(--ui-radius-control)] px-4 py-8 text-center text-[13px];
     color: var(--za-text-muted);
     border: 1px dashed var(--za-line);
     background: color-mix(in srgb, var(--za-panel-1) 70%, transparent);
@@ -391,13 +391,13 @@
   }
 
   .skill-sub-tabs {
-    @apply flex h-9 items-center gap-1 rounded-lg p-1;
+    @apply flex h-9 items-center gap-1 rounded-[var(--ui-radius-control)] p-1;
     background: var(--za-surface-1);
     width: fit-content;
   }
 
   .skill-sub-tabs button {
-    @apply min-w-0 rounded-md px-4 py-1.5 text-[13px] font-medium;
+    @apply min-w-0 rounded-[var(--ui-radius-control)] px-4 py-1.5 text-[13px] font-medium;
     color: var(--za-text-soft);
   }
 
@@ -416,7 +416,7 @@
   }
 
   .skill-search-box {
-    @apply flex flex-1 items-center gap-2 rounded-lg px-3;
+    @apply flex flex-1 items-center gap-2 rounded-[var(--ui-radius-control)] px-3;
     height: 38px;
     border: 1px solid var(--za-line);
     background: var(--za-panel-1);
@@ -438,7 +438,7 @@
   }
 
   .skill-upload-btn {
-    @apply ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-5 text-[13px] font-semibold;
+    @apply ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--ui-radius-pill)] px-5 text-[13px] font-semibold;
     color: #fff;
     background: #222;
   }
@@ -469,7 +469,7 @@
 
   .skill-market-card::after {
     content: '';
-    @apply absolute inset-0 rounded-lg;
+    @apply absolute inset-0 rounded-[var(--ui-radius-control)];
     background: rgba(255, 255, 255, 0.2);
     backdrop-filter: blur(1.5px);
     -webkit-backdrop-filter: blur(2px);
@@ -487,7 +487,7 @@
   }
 
   .skill-market-card-icon {
-    @apply h-8 w-8 shrink-0 rounded-md object-cover;
+    @apply h-8 w-8 shrink-0 rounded-[var(--ui-radius-control-compact)] object-cover;
   }
 
   .skill-market-card-body {
@@ -521,7 +521,7 @@
   }
 
   .skill-market-service-icon {
-    @apply relative flex h-4 w-4 shrink-0 cursor-default items-center justify-center overflow-hidden rounded;
+    @apply relative flex h-4 w-4 shrink-0 cursor-default items-center justify-center overflow-hidden rounded-[var(--ui-radius-chip)];
   }
 
   .skill-market-service-icon img {
@@ -529,7 +529,7 @@
   }
 
   .skill-market-service-placeholder {
-    @apply flex h-full w-full items-center justify-center rounded text-[8px] font-medium;
+    @apply flex h-full w-full items-center justify-center rounded-[var(--ui-radius-chip)] text-[8px] font-medium;
     background: var(--za-surface-1);
     color: var(--za-text-muted);
   }
@@ -539,7 +539,7 @@
   }
 
   .skill-market-tag {
-    @apply rounded-full px-1.5 py-0 text-[8px];
+    @apply rounded-[var(--ui-radius-pill)] px-1.5 py-0 text-[8px];
     background: var(--za-surface-1);
     color: var(--za-text-soft);
   }
@@ -565,7 +565,7 @@
   }
 
   .skill-market-card-install-btn {
-    @apply absolute rounded-md px-3 py-1 text-[12px] font-medium;
+    @apply absolute rounded-[var(--ui-radius-control)] px-3 py-1 text-[12px] font-medium;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
@@ -598,7 +598,7 @@
   .skill-card {
     @apply flex min-w-0 items-start gap-3 overflow-hidden px-4 py-3;
     border: 1px solid var(--za-line);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-control);
     color: var(--za-text);
     background: var(--za-panel-1);
     cursor: pointer;
@@ -615,7 +615,7 @@
   }
 
   .skill-avatar {
-    @apply grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-semibold;
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[var(--ui-radius-circle)] text-[13px] font-semibold;
     color: var(--za-text-muted);
     background: #f0f0f0;
   }
@@ -651,7 +651,7 @@
   }
 
   .skill-source-badge {
-    @apply shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium;
+    @apply shrink-0 rounded-[var(--ui-radius-pill)] px-2 py-0.5 text-[10px] font-medium;
     color: var(--za-text-muted);
     background: color-mix(in srgb, var(--za-text) 8%, transparent);
   }
@@ -683,7 +683,7 @@
   }
 
   .skill-aone-login-btn {
-    @apply mt-3 rounded-lg px-5 py-2 text-[14px] font-medium;
+    @apply mt-3 rounded-[var(--ui-radius-control)] px-5 py-2 text-[14px] font-medium;
     background: var(--za-primary-control-bg);
     color: var(--za-primary-control-ink);
     border: none;
@@ -717,7 +717,7 @@
   }
 
   .aone-skill-card {
-    @apply relative flex flex-col gap-1.5 rounded-lg px-3 py-2.5;
+    @apply relative flex flex-col gap-1.5 rounded-[var(--ui-radius-control)] px-3 py-2.5;
     border: 1px solid var(--za-line);
     background: var(--za-surface-0);
     transition: box-shadow 0.2s;
@@ -726,7 +726,7 @@
 
   .aone-skill-card::after {
     content: '';
-    @apply absolute inset-0 rounded-lg;
+    @apply absolute inset-0 rounded-[var(--ui-radius-control)];
     background: rgba(255, 255, 255, 0.2);
     backdrop-filter: blur(1.5px);
     -webkit-backdrop-filter: blur(2px);
@@ -757,11 +757,11 @@
   }
 
   .aone-skill-card-icon {
-    @apply h-7 w-7 shrink-0 rounded-md object-cover;
+    @apply h-7 w-7 shrink-0 rounded-[var(--ui-radius-control-compact)] object-cover;
   }
 
   .aone-skill-card-avatar {
-    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[12px] font-medium;
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--ui-radius-control-compact)] text-[12px] font-medium;
     background: #f0f0f0;
     color: #666;
   }
@@ -795,7 +795,7 @@
   }
 
   .aone-skill-card-tag {
-    @apply rounded px-1.5 py-0.5 shrink-0;
+    @apply rounded-[var(--ui-radius-chip)] px-1.5 py-0.5 shrink-0;
     background: var(--za-surface-2);
   }
 
@@ -816,7 +816,7 @@
   }
 
   .aone-skill-card-install-btn {
-    @apply absolute rounded-md px-3 py-1 text-[12px] font-medium;
+    @apply absolute rounded-[var(--ui-radius-control)] px-3 py-1 text-[12px] font-medium;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
@@ -859,7 +859,7 @@
   }
 
   .skill-upload-close {
-    @apply flex h-7 w-7 items-center justify-center rounded-full text-[16px] leading-none;
+    @apply flex h-7 w-7 items-center justify-center rounded-[var(--ui-radius-circle)] text-[16px] leading-none;
     color: var(--za-text-muted);
     background: transparent;
     border: none;
@@ -872,19 +872,19 @@
 
   /* Info banner */
   .skill-upload-banner {
-    @apply flex items-center gap-2 rounded-lg px-3 py-2.5 text-[13px];
+    @apply flex items-center gap-2 rounded-[var(--ui-radius-control)] px-3 py-2.5 text-[13px];
     background: #e8f4fd;
     color: #1a1a1a;
   }
 
   .skill-upload-banner-icon {
-    @apply grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[11px] font-bold;
+    @apply grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[var(--ui-radius-circle)] text-[11px] font-bold;
     background: #5bb7f0;
     color: #fff;
   }
 
   .skill-upload-banner-close {
-    @apply ml-auto grid h-5 w-5 shrink-0 place-items-center rounded text-[14px];
+    @apply ml-auto grid h-5 w-5 shrink-0 place-items-center rounded-[var(--ui-radius-chip)] text-[14px];
     color: var(--za-text-muted);
     background: transparent;
     border: none;
@@ -913,7 +913,7 @@
   }
 
   .skill-upload-file-btn {
-    @apply flex h-9 shrink-0 items-center justify-center rounded-lg px-4 text-[13px] font-medium leading-none;
+    @apply flex h-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-control)] px-4 text-[13px] font-medium leading-none;
     border: 1px dashed #ccc;
     color: var(--za-text);
     background: transparent;
@@ -939,7 +939,7 @@
   }
 
   .skill-btn-cancel {
-    @apply h-10 rounded-full px-6 text-[14px] font-medium;
+    @apply h-10 rounded-[var(--ui-radius-pill)] px-6 text-[14px] font-medium;
     border: 1px solid #ddd;
     color: var(--za-text);
     background: transparent;
@@ -950,7 +950,7 @@
   }
 
   .skill-btn-confirm {
-    @apply h-10 rounded-full px-6 text-[14px] font-medium;
+    @apply h-10 rounded-[var(--ui-radius-pill)] px-6 text-[14px] font-medium;
     border: none;
     color: #fff;
     background: #222;
@@ -971,7 +971,7 @@
   }
 
   .skill-link-error {
-    @apply m-0 rounded-lg px-3 py-2 text-[13px];
+    @apply m-0 rounded-[var(--ui-radius-control)] px-3 py-2 text-[13px];
     color: var(--za-danger);
     background: var(--za-panel-1);
     border: 1px solid var(--za-line);
@@ -1001,7 +1001,7 @@
   }
 
   .skill-borrow-btn {
-    @apply h-7 shrink-0 rounded-full px-3 text-[12px] font-medium leading-none;
+    @apply h-7 shrink-0 rounded-[var(--ui-radius-pill)] px-3 text-[12px] font-medium leading-none;
     color: var(--za-primary-control-ink);
     background: var(--za-primary-control-bg);
     border: none;
@@ -1032,7 +1032,7 @@
   }
 
   .mcp-card-badge {
-    @apply inline-flex items-center rounded-full px-2 text-[10px] font-medium uppercase leading-[18px];
+    @apply inline-flex items-center rounded-[var(--ui-radius-pill)] px-2 text-[10px] font-medium uppercase leading-[18px];
     color: var(--za-danger, #d92d20);
     background: color-mix(in srgb, var(--za-danger, #d92d20) 14%, transparent);
   }
@@ -1063,7 +1063,7 @@
   }
 
   .mcp-drawer-credentials .mcp-credential-delete {
-    @apply shrink-0 rounded-md px-2 py-1 text-[12px];
+    @apply shrink-0 rounded-[var(--ui-radius-control-compact)] px-2 py-1 text-[12px];
     color: var(--za-danger, #d92d20);
     background: transparent;
     border: 1px solid var(--za-line);
@@ -1078,7 +1078,7 @@
 
   /* ── Skill detail dialog —— 遮罩/动效由 Overlay 基座提供；本类只负责面板布局 ── */
   .skill-detail-dialog {
-    @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[28px];
+    @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[var(--ui-radius-modal)];
     width: min(900px, 90vw);
     max-height: min(820px, 88vh);
     color: var(--za-text);
@@ -1105,12 +1105,12 @@
     color: var(--za-text-muted);
   }
 
-  .skill-scope-badge { @apply rounded-full px-2.5 py-1 text-[11px] font-medium; }
+  .skill-scope-badge { @apply rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-[11px] font-medium; }
   .skill-scope-badge--workspace { color: #60a5fa; background: rgba(59, 130, 246, 0.14); }
   .skill-scope-badge--global { color: var(--za-text-muted); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
 
   .skill-detail-close {
-    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-0 bg-transparent p-0;
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-circle)] border-0 bg-transparent p-0;
     color: var(--za-text-muted);
     cursor: pointer;
   }
@@ -1128,7 +1128,7 @@
   .skill-uninstall-btn,
   .skill-uninstall-cancel,
   .skill-uninstall-confirm-btn {
-    @apply rounded-xl px-3 py-2 text-sm font-medium;
+    @apply rounded-[var(--ui-radius-control)] px-3 py-2 text-sm font-medium;
     border: 1px solid var(--za-line);
   }
   .skill-uninstall-btn {
@@ -1165,12 +1165,12 @@
     color: var(--za-text-muted);
   }
   .skill-detail-meta code {
-    @apply max-w-full truncate rounded-md px-2 py-1;
+    @apply max-w-full truncate rounded-[var(--ui-radius-control-compact)] px-2 py-1;
     background: color-mix(in srgb, var(--za-text) 7%, transparent);
   }
 
   .skill-detail-content {
-    @apply min-h-0 flex-1 overflow-y-auto rounded-[22px] px-8 py-7;
+    @apply min-h-0 flex-1 overflow-y-auto rounded-[var(--ui-radius-panel)] px-8 py-7;
     margin: 0 18px 18px;
     /* 与弹窗同系浅色表面，避免混入黑色造成“灰黑块” */
     background: var(--za-surface-1);
@@ -1178,7 +1178,7 @@
   }
   .skill-detail-content .markdown-content { font-size: 14px; line-height: 1.75; }
   .skill-detail-when {
-    @apply mb-6 rounded-xl p-4;
+    @apply mb-6 rounded-[var(--ui-radius-panel)] p-4;
     background: color-mix(in srgb, #3b82f6 9%, transparent);
     border: 1px solid color-mix(in srgb, #3b82f6 22%, transparent);
   }
@@ -1188,7 +1188,7 @@
 
   .skill-view-tabs {
     @apply mb-0 inline-flex w-fit p-1;
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-panel);
     background: color-mix(in srgb, var(--za-text) 6%, transparent);
     border: 1px solid var(--za-line);
   }
@@ -1205,7 +1205,7 @@
   .skill-marketplace-toolbar input {
     @apply min-w-[240px] px-3 py-2 text-[13px] outline-none;
     color: var(--za-text); background: var(--za-surface); border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-control);
   }
   .skill-marketplace {
     @apply pt-0;
@@ -1216,7 +1216,7 @@
     align-items: stretch;
   }
   .skill-marketplace-card {
-    @apply flex h-full min-w-0 flex-col gap-2.5 rounded-2xl p-3;
+    @apply flex h-full min-w-0 flex-col gap-2.5 rounded-[var(--ui-radius-panel)] p-3;
     background: var(--za-surface); border: 1px solid var(--za-line);
     transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
   }
@@ -1238,7 +1238,7 @@
   .skill-marketplace-card-body:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--za-accent) 55%, transparent);
     outline-offset: 2px;
-    border-radius: 12px;
+    border-radius: var(--ui-radius-panel);
   }
   .skill-marketplace-card-heading {
     @apply flex min-w-0 w-full items-center gap-3;
@@ -1258,7 +1258,7 @@
   .skill-marketplace-card-copy > span { @apply line-clamp-2 text-[12px] leading-5; color: var(--za-text-muted); }
   .skill-marketplace-install {
     @apply shrink-0 px-3 py-1.5 text-[12px] font-semibold;
-    border-radius: var(--ui-radius-round);
+    border-radius: var(--ui-radius-pill);
     color: #fff; background: var(--za-accent); border: 0; cursor: pointer;
     transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease;
   }
@@ -1289,13 +1289,13 @@
     @apply flex min-w-0 max-w-full items-center gap-2;
   }
   .skill-marketplace-install-scope {
-    @apply inline-flex max-w-full shrink-0 items-center gap-1 rounded-full p-1;
+    @apply inline-flex max-w-full shrink-0 items-center gap-1 rounded-[var(--ui-radius-pill)] p-1;
     width: fit-content;
     background: color-mix(in srgb, var(--za-text) 5%, transparent);
     border: 1px solid var(--za-line);
   }
   .skill-marketplace-install-scope button {
-    @apply min-w-0 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors;
+    @apply min-w-0 rounded-[var(--ui-radius-pill)] px-3 py-1.5 text-[12px] font-medium transition-colors;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1327,11 +1327,11 @@
   }
   .skill-marketplace-workspace-picker .pa-dropdown-trigger {
     min-height: 36px;
-    border-radius: 9999px;
+    border-radius: var(--ui-radius-pill);
   }
   /* 安装失败提示：在弹窗安装区单独占满一行，避免再被 Overlay 挡住 */
   .skill-marketplace-install-error {
-    @apply m-0 rounded-xl px-3 py-2 text-[12px] leading-5;
+    @apply m-0 rounded-[var(--ui-radius-panel)] px-3 py-2 text-[12px] leading-5;
     flex: 1 0 100%;
     color: var(--za-danger);
     background: color-mix(in srgb, var(--za-danger) 8%, transparent);
@@ -1370,7 +1370,7 @@
     color: var(--za-text-muted);
   }
   .skill-marketplace-detail {
-    @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[28px];
+    @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[var(--ui-radius-panel)];
     width: min(760px, 90vw);
     max-height: min(820px, 88vh);
   }
@@ -1403,7 +1403,7 @@
   }
   .skill-marketplace-category-select .pa-dropdown-trigger {
     @apply px-3 py-2 text-[12px];
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-control);
     min-height: 34px;
     color: var(--za-text);
     background: var(--za-surface);
@@ -1414,7 +1414,7 @@
     @apply mb-4 mt-0 flex flex-wrap items-center gap-2;
   }
   .skill-marketplace-filters button {
-    @apply rounded-full px-3.5 py-1.5 text-[12px] font-medium border-0;
+    @apply rounded-[var(--ui-radius-pill)] px-3.5 py-1.5 text-[12px] font-medium border-0;
     color: var(--za-text-muted);
     background: transparent;
     cursor: pointer;
@@ -1428,8 +1428,8 @@
     color: var(--za-text);
     background: color-mix(in srgb, var(--za-text) 8%, transparent);
   }
-  .skill-marketplace-sync { @apply mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3 text-[12px]; color: var(--za-text-muted); background: var(--za-surface-1); border: 1px solid var(--za-line); }
-  .skill-marketplace-error { @apply mb-4 rounded-xl px-4 py-3 text-[12px]; color: var(--za-danger); background: color-mix(in srgb, var(--za-danger) 8%, transparent); }
+  .skill-marketplace-sync { @apply mb-4 flex flex-wrap items-center justify-between gap-2 rounded-[var(--ui-radius-panel)] px-4 py-3 text-[12px]; color: var(--za-text-muted); background: var(--za-surface-1); border: 1px solid var(--za-line); }
+  .skill-marketplace-error { @apply mb-4 rounded-[var(--ui-radius-panel)] px-4 py-3 text-[12px]; color: var(--za-danger); background: color-mix(in srgb, var(--za-danger) 8%, transparent); }
   .skill-marketplace-empty { @apply py-8 text-center text-[13px]; color: var(--za-text-muted); }
   .skill-marketplace-card-main {
     @apply flex min-w-0 w-full flex-col items-start gap-2 border-0 bg-transparent p-0 text-left;
@@ -1440,7 +1440,7 @@
     @apply mt-auto flex min-w-0 items-end justify-between gap-3;
   }
   .skill-marketplace-tags { @apply flex min-w-0 flex-1 flex-wrap gap-1.5; }
-  .skill-marketplace-tags em { @apply rounded-full px-2 py-1 text-[10px] not-italic; color: var(--za-text-muted); background: var(--za-surface-1); }
+  .skill-marketplace-tags em { @apply rounded-[var(--ui-radius-pill)] px-2 py-1 text-[10px] not-italic; color: var(--za-text-muted); background: var(--za-surface-1); }
   .skill-marketplace-tag-category {
     color: var(--za-text);
     background: color-mix(in srgb, var(--za-accent) 10%, var(--za-surface-1));
@@ -1457,7 +1457,7 @@
   }
   .skill-marketplace-pagination { @apply mt-5 flex items-center justify-center gap-4 text-[12px]; color: var(--za-text-muted); }
   .skill-marketplace-pagination button {
-    @apply rounded-lg px-3 py-2;
+    @apply rounded-[var(--ui-radius-control)] px-3 py-2;
     color: var(--za-text);
     background: var(--za-surface);
     border: 1px solid var(--za-line);
@@ -1478,7 +1478,7 @@
     justify-content: center;
     height: 32px;
     width: 32px;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-control);
     font-size: 15px;
     border: 1px solid var(--za-line);
     background: var(--za-surface);
@@ -1494,7 +1494,7 @@
     height: 32px;
     min-width: 32px;
     padding: 0 6px;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-control);
     font-size: 12.5px;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
@@ -1536,10 +1536,10 @@
   }
 }
 
-/* 未分层覆盖：全局 .pa-dropdown-trigger 的 --radius-md(8px) 不在 @layer 内，
-   会盖掉 components 层里的工具栏规则。搜索 / 分类 / 同步与分段外框共用 --za-radius。 */
+/* 未分层覆盖：全局 .pa-dropdown-trigger 的 --ui-radius-control 不在 @layer 内，
+   会盖掉 components 层里的工具栏规则。搜索 / 分类 / 同步采用 control；分段外框采用 panel。 */
 .skill-marketplace-toolbar input,
 .skill-marketplace-category-select .pa-dropdown-trigger,
 .skill-marketplace-toolbar .skill-marketplace-install {
-  border-radius: var(--za-radius);
+  border-radius: var(--ui-radius-control);
 }

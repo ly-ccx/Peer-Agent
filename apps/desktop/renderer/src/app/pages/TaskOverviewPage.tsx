@@ -978,7 +978,7 @@ const WorkItem = memo(function WorkItem({
       <div className="task-overview-work-top">
         <span className="task-overview-work-state">
           {item.actionRight !== 'paused' && item.source !== 'conversation' ? (
-            <i className="task-overview-spinner" aria-hidden="true" />
+            <PeerIcon name="loader" className="task-overview-spinner" />
           ) : null}
           {item.actionRight === 'paused' ? item.statusLabel : advancingStateLabel(item)}
         </span>
@@ -1151,7 +1151,7 @@ function ArtifactList({ item }: { readonly item: TaskOverviewItem }) {
       <summary className="task-artifacts-summary" onClick={(event) => event.stopPropagation()}>
         <span>主要产物</span>
         <span className="task-artifacts-count">{projection.summary}</span>
-        <span className="task-artifacts-chevron" aria-hidden="true" />
+        <PeerIcon name="chevronDown" size={14} className="task-artifacts-chevron" />
       </summary>
       <div className="task-artifacts-content" aria-label="主要产物">
         {projection.groups.map((group) => (
@@ -1300,7 +1300,7 @@ function ResultCard({
         <div className="work-item-actions__buttons">
         {phase === 'submitting' ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
-            <span className="result-card-spinner" aria-hidden="true" />
+            <PeerIcon name="loader" className="result-card-spinner" />
             正在合进源头…
           </button>
         ) : celebrating ? (

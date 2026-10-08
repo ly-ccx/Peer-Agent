@@ -3,9 +3,9 @@
 .settings-nav { background: var(--glass-chrome); backdrop-filter: blur(var(--blur-chrome)); padding-inline: 16px; }
 .settings-nav-list { gap: 14px; }
 .settings-nav-group h2 { color: var(--graphite-soft); font-weight: 400; letter-spacing: 0; text-transform: none; padding-bottom: 8px; }
-.settings-nav-item { min-height: 34px; padding-block: 6px; border-radius: var(--control-radius); font-size: .8125rem; }
+.settings-nav-item { min-height: 34px; padding-block: 6px; border-radius: var(--ui-radius-row); font-size: .8125rem; }
 .settings-nav-item.active { background: var(--chrome-active); }
-.settings-nav-search { height: 32px; margin-inline: 4px; border-radius: var(--control-radius); border-color: transparent; background: var(--chrome-sunken); box-shadow: none; }
+.settings-nav-search { height: 32px; margin-inline: 4px; border-radius: var(--ui-radius-control); border-color: transparent; background: var(--chrome-sunken); box-shadow: none; }
 .settings-nav-search:focus-within { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
 .settings-content { --settings-help-size: .75rem; --settings-help-color: color-mix(in srgb, var(--graphite-soft) 84%, var(--paper-sheet)); container: settings / inline-size; background: var(--chrome-canvas); }
 .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) {
@@ -26,11 +26,11 @@
 }
 .frost-settings-group {
   display: flex; flex-direction: column; min-width: 0; margin: 0;
-  border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius); background: var(--paper-sheet); box-shadow: none;
+  border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); box-shadow: none;
 }
 .frost-settings-group > .frost-group-heading {
   display: block; padding: var(--settings-heading-padding, 18px 23px 16px); margin: 0; border-bottom: 1px solid var(--chrome-hairline);
-  border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; background: var(--paper-base);
+  border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; background: var(--paper-base);
 }
 .frost-settings-group > .frost-group-heading h2 {
   margin: 0; color: var(--graphite-base); font-family: var(--font-sans);
@@ -53,7 +53,7 @@
 .bot-drawer-body .pa-cascading-trigger {
   position: relative; display: flex; align-items: center; justify-content: space-between;
   width: 100%; max-width: none; min-width: 0; min-height: 40px; height: auto; gap: 12px;
-  padding: 8px 14px; border: 1px solid transparent; border-radius: var(--control-radius);
+  padding: 8px 14px; border: 1px solid transparent; border-radius: var(--ui-radius-control);
   background: var(--control-fill); color: var(--graphite-base);
   font-family: var(--font-sans); font-size: .8125rem; font-weight: 400; text-align: left; box-shadow: none;
 }
@@ -62,12 +62,12 @@
 :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger):hover:not(:disabled) { background: var(--control-fill-hover); border-color: transparent; }
 :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger):is(.open, :active):not(:disabled) { background: var(--control-fill-active); border-color: transparent; }
 :is(.settings-content, .bot-drawer-body) :is(button, input, textarea):focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
-.settings-content .general-language-select input { width: 100%; min-height: 40px; height: auto; padding: 8px 14px; border: 1px solid transparent; border-radius: var(--control-radius); background: var(--control-fill); font-size: .8125rem; }
+.settings-content .general-language-select input { width: 100%; min-height: 40px; height: auto; padding: 8px 14px; border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); font-size: .8125rem; }
 .settings-content .general-quiet-setting { grid-template-columns: minmax(0, 1fr) 272px; }
 .general-quiet-controls, .settings-content .general-bots-hours { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .settings-content .general-bots-hours { margin: 0; padding: 0; gap: 8px; }
 .settings-content .general-bots-hours > span { font-size: .75rem; color: var(--graphite-soft); }
-.settings-content .general-bot-time { display: flex; align-items: center; justify-content: center; justify-self: end; gap: 2px; min-width: 88px; padding: 3px 8px; min-height: 40px; border: 1px solid transparent; border-radius: var(--control-radius); background: var(--control-fill); }
+.settings-content .general-bot-time { display: flex; align-items: center; justify-content: center; justify-self: end; gap: 2px; min-width: 88px; padding: 3px 8px; min-height: 40px; border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); }
 .settings-content .general-bot-time .pa-dropdown { width: 31px; }
 .settings-content .general-bot-time .pa-dropdown-trigger { justify-content: center; height: 32px; min-height: 32px; padding: 0; gap: 0; background: transparent; border: 0; font-variant-numeric: tabular-nums; }
 .settings-content .general-bot-time .pa-dropdown-caret { display: none; }
@@ -75,20 +75,20 @@
 .settings-content .general-bot-time:has(button:disabled) { opacity: .52; }
 .settings-content .general-bot-time button:disabled { opacity: 1; }
 /* Off and on must both have a visible thumb on the snow surface. */
-:is(.settings-content, .bot-drawer-body) .peer-switch { width: 40px; height: 23px; min-height: 23px; padding: 3px; border-radius: 16px; border: 1px solid var(--chrome-hairline); background: var(--paper-sunken); }
+:is(.settings-content, .bot-drawer-body) .peer-switch { width: 40px; height: 23px; min-height: 23px; padding: 3px; border-radius: var(--ui-radius-pill); border: 1px solid var(--chrome-hairline); background: var(--paper-sunken); }
 :is(.settings-content, .bot-drawer-body) .peer-switch-thumb { width: 15px; height: 15px; background: var(--graphite-soft); }
 :is(.settings-content, .bot-drawer-body) .peer-switch[data-state='checked'] { background: var(--graphite-base); border-color: var(--graphite-base); }
 :is(.settings-content, .bot-drawer-body) .peer-switch[data-state='checked'] .peer-switch-thumb { background: var(--paper-sheet); transform: translateX(17px); }
 /* Existing complex forms keep their controls, while using the same group surfaces. */
-.settings-content :is(.settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group) { border-radius: var(--surface-radius); border: 1px solid var(--chrome-hairline); background: var(--paper-sheet); box-shadow: none; }
+.settings-content :is(.settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group) { border-radius: var(--ui-radius-panel); border: 1px solid var(--chrome-hairline); background: var(--paper-sheet); box-shadow: none; }
 .settings-content :is(.shortcut-group, .llm-instructions-card) { padding: 0; gap: 0; }
-.settings-content :is(.shortcut-group-heading, .llm-instructions-header, .llm-group-header) { padding: var(--settings-heading-padding); background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
+.settings-content :is(.shortcut-group-heading, .llm-instructions-header, .llm-group-header) { padding: var(--settings-heading-padding); background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; }
 .settings-content :is(.shortcut-group-heading h3, .llm-instructions-header strong, .llm-group-header strong) { font-size: .9375rem; font-weight: 400; color: var(--graphite-base); }
 .settings-content :is(.shortcut-group-heading p, .shortcut-description, .llm-instructions-hint) { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
 .settings-content .shortcut-row { padding: var(--settings-row-padding); }
 .settings-content .shortcut-title { font-size: .875rem; font-weight: 600; }
 .settings-content :is(.shortcut-status, .shortcut-reset, .shortcut-error) { font-size: .8125rem; }
-.settings-content .shortcut-recorder { min-height: 40px; border-radius: var(--control-radius); border-color: transparent; background: var(--control-fill); box-shadow: none; }
+.settings-content .shortcut-recorder { min-height: 40px; border-radius: var(--ui-radius-control); border-color: transparent; background: var(--control-fill); box-shadow: none; }
 .settings-content .shortcut-recorder:hover { background: var(--control-fill-hover); }
 .settings-content .shortcut-recorder:active { background: var(--control-fill-active); }
 .settings-content .shortcut-recorder.is-recording { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
@@ -108,11 +108,11 @@
 .settings-content .model-routing-row { padding-block: 10px; }
 .settings-content .model-routing-role { grid-template-columns: minmax(96px, 1fr) 130px 140px minmax(100px, 1fr) 120px; }
 .settings-content .remote-access-card { padding: 0 var(--settings-group-inset) 10px; }
-.settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: var(--settings-heading-padding); margin: 0 calc(-1 * var(--settings-group-inset)) 12px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0; }
+.settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: var(--settings-heading-padding); margin: 0 calc(-1 * var(--settings-group-inset)) 12px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; }
 .settings-content .remote-access-card h3 { font-size: .9375rem; font-weight: 400; }
 .settings-content .remote-access-card p { font-size: .8125rem; line-height: 1.6; }
-.settings-content .remote-access-gateway input { min-height: 38px; border-radius: 8px; font-size: .8125rem; }
-.settings-content .llm-fallback-vision { padding: var(--settings-row-padding); border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius); background: var(--paper-sheet); }
+.settings-content .remote-access-gateway input { min-height: 38px; border-radius: var(--ui-radius-control); font-size: .8125rem; }
+.settings-content .llm-fallback-vision { padding: var(--settings-row-padding); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); }
 .settings-content .llm-fallback-vision-copy strong { font-size: .875rem; font-weight: 500; }
 .settings-content .llm-fallback-vision-copy p { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
 @container settings (max-width: 920px) {
@@ -137,12 +137,12 @@
 .settings-content > .settings-provider-page .llm-settings-panel { padding: 0; max-width: none; margin: 18px 0 0; }
 
 .settings-content .appearance-mode-thumb { aspect-ratio: auto; height: 92px; }
-.settings-content .appearance-mode-card { padding: 8px; border-color: transparent; border-radius: var(--control-radius); background: var(--control-fill); }
+.settings-content .appearance-mode-card { padding: 8px; border-color: transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); }
 .settings-content .appearance-mode-card.is-active { border-color: transparent; background: var(--control-fill-hover); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--graphite-soft) 35%, transparent); }
 .settings-content .appearance-mode-card:hover { background: var(--control-fill-hover); }
 .settings-content .appearance-mode-card-label { font-size: .75rem; font-weight: 400; padding-top: 5px; }
 
-:is(.pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { border-radius: var(--surface-radius); box-shadow: var(--shadow-popover); }
+:is(.pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { border-radius: var(--ui-radius-modal); box-shadow: var(--shadow-popover); }
 @supports (corner-shape: superellipse(1.4)) {
   :is(.frost-settings-group, .frost-group-heading, .settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group, .shortcut-group-heading, .llm-instructions-header, .llm-group-header, .settings-nav-item, .settings-nav-search, .appearance-mode-card, .general-bot-time, .shortcut-recorder, .pa-dropdown-trigger, .pa-cascading-trigger, .pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { corner-shape: var(--control-corner); }
 }

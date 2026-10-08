@@ -29,7 +29,7 @@
     background: var(--za-app-bg);
     /* 与聊天主面板 (.main-panel) 同 token 的外壳圆角；overflow 裁切四角。 */
     overflow: hidden;
-    border-radius: var(--radius-lg);
+    border-radius: var(--ui-radius-panel);
   }
 
   .main-panel {
@@ -51,7 +51,7 @@
     height: 100%;
     overflow: hidden;
     background: var(--za-app-bg);
-    border-radius: var(--radius-lg);
+    border-radius: var(--ui-radius-panel);
   }
 
   .primary-page-shell > .automation-center,
@@ -74,7 +74,7 @@
   .profile-chip span {
     @apply grid h-7 w-7 place-items-center text-[11px] font-medium;
     border: 1px solid var(--za-line);
-    border-radius: var(--ui-radius-round);
+    border-radius: var(--ui-radius-pill);
     color: var(--za-text);
     background: var(--za-surface-1);
   }
@@ -84,7 +84,7 @@
     /* thread 才是真正的内容纸面：在直角玻璃底 .main-panel 之上负责实色与圆角，
        并利用自身 overflow 裁切内部 header、消息区和 composer。 */
     background: var(--chrome-canvas, var(--za-app-bg));
-    border-radius: var(--radius-lg);
+    border-radius: var(--ui-radius-panel);
     contain: layout;
   }
 
@@ -158,7 +158,7 @@
   .timeline-tool,
   .za-card {
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-panel);
     background: var(--za-panel-1);
   }
 
@@ -219,7 +219,7 @@
     aspect-ratio: 1.55;
     content: '';
     position: absolute;
-    border-radius: 50%;
+    border-radius: var(--ui-radius-circle);
     background: rgba(59, 127, 171, 0.08);
     filter: blur(72px);
     opacity: 0;
@@ -320,7 +320,7 @@
   .message-meta span {
     @apply inline-flex min-h-6 items-center px-2 text-[11px] leading-none;
     border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-sm);
+    border-radius: var(--ui-radius-row);
     color: var(--za-text-muted);
     background: var(--za-surface-1);
   }
@@ -367,7 +367,7 @@
   .peer-startup-seal {
     @apply grid h-20 w-20 place-items-center;
     flex-shrink: 0;
-    border-radius: var(--radius-xs);
+    border-radius: var(--ui-radius-detail);
     background: var(--cinnabar-seal);
     color: var(--surface-vellum-base);
     font-family: var(--font-serif-zh);

@@ -185,7 +185,7 @@
   margin-left: auto;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--pa-text-secondary, var(--graphite-soft));
   cursor: pointer;
@@ -218,7 +218,7 @@
   height: 18px;
   padding: 0 6px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-detail);
   font-family: var(--font-mono);
   font-size: 0.62rem;
   line-height: 1;
@@ -306,7 +306,7 @@
   gap: 6px;
   min-height: 36px;
   padding: 5px 8px 5px 4px;
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  border-radius: var(--ui-radius-row);
   cursor: pointer;
   transition: background var(--za-motion-fast);
   outline: none;
@@ -323,7 +323,7 @@
   border: 0;
   background: transparent;
   color: var(--graphite-fade);
-  border-radius: 4px;
+  border-radius: var(--ui-radius-control);
   cursor: pointer;
 }
 
@@ -393,7 +393,7 @@
   cursor: pointer;
   padding: 0;
   line-height: 1;
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-detail);
   transform: translateY(-50%);
   transition: opacity var(--za-motion-fast) var(--za-ease-out);
   -webkit-app-region: no-drag;
@@ -423,7 +423,7 @@
   width: 8px;
   height: 8px;
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--state-info);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-info) 22%, transparent);
   --motion-ripple-color: var(--state-info);
@@ -509,7 +509,7 @@
   line-height: 1.2;
   text-align: left;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control-compact);
 }
 
 .sidebar-workspace-task-more:hover {
@@ -535,7 +535,7 @@
   height: 22px;
   padding: 0;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-detail);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -570,7 +570,7 @@
   font-size: 11px;
   line-height: 1;
   padding: 3px 5px;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control-compact);
   border: 1px solid var(--za-line);
   color: var(--pa-text-tertiary, var(--graphite-soft));
   flex: 0 0 auto;
@@ -587,7 +587,7 @@
   padding: 7px var(--space-3);
   /* Outline primary: faint border + transparent fill (not selected-row gray). */
   border: 1px solid color-mix(in srgb, var(--za-line, var(--chrome-hairline)) 70%, transparent);
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  border-radius: var(--ui-radius-panel);
   background: transparent;
   color: var(--graphite-base);
   font-weight: 500;
@@ -619,7 +619,7 @@
   /* 比通用 nav-btn 更紧一点，贴近原先侧栏顶部密度。 */
   padding: 6px var(--space-3);
   border: none;
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-base);
   font-size: 0.82rem;
@@ -688,8 +688,8 @@
   min-height: 28px;
   padding: 5px var(--sidebar-conv-row-pad-x);
   border: 1px solid transparent;
-  /* List row, not a capsule: 8px radius on ~28px height stays a rounded rect. */
-  border-radius: var(--ui-radius-row, 8px);
+  /* List row, not a capsule: 8px radius on ~28px height stays a rounded-[var(--ui-radius-row)] rect. */
+  border-radius: var(--ui-radius-row);
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
@@ -788,7 +788,7 @@
   font-weight: 600;
   text-align: left;
   letter-spacing: 0.02em;
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-detail);
   -webkit-app-region: no-drag;
 }
 .sidebar-section-heading:hover {
@@ -819,7 +819,7 @@
   min-width: 150px;
   padding: 6px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-panel, var(--za-radius-lg, 16px));
+  border-radius: var(--ui-radius-panel);
   background: var(--za-surface-elevated, var(--za-sidebar-bg));
   box-shadow: var(--shadow-popover, 0 12px 32px rgb(0 0 0 / 18%));
   -webkit-app-region: no-drag;
@@ -832,7 +832,7 @@
   min-height: 36px;
   padding: 7px 9px;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-base);
   cursor: pointer;
@@ -876,7 +876,7 @@
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  border-radius: var(--ui-radius-panel);
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
@@ -918,7 +918,7 @@
   align-items: center;
   max-width: 4.5rem;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
   background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
   color: var(--azure-seal, #4f7cff);
@@ -986,7 +986,7 @@
   overflow: visible;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--azure-seal);
   --motion-ripple-color: var(--azure-seal);
   --motion-ripple-strength: 50%;
@@ -1000,7 +1000,7 @@
   overflow: visible;
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--state-success, #40a02b);
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--state-success, #40a02b) 22%, transparent),
@@ -1031,7 +1031,7 @@
   overflow: visible;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--azure-seal);
   --motion-ripple-color: var(--azure-seal);
   --motion-ripple-strength: 45%;
@@ -1146,7 +1146,7 @@
   font-size: 0.9rem;
   padding: 0;
   line-height: 1;
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-detail);
   flex-shrink: 0;
 }
 .sidebar-conv-pin:hover,
@@ -1175,7 +1175,7 @@
 .sidebar-conv-confirm button {
   background: none;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-control);
   cursor: pointer;
   font-size: 0.65rem;
   padding: 1px 6px;
@@ -1215,7 +1215,7 @@
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: none;
   color: var(--graphite-soft);
   cursor: pointer;
@@ -1239,7 +1239,7 @@
   z-index: 20;
   min-width: 260px;
   padding: 10px;
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-surface, #fff);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
   border: 1px solid var(--chrome-hairline);
@@ -1269,7 +1269,7 @@
   padding: 6px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   color: inherit;
   text-align: left;
 }
@@ -1340,7 +1340,7 @@
   margin: 16px 0 18px;
   padding: 8px 10px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .edit-project-name input {
@@ -1359,7 +1359,7 @@
 
 .edit-project-source-list {
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   overflow: hidden;
 }
 
@@ -1394,7 +1394,7 @@
 .edit-project-set-primary {
   flex-shrink: 0;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   padding: 2px 8px;
   font-size: 0.68rem;
   background: var(--chrome-sunken, transparent);
@@ -1426,7 +1426,7 @@
   border: none;
   background: color-mix(in srgb, var(--state-danger) 12%, transparent);
   color: var(--state-danger);
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   padding: 8px 12px;
 }
 
@@ -1438,7 +1438,7 @@
 .edit-project-cancel,
 .edit-project-save {
   border: none;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   padding: 8px 14px;
 }
 

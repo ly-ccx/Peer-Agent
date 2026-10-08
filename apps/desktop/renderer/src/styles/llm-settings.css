@@ -9,7 +9,7 @@
   height: 26px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--text-secondary, #6b7280) 24%, transparent);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   color: var(--text-secondary, #6b7280);
   background: var(--surface-raised, rgba(255, 255, 255, 0.72));
 }
@@ -43,7 +43,7 @@
   height: 19px;
   stroke-width: 1.7;
 }
-.llm-brand-icon-model { width: 24px; height: 24px; border-radius: 7px; }
+.llm-brand-icon-model { width: 24px; height: 24px; border-radius: var(--ui-radius-control-compact); }
 .llm-brand-icon-model svg { width: 15px; height: 15px; }
 .llm-brand-icon-model.is-unknown .llm-brand-icon-signal {
   width: 17px;
@@ -70,7 +70,7 @@
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--chrome-hairline, var(--za-line, rgba(0, 0, 0, 0.08)));
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--ui-radius-control);
   /* Use the same surface token as provider groups so dark theme stays dark. */
   background: var(--paper-sheet);
 }
@@ -106,7 +106,7 @@
   min-height: 36px;
   justify-content: space-between;
   border: 1px solid var(--chrome-hairline, var(--za-line, rgba(0, 0, 0, 0.12)));
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: var(--paper-base, var(--paper-sheet));
   color: var(--graphite-base);
   font: inherit;
@@ -135,7 +135,7 @@
   cursor: pointer;
   font-size: 1.2rem;
   padding: var(--space-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   transition: color var(--za-motion-fast);
 }
 .llm-settings-header button:hover { color: var(--graphite-base); }
@@ -180,7 +180,7 @@
   align-items: center;
   gap: 6px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   cursor: pointer;
@@ -201,7 +201,7 @@
   gap: var(--space-3);
   min-height: 108px;
   border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-mute);
   font-size: 0.82rem;
 }
@@ -217,7 +217,7 @@
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   overflow: visible;
   transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
@@ -323,7 +323,7 @@
   max-width: 100%;
   padding: 2px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-detail);
   background: var(--chrome-sunken);
   color: var(--graphite-soft);
   font-size: 0.68rem;
@@ -342,7 +342,7 @@
   font-size: 0.62rem;
   padding: 1px 6px;
   border: 1px solid rgba(78, 163, 217, 0.24);
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-detail);
   box-shadow:
     0 0 0 1px rgba(104, 201, 255, 0.08),
     0 0 12px rgba(104, 201, 255, 0.14);
@@ -393,7 +393,7 @@
 .llm-provider-actions button {
   background: transparent;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-soft);
   cursor: pointer;
   font-size: 0.72rem;
@@ -419,7 +419,7 @@
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
 }
 .llm-instructions-header {
@@ -437,7 +437,7 @@
   resize: vertical;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -456,7 +456,7 @@
 .llm-instructions-actions button {
   background: transparent;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-soft);
   cursor: pointer;
   font-size: 0.82rem;
@@ -482,7 +482,7 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
 }
 .llm-form h3 {
@@ -506,7 +506,7 @@
 .llm-form input:not([type]) {
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -526,7 +526,7 @@
   resize: vertical;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -578,7 +578,7 @@
   max-height: none;
   overflow: visible;
   border: 1px solid color-mix(in srgb, var(--state-success) 35%, var(--chrome-hairline));
-  border-radius: var(--radius-lg);
+  border-radius: var(--ui-radius-modal);
   background: var(--paper-sheet);
   box-shadow: var(--shadow-lg);
 }
@@ -608,7 +608,7 @@
   min-height: 32px;
   padding: 0 var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   cursor: pointer;
@@ -629,7 +629,7 @@
   min-height: 32px;
   padding: 0 var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   font-size: 0.76rem;
@@ -663,7 +663,7 @@
   width: 100%;
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
 }
 .llm-model-candidates-header {
@@ -701,7 +701,7 @@
   gap: var(--space-2);
   min-height: 32px;
   padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   color: var(--graphite-base);
   font-size: 0.76rem;
   cursor: pointer;
@@ -788,7 +788,7 @@
 .llm-form-actions button {
   background: transparent;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-soft);
   cursor: pointer;
   font-size: 0.82rem;
@@ -826,7 +826,7 @@
   min-height: 32px;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
   color: var(--graphite-base);
   font-size: 0.82rem;
@@ -879,7 +879,7 @@
   backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
   isolation: isolate;
   z-index: var(--z-dropdown-portal, 10000);
@@ -911,7 +911,7 @@
   min-height: 34px;
   padding: var(--space-2) var(--space-2);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-base);
   text-align: left;
@@ -973,7 +973,7 @@
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: var(--surface-inset, transparent);
   color: inherit;
   font: inherit;
@@ -991,7 +991,7 @@
   gap: 4px;
   margin: 0 2px 6px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken, var(--pa-surface-muted));
   border: 1px solid var(--chrome-hairline, var(--pa-border-subtle));
 }
@@ -999,7 +999,7 @@
   min-height: 24px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-mute, var(--pa-text-secondary));
   font: inherit;
@@ -1042,7 +1042,7 @@
   font-size: 0.78rem;
   text-align: left;
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   cursor: pointer;
 }
 .pa-dropdown-footer:hover:not(:disabled) {
@@ -1104,7 +1104,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 18px;
+  border-radius: var(--ui-radius-modal);
   background: var(--paper-sheet);
   box-shadow:
     0 24px 64px color-mix(in srgb, var(--graphite-base) 18%, transparent),
@@ -1121,7 +1121,7 @@
 .llm-provider-modal-title .llm-brand-icon {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-avatar);
   margin-top: 1px;
 }
 
@@ -1189,7 +1189,7 @@
   margin-top: var(--space-2);
   padding: var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 88%, var(--graphite-base) 4%);
 }
 
@@ -1218,7 +1218,7 @@
   box-sizing: border-box;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -1263,7 +1263,7 @@
   height: 26px;
   padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-circle);
   background: transparent;
   color: var(--graphite-soft);
   font-size: 0.85rem;
@@ -1298,7 +1298,7 @@
 
 .llm-modal-footer button {
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -1329,7 +1329,7 @@
 /* ── B-2 手风琴：provider 分组折叠 ── */
 .llm-provider-group {
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   overflow: hidden;
 }
@@ -1396,7 +1396,7 @@
 }
 .llm-group-actions button {
   padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -1456,7 +1456,7 @@
 }
 .llm-group-section-actions button {
   padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -1483,7 +1483,7 @@
   min-width: 28px;
   height: 26px;
   padding: 0 var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -1504,7 +1504,7 @@
   flex-direction: column;
   padding: 4px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
 }
@@ -1514,7 +1514,7 @@
   text-align: left;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: none;
   color: var(--graphite-base);
   font-size: 0.78rem;
@@ -1547,7 +1547,7 @@
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-row);
   background: var(--chrome-sunken);
 }
 .llm-model-row.is-default {
@@ -1573,7 +1573,7 @@
 .llm-model-picker .pa-dropdown-trigger {
   min-height: 30px;
   padding: 4px 10px;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
   color: var(--graphite-base);
   font-size: 0.72rem;
@@ -1607,7 +1607,7 @@
 .llm-configured-model-row {
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-row);
   background: var(--chrome-sunken);
   transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
 }
@@ -1741,7 +1741,7 @@
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   color: var(--graphite-soft);
   font-size: 0.66rem;
   white-space: nowrap;
@@ -1773,7 +1773,7 @@
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   background: var(--paper-sheet);
   color: var(--graphite-soft);
   font-size: 0.66rem;
@@ -1834,7 +1834,7 @@
   min-height: 28px;
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   font-size: 0.74rem;
@@ -1871,7 +1871,7 @@
   flex-direction: column;
   overflow: hidden;
   /* 背景/边/阴影/blur 由 .pa-overlay-panel 统一 glass-popover 配方提供 */
-  border-radius: var(--radius-xl);
+  border-radius: var(--ui-radius-modal);
 }
 
 .llm-model-settings-dialog {
@@ -1926,7 +1926,7 @@
 .llm-model-settings-body textarea {
   min-width: 0;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
   color: var(--graphite-base);
   outline: none;
@@ -1959,9 +1959,6 @@
   width: 13px;
   height: 13px;
   flex: 0 0 13px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
   opacity: 0.82;
 }
 
@@ -2020,13 +2017,13 @@
   min-height: 58px;
   padding: var(--space-3);
   border: 1px solid rgba(118, 129, 145, 0.1);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
 }
 
 .llm-catalog-skeleton span {
   display: block;
   height: 11px;
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   background: linear-gradient(100deg, rgba(118, 129, 145, 0.08) 20%, rgba(118, 129, 145, 0.18) 42%, rgba(118, 129, 145, 0.08) 64%);
   background-size: 220% 100%;
   animation: llm-catalog-skeleton-shimmer 1.3s ease-in-out infinite;
@@ -2040,7 +2037,7 @@
 .llm-catalog-skeleton span:nth-child(2) {
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--ui-radius-control-compact);
 }
 
 .llm-catalog-skeleton span:nth-child(3) {
@@ -2091,7 +2088,7 @@
   margin: var(--space-2) var(--space-5) 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid rgba(190, 65, 65, 0.3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: rgba(190, 65, 65, 0.07);
   color: var(--state-danger);
   font-size: 0.74rem;
@@ -2124,7 +2121,7 @@
   min-height: 140px;
   padding: var(--space-4);
   border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-mute);
   font-size: 0.78rem;
   text-align: center;
@@ -2137,7 +2134,7 @@
   gap: var(--space-3);
   padding: var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   cursor: pointer;
   transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
@@ -2214,7 +2211,7 @@
   margin: 0 var(--space-5) var(--space-3);
   padding: var(--space-3);
   border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
 }
 
@@ -2294,9 +2291,6 @@
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
-  border: 2px solid currentcolor;
-  border-right-color: transparent;
-  border-radius: 50%;
 }
 
 .llm-catalog-apply-check {
@@ -2304,7 +2298,7 @@
   width: 16px;
   height: 16px;
   place-items: center;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   animation: motion-enter-pop var(--za-motion-fast) var(--za-ease-spring) both;
 }
 
@@ -2335,7 +2329,7 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
 }
 
@@ -2523,7 +2517,7 @@
   flex: 0 0 auto;
   height: 24px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control-compact);
   border: 1px solid var(--za-border-subtle, rgba(0, 0, 0, 0.08));
   background: var(--za-surface-muted, rgba(0, 0, 0, 0.03));
   color: var(--za-text-secondary, #5b6472);
@@ -2600,7 +2594,7 @@
   align-items: center;
   gap: 6px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   cursor: pointer;
@@ -2628,7 +2622,7 @@
 .llm-service-catalog-search input {
   width: 100%;
   box-sizing: border-box;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   padding: 10px 12px;
   background: var(--control-fill);
@@ -2667,7 +2661,7 @@
 
 .llm-service-template-card {
   text-align: left;
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -2708,7 +2702,7 @@
 }
 
 .llm-service-tier {
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   padding: 2px 8px;
   background: color-mix(in srgb, var(--accent, #5b8cff) 12%, transparent);
 }
@@ -2803,7 +2797,7 @@
 
 .llm-local-cli-step {
   border: 1px solid color-mix(in srgb, var(--border, #d7dde5) 88%, transparent);
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   padding: 10px 12px;
   background: color-mix(in srgb, var(--bg-elevated, #fff) 92%, var(--bg-muted, #f5f7fa));
 }
@@ -2863,7 +2857,7 @@
   display: grid;
   gap: 12px;
   padding: 14px 14px 12px;
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   border: 1px solid color-mix(in srgb, #22c55e 40%, var(--border, #d7dde5));
   background:
     linear-gradient(180deg, color-mix(in srgb, #22c55e 10%, transparent), transparent 48%),

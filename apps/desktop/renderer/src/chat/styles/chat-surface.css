@@ -17,7 +17,7 @@
   display: grid;
   place-items: center;
   border: 1px solid var(--ui-selected-border, var(--azure-seal));
-  border-radius: var(--ui-radius-panel, var(--radius-frost-lg));
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
   box-shadow: inset 0 0 0 1px var(--ui-border-subtle), 0 18px 48px color-mix(in srgb, var(--ui-accent) 14%, transparent);
   pointer-events: none;
@@ -32,7 +32,7 @@
   gap: var(--space-2);
   padding: var(--space-6) var(--space-8);
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-panel, var(--radius-frost-lg));
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 78%, transparent);
   box-shadow: var(--shadow-popover);
   color: var(--graphite-base);
@@ -44,7 +44,7 @@
   place-items: center;
   width: 46px;
   height: 46px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-circle);
   background: var(--ui-accent, var(--azure-seal));
   color: var(--za-accent-ink);
   font-size: 1.9rem;
@@ -138,7 +138,7 @@
   padding: var(--space-2) var(--space-6);
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
-  border-radius: 0 0 var(--ui-radius-panel, var(--radius-md)) var(--ui-radius-panel, var(--radius-md));
+  border-radius: var(--ui-radius-detail);
   /* 独立于三栏基础 Chrome 的局部玻璃层：保留透明采样和下方投影，不叠顶部 inset 高光。 */
   background: var(--glass-frosted-chrome-background);
   box-shadow: var(--glass-frosted-chrome-shadow);
@@ -180,7 +180,7 @@
 .chat-thread-loading-mark {
   width: 28px;
   height: 28px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-circle);
   border: 2px solid color-mix(in srgb, var(--graphite-mute) 35%, transparent);
   border-top-color: var(--azure-seal, #3b82f6);
   animation: motion-spin 0.8s linear infinite;
@@ -237,7 +237,7 @@
 .chat-empty-primary-btn {
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--ink-base) 14%, transparent);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   padding: 7px 16px;
   font: inherit;
   font-size: 13px;
@@ -275,7 +275,7 @@
   min-height: 104px;
   padding: var(--space-4);
   border: 1px solid var(--ui-border-subtle, color-mix(in srgb, var(--graphite-fade) 28%, transparent));
-  border-radius: var(--radius-lg, 12px);
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--chrome-canvas) 88%, var(--graphite-base) 4%);
   color: var(--graphite-base);
   cursor: pointer;
@@ -298,7 +298,7 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-circle);
   color: var(--azure-seal);
   background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
 }
@@ -348,7 +348,7 @@
   width: 36px;
   height: 36px;
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-circle);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   box-shadow: var(--shadow-popover);
@@ -444,7 +444,7 @@
   font-size: var(--ui-font-caption, 11px);
   padding: 0.05rem 0.4rem;
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-chip, 4px);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -478,7 +478,7 @@
   min-height: 96px;
   resize: vertical;
   border: 1px solid var(--ui-selected-border, var(--azure-seal));
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   padding: var(--space-3);
   color: var(--text-primary);
   background: var(--chrome-canvas);
@@ -508,7 +508,7 @@
 
 .chat-message-editor-actions button {
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   padding: 5px 10px;
   color: var(--text-primary);
   background: var(--surface-raised);
@@ -531,7 +531,7 @@
 .chat-msg-assistant {
   background: var(--za-message-bg, var(--paper-sheet));
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-panel, var(--radius-md));
+  border-radius: var(--ui-radius-message);
   padding: var(--space-4) var(--space-5);
   min-width: 0;
 }
@@ -562,7 +562,7 @@
   gap: 8px;
   background: var(--za-control-fill);
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-panel, var(--za-radius));
+  border-radius: var(--ui-radius-panel);
   color: var(--ink-base);
   font-size: var(--ui-font-control, 13px);
   line-height: 1.4;
@@ -589,7 +589,7 @@
   appearance: none;
   padding: 4px 12px;
   border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: var(--za-control-fill-hover);
   color: var(--ink-base);
   font: inherit;
@@ -616,7 +616,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
@@ -721,7 +721,7 @@
 .thinking-history-toggle {
   align-self: flex-start;
   padding: 2px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   color: var(--graphite-mute);
   background: var(--chrome-sunken);
   font-size: var(--ui-font-meta, 12px);
@@ -750,7 +750,7 @@
 }
 .tool-call-card {
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-control, var(--radius-sm));
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface-raised, var(--paper-sheet));
   cursor: pointer;
   overflow: hidden;
@@ -777,7 +777,7 @@
    交互卡(.interaction-card)仍保留卡片外观，故用 :not 排除。 */
 .tool-call-card:not(.interaction-card) {
   border: none;
-  border-radius: var(--ui-radius-control, var(--radius-sm));
+  border-radius: var(--ui-radius-control);
   background: transparent;
   overflow: visible;
   transition: background var(--za-motion-fast) var(--za-ease-out);
@@ -858,7 +858,7 @@
 .skill-capsule-card {
   margin: var(--space-1) 0;
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-panel, var(--radius-md));
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--azure-soft, #5b8def) 8%, var(--ui-surface-raised, var(--paper-sheet)));
   overflow: hidden;
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -915,7 +915,7 @@
   max-width: min(100%, 360px);
   min-width: 0;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   border: 1px solid color-mix(in srgb, var(--azure-soft, #5b8def) 35%, transparent);
   background: color-mix(in srgb, var(--azure-soft, #5b8def) 14%, transparent);
   color: var(--graphite-base);
@@ -1007,7 +1007,7 @@
   text-align: left;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-control, var(--radius-sm));
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface-raised, var(--paper-sheet));
   color: var(--graphite-base);
   font-size: var(--ui-font-meta, 12px);
@@ -1036,7 +1036,7 @@
   font-weight: 600;
   color: var(--ui-accent, var(--azure-seal));
   padding: 1px var(--space-2);
-  border-radius: var(--radius-pill, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--azure-soft);
 }
 .interaction-option-button:disabled {
@@ -1221,7 +1221,7 @@
   height: var(--composer-addon-height);
   min-height: var(--composer-addon-height);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--composer-addon-color);
   font-size: var(--composer-addon-font-size);
@@ -1273,7 +1273,7 @@
   max-width: 180px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--composer-addon-color);
   font-size: var(--composer-addon-font-size);
@@ -1446,7 +1446,7 @@
   /* 单层浮层:显式覆盖全局 .pa-dropdown-menu 的 border/radius/背景,
      避免实心底 + 半透明层 + 错位描边叠成"双层框"。 */
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow-popover);
@@ -1456,7 +1456,7 @@
   min-height: 26px;
   padding: 4px 8px;
   gap: 7px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   color: var(--graphite-soft);
   font-size: var(--composer-addon-font-size);
   font-weight: 500;
@@ -1523,7 +1523,7 @@
   height: var(--composer-addon-height);
   padding: 0 4px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1541,7 +1541,7 @@
   width: 12px;
   height: 12px;
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background:
     conic-gradient(
       var(--azure-seal) calc(var(--ctx-pct, 0) * 1%),
@@ -1568,7 +1568,7 @@
   width: 296px;
   padding: 14px 16px 12px;
   border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
-  border-radius: calc(var(--radius-md) + 4px);
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
   box-shadow: var(--glass-modal-shadow);
   backdrop-filter: blur(18px) saturate(1.08);
@@ -1599,7 +1599,7 @@
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -1626,7 +1626,7 @@
   width: 100%;
   height: 7px;
   margin: 12px 0 14px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: color-mix(in srgb, var(--chrome-sunken) 88%, transparent);
 }
 
@@ -1657,7 +1657,7 @@
 .ctx-usage-panel-swatch {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--ui-radius-circle);
 }
 
 .ctx-usage-panel-label {
@@ -1717,7 +1717,7 @@
   max-width: 112px;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--composer-addon-color);
   font: inherit;
@@ -1776,7 +1776,7 @@
   width: 240px;
   padding: 12px 14px 10px;
   border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
-  border-radius: calc(var(--radius-md) + 1px);
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
   box-shadow: var(--glass-modal-shadow);
   backdrop-filter: blur(18px) saturate(1.08);
@@ -1824,7 +1824,7 @@
   top: 50%;
   height: var(--effort-track-h);
   transform: translateY(-50%);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: var(--effort-rest);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent);
   overflow: hidden;
@@ -1837,7 +1837,7 @@
   left: 0;
   top: 0;
   bottom: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: var(--effort-fill);
 }
 
@@ -1847,7 +1847,7 @@
   top: 50%;
   width: var(--effort-tick);
   height: var(--effort-tick);
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   transform: translate(-50%, -50%);
   background: rgba(255, 255, 255, 0.34);
   box-shadow: none;
@@ -1890,7 +1890,7 @@
   height: 24px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: color-mix(in srgb, var(--graphite-mute) 84%, transparent);
   font: inherit;
@@ -1953,7 +1953,7 @@
 
 .reasoning-effort-slider::-webkit-slider-runnable-track {
   height: var(--effort-track-h);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: transparent;
 }
 
@@ -1963,7 +1963,7 @@
   /* 拇指圆心落在 runnable-track 垂直中线 */
   margin-top: calc((var(--effort-track-h) - var(--effort-thumb)) / 2);
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   appearance: none;
   background: #ffffff;
   box-shadow:
@@ -1981,13 +1981,13 @@
 
 .reasoning-effort-slider::-moz-range-track {
   height: var(--effort-track-h);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: transparent;
 }
 
 .reasoning-effort-slider::-moz-range-progress {
   height: var(--effort-track-h);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: transparent;
 }
 
@@ -1995,7 +1995,7 @@
   width: var(--effort-thumb);
   height: var(--effort-thumb);
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: #ffffff;
   box-shadow:
     0 0 0 1px rgba(15, 23, 42, 0.08),
@@ -2005,7 +2005,7 @@
 .reasoning-effort-slider:focus-visible {
   outline: 2px solid color-mix(in srgb, #6ea8ff 50%, transparent);
   outline-offset: 2px;
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
 }
 
 .composer-model-dropdown .pa-dropdown-trigger {
@@ -2033,7 +2033,7 @@
   min-height: var(--composer-addon-height);
   padding: 0 8px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--composer-addon-color);
   font-family: var(--font-sans);
@@ -2102,7 +2102,7 @@
   color: var(--graphite-mute);
   font-size: 12px;
   padding: 2px 6px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   cursor: pointer;
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
@@ -2124,7 +2124,7 @@
   max-width: var(--chat-content-max);
   margin: 0 auto;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-lg);
+  border-radius: var(--ui-radius-composer);
   background: var(--control-composer);
   padding: var(--space-2);
   /* 轻微阴影衬托浮起感，层级低于 popover/card。 */
@@ -2147,7 +2147,7 @@
   padding: var(--space-2);
   background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-panel, var(--za-radius));
+  border-radius: var(--ui-radius-panel);
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
   z-index: 20;
   animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
@@ -2160,7 +2160,7 @@
   min-height: 44px;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-base);
   text-align: left;
@@ -2395,7 +2395,7 @@
   max-width: min(100%, 360px);
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--chrome-hairline) 80%, transparent);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--paper-sheet);
   box-shadow:
     var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.45)),
@@ -2410,7 +2410,7 @@
   padding: 0;
   overflow: hidden;
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--ui-radius-modal);
   background: var(--chrome-sunken, #eef1f4);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--chrome-hairline) 55%, transparent),
@@ -2440,7 +2440,7 @@
   z-index: 2;
   width: 22px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-circle);
   background: color-mix(in srgb, #111 58%, transparent);
   color: #fff;
   backdrop-filter: blur(8px);
@@ -2475,7 +2475,7 @@
 .attachment-kind-badge {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2549,7 +2549,7 @@
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-circle);
   background: transparent;
   color: var(--graphite-mute);
   display: inline-flex;
@@ -2592,7 +2592,7 @@
   min-height: 44px;
   padding: 10px 12px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-lg);
+  border-radius: var(--ui-radius-panel);
   background: var(--control-composer);
   color: var(--graphite-base);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
@@ -2625,7 +2625,7 @@
   min-width: 40px;
   height: 28px;
   padding: 0 8px;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: color-mix(in srgb, var(--azure-soft, rgba(91, 141, 239, 0.16)) 88%, transparent);
   color: var(--azure-seal, #3d6fd8);
   border: 1px solid color-mix(in srgb, var(--azure-seal, #3d6fd8) 18%, transparent);
@@ -2701,7 +2701,7 @@
   margin: 0;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -2726,7 +2726,7 @@
   margin: 0;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -2751,7 +2751,7 @@
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -2778,7 +2778,7 @@
   min-height: 38px;
   padding: 4px 8px;
   border-color: transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   box-shadow: none;
 }
@@ -2838,7 +2838,7 @@
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -2892,7 +2892,7 @@
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-composer);
   background: var(--za-primary-control-bg);
   color: var(--za-primary-control-ink);
   cursor: pointer;
@@ -3044,7 +3044,7 @@
 .tool-progress-spinner {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--azure-seal);
   flex-shrink: 0;
   --motion-pulse-floor: 0.4;
@@ -3186,7 +3186,7 @@
   margin: var(--space-1) 0 0;
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   font-size: 0.78rem;
   line-height: 1.6;
@@ -3210,7 +3210,7 @@
   padding: var(--space-2) var(--space-3);
   margin-bottom: var(--space-2);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   font-size: var(--ui-font-control, 0.8125rem);
   color: var(--graphite-base);
@@ -3235,7 +3235,7 @@
 .pending-resume-dismiss {
   min-height: 30px;
   padding: 0 var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   border: 1px solid var(--chrome-hairline);
   background: transparent;
   color: var(--graphite-base);
@@ -3292,7 +3292,7 @@
   flex: 1 1 0;
   min-height: 1px;
   max-height: 2px;
-  border-radius: 1px;
+  border-radius: var(--ui-radius-detail);
   background: var(--chrome-hairline);
   transition: background var(--za-motion-fast);
 }
@@ -3327,7 +3327,7 @@
       color-mix(in srgb, var(--chrome-canvas) 56%, transparent)
     );
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-modal, var(--radius-xl));
+  border-radius: var(--ui-radius-modal);
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
   -webkit-backdrop-filter: blur(20px) saturate(1.12);
   backdrop-filter: blur(20px) saturate(1.12);
@@ -3379,7 +3379,7 @@
   cursor: pointer;
   text-align: left;
   white-space: nowrap;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   color: var(--graphite-soft);
   transition:
     background var(--za-motion-fast),
@@ -3453,7 +3453,7 @@
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   box-shadow: var(--shadow-popover);
   /* 查找框浮于 .chat-header 的 -webkit-app-region:drag 拖拽区之上，
@@ -3488,7 +3488,7 @@
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-soft);
   cursor: pointer;
@@ -3623,7 +3623,7 @@
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--graphite-fade);
 }
 
@@ -3678,7 +3678,7 @@
   gap: var(--space-2);
   font-size: 0.85em;
   padding: 3px var(--space-2);
-  border-radius: 5px;
+  border-radius: var(--ui-radius-chip);
 }
 
 .batch-search-lane:hover {
@@ -3689,7 +3689,7 @@
   flex: none;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--graphite-fade);
 }
 
@@ -3724,7 +3724,7 @@
   font-variant-numeric: tabular-nums;
   font-size: 0.82em;
   padding: 0 var(--space-2);
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   color: var(--graphite-base);
   background: var(--graphite-veil, rgba(120, 120, 128, 0.1));
 }
@@ -3864,7 +3864,7 @@
   font: inherit;
   align-items: center;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
   background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
   color: var(--azure-seal, #4f7cff);
@@ -3888,7 +3888,7 @@
   cursor: default;
   user-select: none;
   padding: 2px 6px;
-  border-radius: var(--radius-frost-sm);
+  border-radius: var(--ui-radius-control-compact);
   transition: background var(--za-motion-fast);
 }
 
@@ -3934,7 +3934,7 @@
   color: var(--graphite-base);
   background: var(--control-fill);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-frost-sm);
+  border-radius: var(--ui-radius-control);
   padding: 2px 6px;
   max-width: 320px;
   width: 240px;
@@ -3967,7 +3967,7 @@
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: var(--radius-frost-sm);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -4003,7 +4003,7 @@
   padding: 4px;
   background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-frost);
+  border-radius: var(--ui-radius-panel);
   box-shadow: var(--shadow-popover);
   --motion-enter-from: 6px;
   animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
@@ -4016,7 +4016,7 @@
   width: 100%;
   padding: 6px 10px;
   border: none;
-  border-radius: var(--radius-frost-sm);
+  border-radius: var(--ui-radius-row);
   background: transparent;
   color: var(--graphite-base);
   font-size: 0.78rem;
@@ -4067,7 +4067,7 @@
   padding: 0 8px;
   /* 去掉可见描边：用透明边框保持盒模型尺寸，hover/active 切到背景不抖动。 */
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -4115,7 +4115,7 @@
   padding: 6px;
   background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-frost);
+  border-radius: var(--ui-radius-panel);
   box-shadow: var(--shadow-popover);
   --motion-enter-from: 6px;
   animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
@@ -4178,7 +4178,7 @@
   gap: 6px;
   padding: 3px 8px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-soft);
   font: inherit;
@@ -4195,7 +4195,7 @@
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
-  border-radius: var(--radius-frost-sm);
+  border-radius: var(--ui-radius-control-compact);
 }
 
 .chat-header-cap-item:hover {
@@ -4225,7 +4225,7 @@ button.chat-header-cap-item:focus-visible {
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--graphite-mute);
 }
 
@@ -4269,7 +4269,7 @@ button.chat-header-cap-item:focus-visible {
   width: 100%;
   padding: 5px 8px;
   border: none;
-  border-radius: var(--radius-frost-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-base);
   text-align: left;
@@ -4310,7 +4310,7 @@ button.chat-header-cap-item:focus-visible {
 .chat-header-cap-service-count {
   flex: none;
   padding: 1px 7px;
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   background: var(--chrome-hover);
   font-size: 0.66rem;
   color: var(--graphite-mute);
@@ -4331,7 +4331,7 @@ button.chat-header-cap-item:focus-visible {
   padding: 7px 8px;
   border: none;
   border-top: 1px solid var(--chrome-hairline);
-  border-radius: 0 0 var(--radius-frost-sm) var(--radius-frost-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--za-accent);
   font-size: 0.76rem;
@@ -4365,7 +4365,7 @@ button.chat-header-cap-item:focus-visible {
   min-height: var(--composer-addon-height);
   max-width: 200px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--composer-addon-color);
   font-family: var(--font-sans);
@@ -4422,7 +4422,7 @@ button.chat-header-cap-item:focus-visible {
   backdrop-filter: blur(var(--blur-popover));
   -webkit-backdrop-filter: blur(var(--blur-popover));
   border: none;
-  border-radius: var(--ui-radius-modal, var(--radius-xl));
+  border-radius: var(--ui-radius-modal);
   /* 去掉 --glass-edge-highlight：inset 顶部高光在此弹层上表现为一条亮白横线（“边边”），
      与 message-rail-panel 的浮层观感保持一致，只留外阴影。 */
   box-shadow: var(--shadow-popover);
@@ -4449,7 +4449,7 @@ button.chat-header-cap-item:focus-visible {
   border: none;
   /* 去掉 --glass-edge-highlight：inset 顶部高光在此弹层上表现为一条亮白横线（“边边”），
      与 message-rail-panel 的浮层观感保持一致，只留外阴影。 */
-  border-radius: var(--ui-radius-modal, var(--radius-xl));
+  border-radius: var(--ui-radius-modal);
   box-shadow: var(--shadow-popover);
   isolation: isolate;
 }
@@ -4501,7 +4501,7 @@ button.chat-header-cap-item:focus-visible {
 .pa-cascading-menu-panel::-webkit-scrollbar-thumb,
 .pa-cascading-submenu-panel::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--graphite-base) 22%, transparent);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-circle);
   border: 1px solid transparent;
   background-clip: content-box;
 }
@@ -4520,7 +4520,7 @@ button.chat-header-cap-item:focus-visible {
   width: 100%;
   padding: 6px 10px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-row);
   background: transparent;
   color: var(--graphite-base);
   font-size: 0.76rem;
@@ -4567,7 +4567,7 @@ button.chat-header-cap-item:focus-visible {
   width: 100%;
   padding: 6px 10px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-base);
   font-size: 0.76rem;
@@ -4625,7 +4625,7 @@ button.chat-header-cap-item:focus-visible {
   margin: 10px auto 22px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--za-accent) 20%, var(--graphite-hairline));
-  border-radius: var(--radius-lg);
+  border-radius: var(--ui-radius-panel);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   box-shadow: var(--shadow-card);
@@ -4648,7 +4648,7 @@ button.chat-header-cap-item:focus-visible {
   place-items: center;
   width: 26px;
   height: 26px;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   color: var(--za-accent);
   background: color-mix(in srgb, var(--za-accent) 12%, transparent);
 }
@@ -4700,7 +4700,7 @@ button.chat-header-cap-item:focus-visible {
   margin: 0;
   overflow: hidden;
   border: 1px solid var(--graphite-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--graphite-hairline);
 }
 
@@ -4732,7 +4732,7 @@ button.chat-header-cap-item:focus-visible {
 .automation-proposal-card-note {
   margin-top: 12px;
   padding: 10px 12px;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   font-size: 0.76rem;
   line-height: 1.45;
 }
@@ -4778,7 +4778,7 @@ button.chat-header-cap-item:focus-visible {
 .automation-proposal-card-actions button {
   min-height: 30px;
   padding: 0 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   font: inherit;
   font-size: 0.74rem;
   font-weight: 600;
@@ -4844,7 +4844,7 @@ button.chat-header-cap-item:focus-visible {
   min-height: 26px;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   color: var(--graphite-mute);
   font: inherit;
   font-size: 0.72rem;
@@ -4984,7 +4984,7 @@ button.chat-header-cap-item:focus-visible {
   width: 48px;
   height: 48px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   background: transparent;
   overflow: hidden;
 }
@@ -5060,7 +5060,7 @@ button.chat-header-cap-item:focus-visible {
   gap: 10px;
   max-width: var(--chat-content-max);
   padding: 10px;
-  border-radius: 22px;
+  border-radius: var(--ui-radius-composer);
   border-color: color-mix(in srgb, var(--graphite-hairline) 78%, var(--ink-base) 22%);
   background: color-mix(in srgb, var(--chrome-canvas) 92%, var(--chrome-raised) 8%);
   box-shadow: 0 12px 32px color-mix(in srgb, var(--ink-base) 8%, transparent), 0 1px 4px color-mix(in srgb, var(--ink-base) 4%, transparent);
@@ -5121,7 +5121,7 @@ button.chat-header-cap-item:focus-visible {
   grid-template-rows: minmax(96px, 1fr) auto;
   min-height: 178px;
   padding: 10px;
-  border-radius: 26px;
+  border-radius: var(--ui-radius-composer);
   box-shadow: 0 18px 48px color-mix(in srgb, var(--ink-base) 10%, transparent), 0 2px 8px color-mix(in srgb, var(--ink-base) 5%, transparent);
 }
 
@@ -5216,7 +5216,7 @@ button.chat-header-cap-item:focus-visible {
   flex: 0 0 auto;
   width: 36px;
   height: 36px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-circle);
 }
 
 .chat-composer--home button[type="submit"] {
@@ -5229,7 +5229,7 @@ button.chat-header-cap-item:focus-visible {
 .chat-composer--compact .composer-attach-btn {
   width: var(--composer-addon-height);
   height: var(--composer-addon-height);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
 }
 
 /* 去掉基础规则的 margin-left:auto，让 space-between 独占左右对称。 */
@@ -5302,7 +5302,7 @@ button.chat-header-cap-item:focus-visible {
   min-height: var(--composer-addon-height);
   padding: 0 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: transparent;
   box-shadow: none;
   color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
@@ -5415,7 +5415,7 @@ button.chat-header-cap-item:focus-visible {
 
   .chat-composer--home {
     min-height: 140px;
-    border-radius: 22px;
+    border-radius: var(--ui-radius-composer);
   }
 }
 
@@ -5434,7 +5434,7 @@ button.chat-header-cap-item:focus-visible {
     width: 38px;
     height: 38px;
     margin-top: 2px;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-control);
   }
 
   .chat-empty-home .chat-empty-actions {

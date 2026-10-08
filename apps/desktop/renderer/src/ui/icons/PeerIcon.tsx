@@ -2,6 +2,7 @@ import type { ReactNode, SVGProps } from 'react';
 import lucideLicense from './LUCIDE-LICENSE?raw';
 
 export type PeerIconName =
+  | 'loader'
   | 'back'
   | 'plus'
   | 'close'
@@ -32,6 +33,7 @@ export type PeerIconName =
   | 'arrowRightOff';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
+  loader: <path d="M20 12a8 8 0 1 1-5.5-7.6" />,
   back: (
     <>
       <path d="M19 12H5" />

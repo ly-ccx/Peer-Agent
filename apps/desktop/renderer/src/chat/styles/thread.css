@@ -54,7 +54,7 @@
   .confirmation-inline button {
     @apply min-h-7 px-2.5 text-xs transition-colors duration-150;
     border: 1px solid transparent;
-    border-radius: var(--za-radius-sm);
+    border-radius: var(--ui-radius-control);
     color: var(--za-text-soft);
     background: var(--za-surface-2);
   }
@@ -98,7 +98,7 @@
   .empty-command-suggestions button {
     @apply flex min-h-10 w-full items-center justify-between px-3.5 py-2 text-left transition-colors duration-150;
     border: 1px solid transparent;
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-control);
     color: var(--za-text-muted);
     background: transparent;
   }
@@ -120,7 +120,7 @@
   }
 
   .thread-loading-skeleton {
-    @apply block h-3 rounded-full;
+    @apply block h-3 rounded-[var(--ui-radius-pill)];
     background:
       linear-gradient(90deg, transparent, var(--za-surface-2), transparent),
       var(--za-surface-1);
@@ -142,7 +142,7 @@
   }
 
   .thread-loading-state i {
-    @apply block h-1.5 w-1.5 rounded-full;
+    @apply block h-1.5 w-1.5 rounded-[var(--ui-radius-circle)];
     background: var(--za-text-faint);
     animation: motion-dots 1.1s var(--za-ease-standard) infinite;
   }

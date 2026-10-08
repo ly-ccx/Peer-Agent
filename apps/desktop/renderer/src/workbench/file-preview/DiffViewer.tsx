@@ -5,6 +5,7 @@ import {
   availablePreviewSize,
   positionTaskArtifactPreview,
 } from '../../app/pages/taskArtifactPreviewPosition';
+import { PeerIcon } from '../../ui/icons';
 import { FileKindIcon } from './FileKindIcon';
 import {
   countDiffLineStats,
@@ -120,8 +121,8 @@ function DiffFilePreviewPortal({
           <span className="diff-file-preview-path">
             {active.file.path}
             {active.file.fromPath && active.file.fromPath !== active.file.path
-              ? ` ← ${active.file.fromPath}`
-              : ''}
+              ? <><PeerIcon name="back" size={12} className="diff-rename-arrow" /><span className="diff-rename-source">{active.file.fromPath}</span></>
+              : null}
           </span>
           <span className="diff-file-index-stats">
             {stats.additions > 0 ? <b className="is-add">+{stats.additions}</b> : null}
@@ -270,7 +271,7 @@ export function DiffViewer({
             <header className="diff-file-head-wrap">
               <div className="diff-file-head">
                 {file.path}
-                {file.fromPath && file.fromPath !== file.path ? ` ← ${file.fromPath}` : ''}
+                {file.fromPath && file.fromPath !== file.path ? <><PeerIcon name="back" size={12} className="diff-rename-arrow" /><span className="diff-rename-source">{file.fromPath}</span></> : null}
               </div>
             </header>
           ) : null}

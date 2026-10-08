@@ -511,7 +511,7 @@ export function QuickChatWindow() {
               </svg>
             </button>}
             <button type="button" className="quick-chat-send" aria-label={i18n.t(sending ? 'projectAgent.quick.sending' : 'projectAgent.chat.send')} disabled={(botMode ? !draft.trim() || !botId || !botModel.ready || botModel.busy : ((!draft.trim() && !attachments.length) || !workspacePath)) || sending} onClick={() => void submit(false)}>
-              {sending ? <span className="quick-chat-spinner" aria-hidden="true" /> : (
+              {sending ? <PeerIcon name="loader" className="quick-chat-spinner" /> : (
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" />
                 </svg>
