@@ -6,7 +6,7 @@ import path from 'node:path';
 export async function checkBotTaskDetails({ page, until, report, captureDirectory, commandFile, readTurns }) {
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   let seq = initial.seq;
-  const task = { ...initial.sessions[0], report: undefined, origin: { anchorMessageId: 'internal-source-message-id',
+  const task = { ...initial.sessions[0], sessionId: initial.sessions[0].sessionId + '-report-read', report: undefined, origin: { anchorMessageId: 'internal-source-message-id',
     modelSelection: { worker: { modelId: 'internal-execution-model-id' } } } };
   const instructions = '只读核对历史任务的目标、完成结果和判断依据。\n只使用 list_files / read_file，禁止 bash / write_file。\n分支：internal-branch，提交：' + 'a'.repeat(40);
   const noteHeadline = '核查未通过：部分历史记录缺少可核对的结果依据。我会整理已有记录，并将无法确认的部分单独标明。';
@@ -22,15 +22,16 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
       detailReports: { [task.sessionId]: { summary: instructions, evidenceRefs: ['tool-result://actual-record'] } } };
     writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
   };
-  const open = async () => {
+  const open = async (reset = false) => {
     await page.locator('.bot-profile').click();
     await page.getByRole('tab', { name: '任务', exact: true }).click();
+    if (reset && await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
     if (!await page.locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
     const pendingQuestion = conversationMessages.at(-1).cards?.find(card => card.kind === 'question' && card.resolvedState !== 'resolved');
     if (pendingQuestion) await until(() => page.locator('.bot-task-question').innerText(), text => text === pendingQuestion.content);
     else await until(() => page.locator('.bot-task-update-preview').innerText(), text => text.includes(noteHeadline));
   };
-  change('running', false, 'unavailable'); await open();
+  change('running', false, 'unavailable'); await open(true);
   const detail = page.locator('.bot-task-detail');
   const reportFeedback = detail.locator('.bot-task-report-read');
   const reportInfo = detail.locator('.bot-task-information');
