@@ -93,7 +93,7 @@
   }
 
   .appearance-mode-thumb {
-    @apply relative block overflow-hidden rounded-[var(--ui-radius-circle)];
+    @apply relative block overflow-hidden rounded-[var(--ui-radius-inset)];
     aspect-ratio: 16 / 11;
     border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
   }
@@ -124,7 +124,7 @@
   }
 
   .appearance-mode-thumb-line {
-    @apply block h-[3px] w-full rounded-[var(--ui-radius-circle)];
+    @apply block h-[3px] w-full rounded-[var(--ui-radius-pill)];
     background: color-mix(in srgb, currentColor 22%, transparent);
     color: #1a1d21;
   }
@@ -139,7 +139,7 @@
   }
 
   .appearance-mode-thumb-chip {
-    @apply mt-0.5 block h-[7px] w-[34%] rounded-[var(--ui-radius-circle)];
+    @apply mt-0.5 block h-[7px] w-[34%] rounded-[var(--ui-radius-pill)];
     background: #5d9cbf;
     opacity: 0.9;
   }

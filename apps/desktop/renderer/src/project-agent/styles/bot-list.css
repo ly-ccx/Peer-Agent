@@ -388,7 +388,7 @@
   font-size: 10.5px;
   font-weight: 600;
   background: var(--graphite-base);
-  border-radius: var(--ui-radius-circle);
+  border-radius: var(--ui-radius-pill);
 }
 
 .bot-unread {
@@ -401,9 +401,7 @@
 .bot-spin {
   width: 10px;
   height: 10px;
-  border: 1.5px solid var(--graphite-fade);
-  border-right-color: transparent;
-  border-radius: var(--ui-radius-circle);
+  color: var(--graphite-fade);
 }
 
 .bot-sr {

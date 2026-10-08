@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const sharedUiShots = ['diagnostics', 'appearance', 'automation-list', 'automation-receipt', 'automation-editor', 'classic-chat', 'classic-artifacts', 'classic-diff']
+const sharedUiShots = ['diagnostics', 'appearance', 'automation-list', 'automation-receipt', 'automation-editor', 'classic-chat', 'classic-image-lightbox', 'classic-artifacts', 'classic-diff']
   .flatMap(scene => [`ui-${scene}-1280-dark.png`, `ui-${scene}-760-light.png`]);
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -44,6 +44,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
   if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
+    || !machine.sharedUiConventions?.rectangularPreviews || !machine.sharedUiConventions?.keyboardImagePreview
     || machine.sharedUiConventions?.cases?.length !== sharedUiShots.length
     || !machine.ok || machine.pageErrors?.length || machine.mainAuthorizationErrors?.length
     || !['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)

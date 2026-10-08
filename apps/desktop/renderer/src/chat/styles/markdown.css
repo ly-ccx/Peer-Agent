@@ -309,7 +309,7 @@
     display: block;
     padding: 0;
     border: 1px solid var(--za-line);
-    border-radius: var(--ui-radius-circle);
+    border-radius: var(--ui-radius-inset);
     background: var(--za-bg-1);
     cursor: zoom-in;
     overflow: hidden;

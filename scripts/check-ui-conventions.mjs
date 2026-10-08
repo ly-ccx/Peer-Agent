@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const radiusName = /^--ui-radius-(detail|chip|control(?:-compact)?|row|panel|modal|inset|message|composer|pill|circle|avatar)$/;
-const iconGlyph = /^[\s→←↑↓↗↘↙↖▶▼►▾▸◀▲✕×✓✔✖⚠⚙☰★☆◆◇●○+−-]+$/u;
+const iconGlyph = /^[\s→←↑↓↗↘↙↖▶▼►▾▸◀▲✕×✓✔✖⚠⚙☰★☆◆◇●○+−\-\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D]+$/u;
 const privateGlyph = /[\uE000-\uF8FF]/u;
 
 export function checkUiSource(file, source) {
@@ -37,8 +37,8 @@ export function checkUiSource(file, source) {
       const [, selector, body] = match;
       // Dots, progress bars, switch geometry, sheen, separators and tooltip tips
       // are surfaces. Directional/stroke control icons must be SVG.
-      if (/icon|chevron|spinner|arrow/.test(selector) && !/tooltip|sidebar-conv-spinner|tool-progress-spinner/.test(selector)
-        && (/spinner/.test(selector) || /transform:[^;]*rotate/.test(body))
+      if (/icon|chevron|spin|arrow|loading-mark/.test(selector) && !/tooltip|sidebar-conv-spinner|tool-progress-spinner/.test(selector)
+        && (/spin|loading-mark/.test(selector) || /transform:[^;]*rotate/.test(body))
         && (/border(?:-(?:top|right|bottom|left))?\s*:[^;]*(?:solid|dashed)/.test(body) || /@apply[^;]*\bborder-(?:[trbl]|[1248])\b/.test(body)))
         fail(match.index, 'CSS draws a control icon; use PeerIcon or an existing SVG');
       if (/font-family\s*:[^;]*(?:FontAwesome|Material Icons|iconfont|IcoMoon)/i.test(body)
@@ -49,17 +49,31 @@ export function checkUiSource(file, source) {
   }
   if (!/\.[jt]sx?$/.test(file)) return errors;
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const visit = node => {
-    if (ts.isJsxText(node) && node.text.trim() && (iconGlyph.test(node.text) || privateGlyph.test(node.text))) {
-      // Key symbols and code +/- are content; buttons and named icon slots are icons.
-      const parent = node.parent;
-      const opening = ts.isJsxElement(parent) ? parent.openingElement : null;
-      if (opening && (opening.tagName.getText(tree) === 'button' || /(?:icon|chevron)/i.test(opening.attributes.getText(tree))))
-        fail(node.pos, 'Text glyph in a control icon slot; use SVG');
+  const inIconSlot = node => {
+    // A sign followed by a dynamic count is data, e.g. +{additions}.
+    if (ts.isJsxText(node) && ts.isJsxElement(node.parent)
+      && node.parent.children.some(child => ts.isJsxExpression(child) && child.expression)) return false;
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      // Attribute values (labels, class names, styles) are not rendered content.
+      if (ts.isJsxAttribute(parent)) return false;
+      if (ts.isCallExpression(parent) || ts.isObjectLiteralExpression(parent)) return false;
+      if (!ts.isJsxElement(parent)) continue;
+      const opening = parent.openingElement;
+      const tag = opening.tagName.getText(tree);
+      if (['kbd', 'code', 'pre'].includes(tag)) return false;
+      if (tag === 'button' || /(?:icon|chevron)/i.test(opening.attributes.getText(tree))) return true;
     }
+    return false;
+  };
+  const visit = node => {
+    const text = ts.isJsxText(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : '';
+    if (text.trim() && (iconGlyph.test(text) || privateGlyph.test(text)) && inIconSlot(node))
+      fail(node.pos, 'Text glyph in a control icon slot; use SVG');
     if (ts.isPropertyAssignment(node) && node.name.getText(tree).replace(/['"]/g, '') === 'borderRadius') {
-      const value = node.initializer.getText(tree);
-      if (!/^['"](?:var\(--ui-radius-[\w-]+\)|inherit|0)['"]$/.test(value) && value !== '0')
+      const initializer = node.initializer;
+      const value = ts.isStringLiteral(initializer) || ts.isNoSubstitutionTemplateLiteral(initializer) ? initializer.text : initializer.getText(tree);
+      const token = value.match(/^var\((--[\w-]+)\)$/)?.[1];
+      if (!['inherit', '0'].includes(value) && (!token || !radiusName.test(token)))
         fail(node.pos, 'Inline rounding must use a semantic UI radius');
     }
     if (ts.isJsxAttribute(node) && node.name.getText(tree) === 'className' && node.initializer) {

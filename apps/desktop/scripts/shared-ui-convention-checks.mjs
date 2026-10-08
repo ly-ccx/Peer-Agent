@@ -7,7 +7,7 @@ import { createConversationStore } from '@peer-agent/conversation-store';
 import { createGoalPlanStore } from '@peer-agent/runtime-node';
 import { createAutomationStore } from '../electron/main/automation-store.mjs';
 
-export const sharedUiShots = ['diagnostics', 'appearance', 'automation-list', 'automation-receipt', 'automation-editor', 'classic-chat', 'classic-artifacts', 'classic-diff']
+export const sharedUiShots = ['diagnostics', 'appearance', 'automation-list', 'automation-receipt', 'automation-editor', 'classic-chat', 'classic-image-lightbox', 'classic-artifacts', 'classic-diff']
   .flatMap(scene => [`ui-${scene}-1280-dark.png`, `ui-${scene}-760-light.png`]);
 
 export function seedUiAutomation({ home, workspacePath }) {
@@ -34,6 +34,8 @@ export function seedClassicUiFixture({ home }) {
   git(['init', '-q', '-b', 'main']);
   const content = Array.from({ length: 20 }, (_, i) => `export const item${i} = ${i};`).join('\n') + '\n';
   writeFileSync(path.join(workspacePath, 'old-name.ts'), content);
+  // A wide image with four colored corners exposes accidental ellipse clipping.
+  writeFileSync(path.join(workspacePath, 'preview.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAABxElEQVR42u3VsQ1AQBiGYSemUGMAnV5tACsYQAyjl1hFVDqG0euvwPMMcJd8yZs/bFOfxLQWXQJ/NVRH1PdTE8N7CRgEDAgYEDAIGBAwIGBAwCBgQMCAgEHAgIABAQMCBgEDAgYEDAgYBAwIGBAwCBgQMCBgQMAgYEDAgIABAcPbhXFerAAuMCBgQMAgYEDAgIABAYOAAQEDAgYBAwIGBAwIGAQMCBgQMCBgEDAgYEDAIGBAwICAAQGDgAEBAwIGBAwCBgQMCBgEDAgYEDAgYBAwIGBAwCBgQMCAgAEBg4ABAQMCBgQMAgYEDAgYBAwIGBAwIGAQMCBgQMCAgEHAgIABAYOAAQEDAgYEDAIGBAwIGARsAhAwIGBAwCBgQMCAgAEBg4ABAQMCBgEDAgYEDAgYBAwIGBAwIGAQMCBgQMAgYEDAgIABAYOAAQEDAgYEDAIGBAwIGAQMCBgQMCBgEDAgYEDAIGBAwICAAQGDgAEBAwIGnrJrP6N+UNSllfmttsldYEDAIGBAwICAQcCAgAEBAwIGAQMCBgQMCBgEDAgYEDAIGBAwIGBAwCBgQMCAgAEBg4ABAQMCBgEDAgYEDAgYvukG710K3Y1DwUgAAAAASUVORK5CYII=', 'base64'));
   git(['add', '.']);
   const commit = message => git(['-c', 'user.name=UI Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', message]);
   commit('fixture base');
@@ -44,7 +46,7 @@ export function seedClassicUiFixture({ home }) {
   const conversations = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const conversation = conversations.createConversation({ title: 'UI 规范回归 · 经典聊天', workspacePath });
   conversations.appendMessage(conversation.id, { id: 'rc-ui-classic-user', role: 'user', content: '整理文件命名，并说明改动。', timestamp: Date.now() });
-  conversations.appendMessage(conversation.id, { id: 'rc-ui-classic-reply', role: 'assistant', content: '文件已改名为 `new-name.ts`，保留现有内容并调整第一项。\n\n请在查看进度中核对文件对照。', timestamp: Date.now() });
+  conversations.appendMessage(conversation.id, { id: 'rc-ui-classic-reply', role: 'assistant', content: '文件已改名为 `new-name.ts`，保留现有内容并调整第一项。\n\n本地图片：`./preview.png`\n\n请在查看进度中核对文件对照。', timestamp: Date.now() });
   const plans = createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') });
   const evidenceRef = 'rc-ui-classic-evidence';
   const plan = plans.createPlan({ conversationId: conversation.id, title: 'UI 规范回归 · 文件命名', goal: '整理文件命名。', status: 'completed',
@@ -134,7 +136,10 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
     assert.equal(await preview.evaluate(node => node === document.activeElement), true);
   });
   await nav.getByRole('button', { name: '外观', exact: true }).click();
-  await layouts('appearance');
+  await layouts('appearance', async () => {
+    const radii = await page.locator('.appearance-mode-thumb').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).borderRadius));
+    assert.deepEqual(radii, ['8px', '8px', '8px'], 'rectangular theme previews must retain their corners');
+  });
   await nav.getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('.bot-app-menu-button').click();
   await page.getByRole('menuitem', { name: '自动化', exact: true }).click();
@@ -175,7 +180,26 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
   const conversation = page.locator(`[data-conversation-id="${classicFixture.conversationId}"]`).first();
   await conversation.click();
   await page.getByText('文件已改名为', { exact: false }).waitFor();
-  await layouts('classic-chat');
+  const image = page.locator('.markdown-local-image-thumb');
+  await image.waitFor();
+  await page.waitForFunction(() => document.querySelector('.markdown-local-image-thumb img')?.naturalWidth === 320);
+  await layouts('classic-chat', async () => {
+    assert.equal(await image.evaluate(node => getComputedStyle(node).borderRadius), '8px');
+    assert.equal(await image.locator('img').evaluate(node => node.naturalHeight), 180);
+  });
+  await layouts('classic-image-lightbox', async () => {
+    if (await page.locator('.markdown-local-image-lightbox').isVisible()) await page.keyboard.press('Escape');
+    await page.locator('.markdown-local-image-lightbox').waitFor({ state: 'hidden' });
+    await image.focus(); await page.keyboard.press('Enter');
+    await page.locator('.markdown-local-image-lightbox-stage img').waitFor();
+    assert.equal(await page.locator('.markdown-local-image-lightbox-stage img').evaluate(node => node.naturalWidth), 320);
+    assert.equal(await page.locator('.markdown-local-image-lightbox-panel').evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+    }), true);
+  });
+  await page.keyboard.press('Escape');
+  await page.locator('.markdown-local-image-lightbox').waitFor({ state: 'hidden' });
   const fixtureUrl = await buildLegacyComponentFixture({ captureDirectory, classicFixture });
   const componentWindow = app.waitForEvent('window');
   await app.evaluate(({ BrowserWindow }, url) => {
@@ -212,6 +236,6 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
       return rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
     }), true);
   });
-  report.sharedUiConventions = { keyboardDisclosure: true, svgSelect: true, cases,
+  report.sharedUiConventions = { keyboardDisclosure: true, svgSelect: true, rectangularPreviews: true, keyboardImagePreview: true, cases,
     limits: 'Source Electron and isolated stores; paused automation receipt. Legacy artifact/Diff shots mount production components in an isolated fixture because current Goal projection no longer emits result_ready. Keyboard focus/activation checked; no OS picker, screen reader or installed build.' };
 }

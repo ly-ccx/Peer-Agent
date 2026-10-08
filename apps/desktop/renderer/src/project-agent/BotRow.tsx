@@ -1,6 +1,7 @@
 import type { BotListItem } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { BotAvatar } from './BotAvatar';
+import { PeerIcon } from '../ui/icons';
 import { botAvatarMood } from './state/botAvatarState';
 
 interface BotRowProps {
@@ -45,7 +46,8 @@ export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight
             <span className="bot-sr">{i18n.t('projectAgent.list.unread')}</span>
           </span>
         ) : item.state.running > 0 ? (
-          <span className="bot-spin motion-spin">
+          <span>
+            <PeerIcon name="loader" size={10} className="bot-spin motion-spin" />
             <span className="bot-sr">{i18n.t('projectAgent.list.running')}</span>
           </span>
         ) : null}

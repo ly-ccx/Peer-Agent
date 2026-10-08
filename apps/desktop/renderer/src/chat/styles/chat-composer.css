@@ -226,7 +226,7 @@
   }
 
   .message-image-thumb {
-    @apply h-32 max-w-[200px] rounded-[var(--ui-radius-circle)] object-cover;
+    @apply h-32 max-w-[200px] rounded-[var(--ui-radius-inset)] object-cover;
     border: 1px solid var(--ui-border-subtle, var(--za-line));
     cursor: pointer;
   }

@@ -13,14 +13,26 @@ test('permits semantic geometry, joined edges and nested borders', () => {
   assert.deepEqual(checkUiSource('View.tsx', '<button style={{ borderRadius: "var(--ui-radius-control)" }} className="rounded-[var(--ui-radius-control)]" />'), []);
 });
 test('rejects glyph, CSS, font and native disclosure stand-ins', () => {
-  for (const source of ['<button>×</button>', '<span className="icon">→</span>', '<details><summary>Preview</summary></details>'])
+  for (const source of ['<button>×</button>', '<button>{"×"}</button>', '<button><span>×</span></button>',
+    '<button>{active ? "✓" : "×"}</button>', '<button>🔍</button>', '<button>{`⚙️`}</button>',
+    '<span className="icon">→</span>', '<details><summary>Preview</summary></details>'])
     assert.ok(checkUiSource('View.tsx', source).length);
-  for (const source of ['.chevron { border-right: 1px solid; transform: rotate(45deg); }', '.spinner { border: 2px solid currentColor; }', '.icon { font-family: "Material Icons"; }'])
+  for (const source of ['.chevron { border-right: 1px solid; transform: rotate(45deg); }', '.spinner { border: 2px solid currentColor; }',
+    '.bot-spin { border: 1.5px solid currentColor; border-right-color: transparent; }',
+    '.chat-thread-loading-mark { border: 2px solid gray; border-top-color: blue; animation: motion-spin 0.8s linear infinite; }',
+    '.icon { font-family: "Material Icons"; }'])
     assert.ok(checkUiSource('view.css', source).length);
+});
+test('rejects undefined semantic radius tokens in CSS and inline styles', () => {
+  assert.ok(checkUiSource('View.tsx', '<button style={{ borderRadius: "var(--ui-radius-missing)" }} />').length);
+  assert.ok(checkUiSource('view.css', '.panel { border-radius: var(--ui-radius-missing); }').length);
 });
 test('does not mistake keyboard notation, diff signs, prose or user data for icons', () => {
   assert.deepEqual(checkUiSource('View.tsx', '<><kbd>↑</kbd><code>+ −</code><span>10:00 → 11:00</span><div>{userContent}</div><button>Next step</button><summary><PeerIcon name="chevronRight" />Preview</summary></>'), []);
   assert.deepEqual(checkUiSource('view.css', '.diff-add::before { content: "+ "; } .status-dot { border-radius: var(--ui-radius-circle); } .tooltip-arrow { border: 1px solid; }'), []);
+  assert.deepEqual(checkUiSource('View.tsx', '<><button aria-label="×"><kbd>{"↑"}</kbd><code>+</code>Wait…</button><span>{"🔍"}</span><button>{userContent}</button></>'), []);
+  assert.deepEqual(checkUiSource('View.tsx', '<button><span>+{additions}</span>{!label.includes("→") ? <PeerIcon name="arrowRight" /> : null}</button>'), []);
+  assert.deepEqual(checkUiSource('view.css', '.tool-progress-spinner { background: currentColor; border-radius: var(--ui-radius-circle); animation: motion-pulse 1s infinite; }'), []);
 });
 test('renderer satisfies the shared radius and SVG rules', () => assert.deepEqual(checkUiTree(), []));
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -20,5 +20,8 @@ test('UI fixtures persist a paused receipt and an actual renamed Git file', t =>
   assert.equal(plan.status, 'completed');
   assert.ok(plans.findEvidenceIndexRecords(plan.evidenceRefs)[0].userArtifacts[0].preview.diffLines.some(line => line === 'rename from old-name.ts'));
   assert.match(execFileSync('git', ['-C', classic.workspacePath, 'diff', '--find-renames', plan.baseCommit, 'HEAD'], { encoding: 'utf8' }), /rename to new-name.ts/);
-  assert.equal(new Set(sharedUiShots).size, 16);
+  const image = readFileSync(path.join(classic.workspacePath, 'preview.png'));
+  assert.equal(image.readUInt32BE(16), 320);
+  assert.equal(image.readUInt32BE(20), 180);
+  assert.equal(new Set(sharedUiShots).size, 18);
 });
