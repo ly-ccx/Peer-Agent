@@ -509,7 +509,7 @@ try {
   report.checks.push('older reference loads across pages, locates without a frame, clears its highlight and supports a repeated jump');
   await checkBotShellReply({ page, until, report, captureDirectory: root });
   if (process.argv.includes('--streaming')) {
-    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null });
+    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null, readFixtureTurns: () => readObserved('turns') });
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
   if (workSurfaces) {

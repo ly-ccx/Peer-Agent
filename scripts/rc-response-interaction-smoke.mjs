@@ -6,6 +6,13 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { emitToolArgProgress } from '../packages/runtime-node/dist/index.js';
 
+// Electron polls from another process. Replacing the complete file prevents a
+// truncated JSON read from becoming a provider error and replaying the stream.
+export function writeStreamingCommand(commandFile, scenario, phase) {
+  writeFileSync(commandFile + '.next', JSON.stringify({ scenario, phase }));
+  renameSync(commandFile + '.next', commandFile);
+}
+
 /** Controlled cognition only: exercises the actual executor, host, IPC and UI. */
 export function createStreamingFixture({ commandFile, record, resolveGoalRole }) {
   const active = new Map(), attempts = new Map();
@@ -14,7 +21,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
     abort(streamId) { const turn = active.get(streamId); if (turn) turn.aborted = true; },
     async sendMessage(input) {
       const text = input.messages?.findLast(message => message.role === 'user')?.content || '';
-      record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId });
+      record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId, scenario: text, streamId: input.streamId });
       const interactive = input.turnProfile?.role === 'project_agent';
       if (interactive && input.plan?.kind === 'wake' && input.plan.events.some(event => event.eventId === 'rc-manual-retry-event')) {
         const turn = { aborted: false }; active.set(input.streamId, turn);
@@ -99,9 +106,9 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
   };
 }
 
-export async function checkResponseInteraction({ page, until, report, captureDirectory, commandFile, workCommandFile = null }) {
+export async function checkResponseInteraction({ page, until, report, captureDirectory, commandFile, workCommandFile = null, readFixtureTurns }) {
   const checks = report.streamingInteraction = [];
-  const command = (scenario, phase) => writeFileSync(commandFile, JSON.stringify({ scenario, phase }));
+  const command = (scenario, phase) => writeStreamingCommand(commandFile, scenario, phase);
   const composer = page.locator('.bot-composer textarea'), live = page.locator('.bot-live-reply');
   const detail = page.locator('.bot-reply-details');
   const openDetails = target => openReplyDetails(page, target);
@@ -320,6 +327,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     await until(() => detail.locator('.bot-work-row').getAttribute('data-status'), status => status === 'accepted');
   }
   command('RC_STREAM_TEXT', 3); await live.waitFor({ state: 'detached' });
+  const normalTurns = readFixtureTurns().filter(turn => turn.role === 'project_agent' && turn.scenario === 'RC_STREAM_TEXT');
+  assert.equal(normalTurns.length, 1, 'the controlled successful stream must not silently retry');
+  report.streamingFixtureTurns = normalTurns;
   const completed = page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' });
   assert.equal(await detail.locator('.bot-turn-process').evaluate(node => node.open), true);
   assert.equal(await detail.locator('.bot-tool-step').evaluate(node => node.open), true);
