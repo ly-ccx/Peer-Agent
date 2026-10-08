@@ -2,13 +2,14 @@ import { useEffect, useId, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { Overlay } from '../app/components/Overlay';
 import { clientApi } from '../clientApi';
+import { Dropdown } from '../app/components/Dropdown';
+import { MarkdownMessage } from '../chat/components/markdown/MarkdownMessage';
+import { PeerIcon } from '../ui/icons';
 import { formatDrawerStamp } from './state/drawerState';
-
-export interface HistoryConversation {
-  readonly id: string;
-  readonly title: string;
-  readonly updatedAt: string;
-}
+import { historyTitle, type HistoryConversation } from './state/historyPresentation';
+import { HistoryConversationList } from './HistoryConversationList';
+import './styles/bot-history.css';
+export type { HistoryConversation } from './state/historyPresentation';
 
 export interface HistoryBotChoice {
   readonly workspaceId: string;
@@ -48,6 +49,11 @@ export function HistorySheet({
   const [busy, setBusy] = useState(false);
   const [needsConfirm, setNeedsConfirm] = useState(false);
   const [error, setError] = useState('');
+  const [readState, setReadState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const [previewState, setPreviewState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const [readEpoch, setReadEpoch] = useState(0);
+  const [previewEpoch, setPreviewEpoch] = useState(0);
+  const [continuedTo, setContinuedTo] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -56,21 +62,27 @@ export function HistorySheet({
       setNeedsConfirm(false);
       setError('');
       setBusy(false);
+      setLoaded([]);
+      setReadState('loading');
+      setContinuedTo(null);
       return undefined;
     }
     setBotId(workspaceId);
     if (!unscoped) return undefined;
     let cancelled = false;
+    setLoaded([]);
+    setReadState('loading');
     void clientApi.projectAgentListHistory({ unscoped: true }).then((result) => {
       if (cancelled) return;
       setLoaded(Array.isArray(result?.history) ? result.history : []);
+      setReadState(result?.ok ? 'ready' : 'unavailable');
     }).catch(() => {
-      if (!cancelled) setLoaded([]);
+      if (!cancelled) { setLoaded([]); setReadState('unavailable'); }
     });
     return () => {
       cancelled = true;
     };
-  }, [open, unscoped, workspaceId]);
+  }, [open, unscoped, workspaceId, readEpoch]);
 
   useEffect(() => {
     if (!open || !selectedId) {
@@ -80,16 +92,19 @@ export function HistorySheet({
     }
     let cancelled = false;
     setNeedsConfirm(false);
+    setLines([]);
+    setPreviewState('loading');
     void clientApi.conversationsGet({ id: selectedId }).then((result) => {
       if (cancelled) return;
       setLines(historyLines(result?.messages));
+      setPreviewState(result ? 'ready' : 'unavailable');
     }).catch(() => {
-      if (!cancelled) setLines([]);
+      if (!cancelled) { setLines([]); setPreviewState('unavailable'); }
     });
     return () => {
       cancelled = true;
     };
-  }, [open, selectedId]);
+  }, [open, selectedId, previewEpoch]);
 
   if (!open) return null;
   const rows = items ?? loaded;
@@ -100,44 +115,49 @@ export function HistorySheet({
     <Overlay
       ariaLabel={i18n.t('projectAgent.list.history')}
       panelClassName="bot-sheet bot-history-sheet"
-      onClose={onClose}
+      backdropClassName="bot-history-backdrop"
+      onClose={() => { if (continuedTo && onContinued) onContinued(continuedTo); else onClose(); }}
     >
+      {({ requestClose }) => <>
       <div className="bot-sheet-head">
-        <h2 id={titleId}>{i18n.t('projectAgent.list.history')}</h2>
-        <button type="button" className="bot-sheet-close" onClick={onClose}>
-          {i18n.t('projectAgent.drawer.close')}
+        <div><h2 id={titleId}>{selected ? historyTitle(selected, i18n.t('projectAgent.history.untitled')) : i18n.t('projectAgent.list.history')}</h2>
+          <p>{selected ? formatDrawerStamp(selected.updatedAt) : i18n.t('projectAgent.history.hint')}</p></div>
+        <button type="button" className="bot-sheet-close" aria-label={i18n.t('projectAgent.drawer.close')} onClick={requestClose}>
+          <PeerIcon name="close" size={18} />
         </button>
       </div>
       {selected ? (
         <div className="bot-history-detail">
-          <button type="button" className="bot-back" onClick={() => setSelectedId(null)}>
-            {i18n.t('projectAgent.drawer.back')}
+          <button type="button" className="bot-history-back" onClick={() => setSelectedId(null)}>
+            <PeerIcon name="chevronLeft" size={15} />{i18n.t('projectAgent.history.back')}
           </button>
-          <div className="bot-history-log">
+          <div className="bot-history-log" aria-busy={previewState === 'loading'}>
+            {previewState !== 'ready' ? <p className="bot-history-empty" role="status">{i18n.t(previewState === 'loading'
+              ? 'projectAgent.history.loadingPreview' : 'projectAgent.history.previewUnavailable')}
+              {previewState === 'unavailable' ? <button type="button" onClick={() => setPreviewEpoch(value => value + 1)}>{i18n.t('projectAgent.history.retry')}</button> : null}
+            </p> : !lines.length ? <p className="bot-history-empty">{i18n.t('projectAgent.history.noPreview')}</p> : null}
             {lines.map((line) => (
-              <article key={line.id} className="bot-history-line">
-                <span>{line.role}</span>
-                {line.text ? <p>{line.text}</p> : null}
+              <article key={line.id} className="bot-history-line" data-role={line.role}>
+                <span>{i18n.t(line.role === 'user' ? 'projectAgent.history.user' : 'projectAgent.history.assistant')}</span>
+                {line.role === 'assistant' ? <MarkdownMessage content={line.text} /> : <p>{line.text || i18n.t('projectAgent.history.attachmentOnly')}</p>}
               </article>
             ))}
           </div>
+          <div className="bot-history-actions">
           {unscoped ? (
-            <label className="bot-history-pick">
+            <div className="bot-history-pick">
               <span>{i18n.t('projectAgent.drawer.historyPickBot')}</span>
-              <select value={botId} onChange={(event) => setBotId(event.target.value)}>
-                <option value="">{i18n.t('projectAgent.drawer.historyPickBot')}</option>
-                {bots.map((bot) => (
-                  <option key={bot.workspaceId} value={bot.workspaceId}>{bot.displayName}</option>
-                ))}
-              </select>
-            </label>
+              <Dropdown value={botId} options={bots.map(bot => ({ value: bot.workspaceId, label: bot.displayName }))}
+                onChange={setBotId} disabled={busy || !bots.length} ariaLabel={i18n.t('projectAgent.drawer.historyPickBot')}
+                placeholder={i18n.t('projectAgent.drawer.historyPickBot')} searchable menuPlacement="up" />
+            </div>
           ) : null}
           {needsConfirm ? <p className="bot-history-confirm">{i18n.t('projectAgent.drawer.historyPartial')}</p> : null}
-          {error ? <p className="bot-sheet-error">{error}</p> : null}
+          {error ? <p className="bot-sheet-error" role="alert">{i18n.t('projectAgent.history.continueFailed')}</p> : null}
           <button
             type="button"
             className="bot-sheet-submit"
-            disabled={busy || !targetBot}
+            disabled={busy || !targetBot || previewState !== 'ready'}
             onClick={() => {
               void continueHistory(
                 targetBot,
@@ -146,35 +166,20 @@ export function HistorySheet({
                 setBusy,
                 setError,
                 setNeedsConfirm,
-                onContinued,
+                workspaceId => { setContinuedTo(workspaceId); requestClose(); },
               );
             }}
           >
-            {i18n.t(needsConfirm
+            {i18n.t(busy ? 'projectAgent.history.submitting' : needsConfirm
               ? 'projectAgent.drawer.historyPartialConfirm'
               : 'projectAgent.drawer.continueHistory')}
           </button>
+          </div>
         </div>
-      ) : rows.length === 0 ? (
-        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.historyEmpty')}</p>
-      ) : (
-        <div>
-          {rows.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="bot-sheet-choice"
-              onClick={() => {
-                setError('');
-                setSelectedId(item.id);
-              }}
-            >
-              <strong>{item.title || item.id}</strong>
-              {item.updatedAt ? <span>{formatDrawerStamp(item.updatedAt)}</span> : null}
-            </button>
-          ))}
-        </div>
-      )}
+      ) : null}
+      <HistoryConversationList items={rows} active={!selected} state={items || !unscoped ? 'ready' : readState}
+        i18n={i18n} onRetry={() => setReadEpoch(value => value + 1)} onChoose={id => { setError(''); setLines([]); setPreviewState('loading'); setSelectedId(id); }} />
+      </>}
     </Overlay>
   );
 }
@@ -186,7 +191,7 @@ function historyLines(messages: unknown): readonly HistoryLine[] {
     const id = typeof row.id === 'string' && row.id ? row.id : String(index);
     const role = typeof row.role === 'string' ? row.role : '';
     return { id, role, text: textOf(row.content) };
-  });
+  }).filter(line => line.role === 'user' || line.role === 'assistant');
 }
 
 function textOf(content: unknown): string {

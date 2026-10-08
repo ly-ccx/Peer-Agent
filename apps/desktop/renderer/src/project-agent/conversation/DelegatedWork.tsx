@@ -4,12 +4,13 @@ import { PeerIcon } from '../../ui/icons';
 import type { BotWorkRow } from '../state/botWorkState';
 import { formatDrawerSessionStatus } from '../state/drawerState';
 import '../styles/bot-reply-context.css';
+import '../styles/bot-disclosure.css';
 
 export function DelegatedWork({ rows, botName, i18n, onOpen, disclosure }: { readonly rows: readonly BotWorkRow[]; readonly botName: string; readonly i18n: I18nRuntime; readonly onOpen: (id: string) => void; readonly disclosure?: ProcessDisclosure }) {
   if (!rows.length) return null;
   return <section className="bot-delegated-work" aria-label={i18n.t('projectAgent.chat.work.heading')}>
     {rows.slice(0, 3).map(row => <WorkRow key={row.id} row={row} botName={botName} i18n={i18n} onOpen={onOpen} disclosure={disclosure} />)}
-    {rows.length > 3 ? <details className="bot-work-more" open={disclosure ? disclosure.open['work:more'] ?? false : undefined} onToggle={event => { if (event.target === event.currentTarget) disclosure?.toggle('work:more', event.currentTarget.open); }}><summary>{i18n.t('projectAgent.chat.work.more', { count: rows.length - 3 })}</summary>
+    {rows.length > 3 ? <details className="bot-work-more" open={disclosure ? disclosure.open['work:more'] ?? false : undefined} onToggle={event => { if (event.target === event.currentTarget) disclosure?.toggle('work:more', event.currentTarget.open); }}><summary>{i18n.t('projectAgent.chat.work.more', { count: rows.length - 3 })}<PeerIcon name="chevronDown" size={12} /></summary>
       {rows.slice(3).map(row => <WorkRow key={row.id} row={row} botName={botName} i18n={i18n} onOpen={onOpen} disclosure={disclosure} />)}</details> : null}
   </section>;
 }

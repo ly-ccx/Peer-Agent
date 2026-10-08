@@ -167,7 +167,7 @@ export function BotConversation({
       {background.count ? <details className="bot-background-work"><summary>
         {runningWork?.status ? <><PeerIcon name="terminal" size={14} /><span className="bot-work-title">{runningWork.session?.title || i18n.t('projectAgent.chat.work.related')}</span>
           <span className="bot-work-status is-running">{i18n.t(`projectAgent.chat.sessionState.${runningWork.status}`)}</span></>
-          : i18n.t('projectAgent.chat.work.background', { count: background.count })}<PeerIcon name="chevronDown" size={12} /></summary>
+          : <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span>}<PeerIcon name="chevronDown" size={12} /></summary>
         <DelegatedWork rows={background.rows} botName={label} i18n={i18n} onOpen={onLocateSession} /></details> : null}
       <BotComposer
         key={workspaceId}

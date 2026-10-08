@@ -39,6 +39,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.equal(keyboardFocus.width, '1px');
   assert.ok(keyboardFocus.offset <= -1, 'keyboard outline fits inside the clipped task list');
   checks.push('keyboard work disclosure uses a thin inset focus indicator, without the clipped white frame');
+  await until(() => work.innerText(), text => text.includes('逐条核对历史记录'));
   assert.match(await work.innerText(), /逐条核对历史记录/);
   assert.doesNotMatch(await reply.locator('.bot-reply-bar').innerText(), /rc-message-/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-running.png') });
@@ -63,7 +64,12 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.ok(followUpHint.includes(botName), 'handoff names the main bot responsible for follow-up');
   await backgroundSummary.focus(); await page.keyboard.press('Enter');
   const backgroundWork = page.locator('.bot-background-work .bot-work-row');
-  await backgroundWork.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  const nestedSummary = backgroundWork.locator(':scope > summary');
+  await until(() => nestedSummary.evaluate(node => node.checkVisibility()), Boolean);
+  await nestedSummary.focus();
+  assert.equal(await nestedSummary.evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  await until(() => backgroundWork.innerText(), text => /等待跟进[\s\S]*主对话/.test(text));
   assert.match(await backgroundWork.innerText(), /等待跟进[\s\S]*主对话/);
   assert.doesNotMatch(await backgroundWork.innerText(), /需要你处理|查看并处理/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-waiting.png') });

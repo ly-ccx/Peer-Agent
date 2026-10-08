@@ -126,6 +126,30 @@ export type TranslationKey =
   | 'projectAgent.list.capabilities'
   | 'projectAgent.list.capabilitiesHint'
   | 'projectAgent.list.history'
+  | 'projectAgent.history.hint'
+  | 'projectAgent.history.search'
+  | 'projectAgent.history.clear'
+  | 'projectAgent.history.loading'
+  | 'projectAgent.history.unavailable'
+  | 'projectAgent.history.retry'
+  | 'projectAgent.history.noMatch'
+  | 'projectAgent.history.untitled'
+  | 'projectAgent.history.group.today'
+  | 'projectAgent.history.group.yesterday'
+  | 'projectAgent.history.group.week'
+  | 'projectAgent.history.group.earlier'
+  | 'projectAgent.history.group.other'
+  | 'projectAgent.history.more'
+  | 'projectAgent.history.count'
+  | 'projectAgent.history.back'
+  | 'projectAgent.history.loadingPreview'
+  | 'projectAgent.history.previewUnavailable'
+  | 'projectAgent.history.noPreview'
+  | 'projectAgent.history.user'
+  | 'projectAgent.history.assistant'
+  | 'projectAgent.history.attachmentOnly'
+  | 'projectAgent.history.continueFailed'
+  | 'projectAgent.history.submitting'
   | 'projectAgent.shell.classicNotice'
   | 'projectAgent.shell.banner'
   | 'projectAgent.shell.bannerTitle'
@@ -1539,6 +1563,30 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.capabilities': '能力',
     'projectAgent.list.capabilitiesHint': '插件、技能与 MCP',
     'projectAgent.list.history': '历史对话',
+    'projectAgent.history.hint': '找回之前的讨论，继续推进。',
+    'projectAgent.history.search': '搜索对话标题',
+    'projectAgent.history.clear': '清除搜索',
+    'projectAgent.history.loading': '正在读取历史对话…',
+    'projectAgent.history.unavailable': '暂时无法读取历史对话。',
+    'projectAgent.history.retry': '重试',
+    'projectAgent.history.noMatch': '没有匹配的对话标题。',
+    'projectAgent.history.untitled': '未命名对话',
+    'projectAgent.history.group.today': '今天',
+    'projectAgent.history.group.yesterday': '昨天',
+    'projectAgent.history.group.week': '最近 7 天',
+    'projectAgent.history.group.earlier': '更早',
+    'projectAgent.history.group.other': '其他日期',
+    'projectAgent.history.more': '显示更多对话',
+    'projectAgent.history.count': '显示 {shown} / {count} 条对话',
+    'projectAgent.history.back': '返回历史列表',
+    'projectAgent.history.loadingPreview': '正在读取对话…',
+    'projectAgent.history.previewUnavailable': '暂时无法读取这段对话。',
+    'projectAgent.history.noPreview': '没有可预览的对话消息。',
+    'projectAgent.history.user': '你',
+    'projectAgent.history.assistant': '机器人',
+    'projectAgent.history.attachmentOnly': '附件消息',
+    'projectAgent.history.continueFailed': '暂时无法继续这段对话，请重试。',
+    'projectAgent.history.submitting': '正在提交…',
     'projectAgent.shell.classicNotice': '切换到机器人界面查看',
     'projectAgent.shell.banner': '这是新的机器人列表；原来的会话在各机器人的档案 → 任务 → 历史对话；可以在 设置 → 通用 切回经典界面',
     'projectAgent.shell.bannerTitle': '新的机器人列表',
@@ -2740,6 +2788,30 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.capabilities': 'Capabilities',
     'projectAgent.list.capabilitiesHint': 'Plugins, skills, and MCP',
     'projectAgent.list.history': 'History',
+    'projectAgent.history.hint': 'Find an earlier discussion and pick up where you left off.',
+    'projectAgent.history.search': 'Search conversation titles',
+    'projectAgent.history.clear': 'Clear search',
+    'projectAgent.history.loading': 'Loading conversation history…',
+    'projectAgent.history.unavailable': 'Conversation history is temporarily unavailable.',
+    'projectAgent.history.retry': 'Retry',
+    'projectAgent.history.noMatch': 'No matching conversation titles.',
+    'projectAgent.history.untitled': 'Untitled conversation',
+    'projectAgent.history.group.today': 'Today',
+    'projectAgent.history.group.yesterday': 'Yesterday',
+    'projectAgent.history.group.week': 'Previous 7 days',
+    'projectAgent.history.group.earlier': 'Earlier',
+    'projectAgent.history.group.other': 'Other dates',
+    'projectAgent.history.more': 'Show more conversations',
+    'projectAgent.history.count': 'Showing {shown} of {count} conversations',
+    'projectAgent.history.back': 'Back to history',
+    'projectAgent.history.loadingPreview': 'Loading conversation…',
+    'projectAgent.history.previewUnavailable': 'This conversation is temporarily unavailable.',
+    'projectAgent.history.noPreview': 'No conversation messages to preview.',
+    'projectAgent.history.user': 'You',
+    'projectAgent.history.assistant': 'Assistant',
+    'projectAgent.history.attachmentOnly': 'Attachment message',
+    'projectAgent.history.continueFailed': 'Could not continue this conversation. Please try again.',
+    'projectAgent.history.submitting': 'Submitting…',
     'projectAgent.shell.classicNotice': 'Switch to the bot list to view this',
     'projectAgent.shell.banner': 'This is the new bot list. Older chats are in each bot’s profile → tasks → history. Switch back from Settings → General.',
     'projectAgent.shell.bannerTitle': 'New bot list',

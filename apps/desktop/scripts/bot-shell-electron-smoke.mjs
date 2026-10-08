@@ -4,6 +4,7 @@ import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
 import { checkBotSelectionQuote } from './bot-selection-quote-checks.mjs';
 import { checkBotWorkSurfaces } from './bot-work-surface-checks.mjs';
+import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } from './bot-history-motion-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
 import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
@@ -31,11 +32,12 @@ import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
-const workSurfaces = process.argv.includes('--work-surfaces');
+const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--history-motion-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const fixture = seedBotShellHome({ home });
+const historyFixtures = workSurfaces ? seedHistoryFixtures({ home }) : [];
 let botModelFixtures = [];
 {
   const fixtureSecrets = new Map();
@@ -141,6 +143,7 @@ let observedService = serviceText.replace(readSeam, `const result = directory.re
   }
   globalThis.rcBotShellRecord('reads',{  before: payload.before ?? null, nextCursor: result.nextCursor,
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });`);
+if (workSurfaces) observedService = instrumentHistoryReads(observedService);
 const timingSeams = [
   ['function list(payload = {}) {', 'function list(payload = {}) { const rcListStart = performance.now();'],
   ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; globalThis.rcBotShellRecord(\'list\',{  count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
@@ -256,10 +259,10 @@ globalThis.rcBotShellService.sendMessage=input=>{
 };
 ${workSurfaces ? `const workFile=${JSON.stringify(workCommand)};
 let workCommand=JSON.parse(readFileSync(workFile,'utf8'));
-globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);globalThis.rcBotWorkReports=workCommand.detailReports;globalThis.rcBotWorkMessages=workCommand.conversationMessages;
+globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);globalThis.rcBotWorkReports=workCommand.detailReports;globalThis.rcBotWorkMessages=workCommand.conversationMessages;globalThis.rcHistoryReadMode=workCommand.historyReadMode;
 const workTimer=setInterval(()=>{
   const next=JSON.parse(readFileSync(workFile,'utf8'));if(next.seq<=workCommand.seq)return;
-  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);globalThis.rcBotWorkReports=next.detailReports;globalThis.rcBotWorkMessages=next.conversationMessages;
+  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);globalThis.rcBotWorkReports=next.detailReports;globalThis.rcBotWorkMessages=next.conversationMessages;globalThis.rcHistoryReadMode=next.historyReadMode;
   for(const window of BrowserWindow.getAllWindows())window.webContents.send('project-agent:changed',{workspaceIds:[next.workspaceId]});
 },25);workTimer.unref();` : ''}
 // Keep synthetic updater delivery outside inspector Promise lifetime. Only this
@@ -329,7 +332,12 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
-  if (process.argv.includes('--selection-quote-only')) {
+  if (process.argv.includes('--history-motion-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
+      fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
+  } else if (process.argv.includes('--selection-quote-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotSelectionQuote({ page, until, report, captureDirectory: root });
@@ -507,6 +515,8 @@ try {
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
+    await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
+      fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }
   await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   assert.equal(await page.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
