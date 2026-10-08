@@ -40,13 +40,12 @@ export function ReplyBubble({
       id={`bot-msg-${message.id}`}
       data-kind="agent_reply"
     >
-      <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
       <BotNarration segments={narration} />
-      <div
-        className="bot-reply-body"
-        ref={bodyRef}
-      >
-        <MarkdownMessage content={message.content} />
+      <div className="bot-reply-body">
+        <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
+        <div ref={bodyRef} className="bot-reply-text">
+          <MarkdownMessage content={message.content} />
+        </div>
       </div>
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />

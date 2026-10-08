@@ -37,7 +37,7 @@
     "dev:lab": "pnpm --filter @peer-agent/desktop run dev:lab",
     "qa:product:capture": "node scripts/product-regression.mjs --capture",
     "qa:product:verify": "node scripts/product-regression.mjs --verify",
-    "qa:product:test": "node --test scripts/product-regression.test.mjs"
+    "qa:product:test": "node --test scripts/product-regression.test.mjs scripts/rc-stream-command.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

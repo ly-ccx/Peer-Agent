@@ -73,6 +73,13 @@ seededMessages.at(-1).replyTo = ['rc-message-9500'];
 seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。' + '需要逐项核对实际实现和依据。'.repeat(8) + '原文结束标记';
 seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
 seededMessages.at(-1).meta = { surfacing: 'interrupt', memoryUsed: ['rc-memory-123'] };
+seededMessages[9993] = { ...seededMessages[9993], role: 'user', kind: 'user_input', content: '熟悉仓库' };
+seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agent_reply', replyTo: ['rc-message-9993'],
+  content: '仓库只读熟悉已经完成，工作区没有改动。下面是这次整理的项目情况。\n\n'
+    + '1. 项目结构：应用和运行时分别维护，公共契约在共享包中。\n'
+    + '2. 开发规则：按已有规则修改，界面只负责呈现。\n'
+    + '3. 常用脚本：启动、构建、测试及产品回归都有对应入口。\n'
+    + '4. 最近提交：已核对当前分支与提交记录。\n\n要把这些确认过的事实写入项目记忆吗？' };
 if (process.argv.includes('--selection-quote-only')) seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agent_reply',
   content: '仓库只读熟悉已经完成，工作区没有改动。叶子证据和独立校验都通过了；项目记忆里目前还没有对应条目。\n\n'
     + Array.from({ length: 8 }, (_, i) => `${i + 1}. 项目核对：检查应用、运行时、脚本与规则，整理已核实的事实和未覆盖的范围。`).join('\n')
@@ -337,6 +344,12 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
+  } else if (process.argv.includes('--reply-quote-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+    await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
+    await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
+    await checkBotShellReply({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--selection-quote-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -496,7 +509,7 @@ try {
   report.checks.push('older reference loads across pages, locates without a frame, clears its highlight and supports a repeated jump');
   await checkBotShellReply({ page, until, report, captureDirectory: root });
   if (process.argv.includes('--streaming')) {
-    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null });
+    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null, readFixtureTurns: () => readObserved('turns') });
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
   if (workSurfaces) {
