@@ -118,11 +118,11 @@ describe('workbench maximize behavior', () => {
   it('keeps a visible left radius on the conversation drawer outline', () => {
     assert.match(
       drawerStyles,
-      /\.conversation-chat-drawer \{[\s\S]*?border-radius:\s*var\(--radius-xl\) 0 0 var\(--radius-xl\);/,
+      /\.conversation-chat-drawer \{[\s\S]*?border-radius:\s*var\(--ui-radius-modal\) 0 0 var\(--ui-radius-modal\);/,
     );
     assert.match(
       drawerStyles,
-      /\.conversation-result-drawer \{[\s\S]*?border-radius:\s*var\(--radius-xl\) 0 0 var\(--radius-xl\);/,
+      /\.conversation-result-drawer \{[\s\S]*?border-radius:\s*var\(--ui-radius-modal\) 0 0 var\(--ui-radius-modal\);/,
     );
   });
 });

@@ -4,7 +4,7 @@
   display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 32px;
 }
 .settings-content .settings-provider-page .llm-add-channel-btn {
-  flex: none; min-height: 34px; padding: 7px 12px; gap: 8px; border-radius: 8px; font-size: .8125rem;
+  flex: none; min-height: 34px; padding: 7px 12px; gap: 8px; border-radius: var(--ui-radius-control); font-size: .8125rem;
 }
 .settings-content .settings-provider-page .llm-list-toolbar { padding: 0 0 8px; }
 .settings-content .settings-provider-page .llm-list-summary { gap: 12px; flex-wrap: wrap; }
@@ -21,7 +21,7 @@
   padding: 12px 0; border: 0; border-radius: 0; background: transparent;
 }
 .settings-content .settings-provider-page .llm-group-toggle { flex: 1; align-self: stretch; gap: 18px; text-align: left; }
-.settings-content .settings-provider-page .llm-group-toggle > .llm-brand-icon { width: 32px; height: 32px; border: 0; border-radius: 8px; box-shadow: none; }
+.settings-content .settings-provider-page .llm-group-toggle > .llm-brand-icon { width: 32px; height: 32px; border: 0; border-radius: var(--ui-radius-control); box-shadow: none; }
 .settings-content .settings-provider-page .llm-service-copy { display: grid; gap: 4px; min-width: 0; }
 .settings-content .settings-provider-page .llm-service-copy strong {
   font-size: 1rem; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere;
@@ -41,7 +41,7 @@
 .settings-content .settings-provider-page .llm-group-actions { margin: 0; }
 .settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger {
   display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0;
-  border-radius: 8px; background: transparent; color: var(--graphite-soft);
+  border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-soft);
 }
 .settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger:hover { background: var(--chrome-hover); color: var(--graphite-base); }
 .settings-content .settings-provider-page .llm-group-body { padding: 4px 0 18px 50px; border: 0; }
@@ -56,7 +56,7 @@
 }
 .llm-fallback-vision-toggle {
   display: flex; align-items: center; gap: 20px; width: 100%; min-height: 76px; padding: 12px 0;
-  border: 0; border-radius: 8px; background: transparent; color: var(--graphite-base); text-align: left; cursor: pointer;
+  border: 0; border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-base); text-align: left; cursor: pointer;
 }
 .llm-fallback-vision-toggle:hover { background: var(--chrome-hover); }
 .settings-content .settings-provider-page .llm-fallback-vision-copy { flex: 1; min-width: 0; }

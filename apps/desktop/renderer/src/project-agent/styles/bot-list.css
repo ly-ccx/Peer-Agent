@@ -92,7 +92,7 @@
   color: var(--graphite-soft);
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   appearance: none;
   cursor: pointer;
   transition:
@@ -133,7 +133,7 @@
   margin-bottom: 8px;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   transition:
     border-color var(--za-motion-fast) var(--za-ease-standard),
     box-shadow var(--za-motion-fast) var(--za-ease-standard);
@@ -166,7 +166,7 @@
   font-size: 11px;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--ui-radius-control-compact);
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -203,7 +203,7 @@
   line-height: 1.55;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .bot-upgrade-banner {
@@ -215,7 +215,7 @@
   color: var(--graphite-base);
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
   -webkit-app-region: no-drag;
 }
@@ -283,7 +283,7 @@
   color: var(--chrome-canvas);
   background: var(--graphite-base);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   cursor: pointer;
   transition:
     transform var(--za-motion-fast) var(--za-ease-standard),
@@ -313,7 +313,7 @@
   align-items: center;
   padding: 9px 8px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--ui-radius-row);
   cursor: pointer;
   transition:
     background var(--za-motion-fast) var(--za-ease-standard),
@@ -388,22 +388,20 @@
   font-size: 10.5px;
   font-weight: 600;
   background: var(--graphite-base);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
 }
 
 .bot-unread {
   width: 8px;
   height: 8px;
   background: var(--graphite-base);
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
 }
 
 .bot-spin {
   width: 10px;
   height: 10px;
-  border: 1.5px solid var(--graphite-fade);
-  border-right-color: transparent;
-  border-radius: 50%;
+  color: var(--graphite-fade);
 }
 
 .bot-sr {
@@ -541,7 +539,7 @@
 
 .bot-avatar-image {
   overflow: hidden;
-  border-radius: 13px;
+  border-radius: var(--ui-radius-avatar);
   color: var(--graphite-base);
   background: var(--chrome-hover);
   border: 1px solid var(--chrome-hairline);
@@ -593,7 +591,7 @@
   min-height: 28px;
   padding: 0 5px;
   gap: 6px;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control);
   font: inherit;
 }
 
@@ -606,7 +604,7 @@
 .bot-column-footer .sidebar-version-stage {
   flex: none;
   padding: 3px 5px;
-  border-radius: 4px;
+  border-radius: var(--ui-radius-chip);
   background: var(--chrome-hover);
   color: var(--graphite-soft);
   font-size: 9px;
@@ -635,7 +633,7 @@
 .bot-column-footer .sidebar-version-progress-ring {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: conic-gradient(var(--azure-seal) var(--progress), var(--chrome-hairline) 0);
   mask-image: radial-gradient(circle, transparent 48%, black 54%);
 }
@@ -643,7 +641,7 @@
 .bot-column-footer .sidebar-version-install-btn {
   min-height: 28px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control);
   background: var(--graphite-base);
   color: var(--chrome-canvas);
   animation: none;
@@ -689,7 +687,7 @@
   text-align: left;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--ui-radius-control);
   cursor: pointer;
 }
 
@@ -716,7 +714,7 @@
   padding: 5px;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--surface-radius);
+  border-radius: var(--ui-radius-modal);
   box-shadow: var(--shadow-popover);
 }
 
@@ -736,7 +734,7 @@
   text-align: left;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control);
   cursor: pointer;
 }
 
@@ -841,7 +839,7 @@
   font-size: 12px;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   cursor: pointer;
   transition:
     color var(--za-motion-fast) var(--za-ease-standard),
@@ -864,7 +862,7 @@
   gap: 6px;
   min-height: 32px;
   padding: 6px 10px;
-  border-radius: var(--control-radius-compact);
+  border-radius: var(--ui-radius-control-compact);
   border-color: transparent;
   background: var(--control-fill);
   font-weight: 500;
@@ -943,7 +941,7 @@
   text-align: left;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 16px;
+  border-radius: var(--ui-radius-row);
   cursor: pointer;
   transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
@@ -986,7 +984,7 @@
   width: min(440px, calc(100vw - 32px));
   padding: 16px;
   color: var(--graphite-base);
-  border-radius: 16px;
+  border-radius: var(--ui-radius-modal);
 }
 
 .bot-history-sheet {
@@ -1009,7 +1007,7 @@
   color: var(--graphite-base);
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
 }
 
 .bot-history-log {
@@ -1024,7 +1022,7 @@
 .bot-history-line {
   padding: 8px 10px;
   background: var(--chrome-canvas);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
 }
 
 .bot-history-line span {
@@ -1083,7 +1081,7 @@
   text-align: left;
   background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .bot-sheet-choice span,
@@ -1102,7 +1100,7 @@
   font: inherit;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
 }
 
 .bot-sheet-error {
@@ -1118,7 +1116,7 @@
   color: var(--chrome-canvas);
   background: var(--graphite-base);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
 }
 
 .bot-sheet-submit:disabled,

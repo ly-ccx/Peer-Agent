@@ -495,7 +495,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
           <p className="automation-create-home-hint">{copy.createHomeHint}</p>
           <div className="automation-detect-model compact">
             <label htmlFor="automation-detect-model">{copy.detectModel}</label>
-            <select
+            <span className="automation-select"><select
               id="automation-detect-model"
               value={detectModelId}
               onChange={(event) => setDetectModelId(event.target.value)}
@@ -507,7 +507,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
               {modelOptions.map((option) => (
                 <option key={option.id} value={option.id}>{option.label}</option>
               ))}
-            </select>
+            </select><PeerIcon name="chevronDown" size={14} /></span>
             {detectNotice ? <p className="automation-page-lede">{detectNotice}</p> : null}
           </div>
         </section>
@@ -538,7 +538,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
             />
           </Field>
           <Field label={copy.frequency}>
-            <select
+            <span className="automation-select"><select
               value={draft.scheduleKind}
               onChange={(e) => {
                 setScheduleTouched(true);
@@ -548,7 +548,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
               {(['once','hourly','daily','weekdays','weekly','monthly','custom_cron'] as const).map((kind) => (
                 <option key={kind} value={kind}>{scheduleKindLabel(copy, kind)}</option>
               ))}
-            </select>
+            </select><PeerIcon name="chevronDown" size={14} /></span>
           </Field>
           <div className="automation-bound-timezone">
             <span>{copy.timezone}</span>
@@ -780,7 +780,7 @@ function RunReceipt({ copy, locale, run, busy, onBack, onRetry, onCancel, onConv
     </header>
     {runNeedsAttention(run) ? <div className="automation-alert attention"><strong>{copy.needsAttention}</strong><span>{receipt?.error ?? run.failureReason ?? run.blockedReason ?? copy.openToContinue}</span></div> : null}
     <div className="automation-receipt-grid"><div className="automation-panel wide"><h2>{copy.summary}</h2><p className="automation-receipt-summary">{receipt?.summary ?? receipt?.error ?? run.failureReason ?? copy.noSummary}</p></div>
-      {receipt?.previousSummary ? <div className="automation-panel wide automation-comparison"><div className="automation-latest-result-heading"><h2>{copy.comparison}</h2><span className={`automation-pill ${receipt.resultChanged ? 'attention' : ''}`}>{receipt.resultChanged ? copy.resultChanged : copy.resultUnchanged}</span></div><p>{receipt.comparisonSummary}</p><details><summary>{copy.previousResult}</summary><p className="automation-receipt-summary">{receipt.previousSummary}</p></details></div> : null}
+      {receipt?.previousSummary ? <div className="automation-panel wide automation-comparison"><div className="automation-latest-result-heading"><h2>{copy.comparison}</h2><span className={`automation-pill ${receipt.resultChanged ? 'attention' : ''}`}>{receipt.resultChanged ? copy.resultChanged : copy.resultUnchanged}</span></div><p>{receipt.comparisonSummary}</p><details><summary><PeerIcon name="chevronRight" size={14} />{copy.previousResult}</summary><p className="automation-receipt-summary">{receipt.previousSummary}</p></details></div> : null}
       <div className="automation-panel"><h2>{copy.runFacts}</h2><Review label={copy.trigger} value={run.triggerSource} /><Review label={copy.scheduled} value={formatDateTime(run.scheduledAt, locale)} /><Review label={copy.started} value={formatDateTime(run.startedAt, locale)} /><Review label={copy.finished} value={formatDateTime(run.finishedAt, locale)} /><Review label={copy.definitionVersion} value={String(run.snapshot.definitionVersion)} /></div>
       <div className="automation-panel"><h2>{copy.usage}</h2><Review label={copy.inputTokens} value={String(receipt?.inputTokens ?? '—')} /><Review label={copy.outputTokens} value={String(receipt?.outputTokens ?? '—')} /><Review label={copy.cost} value={receipt?.costUsd == null ? '—' : `${receipt.costUsd.toFixed(4)}`} /><Review label={copy.duration} value={receipt?.durationMs == null ? '—' : copy.seconds(Math.round(receipt.durationMs / 1000))} /></div>
       <div className="automation-panel wide"><h2>{copy.changes}</h2>{receipt?.changes ? <><Review label={copy.branch} value={receipt.changes.branch ?? '—'} /><Review label={copy.worktree} value={receipt.changes.worktreePath ?? '—'} /><Review label={copy.files} value={receipt.changes.changedFiles.length ? receipt.changes.changedFiles.join(', ') : copy.noFilesChanged} /><Review label={copy.diff} value={`+${receipt.changes.additions ?? 0} −${receipt.changes.deletions ?? 0}`} /><Review label={copy.retention} value={receipt.changes.retained ? copy.retainedReview : copy.cleanedUp} /></> : <p>{copy.noWorkspaceChanges}</p>}</div>

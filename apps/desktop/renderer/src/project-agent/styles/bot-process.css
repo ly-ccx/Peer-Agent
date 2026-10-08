@@ -1,7 +1,7 @@
 .bot-turn-process { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.65; }
 .bot-turn-process summary { list-style: none; cursor: pointer; }
 .bot-turn-process summary::-webkit-details-marker { display: none; }
-.bot-turn-process summary:focus-visible, .bot-turn-process pre:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; border-radius: var(--control-radius-compact); }
+.bot-turn-process summary:focus-visible, .bot-turn-process pre:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; border-radius: var(--ui-radius-control-compact); }
 .bot-turn-process-heading { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: 9px; padding: 5px 0; }
 .bot-process-current { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; }
 .bot-process-current > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -15,14 +15,14 @@
 .bot-tool-step-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bot-tool-step-status { flex-shrink: 0; font-size: 11px; color: var(--graphite-fade); }
 .bot-tool-step[open] > summary > svg:last-child { transform: rotate(90deg); }
-.bot-tool-step-content { margin: 3px 0 8px 21px; padding: 9px 12px; background: var(--control-fill); border-radius: var(--control-radius); }
+.bot-tool-step-content { margin: 3px 0 8px 21px; padding: 9px 12px; background: var(--control-fill); border-radius: var(--ui-radius-control); }
 .bot-process-note { margin: 4px 0; color: var(--graphite-soft); font-size: 12px; }
 .bot-tool-preview, .bot-tool-metadata { margin-top: 7px; font-size: 11px; }
 .bot-tool-preview > summary, .bot-tool-metadata > summary { display: flex; align-items: center; gap: 8px; width: fit-content; padding: 3px 0; }
 .bot-tool-preview > summary > svg, .bot-tool-metadata > summary > svg { transition: transform 160ms ease; }
 .bot-tool-preview[open] > summary > svg, .bot-tool-metadata[open] > summary > svg { transform: rotate(90deg); }
 .bot-tool-preview > summary > span { color: var(--graphite-fade); }
-.bot-tool-preview pre { margin: 6px 0; padding: 8px 10px; max-height: 220px; overflow: auto; font: 11px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--paper-sheet); border-radius: var(--control-radius-compact); color: var(--graphite-soft); }
+.bot-tool-preview pre { margin: 6px 0; padding: 8px 10px; max-height: 220px; overflow: auto; font: 11px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--paper-sheet); border-radius: var(--ui-radius-control-compact); color: var(--graphite-soft); }
 .bot-tool-metadata code { font: 11px/1.6 var(--font-mono); }
 .bot-process-current.is-running > span, .bot-tool-step-label.is-running {
   background: linear-gradient(100deg, var(--graphite-soft) 35%, var(--graphite-base) 50%, var(--graphite-soft) 65%);

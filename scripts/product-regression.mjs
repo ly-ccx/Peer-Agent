@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const sharedUiShots = ['diagnostics', 'appearance', 'automation-list', 'automation-receipt', 'automation-editor', 'classic-chat', 'classic-image-lightbox', 'classic-artifacts', 'classic-diff']
+  .flatMap(scene => [`ui-${scene}-1280-dark.png`, `ui-${scene}-760-light.png`]);
+
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const repo = fileURLToPath(new URL('..', import.meta.url));
 export function sourceFingerprint(root) {
@@ -18,7 +21,7 @@ export function sourceFingerprint(root) {
   return digest.digest('hex');
 }
 
-const requiredShots = ['quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const requiredShots = [...sharedUiShots, 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'task-report-loading.png', 'task-report-unavailable.png', 'task-report-stale.png',
   'conversation-updates-dark.png', 'conversation-updates-light.png', 'conversation-complete.png', 'conversation-complete-light.png', 'conversation-details.png', 'task-main-note.png', 'task-follow-up-draft.png', 'task-decision.png', 'task-main-question.png', 'task-detail-running.png', 'task-detail-waiting_user.png', 'task-detail-accepted.png',
@@ -40,7 +43,10 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
-  if (!machine.ok || machine.pageErrors?.length || machine.mainAuthorizationErrors?.length
+  if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
+    || !machine.sharedUiConventions?.rectangularPreviews || !machine.sharedUiConventions?.keyboardImagePreview
+    || machine.sharedUiConventions?.cases?.length !== sharedUiShots.length
+    || !machine.ok || machine.pageErrors?.length || machine.mainAuthorizationErrors?.length
     || !['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)
     || !['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mouseClick', 'draftPreserved', 'bodyBoundary', 'widthReflow', 'dockedFits'].every(check => machine.selectionQuote?.[check] === true)
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.shortReplyQuote?.some(item =>
@@ -99,6 +105,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, manualWakeRetry: machine.manualWakeRetry,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },
+    supplementalCoverage: machine.sharedUiConventions,
     reviewCriteria: [
       '默认内容能回答任务目标、当前进展和下一步；动作写明去向，主机器人负责对用户传达。',
       '内部 ID、模型机制和原始参数按需披露；状态来自结构化事实，目标与完成结论不得混淆。',
@@ -170,6 +177,8 @@ function main() {
   // it must not change the baseline stream-following scenario's history.
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--selection-quote-only',
     '--output', path.join(output, 'selection-machine.json')], path.join(output, 'selection-capture.log'));
+  command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--shared-ui-only',
+    '--output', path.join(output, 'shared-ui-machine.json')], path.join(output, 'shared-ui-capture.log'));
   if (sourceFingerprint(repo) !== fingerprint) throw new Error('Source changed during capture; rerun on stable source');
   const line = readFileSync(path.join(output, 'capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
   const { root: artifactRoot } = JSON.parse(line);
@@ -177,6 +186,11 @@ function main() {
   const selectionLine = readFileSync(path.join(output, 'selection-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
   const selection = JSON.parse(selectionLine);
   if (!selection.ok || selection.pageErrors?.length || selection.mainAuthorizationErrors?.length) throw new Error('Selection quote interaction failed');
+  const sharedLine = readFileSync(path.join(output, 'shared-ui-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
+  const shared = JSON.parse(sharedLine);
+  if (!shared.ok || shared.pageErrors?.length || shared.mainAuthorizationErrors?.length) throw new Error('Shared UI interaction failed');
+  machine.sharedUiConventions = shared.sharedUiConventions;
+  for (const file of sharedUiShots) copyFileSync(path.join(shared.root, file), path.join(artifactRoot, file));
   machine.selectionQuote = selection.selectionQuote;
   machine.selectionQuoteRun = { startedAt: selection.startedAt, finishedAt: selection.finishedAt, scope: selection.scope };
   for (const file of ['selection-quote-1280-dark.png', 'selection-quote-760-light.png', 'selection-quote-docked-light.png'])

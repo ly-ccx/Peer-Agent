@@ -2898,7 +2898,7 @@ export function ChatSurface({
         {/* 切会话 beginLoad 会先清空 messages；空首页仅 loadStatus === 'ready' 且无消息时显示。 */}
         {shouldShowConversationLoadingPlaceholder({ loadStatus, messageCount: messages.length }) ? (
           <div className="chat-thread-loading" role="status" aria-live="polite">
-            <div className="chat-thread-loading-mark" aria-hidden="true" />
+            <PeerIcon name="loader" size={28} className="chat-thread-loading-mark" />
             <p>{isZh ? '正在加载会话…' : 'Loading conversation…'}</p>
           </div>
         ) : showEmptyHome ? (

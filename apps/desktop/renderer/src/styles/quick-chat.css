@@ -56,7 +56,7 @@ body:has(.quick-chat-shell) {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--chrome-hairline, var(--quick-border)) 55%, transparent);
-  border-radius: 16px;
+  border-radius: var(--ui-radius-composer);
   /*
    * Native material comes from BrowserWindow vibrancy (macOS).
    * Do NOT paint a CSS fill / backdrop-filter here — it becomes a white/gray card
@@ -187,7 +187,7 @@ body:has(.quick-chat-shell) {
   width: 6px;
   height: 6px;
   flex: 0 0 auto;
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-circle);
   background: var(--state-success);
 }
 
@@ -300,13 +300,13 @@ select.quick-chat-workspace-name {
   gap: 8px;
   max-width: min(100%, 240px);
   padding: 7px 8px;
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .quick-chat-composer .attachment-kind-badge {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   font-size: 8px;
 }
 
@@ -335,7 +335,7 @@ select.quick-chat-workspace-name {
   width: 56px;
   height: 56px;
   max-width: 56px;
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
 }
 .quick-chat-composer .attachment-chip--media .attachment-thumb-btn {
   width: 100%;
@@ -413,7 +413,7 @@ select.quick-chat-workspace-name {
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-circle);
   color: var(--quick-button-text);
   background: color-mix(in srgb, var(--quick-button) 92%, transparent);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--quick-text) 12%, transparent);
@@ -441,9 +441,6 @@ select.quick-chat-workspace-name {
 .quick-chat-spinner {
   width: 13px;
   height: 13px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: var(--ui-radius-round);
   animation: motion-spin 700ms linear infinite;
 }
 
@@ -455,7 +452,7 @@ select.quick-chat-workspace-name {
   overflow: hidden;
   /* Compact floating card under the bar — single outline, no nested double border. */
   border: 1px solid var(--chrome-hairline, var(--quick-border));
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   color: var(--graphite-base);
   /* popover 与 bar 同档 glass-popover */
   background: var(--glass-popover, var(--quick-surface));
@@ -512,7 +509,7 @@ select.quick-chat-workspace-name {
   gap: 12px;
   padding: 6px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--ui-radius-row);
   color: var(--graphite-base);
   background: transparent;
   cursor: pointer;
@@ -578,7 +575,7 @@ select.quick-chat-workspace-name {
   padding: 6px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--za-line, #c9cdd4) 74%, transparent);
-  border-radius: 15px;
+  border-radius: var(--ui-radius-modal);
   background: color-mix(in srgb, var(--chrome-canvas, #fff) 94%, transparent);
   box-shadow: var(--shadow-card, 0 12px 30px rgb(0 0 0 / 16%));
 }
@@ -607,7 +604,7 @@ select.quick-chat-workspace-name {
   justify-content: space-between;
   padding: 0 12px 0 14px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   color: inherit;
   background: transparent;
   font: inherit;
@@ -686,7 +683,7 @@ select.quick-chat-workspace-name {
   top: 50%;
   height: var(--effort-track-h);
   transform: translateY(-50%);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: var(--effort-rest);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent);
   overflow: hidden;
@@ -699,7 +696,7 @@ select.quick-chat-workspace-name {
   left: 0;
   top: 0;
   bottom: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: var(--effort-fill);
 }
 
@@ -708,7 +705,7 @@ select.quick-chat-workspace-name {
   top: 50%;
   width: var(--effort-tick);
   height: var(--effort-tick);
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   transform: translate(-50%, -50%);
   background: rgba(255, 255, 255, 0.34);
   box-shadow: none;
@@ -739,7 +736,7 @@ select.quick-chat-workspace-name {
 
 .quick-chat-effort-slider::-webkit-slider-runnable-track {
   height: var(--effort-track-h);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: transparent;
 }
 
@@ -749,7 +746,7 @@ select.quick-chat-workspace-name {
   margin-top: calc((var(--effort-track-h) - var(--effort-thumb)) / 2);
   appearance: none;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: #ffffff;
   box-shadow:
     0 0 0 1px rgba(15, 23, 42, 0.08),
@@ -758,13 +755,13 @@ select.quick-chat-workspace-name {
 
 .quick-chat-effort-slider::-moz-range-track {
   height: var(--effort-track-h);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: transparent;
 }
 
 .quick-chat-effort-slider::-moz-range-progress {
   height: var(--effort-track-h);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: transparent;
 }
 
@@ -772,7 +769,7 @@ select.quick-chat-workspace-name {
   width: var(--effort-thumb);
   height: var(--effort-thumb);
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: #ffffff;
   box-shadow:
     0 0 0 1px rgba(15, 23, 42, 0.08),
@@ -786,7 +783,7 @@ select.quick-chat-workspace-name {
   padding: 13px 14px 12px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--workspace-accent) 24%, var(--quick-border));
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--quick-surface);
   box-shadow: var(--shadow-card);
   -webkit-app-region: no-drag;
@@ -868,7 +865,7 @@ select.quick-chat-workspace-name {
 }
 
 .quick-chat-task-title { min-width: 0; gap: 6px; font-size: 11px; font-weight: 650; }
-.quick-chat-task-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--state-warning); }
+.quick-chat-task-dot { width: 7px; height: 7px; border-radius: var(--ui-radius-circle); background: var(--state-warning); }
 .quick-chat-task-conversation { overflow: hidden; color: var(--quick-muted); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .quick-chat-task-question { margin: 9px 0; font-size: 13px; line-height: 1.45; }
 .quick-chat-task-options { flex-wrap: wrap; gap: 6px; }
@@ -876,7 +873,7 @@ select.quick-chat-workspace-name {
 .quick-chat-task-footer button,
 .quick-chat-task-pager button {
   border: 1px solid var(--quick-border);
-  border-radius: 7px;
+  border-radius: var(--ui-radius-control);
   color: var(--quick-text);
   background: var(--quick-surface);
   cursor: pointer;

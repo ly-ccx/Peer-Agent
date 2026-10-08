@@ -4,7 +4,7 @@
     @apply grid items-end gap-2 p-2;
     grid-template-columns: minmax(0, 1fr) auto auto;
     border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-panel, var(--za-radius));
+    border-radius: var(--ui-radius-composer);
     background: var(--za-composer-bg);
     --motion-enter-from: 8px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -15,7 +15,7 @@
   .cloud-chat-composer.empty {
     @apply items-end p-4;
     min-height: 144px;
-    border-radius: var(--ui-radius-modal, var(--radius-xl));
+    border-radius: var(--ui-radius-composer);
     background: var(--za-composer-empty-bg);
   }
 
@@ -51,7 +51,7 @@
   }
 
   .cloud-chat-composer button[type="submit"] {
-    @apply grid h-10 min-h-10 w-10 place-items-center rounded-full p-0 text-[13px] font-medium;
+    @apply grid h-10 min-h-10 w-10 place-items-center rounded-[var(--ui-radius-circle)] p-0 text-[13px] font-medium;
     color: var(--za-primary-control-ink);
     background: var(--za-primary-control-bg);
     border-color: transparent;
@@ -96,7 +96,7 @@
   }
   .agent-picker-label,
   .agent-picker-trigger {
-    @apply flex items-center gap-1 rounded-md px-2 py-1 text-xs;
+    @apply flex items-center gap-1 rounded-[var(--ui-radius-control)] px-2 py-1 text-xs;
     color: var(--za-text-soft);
     background: transparent;
     border: none;
@@ -113,7 +113,7 @@
     opacity: 0.5;
   }
   .agent-picker-dropdown {
-    @apply absolute bottom-full left-0 mb-1 flex flex-col rounded-lg py-1;
+    @apply absolute bottom-full left-0 mb-1 flex flex-col rounded-[var(--ui-radius-control)] py-1;
     min-width: 200px;
     max-height: 280px;
     overflow-y: auto;
@@ -141,7 +141,7 @@
   }
 
   .agent-picker-search {
-    @apply mx-1.5 mb-1 rounded-md border px-2 py-1 text-xs;
+    @apply mx-1.5 mb-1 rounded-[var(--ui-radius-control-compact)] border px-2 py-1 text-xs;
     border-color: var(--ui-border-subtle, var(--za-line));
     background: var(--za-bg-1);
     color: var(--za-text);
@@ -163,7 +163,7 @@
   }
 
   .image-preview-item {
-    @apply relative shrink-0 overflow-hidden rounded-lg;
+    @apply relative shrink-0 overflow-hidden rounded-[var(--ui-radius-control)];
     height: 64px;
     border: 1px solid var(--ui-border-subtle, var(--za-line));
     background: var(--za-surface-1);
@@ -181,7 +181,7 @@
     background: color-mix(in srgb, var(--za-text) 74%, transparent);
     color: var(--za-bg-0);
     border: none;
-    border-radius: 50%;
+    border-radius: var(--ui-radius-circle);
     cursor: pointer;
     opacity: 0;
     transition: opacity 0.15s;
@@ -200,13 +200,13 @@
   }
 
   .image-preview-spinner {
-    @apply inline-block h-4 w-4 animate-spin rounded-full border-2;
-    border-color: var(--za-text-muted);
-    border-right-color: transparent;
-  }
+    @apply inline-block h-4 w-4 animate-spin;
+
+    animation: motion-spin 700ms linear infinite;
+}
 
   .image-preview-add {
-    @apply grid h-16 w-16 shrink-0 place-items-center rounded-lg text-[18px];
+    @apply grid h-16 w-16 shrink-0 place-items-center rounded-[var(--ui-radius-control)] text-[18px];
     border: 1px dashed var(--ui-border-subtle, var(--za-line));
     color: var(--za-text-muted);
     background: transparent;
@@ -226,7 +226,7 @@
   }
 
   .message-image-thumb {
-    @apply h-32 max-w-[200px] rounded-lg object-cover;
+    @apply h-32 max-w-[200px] rounded-[var(--ui-radius-inset)] object-cover;
     border: 1px solid var(--ui-border-subtle, var(--za-line));
     cursor: pointer;
   }

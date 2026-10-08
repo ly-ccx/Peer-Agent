@@ -20,7 +20,7 @@ test('compact popover is a single full-outline card, not a bar extension seam', 
   const openBarRule = ruleBody('.quick-chat-shell.has-open-popover .quick-chat-bar');
 
   assert.match(shellRule, /border:\s*1px solid var\(--chrome-hairline, var\(--quick-border\)\)/);
-  assert.match(shellRule, /border-radius:\s*12px/);
+  assert.match(shellRule, /border-radius:\s*var\(--ui-radius-panel\)/);
   assert.doesNotMatch(shellRule, /border-top-color:\s*transparent/);
   assert.doesNotMatch(shellRule, /border-radius:\s*0 0/);
   assert.match(shellRule, /background:\s*var\(--glass-popover, var\(--quick-surface\)\)/);

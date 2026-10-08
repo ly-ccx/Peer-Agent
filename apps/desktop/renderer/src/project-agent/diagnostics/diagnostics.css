@@ -5,4 +5,8 @@
 .project-diagnostics__summary dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
 .project-diagnostics details { border-top: 1px solid var(--pa-border-subtle); padding-top: var(--space-3); }
 .project-diagnostics summary { cursor: pointer; }
-.project-diagnostics pre { max-height: 320px; overflow: auto; padding: var(--space-3); font-size: .82rem; background: var(--paper-base); border-radius: var(--radius-sm); }
+.project-diagnostics pre { max-height: 320px; overflow: auto; padding: var(--space-3); font-size: .82rem; background: var(--paper-base); border-radius: var(--ui-radius-control-compact); }
+
+.project-diagnostics summary { display: flex; align-items: center; gap: 6px; }
+.project-diagnostics details[open] > summary svg { transform: rotate(90deg); }
+.project-diagnostics summary:focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 3px; border-radius: var(--ui-radius-control); }

@@ -16,7 +16,7 @@
   max-width: min(100%, var(--chat-content-max));
   margin: 0;
   border: 1px solid var(--chrome-hairline, var(--ui-border-subtle, var(--za-line)));
-  border-radius: var(--ui-radius-panel, var(--za-radius));
+  border-radius: var(--ui-radius-panel);
   /* Goal 灯条/侧栏表面统一 glass-popover 毛玻璃。
      不叠 glass-edge-highlight：暗色下顶部 inset 高光会变成一条刺眼亮线。 */
   background: var(--glass-popover);
@@ -56,7 +56,7 @@
 .goal-plan-compact-approval-status {
   flex: none;
   padding: 2px 7px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--za-warn-soft);
   color: var(--za-warn);
   font-weight: 600;
@@ -89,7 +89,7 @@
 .goal-plan-compact-approval-action {
   padding: 4px 8px;
   border: 0;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--za-text-soft);
   font: inherit;
@@ -267,7 +267,7 @@
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-circle);
   background: var(--state-confirm);
   --motion-pulse-floor: 0.4;
   animation: motion-pulse-soft 1.4s var(--za-ease-standard, ease) infinite;
@@ -343,7 +343,7 @@
   width: 14px;
   height: 14px;
   flex: none;
-  border-radius: var(--ui-radius-round, 50%);
+  border-radius: var(--ui-radius-circle);
   background: color-mix(in srgb, var(--state-success) 18%, transparent);
   color: var(--state-success);
   font-size: 10px;
@@ -366,7 +366,7 @@
   /* 扩大可 hover 命中区，避免 7/7 数字过小导致难触发 */
   padding: 2px 4px;
   margin: -2px -4px;
-  border-radius: 4px;
+  border-radius: var(--ui-radius-chip);
   color: var(--za-text-faint);
   font-size: var(--ui-font-caption, 11px);
   font-family: var(--font-mono, monospace);
@@ -499,7 +499,7 @@
 .goal-panel--empty {
   padding: 16px;
   border: 1px dashed var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-panel, var(--za-radius));
+  border-radius: var(--ui-radius-panel);
   color: var(--za-text-muted);
   font-size: var(--ui-font-control, 13px);
   text-align: center;
@@ -507,7 +507,7 @@
 
 .goal-panel-error {
   padding: 8px 12px;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: var(--za-danger-soft);
   color: var(--za-danger);
   font-size: var(--ui-font-control, 13px);
@@ -517,7 +517,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-panel, var(--za-radius));
+  border-radius: var(--ui-radius-panel);
   background: var(--ui-surface-float-bg, var(--ui-surface-raised, var(--za-surface-1)));
   box-shadow: none;
   overflow: hidden;
@@ -569,7 +569,7 @@
 .goal-plan-head-toggle:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
-  border-radius: var(--ui-radius-chip, 4px);
+  border-radius: var(--ui-radius-chip);
 }
 
 .goal-plan-head-timing {
@@ -578,7 +578,7 @@
   color: var(--za-text-soft);
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--ui-surface-hover, var(--za-hover));
   white-space: nowrap;
 }
@@ -592,7 +592,7 @@
   color: var(--za-text-muted);
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--ui-surface-hover, var(--za-hover));
 }
 
@@ -656,7 +656,7 @@
   align-items: center;
   margin: 0 0 8px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken, var(--za-surface-2));
 }
 
@@ -671,7 +671,7 @@
 .goal-plan-merge-node {
   min-width: 0;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: var(--za-surface-1, #fff);
   border: 1px solid var(--chrome-hairline, var(--za-line));
 }
@@ -726,7 +726,7 @@
   box-sizing: border-box;
   padding: 2px 8px;
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--za-surface-1);
   color: var(--za-text-soft);
   font-size: var(--ui-font-caption, 11px);
@@ -788,7 +788,7 @@
 .goal-plan-status {
   flex: none;
   padding: 2px 8px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   font-size: var(--ui-font-caption, 11px);
   background: var(--ui-surface-hover, var(--za-hover));
   color: var(--za-text-soft);
@@ -926,7 +926,7 @@
 .goal-criterion-result {
   flex: none;
   padding: 1px 6px;
-  border-radius: var(--ui-radius-control, 6px);
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface-hover, var(--za-hover));
   color: var(--za-text-soft);
   font-size: var(--ui-font-caption, 11px);
@@ -1010,7 +1010,7 @@
   width: 8px;
   height: 8px;
   margin-top: 6px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-circle);
   background: var(--za-text-faint);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-text-faint) 12%, transparent);
 }
@@ -1065,7 +1065,7 @@
 .goal-run-event-meta span {
   max-width: 100%;
   padding: 1px 5px;
-  border-radius: var(--ui-radius-control, 6px);
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface-hover, var(--za-hover));
   color: var(--za-text-faint);
   font-size: var(--ui-font-caption, 11px);
@@ -1107,7 +1107,7 @@
   max-width: 100%;
   padding: 3px 8px;
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-control, 6px);
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--za-text-soft);
   font-size: var(--ui-font-meta, 12px);
@@ -1182,7 +1182,7 @@
   padding: 6px 8px;
   margin: 0 -8px;
   border: none;
-  border-radius: var(--ui-radius-row, 8px);
+  border-radius: var(--ui-radius-row);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -1208,7 +1208,7 @@
   display: block;
   position: relative;
   height: 6px;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--ui-surface-hover, var(--za-hover));
   background-image: linear-gradient(var(--state-confirm), var(--state-confirm));
   background-repeat: no-repeat;
@@ -1271,7 +1271,7 @@
 
 .goal-task--card {
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface-raised, var(--za-surface-1));
   overflow: hidden;
 }
@@ -1300,7 +1300,7 @@
   flex: none;
   min-width: 48px;
   padding: 1px 6px;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   font-size: var(--ui-font-caption, 11px);
   text-align: center;
   background: var(--za-hover);
@@ -1340,7 +1340,7 @@
 .goal-task-summary {
   margin: 0 10px 8px;
   padding: 4px 8px;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface-hover, var(--za-hover));
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.5;
@@ -1416,7 +1416,7 @@
 
 .goal-plan-actions button {
   padding: 6px 14px;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--ui-border-subtle, var(--za-line));
   font-size: var(--ui-font-control, 13px);
   cursor: pointer;
@@ -1435,7 +1435,7 @@
   line-height: 1.5;
   font-weight: 400;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   white-space: nowrap;
 }
 
@@ -1477,7 +1477,7 @@
 .goal-plan-next-guidance {
   padding: 8px 10px;
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface-muted, var(--za-surface-2));
   color: var(--za-text-soft);
   font-size: var(--ui-font-meta, 12px);
@@ -1496,7 +1496,7 @@
   margin-top: 10px;
   padding: 10px;
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-panel, var(--za-radius, 8px));
+  border-radius: var(--ui-radius-panel);
   background: var(--ui-surface-raised, var(--za-surface-1));
 }
 
@@ -1528,7 +1528,7 @@
   max-width: 100%;
   padding: 2px 7px;
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-round, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--za-surface-2);
   color: var(--za-text);
   font-size: var(--ui-font-caption, 11px);
@@ -1555,7 +1555,7 @@
   gap: 10px;
   padding: 7px 8px;
   border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--ui-radius-control, 6px);
+  border-radius: var(--ui-radius-control);
   background: var(--za-surface-2);
 }
 
@@ -1884,7 +1884,7 @@
   gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--za-line);
-  border-radius: var(--za-radius-md, 10px);
+  border-radius: var(--ui-radius-control);
   background: var(--za-surface-1);
 }
 
@@ -1900,7 +1900,7 @@
   padding: 2px 8px;
   font-size: 12px;
   line-height: 1.5;
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   background: var(--za-warn-soft);
   color: var(--za-warn);
 }
@@ -1936,7 +1936,7 @@
 .chat-goal-approval-btn {
   box-sizing: border-box;
   padding: 6px 14px;
-  border-radius: var(--za-radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid transparent;
   font-size: 13px;
   cursor: pointer;
@@ -2018,7 +2018,7 @@
   box-sizing: border-box;
   padding: 6px 8px;
   border: 1px solid var(--za-line);
-  border-radius: var(--za-radius-sm, 8px);
+  border-radius: var(--ui-radius-control-compact);
   background: var(--za-surface-0);
   color: var(--za-text);
   font-size: 13px;

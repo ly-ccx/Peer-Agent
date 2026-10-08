@@ -31,7 +31,7 @@
       transparent 100%
     );
     background-size: 200% 100%;
-    border-radius: var(--ui-radius-control, var(--za-radius-sm));
+    border-radius: var(--ui-radius-control);
     pointer-events: none;
     animation: za-message-shimmer 800ms var(--za-ease-decelerate) both;
   }
@@ -64,7 +64,7 @@
     opacity: 1;
   }
   .message-action-bar button {
-    @apply flex items-center justify-center rounded-md p-1;
+    @apply flex items-center justify-center rounded-[var(--ui-radius-control)] p-1;
     color: var(--za-text-muted);
     background: transparent;
     border: none;
@@ -87,7 +87,7 @@
     animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
   }
   .message-action-confirm button {
-    @apply rounded-md px-1.5 py-0.5;
+    @apply rounded-[var(--ui-radius-control)] px-1.5 py-0.5;
     font-size: var(--ui-font-caption, 11px);
     line-height: 1.4;
     background: transparent;
@@ -116,7 +116,7 @@
     align-items: flex-start;
     gap: 10px;
     cursor: pointer;
-    border-radius: var(--ui-radius-row, var(--za-radius));
+    border-radius: var(--ui-radius-row);
     padding: 12px 16px;
     transition: background var(--za-motion-fast) var(--za-ease-standard);
   }
@@ -153,7 +153,7 @@
     flex: 1;
   }
   .share-selection-bar button {
-    @apply rounded-md border px-3 py-1.5 text-xs font-medium;
+    @apply rounded-[var(--ui-radius-control)] border px-3 py-1.5 text-xs font-medium;
     border-color: var(--ui-border-subtle, var(--za-line));
     background: var(--za-surface-1);
     color: var(--za-text-soft);
@@ -198,7 +198,7 @@
     justify-content: center;
     width: 28px;
     height: 28px;
-    border-radius: var(--ui-radius-round, 50%);
+    border-radius: var(--ui-radius-circle);
     background: var(--za-primary-control-bg);
     color: var(--za-primary-control-ink);
     font-family: var(--font-serif-zh);
@@ -233,7 +233,7 @@
     @apply w-full object-cover;
     max-height: 160px;
     border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-panel, var(--za-radius));
+    border-radius: var(--ui-radius-panel);
     background: var(--za-surface-1);
   }
 
@@ -241,7 +241,7 @@
     @apply mt-2 grid gap-1 p-2;
     background: var(--za-surface-0);
     border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-control, 6px);
+    border-radius: var(--ui-radius-control);
     box-shadow: none;
     --motion-enter-from: -4px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -325,7 +325,7 @@
     display: inline-block;
     width: 6px;
     height: 6px;
-    border-radius: 50%;
+    border-radius: var(--ui-radius-circle);
     background: var(--za-accent);
     animation: motion-dots 1.1s var(--za-ease-standard) infinite;
   }
@@ -350,7 +350,7 @@
       transparent 100%
     );
     background-size: 200% 100%;
-    border-radius: var(--za-radius-sm);
+    border-radius: var(--ui-radius-control-compact);
     pointer-events: none;
     animation: za-content-shimmer 1s 200ms var(--za-ease-decelerate) both;
   }
@@ -359,7 +359,7 @@
     @apply flex min-h-9 items-center justify-between gap-2.5 px-2 py-2 text-xs;
     position: relative;
     border: 1px solid color-mix(in srgb, var(--state-confirm) 34%, var(--za-line));
-    border-radius: var(--ui-radius-control, 6px);
+    border-radius: var(--ui-radius-control);
     background: var(--ui-surface-raised, var(--za-surface-0));
     color: var(--ink-base);
   }

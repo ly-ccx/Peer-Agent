@@ -176,7 +176,7 @@
     display: inline-block;
     width: 6px;
     height: 6px;
-    border-radius: 50%;
+    border-radius: var(--ui-radius-circle);
     background: var(--za-accent, var(--azure-trace));
     margin-left: 6px;
     vertical-align: middle;
@@ -303,7 +303,7 @@
     @apply m-0 overflow-auto;
     max-height: 280px;
     padding: 6px 8px;
-    border-radius: var(--ui-radius-chip);
+    border-radius: var(--ui-radius-control);
     background: var(--surface-paper-soft, transparent);
     font-family: var(--font-mono);
     font-size: 0.71875rem;

@@ -81,7 +81,7 @@
 .bot-drawer-head button {
   -webkit-app-region: no-drag;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: transparent;
   color: var(--graphite-soft, var(--za-text-muted));
   font: inherit;
@@ -113,12 +113,12 @@
   flex-wrap: wrap;
   padding: 3px;
   background: var(--chrome-canvas);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .bot-drawer-tabs button {
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-soft, var(--za-text-muted));
   font: inherit;
@@ -138,7 +138,7 @@
 .bot-drawer-tab button,
 .bot-drawer-detail button {
   border: 1px solid var(--chrome-hairline, var(--separator));
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--graphite-base, var(--za-text));
   font: inherit;
@@ -178,7 +178,7 @@
   gap: 14px;
   padding: 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -190,7 +190,7 @@
 }
 
 .bot-avatar-settings .bot-avatar-image {
-  border-radius: 16px;
+  border-radius: var(--ui-radius-avatar);
 }
 
 .bot-avatar-settings-actions {
@@ -255,7 +255,7 @@
   height: 34px;
   padding: 4px;
   border: 2px solid transparent;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: transparent;
 }
 
@@ -263,7 +263,7 @@
   display: block;
   width: 22px;
   height: 22px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--bot-swatch-color);
   box-shadow: none;
 }
@@ -362,7 +362,7 @@
   gap: 14px;
   padding: 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -380,7 +380,7 @@
   width: 38px;
   height: 38px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet, var(--za-surface-0));
   color: var(--graphite-secondary, var(--za-text-muted));
 }
@@ -438,7 +438,7 @@
   gap: 10px;
   padding: 15px 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -446,7 +446,7 @@
   flex: 0 0 7px;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--graphite-fade, var(--za-text-muted));
 }
 
@@ -464,7 +464,7 @@
 .bot-overview-tab .bot-overview-brief {
   padding: 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -476,7 +476,7 @@
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -537,7 +537,7 @@
 .bot-tasks-list {
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -618,7 +618,7 @@
   gap: 10px;
   padding: 22px 18px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -642,7 +642,7 @@
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -653,7 +653,7 @@
   width: 38px;
   height: 38px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet, var(--za-surface-0));
 }
 
@@ -695,7 +695,7 @@
 .bot-memory-settings-card {
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -742,7 +742,7 @@
   height: 20px;
   padding: 1px;
   border: 1px solid var(--graphite-hairline);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: var(--control-fill);
 }
 
@@ -763,7 +763,7 @@
   gap: 8px;
   padding: 22px 18px;
   border: 1px dashed var(--chrome-hairline);
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -826,7 +826,7 @@
   gap: 10px;
   padding: 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
 }
 
@@ -841,7 +841,7 @@
 
 .bot-memory-item-meta span {
   padding: 3px 7px;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control-compact);
   background: var(--chrome-hover);
   color: var(--graphite-secondary, var(--za-text-muted));
   font-size: 11px;
@@ -850,7 +850,7 @@
 .bot-drawer-tab .bot-memory-item-actions button {
   width: auto;
   flex: 0 0 auto;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   text-align: center;
 }
 
@@ -861,7 +861,7 @@
 .bot-drawer-tab input {
   width: 100%;
   border: 1px solid var(--chrome-hairline, var(--separator));
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -897,8 +897,8 @@
 .bot-evidence-heading svg { color: var(--graphite-soft); flex-shrink: 0; }
 .bot-evidence-time { margin-top: -7px; font-size: 11px; color: var(--graphite-soft); }
 .bot-evidence-help { margin: 0 0 6px; font-size: 11px; line-height: 1.65; color: var(--graphite-soft); }
-.bot-evidence-content { padding: 14px; border: 1px solid var(--chrome-hairline); border-radius: var(--control-radius); background: var(--control-fill); color: var(--graphite-base); font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
-.bot-evidence-empty { display: flex; align-items: flex-start; gap: 10px; padding: 16px 14px; border-radius: var(--control-radius); background: var(--control-fill); }
+.bot-evidence-content { padding: 14px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); background: var(--control-fill); color: var(--graphite-base); font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bot-evidence-empty { display: flex; align-items: flex-start; gap: 10px; padding: 16px 14px; border-radius: var(--ui-radius-control); background: var(--control-fill); }
 .bot-evidence-empty > svg { flex-shrink: 0; margin-top: 2px; color: var(--graphite-soft); }
 .bot-evidence-empty h4 { margin: 0; color: var(--graphite-base); font-size: 13px; font-weight: 500; line-height: 1.6; }
 .bot-evidence-empty p { margin: 7px 0 0; color: var(--graphite-soft); font-size: 11px; line-height: 1.75; }
@@ -914,7 +914,7 @@
 .bot-process-technical > summary::-webkit-details-marker { display: none; }
 .bot-process-technical[open] > summary svg { transform: rotate(90deg); }
 .bot-process-technical > summary:focus-visible, .bot-process-technical pre:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
-.bot-process-technical pre { max-height: 220px; overflow: auto; padding: 8px; background: var(--paper-sunken); border-radius: 6px; font-family: var(--font-mono); font-size: 11px; margin-top: 4px; }
+.bot-process-technical pre { max-height: 220px; overflow: auto; padding: 8px; background: var(--paper-sunken); border-radius: var(--ui-radius-control-compact); font-family: var(--font-mono); font-size: 11px; margin-top: 4px; }
 .bot-process-technical > p { margin: 8px 0; font-family: var(--font-mono); }
 .bot-process-technical > span { display: block; margin-top: 8px; }
 
@@ -983,12 +983,12 @@
 }
 .bot-settings-disclosure > summary::-webkit-details-marker { display: none; }
 .bot-settings-disclosure > summary:hover { color: var(--graphite-base, var(--za-text)); }
-.bot-settings-disclosure > summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 2px; border-radius: 4px; }
+.bot-settings-disclosure > summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 2px; border-radius: var(--ui-radius-chip); }
 .bot-settings-disclosure[open] > summary .peer-icon { transform: rotate(180deg); }
 .bot-settings-disclosure-body { display: flex; flex-direction: column; gap: 10px; padding-top: 8px; }
 .bot-runtime-settings { padding-bottom: 20px; border-bottom: 1px solid var(--chrome-hairline); }
 .bot-settings-global { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--chrome-hairline); }
-.bot-settings-scope { align-self: flex-start; padding: 3px 7px; border: 1px solid var(--chrome-hairline); border-radius: 6px; color: var(--graphite-secondary, var(--za-text-muted)); font-size: 11px; }
+.bot-settings-scope { align-self: flex-start; padding: 3px 7px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control-compact); color: var(--graphite-secondary, var(--za-text-muted)); font-size: 11px; }
 .bot-host-control { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
 .bot-host-control > span { font-weight: 500; }
 .bot-drawer-tab .bot-host-action,
@@ -1005,12 +1005,12 @@
 
 .bot-task-with-action { display: flex; align-items: center; gap: 8px; }
 .bot-task-with-action > .bot-task-row { flex: 1; min-width: 0; }
-.bot-task-resume { display: inline-flex; align-items: center; gap: 4px; padding: 6px 9px; margin-right: 10px; border: 1px solid var(--chrome-hairline); border-radius: 8px; color: var(--ink-muted); font-size: 12px; background: transparent; }
+.bot-task-resume { display: inline-flex; align-items: center; gap: 4px; padding: 6px 9px; margin-right: 10px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); color: var(--ink-muted); font-size: 12px; background: transparent; }
 .bot-task-resume:hover { color: var(--ink-primary); background: var(--za-surface-2); }
 .bot-task-resume:disabled { opacity: .5; cursor: wait; }
 
 .bot-objective { border-bottom: 1px solid var(--border-color, #2b3039); padding: 16px 0; scroll-margin-top: 12px; }
-.bot-objective.is-selected { outline: 1px solid var(--border-color, #2b3039); outline-offset: 8px; border-radius: 8px; }
+.bot-objective.is-selected { outline: 1px solid var(--border-color, #2b3039); outline-offset: 8px; border-radius: var(--ui-radius-control); }
 .bot-objective header { display: flex; align-items: baseline; gap: 12px; justify-content: space-between; }
 .bot-objective h2 { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .bot-objective-status { flex-shrink: 0; font-size: 11px; color: var(--text-secondary); }
@@ -1021,7 +1021,7 @@
 .bot-objective-controls { display: grid; gap: 8px; margin: 12px 0; }
 .bot-objective-controls label { display: grid; grid-template-columns: 1fr minmax(100px, 48%); align-items: center; gap: 8px; font-size: 12px; }
 .bot-objective-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.bot-objective-actions button, .bot-objective-task-links button { background: transparent; border: 1px solid var(--border-color, #2b3039); border-radius: 6px; padding: 5px 8px; font-size: 11px; color: inherit; cursor: pointer; }
+.bot-objective-actions button, .bot-objective-task-links button { background: transparent; border: 1px solid var(--border-color, #2b3039); border-radius: var(--ui-radius-control); padding: 5px 8px; font-size: 11px; color: inherit; cursor: pointer; }
 .bot-objective-actions button:disabled { opacity: .45; cursor: default; }
 .bot-objective-task-links { display: grid; gap: 6px; font-size: 11px; }
 .bot-objective-task-links > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -1029,7 +1029,7 @@
 .bot-objective-task-links small { color: var(--text-secondary); }
 .bot-objective-edit { display: grid; gap: 8px; margin: 10px 0; }
 .bot-objective-edit label { display: grid; gap: 4px; font-size: 12px; }
-.bot-objective-edit input, .bot-objective-edit textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-color, #2b3039); background: transparent; color: inherit; border-radius: 6px; padding: 8px; font: inherit; }
+.bot-objective-edit input, .bot-objective-edit textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-color, #2b3039); background: transparent; color: inherit; border-radius: var(--ui-radius-control); padding: 8px; font: inherit; }
 .bot-objective-edit textarea { resize: vertical; min-height: 70px; }
 .bot-objective-error { font-size: 12px; color: var(--color-danger, #e78585); }
 
@@ -1044,7 +1044,7 @@
 
 .bot-memory-pages button {
   border: 1px solid var(--chrome-hairline);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   padding: 6px 10px;
   background: var(--chrome-canvas);
   color: var(--graphite-base);
@@ -1065,7 +1065,7 @@
   grid-template-columns: repeat(var(--segment-count), minmax(0, 1fr));
   gap: 0;
   padding: 3px;
-  border-radius: var(--control-radius);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
   touch-action: pan-y;
   user-select: none;
@@ -1078,7 +1078,7 @@
   width: calc((100% - 6px) / var(--segment-count));
   background: var(--paper-sheet);
   border: 1px solid transparent;
-  border-radius: calc(var(--control-radius) - 3px);
+  border-radius: calc(var(--ui-radius-control) - 3px);
   transform: translateX(calc(var(--segment-index) * 100%));
   transition: transform var(--za-motion-fast) var(--za-ease-standard);
   pointer-events: none;
@@ -1106,19 +1106,19 @@
 .bot-drawer-body .bot-model-settings-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .bot-drawer-body .bot-model-settings-row > span { padding: 0; font-size: .75rem; font-weight: 600; }
 .bot-drawer-body .bot-settings-row { font-size: .75rem; }
-.bot-drawer-body .frost-settings-group .pa-dropdown-trigger { height: auto; min-height: 34px; padding: 6px 12px; border-radius: var(--control-radius-compact); font-size: .75rem; }
+.bot-drawer-body .frost-settings-group .pa-dropdown-trigger { height: auto; min-height: 34px; padding: 6px 12px; border-radius: var(--ui-radius-control); font-size: .75rem; }
 .bot-drawer-body .bot-settings-identity .frost-group-content { display: flex; flex-direction: column; gap: 18px; padding: 15px; }
-.bot-drawer-body .bot-settings-name-row input { min-height: 34px; padding: 6px 12px; border-radius: var(--control-radius-compact); border: 1px solid transparent; background: var(--control-fill); font-size: .75rem; }
+.bot-drawer-body .bot-settings-name-row input { min-height: 34px; padding: 6px 12px; border-radius: var(--ui-radius-control); border: 1px solid transparent; background: var(--control-fill); font-size: .75rem; }
 .bot-drawer-body .bot-settings-name-row button { font-size: .75rem; }
 .bot-drawer-body .bot-settings-workflow .frost-group-content > .bot-drawer-note { padding: 0 15px 15px; font-size: .6875rem; }
 .bot-drawer-body .bot-model-advanced > summary { padding: 12px 15px; border-top: 1px solid var(--chrome-hairline); font-size: .6875rem; }
 .bot-drawer-body .bot-model-advanced .bot-settings-disclosure-body { padding: 0 15px 15px; gap: 15px; }
 .bot-drawer-body .bot-model-advanced .bot-model-settings-row { padding-block: 10px; }
-.bot-drawer-body .bot-settings-section .peer-switch { width: 40px; height: 23px; min-height: 23px; padding: 3px; border-radius: 16px; background: var(--paper-sunken); }
+.bot-drawer-body .bot-settings-section .peer-switch { width: 40px; height: 23px; min-height: 23px; padding: 3px; border-radius: var(--ui-radius-pill); background: var(--paper-sunken); }
 .bot-drawer-body .bot-settings-section .peer-switch[data-state='checked'] { background: var(--graphite-base); border-color: var(--graphite-base); }
 .bot-drawer-head p { font-size: .9375rem; }
 
-.bot-drawer-body .bot-drawer-tab :is(.bot-settings-name-row, .bot-avatar-settings-actions) button { min-height: 34px; padding: 6px 12px; border-color: transparent; border-radius: var(--control-radius-compact); background: var(--control-fill); box-shadow: none; }
+.bot-drawer-body .bot-drawer-tab :is(.bot-settings-name-row, .bot-avatar-settings-actions) button { min-height: 34px; padding: 6px 12px; border-color: transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); box-shadow: none; }
 .bot-drawer-body .bot-drawer-tab :is(.bot-settings-name-row, .bot-avatar-settings-actions) button:hover:not(:disabled) { background: var(--control-fill-hover); }
 @supports (corner-shape: superellipse(1.4)) {
   :is(.bot-drawer-segments, .bot-segment-thumb, .bot-settings-name-row input, .bot-settings-name-row button, .bot-avatar-settings-actions button) { corner-shape: var(--control-corner); }

@@ -33,7 +33,7 @@ export function ImagePreviewBar({
 
       {Array.from({ length: uploadingCount }).map((_, i) => (
         <div key={`uploading-${i}`} className="image-preview-item uploading">
-          <span className="image-preview-spinner" />
+          <PeerIcon name="loader" className="image-preview-spinner" />
         </div>
       ))}
 

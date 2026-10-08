@@ -475,7 +475,7 @@ function InboxRow({
             onClick={() => { void onOpen(); }}
             disabled={kind === 'accept' && acceptBusy}
           >
-            {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
+            {kind === 'accept' && submitting ? <PeerIcon name="loader" className="gwb-accept-spinner" /> : null}
             <ActionLabel label={cta} />{kind === 'accept' && celebrating ? <PeerIcon name="check" size={14} /> : null}
             {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
           </button>

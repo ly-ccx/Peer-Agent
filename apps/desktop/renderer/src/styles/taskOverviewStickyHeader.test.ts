@@ -36,7 +36,7 @@ test('compact header shell mask and divider share one height source', async () =
   assert.match(css, /\.task-overview-scroll-region\s*\{[\s\S]*?overflow-y-auto/);
   assert.match(
     css,
-    /\.task-overview-scroll-region\s*\{[\s\S]*?padding-bottom:\s*calc\(var\(--radius-lg\) \+ 3\.25rem\);/,
+    /\.task-overview-scroll-region\s*\{[\s\S]*?padding-bottom:\s*calc\(var\(--ui-radius-panel\) \+ 3\.25rem\);/,
   );
   assert.match(css, /\.task-overview-page-layer:has\(\.task-overview-compact-header\.is-visible\)::before\s*\{[\s\S]*?height:\s*var\(--task-overview-compact-height\);[\s\S]*?background:\s*var\(--za-app-bg\);/);
   assert.match(css, /\.task-overview-page-layer:has\(\.task-overview-compact-header\.is-visible\)::after\s*\{[\s\S]*?top:\s*calc\(var\(--task-overview-compact-height\) - 1px\);[\s\S]*?background:\s*var\(--za-line\);/);

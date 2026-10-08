@@ -186,7 +186,7 @@ export function ModelCatalogDialog({
               disabled={isInitialLoading}
             />
             <button type="button" onClick={onRefresh} disabled={loading} aria-busy={loading}>
-              {loading ? <span className="llm-catalog-fetch-spinner motion-spin" aria-hidden="true" /> : null}
+              {loading ? <PeerIcon name="loader" className="llm-catalog-fetch-spinner motion-spin" /> : null}
               {isInitialLoading
                 ? (zh ? '正在拉取' : 'Loading')
                 : isRefreshing
@@ -234,7 +234,7 @@ export function ModelCatalogDialog({
             {isInitialLoading ? (
               <div className="llm-catalog-initial-loading">
                 <div className="llm-catalog-loading-title">
-                  <span className="llm-catalog-fetch-spinner motion-spin" aria-hidden="true" />
+                  <PeerIcon name="loader" className="llm-catalog-fetch-spinner motion-spin" />
                   <span>{zh ? '正在读取远程模型目录…' : 'Loading remote model catalog…'}</span>
                 </div>
                 <div className="llm-catalog-skeleton-list" aria-hidden="true">
@@ -314,7 +314,7 @@ export function ModelCatalogDialog({
               data-state={applyState}
             >
               {applyState === 'applying' ? (
-                <><span className="llm-catalog-apply-spinner motion-spin" aria-hidden="true" />{zh ? '正在应用…' : 'Applying…'}</>
+                <><PeerIcon name="loader" className="llm-catalog-apply-spinner motion-spin" />{zh ? '正在应用…' : 'Applying…'}</>
               ) : applyState === 'success' ? (
                 <><PeerIcon name="check" size={14} className="llm-catalog-apply-check" />{zh ? '已应用' : 'Applied'}</>
               ) : (

@@ -1,4 +1,5 @@
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
+import { seedUiAutomation, seedClassicUiFixture, checkSharedUiConventions } from './shared-ui-convention-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
@@ -32,11 +33,14 @@ import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
+const sharedUiOnly = process.argv.includes('--shared-ui-only');
 const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--history-motion-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const fixture = seedBotShellHome({ home });
+if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
+const classicUiFixture = sharedUiOnly ? seedClassicUiFixture({ home }) : null;
 const historyFixtures = workSurfaces ? seedHistoryFixtures({ home }) : [];
 let botModelFixtures = [];
 {
@@ -123,6 +127,7 @@ if (process.argv.includes('--streaming')) {
 }
 const settings = JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8'));
 settings.memory = { enabled: false };
+if (classicUiFixture) settings.workspaces.push({ id: 'rc-ui-classic-workspace', path: classicUiFixture.workspacePath, name: 'UI 规范回归' });
 if (botModelFixtures.length) settings.fallbackVision = { providerId: botModelFixtures[0].id };
 const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
 cpSync(path.join(source, 'apps/desktop/dist'), isolation.launch.distDir, { recursive: true });
@@ -348,8 +353,15 @@ try {
   await page.bringToFront();
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
-  await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
-  if (process.argv.includes('--history-motion-only')) {
+  await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
+  if (sharedUiOnly) {
+    await page.locator('.bot-app-menu-button').click();
+    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page.locator('.settings-nav').getByRole('button', { name: '开发者', exact: true }).click();
+    await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
+    await page.locator('.project-diagnostics__summary').waitFor();
+    await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--history-motion-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
@@ -577,7 +589,7 @@ try {
 } catch (error) {
   report.error = error.stack; process.exitCode = 1;
   if (page) report.interactionAfter = await page.evaluate(() => ({ frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus(), search: [...document.querySelectorAll('.bot-search')].map(node => ({ value: node.value, width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height, visibility: getComputedStyle(node).visibility, display: getComputedStyle(node).display })), composers: document.querySelectorAll('.bot-composer textarea').length })).catch(() => null);
-  if (page && app) await tracePaging('failure').catch(() => {});
+  if (page && app && !sharedUiOnly) await tracePaging('failure').catch(() => {});
   if (page) await page.screenshot({ path: path.join(root, 'failure.png') }).catch(() => {});
   const failureOutput = process.argv.indexOf('--output');
   if (page && failureOutput >= 0) await page.screenshot({ path: path.join(path.dirname(process.argv[failureOutput + 1]), 'bot-shell-failure.png') }).catch(() => {});

@@ -5,7 +5,7 @@
   max-width: calc(100vw - 16px);
   margin: 0;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 9px;
+  border-radius: var(--ui-radius-inset);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   box-shadow: var(--shadow-card);

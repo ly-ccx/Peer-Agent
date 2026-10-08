@@ -2,7 +2,7 @@
   .conversation-search-panel {
     width: min(560px, calc(100vw - 48px));
     max-height: min(70vh, 560px);
-    border-radius: var(--ui-radius-modal, 16px);
+    border-radius: var(--ui-radius-modal);
     /* 背景/边/阴影/blur 由 .pa-overlay-panel 统一 glass-popover 配方提供 */
     overflow: hidden;
     display: flex;
@@ -50,7 +50,7 @@
     font-size: var(--ui-font-caption, 0.6875rem);
     line-height: 1;
     padding: 4px 6px;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control-compact);
     border: 1px solid var(--za-line);
     color: var(--pa-text-secondary, var(--graphite-soft));
     background: var(--za-sidebar-active-bg, rgba(127, 127, 127, 0.08));
@@ -92,7 +92,7 @@
 
   .conversation-search-workspace-current {
     padding: 2px 5px;
-    border-radius: 5px;
+    border-radius: var(--ui-radius-chip);
     background: var(--za-sidebar-active-bg, rgba(127, 127, 127, 0.08));
     font-size: 0.625rem;
     font-weight: 500;
@@ -112,7 +112,7 @@
     border: 0;
     background: transparent;
     text-align: left;
-    border-radius: var(--ui-radius-control, 6px);
+    border-radius: var(--ui-radius-control);
     padding: 10px;
     cursor: pointer;
     color: inherit;
@@ -143,7 +143,7 @@
   .conversation-search-mark {
     background: color-mix(in srgb, var(--za-accent, #4c8bf5) 28%, transparent);
     color: inherit;
-    border-radius: 3px;
+    border-radius: var(--ui-radius-chip);
     padding: 0 1px;
   }
 
@@ -165,7 +165,7 @@
     font-size: var(--ui-font-caption, 0.6875rem);
     line-height: 1;
     padding: 3px 5px;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control-compact);
     border: 1px solid var(--za-line);
     color: var(--pa-text-tertiary, var(--graphite-soft));
     opacity: 0.85;

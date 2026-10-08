@@ -11,7 +11,7 @@ test('gwb scroll region keeps a radius-sized bottom inset so the last card clear
   // GWB 是自持滚动器（不依赖外层 task-overview 滚动区），
   // 外层 603863f 的 padding-bottom 对 gwb 视口不生效，
   // 等价契约必须落在 .gwb-page 自己身上。
-  assert.match(css, /\.gwb-page\s*\{[\s\S]*?overflow-y-auto[\s\S]*?padding-bottom:\s*var\(--radius-lg\);/);
+  assert.match(css, /\.gwb-page\s*\{[\s\S]*?overflow-y-auto[\s\S]*?padding-bottom:\s*var\(--ui-radius-panel\);/);
 });
 
 test('gwb-page stays its own scroller (not absorbed into the region-level scroll region)', async () => {

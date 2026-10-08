@@ -108,7 +108,7 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  border-radius: var(--ui-radius-chip);
+  border-radius: var(--ui-radius-pill);
   background-color: transparent;
 }
 
@@ -119,4 +119,9 @@
 
 *::-webkit-scrollbar-thumb:active {
   background-color: var(--za-scrollbar-thumb);
+}
+@layer base {
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::marker { content: ""; }
 }
