@@ -7,7 +7,10 @@ export function ReplyAnchors({ ids, anchors, i18n, onJump }: {
   readonly i18n: I18nRuntime;
   readonly onJump: (id: string) => void;
 }) {
-  return ids.map(id => <ReplyAnchorPreview key={id} id={id} anchor={anchors.get(id)} i18n={i18n} onJump={onJump} />);
+  if (!ids.length) return null;
+  return <div className="bot-reply-anchors">
+    {ids.map(id => <ReplyAnchorPreview key={id} id={id} anchor={anchors.get(id)} i18n={i18n} onJump={onJump} />)}
+  </div>;
 }
 
 export function ReplyAnchorPreview({ id, anchor, excerpt, className = '', i18n, onJump }: {

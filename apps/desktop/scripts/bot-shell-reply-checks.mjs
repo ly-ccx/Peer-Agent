@@ -8,6 +8,8 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   const reply = page.locator('#bot-msg-rc-message-9999');
   await reply.scrollIntoViewIfNeeded();
   const quote = reply.locator('.bot-reply-bar');
+  assert.equal(await quote.evaluate(node => Boolean(node.closest('.bot-reply-body'))), true,
+    'reply reference must belong to the reply bubble, rather than a detached short-text card');
   assert.ok((await quote.textContent()).includes('请帮我梳理项目现状'));
   assert.equal(await quote.locator('svg').count(), 0);
   assert.equal(await quote.locator('.bot-reply-bar-label').textContent(), '你');
@@ -20,7 +22,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await closeReplyDetails(page);
   checks.push('loaded quote names its actual author, preserves full text in its accessible name and tooltip, and removes navigation chrome; delivery stays readonly');
 
-  // The quote is a quiet context inset above the body.
+  // Source and excerpt share a line inside the bubble; the new body remains separate.
   // Secondary actions stay quiet; restore theme and disclosure after samples.
   const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
   const context = reply.locator('.bot-reply-context');
@@ -40,11 +42,20 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     });
     report.replyStyles.push({ theme, ...sample });
     assert.equal(sample.quote.border, '0px');
-    assert.notEqual(sample.quote.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(sample.quote.background, 'rgba(0, 0, 0, 0)');
     assert.equal(sample.quote.edge, '0px');
     assert.equal(sample.quote.shadow, 'none');
-    assert.ok(sample.quote.height >= 44 && sample.quote.height <= 74);
-    assert.ok(sample.quote.width <= 360);
+    assert.ok(sample.quote.height >= 28 && sample.quote.height <= 44);
+    const geometry = await quote.evaluate(node => {
+      const quote = node.getBoundingClientRect(), bubble = node.closest('.bot-reply-body').getBoundingClientRect();
+      const source = node.querySelector('.bot-reply-bar-label').getBoundingClientRect();
+      const excerpt = node.querySelector('.bot-reply-bar-excerpt').getBoundingClientRect();
+      const text = node.closest('.bot-reply-body').querySelector('.bot-reply-text').getBoundingClientRect();
+      return { inside: quote.left >= bubble.left && quote.right <= bubble.right && quote.top >= bubble.top,
+        horizontal: excerpt.left > source.right && Math.abs(source.top + source.height / 2 - excerpt.top - excerpt.height / 2) < 1,
+        aboveBody: quote.bottom < text.top, aligned: Math.abs(quote.left - text.left) < 1 };
+    });
+    assert.ok(Object.values(geometry).every(Boolean), JSON.stringify(geometry));
     assert.equal(sample.source.font, '11px'); assert.equal(sample.excerpt.font, '12px');
     assert.equal(sample.excerpt.clamp, '2');
     assert.equal(sample.action.background, 'rgba(0, 0, 0, 0)');
@@ -59,9 +70,11 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
   }, originalTheme);
   assert.notEqual(report.replyStyles[0].excerpt.color, report.replyStyles[1].excerpt.color);
-  checks.push('dark/light quotes use a subtle inset without a leading vertical edge, 11px source and 12px two-line excerpts, with a 44px hit area and no shadow');
+  checks.push('dark/light references share a horizontal row inside the reply bubble, aligned with its text, with no separate card or leading vertical edge');
 
   await closeReplyDetails(page);
+  await checkShortReplyQuote({ page, report, captureDirectory });
+
   const process = reply.getByRole('button', { name: '查看详情', exact: true });
   await quote.focus();
   assert.equal(await quote.evaluate(node => node === document.activeElement), true);
@@ -103,7 +116,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   checks.push('memory disclosure retrieves the canonical memory and collapses without a nested status pill');
 
   // Select an actual rendered range then exercise the product mouse-up handler.
-  const selected = await reply.locator('.bot-reply-body').evaluate(node => {
+  const selected = await reply.locator('.bot-reply-text').evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
@@ -111,6 +124,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   });
   await page.getByRole('button', { name: '引用', exact: true }).click();
   const composerQuote = page.locator('.bot-quote-chip');
+  assert.equal(selected.includes('原文结束标记'), false, 'selecting the new reply must not capture its quoted source');
   assert.equal(await composerQuote.locator('.bot-reply-bar-excerpt').textContent(), selected);
   assert.equal(await composerQuote.locator('.bot-reply-bar-label').textContent(), 'project-000');
   assert.equal(await composerQuote.evaluate(node => getComputedStyle(node).borderInlineStartWidth), '0px');
@@ -130,7 +144,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal(await composer.inputValue(), '保留我的草稿');
   await composer.fill('');
   // Submit a real explicit quote through the existing composer and durable IPC.
-  await reply.locator('.bot-reply-body').evaluate(node => {
+  await reply.locator('.bot-reply-text').evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
@@ -164,4 +178,32 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   if (originalViewport) await page.setViewportSize(originalViewport);
   checks.push('selected quote shows its actual source, fits a 760px viewport and cancels by keyboard without losing the draft');
   checks.push('explicit quote leaves the composer on send, names the real bot source inside the user bubble and navigates to that source by keyboard');
+}
+
+async function checkShortReplyQuote({ page, report, captureDirectory }) {
+  const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+  const reply = page.locator('#bot-msg-rc-message-9996');
+  const quote = reply.locator('.bot-reply-bar');
+  report.shortReplyQuote = [];
+  for (const width of [1280, 760]) for (const appearance of ['dark', 'light']) {
+    await page.setViewportSize({ width, height: 860 });
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+    await reply.locator('..').scrollIntoViewIfNeeded();
+    assert.equal(await quote.locator('.bot-reply-bar-excerpt').innerText(), '熟悉仓库');
+    const shape = await quote.evaluate(node => {
+      const row = node.getBoundingClientRect(), body = node.closest('.bot-reply-body')?.getBoundingClientRect();
+      const source = node.querySelector('.bot-reply-bar-label').getBoundingClientRect();
+      const excerpt = node.querySelector('.bot-reply-bar-excerpt').getBoundingClientRect();
+      return { inside: Boolean(body && row.left >= body.left && row.right <= body.right && row.top >= body.top),
+        horizontal: excerpt.left > source.right && Math.abs(source.top - excerpt.top) < 3,
+        compact: row.height <= 32, fits: node.scrollWidth <= node.clientWidth };
+    });
+    assert.ok(Object.values(shape).every(Boolean), JSON.stringify(shape));
+    if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `quote-reply-${width}-${appearance}.png`), animations: 'disabled' });
+    report.shortReplyQuote.push({ width, appearance, ...shape });
+  }
+  await page.setViewportSize(viewport);
+  await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+  await page.locator('#bot-msg-rc-message-9999').scrollIntoViewIfNeeded();
 }

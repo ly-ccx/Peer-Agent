@@ -31,6 +31,7 @@ const requiredShots = ['quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 
   'composer-multiline-760-light.png', 'composer-attachment-1280-dark.png',
   'reply-dark.png', 'reply-light.png', 'reply-narrow-quote.png', 'reply-narrow-sent.png',
   'quote-sent-1280-dark.png', 'quote-sent-1280-light.png',
+  'quote-reply-1280-dark.png', 'quote-reply-1280-light.png', 'quote-reply-760-dark.png', 'quote-reply-760-light.png',
   'selection-quote-1280-dark.png', 'selection-quote-760-light.png', 'selection-quote-docked-light.png',
   'completion-review-card.png', 'completion-review-report.png', 'completion-review-760-light.png',
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png'];
@@ -41,6 +42,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   if (!machine.ok || machine.pageErrors?.length || machine.mainAuthorizationErrors?.length
     || !['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)
     || !['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mouseClick', 'draftPreserved', 'bodyBoundary', 'widthReflow', 'dockedFits'].every(check => machine.selectionQuote?.[check] === true)
+    || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.shortReplyQuote?.some(item =>
+      item.width === width && item.appearance === appearance && item.inside && item.horizontal && item.compact && item.fits)))
     || !['multilineScroll', 'widthReflow', 'attachmentFits', 'keyboard'].every(check => machine.composerLayout?.[check] === true)
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.composerLayout?.cases?.some(item =>
       item.width === width && item.appearance === appearance && item.fits && item.grouped && item.centered && item.distinctSurface && item.sendFilled)))
@@ -93,7 +96,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, manualWakeRetry: machine.manualWakeRetry,
-      selectionQuote: machine.selectionQuote },
+      selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },
     reviewCriteria: [
       '默认内容能回答任务目标、当前进展和下一步；动作写明去向，主机器人负责对用户传达。',
       '内部 ID、模型机制和原始参数按需披露；状态来自结构化事实，目标与完成结论不得混淆。',
