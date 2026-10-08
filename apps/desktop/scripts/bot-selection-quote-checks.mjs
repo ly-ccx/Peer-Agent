@@ -6,7 +6,7 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const reply = page.locator('#bot-msg-rc-message-9996');
-  const body = reply.locator('.bot-reply-body');
+  const body = reply.locator('.bot-reply-text');
   const action = page.locator('.bot-quote-action');
   const input = page.locator('.bot-composer textarea');
   const draft = await input.inputValue();

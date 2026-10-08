@@ -15,9 +15,12 @@ export function LiveReply({ activity, referenceIds, i18n, anchors, onJump, onOpe
 }) {
   return (
     <article className="bot-reply bot-live-reply" data-turn-id={activity.turnId} data-phase={activity.phase} aria-label={i18n.t('projectAgent.chat.generating')}>
-      <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
+      {!activity.replyText ? <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} /> : null}
       <BotNarration segments={botNarration(activity.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []), activity.replyText)} live />
-      {activity.replyText ? <div aria-live="off" className="bot-reply-body bot-streaming-conclusion"><MarkdownMessage content={activity.replyText} /></div> : null}
+      {activity.replyText ? <div aria-live="off" className="bot-reply-body bot-streaming-conclusion">
+        <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
+        <MarkdownMessage content={activity.replyText} />
+      </div> : null}
       <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} running={isActivityRunning(activity)} />
     </article>
   );

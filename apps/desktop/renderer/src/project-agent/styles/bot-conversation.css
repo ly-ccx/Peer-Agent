@@ -446,6 +446,48 @@
   transition: color var(--za-motion-fast) var(--za-ease-standard);
 }
 
+/* Reply context belongs to the message, with one quiet horizontal reading line. */
+.bot-reply-anchors {
+  min-width: 0;
+  max-width: min(680px, 100%);
+}
+
+.bot-reply-anchors > .bot-reply-bar {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 0;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.bot-reply-anchors .bot-reply-bar-copy {
+  display: grid;
+  grid-template-columns: fit-content(30%) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.bot-reply-anchors .bot-reply-bar-label {
+  color: var(--graphite-soft);
+  font-weight: 400;
+}
+
+.bot-reply-anchors > .bot-reply-bar:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--graphite-base) 5%, transparent);
+}
+
+.bot-reply-body > .bot-reply-anchors {
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--chrome-hairline);
+}
+
+.bot-reply > .bot-reply-body:has(> .bot-reply-anchors) {
+  min-width: min(240px, 100%);
+}
+
 .bot-reply-marks {
   gap: 6px 8px;
   padding-top: 2px;
