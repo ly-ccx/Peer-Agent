@@ -35,15 +35,23 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   const detail = page.locator('.bot-task-detail');
   const reportFeedback = detail.locator('.bot-task-report-read');
   const reportInfo = detail.locator('.bot-task-information');
+  const captureReport = async name => {
+    await reportFeedback.scrollIntoViewIfNeeded();
+    assert.equal(await reportInfo.getAttribute('open'), '', 'report feedback remains expanded before capture');
+    // A tall element capture can resize the native viewport and remount the
+    // responsive drawer. Capture the real window without changing its layout.
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, name) });
+    assert.equal(await reportInfo.getAttribute('open'), '', 'capture never changes the report disclosure');
+  };
   await reportInfo.locator(':scope > summary').click();
   await reportFeedback.getByText('任务资料暂时无法读取，请重试。', { exact: true }).waitFor();
-  await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-report-unavailable.png') });
+  await captureReport('task-report-unavailable.png');
   const turnsBeforeReportRetry = readTurns();
   change('running', false, 'waiting');
   await reportFeedback.getByRole('button', { name: '重试', exact: true }).click();
   await until(() => reportFeedback.getAttribute('aria-busy'), value => value === 'true');
   await reportFeedback.getByText('正在读取任务资料…', { exact: true }).waitFor();
-  await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-report-loading.png') });
+  await captureReport('task-report-loading.png');
   change('running');
   await until(() => detail.locator('.bot-task-instructions').textContent(), text => text.includes(instructions));
   await until(() => reportFeedback.locator('p').count(), count => count === 0);
@@ -51,7 +59,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await reportFeedback.getByText('任务资料暂时无法更新，以下为上次读取的内容。', { exact: true }).waitFor();
   assert.ok((await detail.locator('.bot-task-instructions').textContent()).includes(instructions));
   assert.equal(await detail.getAttribute('data-status'), 'queued', 'a cached report cannot rewind live status');
-  await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-report-stale.png') });
+  await captureReport('task-report-stale.png');
   change('queued');
   await reportFeedback.getByRole('button', { name: '重试', exact: true }).click();
   await until(() => reportFeedback.locator('p').count(), count => count === 0);
