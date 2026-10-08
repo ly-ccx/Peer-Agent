@@ -54,7 +54,7 @@ Desktop, TUI and CLI share the same core runtime:
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 >
-> beta channel **`0.1.0-rc.8`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
+> beta channel **`0.1.0-rc.9`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
 
 ### The 0.1.0 candidate
 
