@@ -65,6 +65,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await backgroundSummary.focus(); await page.keyboard.press('Enter');
   const backgroundWork = page.locator('.bot-background-work .bot-work-row');
   await backgroundWork.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  await until(() => backgroundWork.innerText(), text => /等待跟进[\s\S]*主对话/.test(text));
   assert.match(await backgroundWork.innerText(), /等待跟进[\s\S]*主对话/);
   assert.doesNotMatch(await backgroundWork.innerText(), /需要你处理|查看并处理/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-waiting.png') });

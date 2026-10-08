@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 
@@ -93,7 +93,8 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   assert.equal(await sheet.locator('.bot-history-row').evaluate(node => node === document.activeElement), true);
   checks.push('title search, honest no-match, SVG clear, keyboard opening and preview/back retain the query and selected-row focus');
 
-  const viewport = page.viewportSize(); const font = await page.evaluate(() => document.documentElement.style.fontSize);
+  const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  const font = await page.evaluate(() => document.documentElement.style.fontSize);
   await search.fill(''); await page.setViewportSize({ width: 390, height: 740 });
   await page.evaluate(() => { document.documentElement.style.fontSize = '20px'; });
   assert.equal(await sheet.evaluate(node => node.scrollWidth <= node.clientWidth), true);
@@ -158,7 +159,8 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   await picker.click(); await page.getByRole('option', { name: 'project-000', exact: true }).click();
   const historyId = fixtureRows[0].id;
   const inputFile = path.join(home, 'project-runtime', workspaceId, 'input-queue.jsonl');
-  const readInputs = () => readFileSync(inputFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const readInputs = () => existsSync(inputFile)
+    ? readFileSync(inputFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   const beforeInputs = readInputs().filter(input => input.historyRef === historyId).length;
   const original = await page.evaluate(id => window.peerAgent.conversationsGet({ id }), historyId);
   await sheet.getByRole('button', { name: '交给这个机器人继续', exact: true }).click();

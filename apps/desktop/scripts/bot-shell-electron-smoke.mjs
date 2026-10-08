@@ -32,7 +32,7 @@ import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
-const workSurfaces = process.argv.includes('--work-surfaces');
+const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--history-motion-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -332,7 +332,12 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
-  if (process.argv.includes('--selection-quote-only')) {
+  if (process.argv.includes('--history-motion-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
+      fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
+  } else if (process.argv.includes('--selection-quote-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotSelectionQuote({ page, until, report, captureDirectory: root });
