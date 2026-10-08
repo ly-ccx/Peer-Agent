@@ -57,7 +57,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || ![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => (width === 1280 ? [false, true] : [false]).every(docked =>
       machine.pendingReplyLayout?.some(item => item.width === width && item.appearance === appearance && item.docked === docked && item.aligned))))
     || !machine.taskDetails?.reportFromDetail || !machine.taskDetails?.metadataCollapsed
-    || !['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPreserved', 'reportRetryRecovers'].every(check => machine.taskDetails?.[check] === true)
+    || !['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPreserved', 'reportRetryRecovers', 'nestedEscapeRetainsTask'].every(check => machine.taskDetails?.[check] === true)
     || !machine.taskDetails?.primaryActionReturnsToBot || !machine.taskDetails?.listClassification || !machine.modelSwitch?.rollbackVerified
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
       .every(check => machine.taskDetails?.[check] === true)

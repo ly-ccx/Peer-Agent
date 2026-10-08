@@ -6,7 +6,7 @@ import path from 'node:path';
 export async function checkBotTaskDetails({ page, until, report, captureDirectory, commandFile, readTurns }) {
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   let seq = initial.seq;
-  const task = { ...initial.sessions[0], sessionId: initial.sessions[0].sessionId + '-report-read', report: undefined, origin: { anchorMessageId: 'internal-source-message-id',
+  const task = { ...initial.sessions[0], sessionId: initial.sessions[0].sessionId + '-report-read', conversationId: 'rc-task-scene-empty', report: undefined, origin: { anchorMessageId: 'internal-source-message-id',
     modelSelection: { worker: { modelId: 'internal-execution-model-id' } } } };
   const instructions = '只读核对历史任务的目标、完成结果和判断依据。\n只使用 list_files / read_file，禁止 bash / write_file。\n分支：internal-branch，提交：' + 'a'.repeat(40);
   const noteHeadline = '核查未通过：部分历史记录缺少可核对的结果依据。我会整理已有记录，并将无法确认的部分单独标明。';
@@ -118,6 +118,14 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.match(await information.innerText(), /internal-source-message-id|tool-result:\/\/actual-record/);
   assert.equal(await information.locator('summary svg').count(), 1);
   await page.keyboard.press('Enter'); assert.equal(await information.getAttribute('open'), null);
+  await information.locator(':scope > summary').click();
+  await detail.locator('.bot-task-scene').click();
+  const nestedScene = page.locator('.conversation-chat-drawer--nested');
+  await nestedScene.waitFor();
+  await page.keyboard.press('Escape');
+  await nestedScene.waitFor({ state: 'detached' });
+  assert.equal(await detail.isVisible(), true, 'Escape dismisses the nested scene and keeps the task detail open');
+  await information.locator(':scope > summary').click();
   task.title = '逐条核对本项目跨月份的历史 AI 任务、交付结果与验证依据，并整理可追溯的完成情况';
   change('waiting_user'); await until(() => detail.locator('h2').innerText(), title => title === task.title);
   for (const width of [1280, 760]) {
@@ -178,6 +186,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages })); renameSync(commandFile + '.next', commandFile);
   report.taskDetails = { states: [...states, 'unavailable'], dimensions, reportFromDetail: true, metadataCollapsed: true,
     reportReadFailureExplained: true, reportLoadingVisible: true, staleReportPreserved: true, reportRetryRecovers: true,
+    nestedEscapeRetainsTask: true,
     primaryActionReturnsToBot: true, listClassification: true, internalInstructionsHidden: true, relatedNoteLocated: true,
     followUpDraftFocused: true, existingDraftPreserved: true, concreteQuestionLocated: true, noAutomaticExecution: true,
     scope: 'Production renderer and IPC with isolated session and main-conversation fixtures; no real model or task approval' };
