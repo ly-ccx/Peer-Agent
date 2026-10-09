@@ -19,7 +19,10 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   };
   update({ sessions: [first, other], cancelMode: 'fail', cancelCalls: [] });
   const background = page.locator('.bot-background-work');
-  await until(() => background.innerText(), text => text.includes(first.title));
+  // The preceding scenario may leave the outer disclosure closed. Wait for
+  // current session facts in the DOM before checking visible actions below.
+  await until(() => background.locator('.bot-work-title').allTextContents(),
+    titles => titles.includes(first.title) && titles.includes(other.title));
   if (await background.getAttribute('open') === null) await background.locator(':scope > summary').click();
   const waiting = background.locator('.bot-work-row[data-status=waiting_user]');
   await waiting.waitFor({ state: 'attached' });
