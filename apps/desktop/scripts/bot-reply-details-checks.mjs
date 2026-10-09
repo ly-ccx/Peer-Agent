@@ -4,6 +4,21 @@ import assert from 'node:assert/strict';
 export async function openReplyDetails(page, message) {
   const button = message.locator('.bot-reply-context > button');
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
+  await page.locator('.bot-composer textarea').focus();
+  await page.mouse.move(1, 1);
+  await page.waitForFunction(node => getComputedStyle(node).opacity === '0', await button.elementHandle());
+  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '0', 'reply details stay quiet until the reply is hovered or focused');
+  const placement = await button.evaluate(node => {
+    const action = node.getBoundingClientRect(), footer = node.parentElement.getBoundingClientRect();
+    const status = node.parentElement.querySelector('.bot-context-running')?.getBoundingClientRect();
+    return { right: Math.abs(action.right - footer.right), gap: status ? action.left - status.right : null };
+  });
+  assert.ok(placement.right <= 2, 'details action aligns with the right edge of the reply column');
+  if (placement.gap !== null) assert.ok(placement.gap >= 24, 'running status and details action have separate sides');
+  await message.hover();
+  await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
+  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'hovering the reply reveals its details');
+  await page.mouse.move(1, 1);
   await button.focus(); await button.press('Enter');
   const details = page.locator('.bot-reply-details');
   await details.waitFor({ state: 'visible' });

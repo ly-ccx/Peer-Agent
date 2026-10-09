@@ -36,16 +36,16 @@ export function ReplyDetailsContext({ workspaceId, message, i18n, onOpenEvidence
 }) {
   const refs = [...new Set(message?.meta.evidenceRefs ?? [])];
   const surfacing = message?.meta.surfacing;
+  const verdicts = message?.marks.filter(mark => mark.outcome && mark.outcome in VERDICTS) ?? [];
   return <div className="bot-reply-context-body">
       {children}
       {refs.length ? <EvidenceList refs={refs} i18n={i18n} onOpen={onOpenEvidence} /> : null}
       <MemoryContext workspaceId={workspaceId} ids={message?.meta.memoryUsed ?? []} i18n={i18n} learned={false} />
       <MemoryContext workspaceId={workspaceId} ids={message?.meta.memoryLearned ?? []} i18n={i18n} learned />
-      <div className="bot-context-metadata">
-        {message?.marks.map((mark, index) => mark.outcome && mark.outcome in VERDICTS ?
-          <span key={index}>{i18n.t(VERDICTS[mark.outcome as keyof typeof VERDICTS])}</span> : null)}
+      {verdicts.length || surfacing && surfacing in SURFACING ? <div className="bot-context-metadata">
+        {verdicts.map((mark, index) => <span key={index}>{i18n.t(VERDICTS[mark.outcome as keyof typeof VERDICTS])}</span>)}
         {surfacing && surfacing in SURFACING ? <span className="bot-reply-delivery"><PeerIcon name="info" size={13} />{i18n.t('projectAgent.chat.surfacingLabel')}{i18n.t(SURFACING[surfacing as keyof typeof SURFACING])}</span> : null}
-      </div>
+      </div> : null}
   </div>;
 }
 

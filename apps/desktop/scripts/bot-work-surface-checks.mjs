@@ -51,8 +51,17 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
     writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, sessions, unavailable }));
     renameSync(commandFile + '.next', commandFile);
   };
+  change([{ ...initial.sessions[0], status: 'verifying', report: { summary: '已完成' } }]);
+  await until(() => work.getAttribute('data-status'), value => value === 'verifying');
+  assert.match(await work.locator(':scope > summary').innerText(), /核验中/);
+  assert.equal(await work.locator('.bot-work-detail > p').first().innerText(), '正在核对执行结果，结束后会在对话中告诉你。');
+  assert.doesNotMatch(await work.innerText(), /已完成/);
+  await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-verifying.png') });
+  report.verificationPresentation = { currentPhaseWins: true };
   change([{ ...initial.sessions[0], status: 'waiting_user', report: { summary: '需要确认是否只使用可读取的历史记录。' } }]);
   await until(() => work.getAttribute('data-status'), value => value === 'waiting_user');
+  assert.doesNotMatch(await work.innerText(), /正在核对执行结果/);
+  report.verificationPresentation.exitsToFollowUp = true;
   assert.match(await work.locator(':scope > summary').innerText(), /等待跟进/);
   assert.doesNotMatch(await work.innerText(), /需要你处理|查看并处理/);
   assert.equal(await work.locator('.is-running').count(), 0);
