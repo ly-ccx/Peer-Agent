@@ -2,12 +2,20 @@
   --bot-column-max: 800px;
   --bot-column-gutter: 28px;
   --bot-column-width: min(var(--bot-column-max), calc(100cqw - 2 * var(--bot-column-gutter)));
+  --bot-reply-tint: 16%;
+  --bot-reply-background: color-mix(in srgb, var(--bot-message-accent, var(--paper-hover)) var(--bot-reply-tint), var(--paper-hover));
+  --bot-reply-secondary: color-mix(in srgb, var(--graphite-soft) 25%, var(--graphite-base));
   container-type: inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
   background: var(--paper-base);
+}
+
+[data-theme="dark"] .bot-convo {
+  --bot-reply-tint: 22%;
+  --bot-reply-secondary: color-mix(in srgb, var(--graphite-soft) 40%, var(--graphite-base));
 }
 
 .bot-thread {
@@ -538,13 +546,15 @@
 .bot-stopped-reply > .bot-reply-body,
 .bot-unavailable-reply > .bot-reply-body,
 .bot-narration .markdown-content > * {
+  --graphite-soft: var(--bot-reply-secondary);
+  --za-text-soft: var(--bot-reply-secondary);
   box-sizing: border-box;
   width: fit-content;
   max-width: min(680px, 100%);
   min-width: 0;
   padding: 10px 14px;
   border-radius: var(--ui-radius-message);
-  background: var(--paper-hover);
+  background: var(--bot-reply-background);
   overflow-wrap: anywhere;
 }
 

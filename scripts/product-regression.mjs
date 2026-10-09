@@ -34,6 +34,7 @@ const requiredShots = [...sharedUiShots, 'quick-chat-bots-dark.png', 'quick-chat
   'composer-empty-1280-dark.png', 'composer-empty-1280-light.png', 'composer-empty-760-dark.png',
   'composer-multiline-760-light.png', 'composer-attachment-1280-dark.png',
   'reply-dark.png', 'reply-light.png', 'reply-narrow-quote.png', 'reply-narrow-sent.png',
+  ...['purple', 'pink', 'green'].flatMap(color => [`bot-message-${color}-dark.png`, `bot-message-${color}-light.png`]),
   'quote-sent-1280-dark.png', 'quote-sent-1280-light.png',
   'quote-reply-1280-dark.png', 'quote-reply-1280-light.png', 'quote-reply-760-dark.png', 'quote-reply-760-light.png',
   'selection-quote-1280-dark.png', 'selection-quote-760-light.png', 'selection-quote-docked-light.png',
@@ -48,6 +49,9 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !machine.sharedUiConventions?.rectangularPreviews || !machine.sharedUiConventions?.keyboardImagePreview
     || machine.sharedUiConventions?.cases?.length !== sharedUiShots.length
     || !machine.ok || machine.pageErrors?.length || machine.mainAuthorizationErrors?.length
+    || !machine.botMessageColors?.identitySwitch || !machine.botMessageColors?.savedColorApplied
+    || machine.botMessageColors?.cases?.length !== 32
+    || !machine.botMessageColors.cases.every(sample => sample.bodyContrast >= 4.5 && sample.quoteContrast >= 4.5 && sample.fits)
     || !['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)
     || !['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mouseClick', 'draftPreserved', 'bodyBoundary', 'widthReflow', 'dockedFits'].every(check => machine.selectionQuote?.[check] === true)
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.shortReplyQuote?.some(item =>
@@ -104,7 +108,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
     checks: { historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
-      chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
+      chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, manualWakeRetry: machine.manualWakeRetry,

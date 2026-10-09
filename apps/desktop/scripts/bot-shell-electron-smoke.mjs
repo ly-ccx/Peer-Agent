@@ -3,6 +3,7 @@ import { seedUiAutomation, seedClassicUiFixture, checkSharedUiConventions } from
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
 import { checkBotShellUpdater } from './bot-shell-updater-checks.mjs';
 import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
+import { checkBotMessageColors } from './bot-message-color-checks.mjs';
 import { checkBotSelectionQuote } from './bot-selection-quote-checks.mjs';
 import { checkBotWorkSurfaces } from './bot-work-surface-checks.mjs';
 import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } from './bot-history-motion-checks.mjs';
@@ -361,6 +362,10 @@ try {
     await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
     await page.locator('.project-diagnostics__summary').waitFor();
     await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--message-colors-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotMessageColors({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--history-motion-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -441,6 +446,7 @@ try {
   assert.equal(await page.locator('.bot-composer textarea').getAttribute('aria-label'), '给 project-000 发消息');
   report.checks.push('composer prompt and accessible name follow the selected bot name');
   await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  await checkBotMessageColors({ page, until, report, captureDirectory: root });
   for (let i = 0; i < 5; i++) {
     const text = `RC_UI_RECEIPT_${i}`;
     await page.locator('.bot-composer textarea').fill(text);
