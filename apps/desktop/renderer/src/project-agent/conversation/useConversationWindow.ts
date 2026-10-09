@@ -1,8 +1,9 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ConversationDisplayRow } from '../state/botConversationState';
-import { conversationOffsets, conversationRowAt, conversationViewport, restoreConversationOffset } from '../state/conversationWindow';
+import { motionDurationMs, sendScrollProgress } from '../state/conversationMotion';
+import { conversationRowKey, conversationOffsets, conversationRowAt, conversationViewport, restoreConversationOffset } from '../state/conversationWindow';
 
-export const conversationRowKey = (row: ConversationDisplayRow) => row.type === 'message' ? row.message.id : row.type === 'activity' ? `live-${row.activity.turnId}` : row.id;
+export { conversationRowKey } from '../state/conversationWindow';
 
 /** Owns scroll geometry and reading identity; no IPC or conversation data ownership. */
 export function useConversationWindow(rows: readonly ConversationDisplayRow[], highlightedId: string | null, highlightRequestId: number, followRequestId = 0) {
@@ -17,6 +18,12 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
   const [top, setTop] = useState(0);
   const [height, setHeight] = useState(0);
   const [following, setFollowing] = useState(true);
+  const sendScroll = useRef<{ frame: number } | null>(null);
+  const stopSendScroll = () => {
+    if (sendScroll.current) cancelAnimationFrame(sendScroll.current.frame);
+    sendScroll.current = null;
+  };
+  useEffect(() => stopSendScroll, []);
   const keys = useMemo(() => rows.map(conversationRowKey), [rows]);
   const offsets = useMemo(() => conversationOffsets(keys, heights.current), [keys, revision]);
   const origin = () => {
@@ -26,6 +33,7 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
   const view = conversationViewport(offsets, Math.max(0, top - origin()), height);
   const updateTop = (value: number) => { observedTop.current = value; setTop(current => Math.abs(current - value) < 0.5 ? current : value); };
   const followLatest = () => {
+    stopSendScroll();
     const node = scrollerRef.current;
     pinned.current = true; reading.current = null; setFollowing(true);
     if (node) { node.scrollTop = node.scrollHeight; updateTop(node.scrollTop); }
@@ -34,7 +42,24 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
   useLayoutEffect(() => {
     if (previousFollow.current === followRequestId) return;
     previousFollow.current = followRequestId;
-    followLatest();
+    const node = scrollerRef.current;
+    stopSendScroll();
+    pinned.current = true; reading.current = null; setFollowing(true);
+    if (!node) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { followLatest(); return; }
+    const from = node.scrollTop, started = performance.now();
+    const duration = motionDurationMs(getComputedStyle(node).getPropertyValue('--za-motion-medium'));
+    const motion = { frame: 0 }; sendScroll.current = motion;
+    const step = (now: number) => {
+      if (sendScroll.current !== motion) return;
+      const progress = sendScrollProgress(now, started, duration);
+      const target = Math.max(0, node.scrollHeight - node.clientHeight);
+      node.scrollTop = from + (target - from) * progress;
+      updateTop(node.scrollTop);
+      if (progress < 1) motion.frame = requestAnimationFrame(step);
+      else sendScroll.current = null;
+    };
+    motion.frame = requestAnimationFrame(step);
   }, [followRequestId]);
   const remember = () => {
     const node = scrollerRef.current;
@@ -54,11 +79,11 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     if (!node) return;
     // A provider update can reach layout before the browser delivers a user's scroll event.
     // Read the actual movement first so an upward scroll cannot be overwritten by follow.
-    if (observedTop.current !== null && node.scrollTop < observedTop.current - 0.5
+    if (!sendScroll.current && observedTop.current !== null && node.scrollTop < observedTop.current - 0.5
       && node.scrollHeight - node.scrollTop - node.clientHeight >= 80) {
       pinned.current = false; setFollowing(false); remember();
     }
-    if (pinned.current) node.scrollTop = node.scrollHeight;
+    if (pinned.current && !sendScroll.current) node.scrollTop = node.scrollHeight;
     else if (reading.current) {
       const target = restoreConversationOffset(keys, offsets, reading.current, origin());
       if (target !== null) node.scrollTop = target;
@@ -91,21 +116,23 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     if (!highlightedId) { located.current = null; return; }
     const request = `${highlightRequestId}:${highlightedId}`;
     if (located.current === request) return;
-    const index = keys.indexOf(highlightedId), node = scrollerRef.current;
+    const index = rows.findIndex(row => row.type === 'message' && row.message.id === highlightedId), node = scrollerRef.current;
     if (index < 0 || !node) return;
     located.current = request;
-    pinned.current = false;
+    stopSendScroll(); pinned.current = false;
     setFollowing(false);
-    reading.current = { key: highlightedId, delta: Math.max(0, (node.clientHeight - (heights.current.get(highlightedId) ?? 72)) / 2) };
+    reading.current = { key: keys[index]!, delta: Math.max(0, (node.clientHeight - (heights.current.get(keys[index]!) ?? 72)) / 2) };
     node.scrollTop = restoreConversationOffset(keys, offsets, reading.current, origin())!;
     updateTop(node.scrollTop);
   }, [highlightedId, highlightRequestId, keys, offsets]);
 
   return { scrollerRef, originRef, view, visibleRows: rows.slice(view.start, view.end), following, followLatest,
+    interruptFollow: () => { if (sendScroll.current) { stopSendScroll(); remember(); pinned.current = false; setFollowing(false); } },
     holdPosition: () => { remember(); pinned.current = false; setFollowing(false); },
     onScroll: () => {
       const node = scrollerRef.current;
       if (!node) return;
+      if (sendScroll.current) { updateTop(node.scrollTop); return; }
       pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
       setFollowing(pinned.current);
       remember(); updateTop(node.scrollTop);

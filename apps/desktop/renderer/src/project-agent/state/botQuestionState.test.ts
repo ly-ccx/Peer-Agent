@@ -20,8 +20,12 @@ test('收到回答后收起对应选择；发送失败保留选择，重发绑�
   const input = { inputId: 'a', text: '自己填写的回答', quoteRefs: [], createdAt: 'now', answerTo: 'card:question:reply:r', state: 'received' as const };
   const shown = applyOptimistic([question()], [input]);
   assert.equal(shown[1]?.answerTo, input.answerTo);
-  assert.equal(hideAcknowledgedQuestions(shown)[0]?.cards.length, 0);
+  assert.equal(hideAcknowledgedQuestions(shown)[0]?.cards[0]?.resolvedState, 'resolved');
+  assert.equal(hideAcknowledgedQuestions(shown)[0]?.cards[0]?.cardId, input.answerTo);
   const failed = applyOptimistic([question()], [{ ...input, state: 'failed' }]);
   assert.equal(hideAcknowledgedQuestions(failed)[0]?.cards.length, 1);
+  assert.equal(hideAcknowledgedQuestions(failed)[0]?.cards[0]?.resolvedState, 'open');
+  const sending = applyOptimistic([question()], [{ ...input, state: 'sending' }]);
+  assert.equal(hideAcknowledgedQuestions(sending)[0]?.cards[0]?.resolvedState, 'open');
   assert.equal(failed[1]?.answerTo, input.answerTo);
 });

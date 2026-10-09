@@ -15,6 +15,7 @@ import { DelegatedWork } from './DelegatedWork';
 import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
 import { BotComposer } from './BotComposer';
 import { BotMessageList } from './BotMessageList';
+import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
 import { PeerIcon } from '../../ui/icons';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
@@ -124,6 +125,7 @@ export function BotConversation({
   };
 
   return (
+    <BotInputContext.Provider value={conversation.answer}>
     <div className="bot-convo">
       {replyDetailsId && replyDetailsTarget ? createPortal(<ReplyDetails key={replyDetailsId} row={detailsRow}
         workspaceId={workspaceId} botName={label} workIndex={workIndex} i18n={i18n}
@@ -197,5 +199,6 @@ export function BotConversation({
         }}
       />
     </div>
+    </BotInputContext.Provider>
   );
 }

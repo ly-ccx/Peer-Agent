@@ -173,20 +173,22 @@ export function useBotConversation(workspaceId: string) {
         ...(quoteRefs.length > 0 ? { quoteRefs } : {}),
         ...(answerTo ? { answerTo } : {}),
       });
-      if (generationRef.current !== ticket) return;
+      if (generationRef.current !== ticket) return { ok: false, code: 'STALE_INPUT' };
       if (!result?.ok) {
         setPending((current) => current.map((item) => (
           item.inputId === inputId ? { ...item, state: 'failed' } : item
         )));
-        return;
+        return result;
       }
       setPending(current => acknowledgeInput(current, inputId));
       setAwaitingSince(createdAt);
+      return result;
     } catch {
-      if (generationRef.current !== ticket) return;
+      if (generationRef.current !== ticket) return { ok: false, code: 'STALE_INPUT' };
       setPending((current) => current.map((item) => (
         item.inputId === inputId ? { ...item, state: 'failed' } : item
       )));
+      return { ok: false, code: 'SEND_FAILED' };
     }
   }, [workspaceId]);
 
@@ -198,6 +200,13 @@ export function useBotConversation(workspaceId: string) {
     const answerTo = questionForInput(applyOptimistic(messages, pending), quoteRefs);
     await submit(inputId, trimmed, quoteRefs, new Date().toISOString(), answerTo, attachments);
   }, [submit, messages, pending]);
+
+  const answer = useCallback(async (text: string, answerTo?: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return { ok: false, code: 'INVALID_INPUT' };
+    setFollowRequestId(value => value + 1);
+    return submit(crypto.randomUUID(), trimmed, [], new Date().toISOString(), answerTo);
+  }, [submit]);
 
   const retry = useCallback(async (inputId: string) => {
     const item = pending.find((entry) => entry.inputId === inputId);
@@ -240,6 +249,7 @@ export function useBotConversation(workspaceId: string) {
     loadOlder,
     locateMessage,
     send,
+    answer,
     retry,
   };
 }

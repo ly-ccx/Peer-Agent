@@ -2,6 +2,7 @@ import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { checkBotChoiceMotion } from './bot-choice-motion-checks.mjs';
 
 /** Uses the isolated fixture's actual input queue and the production question projection. */
 export async function checkBotChatDetails({ page, until, report, captureDirectory, conversationFile }) {
@@ -108,4 +109,5 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
   await page.locator('.bot-thread').getByText('RC scripted reply: 其它工具里的工作记录', { exact: true }).waitFor();
   assert.equal(await page.locator('.bot-question').count(), 0);
   checks.push('option click follows the same durable answer path; switching back does not restore answered choices');
+  await checkBotChoiceMotion({ page, ask, canonical, report, captureDirectory });
 }
