@@ -371,6 +371,8 @@ try {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+  } else if (process.argv.includes('--updater-only')) {
+    await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
   } else if (process.argv.includes('--history-motion-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -398,7 +400,7 @@ try {
     await checkModelSwitchOnly({ page, fixture, until, report, captureDirectory: root,
       failNext: () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) });
   } else {
-  await checkBotShellUpdater({ page, emitUpdaterEvent, until, report, home, captureDirectory: root });
+  await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
   assert.equal(readObserved('turns').length, 0, 'idle bots must not open model turns');
   report.avatarAnimation = await page.evaluate(() => ({ avatars: document.querySelectorAll('.bot-avatar').length, activeAvatars: document.querySelectorAll('[data-avatar-animated="true"]').length, animations: document.getAnimations().length }));
   report.checks.push('200 real bot rows; no idle model turns');

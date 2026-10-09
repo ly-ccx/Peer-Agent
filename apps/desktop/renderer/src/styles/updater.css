@@ -172,14 +172,6 @@
     overflow: hidden;
   }
 
-  /* 点「更新」后弹窗退场：覆写 Overlay 通用退场，朝左上角版本徽标方向收缩淡出。 */
-  .pa-overlay-panel.updater-modal.is-closing {
-    transform-origin: top left;
-    --motion-collapse-x: calc(-1 * var(--za-motion-shift-lg));
-    --motion-collapse-y: -16px;
-    animation: motion-exit-collapse var(--za-motion-medium) var(--za-ease-accelerate) both;
-  }
-
   /* 简单状态（检查中 / 最新 / 错误 / 下载中） */
   .updater-modal-body {
     display: grid;
