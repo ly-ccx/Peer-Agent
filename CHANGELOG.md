@@ -8,6 +8,26 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.10] - 2026-10-09
+
+### Fixed
+
+- Recover an empty Responses reply once without lowering reasoning effort, replaying executed tools or bypassing usage and execution limits.
+- Keep current verification phase distinct from older completed reports; remove empty space after process disclosures collapse.
+- Preserve optimistic answer identity through acknowledgement, duplicate-click protection and failure recovery; smooth option dismissal and message sending.
+- Keep update dialogs mounted through their exit, shrink toward the measured footer progress bar and retain fast-completion and error recovery actions.
+
+### Changed
+
+- Place Details at the right edge on hover or keyboard focus; organize process, related tasks and supporting records in the sidebar.
+- Match bot reply surfaces to avatar identity colors in both themes while preserving readable text and quotations.
+- Extend product regression for combined colors, reply details, answer sending and updater motion; refresh bilingual notes and user guidance.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18. Governed history-query capability, complex-write Evidence and GA acceptance remain separate work.
+- Upgrade Desktop, CLI/TUI and Gateway together; rollback requires the complete pre-upgrade backup.
+
 ## [0.1.0-rc.8] - 2026-10-07
 
 ### Fixed
