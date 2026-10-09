@@ -42,13 +42,16 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
   const label = current ? i18n.t(current.status === 'preparing' ? 'projectAgent.process.preparingTitle' : 'projectAgent.process.runningTitle', { tool: i18n.t(current.labelKey) }) : i18n.t(running
     ? entries.length ? 'projectAgent.process.organizing' : 'projectAgent.process.preparingReply'
     : (activity?.phase ?? outcome) === 'stopped' ? 'projectAgent.process.stopped'
-      : (activity?.phase ?? outcome) === 'error' ? 'projectAgent.process.failed' : 'projectAgent.chat.process');
+      : (activity?.phase ?? outcome) === 'error' ? 'projectAgent.process.failed' : 'projectAgent.process.done');
   return <details className="bot-turn-process" data-running={running} open={disclosure?.open.main}
     onToggle={event => disclosure?.toggle('main', event.currentTarget.open)}>
     <summary className="bot-turn-process-heading">
-      <span className={`bot-process-current${running ? ' is-running' : ''}`}>
-        {current ? <PeerIcon name={current.icon} size={14} /> : null}
-        <span>{label}{current?.summary ? <span className="bot-process-target"> {current.summary}</span> : null}</span>
+      <span className="bot-process-overview">
+        <span className="bot-process-caption">{i18n.t('projectAgent.process.heading')}
+          {entries.length ? <span className="bot-process-count">{i18n.t('projectAgent.process.steps', { count: entries.length })}</span> : null}
+        </span>
+        <span className={`bot-process-current${running ? ' is-running' : ''}`}>{label}</span>
+        {current?.summary ? <span className="bot-process-target" title={current.summary}>{current.summary}</span> : null}
       </span>
       {elapsed !== null ? <span className="bot-process-elapsed" aria-hidden="true">{processDuration(elapsed, i18n)}</span> : null}
       <PeerIcon name="chevronDown" size={12} />
@@ -62,11 +65,11 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
         return <details className="bot-tool-step" data-status={entry.status} key={entry.id} open={disclosure?.open[`step-${index}`]}
           onToggle={event => { event.stopPropagation(); disclosure?.toggle(`step-${index}`, event.currentTarget.open); }}>
           <summary>
-            <PeerIcon name={entry.icon} size={14} />
-            <span className={`bot-tool-step-label${active ? ' is-running' : ''}`}>{i18n.t(entry.labelKey)}
-              {entry.summary ? <span className="bot-process-target"> {entry.summary}</span> : null}</span>
-            <span className="bot-tool-step-status">{i18n.t(`projectAgent.process.${status}`)}</span>
-            {time !== null ? <span className="bot-process-elapsed" aria-hidden="true">{processDuration(time, i18n)}</span> : null}
+            <span className="bot-tool-step-icon"><PeerIcon name={entry.icon} size={15} /></span>
+            <span className="bot-tool-step-copy"><span className={`bot-tool-step-label${active ? ' is-running' : ''}`}>{i18n.t(entry.labelKey)}</span>
+              {entry.summary ? <span className="bot-process-target" title={entry.summary}>{entry.summary}</span> : null}</span>
+            <span className="bot-tool-step-meta"><span className="bot-tool-step-status">{i18n.t(`projectAgent.process.${status}`)}</span>
+              {time !== null ? <span className="bot-process-elapsed" aria-hidden="true">{processDuration(time, i18n)}</span> : null}</span>
             <PeerIcon name="chevronRight" size={12} />
           </summary>
           <div className="bot-tool-step-content">

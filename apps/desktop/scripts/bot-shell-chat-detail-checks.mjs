@@ -18,7 +18,25 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     return { card, replyId };
   };
   const first = await ask();
-  await openReplyDetails(page, page.locator(`[id="bot-msg-${first.replyId}"]`));
+  const firstReply = page.locator(`[id="bot-msg-${first.replyId}"]`);
+  const entryTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+  const entryChecks = [];
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await composer.focus(); await page.mouse.move(1, 1);
+    const button = firstReply.locator('.bot-reply-context > button');
+    await page.waitForFunction(node => getComputedStyle(node).opacity === '0', await button.elementHandle());
+    assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '0');
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `reply-entry-idle-${theme}.png`) });
+    await firstReply.locator('.bot-reply-body').hover();
+    await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
+    assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1');
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `reply-entry-hover-${theme}.png`) });
+    entryChecks.push({ theme, hiddenUntilHover: true });
+  }
+  await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, entryTheme);
+  await openReplyDetails(page, firstReply);
+  report.replyDetailsEntry = { themes: entryChecks, keyboard: true, rightAligned: true };
   const timed = page.locator('.bot-turn-process');
   if (!await timed.evaluate(node => node.open)) await timed.locator(':scope > summary').click();
   await timed.locator('.bot-tool-step > summary .bot-process-elapsed').first().waitFor({ state: 'visible' });
@@ -42,6 +60,9 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
   await page.setViewportSize(timingViewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, timingTheme);
   await timed.locator(':scope > summary').click();
+  await until(() => timed.evaluate(node => node.getBoundingClientRect().height
+    - node.querySelector(':scope > summary').getBoundingClientRect().height), height => height <= 2, 5000);
+  report.replyDetailsEntry.collapsedHeight = true;
   report.processTiming = { subsecond: true, seconds: true, persisted: true, unknownHidden: true, narrowFits: true };
   await page.locator('.bot-reply-rounds > summary').click();
   const process = page.locator('.bot-process'); await process.waitFor();

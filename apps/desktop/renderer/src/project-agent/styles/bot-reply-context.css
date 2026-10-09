@@ -1,8 +1,12 @@
 .bot-reply-context, .bot-delegated-work { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.6; }
- .bot-reply-context { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 11px; }
+.bot-reply-context { display: flex; align-items: center; gap: 24px; margin-top: 2px; font-size: 11px; }
 .bot-delegated-work summary, .bot-background-work > summary { list-style: none; cursor: pointer; }
 .bot-delegated-work summary::-webkit-details-marker, .bot-background-work > summary::-webkit-details-marker { display: none; }
-.bot-reply-context > button { display: inline-flex; align-items: center; gap: 5px; min-height: 27px; padding: 4px 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.bot-reply-context > button { display: inline-flex; align-items: center; gap: 5px; min-height: 27px; margin-inline-start: auto; padding: 4px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0; pointer-events: none; }
+.bot-reply:is(:hover, :focus-within) > .bot-reply-context > button,
+.bot-system:is(:hover, :focus-within) > .bot-reply-context > button { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
+@media (forced-colors: active) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 .bot-context-running { color: var(--graphite-soft); }
 .bot-reply-context[data-running="true"] .bot-context-running { background: linear-gradient(100deg, var(--graphite-soft) 35%, var(--graphite-base) 50%, var(--graphite-soft) 65%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; --motion-shimmer-from: 100%; --motion-shimmer-x: -100%; animation: motion-shimmer 1.8s linear infinite; }
 .bot-reply-context > button:hover, .bot-work-row > summary:hover { color: var(--graphite-base); }
@@ -10,13 +14,16 @@
 .bot-work-row[open] > summary > svg:last-child { transform: rotate(180deg); }
 .bot-reply-context > button:focus-visible, .bot-work-row summary:focus-visible, .bot-work-detail button:focus-visible, .bot-background-work > summary:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: -1px; border-radius: var(--ui-radius-control); }
 .bot-reply-details-slot { min-width: 0; }
-.bot-reply-details { padding: 20px; min-width: 0; font-size: 12px; line-height: 1.6; }
+.bot-reply-details { padding: 24px; min-width: 0; font-size: 12px; line-height: 1.6; }
+.bot-reply-details-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.bot-reply-details-author { color: var(--graphite-base); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.bot-reply-details-header time { color: var(--graphite-soft); font-size: 11px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .bot-reply-details-note { margin: 0 0 16px; color: var(--graphite-mute); font-size: 11px; }
-.bot-reply-context-body { display: grid; gap: 20px; box-sizing: border-box; min-width: 0; }
+.bot-reply-context-body { display: grid; gap: 24px; box-sizing: border-box; min-width: 0; }
 .bot-reply-context-body > * { min-width: 0; }
-.bot-reply-context-body > section, .bot-reply-context-body > .bot-delegated-work { border-top: 1px solid var(--chrome-hairline); padding-top: 16px; }
+.bot-reply-context-body > section { padding: 16px; background: var(--chrome-canvas); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); }
 .bot-reply-context-body .bot-delegated-work { margin-top: 0; }
-.bot-reply-context-body h3 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--graphite-soft); }
+.bot-reply-context-body h3 { margin: 0 0 12px; font-size: 12px; font-weight: 500; color: var(--graphite-base); }
 .bot-context-error pre { margin: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.75 var(--font-mono, monospace); color: var(--graphite-soft); }
 .bot-reply-context-body button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 0; min-height: 27px; border: 0; background: transparent; border-radius: var(--ui-radius-control); color: var(--graphite-soft); font: inherit; cursor: pointer; }
 .bot-reply-context-body button:hover { color: var(--graphite-base); background: var(--paper-hover); }
@@ -28,7 +35,7 @@
 .bot-evidence-list small { display: block; font-size: 10px; line-height: 1.5; color: var(--graphite-soft); }
 .bot-evidence-list svg { flex-shrink: 0; }
 .bot-context-process { justify-self: start; }
-.bot-context-metadata { display: grid; gap: 5px; color: var(--graphite-mute); font-size: 11px; }
+.bot-context-metadata { display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--chrome-hairline); color: var(--graphite-soft); font-size: 11px; }
 .bot-reply-context-body .bot-reply-delivery { margin: 0; }
 .bot-delegated-work { display: grid; gap: 4px; margin: 12px 0 0; }
 .bot-work-row { min-width: 0; }
@@ -42,6 +49,9 @@
 .bot-work-detail p { margin: 0 0 7px; overflow-wrap: anywhere; }
 .bot-work-detail .bot-work-hint { color: var(--graphite-soft); font-size: 11px; font-weight: 400; }
 .bot-work-detail button { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 0; padding: 4px 0; font: inherit; color: var(--graphite-base); cursor: pointer; }
+.bot-reply-work-section .bot-work-row > summary { width: 100%; }
+.bot-reply-work-section .bot-work-title { flex: 1; min-width: 0; }
+.bot-reply-work-section .bot-work-detail { margin-left: 0; }
 .bot-work-more > summary { display: flex; align-items: center; gap: 7px; width: fit-content; padding: 5px 0; font-size: 11px; color: var(--graphite-mute); }
 .bot-background-work { margin: 0 var(--bot-column-gutter) 8px; font-size: 11px; color: var(--graphite-mute); }
 .bot-background-work > summary { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; padding: 5px 0; }
@@ -50,7 +60,7 @@
 .bot-background-work[open] > summary > svg:last-child { transform: rotate(180deg); }
 .bot-background-work .bot-delegated-work { max-height: 180px; overflow: auto; margin-top: 4px; }
 @media (max-width: 600px) { .bot-work-title { flex: 1; } }
-@supports (corner-shape: superellipse(1.4)) { .bot-reply-context-body, .bot-work-detail { corner-shape: var(--control-corner); } }
+@supports (corner-shape: superellipse(1.4)) { .bot-reply-context-body > section, .bot-work-detail { corner-shape: var(--control-corner); } }
 
 .bot-reply-rounds > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-size: 11px; color: var(--graphite-soft); }
 .bot-reply-rounds > summary::-webkit-details-marker { display: none; }

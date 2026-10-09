@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { backgroundWork, indexBotWork, replyWork } from './botWorkState.ts';
+import { backgroundWork, indexBotWork, replyWork, workProgress } from './botWorkState.ts';
+import { createI18n } from '@peer-agent/i18n';
 import type { BotChatMessage } from './botConversationState';
 import type { DrawerSession } from './drawerState';
 
@@ -14,6 +15,15 @@ test('latest host status overrides a reply snapshot, including terminal and wait
   for (const status of ['waiting_user', 'accepted', 'cancelled']) {
     assert.equal(replyWork(reply, indexBotWork([session('work-1', status)], true))[0].status, status);
   }
+});
+test('an active verifier cannot present a worker report or stale label as completed', () => {
+  const current = { ...session('work-1', 'verifying'), summary: '已完成', statusLabel: '已完成' };
+  const row = replyWork(reply, indexBotWork([current], true))[0];
+  assert.equal(workProgress(row, createI18n('zh-CN')), '正在核对执行结果，结束后会在对话中告诉你。');
+  assert.match(workProgress(row, createI18n('en-US')), /^Checking the execution result/);
+  assert.equal(workProgress({ ...row, status: null }, createI18n('zh-CN')), '暂时无法获取最新任务状态，请打开任务查看。');
+  const running = { ...session('work-1'), summary: '逐条核对历史记录' };
+  assert.equal(workProgress(replyWork(reply, indexBotWork([running], true))[0], createI18n('zh-CN')), running.summary);
 });
 test('missing, failed or unrecognized host facts never replay a historical running claim', () => {
   for (const index of [indexBotWork([], true), indexBotWork([session('work-1')], false), indexBotWork([session('work-1', 'unknown')], true)]) {

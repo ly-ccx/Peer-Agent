@@ -1,8 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ProcessDisclosure } from './BotProcess';
 import { PeerIcon } from '../../ui/icons';
-import type { BotWorkRow } from '../state/botWorkState';
-import { formatDrawerSessionStatus } from '../state/drawerState';
+import { workProgress, type BotWorkRow } from '../state/botWorkState';
 import '../styles/bot-reply-context.css';
 import '../styles/bot-disclosure.css';
 
@@ -26,7 +25,7 @@ function WorkRow({ row, botName, i18n, onOpen, disclosure }: { readonly row: Bot
       <span className={`bot-work-status${active ? ' is-running' : ''}`}>{i18n.t(statusKey)}</span>
       <PeerIcon name="chevronDown" size={12} /></summary>
     <div className="bot-work-detail">
-      {row.status && row.session ? <p>{row.session.summary || (formatDrawerSessionStatus(row.session, i18n) !== row.status ? formatDrawerSessionStatus(row.session, i18n) : i18n.t(`projectAgent.chat.sessionState.${row.status}`))}</p> : <p>{i18n.t('projectAgent.chat.work.unavailableHint')}</p>}
+      <p>{workProgress(row, i18n)}</p>
       {handoff ? <p className="bot-work-hint">{i18n.t('projectAgent.chat.work.handoff', { name: botName })}</p> : null}
       <button type="button" onClick={() => onOpen(row.id)}>{i18n.t('projectAgent.chat.work.open')}<PeerIcon name="arrowUpRight" size={13} /></button>
     </div>

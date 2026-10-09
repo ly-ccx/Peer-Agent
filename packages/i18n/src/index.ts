@@ -252,6 +252,8 @@ export type TranslationKey =
   | 'projectAgent.chat.chooseAnswer'
   | 'projectAgent.chat.you'
   | 'projectAgent.process.reply'
+  | 'projectAgent.process.heading'
+  | 'projectAgent.process.steps'
   | 'projectAgent.process.sessions'
   | 'projectAgent.process.session'
   | 'projectAgent.process.start'
@@ -309,6 +311,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.waiting'
   | 'projectAgent.chat.work.resultReady'
   | 'projectAgent.chat.work.handoff'
+  | 'projectAgent.chat.work.verifyingHint'
   | 'projectAgent.chat.work.open'
   | 'projectAgent.chat.work.background'
   | 'projectAgent.chat.context.basis'
@@ -1693,6 +1696,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.chooseAnswer': '选择一个回答，也可以直接输入',
     'projectAgent.chat.you': '你',
     'projectAgent.process.reply': '发送回复',
+    'projectAgent.process.heading': '回复过程',
+    'projectAgent.process.steps': '{count} 个步骤',
     'projectAgent.process.sessions': '查询工作会话',
     'projectAgent.process.session': '查看工作会话',
     'projectAgent.process.start': '创建工作任务',
@@ -1750,6 +1755,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.waiting': '等待跟进',
     'projectAgent.chat.work.resultReady': '结果待确认',
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
+    'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
     'projectAgent.chat.work.open': '查看任务详情',
     'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
@@ -2922,6 +2928,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.chooseAnswer': 'Choose an answer, or type your own',
     'projectAgent.chat.you': 'You',
     'projectAgent.process.reply': 'Send reply',
+    'projectAgent.process.heading': 'Reply process',
+    'projectAgent.process.steps': '{count} steps',
     'projectAgent.process.sessions': 'Find work sessions',
     'projectAgent.process.session': 'Read work session',
     'projectAgent.process.start': 'Create work task',
@@ -2979,6 +2987,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.waiting': 'Awaiting follow-up',
     'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
+    'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',
     'projectAgent.chat.work.open': 'View task details',
     'projectAgent.chat.work.background': '{count} tasks to follow up',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',

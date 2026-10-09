@@ -1,21 +1,27 @@
-.bot-turn-process { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.65; }
+.bot-turn-process { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.65; background: var(--chrome-canvas); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); }
 .bot-turn-process summary { list-style: none; cursor: pointer; }
 .bot-turn-process summary::-webkit-details-marker { display: none; }
 .bot-turn-process summary:focus-visible, .bot-turn-process pre:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; border-radius: var(--ui-radius-control-compact); }
-.bot-turn-process-heading { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: 9px; padding: 5px 0; }
-.bot-process-current { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; }
-.bot-process-current > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bot-process-target { font-weight: 400; color: var(--graphite-mute); }
-.bot-process-elapsed { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; color: var(--graphite-fade); }
+.bot-turn-process-heading { display: flex; max-width: 100%; align-items: center; gap: 12px; padding: 16px; border-radius: var(--ui-radius-panel); }
+.bot-process-overview { display: grid; flex: 1; min-width: 0; gap: 6px; }
+.bot-process-caption { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--graphite-soft); }
+.bot-process-count { padding: 1px 6px; border-radius: var(--ui-radius-pill); background: var(--control-fill); font-size: 10px; font-variant-numeric: tabular-nums; }
+.bot-process-current { min-width: 0; color: var(--graphite-base); font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.bot-process-target { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 400; color: var(--graphite-soft); }
+.bot-process-elapsed { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; color: var(--graphite-soft); }
 .bot-turn-process-heading > svg { flex-shrink: 0; transition: transform 160ms ease; }
 .bot-turn-process[open] > .bot-turn-process-heading > svg { transform: rotate(180deg); }
-.bot-turn-process-content { padding: 6px 0 10px; }
-.bot-tool-step > summary { display: flex; align-items: center; gap: 7px; min-height: 32px; padding: 3px 0; }
+.bot-turn-process-content { margin: 0 8px; padding: 8px 0; border-top: 1px solid var(--chrome-hairline); }
+.bot-tool-step > summary { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px; border-radius: var(--ui-radius-control); }
+.bot-tool-step > summary:hover { background: var(--chrome-hover); }
+.bot-tool-step-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.bot-tool-step-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 30px; height: 30px; background: var(--control-fill); border-radius: var(--ui-radius-control-compact); }
+.bot-tool-step-meta { display: grid; justify-items: end; flex-shrink: 0; gap: 2px; }
 .bot-tool-step > summary > svg { flex-shrink: 0; }
-.bot-tool-step-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bot-tool-step-status { flex-shrink: 0; font-size: 11px; color: var(--graphite-fade); }
+.bot-tool-step-label { min-width: 0; overflow-wrap: anywhere; color: var(--graphite-base); }
+.bot-tool-step-status { font-size: 10px; color: var(--graphite-soft); }
 .bot-tool-step[open] > summary > svg:last-child { transform: rotate(90deg); }
-.bot-tool-step-content { margin: 3px 0 8px 21px; padding: 9px 12px; background: var(--control-fill); border-radius: var(--ui-radius-control); }
+.bot-tool-step-content { margin: 2px 8px 8px; padding: 12px; background: var(--paper-sheet); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); }
 .bot-process-note { margin: 4px 0; color: var(--graphite-soft); font-size: 12px; }
 .bot-tool-preview, .bot-tool-metadata { margin-top: 7px; font-size: 11px; }
 .bot-tool-preview > summary, .bot-tool-metadata > summary { display: flex; align-items: center; gap: 8px; width: fit-content; padding: 3px 0; }
@@ -24,15 +30,17 @@
 .bot-tool-preview > summary > span { color: var(--graphite-fade); }
 .bot-tool-preview pre { margin: 6px 0; padding: 8px 10px; max-height: 220px; overflow: auto; font: 11px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--paper-sheet); border-radius: var(--ui-radius-control-compact); color: var(--graphite-soft); }
 .bot-tool-metadata code { font: 11px/1.6 var(--font-mono); }
-.bot-process-current.is-running > span, .bot-tool-step-label.is-running {
+.bot-process-current.is-running, .bot-tool-step-label.is-running {
   background: linear-gradient(100deg, var(--graphite-soft) 35%, var(--graphite-base) 50%, var(--graphite-soft) 65%);
   background-size: 200% 100%; background-clip: text; -webkit-background-clip: text;
   -webkit-text-fill-color: transparent; --motion-shimmer-from: 100%; --motion-shimmer-x: -100%;
   animation: motion-shimmer 1.8s linear infinite;
 }
-.bot-turn-process::details-content { opacity: 0; transition: opacity 160ms ease, content-visibility 160ms allow-discrete; }
-.bot-turn-process[open]::details-content { opacity: 1; }
+.bot-turn-process { interpolate-size: allow-keywords; }
+.bot-turn-process::details-content { height: 0; overflow: hidden; opacity: 0; transition: height var(--za-motion-medium) var(--za-ease-standard), opacity var(--za-motion-medium) var(--za-ease-standard), content-visibility var(--za-motion-medium) allow-discrete; }
+.bot-turn-process[open]::details-content { height: auto; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .bot-turn-process::details-content { transition: none; } }
 @media (max-width: 600px) { .bot-tool-step-status { font-size: 10px; } .bot-tool-step-content { margin-left: 0; } }
 @supports (corner-shape: superellipse(1.4)) {
-  .bot-tool-step-content, .bot-tool-preview pre { corner-shape: var(--control-corner); }
+  .bot-turn-process, .bot-turn-process-heading, .bot-tool-step > summary, .bot-tool-step-icon, .bot-tool-step-content, .bot-tool-preview pre { corner-shape: var(--control-corner); }
 }

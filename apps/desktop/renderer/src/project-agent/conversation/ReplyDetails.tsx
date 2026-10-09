@@ -22,11 +22,17 @@ export function ReplyDetails({ row, workspaceId, botName, workIndex, i18n, onOpe
   const outcome = message?.cards.some(card => card.kind === 'agent_stopped') ? 'stopped'
     : message?.cards.some(card => card.kind === 'agent_unavailable') ? 'error' : undefined;
   return <div className="bot-reply-details" data-reply-id={message?.id ?? row.activity?.turnId}>
-    <p className="bot-reply-details-note">{botName}{message?.createdAt ? ` · ${new Date(message.createdAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+    <header className="bot-reply-details-header">
+      <span className="bot-reply-details-author">{botName}</span>
+      {message?.createdAt ? <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })}</time> : null}
+    </header>
     <ReplyDetailsContext workspaceId={workspaceId} message={message} i18n={i18n} onOpenEvidence={onOpenEvidence}>
       <BotProcess activity={row.activity} rounds={row.type === 'message' ? row.processRounds : undefined}
         i18n={i18n} disclosure={disclosure} outcome={outcome} />
-      <DelegatedWork rows={work} botName={botName} i18n={i18n} onOpen={onOpenWork} disclosure={disclosure} />
+      {work.length ? <section className="bot-reply-work-section" aria-label={i18n.t('projectAgent.chat.work.heading')}>
+        <h3>{i18n.t('projectAgent.chat.work.heading')}</h3>
+        <DelegatedWork rows={work} botName={botName} i18n={i18n} onOpen={onOpenWork} disclosure={disclosure} />
+      </section> : null}
       {message ? <CardDiagnostics cards={message.cards} i18n={i18n} /> : null}
       {row.type === 'message' && row.processRounds?.length ? <details className="bot-reply-rounds"
         open={disclosure.open.rounds ?? false} onToggle={event => {
