@@ -8,9 +8,10 @@ export function questionForInput(messages: readonly BotChatMessage[], quoteRefs:
   return last.cards.some(card => card.cardId === id && card.kind === 'question' && card.resolvedState !== 'resolved') ? id : undefined;
 }
 
-/** Hide the controls after a durable receipt; host card resolution remains authoritative. */
+/** Close controls after a durable receipt, retaining their identity for the exit transition. */
 export function hideAcknowledgedQuestions(messages: readonly BotChatMessage[]): BotChatMessage[] {
   const answered = new Set(messages.filter(message => message.kind === 'user_input'
     && message.pending !== 'failed' && message.pending !== 'sending' && message.answerTo).map(message => message.answerTo));
-  return messages.map(message => ({ ...message, cards: message.cards.filter(card => card.kind !== 'question' || !answered.has(card.cardId)) }));
+  return messages.map(message => ({ ...message, cards: message.cards.map(card => card.kind === 'question' && answered.has(card.cardId)
+    ? { ...card, resolvedState: 'resolved' as const } : card) }));
 }

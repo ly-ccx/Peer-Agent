@@ -36,6 +36,12 @@
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
 
+  .pa-overlay-panel.is-closing.is-minimizing {
+    transform-origin: top left;
+    animation: motion-exit-to-target var(--za-motion-slow) var(--za-ease-standard) both;
+    pointer-events: none;
+  }
+
   /* Anchored content keeps unified admission without blocking the work surface. */
   .pa-overlay-backdrop.pa-overlay--anchored {
     display: block;

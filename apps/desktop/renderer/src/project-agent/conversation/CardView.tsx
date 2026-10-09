@@ -1,12 +1,15 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { projectAgentFailureKind } from '@peer-agent/protocol';
-import { useState } from 'react';
+import { useContext, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { PeerIcon } from '../../ui/icons';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
 import { cardActionErrorKey } from '../state/cardActionError';
 import { CompletionReview } from './CompletionReview';
+import { BotInputContext } from './BotInputContext';
+import { useQuestionDismissal } from './useQuestionDismissal';
+import { useCardPresence } from './useCardPresence';
 
 /**
  * 所有动作通过应用服务，由宿主校验状态与项目归属。
@@ -22,11 +25,12 @@ export function CardView({
   readonly i18n: I18nRuntime;
   readonly onDone?: () => void;
 }) {
-  if (cards.length === 0) return null;
+  const presence = useCardPresence(cards);
+  if (presence.visible.length === 0) return null;
   return (
     <div className="bot-cards">
-      {cards.map((card) => (
-        <CardItem key={card.cardId} workspaceId={workspaceId} card={card} i18n={i18n} onDone={onDone} />
+      {presence.visible.map((card) => (
+        <CardItem key={card.cardId} workspaceId={workspaceId} card={card} i18n={i18n} onDone={onDone} onClosed={() => presence.close(card.cardId)} />
       ))}
     </div>
   );
@@ -47,39 +51,54 @@ function CardItem({
   card,
   i18n,
   onDone,
+  onClosed,
 }: {
   readonly workspaceId: string;
   readonly card: BotChatCard;
   readonly i18n: I18nRuntime;
   readonly onDone?: () => void;
+  readonly onClosed: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  const sending = useRef(false);
+  const submitInput = useContext(BotInputContext);
   const resolved = done || card.resolvedState === 'resolved';
-  if (card.kind === 'question' && resolved) return null;
+  const question = card.kind === 'question';
+  const dismissal = useQuestionDismissal(question && resolved, onClosed);
+  if (question && !dismissal.present) return null;
   return (
-    <section className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${card.kind === 'question' ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
+    <section ref={dismissal.ref} inert={question && resolved ? true : undefined} aria-hidden={question && resolved ? true : undefined}
+      className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
       {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
       </> : card.kind === 'agent_unavailable' ? <p className="bot-reply-body">{i18n.t(projectAgentFailureKind(card.content) === 'budget_exhausted'
         ? 'projectAgent.chat.budgetExhausted' : 'projectAgent.chat.unavailable')}</p>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
-      {resolved || !card.actions?.length ? null : (
+      {resolved && !question || !card.actions?.length ? null : (
         <div className="bot-card-actions">
           {card.actions.map((action, index) => (
             <button
               key={`${action.id}-${index}`}
               type="button"
-              disabled={busy}
+              disabled={busy || resolved}
               onClick={() => {
-                if (busy) return;
+                if (sending.current || resolved) return;
+                sending.current = true;
                 setBusy(true); setError('');
-                void runCardAction(workspaceId, action).then(result => {
+                const text = typeof action.payload?.text === 'string' ? action.payload.text : '';
+                const answerTo = typeof action.payload?.answerTo === 'string' ? action.payload.answerTo : undefined;
+                const request = submitInput && action.channel === 'project-agent:submit-input'
+                  ? submitInput(text, answerTo) : runCardAction(workspaceId, action);
+                void request.then(result => {
                   if (!result?.ok) { setError(i18n.t(cardActionErrorKey(result?.code))); return; }
+                  if (submitInput && action.channel === 'project-agent:submit-input') {
+                    dismissal.ref.current?.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea')?.focus({ preventScroll: true });
+                  }
                   setDone(true); onDone?.();
-                }).catch(() => setError(i18n.t('projectAgent.chat.actionFailed'))).finally(() => setBusy(false));
+                }).catch(() => setError(i18n.t('projectAgent.chat.actionFailed'))).finally(() => { sending.current = false; setBusy(false); });
               }}
             >
               {actionLabel(action, i18n)}

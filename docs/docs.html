@@ -485,7 +485,7 @@
                 <tr>
                   <td>macOS</td>
                   <td><code>.dmg</code> / app archive on Releases</td>
-                  <td data-i18n="install.macHow">Download → open → install to Applications. Developer ID signed and notarized; in-app updates replace the app on restart from 0.0.18 (0.0.17 and earlier: install 0.0.18 manually once).</td>
+                  <td data-i18n="install.macHow">Download → open → install to Applications. Developer ID signed and notarized. In RC10, Update shrinks the dialog toward the bottom-left version area; download progress remains there, followed by Install when ready. In-app updates start from 0.0.18; earlier versions must install 0.0.18 manually once.</td>
                 </tr>
                 <tr>
                   <td>Windows</td>
@@ -598,7 +598,7 @@ pnpm dist:linux
           <h2 id="desktop-bots" data-i18n="desktop.botsTitle">Bot conversations and settings</h2>
           <ul>
             <li data-i18n="desktop.botsStream">Replies arrive in complete paragraph bubbles. Details opens process, supporting records and technical diagnostics in the right sidebar. Stop preserves partial text and your draft; selected-text quoting appears beside the selection.</li>
-            <li data-i18n="desktop.botsWork">The bot follows background work and delivers results in the main conversation. Task details show current progress and next steps; genuine decisions ask a specific question. Scheduling yields and restart preserve associated work.</li>
+            <li data-i18n="desktop.botsWork">The bot follows background work and delivers results in the main conversation. Reply bubbles follow the avatar color, and choosing an answer sends its message smoothly. Hover or focus a reply to open Details at its right edge. Task details show current progress and next steps; genuine decisions ask a specific question.</li>
             <li data-i18n="desktop.botsProfile">Bot settings opens configuration directly, with Overview, Tasks, Objectives and Memory in adjacent tabs. Back up the complete data root before upgrading to RC8; rollback requires the pre-upgrade backup because older writers can discard new authority and coordination fields.</li>
           </ul>
           <p data-i18n="desktop.classic">Settings → General → Interface returns to classic chat. Its layout is described below.</p>
@@ -1429,7 +1429,7 @@ Evidence owns governance.</code></pre>
             "install.desktopTitle": "Desktop（图形界面）",
             "install.desktopBody": "从 GitHub Releases 下载对应平台包。优先使用最新正式版（v0.0.9 及以后）。",
             "install.thPlat": "平台", "install.thArtifact": "典型产物", "install.thHow": "步骤",
-            "install.macHow": "下载 → 打开 → 安装到应用程序。Developer ID 签名并已公证；从 0.0.18 起应用内更新重启即完成替换（0.0.17 及更早需手动安装一次 0.0.18）。",
+            "install.macHow": "下载 → 打开 → 安装到应用程序。Developer ID 签名并已公证。RC10 点击更新后弹窗收向左下角版本区，下载进度在底部显示，完成后点击安装。从 0.0.18 起支持应用内更新；0.0.17 及更早需手动安装一次 0.0.18。",
             "install.winHow": "下载 → 运行安装器 → 启动 Peer Agent",
             "install.linuxHow": "下载 AppImage 后 chmod +x 再运行，或安装 .deb。应用内自动更新只支持 AppImage。",
             "install.linuxGaps": "Linux Desktop 阶段一缺口：仅 x64、未签名。Ubuntu 22+/24+ 跑 AppImage 可能需要 libfuse2。Wayland 下窗口起不来时改用 X11 或 ELECTRON_OZONE_PLATFORM_HINT=auto。linux-arm64 Desktop 仍待后续。",
@@ -1458,8 +1458,8 @@ Evidence owns governance.</code></pre>
             "desktop.lede": "Desktop 为每个项目列出一个机器人，与 CLI 共用本地 Runtime。可以在对话中阅读回复、跟进委派工作、处理决策与查看依据。",
             "desktop.botsTitle": "机器人对话与设置",
             "desktop.botsStream": "回复以完整段落气泡逐条到达。“查看详情”在右侧栏展示过程、依据与技术诊断。停止生成保留部分正文与草稿；选中文字后的引用按钮紧贴选区。",
-            "desktop.botsWork": "机器人在后台跟进工作，在主对话交付结果。任务详情说明当前进展与下一步，真正需要决定时提出具体问题。调度让出和重启保留关联工作。",
-            "desktop.botsProfile": "“机器人设置”直接打开配置，相邻页签保留概况、任务、目标和记忆。升级 RC8 前备份完整数据根；回退需恢复升级前备份，旧版本写入可能丢失新的验证权限与协调字段。",
+            "desktop.botsWork": "机器人在后台跟进工作，在主对话交付结果。回复气泡跟随头像颜色；点击回答选项后消息平滑发送。悬停回复或键盘聚焦后，右侧“查看详情”打开过程与依据。任务详情说明当前进展与下一步，真正需要决定时提出具体问题。",
+            "desktop.botsProfile": "“机器人设置”直接打开配置，相邻页签保留概况、任务、目标和记忆。升级 RC10 前备份完整数据根；回退需恢复升级前备份，旧版本写入可能丢失新的验证权限与协调字段。",
             "desktop.classic": "设置 → 通用 → 界面可以返回经典对话，下面介绍经典界面的布局。",
             "desktop.layoutTitle": "经典界面布局",
             "desktop.thRegion": "区域", "desktop.thJob": "职责",

@@ -154,6 +154,17 @@
   }
 }
 
+/* A continuing action may dismiss into its measured progress destination. */
+@keyframes motion-exit-to-target {
+  from { opacity: 1; transform: translate3d(0, 0, 0) scale(1, 1); }
+  70% { opacity: 0.7; }
+  to {
+    opacity: 0;
+    transform: translate3d(var(--motion-target-x, 0), var(--motion-target-y, 0), 0)
+      scale(var(--motion-target-scale-x, 1), var(--motion-target-scale-y, 1));
+  }
+}
+
 .motion-exit-fade {
   animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
 }

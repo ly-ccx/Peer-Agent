@@ -110,6 +110,9 @@ export function BotMessageList({
       role="log"
       aria-live="polite"
       aria-busy={loadingOlder}
+      onWheel={scroll.interruptFollow}
+      onTouchStart={scroll.interruptFollow}
+      onKeyDown={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) scroll.interruptFollow(); }}
       onScroll={(event) => {
         const node = event.currentTarget;
         scroll.onScroll();
@@ -141,7 +144,7 @@ export function BotMessageList({
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
-            key={row.message.id}
+            key={conversationRowKey(row)}
             message={row.message}
             replied={replied.has(row.message.id)}
             anchors={anchors}

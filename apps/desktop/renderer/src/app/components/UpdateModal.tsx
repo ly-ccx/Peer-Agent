@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdaterStatus } from '@peer-agent/protocol';
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Overlay } from './Overlay';
 import { selectReleaseNotesByLocale } from './releaseNotesLocale';
 import { ReleaseNotesView } from './ReleaseNotesView';
@@ -10,7 +10,7 @@ import { ReleaseNotesView } from './ReleaseNotesView';
  *
  * 职责（按确认的产品设计，下载阶段不再霸屏）：
  *   - available：Changelog 卡片 —— 新版本做主标题，from 旧版本 + 更新内容 +「更新」「稍后」。
- *     点「更新」= 触发后台下载并带动画收起弹窗，进度改由版本徽标的环形进度表达，
+ *     点「更新」= 触发后台下载并收向版本区，进度由版本徽标表达，
  *     下载完成由侧边栏版本徽标旁的「安装」按钮承接。
  *   - checking：正在检查更新…
  *   - not-available：已是最新 +「重新检查」。
@@ -30,6 +30,8 @@ export function UpdateModal({
   onOpenReleasePage,
   onRecheck,
   onClose,
+  progressTarget,
+  pendingDownload = false,
 }: {
   readonly i18n: I18nRuntime;
   /** 由 VersionBadge 控制是否展示；false 时不挂载 Overlay。 */
@@ -41,9 +43,14 @@ export function UpdateModal({
   readonly onOpenReleasePage: () => void;
   readonly onRecheck: () => void;
   readonly onClose: () => void;
+  readonly progressTarget?: () => HTMLElement | null;
+  readonly pendingDownload?: boolean;
 }) {
-  const { phase } = status;
-  const newVersion = status.availableVersion ?? '';
+  const [closingStatus, setClosingStatus] = useState<UpdaterStatus | null>(null);
+  useEffect(() => { if (!open) setClosingStatus(null); }, [open]);
+  const displayed = closingStatus ?? status;
+  const { phase } = displayed;
+  const newVersion = displayed.availableVersion ?? '';
   const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)));
   const localizedReleaseNotes = selectReleaseNotesByLocale(
     status.releaseNotes,
@@ -57,9 +64,10 @@ export function UpdateModal({
       onClose={onClose}
       ariaLabel={i18n.t('updater.modal.title')}
       panelClassName="updater-modal"
+      closeTarget={closingStatus ? progressTarget : undefined}
     >
       {({ requestClose }) =>
-        phase === 'downloading' ? (
+        phase === 'downloading' || (pendingDownload && !closingStatus) ? (
           <div className="updater-modal-body">
             <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
             <p className="updater-modal-downloading">
@@ -152,8 +160,9 @@ export function UpdateModal({
                 <button
                   type="button"
                   className="updater-btn primary"
+                  disabled={Boolean(closingStatus)}
                   onClick={() => {
-                    // 先触发后台下载，再带动画收起弹窗：进度交由徽标环形进度表达。
+                    setClosingStatus(status);
                     onUpdate();
                     requestClose();
                   }}

@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { BotProfile, BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
@@ -15,6 +15,8 @@ import { DelegatedWork } from './DelegatedWork';
 import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
 import { BotComposer } from './BotComposer';
 import { BotMessageList } from './BotMessageList';
+import { botAvatarDisplayColor } from '../BotAvatar';
+import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
 import { PeerIcon } from '../../ui/icons';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
@@ -124,7 +126,10 @@ export function BotConversation({
   };
 
   return (
-    <div className="bot-convo">
+    <BotInputContext.Provider value={conversation.answer}>
+    <div className="bot-convo" style={{
+      '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
+    } as CSSProperties}>
       {replyDetailsId && replyDetailsTarget ? createPortal(<ReplyDetails key={replyDetailsId} row={detailsRow}
         workspaceId={workspaceId} botName={label} workIndex={workIndex} i18n={i18n}
         disclosure={detailsDisclosure}
@@ -197,5 +202,6 @@ export function BotConversation({
         }}
       />
     </div>
+    </BotInputContext.Provider>
   );
 }

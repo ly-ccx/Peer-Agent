@@ -3,6 +3,7 @@ import { useFocusScope } from '../hooks/useFocusScope';
 import { positionAnchoredOverlay } from './anchoredOverlay';
 import { createPortal } from 'react-dom';
 import { isTopmostOverlay, OVERLAY_SELECTOR } from './overlayStack';
+import { overlayCloseTarget } from './overlayCloseTarget';
 
 /**
  * Overlay —— 统一浮层基座（默认模态；anchor 为非模态，均仅负责表达）。
@@ -30,6 +31,7 @@ export function Overlay({
   anchor,
   id,
   onEscape,
+  closeTarget,
   children,
 }: {
   /** Supplying an anchor selects the non-modal, viewport-clamped variant. */
@@ -37,6 +39,8 @@ export function Overlay({
   readonly id?: string;
   /** Return true when an inner confirmation consumed Escape. */
   readonly onEscape?: () => boolean;
+  /** Optional destination for an action that continues in another visible control. */
+  readonly closeTarget?: () => HTMLElement | null;
   readonly onClose?: () => void;
   readonly closeOnBackdrop?: boolean;
   readonly ariaLabel?: string;
@@ -53,10 +57,17 @@ export function Overlay({
   readonly children: ReactNode | ((api: { readonly requestClose: () => void }) => ReactNode);
 }) {
   const [closing, setClosing] = useState(false);
+  const [closingStyle, setClosingStyle] = useState<CSSProperties>();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   useFocusScope(panelRef, !anchor, { trap: true, ownsScope: () => isTopmostOverlay(overlayRef.current, Array.from(document.querySelectorAll(OVERLAY_SELECTOR))) });
   const [placement, setPlacement] = useState<CSSProperties>({ visibility: 'hidden' });
+
+  useLayoutEffect(() => {
+    if (!closing || !closeTarget) return;
+    const panel = panelRef.current, target = closeTarget();
+    if (panel && target?.isConnected) setClosingStyle(overlayCloseTarget(panel.getBoundingClientRect(), target.getBoundingClientRect()));
+  }, [closing, closeTarget]);
 
   useLayoutEffect(() => {
     if (!anchor) return;
@@ -130,17 +141,20 @@ export function Overlay({
   // 进入退场态后启动兜底定时器；时长略大于退场动画（--za-motion-fast=120ms）。
   useEffect(() => {
     if (!closing) return undefined;
-    fallbackTimer.current = setTimeout(finishClose, 240);
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { finishClose(); return undefined; }
+    const durations = panelRef.current?.getAnimations().map(animation => animation.effect?.getComputedTiming().endTime)
+      .filter((duration): duration is number => typeof duration === 'number' && Number.isFinite(duration)) ?? [];
+    fallbackTimer.current = setTimeout(finishClose, Math.max(240, ...durations.map(duration => duration + 60)));
     return () => {
       if (fallbackTimer.current) {
         clearTimeout(fallbackTimer.current);
         fallbackTimer.current = null;
       }
     };
-  }, [closing, finishClose]);
+  }, [closing, closingStyle, finishClose]);
 
   const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : 'pa-overlay-backdrop';
-  const panelBase = closing ? 'pa-overlay-panel is-closing' : 'pa-overlay-panel';
+  const panelBase = closing ? `pa-overlay-panel is-closing${closingStyle ? ' is-minimizing' : ''}` : 'pa-overlay-panel';
 
   const overlay = (
     <div
@@ -154,13 +168,13 @@ export function Overlay({
         className={panelClassName ? `${panelBase} ${panelClassName}` : panelBase}
         ref={panelRef}
         id={id}
-        style={anchor ? placement : undefined}
+        style={closingStyle ?? (anchor ? placement : undefined)}
         tabIndex={-1}
         role="dialog"
         aria-modal={anchor ? undefined : true}
         aria-label={ariaLabel}
         onClick={(event) => event.stopPropagation()}
-        onAnimationEnd={closing ? finishClose : undefined}
+        onAnimationEnd={closing ? event => { if (event.target === event.currentTarget) finishClose(); } : undefined}
       >
         {typeof children === 'function' ? children({ requestClose }) : children}
       </div>

@@ -54,13 +54,13 @@ Desktop, TUI and CLI share the same core runtime:
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 >
-> beta channel **`0.1.0-rc.9`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
+> beta channel **`0.1.0-rc.10`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
 
 ### The 0.1.0 candidate
 
 Bind a folder or create a managed bot, choose its avatar color, then give it a request. The bot handles read-only understanding and delegates writes to tasks with success criteria. Receipt, verification, acceptance and worktree integration remain visible as separate steps.
 
-Bot settings opens the bot's configuration, with project history, memory and objectives in adjacent tabs. Replies use complete message bubbles, with supporting records and process in the Details sidebar. Keyboard navigation, reduced motion, locale parity and diagnostics are part of the candidate checks. [Candidate release notes](release-notes/v0.1.0-rc.8.md) cover features, upgrade instructions and limits. Upgrade Desktop, CLI/TUI and Gateway together. Back up the complete data root before upgrading; rollback requires that pre-upgrade backup because older writers can discard RC8 authority and coordination fields.
+Bot settings opens the bot's configuration, with project history, memory and objectives in adjacent tabs. Replies use complete message bubbles in the bot's identity color, with supporting records and process in the Details sidebar. Keyboard navigation, reduced motion, locale parity and diagnostics are part of the candidate checks. [Candidate release notes](release-notes/v0.1.0-rc.10.md) cover features, upgrade instructions and limits. Upgrade Desktop, CLI/TUI and Gateway together. Back up the complete data root before upgrading; rollback requires that pre-upgrade backup because older writers can discard RC8 authority and coordination fields.
 
 Stable publication follows comprehensive owner testing and seven days of daily use. Remote input is text only; approvals stay on the computer. Remote device identity currently requires macOS Keychain. Uploaded avatar images remain static.
 
