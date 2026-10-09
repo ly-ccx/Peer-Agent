@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { conversationOffsets, conversationRowAt, conversationViewport, restoreConversationOffset } from './conversationWindow.ts';
+import { conversationRowKey, conversationOffsets, conversationRowAt, conversationViewport, restoreConversationOffset } from './conversationWindow.ts';
+import { normalizeBotMessage } from './botConversationState.ts';
+
+test('the provisional input and durable receipt share one row identity', () => {
+  const pending = normalizeBotMessage({ id: 'input-a', kind: 'user_input', inputId: 'a' })!;
+  const receipt = { ...pending, id: 'host-record-a', pending: undefined };
+  assert.equal(conversationRowKey({ type: 'message', message: pending }), conversationRowKey({ type: 'message', message: receipt }));
+  assert.notEqual(conversationRowKey({ type: 'message', message: receipt }), conversationRowKey({ type: 'message', message: { ...receipt, inputId: 'b' } }));
+});
 
 test('variable heights cover the actual viewport with bounded overscan', () => {
   const keys = Array.from({ length: 1000 }, (_, i) => String(i));

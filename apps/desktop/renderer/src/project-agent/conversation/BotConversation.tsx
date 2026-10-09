@@ -16,6 +16,7 @@ import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
 import { BotComposer } from './BotComposer';
 import { BotMessageList } from './BotMessageList';
 import { botAvatarDisplayColor } from '../BotAvatar';
+import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
 import { PeerIcon } from '../../ui/icons';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
@@ -125,6 +126,7 @@ export function BotConversation({
   };
 
   return (
+    <BotInputContext.Provider value={conversation.answer}>
     <div className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
     } as CSSProperties}>
@@ -200,5 +202,6 @@ export function BotConversation({
         }}
       />
     </div>
+    </BotInputContext.Provider>
   );
 }

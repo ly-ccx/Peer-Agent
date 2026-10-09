@@ -1,3 +1,10 @@
+import type { ConversationDisplayRow } from './botConversationState';
+
+/** A receipt may replace a provisional message ID, but it is still the same input. */
+export const conversationRowKey = (row: ConversationDisplayRow) => row.type === 'message'
+  ? row.message.kind === 'user_input' && row.message.inputId ? `input-${row.message.inputId}` : row.message.id
+  : row.type === 'activity' ? `live-${row.activity.turnId}` : row.id;
+
 /** Measured row geometry; offsets include each row's trailing spacing. */
 export function conversationOffsets(keys: readonly string[], heights: ReadonlyMap<string, number>, estimate = 72): number[] {
   const offsets = [0];

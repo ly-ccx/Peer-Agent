@@ -366,6 +366,11 @@ try {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotMessageColors({ page, until, report, captureDirectory: root });
+  } else if (process.argv.includes('--chat-details-only')) {
+    await page.setViewportSize({ width: 1280, height: 780 });
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   } else if (process.argv.includes('--history-motion-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();

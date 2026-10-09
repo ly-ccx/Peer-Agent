@@ -23,6 +23,7 @@ export function sourceFingerprint(root) {
 
 const requiredShots = [...sharedUiShots, 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
+  'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'task-report-loading.png', 'task-report-unavailable.png', 'task-report-stale.png',
   'conversation-updates-dark.png', 'conversation-updates-light.png', 'conversation-complete.png', 'conversation-complete-light.png', 'conversation-details.png', 'task-main-note.png', 'task-follow-up-draft.png', 'task-decision.png', 'task-main-question.png', 'task-detail-running.png', 'task-detail-waiting_user.png', 'task-detail-accepted.png',
   'task-detail-failed.png', 'task-detail-1280-dark.png', 'task-detail-1280-light.png',
@@ -52,6 +53,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !machine.botMessageColors?.identitySwitch || !machine.botMessageColors?.savedColorApplied
     || machine.botMessageColors?.cases?.length !== 32
     || !machine.botMessageColors.cases.every(sample => sample.bodyContrast >= 4.5 && sample.quoteContrast >= 4.5 && sample.fits)
+    || !machine.choiceSendMotion?.focusRestored || machine.choiceSendMotion?.cases?.length !== 3
+    || !machine.choiceSendMotion.cases.every(sample => sample.continuous && sample.oneReceipt)
     || !['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)
     || !['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mouseClick', 'draftPreserved', 'bodyBoundary', 'widthReflow', 'dockedFits'].every(check => machine.selectionQuote?.[check] === true)
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.shortReplyQuote?.some(item =>
@@ -111,7 +114,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
-      processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, manualWakeRetry: machine.manualWakeRetry,
+      processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, manualWakeRetry: machine.manualWakeRetry, choiceSendMotion: machine.choiceSendMotion,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },
     supplementalCoverage: machine.sharedUiConventions,

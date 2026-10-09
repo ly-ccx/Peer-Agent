@@ -3,6 +3,7 @@ import type { BotChatMessage } from '../state/botConversationState';
 import { BotAttachments } from './BotAttachments';
 import { ReplyAnchorPreview } from './ReplyAnchors';
 import type { ReplyAnchor } from '../state/replyReferenceState';
+import { useState } from 'react';
 
 export function UserBubble({
   message,
@@ -23,6 +24,7 @@ export function UserBubble({
   readonly onRetry: (inputId: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
 }) {
+  const [arriving, setArriving] = useState(message.pending === 'sending');
   const excerpt = message.quoteRefs.length > 1 ? message.quoteRefs[1] : '';
   const answered = message.dispositions.some((item) => item.kind === 'answered');
   const markText = (item: BotChatMessage['dispositions'][number]) => (
@@ -31,7 +33,8 @@ export function UserBubble({
       : i18n.t(item.labelKey)
   );
   return (
-    <article className={`bot-user${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`} data-kind="user_input">
+    <article className={`bot-user${highlighted ? ' is-anchored' : ''}${arriving ? ' is-arriving' : ''}`}
+      onAnimationEnd={() => setArriving(false)} id={`bot-msg-${message.id}`} data-kind="user_input" data-input-id={message.inputId}>
       <div className="bot-user-content">
         {excerpt ? (
           <ReplyAnchorPreview id={message.quoteRefs[0]} anchor={anchors.get(message.quoteRefs[0])}
