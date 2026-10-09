@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { checkUpdaterMinimize } from './updater-minimize-checks.mjs';
 
-export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, report, home, captureDirectory }) {
+export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory }) {
   const checks = report.updater = [];
   const badge = page.locator('.bot-column-footer .sidebar-version-badge');
   await badge.waitFor({ timeout: 5000 });
@@ -158,7 +159,7 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
       }
     }
   }
-  checks.push('available SVG indicator, 42% progress and install control fit 240–360px columns in both locales and themes, including a temporarily measured long candidate label');
+  checks.push('available SVG indicator, horizontal 42% progress and install control fit 240–360px columns in both locales and themes, including a temporarily measured long candidate label');
   await page.evaluate(() => window.peerAgent.setLocale('zh-CN'));
   await page.reload(); await badge.waitFor();
   await page.locator('.bot-column-resizer').dblclick();
@@ -169,4 +170,5 @@ export async function checkBotShellUpdater({ page, emitUpdaterEvent, until, repo
     await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-idle-dark.png') });
   }
   checks.push('reload restores production update state and persisted channel without duplicate badges');
+  await checkUpdaterMinimize({ page, app, emitUpdaterEvent, report, captureDirectory });
 }
