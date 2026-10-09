@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ProcessDisclosure } from './BotProcess';
 import { PeerIcon } from '../../ui/icons';
 import { workProgress, type BotWorkRow } from '../state/botWorkState';
+import { TaskCancelButton } from '../state/TaskCancellation';
 import '../styles/bot-reply-context.css';
 import '../styles/bot-disclosure.css';
 
@@ -27,7 +28,10 @@ function WorkRow({ row, botName, i18n, onOpen, disclosure }: { readonly row: Bot
     <div className="bot-work-detail">
       <p>{workProgress(row, i18n)}</p>
       {handoff ? <p className="bot-work-hint">{i18n.t('projectAgent.chat.work.handoff', { name: botName })}</p> : null}
-      <button type="button" onClick={() => onOpen(row.id)}>{i18n.t('projectAgent.chat.work.open')}<PeerIcon name="arrowUpRight" size={13} /></button>
+      <div className="bot-work-actions">
+        <button type="button" onClick={() => onOpen(row.id)}>{i18n.t('projectAgent.chat.work.open')}<PeerIcon name="arrowUpRight" size={13} /></button>
+        <TaskCancelButton sessionId={row.id} status={row.status} title={row.session?.title ?? i18n.t('projectAgent.chat.work.related')} i18n={i18n} />
+      </div>
     </div>
   </details>;
 }

@@ -12,6 +12,7 @@ import { BotList } from './BotList';
 import { AppMenu } from './AppMenu';
 import { NewBotSheet } from './NewBotSheet';
 import { useBotWorkSessions } from './state/useBotWorkSessions';
+import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
@@ -291,6 +292,7 @@ export function BotListShell({
   };
 
   return (
+    <TaskCancellationProvider workspaceId={opened?.workspaceId ?? null} onRefresh={work.reload}>
     <div className="bot-shell" data-bot-shell="open" style={{ ['--peer-bot-list-width' as string]: `${list.width}px` }}>
       <aside className="bot-column" aria-label={i18n.t('projectAgent.list.brand')}>
         <UpgradeBanner i18n={i18n} />
@@ -591,5 +593,6 @@ export function BotListShell({
         }}
       />
     </div>
+    </TaskCancellationProvider>
   );
 }

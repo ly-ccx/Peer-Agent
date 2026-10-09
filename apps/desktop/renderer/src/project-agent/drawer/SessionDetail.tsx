@@ -10,6 +10,7 @@ import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from
 import { PeerIcon } from '../../ui/icons';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
 import type { TaskReportState } from '../state/taskDetailState';
+import { TaskCancelButton } from '../state/TaskCancellation';
 import '../styles/bot-task-detail.css';
 
 export function SessionDetail({
@@ -44,7 +45,7 @@ export function SessionDetail({
   const label = status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
     : status === 'result_ready' ? i18n.t('projectAgent.chat.work.resultReady')
     : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable');
-  const progress = formatDrawerSessionStatus(session, i18n);
+  const progress = status === 'cancelled' ? label : formatDrawerSessionStatus(session, i18n);
   const stamp = formatDrawerStamp(session.spawnedAt);
   const hint = session.status === 'waiting_user' || session.status === 'result_ready' ? 'confirm'
     : session.status === 'failed' || session.status === 'unavailable' ? 'failed'
@@ -64,6 +65,7 @@ export function SessionDetail({
           {stamp && <time dateTime={session.spawnedAt}>{i18n.t('projectAgent.drawer.task.created', { time: stamp })}</time>}
         </div>
       </header>
+      <TaskCancelButton sessionId={session.sessionId} status={session.status} title={title} i18n={i18n} />
       <section className="bot-task-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
         <h3>{i18n.t('projectAgent.drawer.progress')}</h3>
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
