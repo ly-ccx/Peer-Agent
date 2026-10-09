@@ -220,7 +220,20 @@ export async function agentLoopOpenAI({
 
         const { content, thinkingContent, toolCalls } = providerResponse;
         if (!toolCalls.length) {
+          // A completed Responses stream can contain only opaque reasoning and
+          // an empty final message. Retry as a billed runtime round so the
+          // selected effort, completed tool results, cancellation and budget
+          // remain intact; transport success is not a usable model response.
           if (
+            useResponses &&
+            !String(content || '').trim() &&
+            !String(thinkingContent || '').trim() &&
+            loop.claimEmptyResponseRetry()
+          ) {
+            return { kind: 'continue', state };
+          }
+          if (
+            !useResponses &&
             effectiveSupportsReasoning &&
             (effort === 'high' || effort === 'xhigh') &&
             !String(content || '').trim() &&
