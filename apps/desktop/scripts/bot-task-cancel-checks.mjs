@@ -22,7 +22,9 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   await until(() => background.innerText(), text => text.includes(first.title));
   if (await background.getAttribute('open') === null) await background.locator(':scope > summary').click();
   const waiting = background.locator('.bot-work-row[data-status=waiting_user]');
-  await waiting.locator(':scope > summary').click();
+  await waiting.waitFor({ state: 'attached' });
+  if (await waiting.getAttribute('open') === null) await waiting.locator(':scope > summary').click();
+  await waiting.getByRole('button', { name: `取消任务 ${first.title}`, exact: true }).waitFor({ state: 'visible' });
   assert.equal(await waiting.getByRole('button', { name: `取消任务 ${first.title}`, exact: true }).count(), 1,
     'waiting work must offer a direct cancellation action');
   const reply = page.locator('#bot-msg-rc-message-9999');
