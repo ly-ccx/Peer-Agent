@@ -138,7 +138,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   samples.innerOpen = await recordDisclosure(work, true);
   samples.innerClose = await recordDisclosure(work, false);
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Tab');
-  assert.equal(await work.locator('.bot-work-detail button').evaluate(node => node === document.activeElement), false);
+  assert.equal(await work.locator('.bot-work-detail').evaluate(node => node.contains(document.activeElement)), false);
   samples.outerClose = await recordDisclosure(background, false);
   samples.reverse = await recordDisclosure(background, true, true);
   await cast.send('Page.stopScreencast'); await cast.detach();
