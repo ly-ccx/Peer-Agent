@@ -8,6 +8,21 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.12] - 2026-10-11
+
+### Changed
+
+- Let the main Bot coordinate independent goals concurrently, send supplements, cancel incorrect work and arrange replacements within existing authorization.
+- Preserve correlated parent/child questions and verified result delivery, with short coordination turns and reserved scheduling capacity.
+- Persist task revisions and cancellation/handoff transitions; fence stale receipts and check uncertain outcomes before replaying work.
+- Keep independent work running through main-reply interruptions and expose truthful stopping, outcome checks, cancellation and handoffs in task details.
+- Refresh bilingual release notes, README, user guidance, landing-page copy and generated changelog.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; GA and long-term acceptance remain separate gates.
+- Rollback requires the complete pre-upgrade backup; older hosts must not write into the newer data directory.
+
 ## [0.1.0-rc.11] - 2026-10-10
 
 ### Fixed
