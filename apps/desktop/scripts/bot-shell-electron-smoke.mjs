@@ -38,7 +38,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--history-motion-only');
+const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -412,6 +412,11 @@ try {
     await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
     await page.locator('.project-diagnostics__summary').waitFor();
     await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--work-surfaces-only')) {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
   } else if (process.argv.includes('--wake-retry-only')) {
     assert.ok(process.argv.includes('--streaming'), '--wake-retry-only requires the isolated --streaming cognition fixture');
     await page.setViewportSize({ width: 1280, height: 780 });
@@ -429,10 +434,10 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotMessageColors({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--chat-details-only')) {
-    await page.setViewportSize({ width: 1280, height: 780 });
+    await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
-    await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+    await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   } else if (process.argv.includes('--updater-only')) {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
   } else if (process.argv.includes('--history-motion-only')) {
@@ -607,7 +612,7 @@ try {
   await checkBotShellReply({ page, until, report, captureDirectory: root });
   if (process.argv.includes('--streaming')) {
     await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null, readFixtureTurns: () => readObserved('turns') });
-    await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+    await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
   if (workSurfaces) {
     // The quote-send check adds a real exchange. Reach the older work reply

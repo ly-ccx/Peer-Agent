@@ -81,6 +81,28 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await until(() => backgroundWork.innerText(), text => /等待跟进[\s\S]*主对话/.test(text));
   assert.match(await backgroundWork.innerText(), /等待跟进[\s\S]*主对话/);
   assert.doesNotMatch(await backgroundWork.innerText(), /需要你处理|查看并处理/);
+  // Native details lays out its children before its clipping height finishes opening.
+  await backgroundWork.evaluate(async node => {
+    const animations = node.closest('.bot-background-work').getAnimations({ subtree: true }).filter(animation =>
+      animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime));
+    await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
+  });
+  report.workWaitingExpansion = await backgroundWork.evaluate(node => {
+    const detail = node.querySelector('.bot-work-detail').getBoundingClientRect();
+    const outer = node.closest('.bot-background-work');
+    return { detailBottom: detail.bottom, rowBottom: node.getBoundingClientRect().bottom,
+      outerBottom: outer.getBoundingClientRect().bottom,
+      opacity: getComputedStyle(node, '::details-content').opacity,
+      height: getComputedStyle(node, '::details-content').height,
+      runningAnimations: outer.getAnimations({ subtree: true }).filter(animation => animation.playState === 'running').map(animation => ({
+        pseudoElement: animation.effect?.pseudoElement, progress: animation.effect?.getComputedTiming().progress,
+      })) };
+  });
+  assert.ok(report.workWaitingExpansion.detailBottom <= report.workWaitingExpansion.rowBottom + 1
+    && report.workWaitingExpansion.detailBottom <= report.workWaitingExpansion.outerBottom + 1,
+    `expanded waiting detail must be fully contained: ${JSON.stringify(report.workWaitingExpansion)}`);
+  assert.equal(report.workWaitingExpansion.opacity, '1', 'expanded waiting detail has reached full opacity');
+  assert.equal(report.workWaitingExpansion.runningAnimations.length, 0, 'nested disclosures finish opening before capture');
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-waiting.png') });
   const waitingViewport = page.viewportSize();
   const waitingTheme = await page.evaluate(() => document.documentElement.dataset.theme);
