@@ -12,6 +12,7 @@ export interface CoordinationMandate {
   goalRevision: number;
   allowedActions: CoordinationAction[];
   sessionIds: string[];
+  executionBindings?: Record<string, CoordinationExecutionBinding>;
   materialRefs: string[];
   policyRevision: string;
   lifecycle: CoordinationLifecycle;
@@ -48,6 +49,7 @@ export interface TaskTransition {
   updatedAt: string;
 }
 export interface CoordinationExecutionBinding {
+  sessionId?: string;
   workId: string;
   goalRevision: number;
   executionEpoch: string;

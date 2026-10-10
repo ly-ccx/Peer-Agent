@@ -1822,7 +1822,8 @@ test('superseded tasks retain isolation for seven days then cancel silently and 
     assert.equal(env.goalPlanStore.getPlan(planId).status, 'cancelled');
     assert.equal(cleaned.includes(planId), true);
     await env.supervisor.reconcile();
-    assert.equal(cleaned.filter(id => id === planId).length, 2);
+    assert.equal(cleaned.filter(id => id === planId).length, 1);
+    assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.cancellation.cleanupPending, false);
     assert.equal(env.events.find(event => event.sessionId === a.sessionId && event.reason === 'supersession_expired').surfacing, 'silent');
   } finally { await env.cleanup(); }
 });
@@ -2146,4 +2147,25 @@ test('autonomous or fabricated message_session cannot consume a human question',
       assert.equal(env.goalPlanStore.getPlan(planId).runner.status, 'waiting_user');
     }
   } finally { await env.cleanup(); }
+});
+
+test('cancelling A waits outside the global writer so B can dispatch and A cannot resume', async () => {
+  const env = await harness(); let stopped, release;
+  const idle = new Promise(resolve => { stopped = resolve; });
+  const supervisor = createSessionSupervisor({ conversationStore: env.conversationStore, goalPlanStore: env.goalPlanStore,
+    goalRunner: { ...env.goalRunner, waitForIdle: async () => { stopped(); await new Promise(resolve => { release = resolve; }); } },
+    catalog: visionCatalog(), routing: routing(), deferRecovery: true,
+  });
+  try {
+    const a = await supervisor.spawn(spawnInput({readOnly:true}), contextOf(env));
+    const stopping = supervisor.cancel({sessionId:a.sessionId,reason:'direction corrected'});
+    await idle;
+    const during = supervisor.get({sessionId:a.sessionId});
+    assert.equal(during.origin.cancellation.phase,'stopping');
+    assert.equal((await supervisor.resume({sessionId:a.sessionId,anchorMessageId:'user-1'},contextOf(env))).error,'session_not_running');
+    const b = await supervisor.spawn(spawnInput({title:'independent B',brief:'keep B moving',readOnly:true}), contextOf(env));
+    assert.equal(b.status,'running');
+    release(); assert.equal((await stopping).status,'cancelled');
+    assert.equal(supervisor.get({sessionId:b.sessionId}).origin.phase,'running');
+  } finally { release?.(); await env.cleanup(); }
 });

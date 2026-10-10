@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 export const COORDINATION_ACTIONS = Object.freeze(['parallel', 'augment', 'revise', 'query', 'answer', 'cancel', 'replace', 'handoff']);
-const revisions = new Set(['revise', 'cancel', 'replace', 'handoff']);
+const revisions = new Set(['revise', 'cancel', 'replace']);
 const phases = { recorded: ['stopping', 'ready', 'completed', 'blocked'], stopping: ['awaiting_outcome', 'ready', 'completed', 'blocked'],
   awaiting_outcome: ['ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready'], completed: [] };
 const unique = values => [...new Set(values || [])];
@@ -44,7 +44,7 @@ export function admitCoordinationDecision(state, decision, host) {
     rootInputIds: prior?.rootInputIds || inputs, revisionInputIds: unique([...(prior?.revisionInputIds || []), ...inputs]),
     goalRevision, allowedActions: prior?.allowedActions || [...COORDINATION_ACTIONS], sessionIds: prior?.sessionIds || [],
     materialRefs: unique([...(prior?.materialRefs || []), ...materialRefs]), policyRevision: host.policyRevision || 'existing-project-policy',
-    lifecycle: decision.action === 'cancel' ? 'cancelled' : 'active' };
+    executionBindings: prior?.executionBindings || {}, lifecycle: decision.action === 'cancel' ? 'cancelled' : 'active' };
   const transition = { schemaVersion: 1, operationId: decision.operationId, workId: decision.workId,
     mandateId: mandate.mandateId, expectedGoalRevision: goalRevision, sourceInputIds: inputs, sourceEventIds: events,
     initiator: 'project_agent', decisionSource: inputs.length ? 'user_revision' : 'execution_repair',
@@ -60,6 +60,7 @@ export function executionBindingCurrent(mandate, transition, binding) {
   return Boolean(mandate && transition && binding && mandate.lifecycle === 'active'
     && binding.workId === mandate.workId && binding.goalRevision === mandate.goalRevision
     && transition.expectedGoalRevision === mandate.goalRevision && transition.executionEpoch === binding.executionEpoch
+    && (!binding.sessionId || mandate.executionBindings?.[binding.sessionId]?.executionEpoch === binding.executionEpoch)
     && !['stopping', 'awaiting_outcome', 'blocked'].includes(transition.phase));
 }
 
@@ -76,7 +77,8 @@ export function reduceCoordinationDecision(state, entry) {
   } else if (entry.kind === 'coordination_binding') {
     const mandate = next.mandates[entry.workId];
     if (!mandate || mandate.goalRevision !== entry.goalRevision || mandate.lifecycle !== 'active') throw new Error('goal_revision_conflict');
-    next.mandates[entry.workId] = { ...mandate, sessionIds: unique([...mandate.sessionIds, entry.sessionId]) };
+    next.mandates[entry.workId] = { ...mandate, sessionIds: unique([...mandate.sessionIds, entry.sessionId]),
+      executionBindings: { ...mandate.executionBindings, ...(entry.binding ? { [entry.sessionId]: structuredClone(entry.binding) } : {}) } };
   } else {
     const transition = next.transitions[entry.operationId];
     if (!transition || transition.phase !== entry.expectedPhase) throw new Error('transition_phase_conflict');

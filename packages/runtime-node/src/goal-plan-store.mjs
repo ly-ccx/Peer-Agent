@@ -1798,6 +1798,10 @@ function normalizeDelegationOrigin(value) {
   }
   if (value.readOnly === true || value.readOnly === false) origin.readOnly = value.readOnly;
   if (value.verifying === true) origin.verifying = true;
+  if (value.cancellation && typeof value.cancellation.operationId === 'string'
+    && ['stopping', 'awaiting_outcome', 'completed'].includes(value.cancellation.phase)) origin.cancellation = structuredClone(value.cancellation);
+  if (value.coordinationBinding && typeof value.coordinationBinding.workId === 'string'
+    && Number.isSafeInteger(value.coordinationBinding.goalRevision) && typeof value.coordinationBinding.executionEpoch === 'string') origin.coordinationBinding = structuredClone(value.coordinationBinding);
   if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;
   if (['running', 'queued', 'awaiting_approval'].includes(value.pausedFromPhase)) origin.pausedFromPhase = value.pausedFromPhase;
   if (['execute', 'explore', 'verify', 'synthesize', 'block'].includes(value.pausedRunnerIntent)) origin.pausedRunnerIntent = value.pausedRunnerIntent;

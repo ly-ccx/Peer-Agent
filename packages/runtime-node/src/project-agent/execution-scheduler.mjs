@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
+import { sessionExecutionCurrent } from './execution-ownership.mjs';
 
 const AGE_MS = 30 * 60_000;
 const PRIORITY = { low: 0, normal: 1, high: 2 };
@@ -20,6 +21,7 @@ function failed(plan) {
         && runner.recoverableInterruptionCount >= runner.maxRecoverableInterruptionRetries);
 }
 function occupying(plan) {
+  if (plan.delegationOrigin?.cancellation && plan.delegationOrigin.cancellation.phase !== 'completed') return slot(plan) !== 'read';
   const waiting = plan.runner?.status === 'waiting_user' || Boolean(plan.delegationOrigin?.agentWaitMessageId);
   return plan.delegationOrigin?.phase === 'running' && !TERMINAL.has(plan.status) && !failed(plan)
     && !(waiting && slot(plan) === 'read');
@@ -174,7 +176,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
       drain();
     },
     reconcile, inspect, select, isWorkspaceReady: workspaceId => isWorkspaceReady(workspaceId) === true,
-    canRunPlan(plan) { return !plan?.delegationOrigin || isWorkspaceReady(plan.delegationOrigin.workspaceId) === true && plan.delegationOrigin.phase === 'running' && inspect(plan).allowed; },
+    canRunPlan(plan) { return !plan?.delegationOrigin || sessionExecutionCurrent(plan) && isWorkspaceReady(plan.delegationOrigin.workspaceId) === true && plan.delegationOrigin.phase === 'running' && inspect(plan).allowed; },
     async waitForPlanIdle(planId) {
       while (turnsByPlan.get(planId)?.size) await Promise.allSettled([...turnsByPlan.get(planId)].map(controller => controller.settled));
     },

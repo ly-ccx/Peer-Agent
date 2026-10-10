@@ -103,6 +103,7 @@ export function resolveWorkSessionProfile({ plan, kind = 'worker', fallback = nu
     role: 'work_session',
     agentKind: kind,
     ...(text(origin.workId) ? { workId: text(origin.workId) } : {}),
+    ...(origin.coordinationBinding ? { coordinationBinding: structuredClone(origin.coordinationBinding) } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(planId ? { planId } : {}),

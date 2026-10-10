@@ -1,4 +1,7 @@
 import { controlProjectWork } from './work-control.mjs';
+import { createSessionCancellation } from './session-cancellation.mjs';
+import { sessionExecutionCurrent } from './execution-ownership.mjs';
+import { workBudgetBinding } from './work-budget.mjs';
 import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
@@ -60,6 +63,7 @@ const ROLE_SLOTS = [
 ];
 
 export function evaluateWorkSessionWrite(plan, action = {}) {
+  if (!sessionExecutionCurrent(plan)) return { allowed: false, error: 'work_execution_stopped' };
   if (plan?.delegationOrigin?.readOnly !== true) return { allowed: true };
   const capabilityId = typeof action.capabilityId === 'string' ? action.capabilityId : '';
   const permissionKind = typeof action.permissionKind === 'string' ? action.permissionKind : '';
@@ -141,6 +145,9 @@ export function createSessionSupervisor({
       // 收件箱尚未接入。事件投递失败不回滚已经落盘的任务。
     }
   }
+
+  const cancellation = createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
+    abortStream, isolationPlanner, exclusive, project, emit, promote, now });
 
   function delegatedPlans() {
     let names = [];
@@ -479,6 +486,7 @@ export function createSessionSupervisor({
           anchorMessageId,
           inputId,
           ...(text(context?.workId) ? { workId: text(context.workId) } : {}),
+          ...(context?.coordinationBinding ? { coordinationBinding: { ...structuredClone(context.coordinationBinding), sessionId } } : {}),
           surface: surfaceOf(context?.surface),
           memorySnapshotId: snapshot.snapshotId,
           modelSelection: frozen.snapshot,
@@ -500,6 +508,8 @@ export function createSessionSupervisor({
       planId = plan?.planId || null;
       spawnedSessionId = sessionId;
       if (!plan?.delegationOrigin?.sessionId) throw new Error('delegationOrigin was not stored');
+      if (context.coordinationBinding) workBudgetBinding(workspaceId)?.store.bindSession(context.coordinationBinding.workId,
+        context.coordinationBinding.goalRevision, sessionId, { ...context.coordinationBinding, sessionId });
       if (!hold && isolationPlanner && canManageWorkspace(workspaceId) === true) await isolationPlanner.prepare(plan, delegatedPlans());
       if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
       if (replacingOpen) {
@@ -610,43 +620,6 @@ export function createSessionSupervisor({
     if (spawnError) throw spawnError;
   }
 
-  async function cancelLocked(input) {
-    const plan = findBySession(text(input?.sessionId));
-    if (!plan) return null;
-    if (!canManageWorkspace(plan.delegationOrigin.workspaceId)) return { error: 'lease_unavailable' };
-    if (plan.status === 'completed' || plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
-    if (plan.status === 'cancelled') {
-      if (isolationPlanner) await isolationPlanner.cleanup(plan);
-      return project(plan);
-    }
-    const reason = text(input?.reason) || 'cancelled';
-    executionScheduler.cancelPlan(plan.planId);
-    if (typeof goalRunner?.pause === 'function') goalRunner.pause(plan.planId, reason);
-    if (typeof abortStream === 'function') {
-      await abortStream({
-        sessionId: plan.delegationOrigin.sessionId,
-        planId: plan.planId,
-        conversationId: plan.conversationId,
-        reason,
-      });
-    }
-    // A tool may still be settling after abort; keep its execution site until the pump is idle.
-    if (typeof goalRunner?.waitForIdle === 'function') await goalRunner.waitForIdle(plan.planId);
-    await executionScheduler.waitForPlanIdle(plan.planId);
-    goalPlanStore.setPlanStatus(plan.planId, 'cancelled');
-    if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(plan.planId));
-    emit({
-      kind: 'cancelled',
-      sessionId: plan.delegationOrigin.sessionId,
-      planId: plan.planId,
-      workspaceId: plan.delegationOrigin.workspaceId,
-      reason,
-      ...(reason === 'supersession_expired' ? { surfacing: 'silent', payload: { reason, surfacing: 'silent' } } : {}),
-    });
-    if (input?.promote !== false) await promote();
-    const next = goalPlanStore.getPlan(plan.planId);
-    return next ? project(next) : null;
-  }
 
   function list(input = {}) {
     const limit = Number.isInteger(input?.limit) && input.limit > 0 ? Math.min(input.limit, 50) : 50;
@@ -766,6 +739,7 @@ export function createSessionSupervisor({
   async function settleLocked(sessionId) {
     const plan = findBySession(text(sessionId));
     if (!plan) return null;
+    if (!sessionExecutionCurrent(plan)) return { ok: false, error: 'execution_revision_stale' };
     if (plan.resultAcceptance?.acceptedAt) {
       return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
     }
@@ -997,11 +971,7 @@ export function createSessionSupervisor({
       if (plan.delegationOrigin.phase === 'awaiting_approval' && readLocalPlanApproval(plan, approvalStore)) {
         await resumeFromApprovalLocked({ sessionId: plan.delegationOrigin.sessionId, planId: plan.planId });
       }
-      if (continuity.expired(plan)) {
-        await cancelLocked({ sessionId: plan.delegationOrigin.sessionId, reason: 'supersession_expired', promote: false });
-        continue;
-      }
-      if (isolationPlanner && (TERMINAL.has(plan.status)
+      if (isolationPlanner && !plan.delegationOrigin.cancellation && (TERMINAL.has(plan.status)
         || plan.status === 'interrupted' && plan.runner?.status === 'failed')) await isolationPlanner.cleanup(plan);
       if (plan.status === 'completed' && plan.resultAcceptance?.acceptedAt && plan.delegationOrigin.handoffAuthorizedAt
         && plan.deliveryHandoff?.status !== 'delivered' && plan.deliveryHandoff?.status !== 'stopped'
@@ -1011,7 +981,13 @@ export function createSessionSupervisor({
     await promote();
   }
 
-  const reconciled = deferRecovery ? Promise.resolve() : exclusive(() => reconcilePersistedQueues());
+  async function reconcileExpired() {
+    for (const plan of delegatedPlans().filter(continuity.expired)) {
+      if (canManageWorkspace(plan.delegationOrigin.workspaceId)) await cancellation.cancel({ sessionId: plan.delegationOrigin.sessionId,
+        reason: 'supersession_expired', promote: false });
+    }
+  }
+  const reconciled = deferRecovery ? Promise.resolve() : reconcileExpired().then(() => exclusive(() => reconcilePersistedQueues()));
 
   return {
     executionScheduler,
@@ -1034,7 +1010,7 @@ export function createSessionSupervisor({
       });
     },
     resumeRecovered(workspaceId) {
-      return exclusive(async () => {
+      return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)).then(() => exclusive(async () => {
         if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
           if (isHostHandoffPause(plan)) {
@@ -1053,19 +1029,18 @@ export function createSessionSupervisor({
         // Startup queue repair runs before workspace readiness. Retry durable mail
         // only after the host has activated its execution admission gate.
         communication.recover();
-      });
+      }));
     },
-    cancelWorkspace(workspaceId) {
-      return exclusive(async () => {
-        if (!canManageWorkspace(workspaceId)) return { ok: false, error: 'lease_unavailable' };
-        for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
-          if (['completed', 'failed'].includes(plan.status) || plan.resultAcceptance?.acceptedAt) continue;
-          await cancelLocked({ sessionId: plan.delegationOrigin.sessionId, reason: 'bot_deleted', promote: false });
-        }
-        return { ok: true };
-      });
+    async cancelWorkspace(workspaceId) {
+      if (!canManageWorkspace(workspaceId)) return { ok: false, error: 'lease_unavailable' };
+      for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
+        if (['completed', 'failed'].includes(plan.status) || plan.resultAcceptance?.acceptedAt) continue;
+        const result = await cancellation.cancel({ sessionId: plan.delegationOrigin.sessionId, reason: 'bot_deleted', promote: false });
+        if (result?.error) return { ok: false, ...result };
+      }
+      return { ok: true };
     },
-    reconcile() { return exclusive(() => reconcilePersistedQueues()); },
+    reconcile() { return reconcileExpired().then(() => exclusive(() => reconcilePersistedQueues())); },
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
     },
@@ -1085,22 +1060,24 @@ export function createSessionSupervisor({
         return project(goalPlanStore.getPlan(result.plan.planId));
       });
     },
-    controlWork(input, context = {}) {
-      return exclusive(async () => {
+    async controlWork(input, context = {}) {
+      const checked = await exclusive(() => {
         const plan = findBySession(input.sessionId);
         const history = conversationStore.getPersistedConversationHistory?.(context.parentConversationId);
         if (!plan || plan.delegationOrigin.workspaceId !== context.workspaceId
           || plan.delegationOrigin.parentConversationId !== context.parentConversationId
           || !context.currentInputAnchors?.includes(input.anchorMessageId)
           || !history?.messages?.some(row => row.id === input.anchorMessageId && row.role === 'user')) return { error: 'current_user_required' };
-        const controlled = await controlProjectWork({ session: project(plan), action: input.action, anchorMessageId: input.anchorMessageId, context,
-          sessions: () => delegatedPlans().filter(row => row.delegationOrigin.workspaceId === context.workspaceId).map(project),
-          pause: id => continuity.suspend(id, null, context), cancel: id => cancelLocked({ sessionId: id, reason: 'user cancelled work' }),
-          resume: (sessionId, anchorMessageId) => continuity.resume({ sessionId, anchorMessageId }, context),
-        });
-        if (controlled.ok && input.action === 'resume') await promote();
-        return controlled;
+        return { session: project(plan) };
       });
+      if (checked.error) return checked;
+      const controlled = await controlProjectWork({ session: checked.session, action: input.action, anchorMessageId: input.anchorMessageId, context,
+        sessions: () => delegatedPlans().filter(row => row.delegationOrigin.workspaceId === context.workspaceId).map(project),
+        pause: id => continuity.suspend(id, null, context), cancel: id => cancellation.cancel({ sessionId: id, reason: 'user cancelled work' }),
+        resume: (sessionId, anchorMessageId) => continuity.resume({ sessionId, anchorMessageId }, context),
+      });
+      if (controlled.ok && input.action === 'resume') await exclusive(() => promote());
+      return controlled;
     },
     list,
     /** One fresh plan read for a presentation query; same default bound/order as list(). */
@@ -1123,8 +1100,10 @@ export function createSessionSupervisor({
     deliveryFacts: handoff.facts,
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
     cancel(input) {
-      return exclusive(() => cancelLocked(input || {}));
+      return cancellation.cancel(input || {});
     },
+    requestCancel: input => cancellation.request(input || {}),
+    recoverCancellations: workspaceId => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)),
     message(input, context) {
       return exclusive(() => messageLocked(input || {}, context));
     },

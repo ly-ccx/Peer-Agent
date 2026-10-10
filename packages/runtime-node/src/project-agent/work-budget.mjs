@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { executionBindingCurrent } from './coordination-kernel.mjs';
 
 // Host registry contains local ports, never model supplied policy. Desktop and TUI share this seam.
 const stores = new Map();
@@ -37,6 +38,11 @@ export function createWorkBudgetGuard(profile) {
     store.assertOwner();
     const work = store.read().works[profile.workId];
     if (!work || requireActive && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(work.state)) throw new Error('work_execution_stopped');
+    if (requireActive && profile.coordinationBinding) {
+      const state = store.read(), mandate = state.mandates?.[profile.coordinationBinding.workId];
+      const transition = Object.values(state.transitions || {}).find(row => row.executionEpoch === profile.coordinationBinding.executionEpoch);
+      if (!executionBindingCurrent(mandate, transition, profile.coordinationBinding)) throw new Error('execution_revision_stale');
+    }
     const budget = { modelRequests: 0, toolCalls: 0, tokens: 0, costUsd: 0, unknownUsage: false, unknownCost: false, attempts: {}, ...work.budget, limits };
     const patch = update(budget);
     store.saveWork({ ...work, ...patch, budget });
@@ -56,13 +62,14 @@ export function createWorkBudgetGuard(profile) {
           && Object.keys(budget.attempts).some(id => id !== attemptId)) limited();
         budget.modelRequests++;
         if (metadata?.accounting === 'physical_dispatch') physicalDispatchAccounting = true;
-        budget.attempts[attemptId] = { ...budget.attempts[attemptId], role: profile.role, modelProviderId: profile.modelSelection?.modelProviderId, requests: ++requests };
+        budget.attempts[attemptId] = { ...budget.attempts[attemptId], role: profile.role, planId: profile.planId, sessionId: profile.sessionId,
+          modelProviderId: profile.modelSelection?.modelProviderId, requests: ++requests };
       });
     },
     beforeTool(call = {}) { change(budget => {
       if (budget.toolCalls >= limits.maxToolCalls) limited();
       budget.toolCalls++;
-      const attempt = budget.attempts[attemptId] || { role: profile.role };
+      const attempt = budget.attempts[attemptId] || { role: profile.role, planId: profile.planId, sessionId: profile.sessionId };
       budget.attempts[attemptId] = { ...attempt, pendingTools: [...(attempt.pendingTools || []),
         { toolCallId: call.toolCallId || call.id || null, capabilityId: call.capabilityId || call.name || call.tool || null }] };
     }); },
@@ -114,7 +121,7 @@ export function createWorkBudgetGuard(profile) {
       if (!physicalDispatchAccounting && Number.isFinite(usage?.providerRequestCount)) budget.modelRequests += Math.max(0, usage.providerRequestCount - requests);
       budget.lastUsage = { attemptId, role: profile.role, usage: usage || null };
       if (budget.attempts[attemptId]?.pendingTools?.length) budget.uncertainDispatches = [...(budget.uncertainDispatches || []),
-        ...budget.attempts[attemptId].pendingTools.map(row => ({ ...row, attemptId, role: profile.role }))];
+        ...budget.attempts[attemptId].pendingTools.map(row => ({ ...row, attemptId, role: profile.role, planId: profile.planId, sessionId: profile.sessionId }))];
       delete budget.attempts[attemptId];
       store.saveWork({ ...work, budget });
     },
