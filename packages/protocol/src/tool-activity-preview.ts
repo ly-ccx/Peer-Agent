@@ -4,6 +4,8 @@ const PRIVATE_FIELD = /(?:api.?key|token|secret|password|credential|authorizatio
 
 /** One bounded display seam for tool parameters/results in live and historical presentation. It never executes a tool. */
 export function toolActivityPreview(value: unknown, limit: number): ProjectAgentToolPreview {
+  // A missing result is not the JSON literal null. Stringifying it prints the word "null".
+  if (value == null) return { text: '', truncated: false, redacted: false };
   if (typeof value === 'string' && value.length > 64_000) return { text: '', truncated: true, redacted: true };
   let redacted = false, truncated = false, nodes = 0;
   const cleanText = (text: string) => {

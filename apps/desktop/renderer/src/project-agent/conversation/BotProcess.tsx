@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ProjectAgentActivity, ProjectAgentToolPreview } from '@peer-agent/protocol';
 import { PeerIcon } from '../../ui/icons';
-import { agentProcessEntries, toolPresentation } from '../drawer/agentProcess';
+import { agentProcessEntries, toolPresentation, toolPreviewText, toolStepStatus } from '../drawer/agentProcess';
 import type { BotToolRound } from '../state/botConversationState';
 import { isActivityRunning } from '../state/botActivityState';
 import { processSeconds, processDuration } from '../state/processDuration.ts';
@@ -32,7 +32,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
   const entries = activity ? activity.segments.flatMap(segment => segment.kind === 'tool' ? [{
     ...segment, ...toolPresentation(segment.name), input: segment.input, result: segment.result,
   }] : []) : agentProcessEntries(rounds).filter(entry => entry.name !== 'post_reply').map((entry, index) => ({
-    ...entry, status: entry.status === 'unknown' && outcome ? outcome === 'stopped' ? 'stopped' as const : 'failed' as const : entry.status,
+    ...entry,
     id: String(index), receivedChars: undefined,
     input: entry.inputPreview, result: entry.resultPreview,
   }));
@@ -61,7 +61,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
       {entries.map((entry, index) => {
         const active = ['preparing', 'running'].includes(entry.status);
         const time = processSeconds(entry.startedAt, entry.finishedAt, now, !active);
-        const status = entry.status === 'error' ? 'failed' : entry.status;
+        const status = toolStepStatus(entry.status, entry.result, outcome);
         return <details className="bot-tool-step" data-status={entry.status} key={entry.id} open={disclosure?.open[`step-${index}`]}
           onToggle={event => { event.stopPropagation(); disclosure?.toggle(`step-${index}`, event.currentTarget.open); }}>
           <summary>
@@ -90,8 +90,12 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
 
 function Preview({ label, value, i18n, disclosure, slot }: { readonly label: string; readonly value?: ProjectAgentToolPreview; readonly i18n: I18nRuntime; readonly disclosure?: ProcessDisclosure; readonly slot: string }) {
   if (!value) return null;
+  const text = toolPreviewText(value, {
+    empty: i18n.t('projectAgent.process.noOutput'),
+    limit: i18n.t('projectAgent.process.previewLimit'),
+  });
   return <details className="bot-tool-preview" open={disclosure?.open[slot]} onToggle={event => { event.stopPropagation(); disclosure?.toggle(slot, event.currentTarget.open); }}><summary><PeerIcon name="chevronRight" size={12} />{label}
     {value.truncated ? <span>{i18n.t('projectAgent.process.truncated')}</span> : null}
     {value.redacted ? <span>{i18n.t('projectAgent.process.redacted')}</span> : null}
-  </summary><pre tabIndex={0}>{value.text || i18n.t('projectAgent.process.previewLimit')}</pre></details>;
+  </summary><pre tabIndex={0}>{text}</pre></details>;
 }

@@ -326,6 +326,8 @@ export type TranslationKey =
   | 'projectAgent.process.minutes'
   | 'projectAgent.process.done'
   | 'projectAgent.process.failed'
+  | 'projectAgent.process.cancelled'
+  | 'projectAgent.process.noOutput'
   | 'projectAgent.process.suppressed'
   | 'projectAgent.process.unknown'
   | 'projectAgent.process.sent'
@@ -1815,6 +1817,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.minutes': '{minutes} 分 {seconds} 秒',
     'projectAgent.process.done': '已结束',
     'projectAgent.process.failed': '未完成',
+    'projectAgent.process.cancelled': '已取消',
+    'projectAgent.process.noOutput': '没有返回内容。',
     'projectAgent.process.suppressed': '未发送',
     'projectAgent.process.unknown': '状态未记录',
     'projectAgent.process.sent': '已发送',
@@ -3092,6 +3096,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.minutes': '{minutes}m {seconds}s',
     'projectAgent.process.done': 'Finished',
     'projectAgent.process.failed': 'Did not complete',
+    'projectAgent.process.cancelled': 'Cancelled',
+    'projectAgent.process.noOutput': 'No content was returned.',
     'projectAgent.process.suppressed': 'Not delivered',
     'projectAgent.process.unknown': 'Status not recorded',
     'projectAgent.process.sent': 'Sent',
