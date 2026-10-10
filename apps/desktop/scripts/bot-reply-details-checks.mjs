@@ -11,9 +11,16 @@ export async function openReplyDetails(page, message) {
   const placement = await button.evaluate(node => {
     const action = node.getBoundingClientRect(), footer = node.parentElement.getBoundingClientRect();
     const status = node.parentElement.querySelector('.bot-context-running')?.getBoundingClientRect();
-    return { right: Math.abs(action.right - footer.right), gap: status ? action.left - status.right : null };
+    const bubbles = [...node.closest('.bot-reply, .bot-system').querySelectorAll(
+      ':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
+      + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
+      + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
+    const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0)?.getBoundingClientRect();
+    return { right: Math.abs(action.right - footer.right), bubbleRight: bubble ? Math.abs(action.right - bubble.right) : null,
+      gap: status && action.top < status.bottom ? action.left - status.right : null };
   });
-  assert.ok(placement.right <= 2, 'details action aligns with the right edge of the reply column');
+  assert.ok(placement.right <= 2, 'details action aligns with its footer');
+  if (placement.bubbleRight !== null) assert.ok(placement.bubbleRight <= 2, 'details action aligns with the current bubble, not the conversation column');
   if (placement.gap !== null) assert.ok(placement.gap >= 24, 'running status and details action have separate sides');
   await message.hover();
   await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());

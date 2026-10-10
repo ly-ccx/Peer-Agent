@@ -6,6 +6,9 @@ import type { BotChatMessage } from '../state/botConversationState';
 import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
 import { EvidenceList } from './EvidenceList';
 import '../styles/bot-reply-context.css';
+import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { replyActivityLabel } from '../state/replyActivityLabel';
+import { useReplyFooterBounds } from './useReplyFooterBounds';
 
 const VERDICTS = {
   passed: 'projectAgent.chat.verdict.passed', failed: 'projectAgent.chat.verdict.failed',
@@ -17,11 +20,13 @@ const SURFACING = {
 } as const;
 
 /** Reply metadata stays discoverable without competing with the answer or pending work. */
-export function ReplyContext({ i18n, onOpenDetails, running = false }: {
-  readonly i18n: I18nRuntime; readonly onOpenDetails?: () => void; readonly running?: boolean;
+export function ReplyContext({ i18n, onOpenDetails, activity }: {
+  readonly i18n: I18nRuntime; readonly onOpenDetails?: () => void; readonly activity?: ProjectAgentActivity;
 }) {
-  return <div className="bot-reply-context" data-running={running}>
-    {running ? <span className="bot-context-running">{i18n.t('projectAgent.chat.generating')}</span> : null}
+  const ref = useReplyFooterBounds();
+  const label = replyActivityLabel(activity, i18n);
+  return <div ref={ref} className="bot-reply-context" data-running={Boolean(label)}>
+    {label ? <span className="bot-context-running" role="status" title={label}>{label}</span> : null}
     <button type="button" onClick={event => {
       event.currentTarget.focus({ preventScroll: true });
       onOpenDetails?.();
