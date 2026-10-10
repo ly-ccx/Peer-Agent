@@ -22,6 +22,8 @@ import {
   type ProjectWorkState,
 } from '@peer-agent/protocol';
 
+import { readAgentActivity } from './agentActivityState.ts';
+
 export const CONVERSATION_PAGE_SIZE = 50;
 export const CONVERSATION_GAP_MS = 10 * 60 * 1000;
 export const CONVERSATION_WINDOW_THRESHOLD = 200;
@@ -114,6 +116,7 @@ export interface BotDispositionMark {
 }
 
 export interface BotChatMessage {
+  readonly agentActivity?: import('@peer-agent/protocol').AgentActivity;
   readonly id: string;
   readonly kind: string;
   readonly role: string;
@@ -160,7 +163,7 @@ export type ConversationRow =
 
 export type ConversationDisplayRow = ConversationRow | { readonly type: 'activity'; readonly activity: import('@peer-agent/protocol').ProjectAgentActivity };
 
-const VISIBLE_KINDS = new Set(['user_input', 'agent_reply', 'system_card']);
+const VISIBLE_KINDS = new Set(['user_input', 'agent_reply', 'system_card', 'agent_activity']);
 
 export function optimisticInputMessageId(inputId: string): string {
   return `input-${inputId}`;
@@ -181,6 +184,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     kind,
     role,
     content: readString(raw.content) || readString(raw.text),
+    ...(readAgentActivity(raw.agentActivity) ? { agentActivity: readAgentActivity(raw.agentActivity) } : {}),
     createdAt: readString(raw.createdAt) || readString(raw.at),
     ...(readString(raw.turnId) ? { turnId: readString(raw.turnId) } : {}),
     ...(raw.turnKind === 'user' || raw.turnKind === 'wake' ? { turnKind: raw.turnKind } : {}),

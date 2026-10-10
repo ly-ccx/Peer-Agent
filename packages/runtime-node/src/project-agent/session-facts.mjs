@@ -17,7 +17,8 @@ export function sessionFactsFromPlan(plan) {
     phase: plan?.delegationOrigin?.phase, superseded: Boolean(plan?.delegationOrigin?.supersededBy),
     accepted: Boolean(plan?.resultAcceptance?.acceptedAt),
     needsUser: plan?.delegationOrigin?.phase === 'awaiting_approval',
-    blockedReason: plan?.runner?.blockedReason,
+    blockedReason: plan?.delegationOrigin?.agentWaitMessageId && plan?.runner?.status !== 'waiting_user'
+      ? 'waiting_parent_agent' : plan?.runner?.blockedReason,
     verificationActive,
   }), verificationActive };
 }

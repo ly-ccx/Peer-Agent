@@ -10,6 +10,7 @@ import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } fr
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
 import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
+import { checkBotAgentActivity } from './bot-agent-activity-checks.mjs';
 import { checkBotMessageLayout } from './bot-message-layout-checks.mjs';
 import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
@@ -38,7 +39,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only');
+const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -77,6 +78,10 @@ const budgetErrorText = '代理暂时不可用：agent_tool_budget_exhausted: �
 seededMessages[9997] = { ...seededMessages[9997], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: budgetErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-budget', kind: 'agent_unavailable', content: budgetErrorText,
     actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId: 'rc-budget' } }] }] };
+for (const [offset, state] of ['started', 'question', 'reported', 'started'].entries()) {
+  seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
+    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 3 ? 'rc-work-2' : 'rc-work-1', name: offset === 3 ? '独立核验' : '实现检查', state} };
+}
 // Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
 const recoveryCases = [
   { key: 'missing-checkpoint', failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system',
@@ -459,6 +464,10 @@ try {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  } else if (process.argv.includes('--agent-activity-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotAgentActivity({page, until, report, captureDirectory: root, commandFile: workCommand});
   } else if (process.argv.includes('--composer-layout-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();

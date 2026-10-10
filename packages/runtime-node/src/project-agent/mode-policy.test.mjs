@@ -22,6 +22,7 @@ test('project agent whitelist is the read capabilities plus delegation', () => {
     'local.delegation.list_objectives',
     'local.delegation.get_objective',
     'local.delegation.close_objective',
+    'local.delegation.send_agent_message',
     'local.delegation.spawn_session',
     'local.delegation.resume_session',
     'local.delegation.reprioritize_session', 'local.delegation.control_work',

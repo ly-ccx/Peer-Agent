@@ -202,7 +202,10 @@ test('completed before verifier finishes wakes again for the terminal revision, 
   assert.equal(events[0].payload.outcome,null);
   const accepted = watchFactsFromPlan({...plan,updatedAt:'v2',resultAcceptance:{acceptedAt:'t3'},runner:{verifierRuns:[{
     verifierRunId:'run-1',status:'passed',completedAt:'t2'}]}});
-  assert.equal(mapDelegationEvents({sessions:[finished]},{sessions:[accepted]}).length,0);
+  const ended = mapDelegationEvents({sessions:[finished]},{sessions:[accepted]});
+  assert.deepEqual(ended.map(row => row.kind), ['session_ended']);
+  assert.equal(ended[0].payload.status, 'accepted');
+  assert.equal(mapDelegationEvents({sessions:[accepted]},{sessions:[accepted]}).length, 0);
   const pending = watchFactsFromPlan({...plan,runner:{verifierRuns:[{verifierRunId:'run-1',status:'running'}]}});
   assert.equal(mapDelegationEvents({sessions:[before]},{sessions:[pending]}).length,0);
 });

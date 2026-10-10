@@ -58,3 +58,5 @@ export { createCorePromptSource, renderSystemCorePrompt } from './sources/core-s
 export { createRuntimePromptSource, renderRuntimeContext } from './sources/runtime-source.mjs';
 export { createVerifierPromptSource } from './sources/verifier-source.mjs';
 export { createWebEntryPromptSource, renderWebEntryPrompt } from './sources/web-entry-source.mjs';
+
+export { createAgentCommunicationPromptSource } from './sources/agent-communication-source.mjs';

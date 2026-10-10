@@ -23,19 +23,19 @@ export function createProjectToolProvider(options: {
   const manifests: CapabilityManifest[] = specs.map(spec => ({
     displayName: spec.name, capabilityId: spec.capabilityId,
     description: projectToolDescription(spec.name),
-    inputSchema: spec.inputSchema, modeScopes: ['project_agent'],
+    inputSchema: spec.inputSchema, modeScopes: spec.name === 'send_agent_message' ? ['project_agent', 'goal'] : ['project_agent'],
   }));
   const toolDefinitions: RuntimeToolDefinition[] = manifests.map(manifest => ({
     name: manifest.displayName, capabilityId: manifest.capabilityId,
     description: manifest.description!, inputSchema: manifest.inputSchema, modeScopes: manifest.modeScopes,
   }));
-  const projection = createRuntimeProjection(toolDefinitions, { mode: 'project_agent' });
+  const projections = new Map(['project_agent', 'goal'].map(mode => [mode, createRuntimeProjection(toolDefinitions, { mode })]));
   const routes = new Map(specs.map(spec => [spec.capabilityId,
     MEMORY_TOOL_SPECS.includes(spec) ? memory : delegation]));
   const runtime = createRuntimeSdk({ host: {
     executeProvider: (request, context) => {
       const provider = routes.get(request.call.capabilityId);
-      if (!provider || context.mode !== 'project_agent' || !projection.tools.some(tool => tool.capabilityId === request.call.capabilityId)) return Promise.resolve({
+      if (!provider || !projections.get(typeof context.mode === 'string' ? context.mode : '')?.tools.some(tool => tool.capabilityId === request.call.capabilityId)) return Promise.resolve({
         call: request.call,
         result: createFailedClientToolResult({ call: request.call, locale: 'zh-CN', reason: 'capability_not_projected' }),
       }) as Promise<RuntimeSdkProviderExecution>;
@@ -52,7 +52,7 @@ export function createProjectToolProvider(options: {
     toolDefinitions,
     async execute(capabilityId, arguments_, context: TuiExecutionContext) {
       return runtime.execute({ sessionId: context.sessionId,
-        conversationId: context.conversationId, projectionId: projection.createdAt,
+        conversationId: context.conversationId, projectionId: projections.get(typeof context.mode === 'string' ? context.mode : '')?.createdAt ?? '',
         call: { toolCallId: context.toolCallId ?? 'project-tool', capabilityId, arguments: arguments_ },
       }, { ...context, ...(context.toolContext ?? {}) });
     },

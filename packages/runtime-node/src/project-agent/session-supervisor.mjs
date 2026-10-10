@@ -1,4 +1,5 @@
 import { controlProjectWork } from './work-control.mjs';
+import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
@@ -49,6 +50,7 @@ const READ_ONLY_CAPABILITIES = new Set([
   'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
   'local.goal.record_evidence', 'local.interaction.request_user_input',
   'local.goal.explore',
+  'local.delegation.send_agent_message',
 ]);
 const ROLE_SLOTS = [
   ['session_worker', 'worker'],
@@ -110,6 +112,8 @@ export function createSessionSupervisor({
   }
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
+  const communication = createAgentCommunication({ conversationStore, goalPlanStore, goalRunner, findSession: findBySession,
+    listSessions: delegatedPlans, canManageWorkspace, emitEvent, now });
   const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, conversationStore, promote, now });
   const continuity = createSessionContinuity({ goalPlanStore, conversationStore, goalRunner, executionScheduler,
     findBySession, canManageWorkspace, abortStream, emit, now });
@@ -206,6 +210,7 @@ export function createSessionSupervisor({
         && plan.runner.blockedReason === 'manual_dod_confirmation_required' ? 'executing' : plan.status,
       title: typeof plan.title === 'string' ? plan.title : '',
       runnerStatus: plan.runner?.status,
+      agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
       updatedAt: plan.updatedAt,
       conversationId: plan.conversationId,
       progress: plan.progress,
@@ -814,10 +819,20 @@ export function createSessionSupervisor({
     }
   }
 
-  async function messageLocked(input) {
+  async function messageLocked(input, context) {
     const plan = findBySession(text(input?.sessionId));
     const body = text(input?.text);
     if (!plan || !body) return null;
+    const origin = plan.delegationOrigin;
+    if (!context || context.role !== 'project_agent' || context.workspaceId !== origin.workspaceId
+      || context.conversationId !== origin.parentConversationId || !canManageWorkspace(origin.workspaceId)) {
+      return { error: 'agent_out_of_scope' };
+    }
+    const anchors = new Set(context.currentInputAnchors || []);
+    const human = conversationStore.getPersistedConversationHistory(origin.parentConversationId)?.messages
+      ?.find(row => anchors.has(row.id) && row.kind === 'user_input' && row.role === 'user'
+        && typeof row.content === 'string' && row.content.trim() === body);
+    if (!human) return { error: 'current_user_required', message: 'Use send_agent_message for autonomous work information.' };
     if (['paused', 'superseded'].includes(plan.delegationOrigin.phase)) return { error: 'session_not_running', message: 'Resume the paused session before sending instructions.' };
     if (input?.intent === 'amend' && TERMINAL.has(plan.status)) {
       return {
@@ -1000,6 +1015,8 @@ export function createSessionSupervisor({
 
   return {
     executionScheduler,
+    sendAgentMessage: (input, context) => exclusive(() => communication.send(input, context)),
+    recoverAgentMessages: () => exclusive(() => communication.recover()),
     auditLegacyCriteria(planId, criterionIds) { return legacyCriteria.audit(planId, criterionIds); },
     recoverLegacyCriteria(audit) {
       return exclusive(async () => {
@@ -1012,6 +1029,7 @@ export function createSessionSupervisor({
     recoverQueue(workspaceId) {
       return exclusive(() => {
         if (!canManageWorkspace(workspaceId)) throw new Error('lease_unavailable');
+        communication.recover();
         return executionScheduler.reconcile(delegatedPlans(), { workspaceId });
       });
     },
@@ -1032,6 +1050,9 @@ export function createSessionSupervisor({
           if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId, { awaitIdle: false });
         }
         await reconcilePersistedQueues();
+        // Startup queue repair runs before workspace readiness. Retry durable mail
+        // only after the host has activated its execution admission gate.
+        communication.recover();
       });
     },
     cancelWorkspace(workspaceId) {
@@ -1104,8 +1125,8 @@ export function createSessionSupervisor({
     cancel(input) {
       return exclusive(() => cancelLocked(input || {}));
     },
-    message(input) {
-      return exclusive(() => messageLocked(input || {}));
+    message(input, context) {
+      return exclusive(() => messageLocked(input || {}, context));
     },
     deliverAnswer(input) {
       return exclusive(() => deliverAnswerLocked(input || {}));

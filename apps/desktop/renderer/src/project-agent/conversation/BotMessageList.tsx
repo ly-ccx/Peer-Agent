@@ -25,6 +25,7 @@ import { useMessageHighlight } from './useMessageHighlight';
 import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyContext } from './ReplyContext';
+import { AgentActivityRow } from './AgentActivityRow';
 
 export function BotMessageList({
   workspaceId,
@@ -154,6 +155,8 @@ export function BotMessageList({
             onRetry={onRetry}
             onLocateSession={onLocateSession}
           />
+        ) : row.message.kind === 'agent_activity' ? (
+          row.message.agentActivity ? <AgentActivityRow messageId={row.message.id} activity={row.message.agentActivity} i18n={i18n} onOpen={onLocateSession} /> : null
         ) : row.message.kind === 'system_card' ? (
           <SystemCard
             key={row.message.id}

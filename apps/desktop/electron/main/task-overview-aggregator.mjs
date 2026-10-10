@@ -665,6 +665,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     // Plan completion is authoritative over stale runner state. A completed plan cannot
     // still own a live "waiting for you" interaction until a real user message reopens it.
     runnerStatus: status === GOAL_COMPLETED_STATUS ? undefined : plan.runner?.status,
+    agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
     systemBlocked: status !== GOAL_COMPLETED_STATUS
       && plan.runner?.status === 'blocked'
       && isRecoverableSystemGoalBlocker(plan.runner?.blockedReason),

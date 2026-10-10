@@ -367,3 +367,13 @@ test('optimistic, failed and acknowledged messages keep uploads until the durabl
   assert.equal(applyOptimistic([echo], [input]).length, 1);
   assert.equal(echo.attachments?.[0]?.name, 'brief.md');
 });
+
+test('Agent activity is visible metadata while private work messages stay hidden', () => {
+  const activity = normalizeBotMessage({id: 'activity', kind: 'agent_activity', role: 'system',
+    agentActivity: {eventId: 'event', sessionId: 'child', name: '实现检查', state: 'reported'}})!;
+  const mail = normalizeBotMessage({id: 'mail', kind: 'agent_message', role: 'system', content: 'internal'})!;
+  assert.equal(activity.agentActivity?.name, '实现检查');
+  assert.deepEqual(visibleBotMessages([activity, mail]).map(row => row.id), ['activity']);
+  const malformed = normalizeBotMessage({id: 'bad', kind: 'agent_activity', agentActivity: {state: 'success'}})!;
+  assert.equal(malformed.agentActivity, undefined);
+});
