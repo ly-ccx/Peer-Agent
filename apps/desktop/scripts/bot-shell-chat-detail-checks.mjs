@@ -40,11 +40,13 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     await checkReplyPresence({ page, reply: firstReply, report, until, state: `short-question-${theme}` });
     await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1');
-    // Capture the settled hover state without cancelling/restoring its CSS
-    // transition, which can restart opacity from zero during the screenshot.
+    // Mouse-only hover is checked above. Keep the revealed entry focused for
+    // the still image so native pointer updates cannot dismiss it mid-capture.
+    await button.focus();
+    await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
     await page.screenshot({ path: path.join(captureDirectory, `reply-entry-hover-${theme}.png`) });
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'screenshot retains the hovered entry');
-    entryChecks.push({ theme, hiddenUntilHover: true });
+    entryChecks.push({ theme, hiddenUntilHover: true, stillImageFocus: true });
   }
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, entryTheme);
   await openReplyDetails(page, firstReply);
