@@ -25,3 +25,24 @@ test('unknown child effects fence that executor while coordinator and unrelated 
     assert.throws(()=>createWorkBudgetGuard(profile('B')).beforeRequest(),/work_execution_stopped/);
   }finally{release();rmSync(root,{recursive:true,force:true});}
 });
+
+test('a stopped parent reply cannot revoke its admitted children; root and budget stops still fence them',()=>{
+  const root=mkdtempSync(path.join(os.tmpdir(),'reply-scoped-budget-'));
+  const store=createWorkCoordinationStore({rootDir:root,workspaceId:'w',holdsLease:()=>true,leaseEpoch:()=> 'one'});
+  const release=registerWorkBudget('w',store);
+  const child={workspaceId:'w',workId:'goal',planId:'A',role:'work_session'};
+  try {
+    for (const state of ['paused','cancelled','blocked_system']) {
+      store.saveWork({workId:'goal',state,stopScope:'reply'});
+      const guard=createWorkBudgetGuard(child);
+      guard.beforeRequest(); guard.beforeTool({toolCallId:'read'});
+      guard.checkpoint({},[{call:{toolCallId:'read'},result:{ok:true}}]);
+      guard.finish({totalTokens:1,estimatedCostUsd:0});
+      assert.throws(()=>createWorkBudgetGuard({...child,role:'project_agent'}).beforeRequest(),/work_execution_stopped/);
+    }
+    for (const [state,stopScope] of [['cancelled','work'],['paused','work'],['budget_limited','reply']]) {
+      store.saveWork({workId:'goal',state,stopScope});
+      assert.throws(()=>createWorkBudgetGuard(child).beforeRequest(),/work_execution_stopped/);
+    }
+  } finally {release();rmSync(root,{recursive:true,force:true});}
+});

@@ -55,3 +55,15 @@ export interface CoordinationExecutionBinding {
   goalRevision: number;
   executionEpoch: string;
 }
+
+/** Factual view of a durable operation; completed means disposition applied, not task success. */
+export interface CoordinationSessionFacts {
+  readonly operationId: string;
+  readonly action: CoordinationAction;
+  readonly phase: TaskTransitionPhase;
+  readonly reason: string;
+  readonly goalRevision: number;
+  readonly priorSessionId?: string;
+  readonly replacementSessionId?: string;
+  readonly replacementTitle?: string;
+}

@@ -147,7 +147,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const events = job.events || [];
       const missing = events.filter(event => !store.read().events[event.eventId]);
       if (missing.length) store.transfer(missing);
-      const linked = Object.values(store.read().works).find(work => events.some(event => work.sessionIds?.includes(event.sessionId)));
+      // A fresh batch must not replace an unfinished slice's protected checkpoint.
+      const linked = Object.values(store.read().works).find(work => !['runnable', 'retry_wait'].includes(work.state)
+        && events.some(event => work.sessionIds?.includes(event.sessionId)));
       job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
       const existing = store.read().works[job.workId];
       const checkpointRef = existing?.checkpointRef || store.checkpoint(job.workId, { job: { ...job, continuation: true }, outcome: { rounds: [] } });
@@ -189,7 +191,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         waitFor: [...waiting.map(row => ({ kind: 'session', id: row.sessionId })),
           ...(state === 'retry_wait' && recovery?.reservationId ? [{ kind: 'retry_timer', id: recovery.reservationId }] : [])],
         consumedEventIds: [...new Set([...previous.consumedEventIds, ...(job.events || []).map(row => row.eventId)])].slice(-64) });
-      if (!outcome.failed && !outcome.deliveryPending) store.handled((job.events || []).map(row => row.eventId));
+      if (!outcome.failed && !outcome.yielded && !outcome.deliveryPending) store.handled((job.events || []).map(row => row.eventId));
       return { ...decision, state };
     },
     resume(job) {

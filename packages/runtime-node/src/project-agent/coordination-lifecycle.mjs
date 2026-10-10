@@ -5,7 +5,7 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readMessages, checkTakeover, spawn, requestCancel, send, takeover, holdsLease }) {
+export function createCoordinationLifecycle({ readSession, readMessages, checkTakeover, spawn, requestCancel, send, takeover, holdsLease, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
@@ -25,6 +25,7 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
           .slice(-8).map(item => ({ operationId: item.operationId, action: item.action, phase: item.phase, oldSessionId: item.oldSessionId, replacementSessionId: item.replacementSessionId })) }));
   }
   async function coordinate(input, context) {
+    if (!isEnabled()) return {ok:false,error:'autonomous_coordination_disabled'};
     const workspaceId = context.workspaceId, parentConversationId = context.conversationId || context.parentConversationId;
     const store = storeFor(workspaceId);
     if (!store || !holdsLease(workspaceId)) return { ok: false, error: 'coordination_host_unavailable' };
@@ -97,6 +98,8 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
       ...(transition.error ? { error: transition.error } : {}) };
   }
   async function effect(store, transition) {
+    // Rollback continues registered cancellation, without dispatching new work.
+    if (!isEnabled() && !['cancel','replace'].includes(transition.action)) return;
     const read = () => store.read().transitions[transition.operationId];
     const move = (phase, patch = {}) => { const current = read(); store.advanceTransition(current.operationId, current.phase, { phase, ...patch }); return read(); };
     const state = store.read(), mandate = state.mandates[transition.workId], decision = state.decisions[transition.operationId];
@@ -141,6 +144,7 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
     if (!current()) { move('blocked', { error: 'goal_revision_stale' }); return; }
     if (phase === 'started') { move('completed'); return; }
     if (phase === 'ready' && ['parallel', 'replace'].includes(transition.action)) {
+      if (!isEnabled()) return;
       const handoff = read().handoff;
       const result = await spawn({ ...payload.task, anchorMessageIds: payload.task.anchorMessageIds,
         ...(handoff?.summary ? { brief: `${payload.task.brief}\nRetained work (historical facts, recheck applicability):\n${handoff.summary}`.slice(0, 4000) } : {}) }, context);
@@ -173,5 +177,16 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
     }).finally(() => { drains.delete(workspaceId); if (queued.delete(workspaceId)) void recover(workspaceId); });
     drains.set(workspaceId, promise); return promise;
   }
-  return { coordinate, recover, facts };
+  function forSession(workspaceId, sessionId) {
+    const state=storeFor(workspaceId)?.read();
+    const related=Object.values(state?.transitions || {}).filter(row=>row.action!=='query' && (row.oldSessionId===sessionId || row.replacementSessionId===sessionId));
+    const transition=related.at(-1);
+    if (!transition) return undefined;
+    const lineage=related.findLast(row=>row.action==='replace' && row.replacementSessionId) || transition;
+    return {operationId:transition.operationId,action:transition.action,phase:transition.phase,reason:transition.reason,
+      goalRevision:transition.expectedGoalRevision, ...(lineage.action === 'replace' ? {
+        priorSessionId:lineage.oldSessionId, replacementSessionId:lineage.replacementSessionId,
+        replacementTitle:state.decisions[lineage.operationId].payload?.task?.title} : {})};
+  }
+  return { coordinate, recover, facts, forSession };
 }

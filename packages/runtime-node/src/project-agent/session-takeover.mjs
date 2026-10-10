@@ -35,7 +35,8 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
             || plan.delegationOrigin.takeover?.operationId !== input.operationId || plan.delegationOrigin.cancellation) return;
           const unknown = state.works[input.binding.workId]?.budget?.uncertainDispatches?.some(row => !row.planId || row.planId === plan.planId);
           if (unknown) {
-            store.advanceTransition(input.operationId, 'stopping', { phase: 'awaiting_outcome', error: 'execution_outcome_unknown' }); return;
+            store.advanceTransition(input.operationId, 'stopping', { phase: 'awaiting_outcome', error: 'execution_outcome_unknown' });
+            emit({kind:'interrupted',eventId:`coordination-outcome:${input.operationId}`,workspaceId:context.workspaceId,sessionId:input.sessionId,planId:plan.planId,reason:'execution_outcome_unknown'}); return;
           }
           const binding = { ...input.binding, sessionId: input.sessionId };
           store.bindSession(binding.workId, binding.goalRevision, input.sessionId, binding);

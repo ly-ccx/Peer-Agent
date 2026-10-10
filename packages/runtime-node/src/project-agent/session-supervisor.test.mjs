@@ -139,6 +139,7 @@ async function harness({
   objectives = null,
   isolationPlanner = undefined,
   canManageWorkspace = undefined,
+  autonomousCoordinationEnabled = undefined,
   now = () => '2026-09-27T00:00:00.000Z',
 } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-'));
@@ -185,6 +186,7 @@ async function harness({
     conversationStore,
     goalPlanStore,
     goalRunner,
+    autonomousCoordinationEnabled,
     objectives,
     catalog,
     routing: routing(),
@@ -2228,4 +2230,56 @@ test('actual executor takeover retains GoalPlan, changes epoch, and does not con
     assert.equal(fresh.delegationOrigin.takeover.phase,'completed');
     assert.equal(env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length,1);
   }finally{release();await env.cleanup();}
+});
+
+test('cancellation publishes an unknown outcome and keeps its replacement fenced after recovery',async()=>{
+  const env=await harness();
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try {
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const task=spawnInput({kind:'research',readOnly:true});
+    const a=await env.supervisor.coordinateWork({action:'parallel',reason:'inspect A',task},context);
+    store.saveWork({workId:'root',budget:{uncertainDispatches:[{toolCallId:'unknown-call',planId:planIdOf(env,a.sessionId)}]}});
+    const result=await env.supervisor.coordinateWork({action:'replace',sessionId:a.sessionId,expectedRevision:1,reason:'correct A',task},
+      {...context,deliveryKey:'replace-unknown'});
+    assert.ok(['stopping','awaiting_outcome'].includes(result.phase),JSON.stringify(result));
+    await until(()=>store.read().transitions['replace-unknown'].phase==='awaiting_outcome');
+    const current=env.supervisor.get({sessionId:a.sessionId});
+    assert.equal(current.status,'awaiting_outcome');
+    assert.equal(current.coordination.phase,'awaiting_outcome');
+    assert.equal(current.actionRight,'peer_advancing');
+    assert.equal(env.events.some(row=>row.eventId==='coordination-outcome:replace-unknown' && row.reason==='execution_outcome_unknown'),true);
+    await env.supervisor.recoverCoordination('ws-1');
+    assert.equal(env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length,1);
+    assert.deepEqual(env.goalPlanStore.getPlan(planIdOf(env,a.sessionId)).delegationOrigin.cancellation.evidenceCalls,['unknown-call']);
+  } finally { release(); await env.cleanup(); }
+});
+
+test('rollback does not promote an already queued replacement and never revives its cancelled predecessor',async()=>{
+  let enabled=true;
+  const env=await harness({autonomousCoordinationEnabled:()=>enabled,goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try {
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1']};
+    const open=title=>env.supervisor.coordinateWork({action:'parallel',reason:title,task:spawnInput({title,kind:'research',readOnly:true})},{...context,deliveryKey:title});
+    const a=await open('A'), b=await open('B'); await open('C');
+    const replaced=await env.supervisor.coordinateWork({action:'replace',sessionId:a.sessionId,expectedRevision:1,reason:'correct A',task:spawnInput({title:'correct A',kind:'research',readOnly:true})},
+      {...context,deliveryKey:'replace'});
+    await until(()=>store.read().transitions.replace.phase==='completed');
+    const replacementId=store.read().transitions.replace.replacementSessionId;
+    assert.equal(env.supervisor.get({sessionId:replacementId}).status,'queued');
+    enabled=false;
+    await env.supervisor.cancel({sessionId:b.sessionId,reason:'free slot'});
+    await env.supervisor.reconcile();
+    assert.equal(env.supervisor.get({sessionId:replacementId}).status,'queued');
+    assert.equal(env.supervisor.get({sessionId:a.sessionId}).status,'cancelled');
+    enabled=true;await env.supervisor.reconcile();
+    assert.equal(env.supervisor.get({sessionId:replacementId}).status,'running');
+    assert.equal(env.supervisor.get({sessionId:a.sessionId}).status,'cancelled');
+    assert.equal(replaced.error,undefined);
+  } finally {release();await env.cleanup();}
 });

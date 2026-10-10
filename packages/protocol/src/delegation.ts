@@ -18,6 +18,8 @@ export type WorkSessionStatus =
   | 'running'
   | 'waiting_user'
   | 'waiting_agent'
+  | 'stopping'
+  | 'awaiting_outcome'
   | 'verifying'
   | 'result_ready'
   | 'accepted'
@@ -25,7 +27,7 @@ export type WorkSessionStatus =
   | 'cancelled'
   | 'superseded';
 
-export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running', 'waiting_user', 'waiting_agent', 'verifying',
+export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running', 'waiting_user', 'waiting_agent', 'stopping', 'awaiting_outcome', 'verifying',
   'result_ready', 'accepted', 'failed', 'cancelled', 'superseded'] as const satisfies readonly WorkSessionStatus[];
 
 export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
@@ -61,6 +63,7 @@ export interface SessionQueueFacts {
 }
 
 export interface WorkSessionConversationMeta extends SessionQueueFacts {
+  readonly coordination?: import('./delegation-coordination.ts').CoordinationSessionFacts;
   readonly sessionId?: string;
   readonly conversationId?: string;
   readonly workspaceId: string;
@@ -74,6 +77,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly coordination?: import('./delegation-coordination.ts').CoordinationSessionFacts;
   readonly sessionId: string;
   readonly workspaceId: string;
   readonly title: string;
@@ -397,6 +401,8 @@ function delegationStatus(
   projected: TaskOverviewItem,
 ): WorkSessionStatus {
   return deriveSessionFacts({ status: snapshot.status, runnerStatus: snapshot.runnerStatus,
+    cancellationPhase: meta.origin.cancellation?.phase,
+    takeoverPhase: meta.coordination?.phase === 'awaiting_outcome' ? 'awaiting_outcome' : meta.origin.takeover?.phase,
     accepted: meta.accepted === true || (snapshot.status === 'completed' && meta.acceptance !== 'confirm'
       && meta.accepted === undefined && !meta.verifying && !snapshot.runnerStatus),
     superseded: Boolean(meta.supersededBy), phase: meta.phase,
@@ -415,16 +421,20 @@ export function projectWorkSession(
   conversationMeta: WorkSessionConversationMeta,
 ): WorkSession {
   const projected = projectGoalPlan(plan);
+  const status = delegationStatus(plan, conversationMeta, projected);
+  const transitioning = ['stopping','awaiting_outcome'].includes(status) || conversationMeta.origin.takeover?.phase === 'stopping';
   return {
     sessionId: conversationMeta.sessionId ?? plan.conversationId ?? plan.planId,
     workspaceId: conversationMeta.workspaceId,
     title: plan.title,
     planId: plan.planId,
-    status: delegationStatus(plan, conversationMeta, projected),
-    actionRight: projected.actionRight,
-    nextAction: projected.nextAction,
-    statusLabel: projected.statusLabel,
-    ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
+    status,
+    actionRight: transitioning ? 'peer_advancing' : projected.actionRight,
+    nextAction: transitioning ? 'none' : projected.nextAction,
+    statusLabel: status === 'stopping' ? '正在停止' : status === 'awaiting_outcome' ? '执行结果待核实'
+      : conversationMeta.origin.takeover?.phase === 'stopping' ? '正在接手' : projected.statusLabel,
+    ...(!transitioning && projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
+    ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
     ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
     origin: conversationMeta.origin,
