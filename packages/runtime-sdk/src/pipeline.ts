@@ -108,12 +108,13 @@ export function createRuntimePipeline<
 
         for (let turn = 0; turn < maxTurns; turn += 1) {
           throwIfAborted(signal);
+          if (input.shouldYield?.() === true) return await yieldRun();
           turns = turn + 1;
           const currentContext = turnContext(turn);
           const outcome = await options.model.runTurn(state, currentContext);
           state = outcome.state;
 
-          if (outcome.kind === 'continue') continue;
+          if (outcome.kind === 'continue') { if (input.shouldYield?.() === true) return await yieldRun(); continue; }
 
           if (outcome.kind === 'completed') {
             await options.model.onCompleted?.(state, outcome.output, currentContext);
@@ -202,7 +203,7 @@ export function createRuntimePipeline<
               reason: terminalExecution.terminalReason || 'tool_requested_stop',
             };
           }
-          if (toolCalls >= sliceToolCalls) return await yieldRun();
+          if (toolCalls >= sliceToolCalls || input.shouldYield?.() === true) return await yieldRun();
         }
 
         return input.yieldAtTurnLimit ? await yieldRun() : await exhaust('max_turns_exceeded');

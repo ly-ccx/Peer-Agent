@@ -104,7 +104,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     recoverJob() {
       expireReservations();
-      const work = Object.values(store.read().works).find(row => row.state === 'runnable' && row.checkpointRef)
+      const work = Object.values(store.read().works).sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt))).find(row => row.state === 'runnable' && row.checkpointRef)
         || Object.values(store.read().works).find(row => row.checkpointRef && recoveryReservationDue(row, now()));
       if (!work) return null;
       const checkpoint = readProtectedWork(work);
@@ -150,11 +150,6 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const linked = Object.values(store.read().works).find(work => events.some(event => work.sessionIds?.includes(event.sessionId)));
       job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
       const existing = store.read().works[job.workId];
-      if (inputs.length && !job.continuation) for (const work of Object.values(store.read().works)) {
-        if (work.workId !== job.workId && ['runnable', 'retry_wait'].includes(work.state)) store.saveWork({ ...work, state: 'paused', stopScope: 'reply',
-          recovery: work.recovery ? { ...work.recovery, retryAt: undefined, reservationId: undefined } : undefined,
-          waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') });
-      }
       const checkpointRef = existing?.checkpointRef || store.checkpoint(job.workId, { job: { ...job, continuation: true }, outcome: { rounds: [] } });
       const recovery = job.manualRecovery ? manualRecovery(existing?.recovery, now())
         : existing?.recovery ? { ...existing.recovery, retryAt: undefined, reservationId: undefined,

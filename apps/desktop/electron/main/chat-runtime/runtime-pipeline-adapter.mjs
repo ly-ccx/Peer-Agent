@@ -36,6 +36,7 @@ export async function runDesktopRuntimePipeline({
   maxToolCalls,
   sliceToolCalls,
   yieldAtTurnLimit,
+  shouldYield,
   maxToolBatchCalls,
   budgetGuard = null,
   signal,
@@ -82,7 +83,7 @@ export async function runDesktopRuntimePipeline({
     ...(modelId ? { model: modelId } : {}),
     input: null,
     maxTurns,
-    maxToolCalls, sliceToolCalls, yieldAtTurnLimit, maxToolBatchCalls,
+    maxToolCalls, sliceToolCalls, yieldAtTurnLimit, shouldYield, maxToolBatchCalls,
   }, { signal });
 
   // Desktop 外层已经以异常驱动 chat:stream:error / aborted 与资源清理；公共
