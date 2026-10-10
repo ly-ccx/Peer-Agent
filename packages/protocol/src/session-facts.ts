@@ -16,7 +16,9 @@ export function deriveSessionFacts(input: {
   if (input.status === 'cancelled') status = 'cancelled';
   else if (input.status === 'failed') status = 'failed';
   else if (input.accepted) status = 'accepted';
-  else if (input.needsUser || ['blocked', 'waiting_user'].includes(input.runnerStatus || '')) status = 'waiting_user';
+  else if (input.needsUser || input.runnerStatus === 'waiting_user') status = 'waiting_user';
+  else if (input.blockedReason === 'waiting_parent_agent' && input.phase !== 'paused' && !input.superseded && input.runnerStatus !== 'paused') status = 'waiting_agent';
+  else if (input.runnerStatus === 'blocked') status = 'waiting_user';
   else if (verificationActive) status = 'verifying';
   else if (input.status === 'completed' && ['running', 'starting', 'waiting_provider', 'resuming_after_compaction'].includes(input.runnerStatus || '')) status = 'running';
   else if (input.status === 'completed') status = 'result_ready';

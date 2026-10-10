@@ -69,7 +69,7 @@ export function createDelegationProvider({
         output: { ok: false, error: 'invalid_input', message: 'Unknown delegation capability.' },
       });
     }
-    if (!isProjectAgentTurn({
+    if (item.name !== 'send_agent_message' && !isProjectAgentTurn({
       mode: view.mode ?? request?.mode,
       role: view.role ?? request?.turnProfile?.role,
     })) {
@@ -216,7 +216,7 @@ export function createDelegationProvider({
     });
     const book = ledgerFor({ ...context, workspaceId: view.workspaceId, conversationId: view.conversationId });
     const previous = readResult(book?.get?.(key));
-    if (previous) {
+    if (previous && item.name !== 'send_agent_message') {
       return finish({
         call,
         capabilityId,
@@ -227,7 +227,7 @@ export function createDelegationProvider({
       });
     }
 
-    const dispatched = await dispatch(item.name, input, view);
+    const dispatched = await dispatch(item.name, input, { ...view, deliveryKey: key });
     if (!dispatched.ok) {
       return finish({
         call,
@@ -256,6 +256,7 @@ export function createDelegationProvider({
   }
 
   async function dispatch(name, input, view) {
+    if (name === 'send_agent_message') return accepted(await callPort(supervisor?.sendAgentMessage, input, 'supervisor_unavailable', view), 'supervisor_unavailable');
     if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) {
       const method = name.slice(0, name.indexOf('_'));
       if (typeof objectives?.[method] !== 'function') return {ok:false,output:{ok:false,error:'objectives_unavailable'}};
@@ -278,7 +279,7 @@ export function createDelegationProvider({
     if (name === 'reprioritize_session') return sessionOrMissing(await callPort(supervisor?.reprioritize, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
     if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable'));
-    if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable'));
+    if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable', view));
     if (name === 'get_verification_detail') return readVerification(input);
     if (name === 'verify_session') return verifySession(input);
     if (name === 'set_proactivity') return setProactivity(input, view);
@@ -401,6 +402,9 @@ function executionView(context) {
     : {};
   return {
     workId: text(context?.turnProfile?.workId) || text(nested.turnProfile?.workId),
+    sessionId: text(context?.turnProfile?.sessionId) || text(nested.turnProfile?.sessionId),
+    planId: text(context?.turnProfile?.planId) || text(nested.turnProfile?.planId),
+    agentKind: context?.turnProfile?.agentKind ?? nested.turnProfile?.agentKind,
     manualCriterionAuthorities: context?.manualCriterionAuthorities ?? nested.manualCriterionAuthorities,
     mode: context?.mode ?? nested.mode,
     role: context?.role ?? context?.turnProfile?.role ?? nested.role ?? nested.turnRole ?? nested.turnProfile?.role,
@@ -667,6 +671,8 @@ function finish({ call, capabilityId, name, locale, status, output }) {
         ...(granted && name === 'post_reply'
           ? { control: { terminal: true, reason: 'project_agent_reply' } }
           : {}),
+        ...(granted && name === 'send_agent_message' && output.waitingForParent === true
+          ? { control: { terminal: true, reason: 'agent_message_wait' } } : {}),
       },
       evidence: createEvidenceBundle({
         evidenceId: `delegation-${call.toolCallId || name}`,

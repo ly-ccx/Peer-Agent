@@ -476,6 +476,8 @@ function directToolMessage(message: AnyRecord): CanonicalHistoryMessage | null {
 }
 
 function projectMessage(value: unknown): CanonicalHistoryMessage[] {
+  const internal = recordOf(value);
+  if (internal?.kind === 'agent_message' || internal?.kind === 'agent_activity') return [];
   const message = recordOf(value);
   if (!message || compactionMarker(message)) return [];
   if (message.role === 'user') {

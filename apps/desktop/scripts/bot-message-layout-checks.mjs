@@ -46,7 +46,12 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       assert.equal(await recoveryMessage.locator('[role="status"]').count(), Number(state === 'scheduled'));
       assert.doesNotMatch(await recoveryMessage.innerText(), /ConnectTimeoutError|net::|HTTP 401|execution_outcome_unknown|rc-recovery-/);
       assert.equal(await recoveryMessage.evaluate(node => node.scrollWidth <= node.clientWidth), true);
-      if (state === 'scheduled') assert.equal(await recoveryMessage.locator('.bot-narration p').first().textContent(), '我已经看过项目结构，正在核对实现位置。');
+      if (state === 'scheduled') {
+        assert.equal(await recoveryMessage.locator('.bot-narration p').first().textContent(), '我已经看过项目结构，正在核对实现位置。');
+        const gap = await recoveryMessage.evaluate(node => node.querySelector('.bot-card .bot-reply-body').getBoundingClientRect().top
+          - node.querySelector('.bot-narration .bot-reply-body').getBoundingClientRect().bottom);
+        assert.ok(gap >= 7.5 && gap <= 8.5, `separate narration/recovery bubbles require 8px gap, got ${gap}`);
+      }
       await openReplyDetails(page, recoveryMessage);
       assert.match(await rawError.textContent(), /代理暂时不可用：/);
       await closeReplyDetails(page);
@@ -61,7 +66,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       recoverySamples.push({ state, width, appearance, exactCopy: true, retryVisible, diagnosticsInDrawer: true, fits: true });
     }
   }
-  report.replyRecovery = { cases: recoverySamples, publicProgressRetained: true, reservationTruth: true,
+  report.replyRecovery = { cases: recoverySamples, publicProgressRetained: true, bubbleSpacing: true, reservationTruth: true,
     resolvedReservationRetired: true, unknownHasNoReplay: true, checkpointHasNoReplay: true,
     scope: 'Production renderer from explicit isolated host projection fixtures; request and scheduler recovery are verified separately without live providers' };
   const cases = [];

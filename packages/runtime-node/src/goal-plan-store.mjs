@@ -1791,6 +1791,7 @@ function normalizeDelegationOrigin(value) {
   for (const key of [
     'workspaceId', 'sessionId', 'workId', 'parentSessionId', 'objectiveId', 'objectiveActionId',
     'idempotencyKey', 'parentConversationId', 'supersededBy', 'lastResumeAnchorMessageId',
+    'agentWaitMessageId', 'agentResumePending',
   ]) {
     const text = normalizeOptionalString(value[key]);
     if (text) origin[key] = text;

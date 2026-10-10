@@ -20,7 +20,7 @@ import { pathOf } from '../data-store.mjs';
 import { createBotProfileStore, isBotWorkspaceId } from './bot-profile-store.mjs';
 import { replyQuestionAnswered } from './card-projection.mjs';
 
-const VISIBLE_KINDS = new Set(['user_input', 'agent_reply', 'system_card']);
+const VISIBLE_KINDS = new Set(['user_input', 'agent_reply', 'system_card', 'agent_activity']);
 const PREVIEW_MAX = 80;
 
 function fail(code) {
@@ -60,7 +60,7 @@ export function isVisibleBotMessage(message) {
 function toListMessage(message) {
   const kind = messageKind(message);
   const role = kind === 'user_input' || message?.role === 'user' ? 'user' : 'assistant';
-  const surfacing = message?.meta?.surfacing || message?.surfacing;
+  const surfacing = message?.kind === 'agent_activity' ? 'silent' : message?.meta?.surfacing || message?.surfacing;
   return {
     role,
     text: clip(messageText(message)),
@@ -169,7 +169,7 @@ export function createBotDirectory({
 
   function projectRow(profile, classicBatch = null, messageBatch = null, approvalBatch = null, sessionBatch = null) {
     const messages = messagesOf(profile, messageBatch);
-    const visible = messages.filter(isVisibleBotMessage);
+    const visible = messages.filter(message => isVisibleBotMessage(message) && messageKind(message) !== 'agent_activity');
     const last = visible.length ? toListMessage(visible[visible.length - 1]) : null;
     const sessions = sessionsOf(profile.workspaceId, sessionBatch);
     const questions = questionsIn(messages);

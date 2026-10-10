@@ -7,7 +7,7 @@ const DELEGATION_RUNTIME = Object.freeze({
 export const DELEGATION_TOOL_DEFINITIONS = DELEGATION_TOOL_SPECS.map((item) => ({
   name: item.name,
   capabilityId: item.capabilityId,
-  availableInModes: ['project_agent'],
+  availableInModes: item.name === 'send_agent_message' ? ['project_agent', 'goal'] : ['project_agent'],
   prompt: () => projectToolDescription(item.name),
   runtime: Object.freeze({
     ...DELEGATION_RUNTIME,

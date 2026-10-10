@@ -25,10 +25,16 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   const entryViewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   // Capture the actual view for hover states: surface capture temporarily drops
   // Chromium's :hover even while the pointer, layout and scroll remain unchanged.
-  const nativeView = await app.evaluate(({ BrowserWindow, screen }, { url, viewport }) => {
+  const nativeView = await app.evaluate(({ app, BrowserWindow, screen }, { url, viewport }) => {
     const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url);
     if (!window) throw Error('fixture window missing');
     const previous = window.getContentSize();
+    // Quick Chat can hide the main window. A native-view capture requires a
+    // visible, composited window; keep that precondition explicit.
+    app.show?.();
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
     window.setContentSize(viewport.width, viewport.height);
     return { previous, size: window.getContentSize(), density: screen.getDisplayMatching(window.getBounds()).scaleFactor };
   }, { url: page.url(), viewport: entryViewport });
@@ -62,12 +68,15 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
       opacity: getComputedStyle(node.querySelector('.bot-reply-context > button')).opacity,
       bounds: node.getBoundingClientRect().toJSON(), top: node.closest('.bot-thread').scrollTop }));
     assert.equal(beforeCapture.hovered, true);
-    const session = await page.context().newCDPSession(page);
-    let image;
-    try { image = await session.send('Page.captureScreenshot', { format: 'png', fromSurface: false }); }
-    finally { await session.detach(); }
-    const bytes = Buffer.from(image.data, 'base64');
-    const capture = { method: 'native-view', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20),
+    // Electron's frame capture works for its native window even when Chromium
+    // cannot capture a fromSurface=false view. Preserve the real hover state.
+    const png = await app.evaluate(async ({ BrowserWindow }, url) => {
+      const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url);
+      if (!window) throw Error('fixture window missing for hover capture');
+      return (await window.webContents.capturePage()).toPNG().toString('base64');
+    }, page.url());
+    const bytes = Buffer.from(png, 'base64');
+    const capture = { method: 'electron-webcontents', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20),
       cssWidth: entryViewport.width, cssHeight: entryViewport.height, density: nativeView.density };
     assert.equal(capture.width, Math.round(entryViewport.width * capture.density), 'native hover capture covers the full viewport width');
     assert.equal(capture.height, Math.round(entryViewport.height * capture.density), 'native hover capture covers the full viewport height');

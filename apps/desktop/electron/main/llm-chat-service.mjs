@@ -1,3 +1,4 @@
+import { agentCommunicationExcludedPrefixes } from '@peer-agent/runtime-node';
 import {
   buildAnthropicTools,
   buildAnthropicToolsFromModelProjection,
@@ -146,6 +147,7 @@ function normalizeTurnProfile(value) {
   const context = sanitizeTurnContext(value.context);
   return {
     role,
+    ...(typeof value.agentKind === 'string' ? { agentKind: value.agentKind } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(planId ? { planId } : {}),
@@ -259,6 +261,7 @@ export function projectTurnSystemContext(profile, {
   const turnContext = sanitizeTurnContext(profile.context);
   const fields = {
     role: profile.role,
+    ...(profile.agentKind ? { agentKind: profile.agentKind } : {}),
     ...(textField(profile.workspaceId) ? { workspaceId: textField(profile.workspaceId) } : {}),
     ...(textField(profile.sessionId) ? { sessionId: textField(profile.sessionId) } : {}),
     ...(textField(profile.planId) ? { planId: textField(profile.planId) } : {}),
@@ -1891,6 +1894,7 @@ export function createLlmChatService({
         // (a) 同 provider 流读取早期中断的自动重试：把单次尝试封装为闭包，便于在
         // replay-safe 且为可恢复传输失败时，从头重发同一请求（覆盖全部 wire）。
         const runProviderAttempt = async () => {
+        toolContext.supportsVision = Boolean(provider.supportsVision);
         const attemptStream = createProviderAttemptStream({
           webContents: accumulatingWebContents,
           streamId,
@@ -1916,7 +1920,7 @@ export function createLlmChatService({
           skillStore,
           providerType: resolvedChannel.legacyProvider,
           mode: runtimeMode,
-          excludeCapabilityPrefixes: profile?.excludeCapabilityPrefixes,
+          excludeCapabilityPrefixes: [...(profile?.excludeCapabilityPrefixes ?? []), ...agentCommunicationExcludedPrefixes(profile)],
           readOnlyWorkSession: goalPlanStore?.getPlan?.(profile?.planId)?.delegationOrigin?.readOnly === true,
         });
 

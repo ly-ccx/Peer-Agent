@@ -21,7 +21,7 @@ export function sourceFingerprint(root) {
   return digest.digest('hex');
 }
 
-const requiredShots = [...sharedUiShots, 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const requiredShots = [...sharedUiShots, ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
@@ -72,11 +72,12 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['staleActionExplained', 'disappearedCardRetired', 'separateCompletionStage', 'fullReportInDrawer', 'keyboard', 'narrowFits', 'retryAfterSavedReview'].every(check => machine.completionReview?.[check] === true)
     || !['subsecond', 'seconds', 'persisted', 'unknownHidden', 'narrowFits'].every(check => machine.processTiming?.[check] === true)
     || !['reasonVisible', 'diagnosticInDrawer', 'retryVisible', 'narrowFits'].every(check => machine.budgetFailure?.[check] === true)
-    || !['publicProgressRetained', 'reservationTruth', 'resolvedReservationRetired', 'unknownHasNoReplay', 'checkpointHasNoReplay'].every(check => machine.replyRecovery?.[check] === true)
+    || !['publicProgressRetained', 'bubbleSpacing', 'reservationTruth', 'resolvedReservationRetired', 'unknownHasNoReplay', 'checkpointHasNoReplay'].every(check => machine.replyRecovery?.[check] === true)
     || !['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].every(state => [[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
       machine.replyRecovery?.cases?.some(item => item.state === state && item.width === width && item.appearance === appearance
         && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication'].includes(state))))
     || !['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationRetained', 'noPrivateThinking', 'narrowFits', 'nativeLoaded', 'persistedEventBatch'].every(check => machine.manualWakeRetry?.[check] === true)
+    || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(item => item.width === width && item.appearance === appearance && item.named && item.svg && item.stableIdentity && item.taskDestination && item.humanWaitDistinct && item.fits))
     || machine.manualWakeRetry?.guardedCognitionDispatches !== 1
     || !['controlledCognition', 'realCheckpointPort', 'nativePairLoaded', 'noAutomaticReplay'].every(check => machine.streamingFailureRecovery?.[check] === true)
     || machine.streamingFailureRecovery?.readFileDispatches !== 1 || machine.streamingFailureRecovery?.explicitRetryTurns !== 1
@@ -126,7 +127,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
-      processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
+      processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },
     supplementalCoverage: machine.sharedUiConventions,
@@ -201,6 +202,7 @@ function main() {
   // it must not change the baseline stream-following scenario's history.
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--selection-quote-only',
     '--output', path.join(output, 'selection-machine.json')], path.join(output, 'selection-capture.log'));
+  command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--agent-activity-only', '--output', path.join(output, 'agent-activity.json')], path.join(output, 'agent-activity-capture.log'));
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--shared-ui-only',
     '--output', path.join(output, 'shared-ui-machine.json')], path.join(output, 'shared-ui-capture.log'));
   if (sourceFingerprint(repo) !== fingerprint) throw new Error('Source changed during capture; rerun on stable source');
@@ -213,6 +215,14 @@ function main() {
   const sharedLine = readFileSync(path.join(output, 'shared-ui-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
   const shared = JSON.parse(sharedLine);
   if (!shared.ok || shared.pageErrors?.length || shared.mainAuthorizationErrors?.length) throw new Error('Shared UI interaction failed');
+  const agentLine = readFileSync(path.join(output, 'agent-activity-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
+  const agents = JSON.parse(agentLine);
+  if (!agents.ok || agents.pageErrors?.length || agents.mainAuthorizationErrors?.length) throw new Error('Agent activity interaction failed');
+  machine.agentActivity = agents.agentActivity;
+  machine.agentActivityRun = { startedAt: agents.startedAt, finishedAt: agents.finishedAt, scope: agents.scope };
+  for (const [width, theme] of [[1280, 'dark'], [760, 'light']])
+    for (const file of [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`])
+      copyFileSync(path.join(agents.root, file), path.join(artifactRoot, file));
   machine.sharedUiConventions = shared.sharedUiConventions;
   for (const file of sharedUiShots) copyFileSync(path.join(shared.root, file), path.join(artifactRoot, file));
   machine.selectionQuote = selection.selectionQuote;

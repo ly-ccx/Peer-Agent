@@ -3,6 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import {
   existsSync,
+  openSync,
+  readSync,
+  closeSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -13,6 +16,7 @@ import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import {
   FileReadRangeError,
+  detectLocalImageMediaType,
   parseFileReadLineRange,
   sliceFileReadLines,
 } from '@peer-agent/runtime-node';
@@ -606,6 +610,16 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
     if (name === 'read_file') {
       const filePath = resolveToolPath(args.path, cwd);
       if (!existsSync(filePath)) return { success: false, error: `File not found: ${filePath}` };
+      const fd = openSync(filePath, 'r');
+      const prefix = Buffer.alloc(12);
+      let mediaType;
+      try { mediaType = detectLocalImageMediaType(prefix.subarray(0, readSync(fd, prefix, 0, prefix.length, 0))); }
+      finally { closeSync(fd); }
+      if (mediaType) {
+        return formatToolFailure('read_file', 'failed', 'This is an image. Use view_image to read its pixels.', {
+          path: filePath, code: 'image_requires_view_image', retrievalHint: `view_image(${JSON.stringify({ path: filePath })})`,
+        });
+      }
       const fullContent = readFileSync(filePath, 'utf8');
       let slice;
       try {

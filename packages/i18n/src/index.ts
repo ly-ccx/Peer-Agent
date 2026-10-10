@@ -224,6 +224,17 @@ export type TranslationKey =
   | 'projectAgent.chat.retry'
   | 'projectAgent.chat.continueRetry'
   | 'projectAgent.chat.recoveryScheduled'
+  | 'projectAgent.chat.agent.open'
+  | 'projectAgent.chat.agent.queued'
+  | 'projectAgent.chat.agent.started'
+  | 'projectAgent.chat.agent.update'
+  | 'projectAgent.chat.agent.question'
+  | 'projectAgent.chat.agent.answer'
+  | 'projectAgent.chat.agent.reported'
+  | 'projectAgent.chat.agent.verified'
+  | 'projectAgent.chat.agent.ended'
+  | 'projectAgent.chat.agent.cancelled'
+  | 'projectAgent.chat.agent.blocked'
   | 'projectAgent.chat.recoveryContinuing'
   | 'projectAgent.chat.recoveryExhausted'
   | 'projectAgent.chat.recoveryAuthentication'
@@ -351,6 +362,7 @@ export type TranslationKey =
   | 'projectAgent.drawer.memory.details'
   | 'projectAgent.chat.sessionState.running'
   | 'projectAgent.chat.sessionState.waiting_user'
+  | 'projectAgent.chat.sessionState.waiting_agent'
   | 'projectAgent.chat.sessionState.verifying'
   | 'projectAgent.chat.sessionState.result_ready'
   | 'projectAgent.chat.sessionState.accepted'
@@ -1680,6 +1692,17 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.retry': '重发',
     'projectAgent.chat.continueRetry': '继续尝试',
     'projectAgent.chat.recoveryScheduled': '连接暂时中断，我会接着刚才的进度继续。',
+    'projectAgent.chat.agent.open': '查看 Agent 工作详情',
+    'projectAgent.chat.agent.queued': '已排队',
+    'projectAgent.chat.agent.started': '开始工作',
+    'projectAgent.chat.agent.update': '发来进展',
+    'projectAgent.chat.agent.question': '发来问题',
+    'projectAgent.chat.agent.answer': '发来答复',
+    'projectAgent.chat.agent.reported': '结果已返回',
+    'projectAgent.chat.agent.verified': '核验通过',
+    'projectAgent.chat.agent.ended': '已结束',
+    'projectAgent.chat.agent.cancelled': '已取消',
+    'projectAgent.chat.agent.blocked': '执行受阻',
     'projectAgent.chat.recoveryContinuing': '我正在接着刚才的进度继续处理。',
     'projectAgent.chat.recoveryExhausted': '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。',
     'projectAgent.chat.recoveryAuthentication': '连接的身份验证未通过。请重新登录或检查连接配置，再继续尝试。',
@@ -1807,6 +1830,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.details': '记忆详情',
     'projectAgent.chat.sessionState.running': '正在运行中',
     'projectAgent.chat.sessionState.waiting_user': '需要你处理',
+    'projectAgent.chat.sessionState.waiting_agent': '等待主 Bot 答复',
     'projectAgent.chat.sessionState.verifying': '核验中',
     'projectAgent.chat.sessionState.result_ready': '待你确认',
     'projectAgent.chat.sessionState.accepted': '已签收',
@@ -2924,6 +2948,17 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.retry': 'Retry',
     'projectAgent.chat.continueRetry': 'Continue trying',
     'projectAgent.chat.recoveryScheduled': 'The connection was interrupted. I will continue from the progress already made.',
+    'projectAgent.chat.agent.open': 'View Agent work details',
+    'projectAgent.chat.agent.queued': 'queued',
+    'projectAgent.chat.agent.started': 'started work',
+    'projectAgent.chat.agent.update': 'sent an update',
+    'projectAgent.chat.agent.question': 'asked a work question',
+    'projectAgent.chat.agent.answer': 'sent an answer',
+    'projectAgent.chat.agent.reported': 'returned a result',
+    'projectAgent.chat.agent.verified': 'verification passed',
+    'projectAgent.chat.agent.ended': 'finished',
+    'projectAgent.chat.agent.cancelled': 'cancelled',
+    'projectAgent.chat.agent.blocked': 'blocked',
     'projectAgent.chat.recoveryContinuing': 'I am continuing from the progress already made.',
     'projectAgent.chat.recoveryExhausted': 'The connection has not recovered yet. Progress was saved. You can continue trying or send a new message.',
     'projectAgent.chat.recoveryAuthentication': 'The connection could not be authenticated. Sign in again or check the connection settings, then continue trying.',
@@ -3051,6 +3086,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.details': 'Memory details',
     'projectAgent.chat.sessionState.running': 'Running',
     'projectAgent.chat.sessionState.waiting_user': 'Needs your input',
+    'projectAgent.chat.sessionState.waiting_agent': 'Waiting for the main Bot',
     'projectAgent.chat.sessionState.verifying': 'Verifying',
     'projectAgent.chat.sessionState.result_ready': 'Awaiting your confirmation',
     'projectAgent.chat.sessionState.accepted': 'Accepted',

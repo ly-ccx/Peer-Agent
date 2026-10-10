@@ -302,6 +302,8 @@ export interface GoalPlanProjectionSnapshot {
   readonly runnerStatus?: GoalRunnerStatus;
   /** Runner 阻塞是否由系统基础设施持有，而不是用户行动权。 */
   readonly systemBlocked?: boolean;
+  /** A delegated worker is coordinating with its parent, not asking the human. */
+  readonly agentWaiting?: boolean;
   /**
    * 同一会话此刻是否有前台活流（正在输出 / 调工具 / compact）。
    * 由聚合层从 listActiveStreams 写入；协议层只认这个布尔事实。
@@ -696,6 +698,9 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
   const planStillActive =
     status === 'executing' || status === 'accepted' || status === 'approved';
   const conversationLive = snapshot.conversationLive === true;
+  if (snapshot.agentWaiting && runnerStatus !== 'waiting_user' && ['executing', 'completed'].includes(status)) {
+    return { actionRight: 'peer_advancing', nextAction: 'none', statusLabel: '等待主 Bot 答复', actionLabel: '' };
+  }
   const recoverableSystemBlocked = runnerStatus === 'blocked'
     && snapshot.systemBlocked === true;
   // System infrastructure failures are not user decisions. A foreground turn may

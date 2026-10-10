@@ -2,6 +2,7 @@ import { AUTOMATION_TOOL_DEFINITIONS } from './automation-tool-definitions.mjs';
 import { GOAL_TOOL_DEFINITIONS } from './goal-tool-definitions.mjs';
 import { INTERACTION_TOOL_DEFINITIONS } from './interaction-tool-definitions.mjs';
 import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.mjs';
+import { LOCAL_IMAGE_TOOL_DEFINITIONS } from '@peer-agent/runtime-node';
 import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 import { createSkillToolDefinitionsFromStore } from './skill-tool-definitions.mjs';
 import { DELEGATION_TOOL_DEFINITIONS } from './delegation-tool-definitions.mjs';
@@ -56,6 +57,7 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
   return createToolRegistry({
     tools: [
       ...LEGACY_LOCAL_TOOL_DEFINITIONS,
+      ...LOCAL_IMAGE_TOOL_DEFINITIONS,
       ...SEARCH_TOOL_DEFINITIONS,
       ...DELEGATION_TOOL_DEFINITIONS,
       ...MEMORY_TOOL_DEFINITIONS,
