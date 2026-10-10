@@ -8,6 +8,26 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.11] - 2026-10-10
+
+### Fixed
+
+- Cancel waiting tasks directly from chat and task details, preserving history, current host state and failure retry.
+- Resume unfinished replies from durable checkpoints without replaying previous work; explain checkpoint, scheduling, exhaustion and authentication states.
+- Align Details with the current message bubble and show factual activity descriptions.
+- Deliver authorized local PNG/JPEG/GIF/WebP pixels to vision models and re-read images after recovery, keeping pixels out of persisted evidence and checkpoints.
+
+### Changed
+
+- Execute child Agents in independent conversations with durable bidirectional messaging, answer ownership and named activity.
+- Retain coordination messages received during recovery; distinguish parent-agent questions from human decisions.
+- Integrate product regression for cancellation, reply activity, Agent communication and image delivery; refresh bilingual notes and user guidance.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18. Governed history access, live-model image acceptance, complex-write Evidence and GA remain separate gates.
+- Upgrade Desktop, CLI/TUI and Gateway together; rollback requires the complete pre-upgrade backup.
+
 ## [0.1.0-rc.10] - 2026-10-09
 
 ### Fixed
