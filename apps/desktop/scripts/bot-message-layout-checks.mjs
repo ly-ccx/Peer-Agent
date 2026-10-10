@@ -55,7 +55,15 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       await openReplyDetails(page, recoveryMessage);
       assert.match(await rawError.textContent(), /代理暂时不可用：/);
       await closeReplyDetails(page);
-      await recoveryMessage.scrollIntoViewIfNeeded();
+      // Drawer close restores the reading anchor. Scroll the status card itself,
+      // since the message can be partially visible while its final card is below
+      // the viewport after virtualization measures retained narration.
+      await recoveryMessage.locator('.bot-card').scrollIntoViewIfNeeded();
+      await until(() => recoveryMessage.evaluate(node => {
+        const view = node.closest('.bot-thread').getBoundingClientRect();
+        const card = node.querySelector('.bot-card').getBoundingClientRect();
+        return card.top >= view.top - 1 && card.bottom <= view.bottom + 1;
+      }), Boolean);
       const bounds = await recoveryMessage.evaluate(node => {
         const shell = node.closest('.bot-shell').getBoundingClientRect(), body = node.querySelector('.bot-reply-body').getBoundingClientRect();
         return { shellLeft: shell.left, shellRight: shell.right, bodyLeft: body.left, bodyRight: body.right, viewport: innerWidth };
