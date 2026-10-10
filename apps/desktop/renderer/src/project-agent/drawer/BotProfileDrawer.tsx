@@ -276,6 +276,7 @@ export function BotProfileDrawer({
       ) : null}
       {memory.tab === 'tasks' && memory.sessionId && taskDetail ? (
         <SessionDetail
+          onSelect={sessionId=>onMemory({...memory,open:true,tab:'tasks',sessionId})}
           workspaceId={workspaceId}
           workspacePath={path}
           session={sessionsAvailable ? taskDetail! : { ...taskDetail!, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable') }}

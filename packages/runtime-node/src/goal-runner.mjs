@@ -801,6 +801,7 @@ export function createGoalRunner({
   uiDeliveryAuthority = null,
   emitEvent = null,
   canRunPlan = null,
+  canSettlePlan = canRunPlan,
   prepareIsolation = null,
   now = () => new Date().toISOString(),
   logger = console,
@@ -1418,6 +1419,15 @@ export function createGoalRunner({
     return sessions.get(planId) ?? null;
   }
 
+  // A turn belongs to its admitted owner. Late results/errors cannot undo a
+  // committed suspension or cancellation, including host lease handoff.
+  function turnOwnerStopped(planId, session) {
+    const current = goalPlanStore.getPlan(planId);
+    return !current || session.cancelled || current.status === 'paused'
+      || current.status === 'cancelled' || current.runner?.status === 'paused'
+      || Boolean(canSettlePlan && !canSettlePlan(current));
+  }
+
   async function waitForIdle(planId) {
     const session = getSession(planId);
     if (!session) return getState(planId);
@@ -1432,6 +1442,7 @@ export function createGoalRunner({
     const session = { cancelled: false, promise: null, skipCompletionOnce: false };
     const promise = pump(planId, session)
       .catch((error) => {
+        if (turnOwnerStopped(planId, session)) return getState(planId);
         const message = errorMessage(error);
         logger?.warn?.('[goal-runner] pump failed:', error);
         failPlanRun(goalPlanStore, planId, message, {
@@ -2189,6 +2200,7 @@ export function createGoalRunner({
           explorerRunner,
         });
       } catch (error) {
+        if (turnOwnerStopped(planId, session)) return getState(planId);
         if (isHostVisualReviewFailure(error)) {
           failPlanRun(goalPlanStore, planId, errorMessage(error), {
             appendRunEvent,
@@ -2257,6 +2269,7 @@ export function createGoalRunner({
         return getState(planId);
       }
 
+      if (turnOwnerStopped(planId, session)) return getState(planId);
       if (result?.terminalStatus !== 'error') {
         const currentInterruption = goalPlanStore.getPlan(planId)?.runner?.interruption;
         if (currentInterruption?.recoverable === true) {

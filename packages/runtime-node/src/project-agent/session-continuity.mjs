@@ -9,7 +9,7 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
   findBySession, canManageWorkspace, abortStream, emit, now } = {}) {
   const error = (code) => ({ ok: false, error: code });
   function eligible(plan) {
-    return Boolean(plan && !ENDED.has(plan.status) && !plan.resultAcceptance?.acceptedAt);
+    return Boolean(plan && !ENDED.has(plan.status) && !plan.resultAcceptance?.acceptedAt && !plan.delegationOrigin?.cancellation);
   }
   function check(plan, context) {
     if (!plan) return error('session_not_found');

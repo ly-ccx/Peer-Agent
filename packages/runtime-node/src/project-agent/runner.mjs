@@ -153,7 +153,7 @@ export function createProjectAgentRunner({
       }
     }
     if (userInputs.length > 0) {
-      const inputs = userInputs.splice(0, userInputs.length);
+      const inputs = userInputs.splice(0, coordination ? 1 : userInputs.length);
       const carried = preempted.splice(0, preempted.length);
       const throughSeq = carried.reduce((max, item) => Math.max(max, item.throughSeq || 0), 0);
       return {
@@ -446,7 +446,8 @@ export function createProjectAgentRunner({
     let memoryIds = [];
     while (rounds.length < plan.limits.maxRounds && toolCallsUsed < plan.limits.maxToolCalls) {
       if (disposed) return { turnId, plan, rounds, disposed: true };
-      if (job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
+      if (coordination && rounds.length && userInputs.length) return { turnId, plan, rounds, yielded: true, memoryIds };
+      if (!coordination && job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
         return { turnId, plan, rounds, preempted: true };
       }
       const result = await callRound({
@@ -486,7 +487,7 @@ export function createProjectAgentRunner({
     let lastError = '提供方错误';
     for (let attempt = 0; attempt <= delays.length; attempt += 1) {
       if (disposed) return { disposed: true };
-      if (job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
+      if (!coordination && job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
         return { preempted: true };
       }
       setStatus('waiting_provider');
@@ -503,6 +504,7 @@ export function createProjectAgentRunner({
           roundIndex: rounds.length,
           priorRounds: rounds,
           signal,
+          shouldYield: coordination ? () => userInputs.length > 0 : undefined,
           sink: { ...turnSink, send(channel, payload) { activity.accept(channel, payload); turnSink.send(channel, payload); } },
           modelProviderId: plan.modelProviderId,
           limits: plan.limits,
@@ -604,7 +606,7 @@ export function createProjectAgentRunner({
       if (failedJob.throughSeq > 0) preempted.push({ events: failedJob.events, throughSeq: failedJob.throughSeq });
       failedJob = null; retryArmed = false;
     }
-    if (turnKind === 'wake' && abortController && !abortController.signal.aborted) {
+    if (!coordination && turnKind === 'wake' && abortController && !abortController.signal.aborted) {
       abortController.abort();
     }
     if (!coordination && failedJob && !retryArmed) return kick().then(result => ({ ...result, queued: list.length }));

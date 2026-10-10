@@ -47,10 +47,11 @@ export function TaskCancelButton({ sessionId, status, title, i18n }: {
   readonly sessionId: string; readonly status: string | null; readonly title: string; readonly i18n: I18nRuntime;
 }) {
   const control = useContext(TaskCancellation);
-  if (!control || !canCancelTask(status)) return null;
+  if (!control || !canCancelTask(status) && status !== 'stopping') return null;
   const state = control.states[`${control.workspaceId}:${sessionId}`];
+  const stopping=state?.pending || status==='stopping';
   return <div className="bot-task-cancel">
-    <button type="button" disabled={state?.pending} aria-busy={state?.pending ?? false}
+    <button type="button" disabled={stopping} aria-busy={stopping}
       aria-label={`${i18n.t('projectAgent.task.cancel')} ${title}`} onClick={async event => {
         const trigger = event.currentTarget;
         const returnTo = trigger.closest('.bot-task-detail')?.querySelector<HTMLElement>('.bot-task-back')
@@ -60,7 +61,7 @@ export function TaskCancelButton({ sessionId, status, title, i18n }: {
           const target = returnTo?.isConnected ? returnTo : document.querySelector<HTMLElement>('.bot-background-work > summary, .bot-composer textarea');
           target?.focus({ preventScroll: true });
         });
-      }}><PeerIcon name="stop" size={13} />{i18n.t(state?.pending ? 'projectAgent.task.cancelling' : 'projectAgent.task.cancel')}</button>
+      }}><PeerIcon name="stop" size={13} />{i18n.t(stopping ? 'projectAgent.task.cancelling' : 'projectAgent.task.cancel')}</button>
     {state?.failed && <p role="alert">{i18n.t('projectAgent.task.cancelFailed')}</p>}
   </div>;
 }

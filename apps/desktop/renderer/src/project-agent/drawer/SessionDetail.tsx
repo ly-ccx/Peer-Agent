@@ -11,6 +11,7 @@ import { PeerIcon } from '../../ui/icons';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
 import type { TaskReportState } from '../state/taskDetailState';
 import { TaskCancelButton } from '../state/TaskCancellation';
+import { CoordinationDetails } from './CoordinationDetails';
 import '../styles/bot-task-detail.css';
 
 export function SessionDetail({
@@ -26,6 +27,7 @@ export function SessionDetail({
   reportState,
   hasReadReport,
   onRetryReport,
+  onSelect,
 }: {
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -39,10 +41,11 @@ export function SessionDetail({
   readonly reportState: TaskReportState;
   readonly hasReadReport: boolean;
   readonly onRetryReport: () => void;
+  readonly onSelect?: (sessionId:string)=>void;
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
-  const label = status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
+  const label = session.coordination?.phase === 'stopping' ? formatDrawerSessionStatus(session,i18n) : status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
     : status === 'result_ready' ? i18n.t('projectAgent.chat.work.resultReady')
     : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable');
   const progress = status === 'cancelled' ? label : formatDrawerSessionStatus(session, i18n);
@@ -93,6 +96,7 @@ export function SessionDetail({
       </section> : null}
       <details className="bot-task-information" key={session.sessionId}>
         <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.task.information')}</summary>
+        <CoordinationDetails session={session} i18n={i18n} onSelect={onSelect} />
         <div className="bot-task-report-read" aria-busy={reportState === 'loading'}>
           {reportState !== 'ready' || !session.summary ? <p role="status">{i18n.t(reportState === 'loading'
             ? 'projectAgent.drawer.task.readingReport' : reportState === 'unavailable'

@@ -568,3 +568,18 @@ test('a finite batch beyond the soft slice applies every result before yielding;
   const blocked = await pipeline.run({ sessionId: 'hard', input: '', maxTurns: 2, sliceToolCalls: 1, maxToolCalls: 2 });
   assert.equal(blocked.status, 'exhausted'); assert.equal(executed.length, 3);
 });
+
+test('interjection yields after tool results and checkpoint, never during a write batch', async () => {
+  let requested = false; const order: string[] = [];
+  const pipeline = createRuntimePipeline({
+    model: { initialize: () => 0,
+      runTurn: (state: number) => ({ kind: 'tool_calls' as const, state, calls: [{toolCallId:'write-1'}, {toolCallId:'write-2'}] }),
+      applyToolResults: state => { order.push('applied'); return state + 1; },
+      checkpoint: () => { order.push('durable'); }, onYield: () => { order.push('yield'); },
+    },
+    tools: { execute: call => { requested = true; order.push(call.toolCallId); return { call, result: null }; } },
+  });
+  const result = await pipeline.run({sessionId:'interjection', input:null, shouldYield:()=>requested});
+  assert.equal(result.status, 'yielded'); assert.equal(result.state, 1);
+  assert.deepEqual(order, ['write-1','write-2','applied','durable','yield']);
+});

@@ -9,6 +9,7 @@ import { executeProjectedModelTool } from './chat-runtime/projected-tool-executo
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import { resetCircuitBreaker } from './context-compactor.mjs';
 import { disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
+import { installDelegation } from './project-agent/delegation-port.mjs';
 
 let tmpDir;
 
@@ -2580,6 +2581,48 @@ describe('llm chat service tool materialization', () => {
     }
     assert.equal(urls.some((url) => url.startsWith('https://selected.example/')), true);
     assert.equal(urls.some((url) => url.includes('default.example')), false);
+  });
+
+  it('carries host goal identity and Agent messages through the real desktop tool pipeline',async()=>{
+    const {createLlmChatService}=await loadService();
+    const previousFetch=globalThis.fetch, calls=[];
+    const release=installDelegation({supervisor:{
+      coordinationFacts:()=>[{workId:'root-goal',goalRevision:1,lifecycle:'active',sessionIds:['child']}],
+      coordinateWork:async(input,context)=>{calls.push({input,context});return {ok:true,sessionId:'child',phase:'completed'};},
+      spawn:()=>{throw Error('Goal identity was lost before coordination');},
+      sendAgentMessage:async(input,context)=>{calls.push({input,context});return {ok:true,messageId:'question-one'};},
+    }});
+    const task={anchorMessageIds:['canonical-user'],title:'Inspect fixture',brief:'Inspect only fixture',kind:'research',readOnly:true,
+      successCriteria:[{kind:'model_review',description:'Report the fixture facts'}]};
+    const user={id:'canonical-user',kind:'user_input',role:'user',content:'Inspect fixture'};
+    const service=createLlmChatService({preferredAccessLevel:'restricted_local',
+      conversationStore:{getConversation:()=>({workspacePath:tmpDir}),getPersistedConversationHistory:()=>({messages:[user]})},
+      llmConfigStore:{listProviders:()=>[{id:'fixture',provider:'openai',baseUrl:'https://fixture.example/v1',model:'fixture',isDefault:true,apiKeyConfigured:true}],getDecryptedApiKey:()=> 'fixture-key'},
+    });
+    try {
+      for(const scenario of [
+        {tool:'spawn_session',input:task,profile:{role:'project_agent',workId:'root-goal',workspaceId:'workspace',context:{inputAnchors:[{messageId:user.id}]}}},
+        {tool:'coordinate_work',input:{action:'query',sessionId:'child',expectedRevision:1,reason:'check progress'},profile:{role:'project_agent',workId:'root-goal',workspaceId:'workspace',context:{events:[{eventId:'real-event',sessionId:'child'}]}}},
+        {tool:'send_agent_message',input:{purpose:'question',text:'Which fixture should I inspect?'},profile:{role:'work_session',agentKind:'worker',workId:'root-goal',workspaceId:'workspace',sessionId:'child',planId:'plan-one'}},
+      ]) {
+        let requests=0;
+        globalThis.fetch=async()=>new Response(sse(requests++===0?[
+          {choices:[{delta:{tool_calls:[{index:0,id:'host-fixture',type:'function',function:{name:scenario.tool,arguments:JSON.stringify(scenario.input)}}]},finish_reason:'tool_calls'}]},'[DONE]',
+        ]:[{choices:[{delta:{content:'Fixture complete'}}]},'[DONE]']),{status:200});
+        const outcome=await service.sendMessage({mode:scenario.profile.role==='project_agent'?'project_agent':'goal',conversationId:'same-cached-context',
+          streamId:`identity-${scenario.tool}`,workspacePath:tmpDir,messages:[{role:'user',content:'Inspect fixture'}],turnProfile:scenario.profile,webContents:{send() {}}});
+        assert.equal(outcome.terminalStatus,'done',JSON.stringify(outcome));
+      }
+      assert.equal(calls.length,3);
+      assert.equal(calls[0].input.action,'parallel');
+      assert.equal(calls[0].context.workId,'root-goal');
+      assert.deepEqual(calls[0].context.currentInputAnchors,['canonical-user']);
+      assert.deepEqual(calls[1].context.events,[{eventId:'real-event',sessionId:'child'}]);
+      assert.deepEqual(calls[1].context.currentInputAnchors,[],'cached tool context cannot reuse a prior user grant');
+      assert.equal(calls[2].context.agentKind,'worker');
+      assert.equal(calls[2].context.sessionId,'child');
+      assert.equal(calls[2].context.planId,'plan-one');
+    } finally {release();globalThis.fetch=previousFetch;}
   });
 
   it('does not fail over outside turnProfile.recoveryCandidateIds', async () => {

@@ -29,6 +29,7 @@ export interface TuiTurnRequest {
   hardRemainingToolCalls?: number;
   modelProviderId?: string | null;
   signal?: AbortSignal;
+  shouldYield?: () => boolean;
   ephemeral?: boolean;
   assistantMessageId?: string;
   continuityContext?: readonly object[];
@@ -161,13 +162,13 @@ export function createTuiTurnExecutor(options: {
     try {
       const result = await pipeline.run({ sessionId: `tui:${input.conversationId || streamId}`, conversationId: input.conversationId ?? undefined,
         streamId, mode, ...(profile.role === 'project_agent' ? {
-          maxToolCalls: input.hardRemainingToolCalls, sliceToolCalls: input.remainingToolCalls ?? input.limits?.maxToolCalls,
-          yieldAtTurnLimit: true, maxToolBatchCalls: 32,
+          maxTurns: 2, maxToolCalls: input.hardRemainingToolCalls, sliceToolCalls: Math.min(4, input.remainingToolCalls ?? input.limits?.maxToolCalls ?? 4),
+          yieldAtTurnLimit: true, shouldYield: input.shouldYield, maxToolBatchCalls: 32,
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
           systemContextInput: { role: profile.role, workspaceId, sessionId: profile.sessionId, planId: profile.planId,
             turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
-            ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
+            ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase, goalRevision: input.plan?.delegationOrigin?.coordinationBinding?.goalRevision, takeover: input.plan?.delegationOrigin?.takeover?.text }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
               readOnly: input.plan?.delegationOrigin?.readOnly === true,
               summary: input.plan?.goal,
               snapshotItems: useMemory && profile.memorySnapshotId ? (readSnapshots(workspaceId, {rootDir: options.dataHome}).find((snapshot: any) => snapshot.snapshotId === profile.memorySnapshotId) as any)?.items ?? [] : [] } } : {}),
@@ -198,7 +199,8 @@ export function createTuiTurnExecutor(options: {
     const abort = () => controller.abort();
     input.signal?.addEventListener('abort', abort, { once: true });
     if (input.signal?.aborted) abort();
-    const done = executionScheduler.withTurn({ planId: input.turnProfile?.planId, signal: controller.signal,
+    const done = executionScheduler.withTurn({ planId: input.turnProfile?.planId, workspaceId: input.workspaceId,
+      lane: input.turnProfile?.role === 'project_agent' ? 'coordination' : 'work', signal: controller.signal,
       priority: input.plan?.kind === 'user' ? 'high' : ['memory_curator', 'objective_probe'].includes(input.turnProfile?.role) ? 'low' : undefined,
     }, async (signal: AbortSignal) => {
       const cancel = () => controller.abort(signal.reason);

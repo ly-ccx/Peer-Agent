@@ -137,7 +137,7 @@ test('owned wake events cannot bypass a recovery reservation, while independent 
   } finally { env.close(); }
 });
 
-test('new user input takes priority, has no old checkpoint, and invalidates the older retry', async () => {
+test('new independent input takes priority without inheriting history or cancelling the older retry', async () => {
   const seen = [];
   const env = world(async ({ plan, turnProfile }) => {
     seen.push(plan.userInputs[0].inputId);
@@ -150,8 +150,8 @@ test('new user input takes priority, has no old checkpoint, and invalidates the 
     await env.runner.enqueueUserInputs([input('one')]);
     await env.runner.enqueueUserInputs([input('two')]);
     assert.deepEqual(seen, ['one', 'two']);
-    assert.equal(Object.values(env.store.read().works).find(work => work.anchorInputIds.includes('one')).state, 'paused');
-    await env.advance(2000); assert.deepEqual(seen, ['one', 'two']);
+    assert.equal(Object.values(env.store.read().works).find(work => work.anchorInputIds.includes('one')).state, 'retry_wait');
+    await env.advance(2000); assert.deepEqual(seen, ['one', 'two', 'one']);
   } finally { env.close(); }
 });
 
@@ -501,4 +501,26 @@ test('a stopped parent reply can explicitly continue while its child runs, but a
       assert.equal(requests, cancelled ? 1 : 2);
     } finally { env.close(); }
   }
+});
+
+test('a new user input interrupts a long user slice without pausing its independent continuation', async () => {
+  let started, release; const began = new Promise(resolve => { started = resolve; });
+  const seen = []; let first = true;
+  const env = world(async ({ plan, shouldYield, turnProfile }) => {
+    seen.push(plan.userInputs.map(row => row.inputId).join(','));
+    if (first) {
+      first = false; started(); await new Promise(resolve => { release = resolve; });
+      assert.equal(shouldYield(), true);
+      return { turnEnd: 'yielded', providerCheckpoint: { provider:'test', progress: 'kept' }, toolCalls:[{name:'read_file',input:{path:'a'},result:'saved'}] };
+    }
+    if (plan.userInputs[0]?.inputId === 'a') assert.equal(turnProfile.providerCheckpoint.progress, 'kept');
+    return { text:'done' };
+  });
+  try {
+    const current = env.runner.enqueueUserInputs([input('a')]); await began;
+    const next = env.runner.enqueueUserInputs([input('b'), input('c')]); release();
+    await Promise.all([current, next]);
+    assert.deepEqual(seen, ['a','b','c','a']);
+    assert.ok(Object.values(env.store.read().works).every(work => work.state === 'delivered'));
+  } finally { env.close(); }
 });

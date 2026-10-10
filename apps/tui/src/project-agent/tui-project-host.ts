@@ -157,7 +157,7 @@ export function createTuiProjectHost(options: {
     executeTurn:(request: any)=>turns.runTurn({...request,ephemeral:true,messages:readMessages(request.conversationId)
       .filter(message=>['user_input','agent_reply'].includes(message.kind)).map(message=>({role:message.role,content:message.content}))}),
     resolveModel:(input: any)=>turns.resolveGoalRole({...input,projectPolicy:profiles.read(input.workspaceId)?.modelPolicy}),
-    resolveContext:({workspaceId}: any)=>{const result=objectives.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)});return {objectives:result.ok && 'items' in result ? result.items : []};},
+    resolveContext:({workspaceId}: any)=>{const result=objectives.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)});return {coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId)),objectives:result.ok && 'items' in result ? result.items : []};},
     resolveRoster:(id: string)=>supervisor.list({workspaceId:id}), restoreQueue:(id: string)=>{applyStartupApprovalRecovery({approvalStore:approvals,goalPlanStore:plans,canRecover:row=>row.workspaceId===id});return supervisor.recoverQueue(id);},
     recoverTasks:(id: string)=>goalRunner.recoverContextCheckpoints({workspaceId:id,deferPump:true} as never), activateSessions:supervisor.resumeRecovered,
     restoreWatches:watches.restore,stopWatches:watches.stopWorkspace, reconcileSessions:supervisor.reconcile,

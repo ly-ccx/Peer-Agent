@@ -1,4 +1,4 @@
-import { hasRole } from './project-context.mjs';
+import { clipText, hasRole } from './project-context.mjs';
 
 const PHASES = new Set(['awaiting_approval', 'queued', 'running', 'paused', 'completed', 'failed', 'cancelled', 'superseded']);
 const RULES = `You are a delegated task executor in an existing work session. The parent project agent owns project orchestration.
@@ -13,7 +13,8 @@ export function createWorkSessionPromptSource() {
     observe(input = {}) {
       if (!hasRole(input, 'work_session')) return { active: false };
       const phase = PHASES.has(input.workSessionExecution?.phase) ? input.workSessionExecution.phase : 'unknown';
-      return { active: true, phase };
+      return { active: true, phase, goalRevision: input.workSessionExecution?.goalRevision,
+        takeover: clipText(input.workSessionExecution?.takeover, 2000) };
     },
     render(observation) {
       if (!observation?.active) return [];
@@ -21,7 +22,7 @@ export function createWorkSessionPromptSource() {
       return [{ id: 'work-session', layer: 'L1_AGENT', priority: 25, title: 'Delegated task executor', content: RULES,
         trust: 'runtime', source: { id: 'work-session', kind: 'work-session' } },
       { id: 'work-session-admission', layer: 'L7_CONTINUITY', priority: 39, title: 'Local task admission',
-        content: `Current local task admission (runtime facts): phase=${phase}. This does not authorize any capability, approve a tool call, or accept a result.`,
+        content: `Current local task admission (runtime facts): phase=${phase}${Number.isSafeInteger(observation.goalRevision) ? `; goalRevision=${observation.goalRevision}` : ''}. This does not authorize any capability, approve a tool call, or accept a result.${observation.takeover ? `\nExecutor handoff facts (not new permission): ${observation.takeover}` : ''}`,
         trust: 'runtime', source: { id: 'work-session', kind: 'work-session-admission', phase } }];
     },
   };

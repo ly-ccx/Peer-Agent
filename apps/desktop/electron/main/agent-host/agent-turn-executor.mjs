@@ -34,7 +34,8 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       const abort = () => controller.abort(input.signal?.reason);
       input.signal?.addEventListener('abort', abort, { once: true });
       if (input.signal?.aborted) abort();
-      const done = executionScheduler.withTurn({ planId: profile?.planId, priority, signal: controller.signal }, async signal => {
+      const done = executionScheduler.withTurn({ planId: profile?.planId, workspaceId: profile?.workspaceId || input.workspaceId,
+        lane: profile?.role === 'project_agent' ? 'coordination' : 'work', priority, signal: controller.signal }, async signal => {
         const guard = createWorkBudgetGuard(profile);
         let outcome;
         try { outcome = await runTurn({ ...input, budgetGuard: guard, signal }); return outcome; }
@@ -46,7 +47,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
     },
   };
 
-  function runTurn({ turnProfile = null, sink, signal, budgetGuard = null, ...sendMessageArgs } = {}) {
+  function runTurn({ turnProfile = null, sink, signal, budgetGuard = null, shouldYield, ...sendMessageArgs } = {}) {
     if (!sink || typeof sink.send !== 'function') {
       throw new Error('AgentTurnExecutor requires a sink with send()');
     }
@@ -74,10 +75,11 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
     let yieldedCheckpoint = null;
     sendMessageArgs.executionBudget = {
       guard: budgetGuard,
-      maxTurns: Math.max(1, (sendMessageArgs.limits?.maxRounds ?? USER_TURN_LIMITS.maxRounds) - (sendMessageArgs.roundIndex ?? 0)),
+      maxTurns: Math.min(2, Math.max(1, (sendMessageArgs.limits?.maxRounds ?? USER_TURN_LIMITS.maxRounds) - (sendMessageArgs.roundIndex ?? 0))),
       maxToolCalls: sendMessageArgs.hardRemainingToolCalls ?? Infinity,
-      sliceToolCalls: Math.max(1, sendMessageArgs.remainingToolCalls ?? sendMessageArgs.limits?.maxToolCalls ?? USER_TURN_LIMITS.maxToolCalls),
+      sliceToolCalls: Math.min(4, Math.max(1, sendMessageArgs.remainingToolCalls ?? sendMessageArgs.limits?.maxToolCalls ?? USER_TURN_LIMITS.maxToolCalls)),
       yieldAtTurnLimit: true,
+      shouldYield,
       maxToolBatchCalls: 32,
       providerCheckpoint: turnProfile?.providerCheckpoint,
       onYield: checkpoint => { yieldedCheckpoint = checkpoint; },
