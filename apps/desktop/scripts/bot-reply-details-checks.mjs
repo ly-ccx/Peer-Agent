@@ -13,7 +13,8 @@ export async function openReplyDetails(page, message) {
     const status = node.parentElement.querySelector('.bot-context-running')?.getBoundingClientRect();
     const bubbles = [...node.closest('.bot-reply, .bot-system').querySelectorAll(
       ':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
-      + ':scope > .bot-stopped-reply > .bot-reply-body, :scope > .bot-unavailable-reply > .bot-reply-body')];
+      + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
+      + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0)?.getBoundingClientRect();
     return { right: Math.abs(action.right - footer.right), bubbleRight: bubble ? Math.abs(action.right - bubble.right) : null,
       gap: status && action.top < status.bottom ? action.left - status.right : null };
