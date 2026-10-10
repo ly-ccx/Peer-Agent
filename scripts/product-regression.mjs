@@ -21,7 +21,7 @@ export function sourceFingerprint(root) {
   return digest.digest('hex');
 }
 
-const requiredShots = [...sharedUiShots, ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
@@ -50,6 +50,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
+  if (machine.autonomousCoordination?.cases?.length !== 8 || !machine.autonomousCoordination.cases.every(item=>item.truthful && item.humanQuestionAbsent)) throw new Error('Autonomous coordination projection failed');
   if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
     || !machine.sharedUiConventions?.rectangularPreviews || !machine.sharedUiConventions?.keyboardImagePreview
     || machine.sharedUiConventions?.cases?.length !== sharedUiShots.length
@@ -129,7 +130,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     sourceFingerprint: sourceFingerprint(root), sourceHead: machine.sourceHead, platform: machine.platform,
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
     checks: { historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
-      quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
+      quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
       chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,

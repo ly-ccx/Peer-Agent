@@ -75,7 +75,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
       if (admitted.ok && !admitted.replayed) append(admitted.entry);
       return admitted;
     },
-    bindSession(workId, goalRevision, sessionId) { return append({ kind: 'coordination_binding', workId, goalRevision, sessionId }); },
+    bindSession(workId, goalRevision, sessionId, binding) { return append({ kind: 'coordination_binding', workId, goalRevision, sessionId, binding }); },
     advanceTransition(operationId, expectedPhase, patch) {
       assertOwner();
       if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff'].includes(key))) throw new Error('invalid_transition_patch');

@@ -341,6 +341,16 @@ export type TranslationKey =
   | 'projectAgent.chat.today'
   | 'projectAgent.chat.earlierDay'
   | 'projectAgent.chat.replyTo'
+  | 'projectAgent.chat.sessionState.stopping'
+  | 'projectAgent.chat.sessionState.awaiting_outcome'
+  | 'projectAgent.task.coordination.heading'
+  | 'projectAgent.task.coordination.replacement'
+  | 'projectAgent.task.coordination.prior'
+  | 'projectAgent.task.coordination.applied'
+  | 'projectAgent.task.coordination.pending'
+  | 'projectAgent.task.coordination.unknown'
+  | 'projectAgent.task.coordination.blocked'
+  | 'projectAgent.task.coordination.handoff'
   | 'projectAgent.chat.sessionState.paused'
   | 'projectAgent.chat.sessionState.queued'
   | 'projectAgent.chat.sessionState.starting'
@@ -1830,6 +1840,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.today': '今天 {time}',
     'projectAgent.chat.earlierDay': '{date} {time}',
     'projectAgent.chat.replyTo': '回复',
+    'projectAgent.chat.sessionState.stopping': '正在停止',
+    'projectAgent.chat.sessionState.awaiting_outcome': '执行结果待核实',
+    'projectAgent.task.coordination.heading': '调整记录',
+    'projectAgent.task.coordination.replacement': '后续任务：{title}',
+    'projectAgent.task.coordination.prior': '查看之前的任务',
+    'projectAgent.task.coordination.applied': '调整已应用，任务进度以当前状态为准。',
+    'projectAgent.task.coordination.pending': '正在调整执行安排，已有工作会保留。',
+    'projectAgent.task.coordination.unknown': '停止后有操作尚未确认结果，核实前不会重复执行。',
+    'projectAgent.task.coordination.blocked': '本次调整未能应用，原有记录已保留。',
+    'projectAgent.task.coordination.handoff': '正在接手',
     'projectAgent.chat.sessionState.paused': '已暂停',
     'projectAgent.chat.sessionState.queued': '排队中',
     'projectAgent.chat.sessionState.starting': '正在启动',
@@ -3107,6 +3127,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.today': 'Today {time}',
     'projectAgent.chat.earlierDay': '{date} {time}',
     'projectAgent.chat.replyTo': 'Reply',
+    'projectAgent.chat.sessionState.stopping': 'Stopping',
+    'projectAgent.chat.sessionState.awaiting_outcome': 'Execution outcome needs checking',
+    'projectAgent.task.coordination.heading': 'Work adjustments',
+    'projectAgent.task.coordination.replacement': 'Follow-up task: {title}',
+    'projectAgent.task.coordination.prior': 'View previous task',
+    'projectAgent.task.coordination.applied': 'Adjustment applied. Task progress is shown in its current status.',
+    'projectAgent.task.coordination.pending': 'Adjusting execution. Existing work is retained.',
+    'projectAgent.task.coordination.unknown': 'Some operations have an unconfirmed outcome. They will not be repeated before checking.',
+    'projectAgent.task.coordination.blocked': 'This adjustment could not be applied. Existing records are retained.',
+    'projectAgent.task.coordination.handoff': 'Taking over',
     'projectAgent.chat.sessionState.paused': 'Paused',
     'projectAgent.chat.sessionState.queued': 'Queued',
     'projectAgent.chat.sessionState.starting': 'Starting',

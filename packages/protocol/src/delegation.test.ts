@@ -42,6 +42,17 @@ const origin = {
   depth: 1,
 };
 
+test('pending cancellation and takeover are factual transitions rather than human waits or finished work',()=>{
+  const cancellation={operationId:'cancel-A',reason:'user correction',phase:'stopping' as const,requestedAt:'2026-10-10T00:00:00Z'};
+  const stopping=projectWorkSession(plan({status:'paused',runnerStatus:'waiting_user'}),meta({origin:{...origin,cancellation}}));
+  assert.equal(stopping.status,'stopping'); assert.equal(stopping.statusLabel,'正在停止');
+  assert.equal(stopping.actionRight,'peer_advancing'); assert.equal(stopping.nextAction,'none'); assert.equal(stopping.needsYouReason,undefined);
+  const unknown=projectWorkSession(plan({status:'paused'}),meta({origin:{...origin,cancellation:{...cancellation,phase:'awaiting_outcome'}}}));
+  assert.equal(unknown.status,'awaiting_outcome'); assert.equal(unknown.statusLabel,'执行结果待核实');
+  assert.equal(projectWorkSession(plan({status:'cancelled'}),meta({origin:{...origin,cancellation}})).status,'cancelled');
+  assert.equal(projectWorkSession(plan({status:'completed'}),meta({accepted:true,origin:{...origin,cancellation}})).status,'accepted');
+});
+
 function plan(overrides: Partial<GoalPlanProjectionSnapshot> = {}): GoalPlanProjectionSnapshot {
   return {
     planId: 'plan-1',

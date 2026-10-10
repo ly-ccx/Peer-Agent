@@ -13,6 +13,8 @@ import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createGoalRunner } from '../goal-runner.mjs';
 import { createScriptedTurnExecutor } from '../testing/scripted-turn-executor.mjs';
 import { createSessionSupervisor, evaluateWorkSessionWrite } from './session-supervisor.mjs';
+import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { registerWorkBudget } from './work-budget.mjs';
 
 function model(id, extra = {}) {
   return {
@@ -137,6 +139,7 @@ async function harness({
   objectives = null,
   isolationPlanner = undefined,
   canManageWorkspace = undefined,
+  autonomousCoordinationEnabled = undefined,
   now = () => '2026-09-27T00:00:00.000Z',
 } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-'));
@@ -183,6 +186,7 @@ async function harness({
     conversationStore,
     goalPlanStore,
     goalRunner,
+    autonomousCoordinationEnabled,
     objectives,
     catalog,
     routing: routing(),
@@ -1822,7 +1826,8 @@ test('superseded tasks retain isolation for seven days then cancel silently and 
     assert.equal(env.goalPlanStore.getPlan(planId).status, 'cancelled');
     assert.equal(cleaned.includes(planId), true);
     await env.supervisor.reconcile();
-    assert.equal(cleaned.filter(id => id === planId).length, 2);
+    assert.equal(cleaned.filter(id => id === planId).length, 1);
+    assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.cancellation.cleanupPending, false);
     assert.equal(env.events.find(event => event.sessionId === a.sessionId && event.reason === 'supersession_expired').surfacing, 'silent');
   } finally { await env.cleanup(); }
 });
@@ -2146,4 +2151,135 @@ test('autonomous or fabricated message_session cannot consume a human question',
       assert.equal(env.goalPlanStore.getPlan(planId).runner.status, 'waiting_user');
     }
   } finally { await env.cleanup(); }
+});
+
+test('cancelling A waits outside the global writer so B can dispatch and A cannot resume', async () => {
+  const env = await harness(); let stopped, release;
+  const idle = new Promise(resolve => { stopped = resolve; });
+  const supervisor = createSessionSupervisor({ conversationStore: env.conversationStore, goalPlanStore: env.goalPlanStore,
+    goalRunner: { ...env.goalRunner, waitForIdle: async () => { stopped(); await new Promise(resolve => { release = resolve; }); } },
+    catalog: visionCatalog(), routing: routing(), deferRecovery: true,
+  });
+  try {
+    const a = await supervisor.spawn(spawnInput({readOnly:true}), contextOf(env));
+    const stopping = supervisor.cancel({sessionId:a.sessionId,reason:'direction corrected'});
+    await idle;
+    const during = supervisor.get({sessionId:a.sessionId});
+    assert.equal(during.origin.cancellation.phase,'stopping');
+    assert.equal((await supervisor.resume({sessionId:a.sessionId,anchorMessageId:'user-1'},contextOf(env))).error,'session_not_running');
+    const b = await supervisor.spawn(spawnInput({title:'independent B',brief:'keep B moving',readOnly:true}), contextOf(env));
+    assert.equal(b.status,'running');
+    release(); assert.equal((await stopping).status,'cancelled');
+    assert.equal(supervisor.get({sessionId:b.sessionId}).origin.phase,'running');
+  } finally { release?.(); await env.cleanup(); }
+});
+
+async function until(predicate) {
+  for (let i=0;i<100;i++) { if (predicate()) return; await new Promise(resolve=>setImmediate(resolve)); }
+  assert.fail('durable transition did not settle');
+}
+
+test('actual Supervisor replaces only the corrected task and recovers its durable operation once', async () => {
+  const env=await harness();
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try {
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const task=spawnInput({kind:'research',readOnly:true});
+    const a=await env.supervisor.coordinateWork({action:'parallel',reason:'inspect A',task},context);
+    const b=await env.supervisor.coordinateWork({action:'parallel',reason:'inspect B',task:{...task,title:'independent B',brief:'inspect another entry'}},{...context,deliveryKey:'independent'});
+    assert.ok(a.sessionId); assert.ok(b.sessionId);
+    env.conversationStore.appendMessage(env.parent.id,{id:'correction',role:'user',kind:'user_input',content:'方向错了，改为检查引用卡片'});
+    const input={action:'replace',sessionId:a.sessionId,expectedRevision:1,reason:'corrected scope',task:{...task,anchorMessageIds:['correction'],title:'引用卡片',brief:'check quote card'}};
+    const corrected={...context,currentInputAnchors:['correction'],deliveryKey:'replace-A',scopedSessionIds:[a.sessionId]};
+    const receipt=await env.supervisor.coordinateWork(input,corrected);
+    assert.ok(['stopping','ready','completed'].includes(receipt.phase),JSON.stringify(receipt));
+    await until(()=>store.read().transitions['replace-A'].phase==='completed');
+    const transition=store.read().transitions['replace-A'];
+    assert.equal(env.supervisor.get({sessionId:a.sessionId}).status,'cancelled');
+    assert.equal(env.supervisor.get({sessionId:b.sessionId}).origin.phase,'running');
+    assert.equal(evaluateWorkSessionWrite(env.goalPlanStore.getPlan(planIdOf(env,b.sessionId)),{capabilityId:'local.file.write'}).error,'read_only');
+    const count=env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length;
+    assert.equal((await env.supervisor.coordinateWork(input,corrected)).sessionId,transition.replacementSessionId);
+    await env.supervisor.recoverCoordination('ws-1');
+    assert.equal(env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length,count);
+    assert.equal(count,3);
+  } finally {release();await env.cleanup();}
+});
+
+test('actual executor takeover retains GoalPlan, changes epoch, and does not consume a human question',async()=>{
+  const env=await harness();
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try{
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const a=await env.supervisor.coordinateWork({action:'parallel',reason:'inspect',task:spawnInput({kind:'research',readOnly:true})},context);
+    const planId=planIdOf(env,a.sessionId), original=env.goalPlanStore.getPlan(planId);
+    const denied=await env.supervisor.coordinateWork({action:'handoff',sessionId:a.sessionId,expectedRevision:1,reason:'take over'}, {...context,deliveryKey:'waiting'});
+    assert.equal(denied.error,'human_decision_required');
+    assert.equal(env.goalPlanStore.getPlan(planId).runner.status,'waiting_user');
+    env.goalPlanStore.setRunnerState(planId,{status:'paused'});
+    const handoff=await env.supervisor.coordinateWork({action:'handoff',sessionId:a.sessionId,expectedRevision:1,reason:'retry retained checkpoint'}, {...context,deliveryKey:'handoff'});
+    assert.ok(['stopping','ready','completed'].includes(handoff.phase),JSON.stringify(handoff));
+    await until(()=>store.read().transitions.handoff.phase==='completed');
+    const fresh=env.goalPlanStore.getPlan(planId);
+    assert.equal(fresh.planId,original.planId); assert.equal(fresh.goal,original.goal);
+    assert.notEqual(fresh.delegationOrigin.coordinationBinding.executionEpoch,original.delegationOrigin.coordinationBinding.executionEpoch);
+    assert.equal(fresh.delegationOrigin.takeover.phase,'completed');
+    assert.equal(env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length,1);
+  }finally{release();await env.cleanup();}
+});
+
+test('cancellation publishes an unknown outcome and keeps its replacement fenced after recovery',async()=>{
+  const env=await harness();
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try {
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const task=spawnInput({kind:'research',readOnly:true});
+    const a=await env.supervisor.coordinateWork({action:'parallel',reason:'inspect A',task},context);
+    store.saveWork({workId:'root',budget:{uncertainDispatches:[{toolCallId:'unknown-call',planId:planIdOf(env,a.sessionId)}]}});
+    const result=await env.supervisor.coordinateWork({action:'replace',sessionId:a.sessionId,expectedRevision:1,reason:'correct A',task},
+      {...context,deliveryKey:'replace-unknown'});
+    assert.ok(['stopping','awaiting_outcome'].includes(result.phase),JSON.stringify(result));
+    await until(()=>store.read().transitions['replace-unknown'].phase==='awaiting_outcome');
+    const current=env.supervisor.get({sessionId:a.sessionId});
+    assert.equal(current.status,'awaiting_outcome');
+    assert.equal(current.coordination.phase,'awaiting_outcome');
+    assert.equal(current.actionRight,'peer_advancing');
+    assert.equal(env.events.some(row=>row.eventId==='coordination-outcome:replace-unknown' && row.reason==='execution_outcome_unknown'),true);
+    await env.supervisor.recoverCoordination('ws-1');
+    assert.equal(env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length,1);
+    assert.deepEqual(env.goalPlanStore.getPlan(planIdOf(env,a.sessionId)).delegationOrigin.cancellation.evidenceCalls,['unknown-call']);
+  } finally { release(); await env.cleanup(); }
+});
+
+test('rollback does not promote an already queued replacement and never revives its cancelled predecessor',async()=>{
+  let enabled=true;
+  const env=await harness({autonomousCoordinationEnabled:()=>enabled,goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try {
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1']};
+    const open=title=>env.supervisor.coordinateWork({action:'parallel',reason:title,task:spawnInput({title,kind:'research',readOnly:true})},{...context,deliveryKey:title});
+    const a=await open('A'), b=await open('B'); await open('C');
+    const replaced=await env.supervisor.coordinateWork({action:'replace',sessionId:a.sessionId,expectedRevision:1,reason:'correct A',task:spawnInput({title:'correct A',kind:'research',readOnly:true})},
+      {...context,deliveryKey:'replace'});
+    await until(()=>store.read().transitions.replace.phase==='completed');
+    const replacementId=store.read().transitions.replace.replacementSessionId;
+    assert.equal(env.supervisor.get({sessionId:replacementId}).status,'queued');
+    enabled=false;
+    await env.supervisor.cancel({sessionId:b.sessionId,reason:'free slot'});
+    await env.supervisor.reconcile();
+    assert.equal(env.supervisor.get({sessionId:replacementId}).status,'queued');
+    assert.equal(env.supervisor.get({sessionId:a.sessionId}).status,'cancelled');
+    enabled=true;await env.supervisor.reconcile();
+    assert.equal(env.supervisor.get({sessionId:replacementId}).status,'running');
+    assert.equal(env.supervisor.get({sessionId:a.sessionId}).status,'cancelled');
+    assert.equal(replaced.error,undefined);
+  } finally {release();await env.cleanup();}
 });

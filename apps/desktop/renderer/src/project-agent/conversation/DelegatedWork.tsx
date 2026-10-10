@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ProcessDisclosure } from './BotProcess';
 import { PeerIcon } from '../../ui/icons';
 import { workProgress, type BotWorkRow } from '../state/botWorkState';
+import { formatDrawerSessionStatus } from '../state/drawerState';
 import { TaskCancelButton } from '../state/TaskCancellation';
 import '../styles/bot-reply-context.css';
 import '../styles/bot-disclosure.css';
@@ -23,7 +24,7 @@ function WorkRow({ row, botName, i18n, onOpen, disclosure }: { readonly row: Bot
   return <details className="bot-work-row" data-status={row.status ?? 'unavailable'} open={disclosure ? disclosure.open[`work:${row.id}`] ?? false : undefined} onToggle={event => { if (event.target === event.currentTarget) disclosure?.toggle(`work:${row.id}`, event.currentTarget.open); }}>
     <summary><PeerIcon name={row.status === 'waiting_user' ? 'info' : 'terminal'} size={14} />
       <span className="bot-work-title">{row.session?.title && row.session.title !== row.id ? row.session.title : i18n.t('projectAgent.chat.work.related')}</span>
-      <span className={`bot-work-status${active ? ' is-running' : ''}`}>{i18n.t(statusKey)}</span>
+      <span className={`bot-work-status${active ? ' is-running' : ''}`}>{row.session?.coordination?.phase === 'stopping' ? formatDrawerSessionStatus(row.session,i18n) : i18n.t(statusKey)}</span>
       <PeerIcon name="chevronDown" size={12} /></summary>
     <div className="bot-work-detail">
       <p>{workProgress(row, i18n)}</p>

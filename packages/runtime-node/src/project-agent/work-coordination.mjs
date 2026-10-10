@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import { reduceCoordinationDecision } from './coordination-kernel.mjs';
 /** Durable event transfer and handling are different receipts. Replay is deterministic. */
 export function reduceCoordination(state, entry) {
+  if (entry.schemaVersion !== undefined && entry.schemaVersion !== 1) throw new Error('coordination_schema_unsupported');
+  if (entry.kind === 'coordination_decision' && (entry.transition?.schemaVersion !== 1
+    || !Number.isSafeInteger(entry.transition?.minimumExecutorVersion)
+    || entry.transition.minimumExecutorVersion !== 1)) throw new Error('coordination_executor_unsupported');
   const previous = state || { revision: 0, events: {}, works: {}, deliveries: {} };
   let next = { ...previous, events: { ...previous.events }, works: { ...previous.works }, deliveries: { ...previous.deliveries } };
   if (entry.revision !== next.revision + 1) throw new Error('coordination_revision_gap');
