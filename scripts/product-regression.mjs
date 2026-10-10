@@ -78,7 +78,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPreserved', 'reportRetryRecovers', 'nestedEscapeRetainsTask'].every(check => machine.taskDetails?.[check] === true)
     || !machine.taskDetails?.primaryActionReturnsToBot || !machine.taskDetails?.listClassification || !machine.modelSwitch?.rollbackVerified
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.rightAligned || !machine.replyDetailsEntry?.collapsedHeight
-    || !['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked', 'completed', 'short-question-dark', 'short-question-light'].every(state =>
+    || !['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked', 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'].every(state =>
       machine.replyPresence?.cases?.some(sample => sample.state === state && sample.aligned && sample.fits))
     || ![['first-paragraph', '正在整理回复'], ['preparing-read', '准备阅读 README.md'], ['reading-docked', '正在阅读 README.md']].every(([state, label]) =>
       machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label && sample.noShimmer))

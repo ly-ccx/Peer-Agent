@@ -426,6 +426,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await composer.inputValue(), '停止之后继续保留我的草稿');
   assert.equal(await page.locator('.bot-stop-response').count(), 0);
   const stoppedMessage = page.locator('.bot-system').filter({ has: page.locator('.bot-stopped-reply') });
+  await checkReplyPresence({ page, reply: stoppedMessage, report, until, state: 'stopped' });
   await openDetails(stoppedMessage);
   await detail.locator('.bot-tool-step[data-status="stopped"]').waitFor({ state: 'attached' });
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'stream-stopped.png') });
@@ -443,6 +444,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await failedMessage.locator('.bot-context-error').isVisible(), false);
   assert.equal(await failed.locator(':scope > p').innerText(), '暂时无法完成回复。');
   assert.equal(await failedMessage.locator('.bot-reply-bar').count(), 0);
+  await checkReplyPresence({ page, reply: failedMessage, report, until, state: 'failed' });
   await openDetails(failedMessage);
   await detail.getByText('受控连接失败', { exact: false }).waitFor();
   await detail.locator('.bot-tool-step[data-status="done"]').waitFor({ state: 'attached' });

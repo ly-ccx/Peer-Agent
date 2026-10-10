@@ -11,7 +11,9 @@ export async function checkReplyPresence({ page, reply, report, until, state, la
     samples.labels.push({ state, label, noShimmer: true });
   }
   const bounds = await until(() => reply.evaluate(node => {
-    const bubbles = [...node.querySelectorAll(':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *')];
+    const bubbles = [...node.querySelectorAll(':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
+      + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
+      + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
     if (!bubble) return null;
     const body = bubble.getBoundingClientRect(), footer = node.querySelector('.bot-reply-context').getBoundingClientRect();

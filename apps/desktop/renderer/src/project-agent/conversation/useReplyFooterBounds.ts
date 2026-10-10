@@ -12,7 +12,8 @@ export function useReplyFooterBounds() {
       if (!footer || !reply) return;
       const bubbles = [...reply.querySelectorAll<HTMLElement>(
         ':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
-        + ':scope > .bot-stopped-reply > .bot-reply-body, :scope > .bot-unavailable-reply > .bot-reply-body',
+        + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
+        + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body',
       )];
       const target = [...bubbles].reverse().find(node => node.getBoundingClientRect().width > 0);
       const bounds = target?.getBoundingClientRect(), parent = reply.getBoundingClientRect();
