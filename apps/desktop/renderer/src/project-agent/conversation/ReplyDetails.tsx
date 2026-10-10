@@ -38,7 +38,7 @@ export function ReplyDetails({ row, workspaceId, botName, workIndex, i18n, onOpe
         open={disclosure.open.rounds ?? false} onToggle={event => {
           if (event.target === event.currentTarget) disclosure.toggle('rounds', event.currentTarget.open);
         }}><summary><span>{i18n.t('projectAgent.chat.context.rounds')}</span><PeerIcon name="chevronDown" size={12} /></summary>
-        <AgentProcessView rounds={row.processRounds} i18n={i18n} />
+        <AgentProcessView rounds={row.processRounds} i18n={i18n} outcome={outcome} />
       </details> : null}
     </ReplyDetailsContext>
   </div>;

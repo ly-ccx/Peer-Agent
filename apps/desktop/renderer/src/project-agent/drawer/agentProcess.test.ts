@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { roundsForReply } from '../state/botConversationState.ts';
-import { agentProcessEntries } from './agentProcess.ts';
+import { agentProcessEntries, toolPreviewText, toolStepStatus } from './agentProcess.ts';
 import { normalizeBotMessage } from '../state/botConversationState.ts';
 
 test('过程按回复 turnId 精确关联，包括回复先于 agent_turn 落库的顺序', () => {
@@ -60,4 +60,26 @@ test('历史过程复用有界脱敏预览，保留事实状态且不泄露私�
   assert.equal(entries[0]?.resultPreview.truncated, true);
   assert.doesNotMatch(JSON.stringify(entries), /PRIVATE_/);
   assert.equal(entries.at(-1)?.resultPreview.truncated, true);
+});
+
+test('取消时缺失的 read_file 结果不是字面量 null，真实失败仍显示未完成', () => {
+  const [missing, failed] = agentProcessEntries([{ text: '', toolCalls: [
+    { name: 'read_file', input: { path: 'apps/desktop/renderer/src/styles/inputs.css', start_line: 1, end_line: 95 }, result: null },
+    { name: 'read_file', input: { path: 'README.md' }, result: { status: 'failed', reason: 'start_line_out_of_range' } },
+  ] }]);
+  assert.equal(missing?.status, 'unknown');
+  assert.equal(missing?.result, '');
+  assert.notEqual(missing?.result, 'null');
+  assert.equal(missing?.input.includes('inputs.css'), true);
+  assert.equal(toolStepStatus(missing!.status, missing!.resultPreview, 'error'), 'cancelled');
+  assert.equal(toolStepStatus(missing!.status, missing!.resultPreview, 'stopped'), 'stopped');
+  assert.equal(toolStepStatus('error', { text: '' }, 'error'), 'cancelled');
+  assert.equal(toolStepStatus('stopped', undefined), 'stopped');
+  assert.equal(toolStepStatus('running', undefined), 'running');
+  assert.equal(failed?.status, 'failed');
+  assert.equal(toolStepStatus(failed!.status, failed!.resultPreview, 'error'), 'failed');
+  assert.match(failed!.result, /start_line_out_of_range/);
+  assert.equal(toolPreviewText(missing!.resultPreview, { empty: '没有返回内容。', limit: '内容超出预览上限' }), '没有返回内容。');
+  assert.equal(toolPreviewText({ text: '', truncated: true }, { empty: '没有返回内容。', limit: '内容超出预览上限' }), '内容超出预览上限');
+  assert.equal(toolPreviewText(undefined, { empty: '没有返回内容。', limit: '内容超出预览上限' }), null);
 });
