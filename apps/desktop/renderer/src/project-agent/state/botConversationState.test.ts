@@ -11,11 +11,23 @@ import {
   normalizeBotMessage,
   quoteRefsFor,
   repliedUserIds,
+  roundsForReply,
   showAgentThinking,
   visibleBotMessages,
   windowConversationRows,
   type BotChatMessage,
 } from './botConversationState.ts';
+
+test('legacy reply process cannot inherit a recovery turn across a new user input', () => {
+  const old = normalizeBotMessage({ id: 'old-recovery', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'read_file', result: { ok: true } }] }] })!;
+  const input = normalizeBotMessage({ id: 'new-user', kind: 'user_input', content: '新的问题' })!;
+  const legacy = normalizeBotMessage({ id: 'legacy-reply', kind: 'agent_reply', content: '普通回复' })!;
+  assert.deepEqual(roundsForReply([old, input, legacy], legacy.id), []);
+  const exact = normalizeBotMessage({ ...legacy, id: 'exact-reply', turnId: old.id })!;
+  assert.deepEqual(roundsForReply([old, input, exact], exact.id), old.rounds, 'explicit turn identity takes precedence over physical order');
+  const current = normalizeBotMessage({ id: 'current', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'search_files' }] }] })!;
+  assert.deepEqual(roundsForReply([old, input, current, legacy], legacy.id), current.rounds, 'legacy records within the current input still retain their process');
+});
 
 test('failure presentation preserves typed host recovery and only promises a real reservation', () => {
   const raw = { id: 'failure', kind: 'system_card', cards: [{ cardId: 'failure', kind: 'agent_unavailable',

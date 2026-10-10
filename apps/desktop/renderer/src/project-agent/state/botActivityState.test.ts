@@ -6,6 +6,29 @@ import { normalizeBotMessage, roundsForReply, conversationRows } from './botConv
 const activity: ProjectAgentActivity = { workspaceId: 'w', conversationId: 'c', turnId: 't', revision: 3,
   startedAt: '2026-10-04T01:00:00Z', phase: 'responding', replyTo: ['u'], segments: [], replyText: 'draft' };
 
+test('new input clears legacy process association without disturbing exact recovery or active turns', () => {
+  const old = normalizeBotMessage({ id: 'old', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'read_file' }] }] })!;
+  const input = normalizeBotMessage({ id: 'u', kind: 'user_input', content: '新的问题' })!;
+  const legacy = normalizeBotMessage({ id: 'legacy', kind: 'agent_reply', content: '普通回复' })!;
+  const rowsFor = (messages: NonNullable<ReturnType<typeof normalizeBotMessage>>[], live: ProjectAgentActivity | null = null) =>
+    attachBotProcesses(conversationRows(messages), messages, live).filter(row => row.type === 'message');
+  const unrelated = rowsFor([old, input, legacy]).find(row => row.type === 'message' && row.message.id === legacy.id);
+  if (unrelated?.type !== 'message') throw Error('legacy reply missing');
+  assert.deepEqual(unrelated.processRounds, [], 'old recovery tools never belong to the next input');
+  const exact = normalizeBotMessage({ id: 'exact', kind: 'agent_reply', turnId: old.id, content: '恢复完成' })!;
+  const recovered = rowsFor([old, input, exact]).find(row => row.type === 'message' && row.message.id === exact.id);
+  if (recovered?.type !== 'message') throw Error('recovered reply missing');
+  assert.deepEqual(recovered.processRounds, old.rounds, 'exact identity remains independent of order');
+  const pending = normalizeBotMessage({ id: 'pending', kind: 'agent_reply', turnId: activity.turnId, content: '正在推进' })!;
+  const active = rowsFor([old, input, pending], activity).find(row => row.type === 'message' && row.message.id === pending.id);
+  if (active?.type !== 'message') throw Error('active reply missing');
+  assert.equal(active.activity, activity); assert.deepEqual(active.processRounds, []);
+  const current = normalizeBotMessage({ id: 'current', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'search_files' }] }] })!;
+  const currentLegacy = rowsFor([old, input, current, legacy]).find(row => row.type === 'message' && row.message.id === legacy.id);
+  if (currentLegacy?.type !== 'message') throw Error('current legacy reply missing');
+  assert.deepEqual(currentLegacy.processRounds, current.rounds);
+});
+
 test('explicit wake retry keeps public paragraphs after persistence while automatic wake stays quiet', () => {
   const turn = normalizeBotMessage({ id: 't', kind: 'agent_turn', turnKind: 'wake', publicUpdates: [{ id: 'text-1', text: '正在重试。' }] })!;
   const reply = normalizeBotMessage({ id: 'r', kind: 'agent_reply', turnId: 't', content: '当前进展。' })!;
