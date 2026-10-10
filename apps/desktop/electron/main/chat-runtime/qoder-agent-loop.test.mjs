@@ -335,11 +335,13 @@ describe('agentLoopQoder', () => {
       sendStream,
     });
 
-    assert.equal(attempts.length, 1);
+    assert.equal(attempts.length, 4);
     assert.deepEqual(attempts[0].tools, tools);
     assert.equal(attempts[0].messages.some((message) => /tool-call dialect/i.test(message.content)), false);
     const error = sent.find((event) => event.channel === 'chat:stream:error');
     assert.match(error?.payload?.error, /HTTP 500/);
+    assert.equal(error?.payload?.providerRecovery?.exhausted, true);
+    assert.equal(error?.payload?.providerRecovery?.attempts, 4);
     assert.equal(sent.some((event) => event.channel === 'chat:stream:done'), false);
   });
 });

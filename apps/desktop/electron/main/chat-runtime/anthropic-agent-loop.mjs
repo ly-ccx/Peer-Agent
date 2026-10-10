@@ -116,9 +116,10 @@ export async function agentLoopAnthropic({
     emitRuntimeEvent,
     eventState: runtimeEventState,
     lifecycle: {
-      toolResultsApplied: () => { loop.publishToolResultProjection(); executionBudget?.guard?.checkpoint?.({ provider: 'anthropic', providerId, model, messages: structuredClone(apiMessages) }); },
+      toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
+      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'anthropic', providerId, model, messages: structuredClone(apiMessages) }, executions),
       initialize: () => ({ provider: 'anthropic' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -141,9 +142,9 @@ export async function agentLoopAnthropic({
             goalPlanStore: runtimeMode === 'goal' ? goalPlanStore : null,
             visualRequestHost: { goalPlanStore, workspacePath },
             runtimeUsageAccounting: loop.usageAccounting,
+            budgetGuard: executionBudget?.guard,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
-              executionBudget?.guard?.observeUsage?.(usage, requestFingerprint);
             },
             rebuildSystemPrompt,
             accountingIdentity: accountingIdentity ?? {
@@ -213,9 +214,9 @@ export async function agentLoopAnthropic({
               retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
-            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`, providerResponse.providerRecovery);
           } else {
-            loop.sendHttpError(providerResponse.status, text);
+            loop.sendHttpError(providerResponse.status, text, providerResponse.providerRecovery);
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }

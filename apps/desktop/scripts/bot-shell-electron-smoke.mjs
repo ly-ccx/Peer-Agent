@@ -74,6 +74,30 @@ const budgetErrorText = '代理暂时不可用：agent_tool_budget_exhausted: �
 seededMessages[9997] = { ...seededMessages[9997], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: budgetErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-budget', kind: 'agent_unavailable', content: budgetErrorText,
     actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId: 'rc-budget' } }] }] };
+// Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
+const recoveryCases = [
+  { key: 'missing-checkpoint', failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system',
+    blockedCode: 'RECOVERY_CHECKPOINT_UNAVAILABLE', reason: 'recovery checkpoint unavailable' },
+  { key: 'scheduled', failureKind: 'response_headers_timeout', retryable: true, recoveryWorkState: 'retry_wait',
+    retryAt: '2026-10-10T03:00:02.000Z', reservationId: 'rc-recovery-reservation', reason: 'connect timeout after 20000ms (ConnectTimeoutError)' },
+  { key: 'exhausted', failureKind: 'network', retryable: true, recoveryWorkState: 'blocked_system', reason: 'net::ERR_CONNECTION_CLOSED' },
+  { key: 'authentication', failureKind: 'authentication', retryable: false, recoveryWorkState: 'blocked_system', reason: 'HTTP 401: fixture credential expired' },
+  { key: 'unknown', failureKind: 'execution_outcome_unknown', retryable: false, recoveryWorkState: 'blocked_system', reason: 'execution_outcome_unknown: fixture result not recorded' },
+  { key: 'resolved', failureKind: 'network', retryable: true, recoveryWorkState: 'delivered', resolvedState: 'resolved', reason: 'net::ERR_CONNECTION_CLOSED' },
+];
+for (const [offset, entry] of recoveryCases.entries()) {
+  const { key, reason, recoveryWorkState, resolvedState, ...recovery } = entry;
+  const turnId = key === 'scheduled' ? 'rc-recovery-progress-turn' : `rc-recovery-${key}-turn`;
+  const content = `代理暂时不可用：${reason}`;
+  seededMessages[9984 + offset] = { ...seededMessages[9984 + offset], role: 'assistant', kind: 'system_card', turnId, content,
+    cards: [{ cardId: `rc-recovery-${key}`, kind: 'agent_unavailable', content, recoveryWorkState, ...(resolvedState ? { resolvedState } : {}),
+      recovery: { ...recovery, autoAttempts: 2, failedTurnId: turnId, deadlineAt: '2026-10-10T03:05:00.000Z' },
+      actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId } }] }] };
+}
+seededMessages[9990] = { ...seededMessages[9990], id: 'rc-recovery-progress-turn', turnId: 'rc-recovery-progress-turn',
+  kind: 'agent_turn', role: 'assistant', content: '', turnKind: 'user', outcome: 'error',
+  publicUpdates: [{ id: 'rc-recovery-public-progress', text: '我已经看过项目结构，正在核对实现位置。' }],
+  rounds: [{ text: '', toolCalls: [{ name: 'read_file', input: { path: 'README.md' }, result: { ok: true, content: 'RC_RECOVERY_READ_RESULT' } }] }] };
 seededMessages.at(-1).replyTo = ['rc-message-9500'];
 seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。' + '需要逐项核对实际实现和依据。'.repeat(8) + '原文结束标记';
 seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
@@ -118,11 +142,12 @@ if (process.argv.includes('--streaming')) {
   const bot = fixture.bots[1], file = path.join(home, 'conversations', bot.conversationId + '.jsonl');
   const rows = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   const turnId = 'rc-manual-wake-retry';
+  const wakeErrorText = '代理暂时不可用：response_headers_timeout: connect timeout after 20000ms (ConnectTimeoutError)';
   rows.push({ id: turnId, turnId, role: 'assistant', kind: 'agent_turn', turnKind: 'wake', userInputs: [], content: '',
     createdAt: new Date().toISOString(), rounds: [], meta: { recovery: { throughSeq: 0,
       events: [{ eventId: 'rc-manual-retry-event', kind: 'session_verified', workspaceId: bot.workspaceId, sessionId: 'rc-retry-session', at: new Date().toISOString(), payload: {} }] } } });
-  rows.push({ id: turnId + '-card', turnId, role: 'assistant', kind: 'system_card', card: 'agent_unavailable', content: budgetErrorText,
-    createdAt: new Date().toISOString(), cards: [{ cardId: 'card:agent_unavailable:' + turnId, kind: 'agent_unavailable', content: budgetErrorText,
+  rows.push({ id: turnId + '-card', turnId, role: 'assistant', kind: 'system_card', card: 'agent_unavailable', content: wakeErrorText,
+    createdAt: new Date().toISOString(), cards: [{ cardId: 'card:agent_unavailable:' + turnId, kind: 'agent_unavailable', content: wakeErrorText,
       actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: bot.workspaceId, turnId } }] }] });
   writeFileSync(file, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
 }

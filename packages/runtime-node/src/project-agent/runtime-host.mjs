@@ -150,6 +150,8 @@ export function createProjectAgentHost({
       sink: createSink(),
       now,
       retryDelays,
+      schedule: typeof schedule === 'function' ? schedule : setTimeout,
+      clearSchedule: typeof clearSchedule === 'function' ? clearSchedule : clearTimeout,
       onDigest: (item) => digests.hold(workspaceId, item),
       onDigestDelivered: (message) => {
         const date = message?.meta?.digestDate;
@@ -204,7 +206,8 @@ export function createProjectAgentHost({
     for (const turn of messages) if (turn.kind === 'agent_turn' && stoppedTurns.has(turn.id)) {
       repliedTo.push(...(turn.userInputs || []).map(input => `input-${input.inputId}`));
     }
-    return queue.pendingExecution(workspaceId, { repliedTo });
+    const runner = runners.get(workspaceId);
+    return queue.pendingExecution(workspaceId, { repliedTo }).filter(input => !runner?.ownsInput(input.inputId));
   }
 
   async function sync(workspaceIds) {

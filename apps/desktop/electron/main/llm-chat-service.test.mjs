@@ -1613,6 +1613,7 @@ describe('llm chat service tool materialization', () => {
     const previousFetch = globalThis.fetch;
     const events = [];
     const urls = [];
+    const charges = [];
     const providers = [
       {
         id: 'p-chatgpt',
@@ -1677,6 +1678,7 @@ describe('llm chat service tool materialization', () => {
         messages: [{ role: 'user', content: 'hello' }],
         streamId: 's1',
         conversationId: 'c1',
+        executionBudget: { guard: { beforeRequest: metadata => charges.push(metadata) } },
         webContents: {
           send: (channel, payload) => events.push({ channel, payload }),
         },
@@ -1689,6 +1691,8 @@ describe('llm chat service tool materialization', () => {
       'https://chatgpt.com/backend-api/codex/responses',
       'https://compatible.example/v1/chat/completions',
     ]);
+    assert.equal(charges.length, 2);
+    assert.ok(charges.every(charge => charge.accounting === 'physical_dispatch'));
     const recovery = events.find((event) => event.channel === 'chat:stream:provider-recovery');
     assert.ok(recovery);
     assert.equal(recovery.payload.conversationId, 'c1');
@@ -1698,6 +1702,46 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'same model ok');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('keeps ordinary 403 and protected native recovery on the original provider', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const providers = [
+      { id: 'primary', provider: 'openai', baseUrl: 'https://primary.example/v1', model: 'fixture-model',
+        isDefault: true, apiKeyConfigured: true },
+      { id: 'fallback', provider: 'openai', baseUrl: 'https://fallback.example/v1', model: 'fixture-model',
+        apiKeyConfigured: true },
+    ];
+    const checkpoint = { provider: 'openai', providerId: 'primary', model: 'fixture-model', messages: [
+      { role: 'user', content: 'fixture request' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'completed-fixture', type: 'function',
+        function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'completed-fixture', content: 'confirmed tool result' },
+    ] };
+    try {
+      for (const scenario of [
+        { name: 'ordinary-auth', error: 'HTTP 403: invalid credentials' },
+        { name: 'turn-profile-native', error: 'HTTP 403: Domain Blocking.',
+          turnProfile: { role: 'project_agent', modelSelection: { modelProviderId: 'primary' }, providerCheckpoint: checkpoint } },
+        { name: 'execution-native', error: 'HTTP 403: Domain Blocking.', executionBudget: { providerCheckpoint: checkpoint } },
+      ]) {
+        const urls = [], events = [];
+        globalThis.fetch = async url => { urls.push(String(url));
+          return new Response(scenario.error, { status: 403, statusText: 'Forbidden' }); };
+        const service = createLlmChatService({ llmConfigStore: {
+          listProviders: () => providers, getDecryptedApiKey: () => 'fixture-key',
+        } });
+        await service.sendMessage({ messages: [{ role: 'user', content: 'fixture request' }],
+          streamId: `protected-${scenario.name}`, conversationId: `protected-${scenario.name}`,
+          turnProfile: scenario.turnProfile, executionBudget: scenario.executionBudget,
+          webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        });
+        assert.deepEqual(urls, ['https://primary.example/v1/chat/completions'], scenario.name);
+        assert.equal(events.some(event => event.channel === 'chat:stream:provider-recovery'), false, scenario.name);
+        assert.equal(events.some(event => event.channel === 'chat:stream:error'), true, scenario.name);
+      }
+    } finally { globalThis.fetch = previousFetch; }
   });
 
   it('does not replay a provider failure after model output has reached the stream', async () => {

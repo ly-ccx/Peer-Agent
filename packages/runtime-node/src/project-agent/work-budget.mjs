@@ -13,6 +13,18 @@ export function registerWorkBudget(workspaceId, store, policy = {}) {
   return () => { if (stores.get(workspaceId) === binding) stores.delete(workspaceId); };
 }
 export function workBudgetBinding(workspaceId) { return stores.get(workspaceId); }
+
+/** A fresh manual recovery period never creates a fresh allowance. */
+export function workBudgetCanResume(work, limits) {
+  const budget = work?.budget, previous = budget?.limits;
+  if (!budget || !previous || !limits) return false;
+  const caps = [['maxModelRequests', 'modelRequests'], ['maxToolCalls', 'toolCalls'], ['maxTokens', 'tokens'], ['maxCostUsd', 'costUsd']];
+  const increased = caps.some(([cap]) => Number.isFinite(previous[cap]) && Number.isFinite(limits[cap]) && limits[cap] > previous[cap]);
+  return increased && caps.every(([cap, count]) => limits[cap] === undefined
+    || Number.isFinite(budget[count]) && budget[count] >= 0 && budget[count] < limits[cap])
+    && !(limits.maxTokens !== undefined && budget.unknownUsage)
+    && !(limits.maxCostUsd !== undefined && budget.unknownCost);
+}
 export function createWorkBudgetGuard(profile) {
   if (!profile?.workId) return null;
   const binding = stores.get(profile.workspaceId);
@@ -20,7 +32,7 @@ export function createWorkBudgetGuard(profile) {
   const { store, limits } = binding;
   const attemptId = randomUUID();
   binding.activeAttempts.add(attemptId);
-  let requests = 0, finished = false, observed = 0;
+  let requests = 0, finished = false, observed = 0, physicalDispatchAccounting = false;
   function change(update, requireActive = true) {
     store.assertOwner();
     const work = store.read().works[profile.workId];
@@ -32,9 +44,9 @@ export function createWorkBudgetGuard(profile) {
   }
   function limited() { throw new Error('work_budget_limited'); }
   return {
-    beforeRequest() {
+    beforeRequest(metadata) {
       change(budget => {
-        if (budget.uncertainDispatches?.length || Object.entries(budget.attempts).some(([id, row]) => row.pendingTools?.length && !binding.activeAttempts.has(id))) throw new Error('execution_outcome_unknown');
+        if (budget.uncertainDispatches?.length || Object.entries(budget.attempts).some(([id, row]) => row.pendingTools?.length && (id === attemptId || !binding.activeAttempts.has(id)))) throw new Error('execution_outcome_unknown');
         if (budget.modelRequests >= limits.maxModelRequests) limited();
         if (limits.maxTokens !== undefined && (budget.unknownUsage || budget.tokens >= limits.maxTokens)) limited();
         if (limits.maxCostUsd !== undefined && (budget.unknownCost || budget.costUsd >= limits.maxCostUsd)) limited();
@@ -43,6 +55,7 @@ export function createWorkBudgetGuard(profile) {
         if ((limits.maxTokens !== undefined || limits.maxCostUsd !== undefined)
           && Object.keys(budget.attempts).some(id => id !== attemptId)) limited();
         budget.modelRequests++;
+        if (metadata?.accounting === 'physical_dispatch') physicalDispatchAccounting = true;
         budget.attempts[attemptId] = { ...budget.attempts[attemptId], role: profile.role, modelProviderId: profile.modelSelection?.modelProviderId, requests: ++requests };
       });
     },
@@ -66,11 +79,17 @@ export function createWorkBudgetGuard(profile) {
         else budget.unknownCost = true;
       }, false);
     },
-    checkpoint(native) {
+    checkpoint(native, executions) {
       change(budget => {
         const work = store.read().works[profile.workId];
         const ref = store.checkpoint(`${profile.workId}:${attemptId}`, native);
-        budget.attempts[attemptId] = { ...budget.attempts[attemptId], role: profile.role, checkpointRef: ref, pendingTools: [] };
+        // A paired unknown result records the interruption, not the side effect's
+        // outcome. Successful persistence cannot erase that uncertainty.
+        const settled = new Set((executions || []).filter(execution => execution?.result
+          && ![execution.terminalReason, execution.result.error].some(reason => /outcome_unknown$/.test(reason || '')))
+          .map(execution => execution.call?.toolCallId).filter(Boolean));
+        const pendingTools = (budget.attempts[attemptId]?.pendingTools || []).filter(call => !settled.has(call.toolCallId));
+        budget.attempts[attemptId] = { ...budget.attempts[attemptId], role: profile.role, checkpointRef: ref, pendingTools };
         // Keep the parent checkpoint separate from every child's protected history.
         if (profile.role === 'project_agent') {
           return { nativeCheckpointRef: ref };
@@ -92,7 +111,7 @@ export function createWorkBudgetGuard(profile) {
       const cost = usage?.estimatedCostUsd;
       if (!observed && Number.isFinite(cost) && cost >= 0) budget.costUsd += cost;
       else if (!observed) budget.unknownCost = true;
-      if (Number.isFinite(usage?.providerRequestCount)) budget.modelRequests += Math.max(0, usage.providerRequestCount - requests);
+      if (!physicalDispatchAccounting && Number.isFinite(usage?.providerRequestCount)) budget.modelRequests += Math.max(0, usage.providerRequestCount - requests);
       budget.lastUsage = { attemptId, role: profile.role, usage: usage || null };
       if (budget.attempts[attemptId]?.pendingTools?.length) budget.uncertainDispatches = [...(budget.uncertainDispatches || []),
         ...budget.attempts[attemptId].pendingTools.map(row => ({ ...row, attemptId, role: profile.role }))];

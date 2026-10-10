@@ -1895,6 +1895,9 @@ export function createLlmChatService({
           webContents: accumulatingWebContents,
           streamId,
           provider,
+          // Prior completed tools are not re-emitted during checkpoint restore.
+          // A quiet current stream therefore cannot authorize changing their provider identity.
+          protectedNativeRecovery: Boolean(turnProfile?.providerCheckpoint || executionBudget?.providerCheckpoint),
         });
         const qoderCatalogMetadata = resolvedChannel.wire === 'qoder-private'
           ? getQoderModelMetadata(provider.model)
@@ -2092,6 +2095,7 @@ export function createLlmChatService({
           attemptStream.webContents.send('chat:stream:error', {
             streamId,
             error: describeFetchFailure(err),
+            ...(err?.providerRecovery ? { providerRecovery: err.providerRecovery } : {}),
           });
         }
           return attemptStream;

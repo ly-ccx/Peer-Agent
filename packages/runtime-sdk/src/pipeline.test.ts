@@ -1,6 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+test('checkpoint failure after a side effect stops before another request or terminal success', async () => {
+  for (const terminal of [false, true]) {
+    let requests = 0, writes = 0, projections = 0;
+    const pipeline = createRuntimePipeline({
+      model: {
+        initialize: () => 0,
+        runTurn: async state => {
+          requests++;
+          return { kind: 'tool_calls' as const, state, calls: [{ toolCallId: 'write-1', name: 'write_file' }] };
+        },
+        applyToolResults: state => state + 1,
+        checkpoint: () => { throw new Error('checkpoint_persistence_failed'); },
+      },
+      tools: { execute: async call => { writes++; return { call, result: { output: 'written' }, terminal }; } },
+      lifecycle: { toolResultsApplied: () => { projections++; } },
+    });
+    const result = await pipeline.run({ sessionId: 'checkpoint-case', input: null });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reason, 'checkpoint_persistence_failed');
+    assert.equal(requests, 1);
+    assert.equal(writes, 1);
+    assert.equal(projections, 0, 'uncommitted checkpoint is not published as a finished batch');
+  }
+});
+
 import type { RuntimeSdkEvent, RuntimeSdkEventInput } from './contracts.ts';
 import type {
   RuntimePipelineToolCall,

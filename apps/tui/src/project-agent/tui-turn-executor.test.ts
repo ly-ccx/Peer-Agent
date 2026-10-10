@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createExecutionScheduler, type ModelProvider } from '@peer-agent/runtime-node';
+import { createExecutionScheduler, registerWorkBudget, type ModelProvider } from '@peer-agent/runtime-node';
 import { createTuiHost, type TuiHost } from '../tui-host.ts';
 import { createProviderChatModel } from '../provider-chat-model.ts';
 import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
@@ -56,6 +56,27 @@ test('the turn pipeline executes a real readonly provider and returns its Grant 
   expect(outcome.toolCalls[0].execution.result.evidence).toBeDefined();
   expect(env.requests[0].tools.some((tool:any)=>tool.name==='bash'||tool.name==='write_file')).toBe(false);
   expect(env.requests[0].messages.some((row:any)=>String(row.content).includes('Project agent working rules'))).toBe(true);
+});
+
+test('TUI requires the tool checkpoint commit before another model request', async () => {
+  let rounds = 0;
+  const env = harness({ async stream() { return ++rounds === 1
+    ? { content: '', toolCalls: [{ id: 'read', name: 'read_file', arguments: JSON.stringify({ path: 'README.md' }) }] }
+    : { content: 'done', toolCalls: [] }; } });
+  writeFileSync(path.join(env.home, 'README.md'), 'confirmed read');
+  const works: Record<string, any> = { work: { schemaVersion: 1, workspaceId: 'workspace', workId: 'work',
+    state: 'runnable', revision: 1 } };
+  const store = { assertOwner() {}, read: () => ({ works: structuredClone(works) }),
+    saveWork(work: any) { works.work = structuredClone(work); },
+    checkpoint() { throw new Error('fixture checkpoint disk failure'); } };
+  cleanup.push(registerWorkBudget('workspace', store));
+  const outcome = await env.executor.runTurn({ ...env.input, turnProfile: { ...env.input.turnProfile, workId: 'work' } });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.error).toBe('fixture checkpoint disk failure');
+  expect(env.requests).toHaveLength(1);
+  expect(outcome.toolCalls).toHaveLength(1);
+  expect(works.work.budget.uncertainDispatches).toHaveLength(1);
+  expect(works.work.budget.uncertainDispatches[0].toolCallId).toBe('read');
 });
 
 test('a hallucinated write is denied before the provider despite a project turn', async () => {

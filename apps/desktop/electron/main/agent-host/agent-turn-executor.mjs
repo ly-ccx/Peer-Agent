@@ -93,6 +93,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       turnProfile,
     }).then((outcome) => ({
       ...outcome,
+      ...(outcome?.providerRecovery || collected.providerRecovery() ? { providerRecovery: outcome?.providerRecovery || collected.providerRecovery() } : {}),
       ...(yieldedCheckpoint ? { turnEnd: 'yielded', providerCheckpoint: yieldedCheckpoint } : {}),
       ...(collected.error() || ['error', 'aborted', 'interrupted'].includes(outcome?.terminalStatus)
         ? { ok: false, retryable: false, error: outcome?.error || collected.error() || outcome.terminalStatus }
@@ -108,6 +109,7 @@ function collectTurn(sink) {
   const byId = new Map();
   let text = '';
   let error = '';
+  let providerRecovery = null;
   const wrapped = {
     send(channel, payload) {
       sink.send(channel, payload);
@@ -115,6 +117,7 @@ function collectTurn(sink) {
         text += payload.content;
       } else if (channel === 'chat:stream:error') {
         error = typeof payload?.error === 'string' ? payload.error : '提供方错误';
+        if (payload?.providerRecovery && typeof payload.providerRecovery === 'object') providerRecovery = payload.providerRecovery;
       } else if (channel === 'chat:stream:tool-call') {
         const id = typeof payload?.toolCallId === 'string' && payload.toolCallId
           ? payload.toolCallId
@@ -144,6 +147,7 @@ function collectTurn(sink) {
     sink: wrapped,
     text: () => text,
     error: () => error,
+    providerRecovery: () => providerRecovery,
     toolCalls: () => calls.map((call) => ({ ...call })),
   };
 }

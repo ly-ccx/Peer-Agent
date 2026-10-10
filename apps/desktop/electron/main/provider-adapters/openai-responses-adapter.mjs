@@ -17,6 +17,7 @@ import { encodeOpenAIResponsesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
+import { hasManagedProviderRequest } from '../chat-runtime/provider-request-recovery.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 import { formatGrokSubscriptionHttpError } from '@peer-agent/runtime-node';
@@ -95,6 +96,7 @@ export async function sendOpenAIResponsesStreamWithResilience(sendOnce, {
   transientRetryDelaysMs = OPENAI_RESPONSES_TRANSIENT_RETRY_DELAYS_MS,
   waitImpl = sleepMs,
 } = {}) {
+  if (hasManagedProviderRequest()) return sendOnce();
   const delays = Array.isArray(transientRetryDelaysMs) ? transientRetryDelaysMs : [];
   let lastResult = null;
   let transientAttempts = 0;

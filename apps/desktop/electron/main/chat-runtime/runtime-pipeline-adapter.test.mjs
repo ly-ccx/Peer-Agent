@@ -7,6 +7,52 @@ import {
 } from './runtime-pipeline-adapter.mjs';
 
 describe('Desktop Runtime Pipeline adapter', () => {
+  it('forwards paired tool executions and run context to the critical checkpoint', async () => {
+    const call = { name: 'write_file', toolCallId: 'tool-write' };
+    const execution = { call, result: { output: 'saved' } };
+    let committed = false;
+    const result = await runDesktopRuntimePipeline({ sessionId: 'checkpoint-session', streamId: 'checkpoint-stream',
+      model: { initialize: () => ({ phase: 0 }), applyToolResults: state => ({ ...state, phase: 1 }),
+        runTurn: state => state.phase === 0 ? { kind: 'tool_calls', state, calls: [call] } : { kind: 'completed', state },
+        checkpoint(state, executions, context) {
+          assert.equal(state.phase, 1);
+          assert.deepEqual(executions, [execution]);
+          assert.equal(context.run.streamId, 'checkpoint-stream');
+          committed = true;
+        },
+      }, tools: { execute: async () => execution },
+    });
+    assert.equal(result.status, 'completed');
+    assert.equal(committed, true);
+  });
+
+  it('preserves request failure facts and never debits another logical request', async () => {
+    let debits = 0;
+    const detail = { kind: 'response_headers_timeout', requestId: 'provider-request-fixture', retryable: true, attempts: 4 };
+    await assert.rejects(runDesktopRuntimePipeline({ sessionId: 'fixture', streamId: 'fixture',
+      budgetGuard: { beforeRequest() { debits++; } },
+      model: { initialize: () => ({}), applyToolResults: state => state,
+        runTurn() { throw Object.assign(new Error('connect timeout after 20000ms (ConnectTimeoutError)'), { providerRecovery: detail }); } },
+      tools: { execute: async call => ({ call, result: {} }) },
+    }), error => error.providerRecovery === detail);
+    assert.equal(debits, 0);
+  });
+
+  it('critical checkpoint failure stops terminal tools and retains execution uncertainty', async () => {
+    let rounds = 0;
+    let published = false;
+    await assert.rejects(runDesktopRuntimePipeline({ sessionId: 'fixture', streamId: 'fixture',
+      lifecycle: { toolResultsApplied() { published = true; } },
+      model: { initialize: () => ({}), applyToolResults: state => state,
+        checkpoint() { throw new Error('fixture storage failed'); },
+        runTurn(state) { rounds++; return { kind: 'tool_calls', state, calls: [{ name: 'read_file', toolCallId: 'tool' }] }; },
+      },
+      tools: { execute: async call => ({ call, result: { output: 'fixture' }, terminal: true, terminalReason: 'completed' }) },
+    }), error => error.message === 'checkpoint_persistence_failed' && error.providerRecovery?.kind === 'execution_outcome_unknown');
+    assert.equal(rounds, 1);
+    assert.equal(published, false);
+  });
+
   it('forwards one session event while leaving Desktop terminal events authoritative', () => {
     const events = [];
     const state = { sessionStarted: false };

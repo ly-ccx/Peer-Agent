@@ -16,6 +16,10 @@ import {
   type DispositionMessage,
   type DispositionToolCall,
   type MessageDisposition,
+  classifyProjectAgentFailure,
+  type ProjectRecoveryFailureKind,
+  type ProjectWorkRecovery,
+  type ProjectWorkState,
 } from '@peer-agent/protocol';
 
 export const CONVERSATION_PAGE_SIZE = 50;
@@ -43,6 +47,39 @@ export interface BotChatCard {
   readonly resolvedState?: 'open' | 'resolved';
   readonly actions?: readonly BotChatCardAction[];
   readonly refs?: { readonly sessionId: string };
+  readonly recovery?: ProjectWorkRecovery;
+  readonly recoveryWorkState?: ProjectWorkState;
+}
+
+/** Current host projection, never a local retry scheduler or a promise inferred from prose. */
+export function agentFailurePresentation(card: BotChatCard): { messageKey: TranslationKey; recovering: boolean; retryAllowed: boolean } {
+  const failure = classifyProjectAgentFailure(card.content, card.recovery ? { kind: card.recovery.failureKind, retryable: card.recovery.retryable } : undefined);
+  if (card.resolvedState === 'resolved') return { messageKey: 'projectAgent.chat.recoveryEnded', recovering: false, retryAllowed: false };
+  if (card.recovery?.blockedCode === 'RECOVERY_CHECKPOINT_UNAVAILABLE') {
+    return { messageKey: 'projectAgent.chat.recoveryMissingCheckpoint', recovering: false, retryAllowed: false };
+  }
+  const continuing = Boolean(card.recovery) && card.recoveryWorkState === 'runnable'
+    && failure.kind !== 'execution_outcome_unknown' && failure.kind !== 'cancelled';
+  if (continuing) return { messageKey: 'projectAgent.chat.recoveryContinuing', recovering: true, retryAllowed: false };
+  const recovering = failure.retryable && card.recoveryWorkState === 'retry_wait'
+    && Boolean(card.recovery?.reservationId && card.recovery.retryAt);
+  if (recovering) return { messageKey: 'projectAgent.chat.recoveryScheduled', recovering: true, retryAllowed: false };
+  const keys: Partial<Record<ProjectRecoveryFailureKind, TranslationKey>> = {
+    response_headers_timeout: 'projectAgent.chat.recoveryExhausted',
+    network: 'projectAgent.chat.recoveryExhausted',
+    stream_interrupted: 'projectAgent.chat.recoveryExhausted',
+    provider_transient: 'projectAgent.chat.recoveryExhausted',
+    rate_limited: 'projectAgent.chat.recoveryExhausted',
+    authentication: 'projectAgent.chat.recoveryAuthentication',
+    configuration: 'projectAgent.chat.recoveryConfiguration',
+    invalid_request: 'projectAgent.chat.recoveryInvalidRequest',
+    permission: 'projectAgent.chat.recoveryPermission',
+    budget_exhausted: 'projectAgent.chat.budgetExhausted',
+    execution_outcome_unknown: 'projectAgent.chat.recoveryUnknownOutcome',
+    cancelled: 'projectAgent.chat.stopped',
+  };
+  return { messageKey: keys[failure.kind] ?? 'projectAgent.chat.unavailable',
+    recovering: false, retryAllowed: failure.kind !== 'execution_outcome_unknown' && failure.kind !== 'cancelled' };
 }
 
 export interface BotChatMeta {
@@ -587,12 +624,35 @@ function readCards(value: unknown): BotChatCard[] {
       content: readString(record.content),
       ...(readCompletionReview(record.completionReview) ? { completionReview: readCompletionReview(record.completionReview)! } : {}),
       ...(resolved ? { resolvedState: resolved } : {}),
+      ...(readRecovery(record.recovery) ? { recovery: readRecovery(record.recovery)! } : {}),
+      ...(readRecoveryWorkState(record.recoveryWorkState) ? { recoveryWorkState: readRecoveryWorkState(record.recoveryWorkState)! } : {}),
       actions: readActions(record.actions),
       ...(record.refs && typeof record.refs === 'object' && readString((record.refs as Record<string, unknown>).sessionId)
         ? { refs: { sessionId: readString((record.refs as Record<string, unknown>).sessionId) } } : {}),
     });
   }
   return cards;
+}
+
+function readRecovery(value: unknown): BotChatCard['recovery'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const row = value as Record<string, unknown>;
+  const kinds: readonly ProjectRecoveryFailureKind[] = ['response_headers_timeout', 'network', 'stream_interrupted', 'provider_transient',
+    'rate_limited', 'authentication', 'invalid_request', 'configuration', 'permission', 'budget_exhausted',
+    'execution_outcome_unknown', 'cancelled', 'fatal'];
+  if (!kinds.includes(row.failureKind as ProjectRecoveryFailureKind) || typeof row.retryable !== 'boolean'
+    || typeof row.autoAttempts !== 'number' || !Number.isInteger(row.autoAttempts) || row.autoAttempts < 0 || !readString(row.failedTurnId)) return undefined;
+  const date = (key: string) => typeof row[key] === 'string' && Number.isFinite(Date.parse(row[key] as string)) ? row[key] as string : undefined;
+  return { failureKind: row.failureKind as ProjectRecoveryFailureKind, retryable: row.retryable, autoAttempts: row.autoAttempts,
+    failedTurnId: readString(row.failedTurnId), ...(date('retryAt') ? { retryAt: date('retryAt') } : {}),
+    ...(readString(row.reservationId) ? { reservationId: readString(row.reservationId) } : {}),
+    ...(row.blockedCode === 'RECOVERY_CHECKPOINT_UNAVAILABLE' ? { blockedCode: row.blockedCode } : {}),
+    ...(date('deadlineAt') ? { deadlineAt: date('deadlineAt') } : {}) };
+}
+
+function readRecoveryWorkState(value: unknown): ProjectWorkState | undefined {
+  return ['runnable', 'waiting_children', 'waiting_user', 'retry_wait', 'paused', 'budget_limited', 'blocked_system', 'delivered', 'cancelled']
+    .includes(value as string) ? value as ProjectWorkState : undefined;
 }
 
 function readCompletionReview(value: unknown): import('@peer-agent/protocol').SessionCompletionReview | null {

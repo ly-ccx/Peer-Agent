@@ -1,3 +1,17 @@
+import type { ProjectRecoveryFailureKind } from './project-agent-failure.ts';
+
+/** Local host reservation; neither model text nor a UI timer owns recovery. */
+export interface ProjectWorkRecovery {
+  readonly failureKind: ProjectRecoveryFailureKind;
+  readonly retryable: boolean;
+  readonly autoAttempts: number;
+  readonly failedTurnId: string;
+  readonly retryAt?: string;
+  readonly reservationId?: string;
+  readonly deadlineAt?: string;
+  readonly blockedCode?: 'RECOVERY_CHECKPOINT_UNAVAILABLE';
+}
+
 export type ProjectWorkState = 'runnable' | 'waiting_children' | 'waiting_user' | 'retry_wait' | 'paused'
   | 'budget_limited' | 'blocked_system' | 'delivered' | 'cancelled';
 export type ProjectTurnEnd = 'reply_committed' | 'awaiting_children' | 'yielded' | 'awaiting_user'
@@ -13,6 +27,7 @@ export interface ProjectWorkReceipt {
   readonly revision: number;
   readonly checkpointRef?: string;
   readonly nativeCheckpointRef?: string;
+  readonly recovery?: ProjectWorkRecovery;
   readonly end?: ProjectTurnEnd;
   readonly attemptId?: string;
   readonly pendingEventIds?: readonly string[];

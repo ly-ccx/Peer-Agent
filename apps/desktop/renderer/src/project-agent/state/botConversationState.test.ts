@@ -6,6 +6,7 @@ import {
   applyOptimistic,
   conversationRows,
   conversationWindowAnchor,
+  agentFailurePresentation,
   mergeConversationPage,
   normalizeBotMessage,
   quoteRefsFor,
@@ -15,6 +16,57 @@ import {
   windowConversationRows,
   type BotChatMessage,
 } from './botConversationState.ts';
+
+test('failure presentation preserves typed host recovery and only promises a real reservation', () => {
+  const raw = { id: 'failure', kind: 'system_card', cards: [{ cardId: 'failure', kind: 'agent_unavailable',
+    content: '代理暂时不可用：connect timeout after 20000ms (ConnectTimeoutError)',
+    recoveryWorkState: 'retry_wait', recovery: { failureKind: 'response_headers_timeout', retryable: true, autoAttempts: 1, failedTurnId: 'turn-1',
+      reservationId: 'retry-1', retryAt: '2026-10-10T03:00:00.000Z', deadlineAt: '2026-10-10T03:05:00.000Z' } }] };
+  const card = normalizeBotMessage(raw)!.cards[0]!;
+  assert.equal(card.recovery?.reservationId, 'retry-1');
+  assert.equal(agentFailurePresentation(card).messageKey, 'projectAgent.chat.recoveryScheduled');
+  assert.equal(agentFailurePresentation({ ...card, recovery: { ...card.recovery!, reservationId: undefined } }).messageKey,
+    'projectAgent.chat.recoveryExhausted');
+  assert.equal(agentFailurePresentation({ ...card, recovery: undefined }).messageKey, 'projectAgent.chat.recoveryExhausted');
+  assert.equal(agentFailurePresentation({ ...card, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryEnded');
+  assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: 'runnable', recovery: { ...card.recovery!, reservationId: undefined } }).recovering, true);
+  assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: 'blocked_system' }).recovering, false);
+  assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: undefined }).recovering, false);
+});
+
+test('host failure types override legacy diagnostics and unsafe retries remain unavailable', () => {
+  const base = { cardId: 'failure', kind: 'agent_unavailable', content: 'connect timeout after 20000ms (ConnectTimeoutError)' };
+  const recovery = { failureKind: 'authentication' as const, retryable: false, autoAttempts: 0, failedTurnId: 'turn-1' };
+  assert.equal(agentFailurePresentation({ ...base, recovery }).messageKey, 'projectAgent.chat.recoveryAuthentication');
+  assert.equal(agentFailurePresentation({ ...base, recovery, recoveryWorkState: 'runnable' }).messageKey, 'projectAgent.chat.recoveryContinuing');
+  assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'execution_outcome_unknown' } }).messageKey,
+    'projectAgent.chat.recoveryUnknownOutcome');
+  assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'execution_outcome_unknown' } }).retryAllowed, false);
+  assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'budget_exhausted' } }).messageKey,
+    'projectAgent.chat.budgetExhausted');
+  assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'permission' } }).messageKey,
+    'projectAgent.chat.recoveryPermission');
+  assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'stream_interrupted' } }).messageKey,
+    'projectAgent.chat.recoveryExhausted');
+});
+
+test('malformed recovery payload cannot create a promise to recover or leak arbitrary details', () => {
+  const card = normalizeBotMessage({ id: 'failure', cards: [{ cardId: 'f', kind: 'agent_unavailable', content: 'private diagnostic',
+    recovery: { failureKind: 'invented', retryable: true, autoAttempts: -1, failedTurnId: 'turn', reservationId: 'fake', retryAt: 'bad date' } }] })!.cards[0]!;
+  assert.equal(card.recovery, undefined);
+  assert.deepEqual(agentFailurePresentation(card), { messageKey: 'projectAgent.chat.unavailable', recovering: false, retryAllowed: true });
+});
+
+test('missing durable continuation is explained without offering a replay', () => {
+  const recovery = { failureKind: 'fatal', retryable: false, autoAttempts: 1, failedTurnId: 'turn-1',
+    blockedCode: 'RECOVERY_CHECKPOINT_UNAVAILABLE' };
+  const card = normalizeBotMessage({ id: 'failure', cards: [{ cardId: 'failure', kind: 'agent_unavailable',
+    content: 'provider diagnostic', recoveryWorkState: 'blocked_system', recovery }] })!.cards[0]!;
+  assert.deepEqual(card.recovery, recovery);
+  assert.deepEqual(agentFailurePresentation(card), { messageKey: 'projectAgent.chat.recoveryMissingCheckpoint', recovering: false, retryAllowed: false });
+  const invalid = normalizeBotMessage({ id: 'failure', cards: [{ ...card, recovery: { ...recovery, blockedCode: 'PRIVATE_DETAIL' } }] })!.cards[0]!;
+  assert.deepEqual(invalid.recovery, { failureKind: 'fatal', retryable: false, autoAttempts: 1, failedTurnId: 'turn-1' });
+});
 
 test('durable receipt acknowledges its input and preserves identity until the canonical echo', () => {
   const pending = [{ inputId: 'a', text: 'body', quoteRefs: ['reply'], createdAt: 'now', state: 'sending' as const },

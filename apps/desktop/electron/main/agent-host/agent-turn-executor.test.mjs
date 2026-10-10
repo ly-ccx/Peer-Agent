@@ -3,6 +3,20 @@ import test from 'node:test';
 import { createAgentTurnExecutor } from './agent-turn-executor.mjs';
 import { createBroadcastSink } from './turn-sinks.mjs';
 
+test('project-agent failure retains request recovery facts from the stream beside completed tool results', async () => {
+  const providerRecovery = { kind: 'response_headers_timeout', retryable: true, phase: 'response_headers', requestId: 'request-7', attempts: 4, maxAttempts: 4, exhausted: true, replaySafe: true };
+  const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage(input) {
+    input.webContents.send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', args: { path: 'report' } });
+    input.webContents.send('chat:stream:tool-result', { toolCallId: 'read', result: '{"ok":true,"content":"saved"}' });
+    input.webContents.send('chat:stream:error', { error: 'connect timeout after 20000ms (ConnectTimeoutError)', providerRecovery });
+    return { terminalStatus: 'error', toolCallCount: 1 };
+  } } });
+  const outcome = await executor.runTurn({ mode: 'project_agent', sink: { send() {} } });
+  assert.deepEqual(outcome.providerRecovery, providerRecovery);
+  assert.deepEqual(outcome.toolCalls[0].result, { ok: true, content: 'saved' });
+  assert.equal(outcome.retryable, false, 'request retries already belonged to the service');
+});
+
 test('project agent separates its scheduling slice from hard budget and preserves host tool timing', async () => {
   let request;
   const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage(input) {

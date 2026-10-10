@@ -417,7 +417,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'stream-stopped.png') });
   await closeReplyDetails(page);
   await composer.fill(''); command('RC_STREAM_STOP', 3);
-  await page.locator('.bot-stopped-reply').getByRole('button', { name: '重发', exact: true }).click();
+  await page.locator('.bot-stopped-reply').getByRole('button', { name: '继续尝试', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' }).count(), count => count === 2);
   checks.push('stop preserves incomplete text, stopped running tool, exact-turn process and draft; explicit retry creates one new reply');
   await start('RC_STREAM_FAIL'); command('RC_STREAM_FAIL', 2.5);
@@ -433,14 +433,15 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await detail.getByText('受控连接失败', { exact: false }).waitFor();
   await detail.locator('.bot-tool-step[data-status="done"]').waitFor({ state: 'attached' });
   await closeReplyDetails(page);
-  await failed.getByRole('button', { name: '重发', exact: true }).click();
+  await failed.getByRole('button', { name: '继续尝试', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' }).count(), count => count === 3);
   checks.push('failure retracts unaccepted preview, folds provider diagnostics and offers visible explicit retry without duplicate replies');
   command('RC_MANUAL_WAKE_RETRY', 0);
   await page.locator('.bot-search').fill('project-001');
   await page.locator('.bot-row').first().click();
   const wakeFailure = page.locator('.bot-unavailable-reply').last();
-  await wakeFailure.getByRole('button', { name: '重发', exact: true }).click();
+  assert.equal(await wakeFailure.locator(':scope > p').innerText(), '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。');
+  await wakeFailure.getByRole('button', { name: '继续尝试', exact: true }).click();
   await live.waitFor();
   await live.getByText('正在重试，我会接着核对已有进展。', { exact: true }).waitFor();
   assert.equal(await page.locator('.bot-stop-response').count(), 1);
@@ -459,7 +460,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await wakeReply.waitFor();
   assert.equal(await wakeReply.locator('.bot-narration p').first().textContent(), '正在重试，我会接着核对已有进展。');
   await until(() => page.locator('.bot-stop-response').count(), count => count === 0);
-  await until(() => wakeFailure.getByRole('button', { name: '重发', exact: true }).count(), count => count === 0);
+  await until(() => wakeFailure.getByRole('button', { name: '继续尝试', exact: true }).count(), count => count === 0);
   report.manualWakeRetry = { progressBeforeCompletion: true, stopVisible: true, completed: true, narrationRetained: true, noPrivateThinking: true, narrowFits: true };
   await page.setViewportSize(viewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);

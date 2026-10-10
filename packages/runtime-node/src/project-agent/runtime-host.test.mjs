@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createProjectAgentHost } from './runtime-host.mjs';
 
-function harness(executeTurn = async () => ({ text: 'reply' })) {
+function harness(executeTurn = async () => ({ text: 'reply' }), extra = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-targeted-wake-'));
   let ids = ['a', 'b'];
   const leased = new Set(ids), stopped = [], messages = [];
@@ -17,6 +17,7 @@ function harness(executeTurn = async () => ({ text: 'reply' })) {
     hasMessage: (conversationId, id) => messages.some(message => message.conversationId === conversationId && message.id === id),
     stopWatches: id => stopped.push(id), executeTurn,
     resolveModel: () => ({ ok: true, modelProviderId: 'scripted', reasons: [] }),
+    ...extra,
   });
   return { host, leased, stopped, messages, close: () => { host.dispose(); rmSync(rootDir, { recursive: true, force: true }); },
     remove: id => { ids = ids.filter(value => value !== id); } };
@@ -51,6 +52,27 @@ test('targeted wake keeps other bot runners and their in-flight turns alive', as
     await h.host.sync();
     assert.deepEqual(calls, ['a', 'b'], 'completed inputs must not replay');
   } finally { release(); h.close(); }
+});
+
+test('host restart leaves failed anchors with coordination and admits only genuinely new input', async () => {
+  let calls = 0;
+  const h = harness(async ({ plan }) => {
+    calls++;
+    if (calls === 1) return { ok: false, error: 'ConnectTimeoutError', providerRecovery: { kind: 'network', retryable: true } };
+    assert.equal(plan.userInputs[0].inputId, 'new');
+    assert.equal(plan.turnProfile.providerCheckpoint, undefined);
+    return { text: '新的问题已回复。' };
+  }, { now: () => '2026-10-10T06:00:00Z', schedule: () => 1, clearSchedule: () => {} });
+  try {
+    h.host.inputQueue.submitInput({ workspaceId: 'a', inputId: 'old', text: '原目标', surface: 'desktop' });
+    await h.host.sync(['a']); assert.equal(calls, 1);
+    h.leased.delete('a'); await h.host.sync();
+    h.leased.add('a'); await h.host.sync(['a']);
+    assert.equal(calls, 1);
+    assert.equal(h.host.runnerFor('a').ownsInput('old'), true);
+    h.host.inputQueue.submitInput({ workspaceId: 'a', inputId: 'new', text: '新的问题', surface: 'desktop' });
+    await h.host.sync(['a']); assert.equal(calls, 2);
+  } finally { h.close(); }
 });
 
 test('targeted sync still drops unrequested bots whose lease or registration was removed', async () => {

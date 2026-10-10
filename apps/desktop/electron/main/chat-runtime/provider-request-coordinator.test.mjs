@@ -5,8 +5,56 @@ import {
   executeDesktopProviderRequest,
 } from './provider-request-coordinator.mjs';
 import { createRestoredObservedContextAccountingSnapshot } from '@peer-agent/runtime-core';
+import { dispatchProviderRequest } from './provider-request-recovery.mjs';
 
 describe('Desktop provider request coordinator', () => {
+  it('rejects a mutated canonical request before another physical retry', async () => {
+    let dispatches = 0;
+    await assert.rejects(executeDesktopProviderRequest({
+      request: { messages: [{ role: 'user', content: 'fixture request' }], systemPrompt: 'fixture',
+        contextWindow: 1_000_000, requestRecoveryOptions: { waitImpl: async () => {} } },
+      send: request => dispatchProviderRequest(async () => {
+        dispatches++;
+        request.messages.push({ role: 'assistant', content: 'adapter mutation' });
+        return { ok: false, status: 503 };
+      }),
+    }), error => error.message.startsWith('context_request_fingerprint_mismatch')
+      && error.providerRecovery.kind === 'invalid_request' && error.providerRecovery.retryable === false);
+    assert.equal(dispatches, 1);
+  });
+
+  it('recovers the next canonical request after 19 completed tool pairs without another logical round', async () => {
+    const messages = [{ role: 'user', content: 'fixture request' }];
+    for (let i = 0; i < 19; i++) messages.push(
+      { role: 'assistant', content: '', tool_calls: [{ id: `call-${i}`, type: 'function', function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: `call-${i}`, content: `completed result ${i}` },
+    );
+    const before = JSON.stringify(messages);
+    const canonicalRequests = [];
+    const budget = [];
+    let logicalRounds = 0;
+    const result = await executeDesktopProviderRequest({
+      request: { messages, systemPrompt: 'fixture', contextWindow: 1_000_000,
+        requestRecoveryOptions: { waitImpl: async () => {} },
+        budgetGuard: { beforeRequest: metadata => budget.push(metadata) },
+        onProviderRequest: () => { logicalRounds++; },
+      },
+      send: request => dispatchProviderRequest(async () => {
+        canonicalRequests.push(request);
+        if (canonicalRequests.length === 1) throw Object.assign(new Error('ConnectTimeoutError'), { code: 'ConnectTimeoutError' });
+        if (canonicalRequests.length === 2) return { ok: false, status: 503 };
+        return { ok: true, content: 'completed', streamUsage: { inputTokens: 10, outputTokens: 2 } };
+      }),
+    });
+    assert.equal(result.response.content, 'completed');
+    assert.equal(budget.length, 3);
+    assert.equal(logicalRounds, 1);
+    assert.equal(canonicalRequests.length, 3);
+    assert.ok(canonicalRequests.every(request => request === canonicalRequests[0]));
+    assert.equal(canonicalRequests[0].messages.filter(message => message.role === 'tool').length, 19);
+    assert.equal(JSON.stringify(messages), before);
+  });
+
   it('coordinates compaction without publishing a parallel context projection', async () => {
     const result = await coordinateDesktopProviderRequest({
       messages: [
