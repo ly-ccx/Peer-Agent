@@ -3,6 +3,7 @@ import { openSync, closeSync, fsyncSync, writeSync, readFileSync, mkdirSync, ren
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
+import { admitCoordinationDecision } from './coordination-kernel.mjs';
 
 export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString() }) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)) throw new Error('invalid_workspace');
@@ -68,6 +69,18 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   }
   return {
     read, append, assertOwner, recover,
+    decide(decision, host) {
+      assertOwner();
+      const admitted = admitCoordinationDecision(read(), decision, { ...host, workspaceId, holdsLease: true, now: now() });
+      if (admitted.ok && !admitted.replayed) append(admitted.entry);
+      return admitted;
+    },
+    bindSession(workId, goalRevision, sessionId) { return append({ kind: 'coordination_binding', workId, goalRevision, sessionId }); },
+    advanceTransition(operationId, expectedPhase, patch) {
+      assertOwner();
+      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff'].includes(key))) throw new Error('invalid_transition_patch');
+      return append({ kind: 'coordination_transition', operationId, expectedPhase, patch: { ...patch, updatedAt: now() } });
+    },
     checkpoint(workId, checkpoint) {
       assertOwner();
       const body = JSON.stringify(checkpoint);
