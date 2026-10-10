@@ -1,3 +1,4 @@
+import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
 import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
 import { countGeminiCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -114,7 +115,7 @@ export async function agentLoopGemini({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
-      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'gemini', providerId, model, messages: structuredClone(apiMessages) }, executions),
+      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'gemini', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
       initialize: () => ({ provider: 'gemini' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -273,7 +274,7 @@ export async function agentLoopGemini({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'gemini', providerId, model, messages: structuredClone(apiMessages),
+        executionBudget?.onYield?.({ provider: 'gemini', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },

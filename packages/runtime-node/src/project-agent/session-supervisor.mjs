@@ -46,7 +46,7 @@ const WRITE_CAPABILITIES = new Set(['local.file.write', 'local.file.edit', 'loca
 const WRITE_KINDS = new Set(['file-write', 'shell']);
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'bash']);
 const READ_ONLY_CAPABILITIES = new Set([
-  'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate',
+  'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate', 'local.image.read',
   'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
   'local.goal.record_evidence', 'local.interaction.request_user_input',
   'local.goal.explore',

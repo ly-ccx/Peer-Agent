@@ -56,6 +56,18 @@ function eventTypes(events: readonly RuntimeSdkEvent[]): string[] {
   return events.map((event) => event.type);
 }
 
+test('Hook Evidence keeps host-only visual context without serializing it into events', async () => {
+  const result = completedResult();
+  const context = { visualObservations: [{ dataUrl: 'data:image/png;base64,PRIVATE_PIXELS' }] };
+  Object.defineProperty(result, 'modelContext', { value: context, enumerable: false });
+  const sdk = createRuntimeSdk({ host: createHost({ executeProvider: async () => ({ result, grant: { granted: true } }) }) });
+  const events: RuntimeSdkEvent[] = []; sdk.subscribe(event => events.push(event));
+  const execution = await sdk.execute(request);
+  assert.equal(execution.result.modelContext, context);
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE_PIXELS|base64/);
+  assert.equal(structuredClone(execution.result).modelContext, undefined);
+});
+
 test('runs hooks, provider, evidence and events in the public execution order', async () => {
   const calls: string[] = [];
   const events: RuntimeSdkEvent[] = [];

@@ -36,10 +36,22 @@ test('buildGoalIdempotencyKey is stable for same semantic inputs', () => {
 
 test('classifyGoalToolMutation distinguishes read / idempotent / non-idempotent', () => {
   assert.equal(classifyGoalToolMutation('read_file'), 'read_only');
+  assert.equal(classifyGoalToolMutation('view_image'), 'read_only');
   assert.equal(classifyGoalToolMutation('write_file'), 'idempotent_write');
   assert.equal(classifyGoalToolMutation('edit_file'), 'non_idempotent_write');
   assert.equal(classifyGoalToolMutation('bash', { command: 'rg -n foo src' }), 'read_only');
   assert.equal(classifyGoalToolMutation('bash', { command: 'rm -rf dist' }), 'non_idempotent_write');
+});
+
+test('host fresh-context metadata reexecutes reads but cannot replay completed writes', () => {
+  for (const toolName of ['view_image', 'write_file']) {
+    const input = { planId: 'plan-image', runId: 'run-image', toolName, args: { path: 'shot.png' } };
+    const idempotencyKey = buildGoalIdempotencyKey(input);
+    const completedLedger = new Map([[idempotencyKey, { status: 'completed', evidenceRefs: ['tool-result://old'] }]]);
+    const replay = decideGoalToolReplay({ ...input, completedLedger, requiresFreshResult: true });
+    assert.equal(replay.action, toolName === 'view_image' ? 'execute' : 'reuse');
+    assert.equal(decideGoalToolReplay({ ...input, completedLedger }).action, 'reuse');
+  }
 });
 
 test('decideGoalToolReplay reuses completed ledger hits', () => {

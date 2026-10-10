@@ -12,7 +12,7 @@ import {
 test('project agent whitelist is the read capabilities plus delegation', () => {
   assert.deepEqual(PROJECT_AGENT_ALLOWED_CAPABILITIES, [
     'local.file.list',
-    'local.file.read',
+    'local.file.read', 'local.image.read',
     'local.file.search',
     'local.search.aggregate',
     'local.delegation.create_objective',

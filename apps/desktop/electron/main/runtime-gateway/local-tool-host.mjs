@@ -3,6 +3,7 @@ import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
+import { createDesktopLocalImageProvider } from './local-image-provider.mjs';
 import { createLocalDelegationProvider } from './local-delegation-provider.mjs';
 import { liveDelegationSupervisor, liveObjectiveService, delegationStoreDir } from '../project-agent/delegation-port.mjs';
 import { liveDeliveryFacts } from '../project-agent/delivery-facts-port.mjs';
@@ -33,6 +34,7 @@ export function createLocalToolHost({
   mcpRegistry,
   mcpCredentialResolver = null,
   fileProvider = createLocalFileProvider({ workspaceRoot }),
+  imageProvider = createDesktopLocalImageProvider({ workspaceRoot }),
   shellProvider = null,
   goalProvider = createLocalGoalProvider(),
   delegationProvider = null,
@@ -87,6 +89,7 @@ export function createLocalToolHost({
   const providerRegistry = createCapabilityProviderRegistry({
     providers: providers ?? [
       fileProvider,
+      imageProvider,
       activeShellProvider,
       goalProvider,
       activeDelegationProvider,

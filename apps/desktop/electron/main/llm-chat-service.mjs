@@ -1894,6 +1894,7 @@ export function createLlmChatService({
         // (a) 同 provider 流读取早期中断的自动重试：把单次尝试封装为闭包，便于在
         // replay-safe 且为可恢复传输失败时，从头重发同一请求（覆盖全部 wire）。
         const runProviderAttempt = async () => {
+        toolContext.supportsVision = Boolean(provider.supportsVision);
         const attemptStream = createProviderAttemptStream({
           webContents: accumulatingWebContents,
           streamId,
