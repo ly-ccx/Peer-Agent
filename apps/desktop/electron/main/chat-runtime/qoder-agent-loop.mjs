@@ -126,6 +126,7 @@ export async function agentLoopQoder({
     maxToolCalls: executionBudget?.maxToolCalls,
     sliceToolCalls: executionBudget?.sliceToolCalls,
     yieldAtTurnLimit: executionBudget?.yieldAtTurnLimit,
+    shouldYield: executionBudget?.shouldYield,
     maxToolBatchCalls: executionBudget?.maxToolBatchCalls,
     budgetGuard: executionBudget?.guard,
     signal,

@@ -25,6 +25,8 @@ export interface RuntimePipelineRunInput<TInput = unknown> {
   /** Scheduling allowance; unlike maxToolCalls this can end at a batch boundary. */
   readonly sliceToolCalls?: number;
   readonly yieldAtTurnLimit?: boolean;
+  /** Host scheduling request, checked at durable batch boundaries. */
+  readonly shouldYield?: () => boolean;
   readonly maxToolBatchCalls?: number;
 }
 

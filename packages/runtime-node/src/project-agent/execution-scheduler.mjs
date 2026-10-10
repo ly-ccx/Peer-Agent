@@ -20,7 +20,9 @@ function failed(plan) {
         && runner.recoverableInterruptionCount >= runner.maxRecoverableInterruptionRetries);
 }
 function occupying(plan) {
-  return plan.delegationOrigin?.phase === 'running' && !TERMINAL.has(plan.status) && !failed(plan);
+  const waiting = plan.runner?.status === 'waiting_user' || Boolean(plan.delegationOrigin?.agentWaitMessageId);
+  return plan.delegationOrigin?.phase === 'running' && !TERMINAL.has(plan.status) && !failed(plan)
+    && !(waiting && slot(plan) === 'read');
 }
 function slot(plan) {
   if (plan.delegationOrigin?.readOnly === true) return 'read';
@@ -39,6 +41,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
   const queues = new Map();
   let plansById = new Map();
   let active = 0;
+  const activeLanes = { coordination: 0, work: 0 };
   let sequence = 0;
   const waiting = [];
   function at() { const value = now(); return value instanceof Date ? value.toISOString() : value; }
@@ -135,19 +138,22 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     const currentTime = Date.parse(at());
     waiting.sort((a, b) => rank(b.priority, b.at, currentTime) - rank(a.priority, a.at, currentTime) || a.order - b.order);
     while (active < limit && waiting.length) {
-      const job = waiting.shift();
+      const index = waiting.findIndex(job => limit === 1 || activeLanes[job.lane] < (job.lane === 'coordination' ? 1 : limit - 1));
+      if (index < 0) break;
+      const [job] = waiting.splice(index, 1);
       job.signal?.removeEventListener('abort', job.abort);
       if (job.signal?.aborted) { job.resolve(null); continue; }
       active += 1;
+      activeLanes[job.lane] += 1;
       let released = false;
-      job.resolve(() => { if (released) return; released = true; active -= 1; drain(); });
+      job.resolve(() => { if (released) return; released = true; active -= 1; activeLanes[job.lane] -= 1; drain(); });
     }
   }
   function acquire(input) {
     if (input.signal?.aborted) return Promise.resolve(null);
     const priority = input.priority || plansById.get(input.planId)?.delegationOrigin?.priority || 'normal';
     return new Promise(resolve => {
-      const job = { ...input, priority, at: at(), order: sequence++, resolve };
+      const job = { ...input, lane: input.lane === 'coordination' ? 'coordination' : 'work', priority, at: at(), order: sequence++, resolve };
       job.abort = () => {
         const index = waiting.indexOf(job);
         if (index < 0) return;

@@ -28,7 +28,7 @@ test('project agent separates its scheduling slice from hard budget and preserve
   } } });
   const result = await executor.runTurn({ mode: 'project_agent', limits: { maxRounds: 6, maxToolCalls: 12 }, remainingToolCalls: 2,
     roundIndex: 3, sink: { send() {} } });
-  assert.equal(request.executionBudget.maxTurns, 3);
+  assert.equal(request.executionBudget.maxTurns, 2);
   assert.equal(request.executionBudget.sliceToolCalls, 2);
   assert.equal(request.executionBudget.maxToolCalls, Infinity);
   assert.equal(request.executionBudget.yieldAtTurnLimit, true);

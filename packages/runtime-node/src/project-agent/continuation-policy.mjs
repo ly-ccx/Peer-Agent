@@ -26,6 +26,8 @@ export function continuationDecision({ previous = {}, rounds = [], roster, yield
   const fingerprint = progressFingerprint(rounds, roster);
   const repeats = previous.fingerprint === fingerprint ? (previous.repeats || 0) + 1 : 0;
   const tools = rounds.flatMap(round => round.toolCalls || []);
+  // A host-requested yield may precede the first provider request. It is not a finished reply.
+  if (yielded && tools.length === 0) return { end: 'yielded', state: 'runnable', fingerprint: previous.fingerprint, repeats: previous.repeats || 0 };
   if (repeats >= 2) return { end: 'no_progress', state: 'blocked_system', fingerprint, repeats };
   if (!yielded || tools.length === 0) return { end: 'reply_committed', state: 'delivered', fingerprint, repeats };
   return { end: 'yielded', state: 'runnable', fingerprint, repeats };

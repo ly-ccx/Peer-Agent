@@ -99,7 +99,7 @@ test('cancelling a queued round never invokes the provider; reducing the cap doe
   let cap = 2;
   const s = createExecutionScheduler({ getConcurrency: () => cap });
   const releases = [];
-  const live = [0, 1].map(() => s.withTurn({}, () => new Promise(resolve => releases.push(resolve))));
+  const live = ['work', 'coordination'].map(lane => s.withTurn({ lane }, () => new Promise(resolve => releases.push(resolve))));
   await Promise.resolve();
   const controller = new AbortController();
   let called = false;
@@ -206,4 +206,26 @@ test('a delegated round waiting for a global slot rechecks project ownership bef
   const queued = scheduler.withTurn({ planId: 'p' }, () => { calls++; });
   ready = false; release(); await occupying;
   assert.equal((await queued).error, 'recovery_pending'); assert.equal(calls, 0); assert.equal(scheduler.stats().active, 0);
+});
+
+test('coordinator reserve remains inside the total cap and is shared fairly across projects', async () => {
+  const scheduler = createExecutionScheduler({ getConcurrency: () => 3 });
+  const release = [], order = [];
+  const workers = [0, 1, 2].map(id => scheduler.withTurn({ lane: 'work' }, () => new Promise(resolve => { order.push(`work:${id}`); release.push(resolve); })));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(order.length, 2);
+  await scheduler.withTurn({ lane: 'coordination', workspaceId: 'a' }, () => { order.push('a'); assert.equal(scheduler.stats().active, 3); });
+  await scheduler.withTurn({ lane: 'coordination', workspaceId: 'b' }, () => { order.push('b'); assert.equal(scheduler.stats().active, 3); });
+  assert.deepEqual(order, ['work:0', 'work:1', 'a', 'b']);
+  release.shift()(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(order.at(-1), 'work:2'); release.splice(0).forEach(resolve => resolve());
+  await Promise.all(workers); assert.equal(scheduler.stats().active, 0);
+});
+
+test('logical read waits release read admission; unfinished writes retain their site', () => {
+  const scheduler = createExecutionScheduler();
+  const waits = ['a', 'b'].map(id => ({ ...plan(id, { phase: 'running' }), runner: { status: 'waiting_user' } }));
+  assert.equal(scheduler.inspect(plan('read'), waits).allowed, true);
+  const writing = { ...plan('writer', { phase: 'running', readOnly: false }), runner: { status: 'waiting_user' } };
+  assert.equal(scheduler.inspect(plan('next', { readOnly: false }), [writing]).reason, 'write_slot');
 });
