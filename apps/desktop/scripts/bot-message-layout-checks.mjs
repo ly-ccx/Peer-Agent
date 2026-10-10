@@ -58,6 +58,12 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       // Drawer close restores the reading anchor. Scroll the status card itself,
       // since the message can be partially visible while its final card is below
       // the viewport after virtualization measures retained narration.
+      await recoveryMessage.evaluate(async node => {
+        const animations = node.closest('.bot-shell').getAnimations({ subtree: true }).filter(animation => animation.playState === 'running'
+          && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility());
+        await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
       await recoveryMessage.locator('.bot-card').scrollIntoViewIfNeeded();
       await until(() => recoveryMessage.evaluate(node => {
         const view = node.closest('.bot-thread').getBoundingClientRect();
@@ -71,6 +77,10 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       assert.ok(bounds.shellLeft >= -1 && bounds.shellRight <= bounds.viewport + 1 && bounds.bodyLeft >= 0 && bounds.bodyRight <= bounds.viewport,
         `recovery image must use settled page bounds: ${JSON.stringify({ state, width, appearance, ...bounds })}`);
       await page.screenshot({ path: path.join(captureDirectory, `recovery-${state}-${appearance}.png`), animations: 'disabled' });
+      assert.equal(await recoveryMessage.locator('.bot-card > p').evaluate(node => {
+        const rect = node.getBoundingClientRect();
+        return node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+      }), true, 'captured recovery text remains visible after drawer and virtual-list layout settle');
       recoverySamples.push({ state, width, appearance, exactCopy: true, retryVisible, diagnosticsInDrawer: true, fits: true });
     }
   }
