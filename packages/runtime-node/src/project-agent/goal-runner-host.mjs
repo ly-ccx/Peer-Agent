@@ -1,3 +1,4 @@
+import { agentMessagesForContext } from './agent-communication.mjs';
 import path from 'node:path';
 import { readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -443,7 +444,9 @@ export function createProjectGoalRunnerHost({
         };
         const delegated = resolveDelegatedTurn(plan, 'worker');
         const outcome = await agentTurnExecutor.runTurn({
-          turnProfile: delegated?.turnProfile ?? { role: 'goal_runner', planId: plan.planId },
+          turnProfile: delegated ? { ...delegated.turnProfile, context: {
+            ...delegated.turnProfile.context, agentMessages: agentMessagesForContext(conversation.messages, plan.conversationId),
+          } } : { role: 'goal_runner', planId: plan.planId },
           sink: createSink(),
           plan,
           workspacePath: reviewWorkspacePath(plan),
@@ -460,6 +463,10 @@ export function createProjectGoalRunnerHost({
           runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
           agentProgress,
         });
+        const waiting = goalPlanStore.getPlan(plan.planId)?.delegationOrigin?.agentWaitMessageId;
+        if (waiting && !outcome?.requestedUserInput && outcome?.terminalStatus !== 'error' && outcome?.terminalStatus !== 'aborted') {
+          return { awaitingParentAgent: true, terminalStatus: outcome?.terminalStatus, toolCallCount: outcome?.toolCallCount ?? 0 };
+        }
         // 有 Explorer 请求时返回 explorers，让 Runner 进入 explore 派发分支；
         // 否则维持原有 verify 收尾语义。
         if (collectedExplorers.length > 0) {

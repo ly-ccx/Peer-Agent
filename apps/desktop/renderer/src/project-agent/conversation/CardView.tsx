@@ -1,10 +1,10 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { projectAgentFailureKind } from '@peer-agent/protocol';
 import { useContext, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { PeerIcon } from '../../ui/icons';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
+import { agentFailurePresentation } from '../state/botConversationState';
 import { cardActionErrorKey } from '../state/cardActionError';
 import { CompletionReview } from './CompletionReview';
 import { BotInputContext } from './BotInputContext';
@@ -65,6 +65,8 @@ function CardItem({
   const sending = useRef(false);
   const submitInput = useContext(BotInputContext);
   const resolved = done || card.resolvedState === 'resolved';
+  const failure = card.kind === 'agent_unavailable' ? agentFailurePresentation(card) : undefined;
+  const actions = card.actions?.filter(action => action.id !== 'retry' || failure?.retryAllowed !== false);
   const question = card.kind === 'question';
   const dismissal = useQuestionDismissal(question && resolved, onClosed);
   if (question && !dismissal.present) return null;
@@ -74,12 +76,11 @@ function CardItem({
       {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
-      </> : card.kind === 'agent_unavailable' ? <p className="bot-reply-body">{i18n.t(projectAgentFailureKind(card.content) === 'budget_exhausted'
-        ? 'projectAgent.chat.budgetExhausted' : 'projectAgent.chat.unavailable')}</p>
+      </> : failure ? <p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
-      {resolved && !question || !card.actions?.length ? null : (
+      {resolved && !question || !actions?.length ? null : (
         <div className="bot-card-actions">
-          {card.actions.map((action, index) => (
+          {actions.map((action, index) => (
             <button
               key={`${action.id}-${index}`}
               type="button"
@@ -124,7 +125,7 @@ function actionLabel(action: BotChatCardAction, i18n: I18nRuntime): string {
   if (action.id === 'confirm_completion') return i18n.t('projectAgent.chat.confirmCompletion');
   if (action.id === 'retry_completion') return i18n.t('projectAgent.chat.retryCompletion');
   if (action.id === 'accept_readme') return i18n.t('projectAgent.chat.acceptReadme');
-  if (action.id === 'retry') return i18n.t('projectAgent.chat.retry');
+  if (action.id === 'retry') return i18n.t('projectAgent.chat.continueRetry');
   return action.id;
 }
 

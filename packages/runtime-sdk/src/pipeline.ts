@@ -142,6 +142,7 @@ export function createRuntimePipeline<
             if (options.tools.notExecuted) {
               const denied = await Promise.all(outcome.calls.map(call => options.tools.notExecuted!(call, 'max_tool_calls_exceeded')));
               state = await options.model.applyToolResults(state, denied, currentContext);
+              await options.model.checkpoint?.(state, denied, currentContext);
             }
             return await exhaust('max_tool_calls_exceeded');
           }
@@ -175,6 +176,7 @@ export function createRuntimePipeline<
 
           state = await options.model.applyToolResults(state, executions, currentContext);
           throwIfAborted(signal);
+          await options.model.checkpoint?.(state, executions, currentContext);
           try {
             await options.lifecycle?.toolResultsApplied?.(state, executions, currentContext);
           } catch {

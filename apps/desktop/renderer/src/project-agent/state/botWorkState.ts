@@ -30,7 +30,7 @@ export function workProgress(row: BotWorkRow, i18n: Pick<I18nRuntime, 't'>): str
   return row.session.summary || (formatDrawerSessionStatus(row.session, i18n) !== row.status
     ? formatDrawerSessionStatus(row.session, i18n) : i18n.t(`projectAgent.chat.sessionState.${row.status}`));
 }
-const FOLLOW_UP = ['waiting_user', 'result_ready', 'running', 'starting', 'verifying', 'queued'] as const;
+const FOLLOW_UP = ['waiting_user', 'waiting_agent', 'result_ready', 'running', 'starting', 'verifying', 'queued'] as const;
 /** Attention first; the compact surface is bounded while its count stays factual. */
 export function backgroundWork(index: BotWorkIndex): { count: number; rows: BotWorkRow[] } {
   if (!index.available) return { count: 0, rows: [] };

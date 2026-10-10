@@ -14,7 +14,10 @@ export function writeStreamingCommand(commandFile, scenario, phase) {
   renameSync(commandFile + '.next', commandFile);
 }
 
-/** Controlled cognition only: exercises the actual executor, host, IPC and UI. */
+/** Controlled cognition only: exercises the actual executor, host, IPC and UI.
+ * RC_STREAM_FAIL uses the real local budget/checkpoint port with synthetic
+ * OpenAI-format history. It does not call a provider or read an actual README.
+ */
 export function createStreamingFixture({ commandFile, record, resolveGoalRole }) {
   const active = new Map(), attempts = new Map();
   return {
@@ -25,6 +28,15 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
       record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId, scenario: text, streamId: input.streamId });
       const interactive = input.turnProfile?.role === 'project_agent';
       if (interactive && input.plan?.kind === 'wake' && input.plan.events.some(event => event.eventId === 'rc-manual-retry-event')) {
+        const guard = input.executionBudget?.guard, saved = input.executionBudget?.providerCheckpoint;
+        assert.ok(guard && saved, 'manual wake retry must load the real guarded native checkpoint');
+        assert.equal(saved.provider, 'openai');
+        assert.equal(saved.providerId, input.turnProfile.modelSelection.modelProviderId);
+        assert.equal(saved.model, input.turnProfile.modelSelection.modelId);
+        assert.ok(saved.messages.some(message => message.role === 'user' && message.content === 'RC_MANUAL_WAKE_RETRY'));
+        guard.beforeRequest({ accounting: 'physical_dispatch' });
+        record('turns', { kind: 'manual-wake-recovery', scenario: 'RC_MANUAL_WAKE_RETRY', streamId: input.streamId,
+          nativeLoaded: true, eventIds: input.plan.events.map(event => event.eventId), controlledCognition: true });
         const turn = { aborted: false }; active.set(input.streamId, turn);
         const send = (channel, payload) => input.webContents.send(channel, { streamId: input.streamId, ...payload });
         try {
@@ -34,7 +46,14 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
           while (!turn.aborted && Date.now() < deadline) {
             const command = JSON.parse(readFileSync(commandFile, 'utf8'));
             if (command.scenario === 'RC_MANUAL_WAKE_RETRY' && command.phase >= 2) {
-              send('chat:stream:tool-call', { tool: 'post_reply', toolCallId: 'wake-reply', args: { text: '重试完成，已有进展已保留。', replyTo: [] } });
+              const args = { text: '重试完成，已有进展已保留。', replyTo: [] };
+              guard.beforeTool({ toolCallId: 'wake-reply', capabilityId: 'post_reply' });
+              send('chat:stream:tool-call', { tool: 'post_reply', toolCallId: 'wake-reply', args });
+              guard.checkpoint({ ...saved, messages: [...saved.messages,
+                { role: 'assistant', content: null, tool_calls: [{ id: 'wake-reply', type: 'function',
+                  function: { name: 'post_reply', arguments: JSON.stringify(args) } }] },
+                { role: 'tool', tool_call_id: 'wake-reply', content: JSON.stringify({ ok: true }) }],
+              }, [{ call: { toolCallId: 'wake-reply' }, result: { ok: true }, terminalReason: 'completed' }]);
               send('chat:stream:tool-result', { toolCallId: 'wake-reply', result: JSON.stringify({ ok: true }) });
               return { terminalStatus: 'done' };
             }
@@ -64,6 +83,24 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         return { terminalStatus: 'done', text: 'RC scripted reply: ' + text };
       }
       const attempt = (attempts.get(text) || 0) + 1; attempts.set(text, attempt);
+      const recoveryFixture = text === 'RC_STREAM_FAIL';
+      const guard = recoveryFixture ? input.executionBudget?.guard : null;
+      const saved = recoveryFixture && attempt > 1 ? input.executionBudget?.providerCheckpoint : null;
+      if (recoveryFixture && attempt > 1) {
+        assert.ok(saved, 'explicit retry must load the protected native checkpoint');
+        assert.equal(saved.provider, 'openai');
+        assert.equal(saved.providerId, input.turnProfile.modelSelection.modelProviderId);
+        assert.equal(saved.model, input.turnProfile.modelSelection.modelId);
+        const call = saved.messages.find(message => message.role === 'assistant'
+          && message.tool_calls?.some(tool => tool.id === 'read' && tool.function?.name === 'read_file'));
+        const result = saved.messages.find(message => message.role === 'tool' && message.tool_call_id === 'read');
+        assert.ok(call && result, 'resume retains the complete native read_file ToolCall/Result pair');
+        assert.match(result.content, /README fixture content/);
+        record('turns', { kind: 'streaming-recovery', scenario: text, streamId: input.streamId,
+          nativePairLoaded: true, readFileRepeated: false });
+      }
+      // This represents one controlled cognition dispatch, not a real HTTP request.
+      guard?.beforeRequest({ accounting: 'physical_dispatch' });
       const turn = { aborted: false, text: '' }; active.set(input.streamId, turn);
       const sink = input.webContents, streamId = input.streamId;
       const send = (channel, payload) => { if (!turn.aborted) {
@@ -82,6 +119,19 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
       };
       const aborted = () => ({ terminalStatus: 'aborted', text: turn.text, toolCalls: [] });
       try {
+        if (saved) {
+          const args = { text: '**项目概况**看清楚了。\n\n- 界面展示结果，本地负责执行能力。\n- 开始修改前，先核对项目规则。',
+            replyTo: input.turnProfile.context.inputAnchors.map(anchor => anchor.messageId) };
+          guard.beforeTool({ toolCallId: 'reply', capabilityId: 'post_reply' });
+          send('chat:stream:tool-call', { tool: 'post_reply', toolCallId: 'reply', args });
+          guard.checkpoint({ ...saved, messages: [...saved.messages,
+            { role: 'assistant', content: null, tool_calls: [{ id: 'reply', type: 'function',
+              function: { name: 'post_reply', arguments: JSON.stringify(args) } }] },
+            { role: 'tool', tool_call_id: 'reply', content: JSON.stringify({ ok: true }) }],
+          }, [{ call: { toolCallId: 'reply' }, result: { ok: true }, terminalReason: 'completed' }]);
+          send('chat:stream:tool-result', { toolCallId: 'reply', result: JSON.stringify({ ok: true }) });
+          return { terminalStatus: 'done' };
+        }
         send('chat:stream:thinking', { content: 'PRIVATE_REASONING_MUST_NOT_RENDER' });
         if (!await wait(1)) return aborted();
         send('chat:stream:delta', { content: '我先看看项目的整体情况，整理好后告诉你重点。' });
@@ -92,16 +142,30 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
           send('chat:stream:tool-progress', { tool: 'read_file', toolCallId: 'read', path: 'README.md', receivedChars: 20 });
         }
         if (!await wait(2)) return aborted();
-        send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', args: { path: 'README.md', token: 'PRIVATE_PARAMETER_SECRET' } });
+        const readArgs = { path: 'README.md', token: 'PRIVATE_PARAMETER_SECRET' };
+        guard?.beforeTool({ toolCallId: 'read', capabilityId: 'read_file' });
+        send('chat:stream:tool-call', { tool: 'read_file', toolCallId: 'read', args: readArgs });
+        if (recoveryFixture) record('turns', { kind: 'streaming-read-dispatch', scenario: text, streamId });
         if (!await wait(2.5)) return aborted();
-        send('chat:stream:tool-result', { toolCallId: 'read', result: JSON.stringify({ ok: true, output: '# README fixture content\nThe desktop owns local execution; the interface presents its results. Changes are governed by project rules.', secret: 'PRIVATE_RESULT_SECRET' }) });
+        const readResult = { ok: true, output: '# README fixture content\nThe desktop owns local execution; the interface presents its results. Changes are governed by project rules.', secret: 'PRIVATE_RESULT_SECRET' };
+        const readResultJson = JSON.stringify(readResult);
+        if (guard) guard.checkpoint({ provider: 'openai',
+          providerId: input.turnProfile.modelSelection.modelProviderId, model: input.turnProfile.modelSelection.modelId,
+          messages: [{ role: 'user', content: text },
+            { role: 'assistant', content: turn.text, tool_calls: [{ id: 'read', type: 'function',
+              function: { name: 'read_file', arguments: JSON.stringify(readArgs) } }] },
+            { role: 'tool', tool_call_id: 'read', content: readResultJson }],
+        }, [{ call: { toolCallId: 'read' }, result: readResult, terminalReason: 'completed' }]);
+        send('chat:stream:tool-result', { toolCallId: 'read', result: readResultJson });
         send('chat:stream:delta', { content: '本地执行的结果会交回界面。修改前还需要遵循项目里的开发规则。' });
         const progress = {}, args = { text: '**项目概况**看清楚了。\n\n- 界面展示结果，本地负责执行能力。\n- 开始修改前，先核对项目规则。', replyTo: input.turnProfile.context.inputAnchors.map(anchor => anchor.messageId) };
         emitToolArgProgress(progress, { webContents: sink, streamId, toolCallId: 'reply', toolName: 'post_reply', argsJson: '{"text":"**项目概况**看' });
         if (!await wait(3)) return aborted();
         if (text.includes('FAIL') && attempt === 1) {
-          send('chat:stream:error', { error: '受控连接失败' });
-          return { terminalStatus: 'error', error: '受控连接失败' };
+          const providerRecovery = { kind: 'stream_interrupted', phase: 'stream', requestId: 'controlled-stream-failure',
+            attempts: 1, maxAttempts: 4, exhausted: false, retryable: true, replaySafe: false };
+          send('chat:stream:error', { error: '受控连接失败', providerRecovery });
+          return { terminalStatus: 'error', error: '受控连接失败', providerRecovery };
         }
         send('chat:stream:tool-call', { tool: 'post_reply', toolCallId: 'reply', args });
         send('chat:stream:tool-result', { toolCallId: 'reply', result: JSON.stringify({ ok: true }) });
@@ -257,8 +321,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.locator('.bot-row').first().click();
   await live.getByText('我先看看项目的整体情况，整理好后告诉你重点。', { exact: true }).waitFor();
   checks.push('switching bots hides the other stream and restores the active snapshot');
+  await openDetails(live);
   if (workCommandFile) {
-    await openDetails(live);
     const delegated = detail.locator('.bot-work-row'); await delegated.waitFor({ state: 'attached' });
     if (!(await delegated.evaluate(node => node.open))) await delegated.locator(':scope > summary').click();
   }
@@ -269,7 +333,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   command('RC_STREAM_TEXT', 1.75);
   await checkReplyPresence({ page, reply: live, report, until, state: 'preparing-read', label: '准备阅读 README.md' });
   command('RC_STREAM_TEXT', 2);
-  await openDetails(live);
+  assert.equal(await detail.isVisible(), true, 'the drawer stays open while the user reads earlier messages');
   if (!(await detail.locator('.bot-turn-process').evaluate(node => node.open))) await detail.locator('.bot-turn-process > summary').click();
   const readingStep = detail.locator('.bot-tool-step[data-status="running"]');
   await readingStep.waitFor();
@@ -432,7 +496,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'stream-stopped.png') });
   await closeReplyDetails(page);
   await composer.fill(''); command('RC_STREAM_STOP', 3);
-  await page.locator('.bot-stopped-reply').getByRole('button', { name: '重发', exact: true }).click();
+  await page.locator('.bot-stopped-reply').getByRole('button', { name: '继续尝试', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' }).count(), count => count === 2);
   checks.push('stop preserves incomplete text, stopped running tool, exact-turn process and draft; explicit retry creates one new reply');
   await start('RC_STREAM_FAIL'); command('RC_STREAM_FAIL', 2.5);
@@ -442,21 +506,42 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const failed = failedMessage.locator('.bot-unavailable-reply');
   await failed.waitFor();
   assert.equal(await failedMessage.locator('.bot-context-error').isVisible(), false);
-  assert.equal(await failed.locator(':scope > p').innerText(), '暂时无法完成回复。');
+  assert.equal(await failed.locator(':scope > p').innerText(), '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。');
   assert.equal(await failedMessage.locator('.bot-reply-bar').count(), 0);
   await checkReplyPresence({ page, reply: failedMessage, report, until, state: 'failed' });
   await openDetails(failedMessage);
   await detail.getByText('受控连接失败', { exact: false }).waitFor();
   await detail.locator('.bot-tool-step[data-status="done"]').waitFor({ state: 'attached' });
   await closeReplyDetails(page);
-  await failed.getByRole('button', { name: '重发', exact: true }).click();
+  const failureCognition = () => readFixtureTurns().filter(turn => turn.role === 'project_agent' && turn.scenario === 'RC_STREAM_FAIL');
+  assert.equal(failureCognition().length, 1, 'partial stream failure must wait for explicit retry');
+  await failed.getByRole('button', { name: '继续尝试', exact: true }).click();
   await until(() => page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' }).count(), count => count === 3);
-  checks.push('failure retracts unaccepted preview, folds provider diagnostics and offers visible explicit retry without duplicate replies');
-  command('RC_MANUAL_WAKE_RETRY', 0);
+  const recoveryTrace = readFixtureTurns().filter(turn => turn.scenario === 'RC_STREAM_FAIL');
+  assert.equal(failureCognition().length, 2, 'explicit retry invokes controlled cognition once');
+  assert.equal(recoveryTrace.filter(turn => turn.kind === 'streaming-read-dispatch').length, 1, 'completed read_file must not repeat');
+  assert.deepEqual(recoveryTrace.filter(turn => turn.kind === 'streaming-recovery').map(turn =>
+    ({ nativePairLoaded: turn.nativePairLoaded, readFileRepeated: turn.readFileRepeated })),
+    [{ nativePairLoaded: true, readFileRepeated: false }]);
+  report.streamingFailureRecovery = { controlledCognition: true, realCheckpointPort: true,
+    nativePairLoaded: true, noAutomaticReplay: true, readFileDispatches: 1, explicitRetryTurns: 1 };
+  checks.push('failure retracts unaccepted preview, folds diagnostics and explicitly resumes the real saved native pair without repeating completed read_file');
+  await checkManualWakeRetry({ page, until, report, captureDirectory, commandFile, readFixtureTurns });
+}
+
+/** Focused entry for the same persisted wake/network recovery contract used in the full packet. */
+export async function checkManualWakeRetry({ page, until, report, captureDirectory, commandFile, readFixtureTurns }) {
+  const checks = report.streamingInteraction ??= [];
+  const command = phase => writeStreamingCommand(commandFile, 'RC_MANUAL_WAKE_RETRY', phase);
+  const live = page.locator('.bot-live-reply');
+  const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+  command(0);
   await page.locator('.bot-search').fill('project-001');
   await page.locator('.bot-row').first().click();
   const wakeFailure = page.locator('.bot-unavailable-reply').last();
-  await wakeFailure.getByRole('button', { name: '重发', exact: true }).click();
+  assert.equal(await wakeFailure.locator(':scope > p').innerText(), '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。');
+  await wakeFailure.getByRole('button', { name: '继续尝试', exact: true }).click();
   await live.waitFor();
   await live.getByText('正在重试，我会接着核对已有进展。', { exact: true }).waitFor();
   assert.equal(await page.locator('.bot-stop-response').count(), 1);
@@ -469,14 +554,20 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     // Finish theme transitions before the still image; interaction animation is checked separately.
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `manual-wake-retry-${theme}.png`) });
   }
-  command('RC_MANUAL_WAKE_RETRY', 2);
+  assert.equal(readFixtureTurns().filter(turn => turn.kind === 'manual-wake-recovery').length, 1,
+    'one explicit retry resumes the same persisted wake event batch and native history');
+  command(2);
   await live.waitFor({ state: 'detached' });
   const wakeReply = page.locator('.bot-reply').filter({ hasText: '重试完成，已有进展已保留。' });
   await wakeReply.waitFor();
   assert.equal(await wakeReply.locator('.bot-narration p').first().textContent(), '正在重试，我会接着核对已有进展。');
   await until(() => page.locator('.bot-stop-response').count(), count => count === 0);
-  await until(() => wakeFailure.getByRole('button', { name: '重发', exact: true }).count(), count => count === 0);
-  report.manualWakeRetry = { progressBeforeCompletion: true, stopVisible: true, completed: true, narrationRetained: true, noPrivateThinking: true, narrowFits: true };
+  await until(() => wakeFailure.getByRole('button', { name: '继续尝试', exact: true }).count(), count => count === 0);
+  const recovery = readFixtureTurns().filter(turn => turn.kind === 'manual-wake-recovery');
+  assert.deepEqual(recovery.map(turn => ({ nativeLoaded: turn.nativeLoaded, eventIds: turn.eventIds })),
+    [{ nativeLoaded: true, eventIds: ['rc-manual-retry-event'] }]);
+  report.manualWakeRetry = { progressBeforeCompletion: true, stopVisible: true, completed: true, narrationRetained: true,
+    noPrivateThinking: true, narrowFits: true, nativeLoaded: true, guardedCognitionDispatches: 1, persistedEventBatch: true };
   await page.setViewportSize(viewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
   await page.locator('.bot-search').fill('project-000'); await page.locator('.bot-row').first().click();

@@ -5,7 +5,65 @@ import {
   orderProviderCandidates,
   resolveConversationModelBindingPatch,
   resolvePreferredProvider,
+  createProviderAttemptStream,
 } from './provider-recovery-broker.mjs';
+
+test('canonical request recovery exhaustion cannot trigger outer whole-loop replay', () => {
+  const delivered = [];
+  const attempt = createProviderAttemptStream({ streamId: 'fixture', provider: { id: 'fixture' },
+    webContents: { send: (channel, payload) => delivered.push({ channel, payload }) } });
+  attempt.webContents.send('chat:stream:error', { error: 'connect timeout after 20000ms (ConnectTimeoutError)',
+    providerRecovery: { requestId: 'provider-request-fixture', kind: 'response_headers_timeout',
+      attempts: 4, maxAttempts: 4, exhausted: true, replaySafe: true, retryable: true } });
+  assert.equal(attempt.getResult().sameProviderRetryable, false);
+  assert.equal(attempt.getResult().replayable, false);
+  assert.equal(attempt.flushError(), true);
+  assert.equal(delivered[0].payload.providerRecovery.attempts, 4);
+});
+
+test('managed domain blocking retains only safe provider-route failover', () => {
+  const create = options => createProviderAttemptStream({ streamId: 'fixture', provider: { id: 'fixture' },
+    webContents: { send() {} }, ...options });
+  const failure = { error: 'HTTP 403: Domain Blocking.', providerRecovery: {
+    requestId: 'provider-request-fixture', kind: 'authentication', attempts: 1,
+    maxAttempts: 4, exhausted: false, replaySafe: true, retryable: false } };
+  const safe = create();
+  safe.webContents.send('chat:stream:error', failure);
+  assert.equal(safe.getResult().replayable, true);
+  assert.equal(safe.getResult().sameProviderRetryable, false);
+  for (const channel of ['chat:stream:delta', 'chat:stream:thinking', 'chat:stream:tool-result']) {
+    const partial = create();
+    partial.webContents.send(channel, { content: 'fixture' });
+    partial.webContents.send('chat:stream:error', failure);
+    assert.equal(partial.getResult().replayable, false);
+  }
+  const protectedHistory = create({ protectedNativeRecovery: true });
+  protectedHistory.webContents.send('chat:stream:error', failure);
+  assert.equal(protectedHistory.getResult().replayable, false);
+  const unsafeFailure = create();
+  unsafeFailure.webContents.send('chat:stream:error', { ...failure,
+    providerRecovery: { ...failure.providerRecovery, replaySafe: false } });
+  assert.equal(unsafeFailure.getResult().replayable, false);
+  for (const kind of ['permission', 'configuration', 'execution_outcome_unknown', 'budget_exhausted']) {
+    const blocked = create();
+    blocked.webContents.send('chat:stream:error', { ...failure,
+      providerRecovery: { ...failure.providerRecovery, kind } });
+    assert.equal(blocked.getResult().replayable, false, kind);
+  }
+});
+
+test('ordinary authentication and managed transient failures never restart the outer loop', () => {
+  for (const [error, kind] of [['HTTP 403: invalid credentials', 'authentication'],
+    ['HTTP 401: unauthorized', 'authentication'], ['HTTP 503: server unavailable', 'provider_transient'],
+    ['fetch failed', 'network'], ['HTTP 429: rate limited', 'rate_limited']]) {
+    const attempt = createProviderAttemptStream({ streamId: 'fixture', webContents: { send() {} } });
+    attempt.webContents.send('chat:stream:error', { error, providerRecovery: {
+      requestId: 'provider-request-fixture', kind, attempts: 4, exhausted: true, replaySafe: true,
+      retryable: !['authentication'].includes(kind) } });
+    assert.equal(attempt.getResult().replayable, false, error);
+    assert.equal(attempt.getResult().sameProviderRetryable, false, error);
+  }
+});
 
 test('describeFetchFailure maps model_not_found 404 to a readable Chinese message', () => {
   // 复刻 OpenAI codex 端点对已下线模型的原始报错（ModelProviderHttpError.message）。

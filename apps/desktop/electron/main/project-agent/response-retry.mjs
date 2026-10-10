@@ -15,23 +15,27 @@ export async function retryProjectAgentTurn({ workspaceId, turnId }, {
     return { ok: false, code: 'STALE_TURN' };
   }
   const runner = host.runnerFor(workspaceId);
+  let result;
   if (card.card === 'agent_stopped' && runner?.activity()?.turnId === turnId) {
-    if ((await runner.retryStopped(turnId))?.skipped) return { ok: false, code: 'STALE_TURN' };
-  } else if (runner?.parked()) await runner.retry();
+    result = await runner.retryStopped(turnId);
+    if (result?.skipped) return { ok: false, code: 'STALE_TURN' };
+  } else if (runner) result = await runner.retry(turnId);
   else {
-    const turn = messages.find(message => message.id === turnId && message.kind === 'agent_turn');
     await host.sync([workspaceId]);
     const restored = host.runnerFor(workspaceId);
     if (!restored) return { ok: false, code: 'RECOVERY_FAILED' };
-    if (restored.parked()) await restored.retry();
-    else if (turn?.userInputs?.length) await restored.enqueueUserInputs(turn.userInputs);
-    else await restored.retry();
+    result = await restored.retry(turnId);
   }
+  if (result?.ok === false) return result;
   if (holdsLease(workspaceId) !== true || !host.runnerFor(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
   if (host.runnerFor(workspaceId).status() === 'error') return { ok: false, code: 'TURN_FAILED' };
   const persisted = readMessages();
   const cardIndex = persisted.findIndex(message => message.id === card.id);
-  const completed = cardIndex >= 0 && persisted.slice(cardIndex + 1).findLast(message => message.kind === 'agent_turn');
+  const original = messages.find(message => message.id === turnId && message.kind === 'agent_turn');
+  const workId = card.meta?.workId || original?.meta?.workId || result?.workId;
+  if (workId && result?.workId && result.workId !== workId) return { ok: false, code: 'STALE_TURN' };
+  const completed = cardIndex >= 0 && persisted.slice(cardIndex + 1).findLast(message => message.kind === 'agent_turn'
+    && (!workId || message.meta?.workId === workId) && (!result?.turnId || message.id === result.turnId));
   if (!completed || completed.meta?.diagnosticTiming?.outcome !== 'done') return { ok: false, code: 'TURN_FAILED' };
   projectFacts.resolve(workspaceId, card.cards?.[0]?.cardId || `card:${card.card}:${turnId}`);
   return { ok: true };

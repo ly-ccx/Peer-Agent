@@ -41,6 +41,9 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
   if (!prior) {
     events.push(event(session, { kind: 'session_started', version: session.startRevision || session.startedAt || session.sessionId, at, payload: { status: session.status ?? null } }));
   }
+  if (session.status === 'running' && prior && prior.status !== 'running') {
+    events.push(event(session, { kind: 'session_running', version: session.version ?? at, at, payload: { status: 'running' } }));
+  }
   if (session.reportRevision && session.reportRevision !== prior?.reportRevision) {
     events.push(event(session, { kind: 'report_available', version: session.reportRevision, at,
       payload: { reportRevision: session.reportRevision, verification: 'unverified' } }));
@@ -70,6 +73,9 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
           : {}),
       },
     }));
+  }
+  if (session.status === 'accepted' && prior?.status !== 'accepted') {
+    events.push(event(session, { kind: 'session_ended', version: session.version ?? 1, at, payload: { status: 'accepted' } }));
   }
   if (prior && TERMINAL_KINDS.has(session.status) && prior.status !== session.status) {
     events.push(event(session, {

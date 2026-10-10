@@ -178,3 +178,5 @@ export function normalizeTaskAcceptance(value: unknown): TaskAcceptanceContext &
 export function taskAcceptanceFromMessages(
   messages: readonly unknown[] | null | undefined,
 ): ReturnType<typeof normalizeTaskAcceptance>;
+
+export function createAgentCommunicationPromptSource(): PromptSource;

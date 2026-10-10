@@ -1512,6 +1512,7 @@ export function createGoalRunner({
     // 可选宿主归属门禁必须先于任何共享状态写入。多个 runtime 可以观察同一 store，
     // 但只有 GoalPlan 所属 conversation 的 runtime 可以创建执行 session。
     if (canRunPlan && !canRunPlan(plan)) return getState(planId);
+    if (plan.delegationOrigin?.agentWaitMessageId) return getState(planId);
     // Automatic kicks cannot consume a persisted user question or a real waiting leaf.
     if (plan.runner?.status === 'waiting_user' && !goalPlanWaitsOnPreviewReview(plan)) return getState(planId);
     if (goalPlanWaitsOnUser(plan)) {
@@ -1617,10 +1618,12 @@ export function createGoalRunner({
   }
 
   async function resume(planId, options = {}) {
-    const plan = goalPlanStore.getPlan(planId);
-    if (!plan) return null;
+    const result = admission => options.parentAgentAnswer
+      ? { ...getState(planId), resumeAdmission: admission } : getState(planId);
+    let plan = goalPlanStore.getPlan(planId);
+    if (!plan) return options.parentAgentAnswer ? result('closed') : null;
     // resume 与 start 一样是执行入口，必须在改写共享 runner 状态前校验宿主归属。
-    if (canRunPlan && !canRunPlan(plan)) return getState(planId);
+    if (canRunPlan && !canRunPlan(plan)) return result('deferred');
     if (typeof prepareIsolation === 'function') {
       try {
         await prepareIsolation(plan);
@@ -1632,6 +1635,12 @@ export function createGoalRunner({
         logger?.warn?.('[goal-runner] prepareIsolation failed; writing to bound workspace:', error?.message || error);
       }
     }
+    // Isolation may yield: ownership and human action-owner facts must still hold.
+    plan = goalPlanStore.getPlan(planId);
+    if (!plan) return result('closed');
+    if (canRunPlan && !canRunPlan(plan)) return result('deferred');
+    if (options.parentAgentAnswer && (plan.runner?.status === 'waiting_user' || goalPlanWaitsOnUser(plan))) return result('human_wait');
+    if (options.parentAgentAnswer && (plan.delegationOrigin?.phase !== 'running' || TERMINAL_PLAN_STATUSES.has(plan.status))) return result('closed');
     const canResumeVerificationBlock =
       plan.status === 'completed'
       && plan.runner?.status === 'blocked'
@@ -1674,7 +1683,7 @@ export function createGoalRunner({
     emit('goalRunner:resumed', { planId });
     const promise = schedulePump(planId);
     if (options.awaitIdle) await promise;
-    return getState(planId);
+    return result('admitted');
   }
 
   function pause(planId, reason = 'paused') {
@@ -2293,6 +2302,11 @@ export function createGoalRunner({
       if (!latest || session.cancelled) return getState(planId);
       if (latest.status === 'paused' || latestRunner?.status === 'paused') return getState(planId);
 
+      if (result?.awaitingParentAgent && !result?.requestedUserInput && !goalPlanWaitsOnUser(latest)) {
+        goalPlanStore.setRunnerState(planId, { enabled: true, status: 'blocked', intent: 'block', phase: 'blocked',
+          blockedReason: 'waiting_parent_agent', updatedAt: now() });
+        return getState(planId);
+      }
       // request_user_input is the final action-owner fact of this turn. Process
       // it before terminal progress because the model may complete the current
       // leaf and then ask the user to choose the next direction in one response.

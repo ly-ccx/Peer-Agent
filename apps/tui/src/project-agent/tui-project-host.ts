@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import {
   createHostLease, createProjectRegistry, createBotProfileStore, createBotDirectory,
-  createProjectAgentHost, createSessionSupervisor, createExecutionScheduler,
+  createProjectAgentHost, createSessionSupervisor, createExecutionScheduler, createAgentEventPublisher,
   createProjectInbox, createInputQueue, createApprovalStore, createGoalPlanStore, applyStartupApprovalRecovery,
   createProjectGoalRunnerHost, createGoalWorktreeAdapter, createGoalTaskBranchAdapter,
   createAutomationWorktreeAdapter, createObjectiveStore, createObjectiveActions,
@@ -43,6 +43,10 @@ export function createTuiProjectHost(options: {
   const approvals = createApprovalStore({ rootDir: runtimeRoot });
   const memory = createMemoryStore({ rootDir: dataHome } as never);
   const inbox = createProjectInbox({ rootDir: runtimeRoot } as never);
+  inbox.append = createAgentEventPublisher({ inbox: { append: inbox.append }, conversationStore: conversations,
+    findSession: (id: string, event: any) => plans.getPlan(event.planId || supervisor.get({sessionId: id})?.planId),
+    onChanged: (workspaceId: string) => { changed(); void host?.sync([workspaceId]).catch(() => {}); },
+  } as never);
   const objectivesStore = createObjectiveStore({ rootDir: dataHome } as never);
   const objectiveActions = createObjectiveActions({ rootDir: runtimeRoot } as never);
   const readEvidence = createTuiEvidenceReader({ dataHome, plans, readWatchEvidence: ref => watches?.readEvidenceBody(ref) });
@@ -107,7 +111,7 @@ export function createTuiProjectHost(options: {
     readSessionFacts: (plan: any) => ({autoHandoffOnPolicyAccept: profiles.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true,
       hostAuthority: verification.facts(plan.delegationOrigin.sessionId)}),
     readPlanApproval: (id: string) => profiles.read(id)?.planApproval,
-    emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.reason || ''}`}]); changed();},
+    emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: event.eventId || `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.reason || ''}`}]); changed();},
   } as never);
   const resolveConversationId = (id: string) => profiles.read(id)?.agentConversationId ?? '';
   objectives = createObjectiveService({store: objectivesStore, actions: objectiveActions, canManageWorkspace: holds, resolveConversationId,

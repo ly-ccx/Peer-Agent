@@ -1,3 +1,4 @@
+import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
 import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
 import { countGeminiCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -111,9 +112,10 @@ export async function agentLoopGemini({
     emitRuntimeEvent,
     eventState: runtimeEventState,
     lifecycle: {
-      toolResultsApplied: () => { loop.publishToolResultProjection(); executionBudget?.guard?.checkpoint?.({ provider: 'gemini', providerId, model, messages: structuredClone(apiMessages) }); },
+      toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
+      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'gemini', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
       initialize: () => ({ provider: 'gemini' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -136,9 +138,9 @@ export async function agentLoopGemini({
             goalPlanStore: runtimeMode === 'goal' ? goalPlanStore : null,
             visualRequestHost: { goalPlanStore, workspacePath },
             runtimeUsageAccounting: loop.usageAccounting,
+            budgetGuard: executionBudget?.guard,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
-              executionBudget?.guard?.observeUsage?.(usage, requestFingerprint);
             },
             rebuildSystemPrompt,
             accountingIdentity: accountingIdentity ?? {
@@ -202,9 +204,9 @@ export async function agentLoopGemini({
               retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
-            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`, providerResponse.providerRecovery);
           } else {
-            loop.sendHttpError(providerResponse.status, text);
+            loop.sendHttpError(providerResponse.status, text, providerResponse.providerRecovery);
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
@@ -272,7 +274,7 @@ export async function agentLoopGemini({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'gemini', providerId, model, messages: structuredClone(apiMessages),
+        executionBudget?.onYield?.({ provider: 'gemini', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },

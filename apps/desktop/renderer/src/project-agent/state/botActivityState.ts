@@ -28,7 +28,8 @@ export function attachBotProcesses(rows: readonly ConversationRow[], messages: r
   const legacy = new Map<string, readonly BotToolRound[]>();
   let preceding: readonly BotToolRound[] = [];
   for (const message of messages) {
-    if (message.kind === 'agent_turn') preceding = message.rounds;
+    if (message.kind === 'user_input') preceding = [];
+    else if (message.kind === 'agent_turn') preceding = message.rounds;
     else if (message.kind === 'agent_reply' && !message.turnId) legacy.set(message.id, preceding);
   }
   const narrated = new Set<string>();

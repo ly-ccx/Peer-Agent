@@ -29,6 +29,8 @@ import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-enco
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
 import { neutralizeToolCallSyntax } from './chat-runtime/message-sanitizer.mjs';
+import { runProviderRequestWithRecovery, observeProviderRequestOutput,
+  recordProviderRequestUsage } from './chat-runtime/provider-request-recovery.mjs';
 
 const COMPACTION_CONFIG = {
   // Token 投影与自动压缩阈值只有 runtime-core 一份真值；Desktop 这里只追加摘要执行参数。
@@ -574,6 +576,7 @@ async function summarizeWithLLM({
   let accumulated = '';
   let summaryUsage = null;
   const reportUsage = () => {
+    recordProviderRequestUsage(summaryUsage);
     try {
       onProviderUsage?.(summaryUsage);
     } catch {
@@ -581,6 +584,7 @@ async function summarizeWithLLM({
     }
   };
   const reportProgress = () => {
+    observeProviderRequestOutput('chat:stream:delta', { content: accumulated });
     if (typeof onProgress !== 'function') return;
     try {
       // 分母随真实接收量动态扩张，保证 percent 单调、平滑、done 前不提前到满。
@@ -1489,6 +1493,7 @@ export async function compactIfNeeded({
   // 触发只看下一请求投影估算（messages + tools schema）。
   usageTokens = null,
   onProviderUsage = null,
+  budgetGuard = null,
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
@@ -1613,7 +1618,7 @@ export async function compactIfNeeded({
             maxAttempts: COMPACTION_CONFIG.maxPtlRetries,
             inputTokenBudget: summaryRetryTokenBudget,
           });
-          const rawSummary = await summarizeWithLLM({
+          const rawSummary = await runProviderRequestWithRecovery(() => summarizeWithLLM({
             oldMessages: llmOld,
             providerConfig,
             signal,
@@ -1628,7 +1633,8 @@ export async function compactIfNeeded({
               onProviderUsage?.(usage);
             },
             conversationId,
-          });
+          }), { signal, budgetGuard, webContents, streamId, provider: providerConfig.provider,
+            model: providerConfig.model, requestPurpose: 'compaction_summary' });
 
           if (rawSummary) {
             compactSummary = formatCompactSummary(rawSummary);
@@ -1681,6 +1687,9 @@ export async function compactIfNeeded({
         throw new Error('LLM summary returned empty');
       }
     } catch (err) {
+      if (['cancelled', 'budget_exhausted', 'execution_outcome_unknown'].includes(err?.providerRecovery?.kind)
+        || err?.name === 'AbortError'
+        || /^(work_budget_limited|work_execution_stopped|execution_outcome_unknown|checkpoint_persistence_failed)$/.test(err?.message || '')) throw err;
       const detail = err?.message || String(err);
       console.warn(
         `[context-compactor] LLM summary failed: ${detail}, falling back to structural`,

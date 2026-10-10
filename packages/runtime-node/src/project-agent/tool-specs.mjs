@@ -7,6 +7,14 @@ import { TOOL_LEVELS } from './digest.mjs';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 export const DELEGATION_TOOL_SPECS = Object.freeze([
   ...OBJECTIVE_TOOL_SPECS,
+  spec('send_agent_message', 'local.delegation.send_agent_message', {
+    type: 'object', properties: {
+      sessionId: { type: 'string', maxLength: 200, description: 'Direct child session for the parent. Workers use their own host identity.' },
+      text: { type: 'string', maxLength: 4000 },
+      purpose: { type: 'string', enum: ['update', 'question', 'answer'] },
+      replyTo: { type: 'string', maxLength: 200, description: 'Question messageId being answered. Required to resume a worker waiting for its parent.' },
+    }, required: ['text', 'purpose'], additionalProperties: false,
+  }),
   spec('spawn_session', 'local.delegation.spawn_session', {
     type: 'object',
     properties: {
@@ -168,6 +176,13 @@ export function validateDelegationInput(name, raw) {
   if (!item) return invalid(`Unknown delegation tool: ${name}`);
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
+  if (name === 'send_agent_message') {
+    const body = text(input.text, 4000), sessionId = text(input.sessionId, 200);
+    if (Object.keys(input).some(key => !['sessionId', 'text', 'purpose', 'replyTo'].includes(key))
+      || !body || !['update', 'question', 'answer'].includes(input.purpose)
+      || input.sessionId !== undefined && !sessionId || input.replyTo !== undefined && !text(input.replyTo, 200)) return invalid('A bounded message and purpose are required; identity is assigned by the host.');
+    return { ok: true, value: { text: body, purpose: input.purpose, ...(sessionId ? { sessionId } : {}), ...(input.replyTo ? { replyTo: input.replyTo.trim() } : {}) } };
+  }
   if (name === 'spawn_session') return validateSpawn(input);
   if (name === 'control_work') {
     const sessionId = text(input.sessionId, 200), anchorMessageId = text(input.anchorMessageId, 200);

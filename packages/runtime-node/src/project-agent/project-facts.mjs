@@ -1,8 +1,10 @@
 import { createCardProjection, replyQuestionAnswered } from './card-projection.mjs';
 import { verdictRefFor } from './acceptance.mjs';
+import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
-export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[] }) {
+export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[],
+  readCoordination = workspaceId => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).read(), now = () => new Date().toISOString() }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
@@ -64,10 +66,24 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
         }];
       })).slice(-1);
     });
-    const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => ({
-      turnId: message.turnId, reason: message.content?.replace(/^代理暂时不可用：/, ''),
-      superseded: messages.slice(messages.indexOf(message) + 1).some(later => later.role === 'assistant' && later.kind === 'agent_turn'),
-    }));
+    const works = Object.values(readCoordination(workspaceId)?.works || {});
+    const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => {
+      const turn = messages.find(turn => turn.id === message.turnId && turn.kind === 'agent_turn');
+      const work = works.find(work => work.workId === (message.meta?.workId || turn?.meta?.workId))
+        || works.find(work => work.recovery?.failedTurnId === message.turnId || work.attemptId === message.turnId);
+      const superseded = work ? ['delivered', 'cancelled', 'paused'].includes(work.state)
+        || Boolean(work.recovery?.failedTurnId && work.recovery.failedTurnId !== message.turnId)
+        || Boolean(!work.recovery && work.attemptId && work.attemptId !== message.turnId)
+        : messages.slice(messages.indexOf(message) + 1).some(later => later.role === 'assistant' && later.kind === 'agent_turn');
+      let recovery = !superseded ? work?.recovery : undefined;
+      if (recovery?.reservationId && (work.state !== 'retry_wait'
+        || !work.waitFor?.some(wait => wait.kind === 'retry_timer' && wait.id === recovery.reservationId)
+        || Date.parse(recovery.deadlineAt) <= Date.parse(now()))) {
+        recovery = { ...recovery, retryAt: undefined, reservationId: undefined };
+      }
+      return { turnId: message.turnId, reason: message.content?.replace(/^代理暂时不可用：/, ''), superseded,
+        recovery, recoveryWorkState: work?.state };
+    });
     const stopped = messages.filter(message => message.card === 'agent_stopped').map(message => ({
       turnId: message.turnId, text: message.content,
       superseded: messages.slice(messages.indexOf(message) + 1).some(later => later.kind === 'agent_turn'),

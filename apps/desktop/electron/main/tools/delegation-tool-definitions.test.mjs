@@ -18,7 +18,7 @@ test('delegation prompts are loaded from resource files and only project_agent c
     ).trim();
     assert.equal(tool.prompt(), asset);
     assert.equal(tool.prompt().includes('function '), false);
-    assert.deepEqual(tool.availableInModes, ['project_agent']);
+    assert.deepEqual(tool.availableInModes, tool.name === 'send_agent_message' ? ['project_agent', 'goal'] : ['project_agent']);
   }
   const registry = createRuntimeToolRegistry();
   const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'project_agent' });

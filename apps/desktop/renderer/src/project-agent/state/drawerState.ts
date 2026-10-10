@@ -76,7 +76,7 @@ export interface MemoryFilter {
 
 const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'memory', 'settings']);
 const NEEDS_YOU = new Set(['waiting_user', 'result_ready']);
-const RUNNING = new Set(['starting', 'running', 'verifying']);
+const RUNNING = new Set(['starting', 'running', 'waiting_agent', 'verifying']);
 const QUEUED = new Set(['queued']);
 
 export function closedDrawer(): DrawerMemory {

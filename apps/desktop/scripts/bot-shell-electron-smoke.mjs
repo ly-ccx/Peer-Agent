@@ -11,12 +11,13 @@ import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } fr
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
 import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
+import { checkBotAgentActivity } from './bot-agent-activity-checks.mjs';
 import { checkBotMessageLayout } from './bot-message-layout-checks.mjs';
 import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
-import { checkResponseInteraction, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
+import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -31,12 +32,15 @@ import { createOwnedProcessRegistry } from './lab-process-identity.mjs';
 import { seedBotShellHome } from './seed-bot-shell-home.mjs';
 import { metric } from './perf-project-agent.mjs';
 import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
+import { createWorkCoordinationStore } from '../../../packages/runtime-node/src/project-agent/work-coordination-store.mjs';
+import { coordinationWorkId } from '../../../packages/runtime-node/src/project-agent/work-coordination.mjs';
+import { DEFAULT_WORK_BUDGET } from '../../../packages/runtime-node/src/project-agent/work-budget.mjs';
 
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--history-motion-only') || process.argv.includes('--task-cancel-only');
+const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -75,6 +79,34 @@ const budgetErrorText = '代理暂时不可用：agent_tool_budget_exhausted: �
 seededMessages[9997] = { ...seededMessages[9997], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: budgetErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-budget', kind: 'agent_unavailable', content: budgetErrorText,
     actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId: 'rc-budget' } }] }] };
+for (const [offset, state] of ['started', 'question', 'reported', 'started'].entries()) {
+  seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
+    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 3 ? 'rc-work-2' : 'rc-work-1', name: offset === 3 ? '独立核验' : '实现检查', state} };
+}
+// Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
+const recoveryCases = [
+  { key: 'missing-checkpoint', failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system',
+    blockedCode: 'RECOVERY_CHECKPOINT_UNAVAILABLE', reason: 'recovery checkpoint unavailable' },
+  { key: 'scheduled', failureKind: 'response_headers_timeout', retryable: true, recoveryWorkState: 'retry_wait',
+    retryAt: '2026-10-10T03:00:02.000Z', reservationId: 'rc-recovery-reservation', reason: 'connect timeout after 20000ms (ConnectTimeoutError)' },
+  { key: 'exhausted', failureKind: 'network', retryable: true, recoveryWorkState: 'blocked_system', reason: 'net::ERR_CONNECTION_CLOSED' },
+  { key: 'authentication', failureKind: 'authentication', retryable: false, recoveryWorkState: 'blocked_system', reason: 'HTTP 401: fixture credential expired' },
+  { key: 'unknown', failureKind: 'execution_outcome_unknown', retryable: false, recoveryWorkState: 'blocked_system', reason: 'execution_outcome_unknown: fixture result not recorded' },
+  { key: 'resolved', failureKind: 'network', retryable: true, recoveryWorkState: 'delivered', resolvedState: 'resolved', reason: 'net::ERR_CONNECTION_CLOSED' },
+];
+for (const [offset, entry] of recoveryCases.entries()) {
+  const { key, reason, recoveryWorkState, resolvedState, ...recovery } = entry;
+  const turnId = key === 'scheduled' ? 'rc-recovery-progress-turn' : `rc-recovery-${key}-turn`;
+  const content = `代理暂时不可用：${reason}`;
+  seededMessages[9984 + offset] = { ...seededMessages[9984 + offset], role: 'assistant', kind: 'system_card', turnId, content,
+    cards: [{ cardId: `rc-recovery-${key}`, kind: 'agent_unavailable', content, recoveryWorkState, ...(resolvedState ? { resolvedState } : {}),
+      recovery: { ...recovery, autoAttempts: 2, failedTurnId: turnId, deadlineAt: '2026-10-10T03:05:00.000Z' },
+      actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId } }] }] };
+}
+seededMessages[9990] = { ...seededMessages[9990], id: 'rc-recovery-progress-turn', turnId: 'rc-recovery-progress-turn',
+  kind: 'agent_turn', role: 'assistant', content: '', turnKind: 'user', outcome: 'error',
+  publicUpdates: [{ id: 'rc-recovery-public-progress', text: '我已经看过项目结构，正在核对实现位置。' }],
+  rounds: [{ text: '', toolCalls: [{ name: 'read_file', input: { path: 'README.md' }, result: { ok: true, content: 'RC_RECOVERY_READ_RESULT' } }] }] };
 seededMessages.at(-1).replyTo = ['rc-message-9500'];
 seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。' + '需要逐项核对实际实现和依据。'.repeat(8) + '原文结束标记';
 seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
@@ -119,11 +151,34 @@ if (process.argv.includes('--streaming')) {
   const bot = fixture.bots[1], file = path.join(home, 'conversations', bot.conversationId + '.jsonl');
   const rows = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   const turnId = 'rc-manual-wake-retry';
+  const now = new Date().toISOString();
+  const wakeErrorText = '代理暂时不可用：response_headers_timeout: connect timeout after 20000ms (ConnectTimeoutError)';
+  const event = { eventId: 'rc-manual-retry-event', kind: 'session_verified', workspaceId: bot.workspaceId,
+    sessionId: 'rc-retry-session', at: now, payload: {} };
+  const workId = coordinationWorkId(bot.conversationId, [event.eventId]);
+  const recovery = { failureKind: 'response_headers_timeout', retryable: true, autoAttempts: 2,
+    failedTurnId: turnId, deadlineAt: new Date(Date.now() + 300_000).toISOString() };
+  const coordination = createWorkCoordinationStore({ rootDir: path.join(home, 'project-runtime'), workspaceId: bot.workspaceId,
+    holdsLease: () => true, leaseEpoch: () => 'rc-fixture-seed' });
+  coordination.transfer([event]);
+  const checkpointRef = coordination.checkpoint(workId, { job: { kind: 'wake', workId, turnId, userInputs: [],
+    events: [event], throughSeq: 0, carried: [], continuation: true },
+    outcome: { turnId, rounds: [], failed: true, reason: wakeErrorText } });
+  const nativeCheckpointRef = coordination.checkpoint(workId + ':native', { provider: 'openai',
+    providerId: botModelFixtures[0].id, model: botModelFixtures[0].model,
+    messages: [{ role: 'user', content: 'RC_MANUAL_WAKE_RETRY' }] });
+  coordination.saveWork({ schemaVersion: 1, workspaceId: bot.workspaceId, parentConversationId: bot.conversationId, workId,
+    state: 'blocked_system', end: 'provider_retryable', attemptId: turnId, anchorInputIds: [], sessionIds: [], waitFor: [],
+    consumedEventIds: [event.eventId], pendingResultRefs: [], pendingEventIds: [event.eventId], checkpointRef,
+    nativeCheckpointRef, stopScope: 'reply', recovery,
+    // Saved synthetic accounting must survive explicit continuation rather than reset on a new turn.
+    budget: { modelRequests: 12, toolCalls: 0, tokens: 0, costUsd: 0, unknownUsage: true, unknownCost: true,
+      attempts: {}, limits: DEFAULT_WORK_BUDGET } });
   rows.push({ id: turnId, turnId, role: 'assistant', kind: 'agent_turn', turnKind: 'wake', userInputs: [], content: '',
-    createdAt: new Date().toISOString(), rounds: [], meta: { recovery: { throughSeq: 0,
-      events: [{ eventId: 'rc-manual-retry-event', kind: 'session_verified', workspaceId: bot.workspaceId, sessionId: 'rc-retry-session', at: new Date().toISOString(), payload: {} }] } } });
-  rows.push({ id: turnId + '-card', turnId, role: 'assistant', kind: 'system_card', card: 'agent_unavailable', content: budgetErrorText,
-    createdAt: new Date().toISOString(), cards: [{ cardId: 'card:agent_unavailable:' + turnId, kind: 'agent_unavailable', content: budgetErrorText,
+    createdAt: now, rounds: [], meta: { workId, recovery: { throughSeq: 0, events: [event] } } });
+  rows.push({ id: turnId + '-card', turnId, role: 'assistant', kind: 'system_card', card: 'agent_unavailable', content: wakeErrorText,
+    createdAt: now, meta: { workId }, cards: [{ cardId: 'card:agent_unavailable:' + turnId, kind: 'agent_unavailable', content: wakeErrorText,
+      recovery, recoveryWorkState: 'blocked_system',
       actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: bot.workspaceId, turnId } }] }] });
   writeFileSync(file, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
 }
@@ -378,15 +433,32 @@ try {
     await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
     await page.locator('.project-diagnostics__summary').waitFor();
     await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--work-surfaces-only')) {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+  } else if (process.argv.includes('--wake-retry-only')) {
+    assert.ok(process.argv.includes('--streaming'), '--wake-retry-only requires the isolated --streaming cognition fixture');
+    await page.setViewportSize({ width: 1280, height: 780 });
+    await checkManualWakeRetry({ page, until, report, captureDirectory: root, commandFile: streamCommand,
+      readFixtureTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--streaming-only')) {
+    assert.ok(process.argv.includes('--streaming'), '--streaming-only requires the isolated --streaming cognition fixture');
+    await page.setViewportSize({ width: 1280, height: 780 });
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand,
+      workCommandFile: workSurfaces ? workCommand : null, readFixtureTurns: () => readObserved('turns') });
   } else if (process.argv.includes('--message-colors-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotMessageColors({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--chat-details-only')) {
-    await page.setViewportSize({ width: 1280, height: 780 });
+    await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
-    await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+    await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   } else if (process.argv.includes('--updater-only')) {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
   } else if (process.argv.includes('--task-cancel-only')) {
@@ -412,6 +484,10 @@ try {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  } else if (process.argv.includes('--agent-activity-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotAgentActivity({page, until, report, captureDirectory: root, commandFile: workCommand});
   } else if (process.argv.includes('--composer-layout-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -565,7 +641,7 @@ try {
   await checkBotShellReply({ page, until, report, captureDirectory: root });
   if (process.argv.includes('--streaming')) {
     await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null, readFixtureTurns: () => readObserved('turns') });
-    await checkBotChatDetails({ page, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+    await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   }
   if (workSurfaces) {
     // The quote-send check adds a real exchange. Reach the older work reply

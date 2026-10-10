@@ -7,6 +7,7 @@ import {
   createUnknownContextAccountingSnapshot,
   isContextAccountingSnapshotCurrent,
 } from '@peer-agent/runtime-core';
+import { observeProviderRequestOutput } from './provider-request-recovery.mjs';
 
 export function normalizeAgentLoopMaxTurns(value) {
   if (value === undefined || value === null || value === '' || value === false) {
@@ -112,6 +113,7 @@ export function createAgentLoopKernel({
 
   const providerWebContents = {
     send(channel, payload) {
+      observeProviderRequestOutput(channel, payload);
       if (
         (channel === 'chat:stream:delta' || channel === 'chat:stream:thinking')
         && typeof payload?.content === 'string'
@@ -172,19 +174,20 @@ export function createAgentLoopKernel({
     webContents?.send?.('chat:stream:done', payload);
   }
 
-  function sendError(error) {
+  function sendError(error, providerRecovery = null) {
     const usage = usageAccounting.snapshot().turnTotal;
     const payload = {
       streamId,
       error,
       contextAccounting: contextLifecycle.current(),
+      ...(providerRecovery ? { providerRecovery } : {}),
     };
     if (hasBillableUsage(usage)) payload.usage = usage;
     webContents?.send?.('chat:stream:error', payload);
   }
 
-  function sendHttpError(status, text) {
-    sendError(`HTTP ${status}: ${String(text || '').slice(0, 300)}`);
+  function sendHttpError(status, text, providerRecovery = null) {
+    sendError(`HTTP ${status}: ${String(text || '').slice(0, 300)}`, providerRecovery);
   }
 
   function sendLoopExhausted({ turns = normalizedMaxTurns, reason = 'max_turns_exceeded' } = {}) {

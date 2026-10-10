@@ -68,6 +68,10 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
       assert.equal(await progress.getAttribute('aria-valuenow'), '42');
       const track = await progress.locator('.sidebar-version-progress-track').boundingBox();
       assert.ok(track.width >= 36 && track.height > 0 && track.height <= 4, 'footer must show a horizontal progress bar');
+      // The network fixture resolves at 700ms; its progress transition may still
+      // be running when the independent modal-exit sampling ends at 850ms.
+      await page.waitForFunction(node => Math.abs(new DOMMatrixReadOnly(getComputedStyle(node).transform).a - 0.42) < 0.01,
+        await progress.locator('.sidebar-version-progress-fill').elementHandle());
       const ratio = await progress.locator('.sidebar-version-progress-fill').evaluate(node => new DOMMatrixReadOnly(getComputedStyle(node).transform).a);
       assert.ok(Math.abs(ratio - 0.42) < 0.01, 'visual fill must match host progress');
       assert.equal(await trigger.evaluate(node => document.activeElement === node), true);

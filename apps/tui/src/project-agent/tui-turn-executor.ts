@@ -6,7 +6,7 @@ import {
   loadSharedModelMetadataList,
   type ModelMessage,
 } from '@peer-agent/runtime-node';
-import { createRuntimePipeline, type RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
+import { createRuntimePipeline, type RuntimeSdkProviderExecution, type RuntimePipelineToolExecution } from '@peer-agent/runtime-sdk';
 import { collectToolEvidenceRefs, projectConversationHistory } from '@peer-agent/runtime-core';
 import type { ChatModelInput, ChatModelState, ChatModelToolCall } from '../chat-controller.ts';
 import type { TuiRuntimeMode } from '../tui-mode.ts';
@@ -106,14 +106,17 @@ export function createTuiTurnExecutor(options: {
       sessionWakeIds: (profile.context?.events ?? []).filter((row: any) => ['report_available','result_ready','session_verified'].includes(row.kind) && row.workspaceId === workspaceId).map((row: any) => row.sessionId),
       turnToolCalls: calls, quoteRefs: input.plan?.userInputs?.flatMap((row: any) => row.quoteRefs ?? []) ?? [],
     };
-    const model = { ...runtime.model, runTurn(state: ChatModelState, context: any) {
+    const model = { ...runtime.model,
+      checkpoint(state: ChatModelState, executions: readonly RuntimePipelineToolExecution<ChatModelToolCall, RuntimeSdkProviderExecution>[]) {
+        input.budgetGuard?.checkpoint({ provider: 'tui', modelProviderId: input.modelProviderId, messages: state.modelMessages }, executions);
+      },
+      runTurn(state: ChatModelState, context: any) {
       input.budgetGuard?.beforeRequest();
       input.agentProgress?.onRound?.();
       return runtime.model.runTurn(state, context);
     } };
     const pipeline = createRuntimePipeline<ChatModelInput, ChatModelState, ChatModelToolCall, RuntimeSdkProviderExecution, string>({
       model, defaultMaxTurns: input.limits?.maxRounds ?? Number.POSITIVE_INFINITY,
-      lifecycle: { toolResultsApplied(state) { input.budgetGuard?.checkpoint({ provider: 'tui', modelProviderId: input.modelProviderId, messages: state.modelMessages }); } },
       events: { emit(event) {
         if (event.type === 'message.delta') { streamedText += event.content; input.sink.send('chat:stream:delta', { streamId, content: event.content }); }
         return null;
@@ -162,7 +165,7 @@ export function createTuiTurnExecutor(options: {
           yieldAtTurnLimit: true, maxToolBatchCalls: 32,
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
           systemContextInput: { role: profile.role, workspaceId, sessionId: profile.sessionId, planId: profile.planId,
-            turnContext: profile.context, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
+            turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
             ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
               readOnly: input.plan?.delegationOrigin?.readOnly === true,

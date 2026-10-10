@@ -17,6 +17,7 @@ export type WorkSessionStatus =
   | 'starting'
   | 'running'
   | 'waiting_user'
+  | 'waiting_agent'
   | 'verifying'
   | 'result_ready'
   | 'accepted'
@@ -24,7 +25,7 @@ export type WorkSessionStatus =
   | 'cancelled'
   | 'superseded';
 
-export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running', 'waiting_user', 'verifying',
+export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running', 'waiting_user', 'waiting_agent', 'verifying',
   'result_ready', 'accepted', 'failed', 'cancelled', 'superseded'] as const satisfies readonly WorkSessionStatus[];
 
 export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
@@ -104,6 +105,8 @@ export interface SessionReport {
 }
 
 export type DelegationEventKind =
+  | 'agent_message'
+  | 'session_running'
   | 'session_spawned'
   | 'session_progress'
   | 'session_needs_user'
@@ -113,6 +116,27 @@ export type DelegationEventKind =
   | 'user_intervened'
   | 'objective_signal'
   | 'digest_due';
+
+/** Local orchestration facts; never a human authorization or a verified result. */
+export interface AgentMessage {
+  readonly replyTo?: string;
+  readonly messageId: string;
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly senderConversationId: string;
+  readonly recipientConversationId: string;
+  readonly direction: 'parent_to_child' | 'child_to_parent';
+  readonly purpose: 'update' | 'question' | 'answer';
+  readonly text: string;
+  readonly at: string;
+}
+
+export interface AgentActivity {
+  readonly eventId: string;
+  readonly sessionId: string;
+  readonly name: string;
+  readonly state: 'queued' | 'started' | 'update' | 'question' | 'answer' | 'reported' | 'verified' | 'ended' | 'cancelled' | 'blocked';
+}
 
 export type JsonValue =
   | null
@@ -374,6 +398,7 @@ function delegationStatus(
       && meta.accepted === undefined && !meta.verifying && !snapshot.runnerStatus),
     superseded: Boolean(meta.supersededBy), phase: meta.phase,
     needsUser: snapshot.status === 'awaiting_approval', verificationActive: meta.verifying === true,
+    ...(snapshot.agentWaiting ? { blockedReason: 'waiting_parent_agent' } : {}),
   }).status;
 }
 

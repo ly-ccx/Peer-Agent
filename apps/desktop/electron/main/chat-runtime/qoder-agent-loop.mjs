@@ -1,3 +1,4 @@
+import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
 import { sendQoderPrivateStream } from '../provider-adapters/qoder-private-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
@@ -131,9 +132,10 @@ export async function agentLoopQoder({
     emitRuntimeEvent,
     eventState: runtimeEventState,
     lifecycle: {
-      toolResultsApplied: () => { loop.publishToolResultProjection(); executionBudget?.guard?.checkpoint?.({ provider: 'qoder', providerId, model, messages: structuredClone(apiMessages) }); },
+      toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
+      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'qoder', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
       initialize: () => ({ provider: 'qoder-private' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -151,9 +153,9 @@ export async function agentLoopQoder({
             tools,
             preserveLatestUserTurn: true,
             runtimeUsageAccounting: loop.usageAccounting,
+            budgetGuard: executionBudget?.guard,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
-              executionBudget?.guard?.observeUsage?.(usage, requestFingerprint);
             },
             rebuildSystemPrompt,
             accountingIdentity: accountingIdentity ?? {
@@ -200,9 +202,9 @@ export async function agentLoopQoder({
               retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
-            loop.sendError(`${errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+            loop.sendError(`${errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`, providerResponse.providerRecovery);
           } else {
-            loop.sendHttpError(providerResponse.status, errorText || 'qoder_private_error');
+            loop.sendHttpError(providerResponse.status, errorText || 'qoder_private_error', providerResponse.providerRecovery);
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
@@ -269,7 +271,7 @@ export async function agentLoopQoder({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'qoder', providerId, model, messages: structuredClone(apiMessages),
+        executionBudget?.onYield?.({ provider: 'qoder', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },

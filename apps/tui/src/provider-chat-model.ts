@@ -21,7 +21,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
-import { encodeProviderToolResult, evaluateWorkSessionWrite } from '@peer-agent/runtime-node';
+import { encodeProviderToolResult, evaluateWorkSessionWrite, agentCommunicationExcludedPrefixes } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -276,7 +276,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
   const toolsForTurn = (mode: TuiRuntimeMode, input: ChatModelInput) => toolDefinitionsForMode(mode).filter(tool =>
-    evaluateWorkSessionWrite({ delegationOrigin: { readOnly: (input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly === true } }, tool).allowed);
+    !agentCommunicationExcludedPrefixes(input.systemContextInput).some((prefix: string) => tool.capabilityId.startsWith(prefix))
+    && evaluateWorkSessionWrite({ delegationOrigin: { readOnly: (input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly === true } }, tool).allowed);
   const systemMessagesFor = (context: ProviderSystemPromptContext): readonly ModelMessage[] => {
     const content = options.getSystemPrompt?.(context) ?? options.systemPrompt;
     return content ? [{ role: 'system', content }] : [];

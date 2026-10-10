@@ -54,6 +54,7 @@ export interface GoalToolReplayDecision {
 
 const READ_ONLY_TOOLS = new Set([
   'read_file',
+  'view_image',
   'list_files',
   'search_files',
   'batch_search',
@@ -197,6 +198,8 @@ export function decideGoalToolReplay(input: {
     readonly evidenceRefs?: readonly string[];
     readonly toolCallId?: string;
   }> | null;
+  /** Host-owned tool metadata; transient context must be re-admitted after recovery. */
+  readonly requiresFreshResult?: boolean;
 }): GoalToolReplayDecision {
   const mutationClass = classifyGoalToolMutation(input.toolName, input.args);
   const policy = defaultReplayPolicyForMutation(mutationClass);
@@ -210,6 +213,9 @@ export function decideGoalToolReplay(input: {
   });
 
   const ledgerHit = input.completedLedger?.get(idempotencyKey) ?? null;
+  if (input.requiresFreshResult && mutationClass === 'read_only') {
+    return { action: 'execute', reason: 'fresh_read_context_required', policy: 'safe_retry', mutationClass, idempotencyKey };
+  }
   if (ledgerHit && (ledgerHit.status === 'completed' || ledgerHit.status === 'succeeded')) {
     return {
       action: 'reuse',

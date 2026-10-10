@@ -1120,3 +1120,20 @@ describe('TUI summary input budget', () => {
     expect(maxChars).toBeGreaterThan(2_000 * 4);
   });
 });
+
+test('Agent communication tools are projected only to the main Bot and its worker', async () => {
+  for (const [role, agentKind, allowed] of [
+    ['project_agent', undefined, true], ['work_session', 'worker', true],
+    ['goal_runner', undefined, false], ['work_session', 'explorer', false], ['work_session', 'verifier', false],
+  ] as const) {
+    const requests: ModelProviderRequest[] = [];
+    const model = createProviderChatModel({model: 'test-model', provider: {async stream(request) {requests.push(request); return completed('done');}},
+      toolDefinitions: [{name: 'send_agent_message', capabilityId: 'local.delegation.send_agent_message', description: 'Work communication', inputSchema: {type: 'object'}}]});
+    const context = {run: {mode: 'goal', streamId: 'test', conversationId: 'test'}, signal: new AbortController().signal, emit() {return null;}} as any;
+    const state = await model.initialize({input: {content: 'Continue', history: [], modelMessages: [], turnId: 'test', turnIndex: 0,
+      systemContextInput: {role, turnContext: {agentKind}}}} as any, context);
+    context.run.input = {content: 'Continue', history: [], modelMessages: [], turnId: 'test', turnIndex: 0, systemContextInput: {role, turnContext: {agentKind}}};
+    await model.runTurn(state, context);
+    expect(requests[0]?.tools?.some(tool => tool.name === 'send_agent_message') ?? false).toBe(allowed);
+  }
+});

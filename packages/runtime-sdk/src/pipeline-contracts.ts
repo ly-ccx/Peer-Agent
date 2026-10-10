@@ -104,6 +104,12 @@ export interface RuntimePipelineModelAdapter<
     executions: readonly RuntimePipelineToolExecution<TCall, TToolResult>[],
     context: RuntimePipelineTurnContext<TInput>,
   ): TState | Promise<TState>;
+  /** Critical durable commit after paired tool results; failure ends execution. */
+  checkpoint?(
+    state: TState,
+    executions: readonly RuntimePipelineToolExecution<TCall, TToolResult>[],
+    context: RuntimePipelineTurnContext<TInput>,
+  ): void | Promise<void>;
   onCompleted?(
     state: TState,
     output: TOutput | undefined,

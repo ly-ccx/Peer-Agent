@@ -45,8 +45,20 @@ export async function runDesktopRuntimePipeline({
   emitRuntimeEvent = null,
   eventState = undefined,
 }) {
+  let modelFailure = null;
   const pipeline = createRuntimePipeline({
-    model: { ...model, runTurn(state, context) { budgetGuard?.beforeRequest(); return model.runTurn(state, context); } },
+    model: { ...model, ...(typeof model.checkpoint === 'function' ? { async checkpoint(state, executions, context) {
+      try { return await model.checkpoint(state, executions, context); }
+      catch (cause) {
+        const error = new Error('checkpoint_persistence_failed', { cause });
+        error.providerRecovery = { kind: 'execution_outcome_unknown', phase: 'request', retryable: false };
+        modelFailure = error;
+        throw error;
+      }
+    } } : {}), async runTurn(state, context) {
+      try { return await model.runTurn(state, context); }
+      catch (error) { modelFailure = error; throw error; }
+    } },
     tools: { ...tools,
       async execute(call, context) {
         try { budgetGuard?.beforeTool(call); } catch (error) { return (tools.notExecuted || notExecuted)(call, error.message); }
@@ -77,7 +89,11 @@ export async function runDesktopRuntimePipeline({
   // Pipeline 使用结构化终态，Adapter 在宿主边界恢复既有语义，不能把 failed 当成功返回，
   // 否则外层只会看到“无终态结果”并覆盖真实错误，甚至遗漏 renderer 收口事件。
   if (result.status === 'cancelled') throw createDesktopAbortError();
-  if (result.status === 'failed') throw new Error(result.reason || 'runtime_pipeline_failed');
+  if (result.status === 'failed') {
+    const error = new Error(result.reason || 'runtime_pipeline_failed');
+    if (modelFailure?.providerRecovery) error.providerRecovery = modelFailure.providerRecovery;
+    throw error;
+  }
   return result;
 }
 

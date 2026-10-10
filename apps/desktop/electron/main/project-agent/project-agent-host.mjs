@@ -25,6 +25,7 @@ import {
   createProjectAgentRunner,
   inQuietHours,
   createProjectInbox,
+  createAgentEventPublisher,
   createWatchPublisher,
   normalizeProjectAgentSettings,
   createProjectRegistry,
@@ -141,6 +142,13 @@ export function registerDesktopProjectAgent({
   const fileAnchors = createMemoryFileAnchors({ resolveWorkspacePath: workspaceId => registry.get(workspaceId)?.path });
   const memoryMaintenance = createMemoryMaintenance({ rootDir: runtimeRoot, store: memoryStore, readAnchor: fileAnchors.read, onChanged: memoryChanged });
   const inbox = createProjectInbox({ rootDir: runtimeRoot });
+  inbox.append = createAgentEventPublisher({ inbox: { append: inbox.append }, conversationStore,
+    findSession: (id, event) => goalPlanStore.getPlan(event.planId || supervisor.get({ sessionId: id })?.planId),
+    onChanged: workspaceId => {
+      broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] });
+      void host?.sync([workspaceId]).catch(() => {});
+    },
+  });
   const verification = createSessionVerification({
     goalPlanStore,
     verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
@@ -171,7 +179,7 @@ export function registerDesktopProjectAgent({
       ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
       ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
     } }),
-    emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.supersededBy || event.reason || ''}` }]),
+    emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: event.eventId || `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.supersededBy || event.reason || ''}` }]),
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
   objectiveService = createObjectiveService({store:objectiveStore,actions:objectiveActions,readSessions:workspaceId=>supervisor.sessionsForProject(workspaceId),canManageWorkspace:ownsProject,resolveConversationId,

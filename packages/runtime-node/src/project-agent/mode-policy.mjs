@@ -8,6 +8,7 @@ import { DELEGATION_CAPABILITY_IDS, MEMORY_CAPABILITY_IDS } from './tool-specs.m
 export const PROJECT_AGENT_ALLOWED_CAPABILITIES = Object.freeze([
   'local.file.list',
   'local.file.read',
+  'local.image.read',
   'local.file.search',
   'local.search.aggregate',
   ...DELEGATION_CAPABILITY_IDS,

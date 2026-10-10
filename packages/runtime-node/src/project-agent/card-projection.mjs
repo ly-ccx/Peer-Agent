@@ -328,6 +328,7 @@ function unavailableCards(facts) {
       factState: item.superseded === true ? 'superseded' : '',
       actions: item.superseded === true ? [] : [ipcAction('retry', 'project-agent:retry', { turnId, cardId })],
       refs: refs({ turnId }),
+      ...(item.recovery ? { recovery: item.recovery, recoveryWorkState: item.recoveryWorkState } : {}),
     }));
   }
   return cards;
@@ -408,6 +409,7 @@ function applyResolution(card, stored) {
     ...(resolution ? { resolution } : {}),
     content: card.content,
     ...(card.completionReview ? { completionReview: card.completionReview } : {}),
+    ...(!resolved && card.recovery ? { recovery: card.recovery, recoveryWorkState: card.recoveryWorkState } : {}),
     actions: resolved ? [] : card.actions,
     refs: card.refs,
   };

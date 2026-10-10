@@ -376,7 +376,7 @@
 .bot-reply {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   align-self: flex-start;
   width: 100%;
   background: transparent;
@@ -564,14 +564,14 @@
 .bot-narration {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .bot-narration .markdown-content {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
 }
 
 .bot-narration .markdown-content > * { margin: 0; }
@@ -608,6 +608,42 @@
 }
 
 .bot-unavailable-reply { padding: 0; border: 0; background: transparent; gap: 6px; align-items: flex-start; }
+
+/* Public narration and recovery are separate messages inside one host record. */
+.bot-system:not(.bot-system-welcome), .bot-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bot-agent-activity {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact);
+  padding: 5px 3px;
+  background: transparent;
+  color: var(--graphite-soft);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.bot-agent-activity strong { min-width: 0; overflow-wrap: anywhere; font-weight: 500; color: var(--graphite-base); }
+.bot-agent-activity > span:not(.bot-agent-marker) { flex-shrink: 0; }
+.bot-agent-marker { display: inline-flex; flex-shrink: 0; }
+.bot-agent-marker[data-tone="violet"] { color: light-dark(#7254b4, #b79be9); }
+.bot-agent-marker[data-tone="cyan"] { color: light-dark(#26798b, #6bc0cf); }
+.bot-agent-marker[data-tone="amber"] { color: light-dark(#8d650c, #e4be68); }
+.bot-agent-marker[data-tone="rose"] { color: light-dark(#a54976, #e39abb); }
+.bot-agent-open { flex-shrink: 0; opacity: 0; transition: opacity 140ms var(--za-ease-out); }
+.bot-agent-activity:hover { background: var(--control-fill-hover); }
+.bot-agent-activity:hover .bot-agent-open, .bot-agent-activity:focus-visible .bot-agent-open { opacity: 1; }
+.bot-agent-activity:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
 
 .bot-question {
   box-sizing: border-box;
