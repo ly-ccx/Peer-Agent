@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { backgroundWork, indexBotWork, replyWork, workProgress } from './botWorkState.ts';
+import { backgroundWork, indexBotWork, replyWork, workProgress, canCancelTask } from './botWorkState.ts';
 import { createI18n } from '@peer-agent/i18n';
 import type { BotChatMessage } from './botConversationState';
 import type { DrawerSession } from './drawerState';
@@ -11,6 +11,13 @@ function session(id: string, status = 'running', anchorMessageId = ''): DrawerSe
 const reply: Pick<BotChatMessage, 'sources' | 'marks' | 'meta' | 'replyTo'> = {
   sources: ['work-1'], marks: [], meta: { sessionStates: [{ sessionId: 'work-1', status: 'running' }] }, replyTo: ['input-1'],
 };
+test('cancellation retires waiting work and stale report text without changing another task', () => {
+  const index = indexBotWork([{ ...session('work-1', 'cancelled'), summary: '等待你的选择' }, session('work-2')], true);
+  assert.equal(workProgress(replyWork(reply, index)[0], createI18n('zh-CN')), '已取消');
+  assert.deepEqual(backgroundWork(index).rows.map(row => row.id), ['work-2']);
+  for (const status of ['accepted', 'result_ready', 'cancelled', 'failed', 'unavailable', null]) assert.equal(canCancelTask(status), false);
+  for (const status of ['waiting_user', 'paused', 'superseded', 'running', 'queued', 'starting', 'verifying']) assert.equal(canCancelTask(status), true);
+});
 test('latest host status overrides a reply snapshot, including terminal and waiting states', () => {
   for (const status of ['waiting_user', 'accepted', 'cancelled']) {
     assert.equal(replyWork(reply, indexBotWork([session('work-1', status)], true))[0].status, status);

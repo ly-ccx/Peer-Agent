@@ -1,4 +1,5 @@
 import { openReplyDetails, closeReplyDetails } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
+import { checkReplyPresence } from '../apps/desktop/scripts/bot-reply-presence-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -136,6 +137,10 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         send('chat:stream:delta', { content: '我先看看项目的整体情况，整理好后告诉你重点。' });
         if (!await wait(1.5)) return aborted();
         send('chat:stream:delta', { content: '\n\n项目把界面和本地执行分开了，我再确认它们如何连接。' });
+        if (text === 'RC_STREAM_TEXT') {
+          if (!await wait(1.75)) return aborted();
+          send('chat:stream:tool-progress', { tool: 'read_file', toolCallId: 'read', path: 'README.md', receivedChars: 20 });
+        }
         if (!await wait(2)) return aborted();
         const readArgs = { path: 'README.md', token: 'PRIVATE_PARAMETER_SECRET' };
         guard?.beforeTool({ toolCallId: 'read', capabilityId: 'read_file' });
@@ -267,6 +272,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   checks.push('real delta visible while controlled provider remains pending, before canonical reply');
   const firstParagraph = live.locator('.bot-narration p').first();
   await firstParagraph.evaluate(node => { node.dataset.rcParagraphIdentity = 'first'; });
+  await checkReplyPresence({ page, reply: live, report, until, state: 'first-paragraph', label: '正在整理回复' });
+  await live.hover();
+  await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'reply-presence-progress-dark.png') });
   await page.waitForTimeout(180);
   command('RC_STREAM_TEXT', 1.5);
   const secondParagraph = live.locator('.bot-narration p').filter({ hasText: '项目把界面和本地执行分开了，我再确认它们如何连接。' });
@@ -297,9 +305,10 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     assert.ok(bubbles.every(item => item.background !== 'rgba(0, 0, 0, 0)' && item.radius >= 12 && item.padding >= 12 && item.fits));
     assert.equal(await detail.locator('.bot-turn-process > summary').isVisible(), false);
     assert.equal(await footer.locator(':scope > button').evaluate(node => node.getBoundingClientRect().top >= Math.max(...[...node.closest('.bot-reply').querySelectorAll('.bot-narration p')].map(p => p.getBoundingClientRect().bottom))), true);
-    assert.equal(await footer.textContent(), '正在回复查看详情');
+    assert.equal(await footer.textContent(), '正在整理回复查看详情');
     assert.equal(await footer.locator(':scope > button').evaluate(node => parseFloat(getComputedStyle(node).fontSize)), 11);
     bubbleChecks.push({ theme, bubbles });
+    await checkReplyPresence({ page, reply: live, report, until, state: `latest-paragraph-${theme}`, label: '正在整理回复' });
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `conversation-updates-${theme}.png`) });
   }
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
@@ -321,11 +330,14 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = Math.max(1, node.scrollTop - 350); });
   await page.locator('.bot-thread-latest').waitFor();
   let readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
+  command('RC_STREAM_TEXT', 1.75);
+  await checkReplyPresence({ page, reply: live, report, until, state: 'preparing-read', label: '准备阅读 README.md' });
   command('RC_STREAM_TEXT', 2);
   assert.equal(await detail.isVisible(), true, 'the drawer stays open while the user reads earlier messages');
   if (!(await detail.locator('.bot-turn-process').evaluate(node => node.open))) await detail.locator('.bot-turn-process > summary').click();
   const readingStep = detail.locator('.bot-tool-step[data-status="running"]');
   await readingStep.waitFor();
+  await checkReplyPresence({ page, reply: live, report, until, state: 'reading-docked', label: '正在阅读 README.md' });
   const shine = readingStep.locator('.bot-tool-step-label');
   assert.equal(await shine.evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
   const position = await shine.evaluate(node => getComputedStyle(node).backgroundPosition);
@@ -395,6 +407,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(normalTurns.length, 1, 'the controlled successful stream must not silently retry');
   report.streamingFixtureTurns = normalTurns;
   const completed = page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' });
+  await checkReplyPresence({ page, reply: completed, report, until, state: 'completed' });
+  assert.equal(await completed.locator('.bot-context-running').count(), 0);
   assert.equal(await detail.locator('.bot-turn-process').evaluate(node => node.open), true);
   assert.equal(await detail.locator('.bot-tool-step').evaluate(node => node.open), true);
   assert.equal(await detail.locator('.bot-tool-preview').first().evaluate(node => node.open), true);
@@ -476,6 +490,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await composer.inputValue(), '停止之后继续保留我的草稿');
   assert.equal(await page.locator('.bot-stop-response').count(), 0);
   const stoppedMessage = page.locator('.bot-system').filter({ has: page.locator('.bot-stopped-reply') });
+  await checkReplyPresence({ page, reply: stoppedMessage, report, until, state: 'stopped' });
   await openDetails(stoppedMessage);
   await detail.locator('.bot-tool-step[data-status="stopped"]').waitFor({ state: 'attached' });
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'stream-stopped.png') });
@@ -493,6 +508,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await failedMessage.locator('.bot-context-error').isVisible(), false);
   assert.equal(await failed.locator(':scope > p').innerText(), '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。');
   assert.equal(await failedMessage.locator('.bot-reply-bar').count(), 0);
+  await checkReplyPresence({ page, reply: failedMessage, report, until, state: 'failed' });
   await openDetails(failedMessage);
   await detail.getByText('受控连接失败', { exact: false }).waitFor();
   await detail.locator('.bot-tool-step[data-status="done"]').waitFor({ state: 'attached' });

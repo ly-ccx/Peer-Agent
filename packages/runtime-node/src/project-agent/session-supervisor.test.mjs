@@ -719,6 +719,28 @@ test('cancellation waits for the active turn to settle before removing its execu
   } finally { await env.cleanup(); }
 });
 
+test('waiting task cancellation persists across reload and preserves its history and unrelated work', async () => {
+  const env = await harness({ goalRunner: { start: async () => {}, pause() {} } });
+  try {
+    const waiting = await env.supervisor.spawn(spawnInput({ readOnly: true, title: 'waiting task' }), contextOf(env));
+    const other = await env.supervisor.spawn(spawnInput({ readOnly: true, title: 'other task', brief: 'unrelated work' }), contextOf(env, { inputId: 'other-input' }));
+    const planId = planIdOf(env, waiting.sessionId);
+    env.goalPlanStore.setRunnerState(planId, { status: 'waiting_user', waitingOnUser: true, blockedReason: 'question' });
+    assert.equal(env.supervisor.get({ sessionId: waiting.sessionId }).status, 'waiting_user');
+    const conversationId = env.goalPlanStore.getPlan(planId).conversationId;
+    const history = env.conversationStore.getPersistedConversationHistory(conversationId);
+    const otherBefore = env.goalPlanStore.getPlan(planIdOf(env, other.sessionId));
+    assert.equal((await env.supervisor.cancel({ sessionId: waiting.sessionId, reason: 'user_cancelled' })).status, 'cancelled');
+    const reloaded = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() });
+    assert.equal(reloaded.getPlan(planId).status, 'cancelled');
+    assert.deepEqual(env.conversationStore.getPersistedConversationHistory(conversationId), history);
+    assert.deepEqual(reloaded.getPlan(otherBefore.planId), otherBefore);
+    assert.equal(env.events.filter(event => event.kind === 'cancelled' && event.sessionId === waiting.sessionId).length, 1);
+    assert.equal((await env.supervisor.cancel({ sessionId: waiting.sessionId })).status, 'cancelled');
+    assert.equal(env.events.filter(event => event.kind === 'cancelled' && event.sessionId === waiting.sessionId).length, 1);
+  } finally { await env.cleanup(); }
+});
+
 function hostPassPatch() {
   return {
     tasks: [{ taskId: 'leaf', status: 'completed', evidenceRefs: ['ev-1'] }],

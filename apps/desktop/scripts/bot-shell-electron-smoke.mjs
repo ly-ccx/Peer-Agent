@@ -6,6 +6,7 @@ import { checkBotShellReply } from './bot-shell-reply-checks.mjs';
 import { checkBotMessageColors } from './bot-message-color-checks.mjs';
 import { checkBotSelectionQuote } from './bot-selection-quote-checks.mjs';
 import { checkBotWorkSurfaces } from './bot-work-surface-checks.mjs';
+import { checkBotTaskCancellation } from './bot-task-cancel-checks.mjs';
 import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } from './bot-history-motion-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
@@ -39,7 +40,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only');
+const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -246,6 +247,21 @@ if (process.argv.includes('--effort-stability')) {
     }`);
 }
 if (workSurfaces) {
+  const cancelSeam = 'async function cancelSession(payload = {}) {';
+  assert.equal(observedService.split(cancelSeam).length, 2);
+  observedService = observedService.replace(cancelSeam, `${cancelSeam}
+    if (payload.workspaceId === globalThis.rcBotWorkWorkspace) {
+      const file=${JSON.stringify(workCommand)}, state=JSON.parse(readFileSync(file,'utf8'));
+      writeFileSync(file,JSON.stringify({...state,cancelCalls:[...(state.cancelCalls??[]),payload]}));
+      await new Promise(resolve=>setTimeout(resolve,650));
+      if(state.cancelMode==='fail')return {ok:false,code:'CONTROLLED_CANCEL_FAILURE'};
+      const session=globalThis.rcBotWorkSessions.find(item=>item.sessionId===payload.sessionId);
+      if(!session)return {ok:false,code:'NOT_FOUND'};
+      const next={...session,status:'cancelled',statusLabel:'已取消'};
+      globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?next:item);
+      queueChanged(payload.workspaceId);
+      return {ok:true,session:next};
+    }`);
   const confirmationSeam = 'async function confirmResult(payload = {}) {';
   assert.equal(observedService.split(confirmationSeam).length, 2);
   observedService = observedService.replace(confirmationSeam, `${confirmationSeam}
@@ -445,6 +461,10 @@ try {
     await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
   } else if (process.argv.includes('--updater-only')) {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
+  } else if (process.argv.includes('--task-cancel-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('#bot-msg-rc-message-9999').waitFor();
+    await checkBotTaskCancellation({ page, until, report, captureDirectory: root, commandFile: workCommand });
   } else if (process.argv.includes('--history-motion-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -636,6 +656,7 @@ try {
     await workReply.waitFor();
     report.checks.push('real scrolling reaches the earlier work reply after quote, streaming and question exchanges');
     await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+    await checkBotTaskCancellation({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });

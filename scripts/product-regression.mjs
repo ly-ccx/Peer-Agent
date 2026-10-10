@@ -30,6 +30,7 @@ const requiredShots = [...sharedUiShots, ...[[1280, 'dark'], [760, 'light']].fla
   'conversation-updates-dark.png', 'conversation-updates-light.png', 'conversation-complete.png', 'conversation-complete-light.png', 'conversation-details.png', 'task-main-note.png', 'task-follow-up-draft.png', 'task-decision.png', 'task-main-question.png', 'task-detail-running.png', 'task-detail-waiting_user.png', 'task-detail-accepted.png',
   'task-detail-failed.png', 'task-detail-1280-dark.png', 'task-detail-1280-light.png',
   'task-detail-760-dark.png', 'task-detail-760-light.png', 'work-running.png', 'work-waiting.png', 'work-waiting-760-light.png', 'bot-overview.png', 'bot-memory.png', 'chat-process-summary.png',
+  'task-cancel-failed-dark.png', 'task-cancelled-dark.png', 'task-cancel-detail-760-light.png',
   'long-error-760-dark.png', 'long-error-docked-light.png',
   'background-work-1600-dark.png', 'background-work-760-light.png',
   'fallback-vision-1280-dark.png', 'fallback-vision-1280-light.png', 'fallback-vision-760-dark.png', 'fallback-vision-760-light.png',
@@ -44,7 +45,7 @@ const requiredShots = [...sharedUiShots, ...[[1280, 'dark'], [760, 'light']].fla
   'completion-review-card.png', 'completion-review-report.png', 'completion-review-760-light.png',
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
-  'work-verifying.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png'];
+  'work-verifying.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
@@ -87,8 +88,13 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPreserved', 'reportRetryRecovers', 'nestedEscapeRetainsTask'].every(check => machine.taskDetails?.[check] === true)
     || !machine.taskDetails?.primaryActionReturnsToBot || !machine.taskDetails?.listClassification || !machine.modelSwitch?.rollbackVerified
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.rightAligned || !machine.replyDetailsEntry?.collapsedHeight
+    || !['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked', 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'].every(state =>
+      machine.replyPresence?.cases?.some(sample => sample.state === state && sample.aligned && sample.fits))
+    || ![['first-paragraph', '正在整理回复'], ['preparing-read', '准备阅读 README.md'], ['reading-docked', '正在阅读 README.md']].every(([state, label]) =>
+      machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label && sample.noShimmer))
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp
+    || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned'].every(check => machine.taskCancellation?.[check] === true)
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
       .every(check => machine.taskDetails?.[check] === true)
     || !['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)
@@ -126,7 +132,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
       chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
-      delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
+      delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },

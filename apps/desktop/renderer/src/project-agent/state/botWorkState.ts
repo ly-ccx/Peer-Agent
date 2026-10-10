@@ -19,9 +19,13 @@ export function indexBotWork(sessions: readonly DrawerSession[], available: bool
   return { byId, byAnchor, available };
 }
 export interface BotWorkRow { readonly id: string; readonly session?: DrawerSession; readonly status: WorkSessionStatus | null }
+export function canCancelTask(status: string | null): boolean {
+  return ['starting', 'queued', 'running', 'waiting_user', 'verifying', 'paused', 'superseded'].includes(status ?? '');
+}
 /** A worker's report summary is not the current verification phase. */
 export function workProgress(row: BotWorkRow, i18n: Pick<I18nRuntime, 't'>): string {
   if (!row.status || !row.session) return i18n.t('projectAgent.chat.work.unavailableHint');
+  if (row.status === 'cancelled') return i18n.t('projectAgent.chat.sessionState.cancelled');
   if (row.status === 'verifying') return i18n.t('projectAgent.chat.work.verifyingHint');
   return row.session.summary || (formatDrawerSessionStatus(row.session, i18n) !== row.status
     ? formatDrawerSessionStatus(row.session, i18n) : i18n.t(`projectAgent.chat.sessionState.${row.status}`));

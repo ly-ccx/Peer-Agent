@@ -1,5 +1,7 @@
 .bot-reply-context, .bot-delegated-work { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.6; }
-.bot-reply-context { display: flex; align-items: center; gap: 24px; margin-top: 2px; font-size: 11px; }
+.bot-reply-context { display: flex; align-items: center; gap: 24px; margin-top: 2px; max-width: 100%; box-sizing: border-box; font-size: 11px; }
+.bot-reply-context[data-compact="true"] { flex-wrap: wrap; column-gap: 12px; row-gap: 0; }
+.bot-reply-context[data-compact="true"] .bot-context-running { flex-basis: 100%; }
 .bot-delegated-work summary, .bot-background-work > summary { list-style: none; cursor: pointer; }
 .bot-delegated-work summary::-webkit-details-marker, .bot-background-work > summary::-webkit-details-marker { display: none; }
 .bot-reply-context > button { display: inline-flex; align-items: center; gap: 5px; min-height: 27px; margin-inline-start: auto; padding: 4px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0; pointer-events: none; }
@@ -7,8 +9,8 @@
 .bot-system:is(:hover, :focus-within) > .bot-reply-context > button { opacity: 1; pointer-events: auto; }
 @media (hover: none) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 @media (forced-colors: active) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
-.bot-context-running { color: var(--graphite-soft); }
-.bot-reply-context[data-running="true"] .bot-context-running { background: linear-gradient(100deg, var(--graphite-soft) 35%, var(--graphite-base) 50%, var(--graphite-soft) 65%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; --motion-shimmer-from: 100%; --motion-shimmer-x: -100%; animation: motion-shimmer 1.8s linear infinite; }
+.bot-context-running { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--graphite-soft); }
+.bot-reply-context > button { flex-shrink: 0; max-width: 100%; }
 .bot-reply-context > button:hover, .bot-work-row > summary:hover { color: var(--graphite-base); }
 .bot-work-row > summary > svg:last-child { transition: transform 160ms ease; }
 .bot-work-row[open] > summary > svg:last-child { transform: rotate(180deg); }

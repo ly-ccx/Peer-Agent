@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkBotChoiceMotion } from './bot-choice-motion-checks.mjs';
+import { checkReplyPresence } from './bot-reply-presence-checks.mjs';
 
 /** Uses the isolated fixture's actual input queue and the production question projection. */
 export async function checkBotChatDetails({ page, app, until, report, captureDirectory, conversationFile }) {
@@ -41,6 +42,12 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   assert.deepEqual(nativeView.size, [entryViewport.width, entryViewport.height], 'native window matches the established CSS viewport');
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    // Finish layout/theme transitions before placing the pointer. Screenshot
+    // fast-forwarding must not move the hovered bubble out from under it.
+    await until(() => firstReply.evaluate(node => node.getAnimations({ subtree: true })
+      .filter(animation => animation.playState === 'running'
+        && Number.isFinite(animation.effect?.getComputedTiming().endTime)
+        && animation.effect?.target?.checkVisibility()).length), count => count === 0, 5000);
     await composer.focus(); await page.mouse.move(1, 1);
     const button = firstReply.locator('.bot-reply-context > button');
     await page.waitForFunction(node => getComputedStyle(node).opacity === '0', await button.elementHandle());
@@ -62,6 +69,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
       throw Error('reply body must be visible before hover capture');
     });
     await page.mouse.move(pointer.x, pointer.y);
+    await checkReplyPresence({ page, reply: firstReply, report, until, state: `short-question-${theme}` });
     await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1');
     const beforeCapture = await firstReply.evaluate(node => ({ hovered: node.matches(':hover'),

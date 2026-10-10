@@ -202,6 +202,24 @@ export type TranslationKey =
   | 'projectAgent.chat.thinking'
   | 'projectAgent.chat.waiting'
   | 'projectAgent.chat.generating'
+  | 'projectAgent.chat.activity.preparing'
+  | 'projectAgent.chat.activity.thinking'
+  | 'projectAgent.chat.activity.responding'
+  | 'projectAgent.chat.activity.settling'
+  | 'projectAgent.chat.activity.advancing'
+  | 'projectAgent.chat.activity.prepareRead'
+  | 'projectAgent.chat.activity.readFile'
+  | 'projectAgent.chat.activity.reading'
+  | 'projectAgent.chat.activity.image'
+  | 'projectAgent.chat.activity.command'
+  | 'projectAgent.chat.activity.search'
+  | 'projectAgent.chat.activity.edit'
+  | 'projectAgent.chat.activity.verification'
+  | 'projectAgent.chat.activity.delegating'
+  | 'projectAgent.chat.activity.work'
+  | 'projectAgent.chat.activity.memory'
+  | 'projectAgent.chat.activity.memoryUpdate'
+  | 'projectAgent.chat.activity.directory'
   | 'projectAgent.chat.toolLabel.read'
   | 'projectAgent.chat.toolLabel.search'
   | 'projectAgent.chat.toolLabel.edit'
@@ -336,6 +354,9 @@ export type TranslationKey =
   | 'projectAgent.chat.work.handoff'
   | 'projectAgent.chat.work.verifyingHint'
   | 'projectAgent.chat.work.open'
+  | 'projectAgent.task.cancel'
+  | 'projectAgent.task.cancelling'
+  | 'projectAgent.task.cancelFailed'
   | 'projectAgent.chat.work.background'
   | 'projectAgent.chat.context.basis'
   | 'projectAgent.chat.originalMessage'
@@ -1670,6 +1691,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.thinking': '思考中…',
     'projectAgent.chat.waiting': '等待回复…',
     'projectAgent.chat.generating': '正在回复',
+    'projectAgent.chat.activity.preparing': '正在准备下一步',
+    'projectAgent.chat.activity.thinking': '正在整理思路',
+    'projectAgent.chat.activity.responding': '正在整理回复',
+    'projectAgent.chat.activity.settling': '正在整理结果',
+    'projectAgent.chat.activity.advancing': '正在一点一点推进',
+    'projectAgent.chat.activity.prepareRead': '准备阅读 {name}',
+    'projectAgent.chat.activity.readFile': '正在阅读 {name}',
+    'projectAgent.chat.activity.reading': '正在阅读文件',
+    'projectAgent.chat.activity.image': '正在查看图片',
+    'projectAgent.chat.activity.command': '正在执行命令',
+    'projectAgent.chat.activity.search': '正在查找相关内容',
+    'projectAgent.chat.activity.edit': '正在调整内容',
+    'projectAgent.chat.activity.verification': '正在核对结果',
+    'projectAgent.chat.activity.delegating': '正在安排执行',
+    'projectAgent.chat.activity.work': '正在查看工作进展',
+    'projectAgent.chat.activity.memory': '正在查阅项目记忆',
+    'projectAgent.chat.activity.memoryUpdate': '正在更新项目记忆',
+    'projectAgent.chat.activity.directory': '正在查看文件目录',
     'projectAgent.chat.toolLabel.read': '读取文件',
     'projectAgent.chat.toolLabel.search': '项目搜索',
     'projectAgent.chat.toolLabel.edit': '编辑文件',
@@ -1804,6 +1843,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
     'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
     'projectAgent.chat.work.open': '查看任务详情',
+    'projectAgent.task.cancel': '取消任务',
+    'projectAgent.task.cancelling': '正在取消…',
+    'projectAgent.task.cancelFailed': '取消未完成，请重试。已有结果会保留。',
     'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
@@ -2926,6 +2968,24 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.thinking': 'Thinking…',
     'projectAgent.chat.waiting': 'Waiting for a response…',
     'projectAgent.chat.generating': 'Replying',
+    'projectAgent.chat.activity.preparing': 'Getting ready for the next step',
+    'projectAgent.chat.activity.thinking': 'Thinking it through',
+    'projectAgent.chat.activity.responding': 'Putting the reply together',
+    'projectAgent.chat.activity.settling': 'Putting the results together',
+    'projectAgent.chat.activity.advancing': 'Working through the next step',
+    'projectAgent.chat.activity.prepareRead': 'Preparing to read {name}',
+    'projectAgent.chat.activity.readFile': 'Reading {name}',
+    'projectAgent.chat.activity.reading': 'Reading files',
+    'projectAgent.chat.activity.image': 'Looking at the image',
+    'projectAgent.chat.activity.command': 'Running a command',
+    'projectAgent.chat.activity.search': 'Looking for relevant information',
+    'projectAgent.chat.activity.edit': 'Making changes',
+    'projectAgent.chat.activity.verification': 'Checking the results',
+    'projectAgent.chat.activity.delegating': 'Arranging the work',
+    'projectAgent.chat.activity.work': 'Checking on the work',
+    'projectAgent.chat.activity.memory': 'Looking through project memory',
+    'projectAgent.chat.activity.memoryUpdate': 'Updating project memory',
+    'projectAgent.chat.activity.directory': 'Looking through the folder',
     'projectAgent.chat.toolLabel.read': 'file reading',
     'projectAgent.chat.toolLabel.search': 'project search',
     'projectAgent.chat.toolLabel.edit': 'file editing',
@@ -3060,6 +3120,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
     'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',
     'projectAgent.chat.work.open': 'View task details',
+    'projectAgent.task.cancel': 'Cancel task',
+    'projectAgent.task.cancelling': 'Cancelling…',
+    'projectAgent.task.cancelFailed': 'Could not cancel. Please retry. Existing results are preserved.',
     'projectAgent.chat.work.background': '{count} tasks to follow up',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',

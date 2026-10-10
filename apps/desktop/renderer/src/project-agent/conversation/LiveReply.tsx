@@ -6,7 +6,6 @@ import type { ReplyAnchor } from '../state/replyReferenceState';
 import { BotNarration } from './BotNarration';
 import { botNarration } from '../state/botNarrationState';
 import { ReplyContext } from './ReplyContext';
-import { isActivityRunning } from '../state/botActivityState';
 
 export function LiveReply({ activity, referenceIds, i18n, anchors, onJump, onOpenDetails }: {
   readonly activity: ProjectAgentActivity; readonly referenceIds: readonly string[];
@@ -21,7 +20,7 @@ export function LiveReply({ activity, referenceIds, i18n, anchors, onJump, onOpe
         <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
         <MarkdownMessage content={activity.replyText} />
       </div> : null}
-      <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} running={isActivityRunning(activity)} />
+      <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} activity={activity} />
     </article>
   );
 }
