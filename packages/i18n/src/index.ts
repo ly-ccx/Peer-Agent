@@ -313,6 +313,9 @@ export type TranslationKey =
   | 'projectAgent.chat.work.handoff'
   | 'projectAgent.chat.work.verifyingHint'
   | 'projectAgent.chat.work.open'
+  | 'projectAgent.task.cancel'
+  | 'projectAgent.task.cancelling'
+  | 'projectAgent.task.cancelFailed'
   | 'projectAgent.chat.work.background'
   | 'projectAgent.chat.context.basis'
   | 'projectAgent.chat.originalMessage'
@@ -1757,6 +1760,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
     'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
     'projectAgent.chat.work.open': '查看任务详情',
+    'projectAgent.task.cancel': '取消任务',
+    'projectAgent.task.cancelling': '正在取消…',
+    'projectAgent.task.cancelFailed': '取消未完成，请重试。已有结果会保留。',
     'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
@@ -2989,6 +2995,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
     'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',
     'projectAgent.chat.work.open': 'View task details',
+    'projectAgent.task.cancel': 'Cancel task',
+    'projectAgent.task.cancelling': 'Cancelling…',
+    'projectAgent.task.cancelFailed': 'Could not cancel. Please retry. Existing results are preserved.',
     'projectAgent.chat.work.background': '{count} tasks to follow up',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',

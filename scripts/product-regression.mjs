@@ -30,6 +30,7 @@ const requiredShots = [...sharedUiShots, 'quick-chat-bots-dark.png', 'quick-chat
   'conversation-updates-dark.png', 'conversation-updates-light.png', 'conversation-complete.png', 'conversation-complete-light.png', 'conversation-details.png', 'task-main-note.png', 'task-follow-up-draft.png', 'task-decision.png', 'task-main-question.png', 'task-detail-running.png', 'task-detail-waiting_user.png', 'task-detail-accepted.png',
   'task-detail-failed.png', 'task-detail-1280-dark.png', 'task-detail-1280-light.png',
   'task-detail-760-dark.png', 'task-detail-760-light.png', 'work-running.png', 'work-waiting.png', 'work-waiting-760-light.png', 'bot-overview.png', 'bot-memory.png', 'chat-process-summary.png',
+  'task-cancel-failed-dark.png', 'task-cancelled-dark.png', 'task-cancel-detail-760-light.png',
   'long-error-760-dark.png', 'long-error-docked-light.png',
   'background-work-1600-dark.png', 'background-work-760-light.png',
   'fallback-vision-1280-dark.png', 'fallback-vision-1280-light.png', 'fallback-vision-760-dark.png', 'fallback-vision-760-light.png',
@@ -80,6 +81,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.rightAligned || !machine.replyDetailsEntry?.collapsedHeight
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp
+    || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned'].every(check => machine.taskCancellation?.[check] === true)
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
       .every(check => machine.taskDetails?.[check] === true)
     || !['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)
@@ -117,7 +119,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
       chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
-      delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
+      delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, manualWakeRetry: machine.manualWakeRetry, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },
