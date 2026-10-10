@@ -37,7 +37,9 @@ export function createWorkBudgetGuard(profile) {
   function change(update, requireActive = true) {
     store.assertOwner();
     const work = store.read().works[profile.workId];
-    if (!work || requireActive && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(work.state)) throw new Error('work_execution_stopped');
+    const stopped = work && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(work.state);
+    const stopsExecutor = profile.role === 'project_agent' || work?.stopScope !== 'reply' || work?.state === 'budget_limited';
+    if (!work || requireActive && stopped && stopsExecutor) throw new Error('work_execution_stopped');
     if (requireActive && profile.coordinationBinding) {
       const state = store.read(), mandate = state.mandates?.[profile.coordinationBinding.workId];
       const transition = Object.values(state.transitions || {}).find(row => row.executionEpoch === profile.coordinationBinding.executionEpoch);

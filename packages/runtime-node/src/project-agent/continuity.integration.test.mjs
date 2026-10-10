@@ -196,7 +196,7 @@ test('explicit retry transfers the persisted legacy wake batch before acknowledg
   } finally { env.close(); }
 });
 
-test('wake slices bind the event session so later results settle the same work and remove its continuation', async () => {
+test('a later result preserves the earlier report slice until both batches settle', async () => {
   let requests = 0;
   const env = world(async () => ++requests === 1
     ? { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'result_ready' } }], providerCheckpoint: { messages: [] } }
@@ -208,9 +208,11 @@ test('wake slices bind the event session so later results settle the same work a
     assert.deepEqual(initial.sessionIds, ['s']); assert.equal(initial.state, 'runnable');
     env.inbox.append('w', [event('verified', 'result_ready')]); await env.runner.kick();
     const works = Object.values(env.store.read().works);
-    assert.equal(works.length, 1); assert.equal(works[0].workId, initial.workId);
-    assert.equal(works[0].state, 'delivered'); assert.equal(env.runner.hasContinuation(), false);
-    await env.runner.kick(); assert.equal(requests, 2);
+    assert.equal(works.length, 2); assert.equal(works[0].workId, initial.workId);
+    assert.ok(works.every(work => work.state === 'delivered'));
+    assert.equal(env.runner.hasContinuation(), false);
+    assert.equal(requests, 3);
+    await env.runner.kick(); assert.equal(requests, 3);
   } finally { env.close(); }
 });
 
@@ -232,5 +234,38 @@ test('a child question cannot park a yielded parent before the question reaches 
     assert.equal(Object.values(env.store.read().works)[0].state, 'waiting_user');
     assert.equal(Object.values(env.store.read().works)[0].end, 'awaiting_user');
     await env.runner.kick(); assert.equal(requests, 2);
+  } finally { env.close(); }
+});
+
+
+test('new result batches never overwrite a yielded result checkpoint; each survives restart and reports once', async () => {
+  const seen = [];
+  const env = world(async input => {
+    const checkpoint = input.turnProfile.providerCheckpoint;
+    const id = checkpoint?.result || input.plan.events[0].sessionId;
+    seen.push([id, Boolean(checkpoint)]);
+    if (!checkpoint) return { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: id }, result: { status: 'result_ready', report: id } }], providerCheckpoint: { result: id } };
+    return { toolCalls: [{ name: 'post_reply', input: { text: `${id} 已核对并交付。`, replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => [{ sessionId: 'B', status: 'result_ready' }, { sessionId: 'C', status: 'result_ready' }] });
+  try {
+    env.inbox.append('w', [event('done-B', 'result_ready', 'B')]);
+    await env.runner.kick();
+    assert.equal(env.store.read().events['done-B'].handled, false);
+    const first = Object.values(env.store.read().works)[0];
+    env.inbox.append('w', [event('done-C', 'result_ready', 'C')]);
+    await env.runner.kick();
+    const works = Object.values(env.store.read().works);
+    assert.equal(works.length, 2);
+    assert.equal(env.store.read().works[first.workId].checkpointRef, first.checkpointRef);
+    assert.equal(env.store.read().events['done-C'].handled, false);
+    env.restart();
+    await env.runner.kick();
+    await env.runner.kick();
+    assert.deepEqual(seen, [['B', false], ['C', false], ['B', true], ['C', true]]);
+    assert.equal(env.store.read().events['done-B'].handled, true);
+    assert.equal(env.store.read().events['done-C'].handled, true);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 2);
+    env.restart(); await env.runner.kick();
+    assert.equal(seen.length, 4);
   } finally { env.close(); }
 });

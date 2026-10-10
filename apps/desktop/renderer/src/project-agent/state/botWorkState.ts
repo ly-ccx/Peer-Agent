@@ -20,17 +20,18 @@ export function indexBotWork(sessions: readonly DrawerSession[], available: bool
 }
 export interface BotWorkRow { readonly id: string; readonly session?: DrawerSession; readonly status: WorkSessionStatus | null }
 export function canCancelTask(status: string | null): boolean {
-  return ['starting', 'queued', 'running', 'waiting_user', 'verifying', 'paused', 'superseded'].includes(status ?? '');
+  return ['starting', 'queued', 'running', 'waiting_user', 'waiting_agent', 'verifying', 'paused', 'superseded'].includes(status ?? '');
 }
 /** A worker's report summary is not the current verification phase. */
 export function workProgress(row: BotWorkRow, i18n: Pick<I18nRuntime, 't'>): string {
   if (!row.status || !row.session) return i18n.t('projectAgent.chat.work.unavailableHint');
   if (row.status === 'cancelled') return i18n.t('projectAgent.chat.sessionState.cancelled');
+  if (['stopping','awaiting_outcome'].includes(row.status) || row.session.coordination?.phase === 'stopping') return formatDrawerSessionStatus(row.session,i18n);
   if (row.status === 'verifying') return i18n.t('projectAgent.chat.work.verifyingHint');
   return row.session.summary || (formatDrawerSessionStatus(row.session, i18n) !== row.status
     ? formatDrawerSessionStatus(row.session, i18n) : i18n.t(`projectAgent.chat.sessionState.${row.status}`));
 }
-const FOLLOW_UP = ['waiting_user', 'waiting_agent', 'result_ready', 'running', 'starting', 'verifying', 'queued'] as const;
+const FOLLOW_UP = ['waiting_user', 'waiting_agent', 'result_ready', 'running', 'starting', 'stopping', 'awaiting_outcome', 'verifying', 'queued'] as const;
 /** Attention first; the compact surface is bounded while its count stays factual. */
 export function backgroundWork(index: BotWorkIndex): { count: number; rows: BotWorkRow[] } {
   if (!index.available) return { count: 0, rows: [] };

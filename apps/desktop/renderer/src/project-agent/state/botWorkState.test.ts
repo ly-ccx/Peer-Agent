@@ -11,6 +11,17 @@ function session(id: string, status = 'running', anchorMessageId = ''): DrawerSe
 const reply: Pick<BotChatMessage, 'sources' | 'marks' | 'meta' | 'replyTo'> = {
   sources: ['work-1'], marks: [], meta: { sessionStates: [{ sessionId: 'work-1', status: 'running' }] }, replyTo: ['input-1'],
 };
+test('stopping and unknown outcomes remain visible without replaying stale human-wait text',()=>{
+  const i18n=createI18n('zh-CN');
+  for (const status of ['stopping','awaiting_outcome']) {
+    const current={...session('work-1',status),summary:'等待你的选择'};
+    const index=indexBotWork([current,session('work-2')],true);
+    assert.equal(backgroundWork(index).count,2);
+    assert.equal(canCancelTask(status),false);
+    assert.equal(workProgress(replyWork(reply,index)[0],i18n),status==='stopping'?'正在停止':'执行结果待核实');
+  }
+  assert.equal(canCancelTask('waiting_agent'),true);
+});
 test('cancellation retires waiting work and stale report text without changing another task', () => {
   const index = indexBotWork([{ ...session('work-1', 'cancelled'), summary: '等待你的选择' }, session('work-2')], true);
   assert.equal(workProgress(replyWork(reply, index)[0], createI18n('zh-CN')), '已取消');

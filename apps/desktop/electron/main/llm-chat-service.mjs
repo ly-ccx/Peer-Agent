@@ -115,6 +115,7 @@ function normalizeTurnProfile(value) {
   const workspaceId = typeof value.workspaceId === 'string' ? value.workspaceId.trim() : '';
   const sessionId = typeof value.sessionId === 'string' ? value.sessionId.trim() : '';
   const planId = typeof value.planId === 'string' ? value.planId.trim() : '';
+  const workId = typeof value.workId === 'string' ? value.workId.trim() : '';
   const memorySnapshotId = typeof value.memorySnapshotId === 'string' ? value.memorySnapshotId.trim() : '';
   const excludeCapabilityPrefixes = Array.isArray(value.excludeCapabilityPrefixes)
     ? value.excludeCapabilityPrefixes.filter((prefix) => typeof prefix === 'string' && prefix.trim()).map((prefix) => prefix.trim())
@@ -151,6 +152,7 @@ function normalizeTurnProfile(value) {
     ...(workspaceId ? { workspaceId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(planId ? { planId } : {}),
+    ...(workId ? { workId } : {}),
     ...(memorySnapshotId ? { memorySnapshotId } : {}),
     ...(excludeCapabilityPrefixes.length ? { excludeCapabilityPrefixes } : {}),
     ...(modelSelection ? { modelSelection } : {}),
@@ -1655,6 +1657,7 @@ export function createLlmChatService({
       // 执行层判定准入。见 Goal 模式运行时闸门设计。
       toolContext.mode = runtimeMode;
       toolContext.turnRole = profile?.role ?? null;
+      toolContext.turnProfile = profile;
       toolContext.planId = profile?.planId ?? null;
       toolContext.currentInputAnchors = projectAgentTurn && Array.isArray(profile?.context?.inputAnchors)
         ? profile.context.inputAnchors.map(anchor => anchor.messageId).filter(id => typeof id === 'string') : [];

@@ -111,6 +111,7 @@ export function createSessionSupervisor({
   readPlanApproval = null,
   readManualCriterionAuthorities = null,
   readLegacyCriterionProvenance = () => null,
+  autonomousCoordinationEnabled = () => process.env.PEER_AUTONOMOUS_COORDINATION !== '0',
   now = () => new Date().toISOString(),
 } = {}) {
   if (!conversationStore || !goalPlanStore) {
@@ -141,7 +142,7 @@ export function createSessionSupervisor({
   }
 
   function emit(event) {
-    if (['cancelled', 'session_resumed'].includes(event.kind)) queueMicrotask(() => { void coordination?.recover(event.workspaceId); });
+    if (['cancelled', 'session_resumed', 'interrupted'].includes(event.kind)) queueMicrotask(() => { void coordination?.recover(event.workspaceId); });
     try {
       emitEvent?.({ ...event, at: event.at || now() });
     } catch {
@@ -161,7 +162,8 @@ export function createSessionSupervisor({
     },
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
     spawn: (input, context) => exclusive(() => spawnLocked(input, context)), requestCancel: cancellation.request,
-    send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request, holdsLease: canManageWorkspace, now });
+    send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request,
+    holdsLease: canManageWorkspace, isEnabled: autonomousCoordinationEnabled, now });
 
   function delegatedPlans() {
     let names = [];
@@ -254,6 +256,7 @@ export function createSessionSupervisor({
 
   function project(plan, plans = null) {
     const origin = plan.delegationOrigin;
+    const coordinationFacts = coordination?.forSession(origin.workspaceId, origin.sessionId);
     const conversation = conversationStore.getConversation?.(plan.conversationId);
     const session = projectWorkSession(snapshotOf(plan), {
       sessionId: origin.sessionId,
@@ -264,6 +267,7 @@ export function createSessionSupervisor({
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
       origin,
+      ...(coordinationFacts ? { coordination: coordinationFacts } : {}),
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
       ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
       ...(origin.phase === 'queued'
@@ -587,8 +591,12 @@ export function createSessionSupervisor({
   }
 
   async function promote(spawningPlanId = null) {
+    const eligible = plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true
+      && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)
+      && (autonomousCoordinationEnabled() || plan.delegationOrigin.phase !== 'queued'
+        || coordination.forSession(plan.delegationOrigin.workspaceId, plan.delegationOrigin.sessionId)?.replacementSessionId !== plan.delegationOrigin.sessionId);
     if (isolationPlanner) {
-      const virtual = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId));
+      const virtual = delegatedPlans().filter(eligible);
       for (const plan of virtual) {
         if (plan.delegationOrigin.phase !== 'queued' || TERMINAL.has(plan.status) || plan.runner?.status === 'waiting_user') continue;
         const prepared = await isolationPlanner.prepare(plan, virtual);
@@ -599,7 +607,7 @@ export function createSessionSupervisor({
         }
       }
     }
-    const plans = delegatedPlans().filter(plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId));
+    const plans = delegatedPlans().filter(eligible);
     const { start, blocked } = executionScheduler.select(plans);
     for (const plan of blocked) {
       goalPlanStore.revisePlan(plan.planId, {

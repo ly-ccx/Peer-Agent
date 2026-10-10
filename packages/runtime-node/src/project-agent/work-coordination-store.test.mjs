@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
@@ -40,4 +40,20 @@ test('restart after reply append and failed acceptance only retries acceptance',
     await createReplyDelivery({ store: env.store, ...ports }).recover();
     assert.equal(attempts, 2);
   } finally { env.cleanup(); }
+});
+
+test('an unsupported future executor or schema cannot recover or mutate the journal',()=>{
+  for (const future of [{schemaVersion:2}, {schemaVersion:1,kind:'coordination_decision',transition:{schemaVersion:1,minimumExecutorVersion:2}}]) {
+    const env=world();
+    try {
+      env.store.saveWork({workId:'root',state:'runnable'});
+      const file=path.join(env.options.rootDir,'w','coordination.jsonl');
+      const bytes=readFileSync(file,'utf8')+JSON.stringify({revision:2,kind:'work',work:{workId:'new'},...future})+'\n';
+      writeFileSync(file,bytes);
+      const newer=createWorkCoordinationStore(env.options);
+      assert.throws(()=>newer.recover(),/coordination_(schema|executor)_unsupported/);
+      assert.throws(()=>newer.saveWork({workId:'root',state:'cancelled'}),/coordination_(schema|executor)_unsupported/);
+      assert.equal(readFileSync(file,'utf8'),bytes);
+    } finally {env.cleanup();}
+  }
 });

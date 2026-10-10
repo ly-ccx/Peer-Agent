@@ -10,6 +10,7 @@ import { checkBotTaskCancellation } from './bot-task-cancel-checks.mjs';
 import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } from './bot-history-motion-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
+import { checkBotCoordination } from './bot-coordination-checks.mjs';
 import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
 import { checkBotAgentActivity } from './bot-agent-activity-checks.mjs';
 import { checkBotMessageLayout } from './bot-message-layout-checks.mjs';
@@ -658,6 +659,7 @@ try {
     await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskCancellation({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
+    await checkBotCoordination({page,until,report,captureDirectory:root,commandFile:workCommand});
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,

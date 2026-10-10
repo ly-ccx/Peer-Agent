@@ -39,6 +39,9 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
           goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...plan.delegationOrigin,
             cancellation: { ...registration.receipt, phase: 'awaiting_outcome', evidenceCalls: unknown.map(row => row.toolCallId) } } },
           { reason: 'cancelled execution outcome requires reconciliation', changedBy: 'session-cancellation' });
+          emit({ kind: 'interrupted', eventId: `coordination-outcome:${registration.receipt.operationId}`,
+            sessionId: registration.sessionId, workspaceId: registration.workspaceId, planId: plan.planId,
+            reason: 'execution_outcome_unknown' });
           return { ...project(goalPlanStore.getPlan(plan.planId)), error: 'execution_outcome_unknown', cancellationPending: true };
         }
         goalPlanStore.revisePlan(plan.planId, { status: 'cancelled', delegationOrigin: { ...plan.delegationOrigin,
