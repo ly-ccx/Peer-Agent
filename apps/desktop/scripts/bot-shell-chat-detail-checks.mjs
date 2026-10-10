@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkBotChoiceMotion } from './bot-choice-motion-checks.mjs';
+import { checkReplyPresence } from './bot-reply-presence-checks.mjs';
 
 /** Uses the isolated fixture's actual input queue and the production question projection. */
 export async function checkBotChatDetails({ page, until, report, captureDirectory, conversationFile }) {
@@ -30,6 +31,7 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '0');
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `reply-entry-idle-${theme}.png`) });
     await firstReply.locator('.bot-reply-body').hover();
+    await checkReplyPresence({ page, reply: firstReply, report, until, state: `short-question-${theme}` });
     await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1');
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `reply-entry-hover-${theme}.png`) });

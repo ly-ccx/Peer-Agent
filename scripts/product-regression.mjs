@@ -43,7 +43,7 @@ const requiredShots = [...sharedUiShots, 'quick-chat-bots-dark.png', 'quick-chat
   'selection-quote-1280-dark.png', 'selection-quote-760-light.png', 'selection-quote-docked-light.png',
   'completion-review-card.png', 'completion-review-report.png', 'completion-review-760-light.png',
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
-  'work-verifying.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png'];
+  'work-verifying.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
@@ -78,6 +78,10 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPreserved', 'reportRetryRecovers', 'nestedEscapeRetainsTask'].every(check => machine.taskDetails?.[check] === true)
     || !machine.taskDetails?.primaryActionReturnsToBot || !machine.taskDetails?.listClassification || !machine.modelSwitch?.rollbackVerified
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.rightAligned || !machine.replyDetailsEntry?.collapsedHeight
+    || !['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked', 'completed', 'short-question-dark', 'short-question-light'].every(state =>
+      machine.replyPresence?.cases?.some(sample => sample.state === state && sample.aligned && sample.fits))
+    || ![['first-paragraph', '正在整理回复'], ['preparing-read', '准备阅读 README.md'], ['reading-docked', '正在阅读 README.md']].every(([state, label]) =>
+      machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label && sample.noShimmer))
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
