@@ -25,6 +25,12 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
   const entryChecks = [];
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    // Finish layout/theme transitions before placing the pointer. Screenshot
+    // fast-forwarding must not move the hovered bubble out from under it.
+    await until(() => firstReply.evaluate(node => node.getAnimations({ subtree: true })
+      .filter(animation => animation.playState === 'running'
+        && Number.isFinite(animation.effect?.getComputedTiming().endTime)
+        && animation.effect?.target?.checkVisibility()).length), count => count === 0, 5000);
     await composer.focus(); await page.mouse.move(1, 1);
     const button = firstReply.locator('.bot-reply-context > button');
     await page.waitForFunction(node => getComputedStyle(node).opacity === '0', await button.elementHandle());
@@ -35,6 +41,7 @@ export async function checkBotChatDetails({ page, until, report, captureDirector
     await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1');
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `reply-entry-hover-${theme}.png`) });
+    assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'screenshot retains the hovered entry');
     entryChecks.push({ theme, hiddenUntilHover: true });
   }
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, entryTheme);
