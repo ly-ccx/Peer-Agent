@@ -76,7 +76,10 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].every(state => [[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
       machine.replyRecovery?.cases?.some(item => item.state === state && item.width === width && item.appearance === appearance
         && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication'].includes(state))))
-    || !['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationRetained', 'noPrivateThinking', 'narrowFits'].every(check => machine.manualWakeRetry?.[check] === true)
+    || !['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationRetained', 'noPrivateThinking', 'narrowFits', 'nativeLoaded', 'persistedEventBatch'].every(check => machine.manualWakeRetry?.[check] === true)
+    || machine.manualWakeRetry?.guardedCognitionDispatches !== 1
+    || !['controlledCognition', 'realCheckpointPort', 'nativePairLoaded', 'noAutomaticReplay'].every(check => machine.streamingFailureRecovery?.[check] === true)
+    || machine.streamingFailureRecovery?.readFileDispatches !== 1 || machine.streamingFailureRecovery?.explicitRetryTurns !== 1
     || ![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => (width === 1280 ? [false, true] : [false]).every(docked =>
       machine.pendingReplyLayout?.some(item => item.width === width && item.appearance === appearance && item.docked === docked && item.aligned))))
     || !machine.taskDetails?.reportFromDetail || !machine.taskDetails?.metadataCollapsed
@@ -123,7 +126,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, completionReview: machine.completionReview,
-      processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, manualWakeRetry: machine.manualWakeRetry, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
+      processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },
     supplementalCoverage: machine.sharedUiConventions,

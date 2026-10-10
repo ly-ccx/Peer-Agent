@@ -85,7 +85,14 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (missing.length) store.transfer(missing);
     },
     transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, recover: delivery.recover, hasPendingDelivery: delivery.pending,
-    pending() { return store.pendingEvents().filter(event => !ROUTINE.has(event.kind) && !Object.values(store.read().works).some(work => work.sessionIds?.includes(event.sessionId) && work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state))); },
+    pending() {
+      const works = Object.values(store.read().works);
+      // An owned batch continues through its durable job, never through a new
+      // wake merely because failure has left its delivery unacknowledged.
+      const owned = new Set(works.flatMap(work => [...(work.pendingEventIds || []), ...(work.consumedEventIds || [])]));
+      return store.pendingEvents().filter(event => !ROUTINE.has(event.kind) && !owned.has(event.eventId)
+        && !works.some(work => work.sessionIds?.includes(event.sessionId) && work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)));
+    },
     ownsInput(inputId) { return Object.values(store.read().works).some(work => work.anchorInputIds?.includes(inputId)); },
     nextRetryAt() {
       expireReservations();

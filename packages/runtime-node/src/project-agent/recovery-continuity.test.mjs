@@ -89,6 +89,54 @@ test('automatic attempts are bounded and restart preserves the same reservation 
   } finally { env.close(); }
 });
 
+test('owned wake events cannot bypass a recovery reservation, while independent events remain runnable', async () => {
+  const seen = []; let reads = 0;
+  const env = world(async ({ plan, turnProfile }) => {
+    const ids = plan.events.map(event => event.eventId);
+    seen.push(ids);
+    const guard = createWorkBudgetGuard(turnProfile);
+    try {
+      guard.beforeRequest({ accounting: 'physical_dispatch' });
+      if (ids.includes('new-event')) {
+        assert.equal(turnProfile.providerCheckpoint, undefined, 'independent event does not inherit old native history');
+        return { text: '新事件已处理。' };
+      }
+      if (turnProfile.providerCheckpoint) {
+        assert.equal(turnProfile.providerCheckpoint.messages[0].content, 'saved wake result');
+        return { text: '原工作已恢复。' };
+      }
+      reads++;
+      guard.beforeTool({ toolCallId: 'old-read', capabilityId: 'read_file' });
+      guard.checkpoint({ provider: 'openai', providerId: 'm', model: 'model',
+        messages: [{ role: 'tool', tool_call_id: 'old-read', content: 'saved wake result' }] },
+      [{ call: { toolCallId: 'old-read' }, result: { output: 'saved wake result' } }]);
+      return { ...timeout, toolCalls: [{ name: 'read_file', input: { path: 'README.md' }, result: 'saved wake result' }] };
+    } finally { guard.finish(); }
+  });
+  try {
+    env.store.transfer([{ eventId: 'old-event', kind: 'session_verified', sessionId: 'old-session', at: '2026-10-10T06:00:00Z' }]);
+    await env.runner.kick();
+    const old = env.work(), native = old.nativeCheckpointRef, reservation = old.recovery.reservationId;
+    assert.equal(old.state, 'retry_wait');
+    assert.equal(env.store.read().events['old-event'].handled, false);
+    await env.runner.kick(); env.restart(); await env.runner.kick();
+    assert.deepEqual(seen, [['old-event']], 'ordinary kick and restart cannot recreate the failed wake');
+    env.store.transfer([{ eventId: 'new-event', kind: 'session_verified', sessionId: 'new-session', at: '2026-10-10T06:00:00Z' }]);
+    await env.runner.kick();
+    assert.deepEqual(seen, [['old-event'], ['new-event']]);
+    const preserved = env.store.read().works[old.workId];
+    assert.equal(preserved.nativeCheckpointRef, native);
+    assert.equal(preserved.recovery.reservationId, reservation);
+    assert.equal(preserved.budget.modelRequests, 1);
+    await env.advance(2000);
+    assert.deepEqual(seen, [['old-event'], ['new-event'], ['old-event']]);
+    assert.equal(reads, 1);
+    assert.equal(env.store.read().works[old.workId].budget.modelRequests, 2);
+    assert.equal(env.store.read().works[old.workId].state, 'delivered');
+    assert.equal(env.store.read().events['old-event'].handled, true);
+  } finally { env.close(); }
+});
+
 test('new user input takes priority, has no old checkpoint, and invalidates the older retry', async () => {
   const seen = [];
   const env = world(async ({ plan, turnProfile }) => {

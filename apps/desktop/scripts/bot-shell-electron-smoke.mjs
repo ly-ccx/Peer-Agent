@@ -15,7 +15,7 @@ import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
-import { checkResponseInteraction, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
+import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
 import assert from 'node:assert/strict';
@@ -30,6 +30,9 @@ import { createOwnedProcessRegistry } from './lab-process-identity.mjs';
 import { seedBotShellHome } from './seed-bot-shell-home.mjs';
 import { metric } from './perf-project-agent.mjs';
 import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
+import { createWorkCoordinationStore } from '../../../packages/runtime-node/src/project-agent/work-coordination-store.mjs';
+import { coordinationWorkId } from '../../../packages/runtime-node/src/project-agent/work-coordination.mjs';
+import { DEFAULT_WORK_BUDGET } from '../../../packages/runtime-node/src/project-agent/work-budget.mjs';
 
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
@@ -142,12 +145,34 @@ if (process.argv.includes('--streaming')) {
   const bot = fixture.bots[1], file = path.join(home, 'conversations', bot.conversationId + '.jsonl');
   const rows = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   const turnId = 'rc-manual-wake-retry';
+  const now = new Date().toISOString();
   const wakeErrorText = '代理暂时不可用：response_headers_timeout: connect timeout after 20000ms (ConnectTimeoutError)';
+  const event = { eventId: 'rc-manual-retry-event', kind: 'session_verified', workspaceId: bot.workspaceId,
+    sessionId: 'rc-retry-session', at: now, payload: {} };
+  const workId = coordinationWorkId(bot.conversationId, [event.eventId]);
+  const recovery = { failureKind: 'response_headers_timeout', retryable: true, autoAttempts: 2,
+    failedTurnId: turnId, deadlineAt: new Date(Date.now() + 300_000).toISOString() };
+  const coordination = createWorkCoordinationStore({ rootDir: path.join(home, 'project-runtime'), workspaceId: bot.workspaceId,
+    holdsLease: () => true, leaseEpoch: () => 'rc-fixture-seed' });
+  coordination.transfer([event]);
+  const checkpointRef = coordination.checkpoint(workId, { job: { kind: 'wake', workId, turnId, userInputs: [],
+    events: [event], throughSeq: 0, carried: [], continuation: true },
+    outcome: { turnId, rounds: [], failed: true, reason: wakeErrorText } });
+  const nativeCheckpointRef = coordination.checkpoint(workId + ':native', { provider: 'openai',
+    providerId: botModelFixtures[0].id, model: botModelFixtures[0].model,
+    messages: [{ role: 'user', content: 'RC_MANUAL_WAKE_RETRY' }] });
+  coordination.saveWork({ schemaVersion: 1, workspaceId: bot.workspaceId, parentConversationId: bot.conversationId, workId,
+    state: 'blocked_system', end: 'provider_retryable', attemptId: turnId, anchorInputIds: [], sessionIds: [], waitFor: [],
+    consumedEventIds: [event.eventId], pendingResultRefs: [], pendingEventIds: [event.eventId], checkpointRef,
+    nativeCheckpointRef, stopScope: 'reply', recovery,
+    // Saved synthetic accounting must survive explicit continuation rather than reset on a new turn.
+    budget: { modelRequests: 12, toolCalls: 0, tokens: 0, costUsd: 0, unknownUsage: true, unknownCost: true,
+      attempts: {}, limits: DEFAULT_WORK_BUDGET } });
   rows.push({ id: turnId, turnId, role: 'assistant', kind: 'agent_turn', turnKind: 'wake', userInputs: [], content: '',
-    createdAt: new Date().toISOString(), rounds: [], meta: { recovery: { throughSeq: 0,
-      events: [{ eventId: 'rc-manual-retry-event', kind: 'session_verified', workspaceId: bot.workspaceId, sessionId: 'rc-retry-session', at: new Date().toISOString(), payload: {} }] } } });
+    createdAt: now, rounds: [], meta: { workId, recovery: { throughSeq: 0, events: [event] } } });
   rows.push({ id: turnId + '-card', turnId, role: 'assistant', kind: 'system_card', card: 'agent_unavailable', content: wakeErrorText,
-    createdAt: new Date().toISOString(), cards: [{ cardId: 'card:agent_unavailable:' + turnId, kind: 'agent_unavailable', content: wakeErrorText,
+    createdAt: now, meta: { workId }, cards: [{ cardId: 'card:agent_unavailable:' + turnId, kind: 'agent_unavailable', content: wakeErrorText,
+      recovery, recoveryWorkState: 'blocked_system',
       actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: bot.workspaceId, turnId } }] }] });
   writeFileSync(file, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
 }
@@ -387,6 +412,18 @@ try {
     await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
     await page.locator('.project-diagnostics__summary').waitFor();
     await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--wake-retry-only')) {
+    assert.ok(process.argv.includes('--streaming'), '--wake-retry-only requires the isolated --streaming cognition fixture');
+    await page.setViewportSize({ width: 1280, height: 780 });
+    await checkManualWakeRetry({ page, until, report, captureDirectory: root, commandFile: streamCommand,
+      readFixtureTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--streaming-only')) {
+    assert.ok(process.argv.includes('--streaming'), '--streaming-only requires the isolated --streaming cognition fixture');
+    await page.setViewportSize({ width: 1280, height: 780 });
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand,
+      workCommandFile: workSurfaces ? workCommand : null, readFixtureTurns: () => readObserved('turns') });
   } else if (process.argv.includes('--message-colors-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
