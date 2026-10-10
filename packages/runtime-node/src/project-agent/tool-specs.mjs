@@ -5,17 +5,7 @@
 import { OBJECTIVE_TOOL_SPECS, validateObjectiveToolInput } from './objective-tool-specs.mjs';
 import { TOOL_LEVELS } from './digest.mjs';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
-export const DELEGATION_TOOL_SPECS = Object.freeze([
-  ...OBJECTIVE_TOOL_SPECS,
-  spec('send_agent_message', 'local.delegation.send_agent_message', {
-    type: 'object', properties: {
-      sessionId: { type: 'string', maxLength: 200, description: 'Direct child session for the parent. Workers use their own host identity.' },
-      text: { type: 'string', maxLength: 4000 },
-      purpose: { type: 'string', enum: ['update', 'question', 'answer'] },
-      replyTo: { type: 'string', maxLength: 200, description: 'Question messageId being answered. Required to resume a worker waiting for its parent.' },
-    }, required: ['text', 'purpose'], additionalProperties: false,
-  }),
-  spec('spawn_session', 'local.delegation.spawn_session', {
+const SPAWN_INPUT_SCHEMA = {
     type: 'object',
     properties: {
       anchorMessageIds: {
@@ -58,7 +48,26 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     },
     required: ['anchorMessageIds', 'title', 'brief', 'successCriteria', 'kind', 'readOnly'],
     additionalProperties: false,
+  };
+export const DELEGATION_TOOL_SPECS = Object.freeze([
+  ...OBJECTIVE_TOOL_SPECS,
+  spec('coordinate_work', 'local.delegation.coordinate_work', {
+    type: 'object', properties: {
+      action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff'] },
+      workId: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 },
+      expectedRevision: { type: 'integer', minimum: 0 }, reason: { type: 'string', maxLength: 500 },
+      text: { type: 'string', maxLength: 4000 }, replyTo: { type: 'string', maxLength: 200 }, task: SPAWN_INPUT_SCHEMA,
+    }, required: ['action','reason'], additionalProperties: false,
   }),
+  spec('send_agent_message', 'local.delegation.send_agent_message', {
+    type: 'object', properties: {
+      sessionId: { type: 'string', maxLength: 200, description: 'Direct child session for the parent. Workers use their own host identity.' },
+      text: { type: 'string', maxLength: 4000 },
+      purpose: { type: 'string', enum: ['update', 'question', 'answer'] },
+      replyTo: { type: 'string', maxLength: 200, description: 'Question messageId being answered. Required to resume a worker waiting for its parent.' },
+    }, required: ['text', 'purpose'], additionalProperties: false,
+  }),
+  spec('spawn_session', 'local.delegation.spawn_session', SPAWN_INPUT_SCHEMA),
   spec('resume_session', 'local.delegation.resume_session', {
     type: 'object', properties: { sessionId: { type: 'string' }, anchorMessageId: { type: 'string' } },
     required: ['sessionId', 'anchorMessageId'], additionalProperties: false,
@@ -176,6 +185,21 @@ export function validateDelegationInput(name, raw) {
   if (!item) return invalid(`Unknown delegation tool: ${name}`);
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
+  if (name === 'coordinate_work') {
+    if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task'].includes(key))
+      || !['parallel','augment','revise','query','answer','cancel','replace','handoff'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
+    if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200) || input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Malformed task identity or version.');
+    if (input.action !== 'parallel' && (!text(input.sessionId,200) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Select a real session and its current goalRevision.');
+    if (['parallel','replace'].includes(input.action) && (!input.task || input.task.supersedes || input.task.objectiveId)) return invalid('A task specification is required; objective and supersession authorities are host-owned.');
+    if (['augment','revise','answer'].includes(input.action) && !text(input.text,4000)) return invalid('A bounded work instruction is required.');
+    if (input.action === 'answer' && !text(input.replyTo,200)) return invalid('An actual Agent question id is required.');
+    const task = input.task ? validateSpawn(input.task) : null;
+    if (task && !task.ok) return task;
+    return { ok:true, value:{action:input.action,reason:input.reason.trim(),
+      ...(input.workId ? {workId:input.workId} : {}), ...(input.sessionId ? {sessionId:input.sessionId} : {}),
+      ...(input.expectedRevision !== undefined ? {expectedRevision:input.expectedRevision} : {}),
+      ...(input.text ? {text:input.text.trim()} : {}), ...(input.replyTo ? {replyTo:input.replyTo.trim()} : {}), ...(task ? {task:task.value} : {})} };
+  }
   if (name === 'send_agent_message') {
     const body = text(input.text, 4000), sessionId = text(input.sessionId, 200);
     if (Object.keys(input).some(key => !['sessionId', 'text', 'purpose', 'replyTo'].includes(key))

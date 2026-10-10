@@ -6,7 +6,7 @@ export function installDelegation(port) {
 }
 export function delegationStoreDir() { return current?.storeDir || ''; }
 export function liveDelegationSupervisor() {
-  return Object.fromEntries(['spawn', 'list', 'get', 'cancel', 'message', 'resume', 'reprioritize', 'controlWork'].map((name) => [name, (...args) => (
+  return Object.fromEntries(['spawn', 'list', 'get', 'cancel', 'message', 'resume', 'reprioritize', 'controlWork', 'coordinateWork', 'coordinationFacts'].map((name) => [name, (...args) => (
     typeof current?.supervisor?.[name] === 'function' ? current.supervisor[name](...args) : { error: 'supervisor_unavailable' }
   )]));
 }

@@ -48,11 +48,12 @@ export function createWorkBudgetGuard(profile) {
     store.saveWork({ ...work, ...patch, budget });
     return budget;
   }
+  const relevantOutcome = row => !row.planId || row.planId === profile.planId;
   function limited() { throw new Error('work_budget_limited'); }
   return {
     beforeRequest(metadata) {
       change(budget => {
-        if (budget.uncertainDispatches?.length || Object.entries(budget.attempts).some(([id, row]) => row.pendingTools?.length && (id === attemptId || !binding.activeAttempts.has(id)))) throw new Error('execution_outcome_unknown');
+        if (budget.uncertainDispatches?.some(relevantOutcome) || Object.entries(budget.attempts).some(([id, row]) => relevantOutcome(row) && row.pendingTools?.length && (id === attemptId || !binding.activeAttempts.has(id)))) throw new Error('execution_outcome_unknown');
         if (budget.modelRequests >= limits.maxModelRequests) limited();
         if (limits.maxTokens !== undefined && (budget.unknownUsage || budget.tokens >= limits.maxTokens)) limited();
         if (limits.maxCostUsd !== undefined && (budget.unknownCost || budget.costUsd >= limits.maxCostUsd)) limited();

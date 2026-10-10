@@ -15,6 +15,7 @@ export function spawnIdentity(parentConversationId, input) {
     && OPERATIONS[item.kind].every(key => typeof item[key] === 'string' && item[key].trim()));
   const material = automatic ? {
     parentConversationId,
+    ...(input.coordinationOperationId ? { coordinationOperationId: input.coordinationOperationId } : {}),
     ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
     anchorMessageIds: [...new Set(input.anchorMessageIds || [])].sort(),
     kind: input.kind,

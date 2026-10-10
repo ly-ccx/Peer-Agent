@@ -12,6 +12,7 @@ export interface CoordinationMandate {
   goalRevision: number;
   allowedActions: CoordinationAction[];
   sessionIds: string[];
+  revokedSessionIds?: string[];
   executionBindings?: Record<string, CoordinationExecutionBinding>;
   materialRefs: string[];
   policyRevision: string;

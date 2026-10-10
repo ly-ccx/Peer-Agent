@@ -168,7 +168,7 @@ export function createTuiTurnExecutor(options: {
           systemContextInput: { role: profile.role, workspaceId, sessionId: profile.sessionId, planId: profile.planId,
             turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
-            ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
+            ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase, goalRevision: input.plan?.delegationOrigin?.coordinationBinding?.goalRevision, takeover: input.plan?.delegationOrigin?.takeover?.text }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
               readOnly: input.plan?.delegationOrigin?.readOnly === true,
               summary: input.plan?.goal,
               snapshotItems: useMemory && profile.memorySnapshotId ? (readSnapshots(workspaceId, {rootDir: options.dataHome}).find((snapshot: any) => snapshot.snapshotId === profile.memorySnapshotId) as any)?.items ?? [] : [] } } : {}),

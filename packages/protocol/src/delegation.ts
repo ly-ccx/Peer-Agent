@@ -31,6 +31,7 @@ export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running',
 export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
 
 export interface DelegationOrigin {
+  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed'; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string };
   readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
   readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[] };
   readonly workId?: string;

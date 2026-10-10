@@ -1,5 +1,7 @@
 import { controlProjectWork } from './work-control.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
+import { createSessionTakeover } from './session-takeover.mjs';
+import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
 import { createAgentCommunication } from './agent-communication.mjs';
@@ -124,6 +126,7 @@ export function createSessionSupervisor({
   const legacyCriteria = createLegacyCriterionRecovery({ store: goalPlanStore, readProvenance: readLegacyCriterionProvenance,
     holdsLease: planId => canManageWorkspace(goalPlanStore.getPlan(planId)?.delegationOrigin?.workspaceId), now });
   let tail = Promise.resolve();
+  let coordination;
   let depth = 0;
   function exclusive(task) {
     const run = tail.then(() => {
@@ -138,9 +141,9 @@ export function createSessionSupervisor({
   }
 
   function emit(event) {
-    if (typeof emitEvent !== 'function') return;
+    if (['cancelled', 'session_resumed'].includes(event.kind)) queueMicrotask(() => { void coordination?.recover(event.workspaceId); });
     try {
-      emitEvent({ ...event, at: event.at || now() });
+      emitEvent?.({ ...event, at: event.at || now() });
     } catch {
       // 收件箱尚未接入。事件投递失败不回滚已经落盘的任务。
     }
@@ -148,6 +151,17 @@ export function createSessionSupervisor({
 
   const cancellation = createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
     abortStream, isolationPlanner, exclusive, project, emit, promote, now });
+  const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
+    abortStream, promote, emit, now });
+  coordination = createCoordinationLifecycle({ readSession: input => get(input),
+    checkTakeover: id => {
+      const plan = findBySession(id);
+      return plan?.runner?.status === 'waiting_user' ? 'human_decision_required'
+        : plan?.resultAcceptance?.acceptedAt || ['completed','cancelled'].includes(plan?.status) ? 'session_not_running' : null;
+    },
+    readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
+    spawn: (input, context) => exclusive(() => spawnLocked(input, context)), requestCancel: cancellation.request,
+    send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request, holdsLease: canManageWorkspace, now });
 
   function delegatedPlans() {
     let names = [];
@@ -358,6 +372,7 @@ export function createSessionSupervisor({
     const admittedCriteria = admitted.criteria;
     const supersedes = text(input?.supersedes);
     const key = objectiveActionId ? spawnIdentity(parentConversationId, {objectiveActionId}) : spawnIdentity(parentConversationId, {
+      ...(context.coordinationOperationId ? { coordinationOperationId: context.coordinationOperationId } : {}),
       anchorMessageIds,
       title,
       brief,
@@ -991,6 +1006,9 @@ export function createSessionSupervisor({
 
   return {
     executionScheduler,
+    coordinateWork: (input, context) => coordination.coordinate(input, context),
+    coordinationFacts: (workspaceId, conversationId) => coordination.facts(workspaceId, conversationId),
+    recoverCoordination: workspaceId => coordination.recover(workspaceId),
     sendAgentMessage: (input, context) => exclusive(() => communication.send(input, context)),
     recoverAgentMessages: () => exclusive(() => communication.recover()),
     auditLegacyCriteria(planId, criterionIds) { return legacyCriteria.audit(planId, criterionIds); },
@@ -1010,7 +1028,7 @@ export function createSessionSupervisor({
       });
     },
     resumeRecovered(workspaceId) {
-      return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)).then(() => exclusive(async () => {
+      return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)).then(() => coordination.recover(workspaceId)).then(() => exclusive(async () => {
         if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
           if (isHostHandoffPause(plan)) {

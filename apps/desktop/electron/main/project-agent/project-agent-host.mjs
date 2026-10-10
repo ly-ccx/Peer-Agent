@@ -374,7 +374,7 @@ export function registerDesktopProjectAgent({
     appendMessage,
     inbox,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }),
-    resolveContext:({workspaceId})=>({objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
+    resolveContext:({workspaceId})=>({coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId)),objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
     reconcileSessions: () => supervisor.reconcile(),
     ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,

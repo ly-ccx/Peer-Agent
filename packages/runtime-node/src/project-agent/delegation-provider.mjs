@@ -102,11 +102,14 @@ export function createDelegationProvider({
     }
 
     let input = validated.value;
-    if (item.name === 'spawn_session' && !view.currentInputAnchors.length && !view.objectiveWakeIds.length) {
+    const coordinationFacts = typeof supervisor?.coordinationFacts === 'function' ? await supervisor.coordinationFacts(view.workspaceId, view.conversationId) : [];
+    const wakeMandate = Array.isArray(coordinationFacts) && coordinationFacts.find(row => row.workId === view.workId && row.lifecycle === 'active'
+      && view.events.some(event => row.sessionIds.includes(event.sessionId)));
+    if (item.name === 'spawn_session' && !view.currentInputAnchors.length && !view.objectiveWakeIds.length && !wakeMandate) {
       return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
         output: { ok: false, error: 'current_user_required', message: 'Historical user messages cannot authorize new tasks during an ordinary wake.' } });
     }
-    if (['spawn_session', 'resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
+    if (['spawn_session', 'coordinate_work', 'resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
       && onlyHandoffAnswers(view)) return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
       output: { ok: false, error: 'host_decision_already_handled', message: 'The host handles this merge decision. A separate current user instruction is required for new work.' } });
     if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
@@ -120,7 +123,7 @@ export function createDelegationProvider({
         return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'objective_verification_out_of_scope' } });
       }
     }
-    if (['control_work', 'message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) || item.name === 'spawn_session' && input.supersedes) {
+    if (['coordinate_work', 'control_work', 'message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) && input.sessionId || item.name === 'spawn_session' && input.supersedes) {
       const scope = resolveAnchorScope({
         messages: view.messages,
         quoteRefs: view.quoteRefs,
@@ -144,6 +147,10 @@ export function createDelegationProvider({
           },
         });
       }
+    }
+    if (!view.currentInputAnchors.length && ['resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)) {
+      return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false,
+        error: 'current_user_required', message: 'Use coordinate_work with an active mandate for autonomous task changes.' } });
     }
     if (item.name === 'set_proactivity' || item.name === 'resume_session') {
       const anchorError = validateAnchors([input.anchorMessageId], view.messages);
@@ -256,6 +263,11 @@ export function createDelegationProvider({
   }
 
   async function dispatch(name, input, view) {
+    if (name === 'coordinate_work') {
+      const scope = resolveAnchorScope({ messages: view.messages, quoteRefs: view.quoteRefs, replyTo: view.replyTo });
+      return accepted(await callPort(supervisor?.coordinateWork, input, 'coordination_unavailable', { ...view,
+        ...(scope.scoped ? { scopedSessionIds: scope.sessionIds } : {}) }), 'coordination_unavailable');
+    }
     if (name === 'send_agent_message') return accepted(await callPort(supervisor?.sendAgentMessage, input, 'supervisor_unavailable', view), 'supervisor_unavailable');
     if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) {
       const method = name.slice(0, name.indexOf('_'));
@@ -264,6 +276,17 @@ export function createDelegationProvider({
       return result?.ok === true ? {ok:true,output:result} : {ok:false,output:{...result,error:result?.code || 'objective_failed'}};
     }
     if (name === 'spawn_session') {
+      if (!input.objectiveId && view.workId && typeof supervisor?.coordinateWork === 'function') {
+        const facts = await supervisor.coordinationFacts?.(view.workspaceId, view.conversationId);
+        const target = input.supersedes ? await supervisor.get?.({ sessionId: input.supersedes }) : null;
+        const workId = target?.origin?.workId || view.workId;
+        const mandate = Array.isArray(facts) ? facts.find(row => row.workId === workId) : null;
+        const { supersedes, ...task } = input;
+        const scope = resolveAnchorScope({ messages: view.messages, quoteRefs: view.quoteRefs, replyTo: view.replyTo });
+        return accepted(await callPort(supervisor.coordinateWork, { action: supersedes ? 'replace' : 'parallel', reason: input.brief.slice(0,500), task,
+          ...(supersedes ? { sessionId: supersedes, expectedRevision: mandate?.goalRevision || 0 } : {}) },
+          'coordination_unavailable', { ...view, ...(scope.scoped ? { scopedSessionIds: scope.sessionIds } : {}) }), 'coordination_unavailable');
+      }
       return accepted(
         await callPort(supervisor?.spawn, input, 'supervisor_unavailable', spawnContext(view)),
         'supervisor_unavailable',
@@ -422,6 +445,7 @@ function executionView(context) {
     objectiveWakeIds: idList(context?.objectiveWakeIds ?? nested.objectiveWakeIds),
     sessionWakeIds: idList(context?.sessionWakeIds ?? nested.sessionWakeIds),
     objectiveWakeEvents: Array.isArray(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) ? structuredClone(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) : [],
+    events: context?.turnProfile?.context?.events ?? nested.turnProfile?.context?.events ?? [],
     turnToolCalls: Array.isArray(context?.turnToolCalls)
       ? context.turnToolCalls.slice()
       : (Array.isArray(nested.turnToolCalls) ? nested.turnToolCalls.slice() : []),

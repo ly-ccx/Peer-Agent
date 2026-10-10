@@ -283,7 +283,9 @@ export function projectTurnSystemContext(profile, {
     const origin = plan?.delegationOrigin && typeof plan.delegationOrigin === 'object'
       ? plan.delegationOrigin
       : {};
-    fields.workSessionExecution = { phase: origin.phase };
+    fields.workSessionExecution = { phase: origin.phase,
+      ...(origin.coordinationBinding ? {goalRevision: origin.coordinationBinding.goalRevision} : {}),
+      ...(origin.takeover?.text ? {takeover: origin.takeover.text} : {}) };
     const bag = turnContext?.workSessionOrigin && typeof turnContext.workSessionOrigin === 'object'
       ? turnContext.workSessionOrigin
       : {};
