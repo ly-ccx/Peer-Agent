@@ -10,12 +10,16 @@ export interface SessionFactSnapshot {
 export function deriveSessionFacts(input: {
   status?: string; phase?: string; runnerStatus?: string; accepted?: boolean;
   superseded?: boolean; needsUser?: boolean; blockedReason?: string; verificationActive?: boolean;
+  cancellationPhase?: string; takeoverPhase?: string;
 }): SessionFactSnapshot {
   const verificationActive = input.verificationActive === true;
   let status: WorkSessionStatus;
   if (input.status === 'cancelled') status = 'cancelled';
   else if (input.status === 'failed') status = 'failed';
   else if (input.accepted) status = 'accepted';
+  else if (input.cancellationPhase === 'awaiting_outcome' || input.takeoverPhase === 'awaiting_outcome') status = 'awaiting_outcome';
+  else if (input.cancellationPhase === 'stopping') status = 'stopping';
+  else if (input.takeoverPhase === 'stopping') status = 'starting';
   else if (input.needsUser || input.runnerStatus === 'waiting_user') status = 'waiting_user';
   else if (input.blockedReason === 'waiting_parent_agent' && input.phase !== 'paused' && !input.superseded && input.runnerStatus !== 'paused') status = 'waiting_agent';
   else if (input.runnerStatus === 'blocked') status = 'waiting_user';

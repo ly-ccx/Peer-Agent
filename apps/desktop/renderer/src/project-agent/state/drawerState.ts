@@ -3,6 +3,7 @@
  * 设置写入由调用方只经已有 IPC 发出。
  */
 
+import type { CoordinationSessionFacts } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
 export const DRAWER_WIDTH = 380;
@@ -25,6 +26,7 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly coordination?: CoordinationSessionFacts;
   readonly sessionId: string;
   readonly title: string;
   readonly status: string;
@@ -76,7 +78,7 @@ export interface MemoryFilter {
 
 const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'memory', 'settings']);
 const NEEDS_YOU = new Set(['waiting_user', 'result_ready']);
-const RUNNING = new Set(['starting', 'running', 'waiting_agent', 'verifying']);
+const RUNNING = new Set(['starting', 'running', 'waiting_agent', 'stopping', 'awaiting_outcome', 'verifying']);
 const QUEUED = new Set(['queued']);
 
 export function closedDrawer(): DrawerMemory {
@@ -165,6 +167,8 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
 }
 
 export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
+  if (['stopping','awaiting_outcome'].includes(session.status)) return i18n.t(`projectAgent.chat.sessionState.${session.status}` as 'projectAgent.chat.sessionState.stopping' | 'projectAgent.chat.sessionState.awaiting_outcome');
+  if (session.coordination?.action === 'handoff' && session.coordination.phase === 'stopping') return i18n.t('projectAgent.task.coordination.handoff');
   if (session.queueReason === 'dependency_missing') return i18n.t('projectAgent.drawer.dependencyMissing');
   if (session.queueReason === 'disk_space') return i18n.t('projectAgent.drawer.diskSpace');
   if (session.queueReason === 'isolation_failed') return i18n.t('projectAgent.drawer.isolationFailed');
@@ -188,6 +192,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     : {};
   return {
     sessionId,
+    ...(readCoordination(record.coordination) ? {coordination:readCoordination(record.coordination)} : {}),
     title: readString(record.title) || sessionId,
     status: readString(record.status),
     statusLabel: readString(record.statusLabel),
@@ -299,4 +304,15 @@ function readStringList(value: unknown): string[] {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readCoordination(value: unknown): CoordinationSessionFacts | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const row=value as Record<string,unknown>;
+  const action=['parallel','augment','revise','query','answer','cancel','replace','handoff'].find(item=>item===row.action);
+  const phase=['recorded','stopping','awaiting_outcome','ready','started','completed','blocked'].find(item=>item===row.phase);
+  if (!action || !phase || !readString(row.operationId) || !Number.isSafeInteger(row.goalRevision)) return undefined;
+  return {operationId:readString(row.operationId), action:action as CoordinationSessionFacts['action'], phase:phase as CoordinationSessionFacts['phase'],
+    goalRevision:row.goalRevision as number, reason:readString(row.reason), priorSessionId:readString(row.priorSessionId),
+    replacementSessionId:readString(row.replacementSessionId), replacementTitle:readString(row.replacementTitle)};
 }

@@ -22,6 +22,7 @@ function failed(plan) {
 }
 function occupying(plan) {
   if (plan.delegationOrigin?.cancellation && plan.delegationOrigin.cancellation.phase !== 'completed') return slot(plan) !== 'read';
+  if (plan.delegationOrigin?.takeover?.phase === 'stopping') return slot(plan) !== 'read';
   const waiting = plan.runner?.status === 'waiting_user' || Boolean(plan.delegationOrigin?.agentWaitMessageId);
   return plan.delegationOrigin?.phase === 'running' && !TERMINAL.has(plan.status) && !failed(plan)
     && !(waiting && slot(plan) === 'read');

@@ -1800,6 +1800,8 @@ function normalizeDelegationOrigin(value) {
   if (value.verifying === true) origin.verifying = true;
   if (value.cancellation && typeof value.cancellation.operationId === 'string'
     && ['stopping', 'awaiting_outcome', 'completed'].includes(value.cancellation.phase)) origin.cancellation = structuredClone(value.cancellation);
+  if (value.takeover && typeof value.takeover.operationId === 'string'
+    && ['stopping', 'completed'].includes(value.takeover.phase)) origin.takeover = structuredClone(value.takeover);
   if (value.coordinationBinding && typeof value.coordinationBinding.workId === 'string'
     && Number.isSafeInteger(value.coordinationBinding.goalRevision) && typeof value.coordinationBinding.executionEpoch === 'string') origin.coordinationBinding = structuredClone(value.coordinationBinding);
   if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;

@@ -1,5 +1,5 @@
 export type { ProjectWorkReceipt, ProjectWorkRecovery, ProjectWorkState, ProjectTurnEnd } from './work-coordination.ts';
-export type { CoordinationAction, CoordinationLifecycle, CoordinationMandate, CoordinationDecision, TaskTransitionPhase, TaskTransition, CoordinationExecutionBinding } from './delegation-coordination.ts';
+export type { CoordinationAction, CoordinationLifecycle, CoordinationMandate, CoordinationDecision, TaskTransitionPhase, TaskTransition, CoordinationExecutionBinding, CoordinationSessionFacts } from './delegation-coordination.ts';
 export { deriveSessionFacts, type SessionFactSnapshot } from './session-facts.ts';
 export { projectAgentFailureKind, classifyProjectAgentFailure, type ProjectRecoveryFailureKind, type ProviderRequestRecovery, type ProjectAgentTurnRecovery, type ReplyAnchorCandidate } from './project-agent-failure.ts';
 export type { EvidenceSourceDescription, ProjectAgentEvidenceReadRequest, ProjectAgentEvidenceReadResult } from './evidence-inspection.ts';

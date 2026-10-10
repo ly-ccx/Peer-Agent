@@ -40,7 +40,7 @@ test('host scope, canonical input and active mandate are required; model cannot 
     assert.equal(w.store.decide(next, { ...host, scopedSessionIds: ['sb'] }).error, 'out_of_scope');
     assert.equal(w.store.decide(next, { ...host, parentConversationId: 'other' }).error, 'out_of_scope');
     w.store.decide(next, host);
-    assert.equal(w.store.decide({ ...next, operationId: 'wake', expectedRevision: 2, sourceInputIds: [], sourceEventIds: ['event'] }, host).error, 'mandate_inactive');
+    assert.equal(w.store.decide({ ...next, operationId: 'wake', expectedRevision: 2, sourceInputIds: [], sourceEventIds: ['event'] }, host).error, 'event_out_of_scope');
   } finally { w.close(); }
 });
 test('transition replay has ordered phases and rejects stale execution; legacy records do not acquire authority', () => {

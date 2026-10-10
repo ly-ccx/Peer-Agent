@@ -37,7 +37,9 @@ export function createWorkBudgetGuard(profile) {
   function change(update, requireActive = true) {
     store.assertOwner();
     const work = store.read().works[profile.workId];
-    if (!work || requireActive && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(work.state)) throw new Error('work_execution_stopped');
+    const stopped = work && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(work.state);
+    const stopsExecutor = profile.role === 'project_agent' || work?.stopScope !== 'reply' || work?.state === 'budget_limited';
+    if (!work || requireActive && stopped && stopsExecutor) throw new Error('work_execution_stopped');
     if (requireActive && profile.coordinationBinding) {
       const state = store.read(), mandate = state.mandates?.[profile.coordinationBinding.workId];
       const transition = Object.values(state.transitions || {}).find(row => row.executionEpoch === profile.coordinationBinding.executionEpoch);
@@ -48,11 +50,12 @@ export function createWorkBudgetGuard(profile) {
     store.saveWork({ ...work, ...patch, budget });
     return budget;
   }
+  const relevantOutcome = row => !row.planId || row.planId === profile.planId;
   function limited() { throw new Error('work_budget_limited'); }
   return {
     beforeRequest(metadata) {
       change(budget => {
-        if (budget.uncertainDispatches?.length || Object.entries(budget.attempts).some(([id, row]) => row.pendingTools?.length && (id === attemptId || !binding.activeAttempts.has(id)))) throw new Error('execution_outcome_unknown');
+        if (budget.uncertainDispatches?.some(relevantOutcome) || Object.entries(budget.attempts).some(([id, row]) => relevantOutcome(row) && row.pendingTools?.length && (id === attemptId || !binding.activeAttempts.has(id)))) throw new Error('execution_outcome_unknown');
         if (budget.modelRequests >= limits.maxModelRequests) limited();
         if (limits.maxTokens !== undefined && (budget.unknownUsage || budget.tokens >= limits.maxTokens)) limited();
         if (limits.maxCostUsd !== undefined && (budget.unknownCost || budget.costUsd >= limits.maxCostUsd)) limited();

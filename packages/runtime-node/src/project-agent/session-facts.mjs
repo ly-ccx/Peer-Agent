@@ -15,6 +15,7 @@ export function sessionFactsFromPlan(plan) {
   const verificationActive = attempts.has(plan?.planId);
   return { ...deriveSessionFacts({ status: plan?.status, runnerStatus: plan?.runner?.status,
     phase: plan?.delegationOrigin?.phase, superseded: Boolean(plan?.delegationOrigin?.supersededBy),
+    cancellationPhase: plan?.delegationOrigin?.cancellation?.phase, takeoverPhase: plan?.delegationOrigin?.takeover?.phase,
     accepted: Boolean(plan?.resultAcceptance?.acceptedAt),
     needsUser: plan?.delegationOrigin?.phase === 'awaiting_approval',
     blockedReason: plan?.delegationOrigin?.agentWaitMessageId && plan?.runner?.status !== 'waiting_user'
