@@ -1,3 +1,4 @@
+import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
 import { sendQoderPrivateStream } from '../provider-adapters/qoder-private-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
@@ -134,7 +135,7 @@ export async function agentLoopQoder({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
-      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'qoder', providerId, model, messages: structuredClone(apiMessages) }, executions),
+      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'qoder', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
       initialize: () => ({ provider: 'qoder-private' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -270,7 +271,7 @@ export async function agentLoopQoder({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'qoder', providerId, model, messages: structuredClone(apiMessages),
+        executionBudget?.onYield?.({ provider: 'qoder', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },

@@ -1,3 +1,4 @@
+import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
 import { sendAnthropicMessagesStream } from '../provider-adapters/anthropic-messages-adapter.mjs';
 import { countAnthropicCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -119,7 +120,7 @@ export async function agentLoopAnthropic({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
-      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'anthropic', providerId, model, messages: structuredClone(apiMessages) }, executions),
+      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'anthropic', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
       initialize: () => ({ provider: 'anthropic' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -299,7 +300,7 @@ export async function agentLoopAnthropic({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'anthropic', providerId, model, messages: structuredClone(apiMessages),
+        executionBudget?.onYield?.({ provider: 'anthropic', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },

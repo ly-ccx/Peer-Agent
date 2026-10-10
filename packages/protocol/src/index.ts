@@ -941,7 +941,7 @@ export interface PermissionGrant {
   readonly toolCallId: string;
   readonly granted: boolean;
   readonly duration: PermissionDuration;
-  readonly scope?: string;
+  readonly scope?: string | import('./local-image.ts').LocalImagePermissionScope;
   readonly decidedAt: string;
 }
 
@@ -1088,3 +1088,4 @@ export * from './objectives.ts';
 export * from './remote-access-settings.ts';
 
 export type { BotModelSelectionUpdateRequest, BotModelSelectionUpdateResult } from './bot-model-selection.ts';
+export * from './local-image.ts';

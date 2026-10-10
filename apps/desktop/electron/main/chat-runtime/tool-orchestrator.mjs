@@ -1,5 +1,5 @@
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
-import { materializeToolResultContent } from '@peer-agent/runtime-node';
+import { materializeToolResultContent, isLocalImageObservation } from '@peer-agent/runtime-node';
 import { isDesktopPreviewObservation } from '../runtime-gateway/desktop-preview-service.mjs';
 
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
@@ -392,6 +392,7 @@ export async function executeModelToolCall({
       args,
       openToolCalls: goalPlan.runner.contextCheckpoint?.openToolCalls || [],
       completedLedger: goalIdempotencyLedger.snapshot(),
+      requiresFreshResult: registry?.getTool(name)?.runtime?.resultReplay === 'fresh_read',
     });
     if (decision.action === 'reuse') {
       const reused = {
@@ -601,25 +602,27 @@ export async function executeModelToolCall({
   const controlSignal = extractToolControlSignal(result);
   const visualObservations = Array.isArray(result.execution?.result?.modelContext?.visualObservations)
     ? result.execution.result.modelContext.visualObservations.filter((observation) => (
-        ((observation?.kind === 'browser_screenshot'
+        (result.execution?.result?.status === 'success' && isLocalImageObservation(observation, toolCallId)) || (
+          ((observation?.kind === 'browser_screenshot'
           && typeof observation?.artifactRef === 'string'
           && observation.artifactRef.startsWith('local-browser-artifact://'))
           || (observation?.kind === 'desktop_preview'
             && result.execution?.result?.status === 'success'
             && isDesktopPreviewObservation(observation, toolCallId)))
-        && observation?.mediaType === 'image/png'
-        && typeof observation?.dataUrl === 'string'
-        && observation.dataUrl.startsWith('data:image/png;base64,')
+          && observation?.mediaType === 'image/png'
+          && typeof observation?.dataUrl === 'string'
+          && observation.dataUrl.startsWith('data:image/png;base64,')
+        )
       ))
     : [];
-  return {
+  return Object.defineProperty({
     aborted: false,
     args,
     output: providerOutput,
     result,
     controlSignal,
-    // Side-band, current-turn-only visual context. It is deliberately excluded from
-    // output/providerOutput so Evidence and tool cards never persist image bytes.
-    visualObservations,
-  };
+  }, 'visualObservations', {
+    // Current-turn-only context; JSON and event snapshots exclude image bytes.
+    value: visualObservations, enumerable: false,
+  });
 }

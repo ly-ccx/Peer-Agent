@@ -626,3 +626,6 @@ export { agentMessagesForContext, createAgentCommunication } from './project-age
 export { createAgentEventPublisher } from './project-agent/agent-activity.mjs';
 
 export { agentCommunicationExcludedPrefixes } from './project-agent/work-session-profile.mjs';
+export { createLocalImageProvider, detectLocalImageMediaType, isLocalImageObservation } from './local-image-provider.mjs';
+export { LOCAL_IMAGE_TOOL_DEFINITIONS } from './local-image-tools.mjs';
+export { LOCAL_IMAGE_CONTEXT_PREFIX, checkpointWithoutLocalImagePixels } from './local-image-checkpoint.mjs';
