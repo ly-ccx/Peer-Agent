@@ -112,7 +112,7 @@ export { buildAnthropicTools, buildOpenAITools, buildSystemPrompt };
 export { buildRuntimeTools };
 export { normalizeAnthropicMessages, normalizeOpenAIMessages };
 export { hasUnsupportedToolClaim };
-export { finalizeDanglingToolSegments, terminalDanglingNote };
+export { finalizeDanglingToolSegments, resolvePersistSegments, terminalDanglingNote };
 export { resolveResumeSeed };
 export { mergeUsageAmounts };
 export { sanitizeApiMessages };
@@ -374,8 +374,15 @@ function noteNativeReasoningFallback(provider, details = {}) {
 // segments 做过同样收尾，但仅当终态事件 streamId 与当前会话匹配时才生效；后台会话（已
 // 切走）或事件 streamId 不匹配时，真值来源是这里的落盘 + 切回时的会话重载。因此必须在
 // 主进程的终态落盘汇聚点再兜一次，否则切回会话仍会看到永久转圈的工具段。
-// 与渲染层口径一致：result === undefined 且 synthetic !== true 视为悬空段。
+// 与渲染层 streamSegments.isBlankToolResult 口径一致：
+// 缺省、JSON null、字面量 "null" 都是悬空；空字符串是合法成功结果。
 // 纯函数：无悬空段时返回原数组引用，调用方据此可跳过无谓写入。
+function isBlankToolResult(result) {
+  return result === undefined
+    || result === null
+    || (typeof result === 'string' && result.trim() === 'null');
+}
+
 function terminalDanglingNote(terminalStatus) {
   if (terminalStatus === 'goal_handoff') return null;
   if (terminalStatus === 'aborted') return '工具调用已中断（生成停止）';
@@ -389,13 +396,20 @@ function finalizeDanglingToolSegments(segments, terminalStatus) {
   if (note == null) return segments;
   let changed = false;
   const next = segments.map((segment) => {
-    if (segment?.type === 'tool-call' && segment.result === undefined && segment.synthetic !== true) {
+    if (segment?.type === 'tool-call' && isBlankToolResult(segment.result) && segment.synthetic !== true) {
       changed = true;
       return { ...segment, result: note };
     }
     return segment;
   });
   return changed ? next : segments;
+}
+
+// 终态之后的非 final 落盘（例如迟到的 tool-call）也要收口，否则会把已经补好的
+// 消息重新写成 result 缺失。goal_handoff 的 note 为空，这里保持原样，后续 tool-result 仍可回填。
+function resolvePersistSegments(segments, { final = false, terminalEventSent = false, terminalStatus = null } = {}) {
+  if (!final && !terminalEventSent) return segments;
+  return finalizeDanglingToolSegments(segments, terminalStatus || 'aborted');
 }
 
 /**
@@ -505,10 +519,16 @@ function wrapWebContentsForRuntimeEvents(
     const now = Date.now();
     if (!final && now - lastPersistAt < PERSIST_THROTTLE_MS) return;
     lastPersistAt = now;
-    // 终态落盘时，把已发出但未回填结果的 tool-call 段补成中断态，避免切回会话后永久转圈。
-    const sourceSegments = final
-      ? finalizeDanglingToolSegments(streamRecord.segments, streamRecord.terminalStatus)
-      : streamRecord.segments;
+    // 终态落盘，以及终态之后的迟到 tool-call，都要把空白结果补成说明。
+    // 写回 streamRecord，避免下一次 persist 又把悬空段发出去。
+    const sourceSegments = resolvePersistSegments(streamRecord.segments, {
+      final,
+      terminalEventSent: Boolean(streamRecord.terminalEventSent),
+      terminalStatus: streamRecord.terminalStatus,
+    });
+    if (sourceSegments !== streamRecord.segments) {
+      streamRecord.segments = sourceSegments;
+    }
     const patch = {
       content: streamRecord.accumulatedText || '',
       segments: Array.isArray(sourceSegments)
@@ -1782,6 +1802,19 @@ export function createLlmChatService({
     };
   }
 
+  function abortConversation(conversationId) {
+    const normalized = typeof conversationId === 'string' ? conversationId.trim() : '';
+    if (!normalized) return { aborted: 0, streamIds: [] };
+    const streamIds = [];
+    for (const [streamId, record] of activeStreams.entries()) {
+      if (record?.conversationId !== normalized) continue;
+      if (!isRunning(record)) continue;
+      streamIds.push(streamId);
+    }
+    for (const streamId of streamIds) abort(streamId);
+    return { aborted: streamIds.length, streamIds };
+  }
+
   function abort(streamId) {
     const active = activeStreams.get(streamId);
     if (!active) return { aborted: false };
@@ -1871,6 +1904,7 @@ export function createLlmChatService({
   return {
     sendMessage: (params) => withSelectionRequestContext(conversationStore, params?.conversationId, () => sendMessage(params)),
     abort,
+    abortConversation,
     forceCompleteConversationStreams,
     setWorkspacePath,
     setLocalAccessLevel,

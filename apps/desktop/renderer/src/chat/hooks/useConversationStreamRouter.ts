@@ -469,6 +469,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           const patched: ChatMsg = {
             ...last,
             ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
+            interrupted: true,
             segments: markDanglingToolCallsInterrupted(last.segments, '工具调用已中断（生成停止）'),
           };
           const updated = [...msgs.slice(0, -1), patched];
@@ -511,7 +512,16 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         const last = msgs[msgs.length - 1];
         if (!last || last.role !== 'assistant') return {};
         const segments = [...(last.segments || [])];
-        segments.push({ type: 'tool-call', tool, displayName, args, toolCallId, result: undefined, startedAtMs });
+        // 轮次已经收口后再到的 tool-call 没有后续终态 handler 可以补结果。
+        // 立刻写成与主进程一致的说明，避免卡片停在「未完成 / null」。
+        // goal_handoff 之后若真正的 tool-result 再来，下面的 result handler 会覆盖这段说明。
+        const arrivedAfterSettle = prev.isStreaming === false;
+        const pendingResult = arrivedAfterSettle
+          ? (last.interrupted
+            ? '工具调用已中断（生成停止）'
+            : '工具结果未返回（本轮已结束）')
+          : undefined;
+        segments.push({ type: 'tool-call', tool, displayName, args, toolCallId, result: pendingResult, startedAtMs });
         // 持久化真值由主进程累积代理负责，渲染端仅更新表达层，避免双写。
         return { messages: [...msgs.slice(0, -1), { ...last, segments }] };
       });
@@ -532,9 +542,11 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         // 下一条进度事件覆盖或回合结束（done/aborted/error）才消失。toolProgress 是
         // 单值最新态，收尾即清不会误伤后续工具（后续工具会再次 set 新的进度）。
         if (!last || last.role !== 'assistant') return { toolProgress: null };
+        // 与主进程落盘一致：非字符串（含 null）记成空结果，而不是把 null 画进卡片。
+        const settledResult = typeof result === 'string' ? result : '';
         const segments = (last.segments || []).map((seg) =>
           seg.type === 'tool-call' && seg.toolCallId === toolCallId
-            ? { ...seg, result, startedAtMs: startedAtMs ?? seg.startedAtMs, endedAtMs, durationMs }
+            ? { ...seg, result: settledResult, startedAtMs: startedAtMs ?? seg.startedAtMs, endedAtMs, durationMs }
             : seg,
         );
         return { messages: [...msgs.slice(0, -1), { ...last, segments }], toolProgress: null };

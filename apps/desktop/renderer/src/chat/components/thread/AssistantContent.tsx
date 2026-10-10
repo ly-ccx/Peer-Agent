@@ -3,7 +3,8 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { prefersReducedMotion } from '../../../app/hooks/useMotionPresence';
 import { useConversationToolProgress } from '../../hooks/useConversationState';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
-import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
+import { groupSegments, isPendingToolResult, splitFinalTextGroup } from '../../state/streamSegments';
+import { presentToolCall, type ToolCallPresentationPhase } from '../../state/toolCallPresentation';
 import { buildProcessingSummary } from '../../state/processingSummary';
 import { formatDuration } from '../../state/format';
 import {
@@ -108,6 +109,7 @@ function AssistantContentImpl({
   isStreaming,
   durationMs,
   isZh,
+  interrupted = false,
 }: {
   readonly conversationId: string | null;
   readonly segments?: ContentSegment[];
@@ -115,6 +117,8 @@ function AssistantContentImpl({
   readonly isStreaming: boolean;
   readonly durationMs?: number;
   readonly isZh: boolean;
+  /** 本轮已被中止。终态后仍空白的工具卡显示「已取消」，而不是继续转圈。 */
+  readonly interrupted?: boolean;
 }) {
   const groups = useMemo(
     () => (segments?.length ? groupSegments(segments) : []),
@@ -182,7 +186,7 @@ function AssistantContentImpl({
     const lastRunHasActiveIndicator = Boolean(lastRun && (
       lastRun.kind === 'thinking'
       || lastRun.kind === 'text'
-      || lastRun.group.calls.some((c) => c.result === undefined)
+      || lastRun.group.calls.some((c) => isPendingToolResult(c.result))
     ));
 
     return (
@@ -202,7 +206,7 @@ function AssistantContentImpl({
                 {run.group.calls
                   .filter((tc) => !parseToolCallInteractionView(tc))
                   .map((tc, callIdx) => (
-                    <ToolCallCard key={`stream-tool-${idx}-${callIdx}`} tc={tc} isZh={isZh} />
+                    <ToolCallCard key={`stream-tool-${idx}-${callIdx}`} tc={tc} isZh={isZh} turnSettled={!isStreaming} interrupted={interrupted} />
                   ))}
               </div>
             );
@@ -217,12 +221,14 @@ function AssistantContentImpl({
               isActive={isLive}
               label={isZh ? '已思考' : 'Thought'}
               isZh={isZh}
+              turnSettled={!isStreaming}
+              interrupted={interrupted}
             />
           );
         })}
         {/* 交互卡（request_user_input）始终渲染在折叠面板之外，折叠历史过程时也能看到并点击选项。 */}
         {interactionCalls.map((tc, idx) => (
-          <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} />
+          <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} turnSettled={!isStreaming} interrupted={interrupted} />
         ))}
         {!lastRunHasActiveIndicator ? (
           <LiveToolProgress conversationId={conversationId} showCursor isZh={isZh} />
@@ -249,7 +255,7 @@ function AssistantContentImpl({
   // active 的思考文本组）时才省略底部光标，避免重复闪烁。
   const lastGroupHasActiveIndicator = Boolean(
     lastGroup &&
-    ((lastGroup.type === 'tool-call-group' && lastGroup.calls.some((c) => c.result === undefined)) ||
+    ((lastGroup.type === 'tool-call-group' && lastGroup.calls.some((c) => isPendingToolResult(c.result))) ||
       lastGroup.type === 'thinking'),
   );
   const showCursor = !lastGroupHasActiveIndicator;
@@ -263,6 +269,8 @@ function AssistantContentImpl({
           isActive={processingIsActive}
           label={processingSummary}
           isZh={isZh}
+          turnSettled={!isStreaming}
+          interrupted={interrupted}
         />
       ) : null}
       {finalTextGroups.length > 0 ? (
@@ -272,11 +280,11 @@ function AssistantContentImpl({
           </div>
         ))
       ) : !groups.some(isProcessingGroup) ? (
-        <TimelineGroups groups={groups} isZh={isZh} selectionSources={selectionSources} />
+        <TimelineGroups groups={groups} isZh={isZh} selectionSources={selectionSources} turnSettled={!isStreaming} interrupted={interrupted} />
       ) : null}
       {/* 交互卡（request_user_input）始终渲染在折叠面板之外，折叠历史过程时也能看到并点击选项。 */}
       {interactionCalls.map((tc, idx) => (
-        <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} />
+        <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} turnSettled={!isStreaming} interrupted={interrupted} />
       ))}
       {isStreaming ? (
         <LiveToolProgress conversationId={conversationId} showCursor={showCursor} isZh={isZh} />
@@ -291,12 +299,14 @@ function isProcessingGroup(group: SegmentGroup): group is ProcessingGroup {
   return group.type === 'thinking' || group.type === 'tool-call-group';
 }
 
-function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZh, selectionSources }: {
+function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZh, selectionSources, turnSettled, interrupted }: {
   readonly groups: SegmentGroup[];
   readonly selectionSources?: ReadonlyMap<SegmentGroup, SelectionMessageSource>;
   readonly isActive: boolean;
   readonly label: string;
   readonly isZh: boolean;
+  readonly turnSettled: boolean;
+  readonly interrupted: boolean;
 }) {
   const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
   const [showAll, setShowAll] = useState(false);
@@ -342,7 +352,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
                     : `Show ${processingWindow.omittedCount} earlier event${processingWindow.omittedCount === 1 ? '' : 's'}`)}
             </button>
           ) : null}
-          <TimelineGroups groups={visibleGroups} isZh={isZh} selectionSources={selectionSources} />
+          <TimelineGroups groups={visibleGroups} isZh={isZh} selectionSources={selectionSources} turnSettled={turnSettled} interrupted={interrupted} />
         </div>
       ) : null}
     </div>
@@ -379,10 +389,12 @@ function ThinkingTextGroup({ content, isZh }: {
   );
 }
 
-function TimelineGroups({ groups, isZh, selectionSources }: {
+function TimelineGroups({ groups, isZh, selectionSources, turnSettled, interrupted }: {
   readonly groups: SegmentGroup[];
   readonly isZh: boolean;
   readonly selectionSources?: ReadonlyMap<SegmentGroup, SelectionMessageSource>;
+  readonly turnSettled: boolean;
+  readonly interrupted: boolean;
 }) {
   return groups.map((group, groupIndex) => {
     if (group.type === 'thinking') {
@@ -404,7 +416,7 @@ function TimelineGroups({ groups, isZh, selectionSources }: {
     return group.calls.map((tc, callIndex) => {
       // 交互卡需要用户点击，始终在折叠面板外渲染；时间线内跳过以免重复。
       if (parseToolCallInteractionView(tc)) return null;
-      return <ToolCallCard key={`tool-${groupIndex}-${callIndex}`} tc={tc} isZh={isZh} />;
+      return <ToolCallCard key={`tool-${groupIndex}-${callIndex}`} tc={tc} isZh={isZh} turnSettled={turnSettled} interrupted={interrupted} />;
     });
   });
 }
@@ -430,7 +442,17 @@ function fallbackToolCallLabel(tc: ToolCallLegacy, fallback: string): string {
   return 'tool call';
 }
 
-function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh: boolean }) {
+function ToolCallCard({
+  tc,
+  isZh,
+  turnSettled,
+  interrupted,
+}: {
+  readonly tc: ToolCallLegacy;
+  readonly isZh: boolean;
+  readonly turnSettled: boolean;
+  readonly interrupted: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   // request_user_input：渲染为「问题 + 可点击选项 + 等待你输入」的交互卡，
@@ -463,15 +485,22 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
   });
   if (skillView) {
     const isSynthetic = tc.synthetic === true;
-    const isDone = tc.result !== undefined && !isSynthetic;
+    const presentation = presentToolCall({
+      result: tc.result,
+      turnSettled,
+      interrupted,
+      isZh,
+    });
+    const isRunning = !isSynthetic && presentation.phase === 'running';
+    const isDone = !isSynthetic && (presentation.phase === 'completed' || presentation.phase === 'failed');
     return (
       <SkillCapsuleCard
         skill={skillView}
         isZh={isZh}
         isDone={isDone}
-        isRunning={!isDone && !isSynthetic}
+        isRunning={isRunning}
         durationMs={tc.durationMs}
-        result={tc.result}
+        result={presentation.body ?? tc.result}
       />
     );
   }
@@ -489,43 +518,93 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
           // 避免出现 mcp__server__tool 这类裸名（即「标题不见了」的现象）。
           : fallbackToolCallLabel(tc, tc.displayName ?? tc.tool ?? '');
   const isSynthetic = tc.synthetic === true;
-  const isDone = tc.result !== undefined && !isSynthetic;
+  const presentation = presentToolCall({
+    result: tc.result,
+    turnSettled,
+    interrupted,
+    isZh,
+  });
+  const phase: 'synthetic' | ToolCallPresentationPhase = isSynthetic ? 'synthetic' : presentation.phase;
+  const phaseClass = phase === 'completed' ? 'done' : phase;
   const labelPreview = previewInlineText(label).content;
+  const durationMs = typeof tc.durationMs === 'number' && Number.isFinite(tc.durationMs)
+    ? tc.durationMs
+    : null;
+  const showDuration = phase !== 'synthetic' && phase !== 'running' && durationMs != null;
+  const argsText = JSON.stringify(tc.args && typeof tc.args === 'object' ? tc.args : {}, null, 2);
+  const syntheticBody = isZh
+    ? '这不是一次真实工具调用记录，而是历史 assistant 文本中出现的伪 Tool Call 标记；没有收到对应的工具结果。'
+    : 'This is not a real tool call. It was parsed from historical assistant text and has no tool result.';
+  const resultText = isSynthetic
+    ? syntheticBody
+    : phase === 'running'
+      ? (isZh ? '正在执行…' : 'Running…')
+      : (presentation.body?.trim() ? presentation.body : (isZh ? '（空）' : '(empty)'));
 
   return (
-    <div className={`tool-call-card ${isSynthetic ? 'synthetic' : isDone ? 'done' : 'running'}`} onClick={() => setExpanded(!expanded)}>
+    <div className={`tool-call-card ${phaseClass}`} onClick={() => setExpanded(!expanded)}>
       <div className="tool-call-header">
         <span className="tool-call-icon" aria-hidden="true">
-          {isSynthetic ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="8" x2="12" y2="13" />
-              <circle cx="12" cy="16.6" r="0.9" fill="currentColor" stroke="none" />
-            </svg>
-          ) : isDone ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m5 12.5 4.5 4.5L19 7" />
-            </svg>
-          ) : (
-            <svg className="tool-call-spinner-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-              <path d="M12 3a9 9 0 1 0 9 9" />
-            </svg>
-          )}
+          <ToolCallPhaseIcon phase={phase} />
         </span>
         <span className="tool-call-label">{labelPreview}</span>
-        {isDone && typeof tc.durationMs === 'number' && Number.isFinite(tc.durationMs) ? (
-          <span className="tool-call-duration">{formatDuration(tc.durationMs)}</span>
+        {!isSynthetic && presentation.statusLabel ? (
+          <span className="tool-call-status">{presentation.statusLabel}</span>
+        ) : null}
+        {showDuration && durationMs != null ? (
+          <span className="tool-call-duration">{formatDuration(durationMs)}</span>
         ) : null}
         <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
       </div>
-      {isSynthetic && expanded ? (
-        <pre className="tool-call-output">这不是一次真实工具调用记录，而是历史 assistant 文本中出现的伪 Tool Call 标记；没有收到对应的工具结果。</pre>
-      ) : null}
-      {expanded && tc.result ? (
-        <pre className="tool-call-output">{tc.result}</pre>
+      {expanded ? (
+        <div className="tool-call-fields">
+          <div className="tool-call-field">
+            <span className="tool-call-field-label">{isZh ? '调用参数' : 'Arguments'}</span>
+            <pre className="tool-call-output">{argsText}</pre>
+          </div>
+          <div className="tool-call-field">
+            <span className="tool-call-field-label">{isZh ? '返回内容' : 'Result'}</span>
+            <pre className="tool-call-output">{resultText}</pre>
+          </div>
+          <div className="tool-call-field">
+            <span className="tool-call-field-label">{isZh ? '技术详情' : 'Details'}</span>
+            <pre className="tool-call-output">{tc.tool?.trim() || (isZh ? '未知工具' : 'unknown tool')}</pre>
+          </div>
+        </div>
       ) : null}
     </div>
+  );
+}
+
+function ToolCallPhaseIcon({ phase }: { readonly phase: 'synthetic' | ToolCallPresentationPhase }) {
+  if (phase === 'synthetic' || phase === 'failed') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="8" x2="12" y2="13" />
+        <circle cx="12" cy="16.6" r="0.9" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+  if (phase === 'completed') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m5 12.5 4.5 4.5L19 7" />
+      </svg>
+    );
+  }
+  if (phase === 'cancelled' || phase === 'incomplete') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
+        <path d="M6 12h12" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="tool-call-spinner-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+      <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
   );
 }
 

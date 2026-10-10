@@ -139,6 +139,7 @@ function ChatTurnImpl({
                       isStreaming={isLive && msg === lastMessage}
                       durationMs={msg.durationMs}
                       isZh={isZh}
+                      interrupted={msg.interrupted === true}
                     />
                   </InteractionAnsweredContext.Provider>
                 )}

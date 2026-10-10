@@ -58,17 +58,36 @@ function hasArgs(args: Record<string, unknown> | undefined): boolean {
   return Boolean(args && Object.keys(args).length > 0);
 }
 
+/** 结果还没到：缺省或 JSON null。字面量 "null" 不算进行中。 */
+export function isPendingToolResult(result: unknown): boolean {
+  return result === undefined || result === null;
+}
+
+/**
+ * 没有可用的工具输出。空字符串是合法的成功结果，不能当成悬空。
+ * 与主进程 llm-chat-service 的 isBlankToolResult 保持同一口径。
+ */
+export function isBlankToolResult(result: unknown): boolean {
+  return isPendingToolResult(result) || (typeof result === 'string' && result.trim() === 'null');
+}
+
 function mergeSameToolCallSegment(persisted: ToolCallSegment, live: ToolCallSegment): ToolCallSegment {
   const persistedArgs = persisted.args || {};
   const liveArgs = live.args || {};
+  const liveBlank = isBlankToolResult(live.result);
+  const persistedBlank = isBlankToolResult(persisted.result);
   return {
     type: 'tool-call',
     tool: live.tool || persisted.tool,
     displayName: live.displayName ?? persisted.displayName,
     args: hasArgs(liveArgs) ? liveArgs : persistedArgs,
-    result: live.result !== undefined ? live.result : persisted.result,
+    // 重连快照里的 null / "null" 不是更新的结果，不能盖掉已经落盘的正文。
+    result: !liveBlank ? live.result : (!persistedBlank ? persisted.result : live.result),
     synthetic: live.synthetic ?? persisted.synthetic,
     toolCallId: live.toolCallId || persisted.toolCallId,
+    startedAtMs: live.startedAtMs ?? persisted.startedAtMs,
+    endedAtMs: live.endedAtMs ?? persisted.endedAtMs,
+    durationMs: live.durationMs ?? persisted.durationMs,
   };
 }
 
@@ -158,6 +177,9 @@ function legacyToolCallFromSegment(seg: ToolCallSegment): ToolCallLegacy {
     synthetic: seg.synthetic,
   };
   if (seg.toolCallId) call.toolCallId = seg.toolCallId;
+  if (typeof seg.startedAtMs === 'number') call.startedAtMs = seg.startedAtMs;
+  if (typeof seg.endedAtMs === 'number') call.endedAtMs = seg.endedAtMs;
+  if (typeof seg.durationMs === 'number') call.durationMs = seg.durationMs;
   return call;
 }
 
@@ -490,9 +512,10 @@ export function parseSerializedToolSegments(content: string): ContentSegment[] |
 /**
  * 终态兜底：把「已发出但未回填结果」的 tool-call 段标记为中断。
  *
- * 背景：tool-call 段在渲染层以 `result === undefined && !synthetic` 表达「执行中」
- * （永久转圈）。当一轮在 done/error/aborted 终态结束时，若某个 tool-call 段始终没有
- * 等到 tool-result（例如连接中断、被取消、后端未回传结果），该段会卡在转圈态。
+ * 背景：tool-call 段在渲染层以「结果仍空白 && !synthetic」表达「执行中」
+ * （永久转圈）。空白包括缺省、JSON null、以及字面量 "null"；空字符串是合法成功结果。
+ * 当一轮在 done/error/aborted 终态结束时，若某个 tool-call 段始终没有等到 tool-result
+ * （例如连接中断、被取消、后端未回传结果），该段会卡在转圈态。
  * 本函数为这些残留段补写一个明确的「已中断」result 文本，使其脱离转圈态并向用户
  * 说明原因。这是对既有视图模型的事实兜底，不声称工具已成功执行。
  *
@@ -508,7 +531,7 @@ export function markDanglingToolCallsInterrupted(
   const list = segments || [];
   let changed = false;
   const next = list.map((segment) => {
-    if (segment.type === 'tool-call' && segment.result === undefined && segment.synthetic !== true) {
+    if (segment.type === 'tool-call' && isBlankToolResult(segment.result) && segment.synthetic !== true) {
       changed = true;
       return { ...segment, result: note };
     }

@@ -44,6 +44,7 @@ function createRunner({
   logger = null,
   prepareIsolation = null,
   maxRecoverableInterruptionRetries,
+  onPlanCleared = null,
 } = {}) {
   return createGoalRunner({
     goalPlanStore: store,
@@ -57,6 +58,7 @@ function createRunner({
     ...(maxRecoverableInterruptionRetries === undefined
       ? {}
       : { maxRecoverableInterruptionRetries }),
+    ...(typeof onPlanCleared === 'function' ? { onPlanCleared } : {}),
   });
 }
 
@@ -414,6 +416,52 @@ test('clear: 会 cancel plan 并停止 Runner', async () => {
   assert.equal(cleared.runner.enabled, false);
   assert.equal(cleared.runner.status, 'idle');
   assert.equal(cleared.runner.blockedReason, 'user clear');
+});
+
+test('clear: 通知 onPlanCleared，宿主可以中止该会话的在途流', async () => {
+  const plan = createApprovedPlan();
+  const runtime = {
+    async runGoalTurn() {
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const clearedEvents = [];
+  const runner = createRunner({
+    runtime,
+    onPlanCleared: (event) => clearedEvents.push(event),
+  });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+  runner.clear(plan.planId, 'user clear');
+
+  assert.equal(clearedEvents.length, 1);
+  assert.equal(clearedEvents[0].planId, plan.planId);
+  assert.equal(clearedEvents[0].conversationId, 'conv-runner');
+  assert.equal(clearedEvents[0].reason, 'user clear');
+});
+
+test('clear: onPlanCleared 抛错时计划仍然取消', async () => {
+  const plan = createApprovedPlan();
+  const runtime = {
+    async runGoalTurn() {
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const warnings = [];
+  const runner = createRunner({
+    runtime,
+    logger: { warn: (...args) => warnings.push(args.join(' ')) },
+    onPlanCleared: () => {
+      throw new Error('abort failed');
+    },
+  });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+  const cleared = runner.clear(plan.planId, 'user clear');
+
+  assert.equal(cleared.planStatus, 'cancelled');
+  assert.equal(cleared.runner.status, 'idle');
+  assert.ok(warnings.some((line) => line.includes('onPlanCleared failed')));
 });
 
 test('budget: 次数/轮次预算已移除，不再进入 budget_exhausted', async () => {

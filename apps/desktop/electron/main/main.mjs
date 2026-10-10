@@ -1200,6 +1200,9 @@ const chatStreamApplicationService = createChatStreamApplicationService({
 
 goalRunner = createGoalRunner({
   goalPlanStore,
+  onPlanCleared: ({ conversationId }) => {
+    if (conversationId) llmChatService.abortConversation(conversationId);
+  },
   prepareIsolation: async (plan) => {
     if (!plan) return plan;
     const conversation = plan.conversationId

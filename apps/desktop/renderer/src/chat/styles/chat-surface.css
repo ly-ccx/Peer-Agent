@@ -812,6 +812,11 @@
 .tool-call-card.done .tool-call-icon {
   color: var(--state-success);
 }
+.tool-call-card.cancelled .tool-call-icon,
+.tool-call-card.incomplete .tool-call-icon {
+  color: var(--graphite-mute);
+}
+.tool-call-card.failed .tool-call-icon,
 .tool-call-card.synthetic .tool-call-icon {
   color: var(--za-warn);
 }
@@ -823,6 +828,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tool-call-status {
+  flex-shrink: 0;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--graphite-mute);
+}
+.tool-call-card.failed .tool-call-status {
+  color: var(--za-warn);
+}
+.tool-call-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 var(--space-2) var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--ui-radius-control, var(--radius-sm));
+  background: var(--chrome-sunken);
+}
+.tool-call-field-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--graphite-mute);
+}
+.tool-call-fields .tool-call-output {
+  margin: 0;
+  padding: 0;
+  border-top: none;
+  background: transparent;
 }
 .tool-call-expand {
   color: var(--graphite-mute);

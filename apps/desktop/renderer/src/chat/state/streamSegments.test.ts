@@ -123,6 +123,23 @@ describe('mergeReattachedSegments', () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].result, 'ok');
   });
+  it('does not let a live null or literal "null" overwrite a persisted tool result', () => {
+    const completed = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' }, result: 'ok', durationMs: 40 });
+    const liveNull = tool('read', {
+      toolCallId: 'call_read',
+      args: { path: '/tmp/a' },
+      result: null as unknown as string,
+    });
+    const liveWord = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' }, result: 'null' });
+
+    const fromNull = mergeReattachedSegments([completed], [liveNull]);
+    const fromWord = mergeReattachedSegments([completed], [liveWord]);
+    const nullCall = fromNull.find((seg) => seg.type === 'tool-call') as Extract<ContentSegment, { type: 'tool-call' }>;
+    const wordCall = fromWord.find((seg) => seg.type === 'tool-call') as Extract<ContentSegment, { type: 'tool-call' }>;
+    assert.equal(nullCall.result, 'ok');
+    assert.equal(nullCall.durationMs, 40);
+    assert.equal(wordCall.result, 'ok');
+  });
   it('deduplicates a same-id tool call even when earlier reattach content diverges', () => {
     const pending = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' } });
     const completed = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' }, result: 'ok' });
@@ -326,6 +343,15 @@ describe('groupSegments', () => {
     const call = (groups[0] as { calls: Array<{ toolCallId?: string }> }).calls[0];
     assert.equal(call.toolCallId, 'tool_call_empty_args');
   });
+  it('carries tool lifecycle timing onto the grouped tool call', () => {
+    const groups = groupSegments([
+      tool('read_file', { startedAtMs: 10, endedAtMs: 28, durationMs: 18, result: 'ok' }),
+    ]);
+    const call = (groups[0] as { calls: Array<{ durationMs?: number; startedAtMs?: number; endedAtMs?: number }> }).calls[0];
+    assert.equal(call.startedAtMs, 10);
+    assert.equal(call.endedAtMs, 28);
+    assert.equal(call.durationMs, 18);
+  });
 });
 
 describe('splitFinalTextGroup', () => {
@@ -487,6 +513,18 @@ describe('markDanglingToolCallsInterrupted', () => {
     const input: ContentSegment[] = [tool('bash', { result: 'done' })];
     const out = markDanglingToolCallsInterrupted(input, 'INTERRUPTED');
     assert.equal(toolOf(out, 0).result, 'done');
+  });
+
+  it('fills JSON null and the literal string null, and leaves an empty success result alone', () => {
+    const blank: ContentSegment[] = [
+      tool('read_file', { result: null as unknown as string }),
+      tool('read_file', { result: 'null' }),
+      tool('read_file', { result: '' }),
+    ];
+    const out = markDanglingToolCallsInterrupted(blank, 'INTERRUPTED');
+    assert.equal(toolOf(out, 0).result, 'INTERRUPTED');
+    assert.equal(toolOf(out, 1).result, 'INTERRUPTED');
+    assert.equal(toolOf(out, 2).result, '');
   });
 
   it('skips synthetic tool-call segments (parsed from historical text, not live execution)', () => {

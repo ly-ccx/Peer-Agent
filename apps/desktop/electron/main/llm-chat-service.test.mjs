@@ -2458,6 +2458,43 @@ describe('finalizeDanglingToolSegments (terminal persist fallback)', () => {
     assert.equal(finalizeDanglingToolSegments(segments, 'done'), segments);
     assert.equal(finalizeDanglingToolSegments(null, 'done'), null);
   });
+
+  it('fills JSON null and the literal string null, and leaves empty success results', async () => {
+    const { finalizeDanglingToolSegments } = await loadService();
+    const segments = [
+      { type: 'tool-call', toolCallId: 't1', tool: 'read_file', result: null },
+      { type: 'tool-call', toolCallId: 't2', tool: 'read_file', result: 'null' },
+      { type: 'tool-call', toolCallId: 't3', tool: 'read_file', result: '' },
+      { type: 'tool-call', toolCallId: 't4', tool: 'read_file', result: 'ok' },
+    ];
+    const next = finalizeDanglingToolSegments(segments, 'aborted');
+    assert.equal(next[0].result, '工具调用已中断（生成停止）');
+    assert.equal(next[1].result, '工具调用已中断（生成停止）');
+    assert.equal(next[2].result, '');
+    assert.equal(next[3].result, 'ok');
+  });
+
+  it('finalizes a late tool-call once the stream is already terminal, except goal handoff', async () => {
+    const { resolvePersistSegments } = await loadService();
+    const dangling = [
+      { type: 'tool-call', toolCallId: 'late', tool: 'read_file', result: undefined },
+    ];
+    const open = resolvePersistSegments(dangling, { final: false, terminalEventSent: false });
+    assert.equal(open, dangling);
+
+    const afterAbort = resolvePersistSegments(dangling, {
+      final: false,
+      terminalEventSent: true,
+      terminalStatus: 'aborted',
+    });
+    assert.equal(afterAbort[0].result, '工具调用已中断（生成停止）');
+
+    const handoff = resolvePersistSegments(
+      [{ type: 'tool-call', toolCallId: 'late', tool: 'read_file', result: null }],
+      { final: true, terminalEventSent: true, terminalStatus: 'goal_handoff' },
+    );
+    assert.equal(handoff[0].result, null);
+  });
 });
 
 describe('resolveRunWorkspacePath (per-run workspace truth)', () => {

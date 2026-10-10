@@ -735,6 +735,7 @@ function summarizeVerificationGate(gate) {
  *   prepareIsolation?: Function | null,
  *   now?: () => string,
  *   logger?: { info?: Function, warn?: Function, error?: Function },
+ *   onPlanCleared?: (event: { planId: string, conversationId: string | null, reason: string }) => void,
  * }} options
  */
 export function createGoalRunner({
@@ -748,6 +749,7 @@ export function createGoalRunner({
   now = () => new Date().toISOString(),
   logger = console,
   maxRecoverableInterruptionRetries = DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES,
+  onPlanCleared = null,
 } = {}) {
   if (!goalPlanStore) throw new Error('createGoalRunner requires goalPlanStore');
   if (!chatRuntime || typeof chatRuntime.runGoalTurn !== 'function') {
@@ -1487,6 +1489,19 @@ export function createGoalRunner({
       updatedAt: now(),
     });
     emit('goalRunner:cleared', { planId, reason });
+    // 取消只停后续 pump。在途的 sendMessage 要由宿主 abort，工具卡才能收到终态。
+    // 抛错不能把计划留在非取消态：状态已经写完，这里只记录。
+    if (typeof onPlanCleared === 'function') {
+      try {
+        onPlanCleared({
+          planId,
+          conversationId: plan.conversationId ?? null,
+          reason,
+        });
+      } catch (error) {
+        logger?.warn?.('[goal-runner] onPlanCleared failed:', error?.message || error);
+      }
+    }
     return getState(planId);
   }
 
