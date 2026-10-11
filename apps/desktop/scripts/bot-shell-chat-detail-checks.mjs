@@ -108,9 +108,10 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   if (!await timed.evaluate(node => node.open)) await timed.locator(':scope > summary').click();
   await timed.locator('.bot-tool-step > summary .bot-process-elapsed').first().waitFor({ state: 'visible' });
   const times = await timed.locator('.bot-tool-step > summary .bot-process-elapsed').allTextContents();
-  assert.deepEqual(times, ['少于 1 秒', '2 秒']);
+  assert.deepEqual(await timed.locator('.bot-tool-step-label').allTextContents(), ['查看工作会话', '读取文件', '查询工作会话']);
+  assert.deepEqual(times, ['2 秒', '少于 1 秒']);
   assert.doesNotMatch(await timed.innerText(), /(?:^|\s)0 秒/);
-  assert.equal(await timed.locator('.bot-tool-step').last().locator('.bot-process-elapsed').count(), 0);
+  assert.equal(await timed.locator('.bot-tool-step').first().locator('.bot-process-elapsed').count(), 0);
   const timingViewport = page.viewportSize();
   const timingTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   for (const [width, theme] of [[1280, 'dark'], [760, 'light']]) {
@@ -149,7 +150,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     return dock.getBoundingClientRect().width >= parseFloat(getComputedStyle(dock).getPropertyValue('--pa-drawer-width'));
   }), Boolean);
   const states = await process.locator('.bot-process-status').allTextContents();
-  assert.deepEqual(states, ['已结束', '已结束', '已结束', '已发送']);
+  assert.deepEqual(states, ['已发送', '已结束', '已结束', '已结束']);
   assert.equal(await process.locator('.bot-process-status').last().evaluate(node => node.getBoundingClientRect().right <= innerWidth), true);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'chat-process-summary.png') });
   await closeReplyDetails(page);
