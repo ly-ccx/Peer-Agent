@@ -8,6 +8,25 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.14] - 2026-10-11
+
+### Fixed
+
+- Automatically surface permission cards from actual image reads in the main Bot conversation, with truthful waiting-for-approval activity.
+- Continue the original read after approval; separately settle rejection, card cancellation, reply stop and a five-minute permission deadline.
+- Prevent duplicate or late approvals from reviving ended calls, and keep historical cards consistent after approval-log compaction.
+- Share the local approval store across the Bot host and permission gate; preserve structured cancellation, timeout and execution evidence.
+
+### Changed
+
+- Restore the shimmer on active reply status text while keeping permission waits static.
+- Refresh bilingual release notes, README guidance, permission documentation and generated site changelog for RC14.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; real cloud vision, full platform installation coverage and GA remain separate gates.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
 ## [0.1.0-rc.13] - 2026-10-11
 
 ### Fixed
