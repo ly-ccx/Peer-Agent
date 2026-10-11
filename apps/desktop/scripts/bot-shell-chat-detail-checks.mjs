@@ -138,7 +138,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   assert.match(visible, /查询工作会话/); assert.match(visible, /发送回复/);
   assert.doesNotMatch(visible, /post_reply|replyTo|RC scripted reply/);
   assert.equal(await process.locator('details[open]').count(), 0);
-  const technical = process.locator('details').last();
+  const technical = process.locator('details').first();
   await technical.locator('summary').focus(); await technical.locator('summary').press('Enter');
   assert.equal(await technical.getAttribute('open'), '');
   assert.match(await technical.innerText(), /post_reply/);
