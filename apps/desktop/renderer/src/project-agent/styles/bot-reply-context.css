@@ -16,12 +16,12 @@
 .bot-work-row[open] > summary > svg:last-child { transform: rotate(180deg); }
 .bot-reply-context > button:focus-visible, .bot-work-row summary:focus-visible, .bot-work-detail button:focus-visible, .bot-background-work > summary:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: -1px; border-radius: var(--ui-radius-control); }
 .bot-reply-details-slot { min-width: 0; }
-.bot-reply-details { padding: 24px; min-width: 0; font-size: 12px; line-height: 1.6; }
-.bot-reply-details-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.bot-reply-details { padding: 2px 0 8px; min-width: 0; font-size: 12px; line-height: 1.45; }
+.bot-reply-details-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .bot-reply-details-author { color: var(--graphite-base); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 .bot-reply-details-header time { color: var(--graphite-soft); font-size: 11px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .bot-reply-details-note { margin: 0 0 16px; color: var(--graphite-mute); font-size: 11px; }
-.bot-reply-context-body { display: grid; gap: 24px; box-sizing: border-box; min-width: 0; }
+.bot-reply-context-body { display: grid; gap: 12px; box-sizing: border-box; min-width: 0; }
 .bot-reply-context-body > * { min-width: 0; }
 .bot-reply-context-body > section { padding: 16px; background: var(--chrome-canvas); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); }
 .bot-reply-context-body .bot-delegated-work { margin-top: 0; }
@@ -69,7 +69,9 @@
 .bot-reply-rounds > summary > svg { transition: transform 160ms ease; }
 .bot-reply-rounds[open] > summary > svg { transform: rotate(180deg); }
 .bot-reply-rounds > summary:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
-.bot-reply-rounds .bot-process { padding: 12px 0 0; }
+.bot-reply-rounds .bot-process { padding: 4px 0 0; gap: 0; }
+.bot-reply-rounds .bot-process h3 { margin-bottom: 2px; }
+.bot-reply-rounds .bot-process-entry { padding: 6px 0; }
 
 .bot-work-row > summary > svg:last-child, .bot-background-work > summary > svg:last-child,
 .bot-work-more > summary > svg:last-child { transition: transform var(--za-motion-medium) var(--za-ease-standard); }

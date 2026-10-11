@@ -17,7 +17,7 @@ export function AgentProcessView({
     <section className="bot-process" aria-label={i18n.t('projectAgent.chat.process')}>
       <h3>{i18n.t('projectAgent.chat.process')}</h3>
       {entries.length === 0 ? <p className="bot-process-empty">{i18n.t('projectAgent.process.empty')}</p> : null}
-      {entries.map((entry, index) => (
+      {entries.map((entry, index) => ({ entry, index })).reverse().map(({ entry, index }) => (
         <div className="bot-process-entry" key={`${entry.name}-${index}`} data-status={entry.status}>
           <div className="bot-process-heading"><PeerIcon name={entry.icon} size={15} />
             <span>{i18n.t(entry.labelKey)}</span><span className="bot-process-status">{i18n.t(entry.name === 'post_reply' && entry.status === 'done' ? 'projectAgent.process.sent' : `projectAgent.process.${toolStepStatus(entry.status, entry.resultPreview, outcome)}`)}</span>

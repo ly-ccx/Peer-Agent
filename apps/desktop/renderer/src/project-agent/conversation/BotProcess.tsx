@@ -58,14 +58,14 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
     </summary>
     <div className="bot-turn-process-content">
       {!entries.length ? <p className="bot-process-note">{i18n.t('projectAgent.process.awaitingContent')}</p> : null}
-      {entries.map((entry, index) => {
+      {entries.map((entry, index) => ({ entry, index })).reverse().map(({ entry, index }) => {
         const active = ['preparing', 'running'].includes(entry.status);
         const time = processSeconds(entry.startedAt, entry.finishedAt, now, !active);
         const status = toolStepStatus(entry.status, entry.result, outcome);
         return <details className="bot-tool-step" data-status={entry.status} key={entry.id} open={disclosure?.open[`step-${index}`]}
           onToggle={event => { event.stopPropagation(); disclosure?.toggle(`step-${index}`, event.currentTarget.open); }}>
           <summary>
-            <span className="bot-tool-step-icon"><PeerIcon name={entry.icon} size={15} /></span>
+            <span className="bot-tool-step-icon"><PeerIcon name={entry.icon} size={13} /></span>
             <span className="bot-tool-step-copy"><span className={`bot-tool-step-label${active ? ' is-running' : ''}`}>{i18n.t(entry.labelKey)}</span>
               {entry.summary ? <span className="bot-process-target" title={entry.summary}>{entry.summary}</span> : null}</span>
             <span className="bot-tool-step-meta"><span className="bot-tool-step-status">{i18n.t(`projectAgent.process.${status}`)}</span>
