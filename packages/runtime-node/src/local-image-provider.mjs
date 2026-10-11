@@ -9,7 +9,13 @@ import { createFailedClientToolResult, createPermissionGrant, nowIso } from './t
 const observations = new WeakMap();
 /** @param {unknown} value @param {string} [toolCallId] @returns {value is import('@peer-agent/protocol').LocalImageObservation} */
 export function isLocalImageObservation(value, toolCallId) {
-  return Boolean(value && observations.has(value) && (toolCallId === undefined || observations.get(value) === toolCallId));
+  return Boolean(value && observations.has(value) && (toolCallId === undefined || observations.get(value).toolCallId === toolCallId));
+}
+
+/** Host-only continuing context must still carry its original issuance proof. */
+export function isLocalImageObservationAuthorized(value) {
+  const proof = value && observations.get(value);
+  return Boolean(proof && (!proof.validate || proof.validate()));
 }
 
 export function detectLocalImageMediaType(bytes) {
@@ -144,7 +150,7 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
         if (validatePermission && !validatePermission()) { granted = false; throw failure('image_permission_revoked', 'denied'); }
         const metadata = { path, mediaType, width: dimensions.width, height: dimensions.height, byteLength: bytes.length, sha256, artifactRef: `local-image-artifact://${sha256}` };
         const observation = Object.freeze({ ...metadata, kind: 'local_image', dataUrl: `data:${mediaType};base64,${bytes.toString('base64')}` });
-        observations.set(observation, call.toolCallId);
+        observations.set(observation, { toolCallId: call.toolCallId, validate: validatePermission });
         const result = {
           toolCallId: call.toolCallId, status: 'success', completedAt: nowIso(),
           outputPreview: { ...metadata, retrievalHint: `view_image(${JSON.stringify({ path })})` },

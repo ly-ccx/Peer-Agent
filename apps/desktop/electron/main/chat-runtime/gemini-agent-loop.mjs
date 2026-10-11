@@ -1,4 +1,4 @@
-import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
+import { localImageContinuations } from '@peer-agent/runtime-node';
 import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
 import { countGeminiCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -63,10 +63,12 @@ export async function agentLoopGemini({
 }) {
   let effectiveSystemPrompt = systemPrompt;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages], { toolCallFormat: 'gemini' });
+  const imageScope = { conversationId, workspacePath, planId: toolContext?.planId, provider: 'gemini', providerId, model };
+  let nativeCheckpoint;
   const saved = executionBudget?.providerCheckpoint;
   if (saved && (saved.provider !== 'gemini' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
   if (saved && saved.provider === 'gemini' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
-    apiMessages = structuredClone(saved.messages);
+    apiMessages = localImageContinuations.restore(saved, imageScope);
   }
   const loop = createAgentLoopKernel({
     executionBudget,
@@ -116,7 +118,10 @@ export async function agentLoopGemini({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
-      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'gemini', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
+      checkpoint: (_state, executions) => {
+        nativeCheckpoint = localImageContinuations.checkpoint({ provider: 'gemini', providerId, model, messages: apiMessages }, imageScope);
+        return executionBudget?.guard?.checkpoint?.(nativeCheckpoint, executions);
+      },
       initialize: () => ({ provider: 'gemini' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -275,7 +280,7 @@ export async function agentLoopGemini({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'gemini', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
+        executionBudget?.onYield?.({ ...(nativeCheckpoint ?? localImageContinuations.checkpoint({ provider: 'gemini', providerId, model, messages: apiMessages }, imageScope)),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },

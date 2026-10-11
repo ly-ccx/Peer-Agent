@@ -629,6 +629,6 @@ export { createAgentEventPublisher } from './project-agent/agent-activity.mjs';
 export { agentCommunicationExcludedPrefixes } from './project-agent/work-session-profile.mjs';
 export { createLocalImageProvider, detectLocalImageMediaType, isLocalImageObservation } from './local-image-provider.mjs';
 export { LOCAL_IMAGE_TOOL_DEFINITIONS } from './local-image-tools.mjs';
-export { LOCAL_IMAGE_CONTEXT_PREFIX, checkpointWithoutLocalImagePixels } from './local-image-checkpoint.mjs';
+export { LOCAL_IMAGE_CONTEXT_PREFIX, checkpointWithoutLocalImagePixels, bindLocalImageContextBlock, createLocalImageContinuationStore, localImageContinuations } from './local-image-checkpoint.mjs';
 
 export { createImageReadAuthority, resolvePermissionPrincipal, permissionOperationKey, IMAGE_READ_GRANT_TTL_MS } from './project-agent/permission-inheritance.mjs';

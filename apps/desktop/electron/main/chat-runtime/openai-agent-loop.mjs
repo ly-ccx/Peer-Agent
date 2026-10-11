@@ -1,4 +1,4 @@
-import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
+import { localImageContinuations } from '@peer-agent/runtime-node';
 import {
   sendOpenAIChatStream,
   shouldUsePublicOpenAIChatStream,
@@ -82,10 +82,12 @@ export async function agentLoopOpenAI({
       })
     : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages]);
+  const imageScope = { conversationId, workspacePath, planId: toolContext?.planId, provider: 'openai', providerId, model };
+  let nativeCheckpoint;
   const saved = executionBudget?.providerCheckpoint;
   if (saved && (saved.provider !== 'openai' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
   if (saved && saved.provider === 'openai' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
-    apiMessages = structuredClone(saved.messages);
+    apiMessages = localImageContinuations.restore(saved, imageScope);
   }
   const loop = createAgentLoopKernel({
     executionBudget,
@@ -136,7 +138,10 @@ export async function agentLoopOpenAI({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
-      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'openai', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
+      checkpoint: (_state, executions) => {
+        nativeCheckpoint = localImageContinuations.checkpoint({ provider: 'openai', providerId, model, messages: apiMessages }, imageScope);
+        return executionBudget?.guard?.checkpoint?.(nativeCheckpoint, executions);
+      },
       initialize: () => ({ provider: 'openai' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -295,7 +300,7 @@ export async function agentLoopOpenAI({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'openai', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
+        executionBudget?.onYield?.({ ...(nativeCheckpoint ?? localImageContinuations.checkpoint({ provider: 'openai', providerId, model, messages: apiMessages }, imageScope)),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },
