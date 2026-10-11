@@ -1484,13 +1484,6 @@ export function LlmSettingsPanel({
         </button> : null}
       </header>
 
-      {!catalogOpen ? <div className="llm-list-toolbar">
-        <div className="llm-list-summary">
-          <strong>{i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}</strong>
-          <span>{groups.length} {i18n.locale === 'zh-CN' ? '个服务' : 'services'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
-        </div>
-      </div> : null}
-
             {catalogOpen ? (
 
         <div className={`llm-service-catalog${catalogClosing ? ' is-closing' : ''}`} role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
@@ -1593,7 +1586,12 @@ export function LlmSettingsPanel({
           })()}
         </div>
       ) : (
-        <div className="llm-provider-list">
+        <section className="llm-connected-group" aria-label={i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}>
+          <header className="llm-connected-band">
+            <h2>{i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}</h2>
+            <span className="llm-connected-meta">{groups.length} {i18n.locale === 'zh-CN' ? '个服务' : 'services'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+          </header>
+          <div className="llm-provider-list">
 {providers.length === 0 ? (
           <div className="llm-empty">
             <p>{i18n.locale === 'zh-CN' ? '还没有连接 AI 服务。' : 'No AI services connected yet.'}</p>
@@ -1610,6 +1608,7 @@ export function LlmSettingsPanel({
           const quotaSummary = usageSummaryChip(currentAccountUsage(quotaResults[head.id], head), zh);
           const groupState = aggregateGroupConnectionState(g.models);
           const status = connectionStatusLabel(groupState ? { ...head, connectionState: groupState } : head, zh);
+          const defaultModel = g.models.find((model) => model.isDefault);
           return (
           <div key={g.groupId} data-llm-group-id={g.groupId} className={`llm-provider-group${highlightGroupId === g.groupId ? ' is-highlight' : ''}`}>
             <div className="llm-group-header">
@@ -1618,7 +1617,9 @@ export function LlmSettingsPanel({
                 <LlmBrandIcon channelId={head.channelId} providerName={head.name} serviceTemplateId={head.serviceTemplateId} />
                 <span className="llm-service-copy">
                   <strong>{head.name || head.provider}</strong>
-                  <span className="llm-group-count">{g.models.length} {zh ? '个模型' : 'models'}</span>
+                  <span className="llm-group-count">
+                    {`${accessMethodLabel(head, zh)} · ${g.models.length} ${zh ? '个模型' : 'models'}${defaultModel ? ` · ${zh ? '默认' : 'default'} ${defaultModel.modelLabel || defaultModel.model}` : ''}`}
+                  </span>
                 </span>
                 <PeerIcon name="chevronDown" size={14} className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`} />
               </button>
@@ -1692,7 +1693,8 @@ export function LlmSettingsPanel({
           </div>
           );
         })}
-        </div>
+          </div>
+        </section>
       )}
 
       {!catalogOpen ? <FallbackVisionSetting i18n={i18n} value={fallbackVisionProviderId}
