@@ -415,6 +415,18 @@ export type TranslationKey =
   | 'projectAgent.chat.allowOnce'
   | 'projectAgent.chat.allowTask'
   | 'projectAgent.chat.allowImage'
+  | 'projectAgent.chat.activity.permission'
+  | 'projectAgent.process.awaiting_permission'
+  | 'projectAgent.process.permissionTitle'
+  | 'projectAgent.process.permissionNote'
+  | 'projectAgent.process.image'
+  | 'projectAgent.chat.cancelImageRead'
+  | 'projectAgent.chat.imageWaitLimit'
+  | 'projectAgent.chat.imageTimeout'
+  | 'projectAgent.chat.imageCancelled'
+  | 'projectAgent.chat.imageDenied'
+  | 'projectAgent.chat.imageApproved'
+  | 'projectAgent.chat.imageUnavailable'
   | 'projectAgent.chat.imageReadNotice'
   | 'projectAgent.chat.approveContinue'
   | 'projectAgent.chat.reject'
@@ -1918,6 +1930,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.allowOnce': '仅这一次',
     'projectAgent.chat.allowTask': '本任务重复此操作',
     'projectAgent.chat.allowImage': '本轮允许此图片',
+    'projectAgent.chat.activity.permission': '等待你的授权',
+    'projectAgent.process.awaiting_permission': '等待授权',
+    'projectAgent.process.permissionTitle': '等待授权 · {tool}',
+    'projectAgent.process.permissionNote': '这一步需要你的授权，尚未读取图片。请在对话中的权限卡选择允许、拒绝或取消。',
+    'projectAgent.process.image': '查看图片',
+    'projectAgent.chat.cancelImageRead': '取消本次读取',
+    'projectAgent.chat.imageWaitLimit': '等待授权最多 5 分钟；允许后会继续这次读取。',
+    'projectAgent.chat.imageTimeout': '等待授权已超时，本次没有读取图片。需要查看时可以重新发起。',
+    'projectAgent.chat.imageCancelled': '本次图片读取已取消。',
+    'projectAgent.chat.imageDenied': '已拒绝本次图片读取。',
+    'projectAgent.chat.imageApproved': '已授权，继续本次图片读取。',
+    'projectAgent.chat.imageUnavailable': '本次授权请求已结束，没有读取图片。需要查看时可以重新发起。',
     'projectAgent.chat.imageReadNotice': '读取这张图片并交给当前模型。选择“本轮允许”后，仅此图片可供当前机器人及其任务使用，30 分钟内有效。',
     'projectAgent.chat.approveContinue': '批准并继续',
     'projectAgent.chat.reject': '拒绝',
@@ -3209,6 +3233,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.allowOnce': 'Allow once',
     'projectAgent.chat.allowTask': 'Repeat this operation for this task',
     'projectAgent.chat.allowImage': 'Allow this image for this session',
+    'projectAgent.chat.activity.permission': 'Waiting for permission',
+    'projectAgent.process.awaiting_permission': 'Waiting for permission',
+    'projectAgent.process.permissionTitle': 'Waiting for permission · {tool}',
+    'projectAgent.process.permissionNote': 'This step needs permission and has not read the image. Allow, deny or cancel in the conversation permission card.',
+    'projectAgent.process.image': 'View image',
+    'projectAgent.chat.cancelImageRead': 'Cancel this read',
+    'projectAgent.chat.imageWaitLimit': 'Permission waits up to 5 minutes. Allowing continues this read.',
+    'projectAgent.chat.imageTimeout': 'Permission timed out. This request did not read the image. Start a new request if needed.',
+    'projectAgent.chat.imageCancelled': 'This image read was cancelled.',
+    'projectAgent.chat.imageDenied': 'This image read was denied.',
+    'projectAgent.chat.imageApproved': 'Permission granted. Continuing this image read.',
+    'projectAgent.chat.imageUnavailable': 'This permission request ended without reading the image. Start a new request if needed.',
     'projectAgent.chat.imageReadNotice': 'Read this image for the current model. Allowing it for this session covers only this image, for this bot and its tasks, valid for 30 minutes.',
     'projectAgent.chat.approveContinue': 'Approve and continue',
     'projectAgent.chat.reject': 'Reject',

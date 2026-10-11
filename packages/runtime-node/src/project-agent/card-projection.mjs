@@ -13,7 +13,7 @@ const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const ID_MAX = 200;
 const CARD_ID_MAX = 500;
 const TEXT_MAX = 240;
-const CLOSED_APPROVAL = new Set(['approved', 'denied', 'expired']);
+const CLOSED_APPROVAL = new Set(['approved', 'denied', 'expired', 'cancelled']);
 
 /** Conversational choices only. Legacy freeform answers do not approve task or permission cards. */
 export function replyQuestionAnswered(messages, reply) {
@@ -181,6 +181,7 @@ function approvalActions(approvalId, state, capabilityId) {
     action('allow', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'once' }),
     action('allow_task', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'task', ...(capabilityId === 'local.image.read' ? { capabilityId } : {}) }),
     action('reject', 'project-agent:decide-approval', { approvalId, decision: 'reject', duration: 'denied' }),
+    ...(capabilityId === 'local.image.read' ? [action('cancel_read', 'project-agent:decide-approval', { approvalId, decision: 'cancel', duration: 'denied' })] : []),
   ];
 }
 
@@ -191,6 +192,10 @@ function approvalRefs(approval, approvalId) {
     capabilityId: boundedId(approval.capabilityId, ID_MAX),
     riskLevel: boundedId(approval.riskLevel, ID_MAX),
     taskName: boundedId(approval.taskName, ID_MAX),
+    conversationId: boundedId(approval.conversationId, ID_MAX),
+    streamId: boundedId(approval.streamId, ID_MAX),
+    deadlineAt: boundedId(approval.deadlineAt, ID_MAX),
+    decisionReason: boundedId(approval.decisionReason, ID_MAX),
   });
 }
 

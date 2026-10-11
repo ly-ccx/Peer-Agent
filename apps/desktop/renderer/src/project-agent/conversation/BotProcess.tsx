@@ -36,10 +36,10 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
     id: String(index), receivedChars: undefined,
     input: entry.inputPreview, result: entry.resultPreview,
   }));
-  const current = [...entries].reverse().find(entry => ['preparing', 'running'].includes(entry.status));
+  const current = [...entries].reverse().find(entry => ['preparing', 'running', 'awaiting_permission'].includes(entry.status));
   const elapsed = activity ? processSeconds(activity.startedAt, activity.finishedAt, now) : null;
   if (!entries.length && !running) return null;
-  const label = current ? i18n.t(current.status === 'preparing' ? 'projectAgent.process.preparingTitle' : 'projectAgent.process.runningTitle', { tool: i18n.t(current.labelKey) }) : i18n.t(running
+  const label = current ? i18n.t(current.status === 'awaiting_permission' ? 'projectAgent.process.permissionTitle' : current.status === 'preparing' ? 'projectAgent.process.preparingTitle' : 'projectAgent.process.runningTitle', { tool: i18n.t(current.labelKey) }) : i18n.t(running
     ? entries.length ? 'projectAgent.process.organizing' : 'projectAgent.process.preparingReply'
     : (activity?.phase ?? outcome) === 'stopped' ? 'projectAgent.process.stopped'
       : (activity?.phase ?? outcome) === 'error' ? 'projectAgent.process.failed' : 'projectAgent.process.done');
@@ -50,7 +50,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
         <span className="bot-process-caption">{i18n.t('projectAgent.process.heading')}
           {entries.length ? <span className="bot-process-count">{i18n.t('projectAgent.process.steps', { count: entries.length })}</span> : null}
         </span>
-        <span className={`bot-process-current${running ? ' is-running' : ''}`}>{label}</span>
+        <span className={`bot-process-current${running && activity?.phase !== 'awaiting_permission' ? ' is-running' : ''}`}>{label}</span>
         {current?.summary ? <span className="bot-process-target" title={current.summary}>{current.summary}</span> : null}
       </span>
       {elapsed !== null ? <span className="bot-process-elapsed" aria-hidden="true">{processDuration(elapsed, i18n)}</span> : null}
@@ -59,14 +59,14 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
     <div className="bot-turn-process-content">
       {!entries.length ? <p className="bot-process-note">{i18n.t('projectAgent.process.awaitingContent')}</p> : null}
       {entries.map((entry, index) => ({ entry, index })).reverse().map(({ entry, index }) => {
-        const active = ['preparing', 'running'].includes(entry.status);
+        const active = ['preparing', 'running', 'awaiting_permission'].includes(entry.status);
         const time = processSeconds(entry.startedAt, entry.finishedAt, now, !active);
         const status = toolStepStatus(entry.status, entry.result, outcome);
         return <details className="bot-tool-step" data-status={entry.status} key={entry.id} open={disclosure?.open[`step-${index}`]}
           onToggle={event => { event.stopPropagation(); disclosure?.toggle(`step-${index}`, event.currentTarget.open); }}>
           <summary>
             <span className="bot-tool-step-icon"><PeerIcon name={entry.icon} size={13} /></span>
-            <span className="bot-tool-step-copy"><span className={`bot-tool-step-label${active ? ' is-running' : ''}`}>{i18n.t(entry.labelKey)}</span>
+            <span className="bot-tool-step-copy"><span className={`bot-tool-step-label${active && entry.status !== 'awaiting_permission' ? ' is-running' : ''}`}>{i18n.t(entry.labelKey)}</span>
               {entry.summary ? <span className="bot-process-target" title={entry.summary}>{entry.summary}</span> : null}</span>
             <span className="bot-tool-step-meta"><span className="bot-tool-step-status">{i18n.t(`projectAgent.process.${status}`)}</span>
               {time !== null ? <span className="bot-process-elapsed" aria-hidden="true">{processDuration(time, i18n)}</span> : null}</span>
@@ -74,7 +74,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
           </summary>
           <div className="bot-tool-step-content">
             {entry.receivedChars !== undefined && entry.status === 'preparing' ? <p className="bot-process-note">{i18n.t('projectAgent.process.receiving', { count: entry.receivedChars })}</p> : null}
-            {active ? <p className="bot-process-note">{i18n.t(entry.status === 'preparing' ? 'projectAgent.process.preparingNote' : 'projectAgent.process.runningNote')}</p> : null}
+            {active ? <p className="bot-process-note">{i18n.t(entry.status === 'awaiting_permission' ? 'projectAgent.process.permissionNote' : entry.status === 'preparing' ? 'projectAgent.process.preparingNote' : 'projectAgent.process.runningNote')}</p> : null}
             <Preview label={i18n.t('projectAgent.process.parameters')} value={entry.input} i18n={i18n} disclosure={disclosure} slot={`input-${index}`} />
             <Preview label={i18n.t('projectAgent.process.output')} value={entry.result} i18n={i18n} disclosure={disclosure} slot={`result-${index}`} />
             <details className="bot-tool-metadata" open={disclosure?.open[`metadata-${index}`]}

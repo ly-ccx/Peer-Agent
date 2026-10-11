@@ -8,7 +8,7 @@
  *
  * PendingApproval 的协议类型由 B1-07 定义。在那之前，形状以本文件的 JSDoc 为准。
  *
- * @typedef {'open' | 'approved' | 'denied' | 'expired' | 'stale'} ApprovalState
+ * @typedef {'open' | 'approved' | 'denied' | 'expired' | 'stale' | 'cancelled'} ApprovalState
  * @typedef {'local_ui' | 'policy'} ApprovalDecider
  * @typedef {Object} PendingApproval
  * @property {string} approvalId 权限请求的 toolCallId
@@ -43,7 +43,7 @@ import {
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 
-const STATES = new Set(['open', 'approved', 'denied', 'expired', 'stale']);
+const STATES = new Set(['open', 'approved', 'denied', 'expired', 'stale', 'cancelled']);
 const DECIDERS = new Set(['local_ui', 'policy']);
 const KINDS = new Set(['approval', 'plan_approval', 'image_read_grant']);
 const KEPT_ON_COMPACT = new Set(['open', 'stale']);
@@ -80,6 +80,7 @@ export function createApprovalStore({
   rootDir = null,
   now = () => new Date(),
   compactBytes = DEFAULT_COMPACT_BYTES,
+  onChanged = null,
 } = {}) {
   const limit = Number.isFinite(compactBytes) && compactBytes > 0
     ? compactBytes
@@ -114,6 +115,8 @@ export function createApprovalStore({
       createdAt: nullableString(input.createdAt) || now().toISOString(),
       state: input.state,
     };
+    if (typeof input.deadlineAt === 'string' && Number.isFinite(Date.parse(input.deadlineAt))) record.deadlineAt = input.deadlineAt;
+    if (['permission_cancelled', 'permission_timeout', 'permission_unavailable', 'local_user_denied'].includes(input.decisionReason)) record.decisionReason = input.decisionReason;
     const decidedAt = nullableString(input.decidedAt);
     if (decidedAt) record.decidedAt = decidedAt;
     if (DECIDERS.has(input.decidedBy)) record.decidedBy = input.decidedBy;
@@ -222,6 +225,7 @@ export function createApprovalStore({
     mkdirSync(path.dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
     maybeCompact(file);
+    try { onChanged?.({ workspaceId: record.workspaceId, approvalId: record.approvalId, state: record.state, record: { ...record } }); } catch {}
     return record;
   }
 
@@ -256,7 +260,8 @@ export function createApprovalStore({
       if (!canRecover(record)) continue;
       const next = append({
         ...record,
-        state: 'stale',
+        state: record.deadlineAt && Date.parse(record.deadlineAt) <= now().getTime() ? 'expired' : 'stale',
+        ...(record.deadlineAt && Date.parse(record.deadlineAt) <= now().getTime() ? { decisionReason: 'permission_timeout', decidedBy: 'policy' } : {}),
         decidedAt,
       });
       if (next) changed.push(next);

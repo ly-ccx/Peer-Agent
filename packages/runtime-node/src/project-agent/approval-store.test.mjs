@@ -33,6 +33,21 @@ function openRecord(overrides = {}) {
   };
 }
 
+test('change notifications follow persistence, ignore duplicates and cannot roll back a saved decision', t => {
+  const root = tempRoot('notifications'); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const events = [];
+  const store = createApprovalStore({ rootDir: root, onChanged(event) {
+    assert.equal(store.list()[0].state, event.state);
+    events.push(event); throw new Error('presentation subscriber unavailable');
+  } });
+  const record = openRecord({ deadlineAt: '2026-10-11T11:00:00.000Z' });
+  store.append(record); store.append(record);
+  store.append({ ...record, state: 'cancelled', decisionReason: 'permission_cancelled' });
+  assert.deepEqual(events.map(event => event.state), ['open', 'cancelled']);
+  assert.equal(createApprovalStore({ rootDir: root }).list()[0].decisionReason, 'permission_cancelled');
+  assert.equal(events[0].record.deadlineAt, record.deadlineAt);
+});
+
 test('compaction retains folded approved plan history while dropping settled tool permissions', () => {
   const root = tempRoot('plan-history');
   try {

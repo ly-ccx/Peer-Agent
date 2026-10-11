@@ -36,6 +36,22 @@ const METHODS = [
   ['startFamiliarize', { workspaceId: 'ws-1' }],
 ];
 
+test('deadline crossed while reading the session closes through the live gate before granting', async () => {
+  let at = Date.parse('2026-10-11T10:00:00.000Z');
+  let record = { approvalId: 'image', workspaceId: 'w', sessionId: 's', capabilityId: 'local.image.read',
+    state: 'open', deadlineAt: new Date(at + 100).toISOString() };
+  const decisions = [];
+  const service = createProjectAgentApplicationService({ enabled: () => true, now: () => new Date(at).toISOString(),
+    approvals: { list: () => [record], append(row) { record = row; return row; } },
+    sessions: { async get() { at += 200; return { status: 'running' }; } },
+    directory: { list: () => [] }, schedule: () => 1,
+    settleLive(current, decision) { decisions.push(decision); record = { ...current, state: 'expired', decisionReason: decision.reason }; return false; },
+  });
+  const result = await service.decideApproval({ workspaceId: 'w', approvalId: 'image', decision: 'approve', duration: 'task' });
+  assert.equal(result.approval.state, 'expired'); assert.equal(result.approval.decisionReason, 'permission_timeout');
+  assert.deepEqual(decisions, [{ decision: 'expired', reason: 'permission_timeout' }]);
+});
+
 test('stale image approval persists exact authority before recovery and leaves unrelated requests open', async t => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'stale-image-approval-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -847,7 +863,7 @@ test('paused approvals can be denied without restarting the task', async () => {
     const plan = { approvalId: 'plan:s1', sessionId: 's1', state };
     const service = createProjectAgentApplicationService({ enabled: () => true,
       approvals: { list: () => [permission, plan], append: item => { saved.push(item); return item; } },
-      settleLive: (_approval, decision) => settled.push(decision),
+      settleLive: (_approval, decision) => { settled.push(decision); return true; },
       sessions: { get: () => ({ status }), resumeFromApproval: () => { restarts++; },
         cancel: input => { cancelled.push(input); return { sessionId: 's1', status: 'cancelled' }; } } });
     assert.equal((await service.decideApproval({ approvalId: permission.approvalId, decision: 'deny' })).approval?.state, 'denied');

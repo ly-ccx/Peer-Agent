@@ -79,6 +79,7 @@ export function toolPresentation(name: string): { labelKey: TranslationKey; icon
     const [label, icon] = LABELS[name as keyof typeof LABELS];
     return { labelKey: `projectAgent.process.${label}`, icon };
   }
+  if (name === 'view_image') return { labelKey: 'projectAgent.process.image', icon: 'image' };
   if (/^(read_file|read_files|list_directory)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.read', icon: 'fileText' };
   if (/^(search_files|search_text|search|rg)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.search', icon: 'fileText' };
   if (/^(write_file|edit_file|apply_patch)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.edit', icon: 'fileText' };
@@ -92,18 +93,18 @@ function piles(value: unknown, depth = 0): Record<string, unknown>[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   const row = value as Record<string, unknown>;
   const preview = row.outputPreview as Record<string, unknown> | undefined;
-  return [row, ...piles(row.output ?? preview?.legacyResult ?? row.legacyResult, depth + 1)];
+  return [row, ...piles(row.output ?? preview?.legacyResult ?? row.legacyResult ?? preview, depth + 1)];
 }
 
 function resultStatus(result: unknown): AgentProcessEntry['status'] {
   const rows = piles(result);
-  if (rows.some(row => row.ok === false || row.success === false || row.error || ['failed', 'denied'].includes(String(row.status)))) return 'failed';
   if (rows.some(row => ['cancelled', 'aborted'].includes(String(row.status)))) return 'cancelled';
+  if (rows.some(row => row.ok === false || row.success === false || row.error || ['failed', 'denied', 'timeout'].includes(String(row.status)))) return 'failed';
   if (rows.some(row => row.suppressed === true || ['silent', 'digest'].includes(String(row.surfacing ?? (row.meta as Record<string, unknown> | undefined)?.surfacing)))) return 'suppressed';
   return rows.some(row => row.ok === true || row.success === true) ? 'done' : 'unknown';
 }
 
-const STEP_LABELS = ['preparing', 'running', 'done', 'failed', 'cancelled', 'suppressed', 'unknown', 'stopped'] as const;
+const STEP_LABELS = ['preparing', 'running', 'awaiting_permission', 'done', 'failed', 'cancelled', 'suppressed', 'unknown', 'stopped'] as const;
 export type ToolStepLabel = (typeof STEP_LABELS)[number];
 
 function stepLabel(status: string): ToolStepLabel {
@@ -119,7 +120,7 @@ export function toolStepStatus(
   const absent = !result?.text && result?.truncated !== true;
   // Task cancel aborts the turn as a failure before tool-result. That is not a failed read.
   if (absent && (status === 'error' || (status === 'unknown' && outcome === 'error'))) return 'cancelled';
-  if (status === 'error') return 'failed';
+  if (status === 'error') return resultStatus(result?.text) === 'cancelled' ? 'cancelled' : 'failed';
   if (status === 'cancelled') return 'cancelled';
   if (status === 'unknown' && outcome) return outcome === 'stopped' ? 'stopped' : 'failed';
   return stepLabel(status);

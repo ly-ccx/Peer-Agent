@@ -123,7 +123,7 @@ export function useBotConversation(workspaceId: string) {
     const offActivity = clientApi.onProjectAgentActivity(event => {
       if (generationRef.current !== ticket || event.workspaceId !== workspaceId) return;
       setActivity(current => mergeBotActivity(current, event, workspaceId));
-      if (['done', 'error', 'stopped', 'disposed'].includes(event.phase)) void refresh.request();
+      if (['awaiting_permission', 'done', 'error', 'stopped', 'disposed'].includes(event.phase)) void refresh.request();
     });
     void refresh.request();
     return () => {

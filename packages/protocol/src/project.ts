@@ -112,13 +112,14 @@ export interface ProjectAgentToolActivity {
   readonly kind: 'tool';
   readonly id: string;
   readonly name: string;
-  readonly status: 'preparing' | 'running' | 'done' | 'error' | 'stopped';
+  readonly status: 'preparing' | 'running' | 'awaiting_permission' | 'done' | 'error' | 'stopped';
   readonly startedAt?: string;
   readonly finishedAt?: string;
   readonly summary?: string;
   readonly input?: ProjectAgentToolPreview;
   readonly result?: ProjectAgentToolPreview;
   readonly receivedChars?: number;
+  readonly permissionDeadlineAt?: string;
 }
 
 /** Public conversation update, never hidden reasoning, Tool Result or Evidence.
@@ -140,7 +141,7 @@ export interface ProjectAgentActivity {
   readonly finishedAt?: string;
   readonly modelSelection?: Pick<import('./model-routing.ts').RuntimeModelSelection, 'modelProviderId' | 'reasoningEffort'>;
   readonly replyTo: readonly string[];
-  readonly phase: 'waiting' | 'thinking' | 'responding' | 'tool' | 'settling' | 'done' | 'error' | 'stopped' | 'disposed';
+  readonly phase: 'waiting' | 'thinking' | 'responding' | 'tool' | 'awaiting_permission' | 'settling' | 'done' | 'error' | 'stopped' | 'disposed';
   readonly replyText: string;
   readonly segments: readonly (
     | ({ readonly kind: 'text' } & ProjectAgentPublicUpdate)

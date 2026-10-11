@@ -77,6 +77,7 @@ test('policy withdrawal removes durable image authority and approval storage fai
   const gate = createChatPermissionGate({ activeStreams: new Map([['s', {}]]), approvalStore: failing });
   const result = gate.createLocalCapabilityPermissionRequester({ streamId: 's', toolCallId: 'i', conversationId: 'bot', workspacePath: '/repo',
     webContents: { send: (channel, { call }) => events.push(call) } })({ capabilityId: 'local.image.read', args: { path: scope.path }, scope });
-  gate.settlePermissionRequest(events[0].toolCallId, { grantId: 'ui', granted: true, duration: 'scope' });
-  assert.equal((await result).granted, false);
+  assert.equal(events.length, 0);
+  assert.equal((await result).reason, 'permission_unavailable');
+  assert.equal(gate.listPendingPermissions().length, 0);
 });

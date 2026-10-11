@@ -1086,7 +1086,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentDecideApproval: (params: {
     workspaceId: string;
     approvalId: string;
-    decision: 'approve' | 'reject' | 'deny';
+    decision: 'approve' | 'reject' | 'deny' | 'cancel';
     duration?: 'once' | 'task' | 'denied';
   }) => Promise<{ ok: boolean; code?: string; approval?: unknown }>;
   readonly projectAgentMarkRead: (params: { workspaceId: string; viewing?: boolean }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null; viewing?: boolean }>;
@@ -1499,8 +1499,8 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   // 流式工具参数进度(Codex 式实时体感)。仅是 provider 流式提示,不替代 Tool Result / Evidence。
   readonly onChatStreamToolProgress: (listener: (payload: { streamId: string; toolCallId: string; tool: string; path: string | null; receivedChars: number; receivedLines: number }) => void) => () => void;
   readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string; startedAtMs?: number; endedAtMs?: number; durationMs?: number }) => void) => () => void;
-  readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
-  readonly onChatStreamPermissionSettled: (listener: (payload: { streamId: string; toolCallIds: readonly string[] }) => void) => () => void;
+  readonly onChatStreamPermissionRequest: (listener: (payload: import('@peer-agent/protocol').ChatPermissionRequest) => void) => () => void;
+  readonly onChatStreamPermissionSettled: (listener: (payload: import('@peer-agent/protocol').ChatPermissionSettled) => void) => () => void;
   readonly onChatStreamError: (listener: (payload: {
     streamId: string;
     conversationId?: string;

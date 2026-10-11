@@ -35,7 +35,8 @@ function defaultSettleLive(approval, grant) {
     duration: granted ? (grant.duration === 'task' ? 'task' : 'once') : 'denied',
     scope: approval?.capabilityId || null,
     decidedAt: new Date().toISOString(),
-  }, { remember: grant?.remember === true });
+  }, { remember: grant?.remember === true, decidedBy: grant?.decision === 'expired' ? 'policy' : 'local_ui',
+    ...(grant?.reason ? { reason: grant.reason } : grant?.decision === 'cancelled' ? { reason: 'permission_cancelled' } : {}) });
 }
 
 function sessionIdFromAnswer(answerTo) {
@@ -371,12 +372,22 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     const decision = payload.decision === 'approve'
       ? 'approved'
-      : (payload.decision === 'reject' || payload.decision === 'deny' ? 'denied' : '');
+      : payload.decision === 'cancel' ? 'cancelled' : (payload.decision === 'reject' || payload.decision === 'deny' ? 'denied' : '');
     if (!decision) return { ok: false, code: 'INVALID_INPUT' };
     const listed = approvals.list({ workspaceId: payload.workspaceId });
-    const current = listed.find((item) => item.approvalId === payload.approvalId);
+    let current = listed.find((item) => item.approvalId === payload.approvalId);
+    const expireDeadline = record => {
+      const at = Date.parse(typeof now === 'function' ? now() : now);
+      if (!record || !['open', 'stale'].includes(record.state) || !record.deadlineAt || Date.parse(record.deadlineAt) > (Number.isFinite(at) ? at : Date.now())) return record;
+      // Claim through the live gate as well, so a delayed timer cannot leave the tool waiting.
+      if (record.state === 'open') { try { settleLive?.(record, { decision: 'expired', reason: 'permission_timeout' }); } catch {} }
+      const latest = approvals.list({ workspaceId: payload.workspaceId }).find(row => row.approvalId === record.approvalId);
+      if (latest && !['open', 'stale'].includes(latest.state)) return latest;
+      return approvals.append({ ...record, state: 'expired', decidedBy: 'policy', decisionReason: 'permission_timeout', decidedAt: typeof now === 'function' ? now() : now });
+    };
+    current = expireDeadline(current);
     if (!current) return { ok: false, code: 'NOT_FOUND' };
-    if (current.state === 'approved' || current.state === 'denied' || current.state === 'expired') {
+    if (current.state === 'approved' || current.state === 'denied' || current.state === 'expired' || current.state === 'cancelled') {
       const waiting = decision === 'approved' && current.state === 'approved' && isPlanApproval(current) && current.sessionId
         && typeof sessions?.get === 'function' ? await sessions.get({ sessionId: current.sessionId }) : null;
       if (waiting?.origin?.phase === 'awaiting_approval' && typeof sessions?.resumeFromApproval === 'function') {
@@ -388,7 +399,11 @@ export function createProjectAgentApplicationService({
     }
     const currentSession = current.sessionId && typeof sessions?.get === 'function'
       ? await sessions.get({ sessionId: current.sessionId }) : null;
-    if (decision === 'approved' && currentSession && ['paused', 'superseded'].includes(currentSession.status)) return { ok: false, code: 'SESSION_PAUSED' };
+    const refreshed = approvals.list({ workspaceId: payload.workspaceId }).find(row => row.approvalId === current.approvalId);
+    if (refreshed && !['open', 'stale'].includes(refreshed.state)) return { ok: true, approval: refreshed };
+    current = expireDeadline(refreshed ?? current);
+    if (current && !['open', 'stale'].includes(current.state)) return { ok: true, approval: current };
+    if (decision === 'approved' && currentSession && ['paused', 'superseded', 'cancelled'].includes(currentSession.status)) return { ok: false, code: 'SESSION_PAUSED' };
     const duration = decision !== 'approved'
       ? 'denied'
       : payload.duration === 'task'
@@ -396,8 +411,9 @@ export function createProjectAgentApplicationService({
         : 'once';
     const plan = isPlanApproval(current);
     const decisionRecord = { ...current, state: decision,
-      decidedAt: typeof now === 'function' ? now() : now, decidedBy: 'local_ui' };
-    if (decision === 'approved' && duration === 'task' && current.capabilityId === 'local.image.read') {
+      decidedAt: typeof now === 'function' ? now() : now, decidedBy: 'local_ui',
+      ...(decision === 'cancelled' ? { decisionReason: 'permission_cancelled' } : decision === 'denied' ? { decisionReason: 'local_user_denied' } : {}) };
+    if (decision === 'approved' && duration === 'task' && current.state === 'stale' && current.capabilityId === 'local.image.read') {
       try {
         const principal = resolvePermissionPrincipal({ ...current, goalPlanStore });
         if (!imageAuthority.remember({ principal, scope: current.imageReadScope, record: decisionRecord })) {
@@ -441,15 +457,20 @@ export function createProjectAgentApplicationService({
       } catch (error) {
         return { ok: false, code: 'CANCEL_FAILED', message: error?.message || 'cancel failed' };
       }
-    } else if (current.state === 'open' && !plan && typeof settleLive === 'function') {
-      try {
-        settleLive(current, {
-          decision,
-          duration,
-          remember: decision === 'approved' && duration === 'task',
-        });
-      } catch {
-        // 现场请求已经不在时，持久记录仍然是两处共同的事实。
+    } else if (current.state === 'open' && !plan) {
+      // The live gate claims the request before signing any resource grant. A stale
+      // button must never overwrite a timeout/cancel that happened during awaits.
+      let settled = false;
+      try { settled = settleLive?.(current, { decision, duration, remember: decision === 'approved' && duration === 'task' }) === true; } catch {}
+      const latest = approvals.list({ workspaceId: payload.workspaceId }).find(row => row.approvalId === current.approvalId);
+      if (latest && !['open', 'stale'].includes(latest.state)) {
+        queueChanged(payload.workspaceId);
+        return { ok: true, approval: latest };
+      }
+      if (!settled) {
+        saved = approvals.append({ ...current, state: 'expired', decidedBy: 'policy', decisionReason: 'permission_unavailable', decidedAt: new Date().toISOString() });
+        queueChanged(payload.workspaceId);
+        return { ok: true, approval: saved };
       }
     }
     saved ||= approvals.append(decisionRecord);

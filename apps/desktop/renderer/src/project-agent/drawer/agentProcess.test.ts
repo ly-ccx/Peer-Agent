@@ -5,6 +5,15 @@ import { roundsForReply } from '../state/botConversationState.ts';
 import { agentProcessEntries, toolPreviewText, toolStepStatus } from './agentProcess.ts';
 import { normalizeBotMessage } from '../state/botConversationState.ts';
 
+test('structured image cancellation remains cancelled in live and saved details', () => {
+  const result = { ok: false, outputPreview: { status: 'cancelled', reason: 'permission_cancelled' } };
+  assert.equal(toolStepStatus('error', { text: JSON.stringify(result) }), 'cancelled');
+  const [entry] = agentProcessEntries([{ text: '', toolCalls: [{ name: 'view_image', input: { path: '/screen.png' }, result }] }]);
+  assert.equal(entry?.status, 'cancelled'); assert.equal(entry?.labelKey, 'projectAgent.process.image');
+  assert.equal(toolStepStatus('awaiting_permission', undefined), 'awaiting_permission');
+  assert.equal(toolStepStatus('error', { text: JSON.stringify({ outputPreview: { status: 'timeout' } }) }), 'failed');
+});
+
 test('过程按回复 turnId 精确关联，包括回复先于 agent_turn 落库的顺序', () => {
   const old = normalizeBotMessage({ id: 'old', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'post_reply', input: { text: '旧回复' } }] }] })!;
   const reply = normalizeBotMessage({ id: 'new-reply', kind: 'agent_reply', turnId: 'new', content: '本轮回复' })!;

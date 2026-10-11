@@ -53,7 +53,7 @@ describe('chat permission gate', () => {
       workspacePath: '/workspace',
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     assert.equal(events[0].payload.call.capabilityId, 'local.file.write');
     assert.equal(activeStreams.get('s1').permissionIds.has(events[0].payload.call.toolCallId), true);
 
@@ -84,7 +84,7 @@ describe('chat permission gate', () => {
 
     assert.equal(second.granted, true);
     assert.equal(second.reason, 'local_user_approved_scope');
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
   });
 
   it('does not reuse allow-once for another file write', async () => {
@@ -105,7 +105,7 @@ describe('chat permission gate', () => {
       workspacePath: '/workspace',
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
       grantId: 'g-write-once',
       toolCallId: events[0].payload.call.toolCallId,
@@ -158,7 +158,7 @@ describe('chat permission gate', () => {
       ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     assert.equal(events[0].payload.call.capabilityId, 'local.shell.exec');
     gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
       grantId: 'g-shell',
@@ -185,7 +185,7 @@ describe('chat permission gate', () => {
 
     assert.equal(second.granted, true);
     assert.equal(second.reason, 'local_user_approved_scope');
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
   });
 
   it('does not reuse allow-once for another shell command', async () => {
@@ -213,7 +213,7 @@ describe('chat permission gate', () => {
       ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
       grantId: 'g-echo-once',
       toolCallId: events[0].payload.call.toolCallId,
@@ -295,8 +295,8 @@ describe('chat permission gate', () => {
     assert.equal(second.granted, true);
     assert.equal(second.reason, 'local_user_approved_scope');
     const settled = events.filter((event) => event.channel === 'chat:stream:permission-settled');
-    assert.equal(settled.length, 1);
-    assert.deepEqual(settled[0].payload.toolCallIds, [requestEvents[1].payload.call.toolCallId]);
+    assert.equal(settled.length, 2);
+    assert.deepEqual(settled.flatMap(event => event.payload.toolCallIds).sort(), requestEvents.map(event => event.payload.call.toolCallId).sort());
   });
 
   it('still asks each Goal confirmation even after a same-capability allow', async () => {
@@ -392,7 +392,7 @@ describe('chat permission gate', () => {
       ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     assert.equal(events[0].payload.call.toolCallId, 'chat-permission:shell-auto');
     gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
       grantId: 'g-high',
@@ -434,7 +434,7 @@ describe('chat permission gate', () => {
       dataLevel: 'D2_sensitive',
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     const call = events[0].payload.call;
     assert.equal(call.capabilityId, 'goal.high_risk.action');
     assert.equal(call.confirmation.kind, 'high_risk');
@@ -472,7 +472,7 @@ describe('chat permission gate', () => {
       riskLevel: 'L4_privileged',
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
       grantId: 'g-preview',
       toolCallId: events[0].payload.call.toolCallId,
@@ -496,7 +496,7 @@ describe('chat permission gate', () => {
       riskLevel: 'L4_privileged',
     });
 
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     assert.equal(second.granted, true);
     assert.equal(second.reason, 'local_user_approved_same_tool_call');
   });
@@ -540,10 +540,10 @@ describe('chat permission gate', () => {
       args: { action: 'observe' },
       riskLevel: 'L4_privileged',
     });
-    assert.equal(events.length, 2);
-    gate.settlePermissionRequest(events[1].payload.call.toolCallId, {
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 2);
+    gate.settlePermissionRequest(events.filter(event => event.channel === 'chat:stream:permission-request')[1].payload.call.toolCallId, {
       grantId: 'g-preview-2',
-      toolCallId: events[1].payload.call.toolCallId,
+      toolCallId: events.filter(event => event.channel === 'chat:stream:permission-request')[1].payload.call.toolCallId,
       granted: true,
       duration: 'once',
       decidedAt: new Date().toISOString(),
@@ -860,7 +860,7 @@ describe('one-time approval grant', () => {
     });
 
     const firstPending = request();
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
     const call = events[0].payload.call;
     gate.settlePermissionRequest(call.toolCallId, {
       grantId: 'g-ask',
@@ -875,13 +875,13 @@ describe('one-time approval grant', () => {
     const granted = await request();
     assert.equal(granted.granted, true);
     assert.equal(granted.reason, 'local_user_approved_once');
-    assert.equal(events.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 1);
 
     const again = request();
-    assert.equal(events.length, 2);
-    gate.settlePermissionRequest(events[1].payload.call.toolCallId, {
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 2);
+    gate.settlePermissionRequest(events.filter(event => event.channel === 'chat:stream:permission-request')[1].payload.call.toolCallId, {
       grantId: 'g-again',
-      toolCallId: events[1].payload.call.toolCallId,
+      toolCallId: events.filter(event => event.channel === 'chat:stream:permission-request')[1].payload.call.toolCallId,
       granted: false,
       duration: 'denied',
       decidedAt: new Date(clock).toISOString(),
@@ -891,10 +891,10 @@ describe('one-time approval grant', () => {
     clock += 30 * 60 * 1000;
     book.remember({ capabilityId: call.capabilityId, argsDigest: digestApprovalArgs(call.arguments), at: clock - 30 * 60 * 1000 });
     const expired = request();
-    assert.equal(events.length, 3);
-    gate.settlePermissionRequest(events[2].payload.call.toolCallId, {
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 3);
+    gate.settlePermissionRequest(events.filter(event => event.channel === 'chat:stream:permission-request')[2].payload.call.toolCallId, {
       grantId: 'g-expired',
-      toolCallId: events[2].payload.call.toolCallId,
+      toolCallId: events.filter(event => event.channel === 'chat:stream:permission-request')[2].payload.call.toolCallId,
       granted: false,
       duration: 'denied',
       decidedAt: new Date(clock).toISOString(),

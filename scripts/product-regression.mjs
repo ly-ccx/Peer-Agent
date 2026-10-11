@@ -43,6 +43,8 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'quote-reply-1280-dark.png', 'quote-reply-1280-light.png', 'quote-reply-760-dark.png', 'quote-reply-760-light.png',
   'selection-quote-1280-dark.png', 'selection-quote-760-light.png', 'selection-quote-docked-light.png',
   'completion-review-card.png', 'completion-review-report.png', 'completion-review-760-light.png',
+  'image-live-wait-1280-dark.png', 'image-live-wait-760-light.png',
+  ...['allow', 'deny', 'cancel', 'stop', 'timeout'].map(state => `image-live-${state}-1280-dark.png`),
   'image-approval-1280-dark.png', 'image-approval-760-light.png',
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
@@ -51,6 +53,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
+  if (!machine.imagePermissionLifecycle?.realCalls || machine.imagePermissionLifecycle?.cases?.length !== 6
+    || !machine.imagePermissionLifecycle.cases.every(row => row.realProjection && row.evidence && row.ended && row.cardAutomatic && row.fits)) throw new Error('Real image permission lifecycle regression failed');
   if (!machine.imageApproval?.persisted || !machine.imageApproval?.unrelatedUnapproved || !machine.imageApproval?.keyboard || !machine.imageApproval?.narrowFits) throw new Error('Image approval scope regression failed');
   if (machine.autonomousCoordination?.cases?.length !== 8 || !machine.autonomousCoordination.cases.every(item=>item.truthful && item.humanQuestionAbsent)) throw new Error('Autonomous coordination projection failed');
   if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
@@ -133,7 +137,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
     checks: { historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
-      chatDetails: machine.chatDetails, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
+      chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
