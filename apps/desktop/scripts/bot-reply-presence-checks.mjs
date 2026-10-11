@@ -7,8 +7,8 @@ export async function checkReplyPresence({ page, reply, report, until, state, la
   const footer = reply.locator('.bot-reply-context');
   if (label) {
     await until(() => footer.locator('.bot-context-running').textContent(), text => text === label);
-    assert.equal(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).animationName), 'none');
-    samples.labels.push({ state, label, noShimmer: true });
+    assert.equal(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
+    samples.labels.push({ state, label, shimmer: true });
   }
   const bounds = await until(() => reply.evaluate(node => {
     const bubbles = [...node.querySelectorAll(':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '

@@ -10,6 +10,7 @@
 @media (hover: none) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 @media (forced-colors: active) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 .bot-context-running { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--graphite-soft); }
+.bot-reply-context[data-running="true"] .bot-context-running { background: linear-gradient(100deg, var(--graphite-soft) 35%, var(--graphite-base) 50%, var(--graphite-soft) 65%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; --motion-shimmer-from: 100%; --motion-shimmer-x: -100%; animation: motion-shimmer 1.8s linear infinite; }
 .bot-reply-context > button { flex-shrink: 0; max-width: 100%; }
 .bot-reply-context > button:hover, .bot-work-row > summary:hover { color: var(--graphite-base); }
 .bot-work-row > summary > svg:last-child { transition: transform 160ms ease; }

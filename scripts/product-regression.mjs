@@ -94,7 +94,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked', 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'].every(state =>
       machine.replyPresence?.cases?.some(sample => sample.state === state && sample.aligned && sample.fits))
     || ![['first-paragraph', '正在整理回复'], ['preparing-read', '准备阅读 README.md'], ['reading-docked', '正在阅读 README.md']].every(([state, label]) =>
-      machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label && sample.noShimmer))
+      machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label && sample.shimmer))
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp
     || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned'].every(check => machine.taskCancellation?.[check] === true)
