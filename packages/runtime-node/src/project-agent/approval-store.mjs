@@ -1,9 +1,10 @@
 /**
  * 待批准项的持久记录。
  *
- * 执行仍由内存中的 permission-gate 负责。这里只追加事实：
+ * 执行由 permission-gate / Provider 负责。保存待批准事实及明确签发的图片资源授权：
  * 每个 workspaceId 一个 jsonl，没有 workspaceId 的会话写到 _unscoped。
- * 读取时按 approvalId 折叠为最新状态。文件超过阈值时，压成只含 open / stale 的快照。
+ * 读取时按 approvalId 折叠为最新状态。压缩保留待处理项、计划授权和未过期图片授权。
+ * 普通批准历史不构成可继承许可；图片授权由 PermissionInheritance 核验。
  *
  * PendingApproval 的协议类型由 B1-07 定义。在那之前，形状以本文件的 JSDoc 为准。
  *
@@ -25,7 +26,10 @@
  * @property {string} [decidedAt]
  * @property {ApprovalDecider} [decidedBy]
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { digestApprovalArgs } from './permission-operation.mjs';
+import { normalizeImageReadGrant } from './permission-inheritance.mjs';
+export { digestApprovalArgs } from './permission-operation.mjs';
 import {
   appendFileSync,
   existsSync,
@@ -41,31 +45,12 @@ import { pathOf } from '../data-store.mjs';
 
 const STATES = new Set(['open', 'approved', 'denied', 'expired', 'stale']);
 const DECIDERS = new Set(['local_ui', 'policy']);
-const KINDS = new Set(['approval', 'plan_approval']);
+const KINDS = new Set(['approval', 'plan_approval', 'image_read_grant']);
 const KEPT_ON_COMPACT = new Set(['open', 'stale']);
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const UNSCOPED_DIR = '_unscoped';
 const DEFAULT_COMPACT_BYTES = 5 * 1024 * 1024;
 const SUMMARY_LIMIT = 240;
-
-function stableStringify(value) {
-  if (value === undefined) return 'null';
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-  const keys = Object.keys(value).sort();
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
-}
-
-/** 参数摘要。同一参数对象得到同一个 sha256，不把参数正文写进记录。 */
-export function digestApprovalArgs(args) {
-  let encoded = '"unserializable"';
-  try {
-    encoded = stableStringify(args ?? null);
-  } catch {
-    encoded = '"unserializable"';
-  }
-  return createHash('sha256').update(encoded).digest('hex');
-}
 
 function redactSummary(value) {
   const text = typeof value === 'string' ? value : '';
@@ -135,6 +120,11 @@ export function createApprovalStore({
     if (KINDS.has(input.kind)) record.kind = input.kind;
     const taskName = nullableString(input.taskName);
     if (taskName && taskName.length <= 200) record.taskName = taskName;
+    const imageReadScope = normalizeImageReadGrant({ schemaVersion: 1, grantId: 'scope', conversationId: 'scope', expiresAt: 0,
+      scope: input.imageReadScope })?.scope;
+    if (imageReadScope && record.capabilityId === 'local.image.read') record.imageReadScope = imageReadScope;
+    const imageReadGrant = normalizeImageReadGrant(input.imageReadGrant);
+    if (imageReadGrant && record.kind === 'image_read_grant' && record.capabilityId === 'local.image.read') record.imageReadGrant = imageReadGrant;
     return record;
   }
 
@@ -204,7 +194,8 @@ export function createApprovalStore({
     }
     if (size <= limit) return;
     const kept = foldRecords(readLines(file)).filter((record) => KEPT_ON_COMPACT.has(record.state)
-      || record.state === 'approved' && record.kind === 'plan_approval' && record.capabilityId === 'goal.plan');
+      || record.state === 'approved' && (record.kind === 'plan_approval' && record.capabilityId === 'goal.plan'
+        || record.imageReadGrant?.expiresAt > now().getTime()));
     const text = kept.length ? `${kept.map((record) => JSON.stringify(record)).join('\n')}\n` : '';
     replaceFile(file, text);
   }

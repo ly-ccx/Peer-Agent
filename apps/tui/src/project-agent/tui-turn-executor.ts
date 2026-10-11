@@ -101,7 +101,7 @@ export function createTuiTurnExecutor(options: {
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
-      mode, role: profile.role, turnProfile: profile, surface: 'tui', turnId: streamId, messages: options.readMessages(input.conversationId ?? ''),
+      mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: options.readMessages(input.conversationId ?? ''),
       currentInputAnchors: (profile.context?.inputAnchors ?? []).map((row: any) => row.messageId),
       objectiveWakeIds: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId).map((row: any) => row.objectiveId),
       objectiveWakeEvents: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId),

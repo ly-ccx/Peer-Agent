@@ -6,7 +6,7 @@ import { buildPermissionGateView } from '../../state/permissionGateView';
 interface PermissionGateStripProps {
   readonly pendingCalls: readonly ClientToolCall[];
   readonly onApprove: (call: ClientToolCall) => void;
-  /** 「一直允许」仍显式记 scope；「允许」对 shell/写文件也会按命令类型记住，后续同类不再问。 */
+  /** Scope decisions cover only the displayed operation; inheritance is host enforced. */
   readonly onApproveAlways: (call: ClientToolCall) => void;
   readonly onReject: (call: ClientToolCall) => void;
   readonly showApproveAlways?: boolean;
@@ -42,9 +42,7 @@ export function PermissionGateStrip({
 
   const handleApproveAlways = () => {
     exit(() => {
-      for (const call of pendingCalls) {
-        onApproveAlways(call);
-      }
+      onApproveAlways(head);
     });
   };
 
@@ -69,8 +67,8 @@ export function PermissionGateStrip({
           {view.allowLabel ?? i18n.t('review.allow')}
         </button>
         {showApproveAlways && !view.isGoalConfirmation ? (
-          <button type="button" className="allow-always" onClick={handleApproveAlways}>
-            {i18n.t('review.allowAlways')}
+          <button type="button" className="allow-always" title={view.allowAlwaysHint} onClick={handleApproveAlways}>
+            {view.allowAlwaysLabel ?? i18n.t('review.allowAlways')}
           </button>
         ) : null}
       </div>

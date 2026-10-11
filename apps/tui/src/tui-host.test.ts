@@ -58,6 +58,16 @@ afterEach(async () => {
 });
 
 describe('TUI Runtime host', () => {
+  test('project Agent role cannot inherit chat-mode side effects even under full local access', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createHost({ workspaceRoot, accessLevel: 'full_local' });
+    const target = path.join(workspaceRoot, 'must-not-exist.txt');
+    const execution = await host.execute('local.file.write', { path: target, content: 'unexpected' }, {
+      ...sessionContext('bot-role'), mode: 'chat', toolContext: { turnRole: 'project_agent' },
+    });
+    expect(execution.result.status).not.toBe('completed');
+    expect(await readFile(target, 'utf8').catch(() => null)).toBeNull();
+  });
   test('uses the desktop ask level by default and updates the runtime permission truth', async () => {
     const workspaceRoot = await createWorkspace();
     const host = createHost(workspaceRoot);
@@ -603,7 +613,7 @@ describe('TUI Runtime host', () => {
     expect(approvalIds).toEqual([first.result.toolCallId ?? '', second.result.toolCallId ?? '']);
   });
 
-  test('allow for session reuses a capability grant only in the matching session', async () => {
+  test('session grants require exact arguments and a matching session', async () => {
     const workspaceRoot = await createWorkspace();
     const host = createHost(workspaceRoot);
     let approvalCount = 0;
@@ -625,9 +635,9 @@ describe('TUI Runtime host', () => {
     unsubscribe();
 
     expect(first.result.status).toBe('completed');
-    expect(second.result.status).toBe('completed');
+    expect(second.result.status).toBe('denied');
     expect(isolated.result.status).toBe('denied');
-    expect(approvalCount).toBe(2);
+    expect(approvalCount).toBe(3);
     expect(await Bun.file(path.join(workspaceRoot, 'session-b.txt')).exists()).toBe(false);
   });
 

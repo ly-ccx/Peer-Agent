@@ -310,6 +310,7 @@ export async function executeProjectedModelTool({
         confirmation: gate.confirmation ?? null,
         scope: {
           kind: 'goal-confirmation',
+          authorizedCapabilityId: projection.call.capabilityId,
           confirmationKind,
           tool: name,
           workspacePath: cwd,

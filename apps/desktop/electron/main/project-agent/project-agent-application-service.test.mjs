@@ -9,6 +9,8 @@ import { createConversationStore } from '../../../../../packages/conversation-st
 import { createBotLifecycle } from '../../../../../packages/runtime-node/src/project-agent/bot-lifecycle.mjs';
 import { createInputQueue } from '../../../../../packages/runtime-node/src/project-agent/input-queue.mjs';
 import { createProjectRegistry } from '../../../../../packages/runtime-node/src/project-registry.mjs';
+import { createApprovalStore } from '../../../../../packages/runtime-node/src/project-agent/approval-store.mjs';
+import { createImageReadAuthority } from '../../../../../packages/runtime-node/src/project-agent/permission-inheritance.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 
 const METHODS = [
@@ -33,6 +35,22 @@ const METHODS = [
   ['continueHistory', { workspaceId: 'ws-1', conversationId: 'conv-1' }],
   ['startFamiliarize', { workspaceId: 'ws-1' }],
 ];
+
+test('stale image approval persists exact authority before recovery and leaves unrelated requests open', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'stale-image-approval-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const approvals = createApprovalStore({ rootDir: root, compactBytes: 1 });
+  const scope = { capabilityId: 'local.image.read', path: '/outside/screen.png', workspacePath: '/repo',
+    action: 'read_image_for_model', fileIdentity: { dev: 1, ino: 2, size: 3, mtimeMs: 4, ctimeMs: 5 } };
+  approvals.append({ approvalId: 'image', workspaceId: 'w', conversationId: 'bot', capabilityId: 'local.image.read', imageReadScope: scope, state: 'stale' });
+  approvals.append({ approvalId: 'write', workspaceId: 'w', conversationId: 'bot', capabilityId: 'local.file.write', state: 'open' });
+  const service = createProjectAgentApplicationService({ enabled: () => true, approvals,
+    rememberGrant() { assert.ok(createImageReadAuthority({ approvalStore: approvals }).match({ principal: { workspaceId: 'w', conversationId: 'bot' }, scope, toolCallId: 'resume' })); },
+    directory: { list: () => [] }, schedule: () => 1 });
+  assert.equal((await service.decideApproval({ workspaceId: 'w', approvalId: 'image', decision: 'approve', duration: 'task' })).ok, true);
+  assert.equal(approvals.list().find(row => row.approvalId === 'write').state, 'open');
+  assert.ok(createImageReadAuthority({ approvalStore: createApprovalStore({ rootDir: root }) }).match({ principal: { workspaceId: 'w', conversationId: 'bot' }, scope, toolCallId: 'restart' }));
+});
 
 test('completion review dispatch is local, workspace scoped, and failures refresh obsolete cards', async () => {
   const calls = [], events = [], scheduled = [];

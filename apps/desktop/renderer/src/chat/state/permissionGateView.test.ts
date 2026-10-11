@@ -77,3 +77,11 @@ test('buildPermissionGateView renders Goal high-risk actions as a dedicated conf
   assert.equal(view.preview, 'node build.js');
   assert.equal(view.denyLabel, '拒绝执行');
 });
+
+test('image approval states its model transfer and exact bounded scope', () => {
+  const view = buildPermissionGateView({ ...baseCall, capabilityId: 'local.image.read', arguments: { path: '/outside/screen.png' } }, 'zh-CN');
+  assert.match(view.capabilityLabel, /当前模型/);
+  assert.equal(view.preview, '/outside/screen.png');
+  assert.equal(view.allowLabel, '仅这一次');
+  assert.match(view.allowAlwaysHint ?? '', /仅此图片.*30 分钟/);
+});

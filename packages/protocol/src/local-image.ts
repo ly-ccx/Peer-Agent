@@ -24,6 +24,16 @@ export interface LocalImagePermissionScope {
   path: string;
   workspacePath: string | null;
   action: 'read_image_for_model';
+  fileIdentity?: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number };
+}
+/** Local host-issued exact-image read authority; no pixels are persisted. */
+export interface ImageReadGrant {
+  schemaVersion: 1;
+  grantId: string;
+  workspaceId: string | null;
+  conversationId: string;
+  expiresAt: number;
+  scope: LocalImagePermissionScope;
 }
 /** Concrete image grant; legacy grant scopes remain unchanged. */
 export interface LocalImagePermissionGrant extends PermissionGrant {

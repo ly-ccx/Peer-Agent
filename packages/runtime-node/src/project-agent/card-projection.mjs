@@ -117,7 +117,7 @@ function isPlanApproval(approval) {
 function approvalCards(facts) {
   const cards = [];
   for (const approval of asList(facts.approvals)) {
-    if (isPlanApproval(approval)) continue;
+    if (isPlanApproval(approval) || approval.kind === 'image_read_grant') continue;
     const approvalId = boundedId(approval?.approvalId, ID_MAX);
     if (!approvalId) continue;
     const state = typeof approval.state === 'string' ? approval.state : 'open';
@@ -130,7 +130,7 @@ function approvalCards(facts) {
       content: approvalContent(approval),
       factResolved: closed,
       factState: closed ? state : '',
-      actions: closed ? [] : approvalActions(approvalId, state),
+      actions: closed ? [] : approvalActions(approvalId, state, approval.capabilityId),
       refs: approvalRefs(approval, approvalId),
     }));
   }
@@ -164,6 +164,7 @@ function planApprovalCards(facts) {
 }
 
 function approvalContent(approval) {
+  if (approval.capabilityId === 'local.image.read' && approval.imageReadScope?.path) return clip(approval.imageReadScope.path, '图片');
   const summary = clip(approval.summary, '需要你批准');
   const extra = [approval.capabilityId, approval.riskLevel, approval.taskName]
     .map((item) => boundedId(item, ID_MAX))
@@ -172,13 +173,13 @@ function approvalContent(approval) {
   return clip(`${summary} · ${extra.join(' · ')}`, summary);
 }
 
-function approvalActions(approvalId, state) {
-  if (state === 'stale') {
+function approvalActions(approvalId, state, capabilityId) {
+  if (state === 'stale' && capabilityId !== 'local.image.read') {
     return [action('continue', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'once' })];
   }
   return [
     action('allow', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'once' }),
-    action('allow_task', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'task' }),
+    action('allow_task', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'task', ...(capabilityId === 'local.image.read' ? { capabilityId } : {}) }),
     action('reject', 'project-agent:decide-approval', { approvalId, decision: 'reject', duration: 'denied' }),
   ];
 }

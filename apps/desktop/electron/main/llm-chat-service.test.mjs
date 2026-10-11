@@ -1803,7 +1803,7 @@ describe('llm chat service tool materialization', () => {
     assert.match(error.payload.error, /provider_stream_error/);
   });
 
-  it('reuses scope permission grants in the main runtime without renderer auto-approval state', async () => {
+  it('reuses exact operation scope in the main runtime while asking for another file write', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const workspaceDir = path.join(tmpDir, 'workspace');
@@ -1838,6 +1838,7 @@ describe('llm chat service tool materialization', () => {
 
     const responses = [
       () => toolStream('tool-1', { path: firstPath, content: 'one\n' }),
+      () => toolStream('tool-1-repeat', { path: firstPath, content: 'one\n' }),
       () => toolStream('tool-2', { path: secondPath, content: 'two\n' }),
       () => textStream('done'),
     ];
@@ -1885,7 +1886,7 @@ describe('llm chat service tool materialization', () => {
       globalThis.fetch = previousFetch;
     }
 
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
     assert.equal(requests[0].capabilityId, 'local.file.write');
     assert.equal(readFileSync(firstPath, 'utf8'), 'one\n');
     assert.equal(readFileSync(secondPath, 'utf8'), 'two\n');

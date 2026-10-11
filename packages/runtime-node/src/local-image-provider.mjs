@@ -74,7 +74,7 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
     capabilityIds: [LOCAL_IMAGE_CAPABILITY],
     /**
      * @param {{ call: import('@peer-agent/protocol').ClientToolCall }} request
-     * @param {{ locale?: string, workspaceRoot?: string, signal?: AbortSignal, toolContext?: { workspacePath?: string, supportsVision?: boolean, accessLevel?: string, turnRole?: string, readableRoots?: readonly string[], permissionPolicy?: { kind?: string } }, requestPermission?: (request: { capabilityId: string, toolName: string, args: Record<string, unknown>, scope: import('@peer-agent/protocol').LocalImagePermissionScope, riskLevel: string, dataLevel: string, reason: string }) => Promise<{ granted: boolean }> }} context
+     * @param {{ locale?: string, workspaceRoot?: string, signal?: AbortSignal, toolContext?: { workspacePath?: string, supportsVision?: boolean, accessLevel?: string, turnRole?: string, readableRoots?: readonly string[], permissionPolicy?: { kind?: string } }, requestPermission?: (request: { capabilityId: string, toolName: string, args: Record<string, unknown>, scope: import('@peer-agent/protocol').LocalImagePermissionScope, riskLevel: string, dataLevel: string, reason: string }) => Promise<{ granted: boolean, grant?: import('@peer-agent/protocol').PermissionGrant, validate?: () => boolean }> }} context
      * @returns {Promise<{ call: import('@peer-agent/protocol').ClientToolCall, grant: import('@peer-agent/protocol').LocalImagePermissionGrant, result: import('@peer-agent/protocol').LocalImageToolResult } | null>}
      */
     async executeCapability({ call }, { locale = 'zh-CN', toolContext = {}, requestPermission, signal, workspaceRoot: executionRoot } = {}) {
@@ -82,6 +82,7 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
       const args = call.arguments || {};
       let granted = false;
       let scope = LOCAL_IMAGE_CAPABILITY;
+      let permissionGrant, validatePermission;
       let handle;
       try {
         checkSignal(signal);
@@ -94,22 +95,25 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
         const before = await stat(path);
         if (!before.isFile()) throw failure('image_regular_file_required');
         if (before.size > maxBytes) throw failure('image_byte_limit_exceeded');
-        scope = { capabilityId: LOCAL_IMAGE_CAPABILITY, path, workspacePath: root || null, action: 'read_image_for_model' };
+        scope = { capabilityId: LOCAL_IMAGE_CAPABILITY, path, workspacePath: root || null, action: 'read_image_for_model',
+          fileIdentity: { dev: before.dev, ino: before.ino, size: before.size, mtimeMs: before.mtimeMs, ctimeMs: before.ctimeMs } };
         const roots = Array.isArray(toolContext.readableRoots) ? toolContext.readableRoots : [root].filter(Boolean);
         const canonicalRoots = await Promise.all(roots.map(r => realpath(r).catch(() => null)));
         granted = canonicalRoots.some(r => r && within(path, r));
         if (!granted) {
-          if (toolContext.accessLevel === 'restricted_local' || toolContext.turnRole === 'project_agent') throw failure('image_outside_read_scope', 'denied');
           const decision = await requestPermission?.({
             capabilityId: LOCAL_IMAGE_CAPABILITY, toolName: 'view_image',
-            args: { path, workspacePath: root || null }, scope,
+            args: { path, workspacePath: root || null, fileIdentity: scope.fileIdentity }, scope,
             riskLevel: 'L1_local_read', dataLevel: 'D2_sensitive',
             reason: 'Read this local image and send its pixels to the current model.',
           });
           granted = decision?.granted === true;
+          permissionGrant = decision?.grant;
+          validatePermission = decision?.validate;
           if (!granted) throw failure('image_permission_denied', 'denied');
         }
         checkSignal(signal);
+        if (validatePermission && !validatePermission()) { granted = false; throw failure('image_permission_revoked', 'denied'); }
         handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
         if (!unchanged(before, await handle.stat())) throw failure('image_changed_during_read');
         const bytes = Buffer.alloc(before.size);
@@ -133,6 +137,7 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
         checkDimensions(dimensions, maxPixels);
         checkSignal(signal);
         const sha256 = createHash('sha256').update(bytes).digest('hex');
+        if (validatePermission && !validatePermission()) { granted = false; throw failure('image_permission_revoked', 'denied'); }
         const metadata = { path, mediaType, width: dimensions.width, height: dimensions.height, byteLength: bytes.length, sha256, artifactRef: `local-image-artifact://${sha256}` };
         const observation = Object.freeze({ ...metadata, kind: 'local_image', dataUrl: `data:${mediaType};base64,${bytes.toString('base64')}` });
         observations.set(observation, call.toolCallId);
@@ -142,7 +147,8 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
           evidence: createEvidenceBundle({ evidenceId: randomUUID(), toolCallId: call.toolCallId, locale, dataLevel: 'D2_sensitive', returnedToCloud: true, summary: `Local image read: ${path} (${dimensions.width} × ${dimensions.height})`, artifactRefs: [metadata.artifactRef], metadata }),
         };
         Object.defineProperty(result, 'modelContext', { value: Object.freeze({ visualObservations: Object.freeze([observation]) }), enumerable: false });
-        return { call, grant: createPermissionGrant({ toolCallId: call.toolCallId, granted, scope }), result };
+        return { call, grant: { ...createPermissionGrant({ toolCallId: call.toolCallId, granted, scope }),
+          ...(permissionGrant ? { ...permissionGrant, toolCallId: call.toolCallId, granted, scope } : {}) }, result };
       } catch (error) {
         const reason = error.reason || (error.code === 'ENOENT' ? 'image_not_found' : 'image_read_failed');
         return { call, grant: createPermissionGrant({ toolCallId: call.toolCallId, granted, scope }), result: createFailedClientToolResult({ call, locale, reason, status: error.status || 'failed', dataLevel: 'D2_sensitive' }) };

@@ -77,8 +77,8 @@ describe('chat permission gate', () => {
       conversationId: 'c1',
     })({
       tool: 'write_file',
-      args: { path: '/outside/two.txt', content: 'two' },
-      filePath: '/outside/two.txt',
+      args: { path: '/outside/one.txt', content: 'one' },
+      filePath: '/outside/one.txt',
       workspacePath: '/workspace',
     });
 
@@ -87,7 +87,7 @@ describe('chat permission gate', () => {
     assert.equal(events.length, 1);
   });
 
-  it('reuses a once-allow for later file writes of the same type', async () => {
+  it('does not reuse allow-once for another file write', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];
     const gate = createChatPermissionGate({ activeStreams });
@@ -115,7 +115,7 @@ describe('chat permission gate', () => {
     });
     assert.equal((await firstPromise).granted, true);
 
-    const second = await gate.createFilePermissionRequester({
+    const secondPromise = gate.createFilePermissionRequester({
       webContents,
       streamId: 's1',
       toolCallId: 'write-once-2',
@@ -127,12 +127,13 @@ describe('chat permission gate', () => {
       workspacePath: '/workspace',
     });
 
-    assert.equal(second.granted, true);
-    assert.equal(second.reason, 'local_user_approved_scope');
-    assert.equal(events.filter((event) => event.channel === 'chat:stream:permission-request').length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 2);
+    const pending = gate.listPendingPermissions().at(-1).call;
+    gate.settlePermissionRequest(pending.toolCallId, { granted: false, duration: 'denied' });
+    assert.equal((await secondPromise).granted, false);
   });
 
-  it('scopes shell always-allow by normalized command family', async () => {
+  it('scopes shell repeat approval by exact arguments', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];
     const gate = createChatPermissionGate({ activeStreams });
@@ -172,7 +173,7 @@ describe('chat permission gate', () => {
     const second = await gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'shell-2' })({
       call: { toolCallId: 'local-shell-2' },
       classification: {
-        command: 'pnpm test -- bar',
+        command: 'pnpm test -- foo',
         cwd: '/workspace',
         category: 'process-control',
         riskLevel: 'L4_privileged',
@@ -187,7 +188,7 @@ describe('chat permission gate', () => {
     assert.equal(events.length, 1);
   });
 
-  it('reuses a once-allow for the same shell command family instead of asking again', async () => {
+  it('does not reuse allow-once for another shell command', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];
     const gate = createChatPermissionGate({ activeStreams });
@@ -222,7 +223,7 @@ describe('chat permission gate', () => {
     });
     assert.equal((await firstPromise).granted, true);
 
-    const second = await gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'echo-2' })({
+    const secondPromise = gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'echo-2' })({
       call: { toolCallId: 'local-echo-2' },
       classification: {
         command: 'echo two',
@@ -235,34 +236,13 @@ describe('chat permission gate', () => {
       ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
     });
 
-    assert.equal(second.granted, true);
-    assert.equal(second.reason, 'local_user_approved_scope');
-    assert.equal(events.filter((event) => event.channel === 'chat:stream:permission-request').length, 1);
-
-    const other = gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'git-1' })({
-      call: { toolCallId: 'local-git-1' },
-      classification: {
-        command: 'git status',
-        cwd: '/workspace',
-        category: 'read',
-        riskLevel: 'L1_local_read',
-        dataLevel: 'D0_public',
-        reason: 'git_status',
-      },
-      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
-    });
-    assert.equal(events.filter((event) => event.channel === 'chat:stream:permission-request').length, 2);
-    gate.settlePermissionRequest(events.at(-1).payload.call.toolCallId, {
-      grantId: 'g-git-once',
-      toolCallId: events.at(-1).payload.call.toolCallId,
-      granted: true,
-      duration: 'once',
-      decidedAt: new Date().toISOString(),
-    });
-    assert.equal((await other).granted, true);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:permission-request').length, 2);
+    const pending = gate.listPendingPermissions().at(-1).call;
+    gate.settlePermissionRequest(pending.toolCallId, { granted: false, duration: 'denied' });
+    assert.equal((await secondPromise).granted, false);
   });
 
-  it('settles queued same-type shell asks together after one allow', async () => {
+  it('settles identical queued shell asks after explicit scope approval', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];
     const gate = createChatPermissionGate({ activeStreams });
@@ -289,7 +269,7 @@ describe('chat permission gate', () => {
     const secondPromise = gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'echo-queue-2' })({
       call: { toolCallId: 'local-echo-queue-2' },
       classification: {
-        command: 'echo two',
+        command: 'echo one',
         cwd: '/workspace',
         category: 'read',
         riskLevel: 'L1_local_read',
@@ -305,7 +285,7 @@ describe('chat permission gate', () => {
       grantId: 'g-echo-queue',
       toolCallId: requestEvents[0].payload.call.toolCallId,
       granted: true,
-      duration: 'once',
+      duration: 'scope',
       decidedAt: new Date().toISOString(),
     });
 
@@ -486,6 +466,7 @@ describe('chat permission gate', () => {
       workspacePath: '/workspace',
     })({
       capabilityId: 'goal.high_risk.action',
+      scope: { kind: 'goal-confirmation', authorizedCapabilityId: 'local.desktop.preview' },
       toolName: 'desktop_preview',
       args: { action: 'observe', scene: 'background-runtime' },
       riskLevel: 'L4_privileged',
@@ -507,10 +488,11 @@ describe('chat permission gate', () => {
       toolCallId: 'tc_preview',
       conversationId: 'c1',
       workspacePath: '/workspace',
+      sourceArguments: { action: 'observe', scene: 'background-runtime' },
     })({
       capabilityId: 'local.desktop.preview',
       toolName: 'desktop_preview',
-      args: { action: 'observe', scene: 'background-runtime' },
+      args: { action: 'observe', scene: 'background-runtime', canonicalizedByProvider: true },
       riskLevel: 'L4_privileged',
     });
 

@@ -11,6 +11,8 @@ import {
   cleanDisplayName,
   collectConversationSearchDocuments,
   createConversationSearchIndex,
+  createImageReadAuthority,
+  resolvePermissionPrincipal,
   projectClassicGoals,
   projectHistory,
 } from '@peer-agent/runtime-node';
@@ -93,6 +95,7 @@ export function createProjectAgentApplicationService({
   requestTakeover = null,
   diagnostics = null,
 } = {}) {
+  const imageAuthority = createImageReadAuthority({ approvalStore: approvals });
   let corpusToken = null;
   const retrying = new Map();
   const pendingChanged = new Set();
@@ -394,6 +397,14 @@ export function createProjectAgentApplicationService({
     const plan = isPlanApproval(current);
     const decisionRecord = { ...current, state: decision,
       decidedAt: typeof now === 'function' ? now() : now, decidedBy: 'local_ui' };
+    if (decision === 'approved' && duration === 'task' && current.capabilityId === 'local.image.read') {
+      try {
+        const principal = resolvePermissionPrincipal({ ...current, goalPlanStore });
+        if (!imageAuthority.remember({ principal, scope: current.imageReadScope, record: decisionRecord })) {
+          return { ok: false, code: 'IMAGE_AUTHORIZATION_UNAVAILABLE' };
+        }
+      } catch { return { ok: false, code: 'IMAGE_AUTHORIZATION_UNAVAILABLE' }; }
+    }
     let saved = null;
     if (plan && decision === 'approved') {
       saved = approvals.append(decisionRecord);

@@ -65,6 +65,7 @@ import {
   createProjectRegistry,
   readSnapshots,
   resolveRoleRoute,
+  resolvePermissionPrincipal,
 } from '@peer-agent/runtime-node';
 import { liveMemoryGate } from './project-agent/memory-gate-port.mjs';
 
@@ -1140,6 +1141,12 @@ export function createLlmChatService({
       }
       return { workspaceId, planId, conversationId: conversationId ?? null };
     },
+    resolvePermissionPrincipal({ streamId, conversationId, workspacePath }) {
+      const profile = activeStreams.get(streamId)?.turnProfile;
+      approvalRegistry ??= createProjectRegistry();
+      return resolvePermissionPrincipal({ workspaceId: profile?.workspaceId ?? approvalRegistry.findByPath(workspacePath)?.workspaceId,
+        conversationId, planId: profile?.planId, sessionId: profile?.sessionId, goalPlanStore });
+    },
     settleNotifier: typeof broadcast === 'function'
       ? (streamId, toolCallIds) => {
         try {
@@ -1652,9 +1659,8 @@ export function createLlmChatService({
       });
       streamRecord.runtimeWebContents = accumulatingWebContents;
 
-      const toolContext = getConversationToolContext({ conversationId, workspacePath: runWorkspacePath });
-      // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
-      // 执行层判定准入。见 Goal 模式运行时闸门设计。
+      const toolContext = { ...getConversationToolContext({ conversationId, workspacePath: runWorkspacePath }) };
+      // 会话只共享工具缓存；身份、权限、目标路径与回调在每个回合独立，避免并发串写。
       toolContext.mode = runtimeMode;
       toolContext.turnRole = profile?.role ?? null;
       toolContext.turnProfile = profile;
@@ -1669,7 +1675,7 @@ export function createLlmChatService({
       toolContext.conversationId = typeof conversationId === 'string' && conversationId.trim()
         ? conversationId.trim()
         : null;
-      // 复用的会话 toolContext 必须按回合覆写。项目代理固定只读不询问；其他回合清空。
+      // 项目代理固定只读，范围外图片走正式授权；其他回合使用访问策略。
       toolContext.accessLevel = projectAgentTurn ? 'restricted_local' : null;
       toolContext.workspacePath = runWorkspacePath;
       toolContext.originWorkspacePath = goalWorkspaceBinding?.originWorkspacePath ?? conversationWorkspacePath;
