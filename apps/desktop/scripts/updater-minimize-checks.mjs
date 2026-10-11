@@ -34,16 +34,34 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
         window.rcUpdateFrames = null;
         node.addEventListener('click', () => {
           const frames = [], started = performance.now();
-          const sample = () => {
+          const sampleFrame = event => {
             const box = panel.isConnected ? panel.getBoundingClientRect() : null;
             const bar = document.querySelector('.bot-column-footer .sidebar-version-progress');
             const target = bar?.getBoundingClientRect();
             frames.push({ time: performance.now() - started, connected: panel.isConnected,
+              event,
               panel: box && { left: box.left, top: box.top, width: box.width, height: box.height },
               target: target && { left: target.left, top: target.top, width: target.width, height: target.height },
-              progress: bar?.getAttribute('aria-valuenow'), animation: panel.isConnected && panel.getAnimations().some(animation => animation.playState === 'running') });
+              progress: bar?.getAttribute('aria-valuenow'), animation: panel.isConnected && panel.getAnimations().some(animation => animation.playState === 'running'),
+              animations: panel.getAnimations().map(animation => ({ name: animation.animationName,
+                state: animation.playState, pending: animation.pending, currentTime: animation.currentTime,
+                endTime: animation.effect?.getComputedTiming().endTime })) });
+          };
+          // React removes the panel in its animationend handler. A RAF observer
+          // can see a near-final frame followed by a detached node and miss the
+          // actual endpoint entirely. Capture before React's bubble handler;
+          // this keeps the real geometry assertion, including premature exits.
+          const completed = event => {
+            if (event.target === panel && event.animationName === 'motion-exit-to-target') sampleFrame('animationend');
+          };
+          panel.addEventListener('animationend', completed, { capture: true });
+          const sample = () => {
+            sampleFrame('raf');
             if (performance.now() - started < 850) requestAnimationFrame(sample);
-            else window.rcUpdateFrames = frames;
+            else {
+              panel.removeEventListener('animationend', completed, { capture: true });
+              window.rcUpdateFrames = frames;
+            }
           };
           sample();
         }, { once: true });
