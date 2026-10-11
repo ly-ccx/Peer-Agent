@@ -390,6 +390,10 @@ async function settingsFirstScreen(page) {
 
 async function settleColorTransitions(page) {
   // Wait for this control's real theme colors; unrelated offscreen transitions can be paused.
+  // Earlier disclosure/scroll actions can leave the pointer on this switch.
+  // Compare the idle theme colors with keyboard focus intact, rather than its hover fill.
+  await page.mouse.move(10, 10);
+  assert.equal(await page.locator('#bot-auto-handoff').evaluate(node => node.matches(':hover')), false);
   await page.waitForFunction(() => {
     const node = document.querySelector('#bot-auto-handoff'), style = getComputedStyle(node);
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
