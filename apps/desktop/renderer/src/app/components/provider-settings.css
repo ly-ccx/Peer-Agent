@@ -5,20 +5,20 @@
   display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 8px;
 }
 .settings-content .settings-provider-page .llm-add-channel-btn {
-  flex: none; min-height: 34px; padding: 7px 12px; gap: 8px; border-radius: 8px; font-size: .8125rem;
+  flex: none; min-height: 34px; padding: 7px 12px; gap: 8px; border-radius: var(--ui-radius-control); font-size: .8125rem;
 }
 
 /* ── Card group shell, shared by the connected list and fallback vision ── */
 .settings-content .settings-provider-page .llm-connected-group {
   padding: 0;
-  border: 1px solid var(--chrome-hairline); border-radius: var(--surface-radius);
+  border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel);
   background: var(--paper-sheet); box-shadow: none;
 }
 .settings-content .settings-provider-page .llm-connected-band {
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
   padding: 12px var(--settings-group-inset);
   background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline);
-  border-radius: calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px) 0 0;
+  border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0;
 }
 .settings-content .settings-provider-page .llm-connected-band h2 {
   margin: 0; color: var(--graphite-base); font-size: .9375rem; font-weight: 500; line-height: 1.4;
@@ -41,10 +41,10 @@
 .settings-content .settings-provider-page .llm-provider-group:is(:has(.llm-group-toggle:hover), :has(.llm-group-toggle[aria-expanded='true'])) > .llm-group-header { background: var(--paper-hover); }
 /* Keep the last closed row's highlight inside the card's rounded bottom corners. */
 .settings-content .settings-provider-page .llm-provider-list > .llm-provider-group:last-child:not(:has(.llm-group-toggle[aria-expanded='true'])) > .llm-group-header {
-  border-radius: 0 0 calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px);
+  border-radius: 0 0 var(--ui-radius-panel) var(--ui-radius-panel);
 }
 .settings-content .settings-provider-page .llm-group-toggle { flex: 1; align-self: stretch; gap: 18px; text-align: left; }
-.settings-content .settings-provider-page .llm-group-toggle > .llm-brand-icon { width: 32px; height: 32px; border: 0; border-radius: 8px; box-shadow: none; }
+.settings-content .settings-provider-page .llm-group-toggle > .llm-brand-icon { width: 32px; height: 32px; border: 0; border-radius: var(--ui-radius-control); box-shadow: none; }
 .settings-content .settings-provider-page .llm-service-copy { display: grid; gap: 3px; min-width: 0; }
 .settings-content .settings-provider-page .llm-service-copy strong {
   font-size: .875rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere;
@@ -64,7 +64,7 @@
 .settings-content .settings-provider-page .llm-group-actions { margin: 0; }
 .settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger {
   display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0;
-  border-radius: 8px; background: transparent; color: var(--graphite-soft);
+  border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-soft);
 }
 .settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger:hover { background: var(--chrome-hover); color: var(--graphite-base); }
 
@@ -74,7 +74,7 @@
 }
 .settings-content .settings-provider-page .llm-service-connection-details {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
-  padding: 10px 14px; border-radius: var(--radius-lg); background: var(--chrome-sunken);
+  padding: 10px 14px; border-radius: var(--ui-radius-control); background: var(--chrome-sunken);
   font-size: .75rem; color: var(--graphite-soft); overflow-wrap: anywhere;
 }
 .llm-settings-disclosure { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden;
@@ -93,7 +93,7 @@
 }
 .llm-fallback-vision-toggle:hover { background: var(--paper-hover); }
 .settings-content .settings-provider-page .llm-fallback-vision:not(:has(.llm-settings-disclosure[data-expanded='true'])) .llm-fallback-vision-toggle {
-  border-radius: 0 0 calc(var(--surface-radius) - 1px) calc(var(--surface-radius) - 1px);
+  border-radius: 0 0 var(--ui-radius-panel) var(--ui-radius-panel);
 }
 .settings-content .settings-provider-page .llm-fallback-vision-copy { flex: 1; min-width: 0; }
 .settings-content .settings-provider-page .llm-fallback-vision-copy strong { font-size: .875rem; font-weight: 600; line-height: 1.4; }
