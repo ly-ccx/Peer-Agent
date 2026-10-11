@@ -19,7 +19,7 @@ export async function checkFallbackVisionLayout({ page, until, report, captureDi
     for (const appearance of ['dark', 'light']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
       await row.scrollIntoViewIfNeeded();
-      assert.equal(await row.locator('strong').textContent(), '图像识别设置');
+      assert.equal(await row.locator('strong').textContent(), '备用视觉模型');
       assert.equal(await row.locator('.llm-fallback-vision-help').textContent(), '主模型无法识别图片时使用。');
       const bounds = await toggle.evaluate(node => {
         const copy = node.querySelector('.llm-fallback-vision-copy');

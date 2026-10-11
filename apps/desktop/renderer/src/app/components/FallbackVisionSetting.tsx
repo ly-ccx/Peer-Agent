@@ -17,15 +17,19 @@ export function FallbackVisionSetting({ i18n, value, groups, saving, onChange }:
   const group = groups.find(item => item.items.some(model => model.id === value));
   const model = group?.items.find(item => item.id === value);
   const title = i18n.t('settings.fallbackVision');
+  const rowLabel = i18n.locale === 'zh-CN' ? '备用视觉模型' : 'Fallback vision model';
   const summary = value
     ? model?.label ?? (i18n.locale === 'zh-CN' ? '模型不可用' : 'Model unavailable')
     : i18n.t('settings.fallbackVision.none');
   return (
-    <section className="llm-fallback-vision" aria-label={title}>
+    <section className="llm-connected-group llm-fallback-vision" aria-label={title}>
+      <header className="llm-connected-band">
+        <h2>{title}</h2>
+      </header>
       <button type="button" className="llm-fallback-vision-toggle" aria-expanded={expanded} aria-controls={contentId}
         onClick={() => setExpanded(open => !open)}>
         <span className="llm-fallback-vision-copy">
-          <strong>{title}</strong>
+          <strong>{rowLabel}</strong>
           <span className="llm-fallback-vision-help">{i18n.t('settings.fallbackVision.description')}</span>
         </span>
         <span className="llm-fallback-vision-summary" aria-live="polite">
