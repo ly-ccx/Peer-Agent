@@ -9,9 +9,9 @@ import { executeProjectedModelTool } from './projected-tool-executor.mjs';
 import {
   buildProjectAgentModeDenial,
   evaluateProjectAgentModeGate,
-  restrictProjectAgentPermission,
 } from './project-agent-mode-gate.mjs';
 import { createMemoryStore, createSnapshot } from '@peer-agent/runtime-node';
+import { createChatPermissionGate } from './permission-gate.mjs';
 import { buildRuntimeTools, createLlmChatService, projectTurnSystemContext } from '../llm-chat-service.mjs';
 import { createToolRegistry } from '../tools/tool-registry.mjs';
 import {
@@ -117,15 +117,17 @@ describe('project agent mode gate', () => {
     const dir = tempDir();
     const outside = tempDir();
     writeFileSync(path.join(outside, 'secret.txt'), 'private');
-    let asked = 0;
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams: new Map([['s', { approver: 'none' }]]) });
     const registry = createRuntimeToolRegistry();
     const result = await executeProjectedModelTool({
       name: 'search_files', args: { path: outside, query: 'private' }, workspacePath: dir,
       toolContext: { mode: 'project_agent', conversationId: 'agent', readFiles: new Map() },
       registry, runtimeProjection: createRuntimeProjectionFromToolRegistry(registry, { mode: 'project_agent' }),
-      toolCallId: 'outside-search', requestPermission: async () => { asked++; throw new Error('must not ask'); },
+      toolCallId: 'outside-search', requestPermission: gate.createFilePermissionRequester({ streamId: 's',
+        toolCallId: 'outside-search', webContents: { approver: 'none', send: (...event) => events.push(event) } }),
     });
-    assert.equal(asked, 0);
+    assert.deepEqual(events, []);
     assert.equal(result.success, false);
     assert.equal(result.execution.call.capabilityId, 'local.file.search');
     assert.equal(result.execution.grant.granted, false);
@@ -133,11 +135,14 @@ describe('project agent mode gate', () => {
     assert.ok(result.execution.result.evidence);
   });
 
-  it('denies file read/list/search scope requests before the ordinary permission requester', async () => {
-    const wrapped = restrictProjectAgentPermission(() => { throw new Error('invisible approver'); });
+  it('lets the host Full policy authorize admitted outside file read/list/search requests', async () => {
+    const gate = createChatPermissionGate({ activeStreams: new Map([['s', { approver: 'none',
+      turnProfile: { role: 'project_agent' } }]]), accessLevel: 'full_local' });
     for (const tool of ['read_file', 'list_files', 'search_files']) {
-      assert.deepEqual(await wrapped({ tool, filePath: '/outside', workspacePath: '/project' }),
-        { granted: false, reason: 'project_agent_capability_denied' });
+      const result = await gate.createFilePermissionRequester({ streamId: 's', toolCallId: tool,
+        webContents: { approver: 'none' } })({ tool, filePath: '/outside', workspacePath: '/project' });
+      assert.equal(result.granted, true);
+      assert.equal(result.reason, 'local_access_level_full');
     }
   });
 
@@ -204,18 +209,21 @@ describe('project agent mode gate', () => {
     assert.equal(chatNames.includes('memory_search'), false);
   });
 
-  it('does not keep a global full or session auto-grant on a project agent turn', async () => {
-    const wrapped = restrictProjectAgentPermission(async () => ({
-      granted: true,
-      reason: 'local_access_level_full',
-      grant: { grantId: 'g1', granted: true, duration: 'once' },
-    }));
-    const decision = await wrapped({ tool: 'read_file' });
-    assert.equal(decision.granted, false);
-    assert.equal(decision.reason, 'project_agent_capability_denied');
-    assert.equal(decision.grant.granted, false);
-    const asked = restrictProjectAgentPermission(async () => ({ granted: true, reason: 'local_user_approved_scope' }));
-    assert.equal((await asked({})).granted, true);
+  it('preserves a Full host grant for a projected outside read while keeping the role read-only', async () => {
+    const dir = tempDir(), outside = tempDir(), file = path.join(outside, 'full.txt');
+    writeFileSync(file, 'full read result');
+    const registry = createRuntimeToolRegistry();
+    const gate = createChatPermissionGate({ activeStreams: new Map([['s', { approver: 'none',
+      turnProfile: { role: 'project_agent' } }]]), accessLevel: 'full_local' });
+    const result = await executeProjectedModelTool({ name: 'read_file', args: { path: file }, workspacePath: dir,
+      toolContext: { mode: 'project_agent', conversationId: 'agent', readFiles: new Map() }, registry,
+      runtimeProjection: createRuntimeProjectionFromToolRegistry(registry, { mode: 'project_agent' }),
+      toolCallId: 'full-read', requestPermission: gate.createFilePermissionRequester({ streamId: 's', toolCallId: 'full-read',
+        webContents: { approver: 'none' } }) });
+    assert.equal(result.success, true);
+    assert.equal(result.execution.grant.granted, true);
+    assert.match(result.output, /full read result/);
+    assert.equal(evaluateProjectAgentModeGate({ mode: 'project_agent', capabilityId: 'local.file.write' }).allowed, false);
   });
 
   it('accepts project_agent on the existing turnProfile without a new sendMessage parameter', async () => {

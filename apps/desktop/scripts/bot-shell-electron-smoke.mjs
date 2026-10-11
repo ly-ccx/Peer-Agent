@@ -1,4 +1,5 @@
 import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
+import { checkBotFullAccessImages } from './bot-full-access-image-checks.mjs';
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 import { seedUiAutomation, seedClassicUiFixture, checkSharedUiConventions } from './shared-ui-convention-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
@@ -438,6 +439,7 @@ try {
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
   if (process.argv.includes('--image-permission-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
   } else if (sharedUiOnly) {
     await page.locator('.bot-app-menu-button').click();
@@ -675,6 +677,7 @@ try {
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
+    await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });

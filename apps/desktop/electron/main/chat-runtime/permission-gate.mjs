@@ -512,6 +512,18 @@ export function createChatPermissionGate({
         resolvePermission(policyDecision);
         return;
       }
+      // Full is the user's current host policy. Roles still pass their own
+      // capability gates; they do not turn an already authorized read into
+      // another per-file question or depend on an older scoped grant's TTL.
+      if (accessLevel === 'full_local') {
+        const epoch = policyEpoch;
+        resolvePermission({
+          ...createAutoAccessGrant({ toolCallId: call.toolCallId,
+            scope: request.scope ?? call.capabilityId, reason: 'local_access_level_full' }),
+          validate: () => accessLevel === 'full_local' && policyEpoch === epoch,
+        });
+        return;
+      }
       if (call.capabilityId === 'local.image.read') {
         const inherited = imageAuthority.match({ principal: principalFor({ streamId, conversationId, workspacePath }),
           scope: request.scope, toolCallId: call.toolCallId });
@@ -526,15 +538,6 @@ export function createChatPermissionGate({
           grant: createAutoScopeGrant({ toolCallId: call.toolCallId, scope: scopedGrant.scope || call.capabilityId }),
           reason: 'local_user_approved_scope',
         });
-        return;
-      }
-      const profile = activeStreams.get(streamId)?.turnProfile;
-      if (accessLevel === 'full_local' && profile?.role !== 'project_agent' && profile?.agentKind !== 'verifier') {
-        resolvePermission(createAutoAccessGrant({
-          toolCallId: call.toolCallId,
-          scope: call.capabilityId,
-          reason: 'local_access_level_full',
-        }));
         return;
       }
       const sourceGrant = reuseApprovedSourceToolCall(call, { streamId, conversationId, workspacePath, sourceArguments });

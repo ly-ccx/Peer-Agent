@@ -22,12 +22,13 @@ export async function withImagePermissionFixture(service, { mainRoot, imageRoot,
     abort(id) { running.get(id)?.abort(); originalAbort(id); },
     async sendMessage(input) {
       const message = input.messages?.findLast(row => row.role === 'user')?.content;
-      const scenario = typeof message === 'string' ? /RC_IMAGE_(ALLOW|TASK|DENY|CANCEL|STOP|TIMEOUT)/.exec(message)?.[1] : null;
+      const scenario = typeof message === 'string' ? /RC_IMAGE_(FULL|ALLOW|TASK|DENY|CANCEL|STOP|TIMEOUT)/.exec(message)?.[1] : null;
       if (!scenario || input.turnProfile?.role !== 'project_agent') return original(input);
       assert.ok(approvalStore, 'production host must configure its own ApprovalStore');
       const controller = new AbortController(); running.set(input.streamId, controller);
       const streams = new Map([[input.streamId, { turnProfile: input.turnProfile, runtimeTurn: { signal: controller.signal } }]]);
       const gate = createChatPermissionGate({ activeStreams: streams, approvalStore,
+        accessLevel: scenario === 'FULL' ? 'full_local' : 'ask_before_local',
         permissionWaitMs: scenario === 'TIMEOUT' ? 2500 : 60_000,
         resolveApprovalScope: () => ({ workspaceId: input.turnProfile.workspaceId, conversationId: input.conversationId }) });
       const image = path.join(imageRoot, `permission-check-${scenario.toLowerCase()}.png`);
@@ -49,10 +50,28 @@ export async function withImagePermissionFixture(service, { mainRoot, imageRoot,
       let execution;
       context.onToolExecution = value => { execution = value; };
       try {
-        const read = toolCallId => executeModelToolCall({ name: 'view_image', rawArguments: JSON.stringify({ path: image }),
+        const read = (toolCallId, imagePath = image) => executeModelToolCall({ name: 'view_image', rawArguments: JSON.stringify({ path: imagePath }),
           toolCallId, workspacePath: input.workspacePath, toolContext: context, permissionGate: gate,
           registry, runtimeProjection: projection,
           webContents: observedSink, streamId: input.streamId, conversationId: input.conversationId, signal: controller.signal });
+        if (scenario === 'FULL') {
+          for (let index = 0; index < 4; index++) {
+            const imagePath = path.join(imageRoot, `full-${index}.png`);
+            writeFileSync(imagePath, nativeImage.createFromBitmap(Buffer.from([30 + index * 40, 80 + index * 20, 160, 255]), { width: 1, height: 1 }).toPNG());
+            const value = await read(`${id}-${index}`, imagePath);
+            const pixels = value.visualObservations?.[0];
+            assert.ok(pixels, 'Full must read each different outside image without prompting');
+            assert.equal(pixels.sha256, createHash('sha256').update(readFileSync(imagePath)).digest('hex'));
+            assert.equal(execution.result.status, 'success');
+            assert.ok(execution.grant.granted && execution.result.evidence);
+            assert.equal(gate.listPendingPermissions().length, 0);
+            save({ scenario, stage: 'full-read', toolCallId: `${id}-${index}`, image: imagePath,
+              sha256: pixels.sha256, pixels: true, evidence: true, grantId: execution.grant.grantId });
+          }
+          save({ scenario, stage: 'finished', streamId: input.streamId, toolCallId: id, images: 4,
+            status: 'success', pixels: true, evidence: true, pending: gate.listPendingPermissions().length });
+          return { terminalStatus: 'done', text: '四张图片已经连续读取，我会接着核对结果。' };
+        }
         const result = await read(id);
         const pixels = result.visualObservations?.[0];
         if (pixels) {

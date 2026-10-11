@@ -16,7 +16,6 @@ import {
   attachProjectAgentDenialEvidence,
   buildProjectAgentModeDenial,
   evaluateProjectAgentModeGate,
-  restrictProjectAgentPermission,
 } from './project-agent-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
 import { getDesktopPreviewService } from '../runtime-gateway/desktop-preview-service.mjs';
@@ -381,9 +380,7 @@ export async function executeProjectedModelTool({
   });
   const execution = await host.execute({ call: projection.call, conversationId }, {
     toolContext: effectiveToolContext,
-    requestPermission: projectAgentGate.applies
-      ? restrictProjectAgentPermission(requestPermission)
-      : requestPermission,
+    requestPermission,
     signal,
     locale,
   });
