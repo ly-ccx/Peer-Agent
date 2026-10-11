@@ -82,9 +82,37 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
     await emitUpdaterEvent({ type: 'update-available', version: '0.1.0-rc.99' });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.locator('.bot-column-footer .sidebar-version-text-btn').click();
-    await page.locator('.updater-modal').getByRole('button', { name: '更新', exact: true }).click();
+    const completionButton = page.locator('.updater-modal').getByRole('button', { name: '更新', exact: true });
+    // Observe the transient exit before dispatch. Inspector/trace latency can
+    // outlast the animation, so a post-click DOM query cannot prove retention.
+    await completionButton.evaluate(node => {
+      const panel = node.closest('.updater-modal');
+      const changelog = panel.querySelector('.updater-modal-changelog');
+      if (!changelog) throw Error('update content must exist before the exit starts');
+      const initialContent = changelog.textContent;
+      window.rcUpdateCompletionFrames = null;
+      node.addEventListener('click', () => {
+        const frames = [], started = performance.now();
+        const sample = () => {
+          frames.push({ time: performance.now() - started, connected: panel.isConnected,
+            minimizing: panel.classList.contains('is-minimizing'),
+            downloaded: Boolean(document.querySelector('.bot-column-footer .sidebar-version-install-btn')),
+            contentRetained: panel.querySelector('.updater-modal-changelog')?.textContent === initialContent });
+          if (performance.now() - started < 650) requestAnimationFrame(sample);
+          else window.rcUpdateCompletionFrames = frames;
+        };
+        sample();
+      }, { once: true });
+    });
+    await completionButton.click();
     await emitUpdaterEvent({ type: 'update-downloaded', version: '0.1.0-rc.99' });
-    assert.equal(await page.locator('.updater-modal.is-minimizing .updater-modal-changelog').count(), 1);
+    const completionFrames = await page.waitForFunction(() => window.rcUpdateCompletionFrames).then(handle => handle.jsonValue());
+    report.updaterMinimize.completionFrames = completionFrames;
+    const exitingFrames = completionFrames.filter(frame => frame.connected && frame.minimizing);
+    assert.ok(exitingFrames.length > 0, 'fast completion must preserve an observable outgoing modal');
+    assert.ok(exitingFrames.some(frame => frame.downloaded), 'completion actually arrives while the outgoing modal is still mounted');
+    assert.ok(exitingFrames.every(frame => frame.contentRetained), 'outgoing modal retains its captured content until exit finishes');
+    assert.equal(completionFrames.at(-1).connected, false, 'fast completion still closes the modal');
     await page.locator('.updater-modal').waitFor({ state: 'detached' });
     await page.locator('.sidebar-version-install-btn').waitFor();
     assert.equal(await app.evaluate(() => globalThis.rcUpdateDownloadCalls), 4, 'each update click dispatches once');

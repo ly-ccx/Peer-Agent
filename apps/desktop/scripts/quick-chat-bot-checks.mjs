@@ -13,13 +13,13 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
     Menu.prototype.popup = function (options) { globalThis.rcQuickMenu = this; globalThis.rcQuickMenuOptions = options; };
   });
   const selectNative = async (trigger, label) => {
-    await app.evaluate(() => { delete globalThis.rcQuickMenu; });
+    await app.evaluate(() => { delete globalThis.rcQuickMenu; return true; });
     await trigger.focus(); await trigger.press('Enter');
     await until(() => app.evaluate(() => Boolean(globalThis.rcQuickMenu)), Boolean);
     await app.evaluate((_electron, label) => {
       const item = globalThis.rcQuickMenu.items.find(item => item.label === label);
       if (!item) throw Error('Quick Chat native choice missing: ' + label);
-      item.click(); globalThis.rcQuickMenuOptions.callback();
+      item.click(); globalThis.rcQuickMenuOptions.callback(); return true;
     }, label);
   };
   const selectBot = async index => {

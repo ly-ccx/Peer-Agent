@@ -132,15 +132,15 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     frameTimes.push({ file, timestamp: frame.metadata.timestamp });
     void cast.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
   });
-  await cast.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
-  samples.outerOpen = await recordDisclosure(background, true);
+  await cast.send('Page.startScreencast', { format: 'png', everyNthFrame: 2 });
+  await recordDisclosure(background, true, false, capture => { samples.outerOpen = capture; });
   const work = background.locator('.bot-work-row').first();
-  samples.innerOpen = await recordDisclosure(work, true);
-  samples.innerClose = await recordDisclosure(work, false);
+  await recordDisclosure(work, true, false, capture => { samples.innerOpen = capture; });
+  await recordDisclosure(work, false, false, capture => { samples.innerClose = capture; });
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Tab');
   assert.equal(await work.locator('.bot-work-detail').evaluate(node => node.contains(document.activeElement)), false);
-  samples.outerClose = await recordDisclosure(background, false);
-  samples.reverse = await recordDisclosure(background, true, true);
+  await recordDisclosure(background, false, false, capture => { samples.outerClose = capture; });
+  await recordDisclosure(background, true, true, capture => { samples.reverse = capture; });
   await cast.send('Page.stopScreencast'); await cast.detach();
   report.disclosureCastFrames = frameIndex;
   writeFileSync(path.join(frameDir, 'timeline.json'), JSON.stringify(frameTimes));
@@ -178,7 +178,12 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     errorRecovery: true, continuation: true, animations: true, reducedMotion: true };
 }
 
-async function recordDisclosure(locator, open, reverse = false) {
+async function recordDisclosure(locator, open, reverse = false, observed) {
+  // Finish the previous finite disclosure transition before starting a new
+  // measurement. The recording keeps all original continuity assertions.
+  await locator.evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+    .filter(animation => animation instanceof CSSTransition && ['height', 'opacity', 'content-visibility'].includes(animation.transitionProperty))
+    .map(animation => animation.finished.catch(() => {}))));
   const expectedClicks = reverse ? 2 : 1;
   // Install before input, then sample a complete interval after the last real click.
   // Remote Playwright dispatch time must not consume the closing observation window.
@@ -207,6 +212,7 @@ async function recordDisclosure(locator, open, reverse = false) {
   if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await summary.click({ force: true }); }
   const capture = await locator.evaluate(node => node.__rcDisclosureCapture);
   await locator.evaluate(node => { delete node.__rcDisclosureCapture; });
+  observed?.(capture);
   assert.equal(capture.timedOut, false, 'real disclosure input and observation complete within the bound');
   assert.equal(capture.clicks, expectedClicks, 'each intended native disclosure click occurred');
   const samples = capture.samples;
