@@ -112,6 +112,9 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
       for (const segment of state.segments) {
         if (segment.kind === 'tool' && ['running', 'preparing'].includes(segment.status)) {
           segment.status = phase === 'stopped' ? 'stopped' : 'error'; segment.finishedAt = state.finishedAt;
+          // Display-only. The persisted tool result stays null so retry continuity
+          // does not treat an unfinished call as a real tool result.
+          if (!segment.result) segment.result = preview(null, 4000);
         }
       }
       if (phase === 'error') state.replyText = '';

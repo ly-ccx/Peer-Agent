@@ -172,8 +172,10 @@ test('stop and failure retain actual tool steps, end running states and reject l
     a.accept('chat:stream:tool-call', { streamId: 't', toolCallId: 'r', tool: 'read_file', args: { path: 'file' } });
     a.finish(phase);
     assert.equal(a.snapshot().segments[0].status, status);
+    assert.equal(a.snapshot().segments[0].result.text, '');
+    assert.notEqual(a.snapshot().segments[0].result.text, 'null');
     a.accept('chat:stream:tool-result', { streamId: 't', toolCallId: 'r', result: { output: 'late' } });
-    assert.equal(a.snapshot().segments[0].result, undefined);
+    assert.equal(a.snapshot().segments[0].result.text, '');
     a.begin({ turnId: 'new', visible: true });
     a.accept('chat:stream:tool-call', { streamId: 't', toolCallId: 'r', tool: 'read_file' });
     assert.equal(a.snapshot().segments.length, 0);

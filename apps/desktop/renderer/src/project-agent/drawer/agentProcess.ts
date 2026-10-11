@@ -11,7 +11,7 @@ export interface AgentProcessEntry {
   readonly resultPreview: ProjectAgentToolPreview;
   readonly labelKey: TranslationKey;
   readonly icon: PeerIconName;
-  readonly status: 'done' | 'failed' | 'suppressed' | 'unknown';
+  readonly status: 'done' | 'failed' | 'cancelled' | 'suppressed' | 'unknown';
   readonly summary: string;
   readonly count?: number;
   readonly startedAt?: string;
@@ -97,9 +97,42 @@ function piles(value: unknown, depth = 0): Record<string, unknown>[] {
 
 function resultStatus(result: unknown): AgentProcessEntry['status'] {
   const rows = piles(result);
-  if (rows.some(row => row.ok === false || row.success === false || row.error || ['failed', 'denied', 'cancelled', 'aborted'].includes(String(row.status)))) return 'failed';
+  if (rows.some(row => row.ok === false || row.success === false || row.error || ['failed', 'denied'].includes(String(row.status)))) return 'failed';
+  if (rows.some(row => ['cancelled', 'aborted'].includes(String(row.status)))) return 'cancelled';
   if (rows.some(row => row.suppressed === true || ['silent', 'digest'].includes(String(row.surfacing ?? (row.meta as Record<string, unknown> | undefined)?.surfacing)))) return 'suppressed';
   return rows.some(row => row.ok === true || row.success === true) ? 'done' : 'unknown';
+}
+
+const STEP_LABELS = ['preparing', 'running', 'done', 'failed', 'cancelled', 'suppressed', 'unknown', 'stopped'] as const;
+export type ToolStepLabel = (typeof STEP_LABELS)[number];
+
+function stepLabel(status: string): ToolStepLabel {
+  return (STEP_LABELS as readonly string[]).includes(status) ? status as ToolStepLabel : 'unknown';
+}
+
+/** Step label for a tool card. A missing result is not a failed payload. */
+export function toolStepStatus(
+  status: string,
+  result: { readonly text?: string; readonly truncated?: boolean } | null | undefined,
+  outcome?: 'stopped' | 'error',
+): ToolStepLabel {
+  const absent = !result?.text && result?.truncated !== true;
+  // Task cancel aborts the turn as a failure before tool-result. That is not a failed read.
+  if (absent && (status === 'error' || (status === 'unknown' && outcome === 'error'))) return 'cancelled';
+  if (status === 'error') return 'failed';
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'unknown' && outcome) return outcome === 'stopped' ? 'stopped' : 'failed';
+  return stepLabel(status);
+}
+
+/** Empty non-truncated previews are missing results, not "content over the limit" and not the word null. */
+export function toolPreviewText(
+  preview: { readonly text?: string; readonly truncated?: boolean } | null | undefined,
+  labels: { readonly empty: string; readonly limit: string },
+): string | null {
+  if (!preview) return null;
+  if (preview.text) return preview.text;
+  return preview.truncated ? labels.limit : labels.empty;
 }
 
 function countOf(name: string, result: unknown): { count?: number } {
