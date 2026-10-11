@@ -8,6 +8,7 @@ const eventTime = (value, fallback) => Number.isFinite(value) && value >= 0 && v
 /** Bounded presentation projection of an existing TurnSink, independent of persistence. */
 export function createTurnActivity({ workspaceId, conversationId, publish = null, now = () => new Date().toISOString() } = {}) {
   let state = null, revision = 0, timer = null, textSequence = 0, textSegmentId = null, visible = false, replyCallId = null, previewChars = 0;
+  const pendingPermissions = new Map();
   const snapshot = () => visible && state ? { ...state, replyTo: [...state.replyTo], ...(state.modelSelection ? { modelSelection: { ...state.modelSelection } } : {}), segments: state.segments.map(segment => ({ ...segment,
     ...(segment.input ? { input: { ...segment.input } } : {}), ...(segment.result ? { result: { ...segment.result } } : {}) })) } : null;
   const preview = (value, limit) => {
@@ -22,6 +23,7 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
   };
   const changed = (immediate = false) => {
     if (!state) return;
+    if (pendingPermissions.size) state.phase = 'awaiting_permission';
     state.revision = ++revision;
     if (immediate) flush();
     else if (!timer) { timer = setTimeout(flush, INTERVAL); timer.unref?.(); }
@@ -31,7 +33,7 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
     snapshot,
     begin({ turnId, modelSelection, replyTo = [], startedAt = '', visible: show = false }) {
       if (timer) clearTimeout(timer);
-      timer = null; visible = show; textSequence = 0; textSegmentId = null; replyCallId = null; previewChars = 0;
+      timer = null; pendingPermissions.clear(); visible = show; textSequence = 0; textSegmentId = null; replyCallId = null; previewChars = 0;
       state = { workspaceId, conversationId, turnId, replyTo: replyTo.slice(0, 32), startedAt, revision: ++revision,
         phase: 'waiting', segments: [], replyText: '',
         ...(modelSelection?.modelProviderId ? { modelSelection: { modelProviderId: modelSelection.modelProviderId, reasoningEffort: modelSelection.reasoningEffort } } : {}) };
@@ -88,6 +90,22 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
           }
         }
         changed();
+      } else if (channel === 'chat:stream:permission-request') {
+        const permissionId = payload.call?.toolCallId;
+        if (typeof permissionId !== 'string') return;
+        const sourceId = permissionId.replace(/^chat-permission:/, '');
+        pendingPermissions.set(permissionId, sourceId);
+        const segment = tool(sourceId);
+        if (segment && ['running', 'preparing', 'awaiting_permission'].includes(segment.status)) {
+          segment.status = 'awaiting_permission'; segment.permissionDeadlineAt = payload.deadlineAt;
+        }
+        state.phase = 'awaiting_permission'; changed(true);
+      } else if (channel === 'chat:stream:permission-settled') {
+        for (const id of payload.toolCallIds ?? []) {
+          const segment = tool(pendingPermissions.get(id)); pendingPermissions.delete(id);
+          if (segment?.status === 'awaiting_permission') { segment.status = 'running'; delete segment.permissionDeadlineAt; }
+        }
+        state.phase = pendingPermissions.size ? 'awaiting_permission' : 'tool'; changed(true);
       } else if (channel === 'chat:stream:tool-result') {
         textSegmentId = null;
         const result = resultOf(payload.result);
@@ -95,22 +113,23 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
           state.replyText = ''; state.phase = 'thinking'; changed(true);
         }
         const segment = tool(payload.toolCallId);
-        if (segment && ['preparing', 'running'].includes(segment.status)) {
+        if (segment && ['preparing', 'running', 'awaiting_permission'].includes(segment.status)) {
           segment.status = failedResult(payload.result) ? 'error' : 'done';
           segment.startedAt = eventTime(payload.startedAtMs, segment.startedAt);
           segment.finishedAt = eventTime(payload.endedAtMs, now()); segment.result = preview(payload.result ?? null, 4000); changed();
         }
       } else if (channel === 'chat:stream:provider-recovery' || channel === 'chat:stream:connection-recovery') {
         if (channel === 'chat:stream:provider-recovery' && payload.toProviderId) state.modelSelection = { modelProviderId: payload.toProviderId };
-        state.replyText = ''; state.segments = []; textSegmentId = null; previewChars = 0; state.phase = 'waiting'; changed(true);
+        pendingPermissions.clear(); state.replyText = ''; state.segments = []; textSegmentId = null; previewChars = 0; state.phase = 'waiting'; changed(true);
       }
     },
     finish(phase) {
       if (!state) return;
+      pendingPermissions.clear();
       state.phase = phase;
       state.finishedAt = now();
       for (const segment of state.segments) {
-        if (segment.kind === 'tool' && ['running', 'preparing'].includes(segment.status)) {
+        if (segment.kind === 'tool' && ['running', 'preparing', 'awaiting_permission'].includes(segment.status)) {
           segment.status = phase === 'stopped' ? 'stopped' : 'error'; segment.finishedAt = state.finishedAt;
           // Display-only. The persisted tool result stays null so retry continuity
           // does not treat an unfinished call as a real tool result.
@@ -142,7 +161,7 @@ function failedResult(result, depth = 0) {
   if (depth > 8) return true;
   if (typeof result === 'string') { try { return failedResult(JSON.parse(result), depth + 1); } catch { return false; } }
   if (!result || typeof result !== 'object') return false;
-  if (result.ok === false || result.success === false || result.error || ['failed', 'denied', 'cancelled'].includes(result.status)) return true;
+  if (result.ok === false || result.success === false || result.error || ['failed', 'denied', 'cancelled', 'timeout'].includes(result.status)) return true;
   const nested = result.output ?? result.outputPreview?.legacyResult ?? result.legacyResult;
   return nested != null ? failedResult(nested, depth + 1) : false;
 }

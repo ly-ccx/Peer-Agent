@@ -110,7 +110,11 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
           granted = decision?.granted === true;
           permissionGrant = decision?.grant;
           validatePermission = decision?.validate;
-          if (!granted) throw failure('image_permission_denied', 'denied');
+          if (!granted) {
+            if (decision?.reason === 'permission_cancelled') throw failure('permission_cancelled', 'cancelled');
+            if (decision?.reason === 'permission_timeout') throw failure('permission_timeout', 'timeout');
+            throw failure(decision?.reason === 'permission_unavailable' ? 'permission_unavailable' : 'image_permission_denied', 'denied');
+          }
         }
         checkSignal(signal);
         if (validatePermission && !validatePermission()) { granted = false; throw failure('image_permission_revoked', 'denied'); }
@@ -151,7 +155,7 @@ export function createLocalImageProvider({ workspaceRoot, decodeImage, maxBytes 
           ...(permissionGrant ? { ...permissionGrant, toolCallId: call.toolCallId, granted, scope } : {}) }, result };
       } catch (error) {
         const reason = error.reason || (error.code === 'ENOENT' ? 'image_not_found' : 'image_read_failed');
-        return { call, grant: createPermissionGrant({ toolCallId: call.toolCallId, granted, scope }), result: createFailedClientToolResult({ call, locale, reason, status: error.status || 'failed', dataLevel: 'D2_sensitive' }) };
+        return { call, grant: { ...createPermissionGrant({ toolCallId: call.toolCallId, granted, scope }), ...(permissionGrant ? { ...permissionGrant, toolCallId: call.toolCallId, granted, scope } : {}) }, result: createFailedClientToolResult({ call, locale, reason, status: error.status || 'failed', dataLevel: 'D2_sensitive' }) };
       } finally { await handle?.close(); }
     },
   };

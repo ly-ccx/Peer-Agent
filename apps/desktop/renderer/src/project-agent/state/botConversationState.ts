@@ -48,7 +48,8 @@ export interface BotChatCard {
   readonly completionReview?: import('@peer-agent/protocol').SessionCompletionReview;
   readonly resolvedState?: 'open' | 'resolved';
   readonly actions?: readonly BotChatCardAction[];
-  readonly refs?: { readonly sessionId: string };
+  readonly refs?: { readonly sessionId: string; readonly capabilityId?: string; readonly decisionReason?: string; readonly deadlineAt?: string };
+  readonly resolution?: { readonly state: string };
   readonly recovery?: ProjectWorkRecovery;
   readonly recoveryWorkState?: ProjectWorkState;
 }
@@ -632,8 +633,13 @@ function readCards(value: unknown): BotChatCard[] {
       ...(readRecovery(record.recovery) ? { recovery: readRecovery(record.recovery)! } : {}),
       ...(readRecoveryWorkState(record.recoveryWorkState) ? { recoveryWorkState: readRecoveryWorkState(record.recoveryWorkState)! } : {}),
       actions: readActions(record.actions),
-      ...(record.refs && typeof record.refs === 'object' && readString((record.refs as Record<string, unknown>).sessionId)
-        ? { refs: { sessionId: readString((record.refs as Record<string, unknown>).sessionId) } } : {}),
+      ...(record.refs && typeof record.refs === 'object' ? { refs: {
+        sessionId: readString((record.refs as Record<string, unknown>).sessionId),
+        capabilityId: readString((record.refs as Record<string, unknown>).capabilityId),
+        decisionReason: readString((record.refs as Record<string, unknown>).decisionReason),
+        deadlineAt: readString((record.refs as Record<string, unknown>).deadlineAt),
+      } } : {}),
+      ...(record.resolution && typeof record.resolution === 'object' ? { resolution: { state: readString((record.resolution as Record<string, unknown>).state) } } : {}),
     });
   }
   return cards;

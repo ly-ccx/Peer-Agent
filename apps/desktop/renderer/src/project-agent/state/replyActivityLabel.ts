@@ -6,6 +6,7 @@ import { isActivityRunning } from './botActivityState.ts';
 /** Public activity only. Neither tool parameters/results nor reasoning enter the footer. */
 export function replyActivityLabel(activity: ProjectAgentActivity | undefined, i18n: I18nRuntime): string | null {
   if (!activity || !isActivityRunning(activity)) return null;
+  if (activity.phase === 'awaiting_permission') return i18n.t('projectAgent.chat.activity.permission');
   if (activity.phase === 'tool') {
     const tool = [...activity.segments].reverse().find(segment => segment.kind === 'tool'
       && (segment.status === 'preparing' || segment.status === 'running'));

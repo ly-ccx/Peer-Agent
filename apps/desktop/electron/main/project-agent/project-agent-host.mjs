@@ -1,3 +1,4 @@
+import { syncApprovalConversation } from './approval-conversation.mjs';
 import { shouldPauseForHostHandoff } from '@peer-agent/runtime-node';
 import { createProjectAgentHost as createPortableProjectAgentHost } from '@peer-agent/runtime-node';
 import {createDesktopObjectiveWatchHost} from './objective-watch-host.mjs';
@@ -115,6 +116,7 @@ export function registerDesktopProjectAgent({
   onReady = null,
   onAppendedMessage = null,
   onViewing = null,
+  configurePermissions = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   let host = null;
@@ -132,9 +134,16 @@ export function registerDesktopProjectAgent({
   const registry = createProjectRegistry({
     filePath: path.join(dataHome, 'projects', 'registry.json'),
   });
-  const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
+  const approvalStore = createApprovalStore({ rootDir: runtimeRoot,
+    onChanged: ({ workspaceId, record }) => {
+      try { syncApprovalConversation({ record, profile: profileStore.read(workspaceId), conversationStore, appendMessage }); }
+      catch (error) { console.warn('[project-agent] approval presentation failed:', error?.message || error); }
+      if (workspaceId) broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] });
+    },
+  });
   const profileStore = createBotProfileStore({ rootDir: dataHome });
   const memoryStore = createMemoryStore({ rootDir: dataHome });
+  configurePermissions?.(approvalStore);
   const memoryChanged = workspaceId => {
     liveMemoryIndex().rebuild();
     if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });

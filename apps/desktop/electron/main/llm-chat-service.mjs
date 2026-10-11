@@ -1148,9 +1148,9 @@ export function createLlmChatService({
         conversationId, planId: profile?.planId, sessionId: profile?.sessionId, goalPlanStore });
     },
     settleNotifier: typeof broadcast === 'function'
-      ? (streamId, toolCallIds) => {
+      ? (streamId, toolCallIds, event = {}) => {
         try {
-          broadcast('chat:stream:permission-settled', { streamId, toolCallIds });
+          broadcast('chat:stream:permission-settled', { ...event, streamId, toolCallIds });
         } catch (error) {
           console.warn('[llm-chat] permission settle broadcast failed:', error?.message || error);
         }
@@ -2448,6 +2448,7 @@ export function createLlmChatService({
     forceCompleteConversationStreams,
     setWorkspacePath,
     setLocalAccessLevel,
+    setApprovalStore: approvalStore => permissionGate.configure({ approvalStore }),
     resolvePermissionGrant,
     reattach,
     listActiveConversationIds,

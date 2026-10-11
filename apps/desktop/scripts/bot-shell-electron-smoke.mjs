@@ -1,3 +1,4 @@
+import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 import { seedUiAutomation, seedClassicUiFixture, checkSharedUiConventions } from './shared-ui-convention-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
@@ -21,7 +22,8 @@ import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
-// This proves shell/IPC/durable input behavior, never live-model latency or tool execution.
+// This proves shell/IPC/durable input behavior, not live-model latency. The image
+// lifecycle scenarios additionally execute the production view_image Provider.
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, cpSync, existsSync } from 'node:fs';
 import os from 'node:os';
@@ -42,7 +44,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only');
+const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -202,6 +204,9 @@ if (botModelFixtures.length) {
   assert.equal(isolatedMain.split(catalogueSeam).length, 2, 'exact production catalogue assembly seam required');
   isolatedMain = isolatedMain.replace(catalogueSeam, 'listModels: () => globalThis.rcBotModelFixtures,');
 }
+const permissionSeam = 'configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),';
+assert.equal(isolatedMain.split(permissionSeam).length, 2, 'exact production permission store assembly seam required');
+isolatedMain = isolatedMain.replace(permissionSeam, 'configurePermissions: approvalStore => { llmChatService.setApprovalStore(approvalStore); globalThis.rcBotShellService.setApprovalStore?.(approvalStore); },');
 writeFileSync(main, isolatedMain);
 // Observe production pagination without changing its results or admitting a new IPC.
 const applicationService = path.join(isolation.launch.desktopDir, 'electron/main/project-agent/project-agent-application-service.mjs');
@@ -314,6 +319,7 @@ if (process.argv.includes('--streaming')) {
   assert.equal(failed.terminalStatus, 'error', 'background cognition must not consume the first interactive failure');
   assert.ok(events.some(([channel]) => channel === 'chat:stream:error'));
 }
+const imageReceipt = path.join(root, 'image-receipt.json');
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
 const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
@@ -346,6 +352,8 @@ globalThis.rcBotShellService={
 };
 ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'scripts/rc-response-interaction-smoke.mjs')).href)});
 globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole});` : ''}
+const {withImagePermissionFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/image-permission-fixture.mjs')).href)});
+globalThis.rcBotShellService=await withImagePermissionFixture(globalThis.rcBotShellService,{mainRoot:${JSON.stringify(path.dirname(main))},imageRoot:${JSON.stringify(path.join(root,'image-lifecycle'))},receiptFile:${JSON.stringify(imageReceipt)}});
 const fixtureSend=globalThis.rcBotShellService.sendMessage.bind(globalThis.rcBotShellService);
 globalThis.rcBotShellService.sendMessage=input=>{
   if(input.messages?.findLast(message=>message.role==='user')?.content==='RC_QUICK_INPUT') {
@@ -428,7 +436,10 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (sharedUiOnly) {
+  if (process.argv.includes('--image-permission-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
+  } else if (sharedUiOnly) {
     await page.locator('.bot-app-menu-button').click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page.locator('.settings-nav').getByRole('button', { name: '开发者', exact: true }).click();
@@ -664,6 +675,7 @@ try {
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
+    await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }

@@ -2155,6 +2155,7 @@ function registerDesktopIpcHost() {
     ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService }),
     ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
     ...registerDesktopProjectAgent({
+      configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),
       enabled: () => true,
       dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,

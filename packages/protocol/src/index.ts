@@ -920,6 +920,19 @@ export interface ClientToolCall extends RuntimeToolCall {
   readonly requestedAt: string;
 }
 
+/** Host permission wait events. Requests are presentation, never permission truth. */
+export interface ChatPermissionRequest {
+  readonly streamId: string;
+  readonly call: ClientToolCall;
+  readonly deadlineAt?: string;
+}
+export interface ChatPermissionSettled {
+  readonly streamId: string;
+  readonly toolCallIds: readonly string[];
+  readonly granted?: boolean;
+  readonly reason?: string;
+}
+
 export interface ClientToolCallPollRequest {
   readonly sessionId: string;
   readonly projectionId?: string;

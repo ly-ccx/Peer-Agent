@@ -15,6 +15,7 @@ export type PeerIconName =
   | 'terminal'
   | 'info'
   | 'fileText'
+  | 'image'
   | 'userRound'
   | 'stop'
   | 'settings'
@@ -50,6 +51,7 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   terminal: <><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3m6 0h4" /></>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v.01" /></>,
   fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8m-8 4h6" /></>,
+  image: <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></>,
   // Lucide user-round (ISC); source and notice in LUCIDE-LICENSE.
   userRound: <g data-license={lucideLicense}><circle cx="12" cy="8" r="5" /><path d="M20 21a8 8 0 0 0-16 0" /></g>,
   settings: <><path d="M3 6h5m4 0h9M3 12h10m4 0h4M3 18h3m4 0h11" /><circle cx="10" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="8" cy="18" r="2" /></>,

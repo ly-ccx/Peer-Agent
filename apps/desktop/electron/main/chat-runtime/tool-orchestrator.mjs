@@ -356,6 +356,7 @@ export async function executeModelToolCall({
     conversationId,
     permissionPolicy: toolContext.permissionPolicy,
     sourceArguments: args,
+    signal,
   });
   const requestLocalCapabilityPermission = permissionGate.createLocalCapabilityPermissionRequester({
     webContents,
@@ -365,6 +366,7 @@ export async function executeModelToolCall({
     workspacePath,
     permissionPolicy: toolContext.permissionPolicy,
     sourceArguments: args,
+    signal,
   });
 
   // Milestone D: Goal side-effect guard. When Goal context is present, avoid
@@ -483,6 +485,7 @@ export async function executeModelToolCall({
       workspacePath,
       permissionPolicy: toolContext.permissionPolicy,
       sourceArguments: args,
+      signal,
     }),
     signal,
     registry,
@@ -499,8 +502,8 @@ export async function executeModelToolCall({
     webContents.send('chat:stream:tool-result', {
       streamId,
       toolCallId,
-      result: '工具调用已中断',
-      evidenceRefs: [],
+      result: result.execution?.result ? JSON.stringify(result.execution.result) : '工具调用已中断',
+      evidenceRefs: collectToolEvidenceRefs({ toolCallId, execution: result.execution }),
       startedAtMs,
       endedAtMs,
       durationMs: Math.max(0, endedAtMs - startedAtMs),

@@ -316,7 +316,7 @@ export interface ProjectInput {
   readonly createdAt: string;
 }
 
-export type PendingApprovalState = 'open' | 'approved' | 'denied' | 'expired' | 'stale';
+export type PendingApprovalState = 'open' | 'approved' | 'denied' | 'expired' | 'stale' | 'cancelled';
 
 export interface PendingApproval {
   readonly imageReadScope?: import('./local-image.ts').LocalImagePermissionScope;
@@ -334,6 +334,8 @@ export interface PendingApproval {
   readonly argsDigest: string;
   readonly createdAt: string;
   readonly state: PendingApprovalState;
+  readonly deadlineAt?: string;
+  readonly decisionReason?: 'permission_cancelled' | 'permission_timeout' | 'permission_unavailable' | 'local_user_denied';
   readonly decidedAt?: string;
   readonly decidedBy?: 'local_ui' | 'policy';
 }

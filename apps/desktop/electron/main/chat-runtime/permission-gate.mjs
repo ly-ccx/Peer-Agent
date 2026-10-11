@@ -1,3 +1,4 @@
+import { createPendingPermissionWait } from './pending-permission-wait.mjs';
 import { createOneTimeApprovalBook } from '@peer-agent/runtime-node';
 export { createOneTimeApprovalBook } from '@peer-agent/runtime-node';
 import { evaluateObjectiveProbeCall } from './objective-probe-gate.mjs';
@@ -226,8 +227,11 @@ export function createChatPermissionGate({
   settleNotifier = null,
   oneTimeApprovals = sharedOneTimeApprovals,
   now = () => Date.now(),
+  permissionWaitMs,
+  permissionTimers = {},
 } = {}) {
-  const pendingPermissionRequests = new Map();
+  const pendingPermissionRequests = createPendingPermissionWait({ now, waitMs: permissionWaitMs,
+    ...permissionTimers, onEnd: (id, grant, options) => settlePermissionRequest(id, grant, options) });
   const approvedPermissionScopes = new Map();
   const approvedSourceToolCalls = new Map();
   let accessLevel = normalizeLocalAccessLevel(initialAccessLevel);
@@ -259,6 +263,8 @@ export function createChatPermissionGate({
     planId = undefined,
     argsDigest = undefined,
     createdAt = undefined,
+    deadlineAt = undefined,
+    decisionReason = undefined,
   }) {
     if (!durableApprovals || typeof durableApprovals.append !== 'function' || !call) return null;
     let scope = {};
@@ -289,9 +295,11 @@ export function createChatPermissionGate({
       argsDigest: argsDigest || digestApprovalArgs(call.arguments),
       createdAt: createdAt || call.requestedAt || new Date().toISOString(),
       state,
+      ...(deadlineAt ? { deadlineAt } : {}),
+      ...(decisionReason ? { decisionReason } : {}),
     };
     if (state !== 'open') {
-      record.decidedAt = new Date().toISOString();
+      record.decidedAt = new Date(Number(now())).toISOString();
       record.decidedBy = decidedBy || 'local_ui';
     }
     try {
@@ -346,8 +354,15 @@ export function createChatPermissionGate({
     conversationId = null,
     approval = null,
     workspacePath = null,
+    signal = null,
+    deadlineAt,
   }) {
-    pendingPermissionRequests.set(call.toolCallId, {
+    const active = activeStreams.get(streamId);
+    if (active) {
+      if (!active.permissionIds) active.permissionIds = new Set();
+      active.permissionIds.add(call.toolCallId);
+    }
+    pendingPermissionRequests.add(call.toolCallId, {
       streamId,
       call,
       conversationId,
@@ -358,12 +373,9 @@ export function createChatPermissionGate({
       webContents,
       reusable: isReusablePermissionType(call),
       approval,
+      deadlineAt,
+      signal: signal ?? active?.runtimeTurn?.signal,
     });
-    const active = activeStreams.get(streamId);
-    if (active) {
-      if (!active.permissionIds) active.permissionIds = new Set();
-      active.permissionIds.add(call.toolCallId);
-    }
   }
 
   function askUser({
@@ -375,6 +387,7 @@ export function createChatPermissionGate({
     resolve,
     conversationId = null,
     workspacePath = null,
+    signal = null,
   }) {
     const at = Number(now());
     const argsDigest = digestApprovalArgs(call?.arguments);
@@ -427,13 +440,12 @@ export function createChatPermissionGate({
       });
       return;
     }
-    const approval = recordApproval({
-      call,
-      streamId,
-      conversationId,
-      workspacePath,
-      state: 'open',
-    });
+    const deadlineAt = pendingPermissionRequests.deadlineAt();
+    const approval = recordApproval({ call, streamId, conversationId, workspacePath, state: 'open', deadlineAt });
+    if (durableApprovals && !approval) {
+      resolve(createPolicyDenial({ toolCallId: call.toolCallId, reason: 'permission_unavailable' }));
+      return;
+    }
     registerPendingPermission({
       streamId,
       call,
@@ -443,12 +455,14 @@ export function createChatPermissionGate({
       resolve,
       webContents,
       conversationId,
-      approval,
+      approval, signal, deadlineAt,
     });
-    webContents.send('chat:stream:permission-request', { streamId, call });
+    if (!pendingPermissionRequests.get(call.toolCallId)) return;
+    try { webContents.send('chat:stream:permission-request', { streamId, call, deadlineAt }); }
+    catch { settlePermissionRequest(call.toolCallId, { granted: false, duration: 'denied' }, { reason: 'permission_unavailable', terminal: true }); }
   }
 
-  function createFilePermissionRequester({ webContents, streamId, toolCallId, conversationId = null, permissionPolicy = null, sourceArguments = undefined }) {
+  function createFilePermissionRequester({ webContents, streamId, toolCallId, conversationId = null, permissionPolicy = null, sourceArguments = undefined, signal = null }) {
     return ({ tool, args, filePath, workspacePath }) => new Promise((resolvePermission) => {
       const call = buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCallId });
       const policyDecision = automationCapabilityDecision(permissionPolicy, call);
@@ -483,13 +497,14 @@ export function createChatPermissionGate({
         scopeKey,
         scope: call.capabilityId,
         resolve: resolvePermission,
+        signal,
         conversationId,
         workspacePath,
       });
     });
   }
 
-  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null, sourceArguments = undefined }) {
+  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null, sourceArguments = undefined, signal = null }) {
     return (request = {}) => new Promise((resolvePermission) => {
       const call = buildLocalCapabilityPermissionCall({ request, toolCallId });
       const policyDecision = automationCapabilityDecision(permissionPolicy, call);
@@ -534,6 +549,7 @@ export function createChatPermissionGate({
         scopeKey,
         scope: call.capabilityId,
         resolve: resolvePermission,
+        signal,
         conversationId,
         workspacePath,
       });
@@ -548,6 +564,7 @@ export function createChatPermissionGate({
     workspacePath = null,
     permissionPolicy = null,
     sourceArguments = undefined,
+    signal = null,
   }) {
     return ({ call, classification, ruleDecision }) => new Promise((resolvePermission) => {
       const permissionCall = buildShellPermissionCall({ call, classification, ruleDecision, toolCallId });
@@ -600,6 +617,7 @@ export function createChatPermissionGate({
         scopeKey,
         scope: permissionCall.capabilityId,
         resolve: resolvePermission,
+        signal,
         conversationId,
         workspacePath: workspacePath || classification.cwd,
       });
@@ -607,10 +625,11 @@ export function createChatPermissionGate({
   }
 
   function settlePermissionRequest(toolCallId, grant, options = {}) {
-    const pending = pendingPermissionRequests.get(toolCallId);
+    const pending = pendingPermissionRequests.take(toolCallId, options.terminal === true);
     if (!pending) return false;
-    pendingPermissionRequests.delete(toolCallId);
     activeStreams.get(pending.streamId)?.permissionIds?.delete(toolCallId);
+    let endingReason = options.reason ?? (grant?.reason && grant.granted !== true ? 'permission_cancelled' : null);
+    if (endingReason) grant = { ...grant, granted: false, duration: 'denied' };
     const rememberType = options.remember === false
       ? false
       : Boolean(grant?.granted && ['scope', 'session', 'task', 'persistent'].includes(grant.duration) && pending.reusable && pending.scopeKey);
@@ -633,7 +652,8 @@ export function createChatPermissionGate({
       approvedPermissionScopes.delete(pending.scopeKey);
       try {
         const record = recordApproval({ call: pending.call, streamId: pending.streamId,
-          conversationId: pending.conversationId, workspacePath: pending.workspacePath, state: 'approved', decidedBy: 'local_ui' });
+          conversationId: pending.conversationId, workspacePath: pending.workspacePath, state: 'approved', decidedBy: 'local_ui',
+          deadlineAt: pending.deadlineAt, createdAt: pending.approval?.createdAt });
         const imageGrant = imageAuthority.remember({ principal: principalFor(pending), scope: pending.call.argumentsPreview, record });
         if (!imageGrant) { grant = { ...grant, granted: false, duration: 'denied' }; }
         else grant = { ...grant, grantId: imageGrant.grantId, scope: imageGrant.scope };
@@ -642,6 +662,23 @@ export function createChatPermissionGate({
     }
     const decisionPrincipal = principalFor(pending);
     const decisionEpoch = policyEpoch;
+    const saved = recordApproval({
+      call: pending.call,
+      streamId: pending.streamId,
+      conversationId: pending.approval?.conversationId ?? pending.conversationId,
+      state: grant?.granted ? 'approved' : endingReason === 'permission_cancelled' ? 'cancelled' : endingReason ? 'expired' : 'denied',
+      decidedBy: options.decidedBy ?? (endingReason ? 'policy' : 'local_ui'),
+      deadlineAt: pending.deadlineAt,
+      decisionReason: endingReason ?? (grant?.granted ? undefined : 'local_user_denied'),
+      workspaceId: pending.approval?.workspaceId ?? null,
+      planId: pending.approval?.planId ?? null,
+      argsDigest: pending.approval?.argsDigest,
+      createdAt: pending.approval?.createdAt,
+    });
+    if (durableApprovals && !saved && grant?.granted) {
+      grant = { ...grant, granted: false, duration: 'denied' }; endingReason = 'permission_unavailable';
+      approvedPermissionScopes.delete(pending.scopeKey); approvedSourceToolCalls.delete(sourceToolCallIdFromPermissionId(toolCallId));
+    }
     pending.resolve({
       ...(pending.call.capabilityId === 'local.image.read' ? { validate: () => {
         if (policyEpoch !== decisionEpoch || !decisionPrincipal || digestApprovalArgs(principalFor(pending)) !== digestApprovalArgs(decisionPrincipal)) return false;
@@ -653,48 +690,27 @@ export function createChatPermissionGate({
         ? rememberType
           ? 'local_user_approved_scope'
           : 'local_user_approved_once'
-        : 'local_user_denied',
+        : endingReason ?? 'local_user_denied',
     });
-    recordApproval({
-      call: pending.call,
-      streamId: pending.streamId,
-      conversationId: pending.approval?.conversationId ?? pending.conversationId,
-      state: grant?.granted ? 'approved' : 'denied',
-      decidedBy: 'local_ui',
-      workspaceId: pending.approval?.workspaceId ?? null,
-      planId: pending.approval?.planId ?? null,
-      argsDigest: pending.approval?.argsDigest,
-      createdAt: pending.approval?.createdAt,
-    });
-    if (rememberType && !options.cascaded) {
-      const cascadedIds = [];
+    const settledEvent = { streamId: pending.streamId, toolCallIds: [toolCallId], granted: Boolean(grant?.granted),
+      reason: endingReason ?? (grant?.granted ? 'local_user_approved_once' : 'local_user_denied') };
+    // Bot sinks have no BrowserWindow. Broadcast alone cannot update their Activity.
+    if (typeof notifySettled !== 'function' || activeStreams.get(pending.streamId)?.turnProfile?.role === 'project_agent') {
+      try { pending.webContents?.send?.('chat:stream:permission-settled', settledEvent); } catch {}
+    }
+    try { notifySettled?.(pending.streamId, [toolCallId], settledEvent); } catch {}
+    if (rememberType && grant?.granted && !options.cascaded) {
       for (const [pendingId, other] of [...pendingPermissionRequests.entries()]) {
         if (other.scopeKey !== pending.scopeKey) continue;
-        const cascadedGrant = {
-          ...grant,
-          toolCallId: pendingId,
-        };
-        settlePermissionRequest(pendingId, cascadedGrant, { cascaded: true });
-        cascadedIds.push(pendingId);
+        settlePermissionRequest(pendingId, { ...grant, toolCallId: pendingId }, { cascaded: true });
       }
-      const settledIds = [toolCallId, ...cascadedIds];
-      if (typeof notifySettled === 'function') {
-        notifySettled(pending.streamId, settledIds);
-      } else if (cascadedIds.length) {
-        pending.webContents?.send?.('chat:stream:permission-settled', {
-          streamId: pending.streamId,
-          toolCallIds: cascadedIds,
-        });
-      }
-    } else if (!options.cascaded && typeof notifySettled === 'function') {
-      notifySettled(pending.streamId, [toolCallId]);
     }
     return true;
   }
 
   function listPendingPermissions({ streamId = null, conversationId = null } = {}) {
     const items = [];
-    for (const [toolCallId, pending] of pendingPermissionRequests) {
+    for (const [toolCallId, pending] of pendingPermissionRequests.entries()) {
       if (streamId && pending.streamId !== streamId) continue;
       if (conversationId && pending.conversationId !== conversationId) continue;
       items.push({ toolCallId, streamId: pending.streamId, call: pending.call });
@@ -703,10 +719,9 @@ export function createChatPermissionGate({
   }
 
   function settleStreamPermissionRequests(streamId, grant) {
-    const active = activeStreams.get(streamId);
-    const ids = active?.permissionIds ? [...active.permissionIds] : [];
+    const ids = [...pendingPermissionRequests.entries()].filter(([, pending]) => pending.streamId === streamId).map(([id]) => id);
     for (const id of ids) {
-      settlePermissionRequest(id, grant);
+      settlePermissionRequest(id, grant, { reason: 'permission_cancelled', terminal: true });
     }
   }
 

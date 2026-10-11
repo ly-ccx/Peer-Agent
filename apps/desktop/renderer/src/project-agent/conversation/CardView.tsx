@@ -67,6 +67,13 @@ function CardItem({
   const resolved = done || card.resolvedState === 'resolved';
   const failure = card.kind === 'agent_unavailable' ? agentFailurePresentation(card) : undefined;
   const actions = card.actions?.filter(action => action.id !== 'retry' || failure?.retryAllowed !== false);
+  const imageApproval = card.kind === 'approval' && (card.refs?.capabilityId === 'local.image.read' || actions?.some(a => a.payload?.capabilityId === 'local.image.read'));
+  const imageState = card.resolution?.state;
+  const imageNotice = card.refs?.decisionReason === 'permission_timeout' ? 'projectAgent.chat.imageTimeout'
+    : card.refs?.decisionReason === 'permission_unavailable' ? 'projectAgent.chat.imageUnavailable'
+    : imageState === 'cancelled' ? 'projectAgent.chat.imageCancelled'
+    : imageState === 'denied' ? 'projectAgent.chat.imageDenied'
+    : imageState === 'approved' ? 'projectAgent.chat.imageApproved' : 'projectAgent.chat.imageReadNotice';
   const question = card.kind === 'question';
   const dismissal = useQuestionDismissal(question && resolved, onClosed);
   if (question && !dismissal.present) return null;
@@ -77,7 +84,7 @@ function CardItem({
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
       </> : failure ? <p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
-        : card.kind === 'approval' && actions?.some(a => a.payload?.capabilityId === 'local.image.read') ? <><p>{i18n.t('projectAgent.chat.imageReadNotice')}</p><p>{card.content}</p></>
+        : imageApproval ? <><p role="status">{i18n.t(imageNotice)}</p><p>{card.content}</p>{!resolved && card.refs?.deadlineAt ? <p className="bot-drawer-note">{i18n.t('projectAgent.chat.imageWaitLimit')}</p> : null}</>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved && !question || !actions?.length ? null : (
         <div className="bot-card-actions">
@@ -120,6 +127,7 @@ function actionLabel(action: BotChatCardAction, i18n: I18nRuntime): string {
   if (action.id === 'allow_task') return i18n.t(action.payload?.capabilityId === 'local.image.read' ? 'projectAgent.chat.allowImage' : 'projectAgent.chat.allowTask');
   if (action.id === 'continue') return i18n.t('projectAgent.chat.approveContinue');
   if (action.id === 'approve') return i18n.t('projectAgent.chat.approve');
+  if (action.id === 'cancel_read') return i18n.t('projectAgent.chat.cancelImageRead');
   if (action.id === 'reject') return i18n.t('projectAgent.chat.reject');
   if (action.id === 'answer') return i18n.t('projectAgent.chat.answer');
   if (action.id === 'confirm') return i18n.t('projectAgent.chat.confirmResult');
@@ -139,7 +147,7 @@ async function runCardAction(workspaceId: string, action: BotChatCardAction): Pr
     const approvalId = typeof payload.approvalId === 'string' ? payload.approvalId : '';
     const decision = payload.decision;
     const duration = payload.duration;
-    if (!approvalId || (decision !== 'approve' && decision !== 'reject' && decision !== 'deny')) return { ok: false, code: 'INVALID_INPUT' };
+    if (!approvalId || (decision !== 'approve' && decision !== 'reject' && decision !== 'deny' && decision !== 'cancel')) return { ok: false, code: 'INVALID_INPUT' };
     return clientApi.projectAgentDecideApproval({ workspaceId, approvalId, decision,
       ...(duration === 'once' || duration === 'task' || duration === 'denied' ? { duration } : {}) });
   }
