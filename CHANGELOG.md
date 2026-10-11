@@ -8,6 +8,26 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.13] - 2026-10-11
+
+### Fixed
+
+- Route out-of-project images through formal local approval and inherit exact image grants across the current Bot, child Agents, verification and restart recovery.
+- Bind reusable approvals to the exact capability, arguments, workspace and execution identity; keep one-time and unrelated queued approvals separate.
+- Fence concurrent permission contexts and recheck revocation, file identity, task state, cancellation and leases.
+- Bound delegated verification with a five-minute overall deadline and promptly return permission denial when no approval interface exists.
+- Keep cancelled file reads from displaying missing results as null.
+
+### Changed
+
+- Make reply details compact, put the latest execution steps first and align provider settings with Frost groups and semantic radius tokens.
+- Refresh bilingual release notes, current README guidance and generated changelog for RC13.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; live cloud vision, complete platform installation coverage and GA remain separate gates.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
 ## [0.1.0-rc.12] - 2026-10-11
 
 ### Changed
