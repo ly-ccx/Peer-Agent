@@ -414,6 +414,8 @@ export type TranslationKey =
   | 'projectAgent.chat.approve'
   | 'projectAgent.chat.allowOnce'
   | 'projectAgent.chat.allowTask'
+  | 'projectAgent.chat.allowImage'
+  | 'projectAgent.chat.imageReadNotice'
   | 'projectAgent.chat.approveContinue'
   | 'projectAgent.chat.reject'
   | 'projectAgent.chat.answer'
@@ -1913,8 +1915,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': '收进小结',
     'projectAgent.chat.surfacing.silent': '不打扰',
     'projectAgent.chat.approve': '批准',
-    'projectAgent.chat.allowOnce': '允许',
-    'projectAgent.chat.allowTask': '本任务内都允许',
+    'projectAgent.chat.allowOnce': '仅这一次',
+    'projectAgent.chat.allowTask': '本任务重复此操作',
+    'projectAgent.chat.allowImage': '本轮允许此图片',
+    'projectAgent.chat.imageReadNotice': '读取这张图片并交给当前模型。选择“本轮允许”后，仅此图片可供当前机器人及其任务使用，30 分钟内有效。',
     'projectAgent.chat.approveContinue': '批准并继续',
     'projectAgent.chat.reject': '拒绝',
     'projectAgent.chat.answer': '回答',
@@ -3202,8 +3206,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': 'Keep for the digest',
     'projectAgent.chat.surfacing.silent': 'Stay quiet',
     'projectAgent.chat.approve': 'Approve',
-    'projectAgent.chat.allowOnce': 'Allow',
-    'projectAgent.chat.allowTask': 'Allow for this task',
+    'projectAgent.chat.allowOnce': 'Allow once',
+    'projectAgent.chat.allowTask': 'Repeat this operation for this task',
+    'projectAgent.chat.allowImage': 'Allow this image for this session',
+    'projectAgent.chat.imageReadNotice': 'Read this image for the current model. Allowing it for this session covers only this image, for this bot and its tasks, valid for 30 minutes.',
     'projectAgent.chat.approveContinue': 'Approve and continue',
     'projectAgent.chat.reject': 'Reject',
     'projectAgent.chat.answer': 'Answer',

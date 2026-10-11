@@ -8,6 +8,7 @@ import { createGoalPlanStore } from '../../../../../packages/runtime-node/src/go
 import { createSessionSupervisor } from '../../../../../packages/runtime-node/src/project-agent/session-supervisor.mjs';
 import { createDelegationProvider } from '../../../../../packages/runtime-node/src/project-agent/delegation-provider.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
+import { runVerifierWithReport } from '../../../../../packages/runtime-node/src/project-agent/verifier-report.mjs';
 import {
   createSessionVerification,
   installSessionVerification,
@@ -73,6 +74,44 @@ function origin(extra = {}) {
     ...extra,
   };
 }
+
+test('a timed out verify_session clears verifying and never persists its late successful report', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-timeout-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  const plan = store.createPlan({ conversationId: 'child-1', title: 'Review', goal: 'Review', tasks: [],
+    successCriteria: [{ id: 'review', kind: 'model_review', description: 'Review real evidence' }], delegationOrigin: origin() });
+  let finish;
+  const verification = createSessionVerification({ goalPlanStore: store,
+    verifySession: () => {
+      assert.equal(store.getPlan(plan.planId).delegationOrigin.verifying, true);
+      return runVerifierWithReport({ timeoutMs: 20, run: () => new Promise(resolve => { finish = resolve; }) });
+    } });
+  const provider = createDelegationProvider({ verification });
+  const executed = await provider.executeCapability({ call: { toolCallId: 'timeout', capabilityId: 'local.delegation.verify_session',
+    arguments: { sessionId: 'session-1' } } }, { mode: 'project_agent', role: 'project_agent', messages: [] });
+  const result = JSON.parse(executed.result.outputPreview.legacyResult.output);
+  assert.equal(result.error, 'verifier_timeout');
+  assert.notEqual(store.getPlan(plan.planId).delegationOrigin.verifying, true);
+  finish({ events: [{ channel: 'chat:stream:delta', payload: { content: JSON.stringify({ passed: true, evidenceRefs: ['forged'] }) } },
+    { channel: 'chat:stream:done', payload: {} }] });
+  await new Promise(resolve => setImmediate(resolve));
+  const after = store.getPlan(plan.planId);
+  assert.notEqual(after.hostVerification?.independentVerifier, 'passed');
+  assert.equal(after.runner?.verifierRuns?.length || 0, 0);
+});
+
+test('verification failures retain cancellation and permission classifications', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-classification-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  store.createPlan({ conversationId: 'child-1', title: 'Review', goal: 'Review', tasks: [], delegationOrigin: origin() });
+  for (const code of ['verifier_cancelled', 'verifier_permission_denied']) {
+    const verification = createSessionVerification({ goalPlanStore: store,
+      verifySession: () => { throw Object.assign(new Error('failed'), { code }); } });
+    assert.equal((await verification.run({ sessionId: 'session-1' })).error, code);
+  }
+});
 
 test('桌面复核端口从宿主计划和证据索引取事实，复核完成后退出 verifying', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b3-04-verify-'));

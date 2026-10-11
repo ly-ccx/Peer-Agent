@@ -17,6 +17,7 @@ import { checkBotMessageLayout } from './bot-message-layout-checks.mjs';
 import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
+import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
@@ -662,6 +663,7 @@ try {
     await checkBotCoordination({page,until,report,captureDirectory:root,commandFile:workCommand});
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
+    await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }

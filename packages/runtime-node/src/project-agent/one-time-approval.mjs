@@ -8,15 +8,15 @@ export function createOneTimeApprovalBook({ ttlMs = ONE_TIME_GRANT_TTL_MS } = {}
   function scopeId(value) {
     return typeof value === 'string' ? value.trim() : '';
   }
-  function keyOf(capabilityId, argsDigest, sessionId) {
+  function keyOf(capabilityId, argsDigest, sessionId, workspaceId) {
     if (typeof capabilityId !== 'string' || !capabilityId.trim()) return '';
     if (typeof argsDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(argsDigest)) return '';
     const base = `${capabilityId.trim()}::${argsDigest.toLowerCase()}`;
     const session = scopeId(sessionId);
-    return session ? `${base}::${session}` : base;
+    return `${base}::${session}::${scopeId(workspaceId)}`;
   }
   function remember({ capabilityId, argsDigest, at, sessionId, workspaceId }) {
-    const key = keyOf(capabilityId, argsDigest, sessionId);
+    const key = keyOf(capabilityId, argsDigest, sessionId, workspaceId);
     if (!key || !Number.isFinite(at)) return null;
     const record = { expiresAt: at + ttlMs, used: false, workspaceId: scopeId(workspaceId) };
     entries.set(key, record);
@@ -29,7 +29,7 @@ export function createOneTimeApprovalBook({ ttlMs = ONE_TIME_GRANT_TTL_MS } = {}
     };
   }
   function match({ capabilityId, argsDigest, at, sessionId, workspaceId }) {
-    const key = keyOf(capabilityId, argsDigest, sessionId);
+    const key = keyOf(capabilityId, argsDigest, sessionId, workspaceId);
     if (!key || !Number.isFinite(at)) return false;
     const record = entries.get(key);
     if (!record) return false;

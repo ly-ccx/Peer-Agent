@@ -355,6 +355,7 @@ export async function executeModelToolCall({
     toolCallId,
     conversationId,
     permissionPolicy: toolContext.permissionPolicy,
+    sourceArguments: args,
   });
   const requestLocalCapabilityPermission = permissionGate.createLocalCapabilityPermissionRequester({
     webContents,
@@ -363,6 +364,7 @@ export async function executeModelToolCall({
     conversationId,
     workspacePath,
     permissionPolicy: toolContext.permissionPolicy,
+    sourceArguments: args,
   });
 
   // Milestone D: Goal side-effect guard. When Goal context is present, avoid
@@ -469,7 +471,7 @@ export async function executeModelToolCall({
     toolContext: callOrdinal == null ? toolContext : { ...toolContext, toolCallOrdinal: callOrdinal },
     toolCallId,
     requestPermission: (request) => {
-      if (request?.confirmation) return requestLocalCapabilityPermission(request);
+      if (request?.confirmation || request?.capabilityId) return requestLocalCapabilityPermission(request);
       if (request?.filePath || request?.tool || request?.workspacePath) return requestFilePermission(request);
       return requestLocalCapabilityPermission(request);
     },
@@ -480,6 +482,7 @@ export async function executeModelToolCall({
       conversationId,
       workspacePath,
       permissionPolicy: toolContext.permissionPolicy,
+      sourceArguments: args,
     }),
     signal,
     registry,

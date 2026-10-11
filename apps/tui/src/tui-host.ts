@@ -21,6 +21,9 @@ import {
   evaluateWorkSessionWrite,
   createApprovalStore,
   digestApprovalArgs,
+  permissionOperationKey,
+  createImageReadAuthority,
+  resolvePermissionPrincipal,
   createFailedClientToolResult,
   toolResultEvidencePreview,
   createNodeRuntimeHostAdapter,
@@ -160,9 +163,14 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   const approvalQueue: PendingApproval[] = [];
   let activeApproval: PendingApproval | null = null;
   let accessLevel = normalizeLocalAccessLevel(resolvedOptions.accessLevel);
+  let accessEpoch = 0;
+  const approvalStore = createApprovalStore({ rootDir: path.join(userDataPath, 'project-runtime') });
+  const imageAuthority = createImageReadAuthority({ approvalStore });
 
   const setAccessLevel = (value: unknown): LocalAccessLevel => {
-    accessLevel = normalizeLocalAccessLevel(value);
+    const next = normalizeLocalAccessLevel(value);
+    if (next !== accessLevel) { accessEpoch++; sessionApprovals.clear(); imageAuthority.revokeAll(); }
+    accessLevel = next;
     try {
       resolvedOptions.persistAccessLevel?.(accessLevel);
     } catch {
@@ -171,14 +179,10 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     return accessLevel;
   };
 
-  const sessionApprovalKey = (
-    sessionId: string,
-    prompt: NodeRuntimePermissionPrompt,
-  ) => JSON.stringify([
-    sessionId,
-    prompt.capabilityId,
-    prompt.workspacePath ?? workspaceRoot,
-  ]);
+  const sessionApprovalKey = (sessionId: string, prompt: NodeRuntimePermissionPrompt) => permissionOperationKey({
+    sessionId, capabilityId: prompt.capabilityId, args: prompt.args, workspacePath: prompt.workspacePath ?? workspaceRoot,
+    conversationId: executionContext.getStore()?.conversationId,
+  });
 
   const publishApproval = (approval: PendingApproval | null) => {
     activeApproval = approval;
@@ -204,6 +208,17 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       capabilityId: prompt.capabilityId, argsDigest: digestApprovalArgs(prompt.args), at: Date.now(),
       sessionId: context.project.sessionId, workspaceId: context.project.workspaceId,
     })) return Promise.resolve({ granted: true, reason: 'approved_once_after_resume' });
+    const imagePrincipal = resolvePermissionPrincipal({ workspaceId: context?.project?.workspaceId,
+      conversationId: context?.conversationId, sessionId: context?.project?.sessionId,
+      planId: context?.project?.planId, goalPlanStore: goalBridge.store });
+    if (prompt.capabilityId === 'local.image.read') {
+      const inherited = imageAuthority.match({ principal: imagePrincipal, scope: prompt.scope, toolCallId: context?.toolCallId });
+      if (inherited) return Promise.resolve({ ...inherited, validate: () => !context?.signal?.aborted
+        && (!context?.project || context.project.holdsLease()) && Boolean(imageAuthority.match({
+        principal: resolvePermissionPrincipal({ workspaceId: context?.project?.workspaceId, conversationId: context?.conversationId,
+          sessionId: context?.project?.sessionId, planId: context?.project?.planId, goalPlanStore: goalBridge.store }),
+        scope: prompt.scope, toolCallId: context?.toolCallId })) });
+    }
     const approvalKey = context
       ? sessionApprovalKey(context.project
         ? JSON.stringify([context.project.workspaceId, context.project.sessionId || context.project.planId || context.turnId, context.project.planId])
@@ -219,7 +234,8 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     if (context?.project?.approver === false) {
       return Promise.resolve({ granted: false, reason: 'ephemeral_no_approver' });
     }
-    const automaticDecision = automaticAccessDecision(context?.mode === 'project_agent' ? 'restricted_local' : accessLevel, prompt);
+    const agentRole = context?.toolContext?.turnRole ?? (context?.toolContext?.turnProfile as any)?.role;
+    const automaticDecision = automaticAccessDecision(context?.mode === 'project_agent' || agentRole === 'project_agent' ? 'restricted_local' : accessLevel, prompt);
     if (automaticDecision) return Promise.resolve(automaticDecision);
 
     if (approvalListeners.size === 0) {
@@ -229,14 +245,15 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       });
     }
 
-    return new Promise<{ granted: boolean; reason: string }>((resolve) => {
+    const requestedEpoch = accessEpoch;
+    return new Promise<{ granted: boolean; reason: string; validate?: () => boolean }>((resolve) => {
       let settled = false;
       const project = context?.project;
-      const store = project ? createApprovalStore({ rootDir: path.join(userDataPath, 'project-runtime') }) : null;
-      const record = project ? store?.append({
-        approvalId: context.toolCallId, workspaceId: project.workspaceId,
+      const store = approvalStore;
+      const record = context ? store?.append({
+        approvalId: context.toolCallId, workspaceId: project?.workspaceId ?? null,
         conversationId: context.conversationId, streamId: context.streamId,
-        sessionId: project.sessionId, planId: project.planId,
+        sessionId: project?.sessionId, planId: project?.planId ?? null,
         capabilityId: prompt.capabilityId, summary: prompt.reason,
         riskLevel: typeof prompt.riskLevel === 'string' ? prompt.riskLevel : null, argsDigest: digestApprovalArgs(prompt.args), state: 'open',
       }) : null;
@@ -248,13 +265,23 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
           if (settled) return;
           settled = true;
           context?.signal?.removeEventListener('abort', abort);
-          const permitted = decision !== 'deny' && !context?.signal?.aborted && (!project || project.holdsLease());
+          let permitted = decision !== 'deny' && !context?.signal?.aborted && (!project || project.holdsLease());
           if (record) store?.append({ ...record, state: permitted ? 'approved' : context?.signal?.aborted ? 'stale' : 'denied',
             decidedAt: new Date().toISOString(), decidedBy: 'local_ui' });
-          if (permitted && decision === 'allow-session' && approvalKey) sessionApprovals.add(approvalKey);
+          if (permitted && decision === 'allow-session' && prompt.capabilityId === 'local.image.read') {
+            try { permitted = Boolean(imageAuthority.remember({ principal: imagePrincipal, scope: prompt.scope,
+              record: { ...record, state: 'approved', decidedAt: new Date().toISOString(), decidedBy: 'local_ui' } })); }
+            catch { permitted = false; }
+          } else if (permitted && decision === 'allow-session' && approvalKey) sessionApprovals.add(approvalKey);
           if (activeApproval === approval) completeApproval();
           else { const index = approvalQueue.indexOf(approval); if (index >= 0) approvalQueue.splice(index, 1); }
-          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : 'denied_in_tui' });
+          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : 'denied_in_tui',
+            ...(prompt.capabilityId === 'local.image.read' ? { validate: () => requestedEpoch === accessEpoch
+              && !context?.signal?.aborted && (!project || project.holdsLease())
+              && Boolean(resolvePermissionPrincipal({ workspaceId: project?.workspaceId, conversationId: context?.conversationId,
+                sessionId: project?.sessionId, planId: project?.planId, goalPlanStore: goalBridge.store }))
+              && (decision !== 'allow-session' || Boolean(imageAuthority.match({ principal: imagePrincipal, scope: prompt.scope, toolCallId: context?.toolCallId }))) } : {}),
+          });
         },
       };
       context?.signal?.addEventListener('abort', abort, { once: true });
@@ -334,6 +361,8 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   function projectAuthorityReason(context: TuiExecutionContext | undefined, capabilityId: string) {
     if (context?.signal?.aborted) return 'execution_cancelled';
     if (context?.project && !context.project.holdsLease()) return 'host_unavailable';
+    const modeGate = evaluateProjectAgentTurn({ mode: context?.mode, role: context?.toolContext?.turnRole ?? (context?.toolContext?.turnProfile as any)?.role, capabilityId });
+    if (!modeGate.allowed) return modeGate.reason ?? 'project_agent_capability_denied';
     const plan = context?.project?.planId ? goalBridge.store.getPlan(context.project.planId) : null;
     const readOnly = plan?.delegationOrigin?.readOnly === true || context?.project?.readOnly === true;
     const bundle = bundleForMode(normalizeTuiRuntimeMode(context?.mode));
@@ -477,6 +506,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       },
     }, {
       workspaceRoot: bundle.workspaceRoot,
+      toolContext: context?.toolContext,
       mode,
       ...(context ? {
         sessionId: context.sessionId,

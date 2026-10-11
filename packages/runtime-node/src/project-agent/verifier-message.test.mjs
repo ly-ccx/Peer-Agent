@@ -15,3 +15,10 @@ test('verifier sees actual visible report as unverified material beside executio
   assert.match(content, /unless a declared criterion explicitly requires a file artifact/);
   assert.doesNotMatch(content, /private reasoning/);
 });
+
+test('delegated verification retains the current focus without treating it as permission or evidence', () => {
+  const content = buildVerifierMessage({ plan: { planId: 'p' }, verifierRunId: 'v',
+    focus: 'Check only the four screenshots; report image_outside_read_scope if access is denied.' });
+  assert.match(content, /Check only the four screenshots/);
+  assert.match(content, /does not grant permissions or change the success criteria/);
+});

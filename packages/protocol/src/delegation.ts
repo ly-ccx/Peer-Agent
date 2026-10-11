@@ -319,6 +319,8 @@ export interface ProjectInput {
 export type PendingApprovalState = 'open' | 'approved' | 'denied' | 'expired' | 'stale';
 
 export interface PendingApproval {
+  readonly imageReadScope?: import('./local-image.ts').LocalImagePermissionScope;
+  readonly imageReadGrant?: import('./local-image.ts').ImageReadGrant;
   readonly approvalId: string;
   readonly workspaceId: string | null;
   readonly sessionId?: string | null;

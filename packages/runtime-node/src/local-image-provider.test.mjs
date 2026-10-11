@@ -29,7 +29,7 @@ test('authorized image creates bound pixels and metadata-only Evidence', async t
   assert.equal(structuredClone(result).modelContext, undefined);
   assert.match(result.outputPreview.retrievalHint, /view_image/);
 });
-test('canonical symlinks require outside authorization, restricted Bot refuses', async t => {
+test('canonical symlinks and restricted Bot require the host authorization seam', async t => {
   const f = await fixture(t); const outside = await fixture(t);
   const link = join(f.root, 'outside.png'); await symlink(outside.path, link);
   const call = { ...f.call, arguments: { path: link } };
@@ -42,8 +42,8 @@ test('canonical symlinks require outside authorization, restricted Bot refuses',
   assert.equal((await f.provider.executeCapability({ call }, { requestPermission })).result.status, 'success');
   assert.equal(asks, 1);
   assert.equal((await f.provider.executeCapability({ call })).result.outputPreview.reason, 'image_permission_denied');
-  assert.equal((await f.provider.executeCapability({ call }, { requestPermission, toolContext: { accessLevel: 'restricted_local' } })).result.outputPreview.reason, 'image_outside_read_scope');
-  assert.equal(asks, 1);
+  assert.equal((await f.provider.executeCapability({ call }, { requestPermission, toolContext: { accessLevel: 'restricted_local', turnRole: 'project_agent' } })).result.status, 'success');
+  assert.equal(asks, 2);
 });
 test('no pixels on cancellation, denial, absence, malformed input or nonvision model', async t => {
   const f = await fixture(t); const ac = new AbortController(); ac.abort();
@@ -83,6 +83,21 @@ test('file changed while authorization awaited is not observed', async t => {
     requestPermission: async () => { await writeFile(other.path, Buffer.concat([PNG, Buffer.from('modified')])); return { granted: true }; },
   });
   assert.equal(execution.result.outputPreview.reason, 'image_changed_during_read');
+  assert.equal(execution.result.modelContext, undefined);
+});
+
+test('permission withdrawn during decoding returns denied without pixels', async t => {
+  const f = await fixture(t); const outside = await fixture(t);
+  let authorized = true;
+  const provider = createLocalImageProvider({ workspaceRoot: f.root, decodeImage: async () => {
+    authorized = false; return { width: 1, height: 1 };
+  } });
+  const execution = await provider.executeCapability({ call: { ...f.call, arguments: { path: outside.path } } }, {
+    requestPermission: async () => ({ granted: true, validate: () => authorized }),
+  });
+  assert.equal(execution.result.status, 'denied');
+  assert.equal(execution.result.outputPreview.reason, 'image_permission_revoked');
+  assert.equal(execution.grant.granted, false);
   assert.equal(execution.result.modelContext, undefined);
 });
 test('durable checkpoints remove local pixels in all wires, preserve normal attachments and pairing', () => {

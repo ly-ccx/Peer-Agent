@@ -253,3 +253,12 @@ test('one stable memory conflict card exposes sources and scoped choices and dis
   assert.deepEqual(projectCards('ws-1',{memories}),first);
   assert.deepEqual(projectCards('ws-1',{memories:memories.map((m,i)=>({...m,status:i?'forgotten':'active'}))}),[]);
 });
+
+test('image approvals retain a specific scope choice after restart and grant records do not create duplicate cards', () => {
+  const approvals = [{ approvalId: 'image', state: 'stale', capabilityId: 'local.image.read', imageReadScope: { path: '/tmp/screen.png' } },
+    { approvalId: 'grant', kind: 'image_read_grant', state: 'approved', capabilityId: 'local.image.read' }];
+  const cards = projectCards('w', { approvals });
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].content, '/tmp/screen.png');
+  assert.equal(cards[0].actions.find(a => a.id === 'allow_task').payload.capabilityId, 'local.image.read');
+});

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   resolveRoleRoute, readSnapshots, createExecutionScheduler, createWorkBudgetGuard,
+  runBoundedVerification, isVerificationTurn, verificationExecutionBudget,
   createFailedClientToolResult,
   createGoalPlanStore,
   loadSharedModelMetadataList,
@@ -100,7 +101,7 @@ export function createTuiTurnExecutor(options: {
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
-      mode, role: profile.role, turnProfile: profile, surface: 'tui', turnId: streamId, messages: options.readMessages(input.conversationId ?? ''),
+      mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: options.readMessages(input.conversationId ?? ''),
       currentInputAnchors: (profile.context?.inputAnchors ?? []).map((row: any) => row.messageId),
       objectiveWakeIds: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId).map((row: any) => row.objectiveId),
       objectiveWakeEvents: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId),
@@ -161,7 +162,7 @@ export function createTuiTurnExecutor(options: {
     });
     try {
       const result = await pipeline.run({ sessionId: `tui:${input.conversationId || streamId}`, conversationId: input.conversationId ?? undefined,
-        streamId, mode, ...(profile.role === 'project_agent' ? {
+        streamId, mode, ...(isVerificationTurn(profile) ? verificationExecutionBudget() : profile.role === 'project_agent' ? {
           maxTurns: 2, maxToolCalls: input.hardRemainingToolCalls, sliceToolCalls: Math.min(4, input.remainingToolCalls ?? input.limits?.maxToolCalls ?? 4),
           yieldAtTurnLimit: true, shouldYield: input.shouldYield, maxToolBatchCalls: 32,
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
@@ -208,7 +209,19 @@ export function createTuiTurnExecutor(options: {
       if (signal.aborted) cancel();
       const budgetGuard = createWorkBudgetGuard(input.turnProfile);
       let outcome: any;
-      try { outcome = await execute({ ...input, budgetGuard, signal }, controller); return outcome; }
+      try {
+        outcome = isVerificationTurn(input.turnProfile) ? await runBoundedVerification({ signal,
+          run: verificationSignal => {
+            const abortReview = () => controller.abort(verificationSignal.reason);
+            verificationSignal.addEventListener('abort', abortReview, { once: true });
+            return execute({ ...input, budgetGuard, signal: verificationSignal }, controller)
+              .finally(() => verificationSignal.removeEventListener('abort', abortReview));
+          } }).catch(error => {
+            if (error?.code === 'verifier_cancelled') return { ok: false, terminalStatus: 'aborted', error: error.code };
+            throw error;
+          }) : await execute({ ...input, budgetGuard, signal }, controller);
+        return outcome;
+      }
       finally { budgetGuard?.finish(outcome?.usage); signal.removeEventListener('abort', cancel); }
     }).finally(() => {
       input.signal?.removeEventListener('abort', abort); active.delete(key);

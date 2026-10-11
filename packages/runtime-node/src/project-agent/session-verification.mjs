@@ -141,8 +141,10 @@ export function createSessionVerification({
       const sourceRevision = criterionSourceRevision(plan);
       try {
         report = await verifySession(plan, input.focus);
-      } catch {
-        return { ok: false, error: 'verifier_failed' };
+      } catch (error) {
+        const code = ['verifier_timeout', 'verifier_cancelled', 'verifier_permission_denied'].includes(error?.code)
+          ? error.code : error?.name === 'AbortError' ? 'verifier_cancelled' : 'verifier_failed';
+        return { ok: false, error: code };
       }
       if (!report || report.ok === false || typeof report.passed !== 'boolean') {
         return { ok: false, error: report?.error || 'verifier_failed' };

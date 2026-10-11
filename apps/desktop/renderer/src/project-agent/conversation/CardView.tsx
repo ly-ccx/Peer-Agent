@@ -77,6 +77,7 @@ function CardItem({
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
       </> : failure ? <p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
+        : card.kind === 'approval' && actions?.some(a => a.payload?.capabilityId === 'local.image.read') ? <><p>{i18n.t('projectAgent.chat.imageReadNotice')}</p><p>{card.content}</p></>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved && !question || !actions?.length ? null : (
         <div className="bot-card-actions">
@@ -116,7 +117,7 @@ function actionLabel(action: BotChatCardAction, i18n: I18nRuntime): string {
   const text = typeof action.payload?.text === 'string' ? action.payload.text.trim() : '';
   if (text) return text;
   if (action.id === 'allow') return i18n.t('projectAgent.chat.allowOnce');
-  if (action.id === 'allow_task') return i18n.t('projectAgent.chat.allowTask');
+  if (action.id === 'allow_task') return i18n.t(action.payload?.capabilityId === 'local.image.read' ? 'projectAgent.chat.allowImage' : 'projectAgent.chat.allowTask');
   if (action.id === 'continue') return i18n.t('projectAgent.chat.approveContinue');
   if (action.id === 'approve') return i18n.t('projectAgent.chat.approve');
   if (action.id === 'reject') return i18n.t('projectAgent.chat.reject');
