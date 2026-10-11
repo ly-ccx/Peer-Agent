@@ -602,6 +602,7 @@ export { resolveGoalSitePath, createGoalWorktreeAdapter } from './project-agent/
 export { createAutomationWorktreeAdapter } from './project-agent/automation-worktree-adapter.mjs';
 export { isDelegatedWorkSession, resolveDelegatedWorkTurn, resolveWorkSessionProfile, WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES } from './project-agent/work-session-profile.mjs';
 export { finalVerifierText, decodeVerifierReport, runVerifierWithReport } from './project-agent/verifier-report.mjs';
+export { runBoundedVerification, isVerificationTurn, verificationExecutionBudget } from './project-agent/verifier-lifecycle.mjs';
 export { verifierEvidenceSnapshots } from './project-agent/verifier-evidence.mjs';
 export { createGoalTaskBranchAdapter, slugifyTaskBranchName, planNeedsTaskBranch } from './project-agent/goal-task-branch.mjs';
 export { createProjectGoalRunnerHost, buildGoalRunnerMessage } from './project-agent/goal-runner-host.mjs';

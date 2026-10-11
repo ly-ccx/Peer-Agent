@@ -1,4 +1,4 @@
-import { createExecutionScheduler, USER_TURN_LIMITS, createWorkBudgetGuard } from '@peer-agent/runtime-node';
+import { createExecutionScheduler, USER_TURN_LIMITS, createWorkBudgetGuard, runBoundedVerification, isVerificationTurn, verificationExecutionBudget } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -57,17 +57,25 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
     if (budgetGuard) sendMessageArgs.executionBudget = { guard: budgetGuard };
     if (!projectAgent) {
       if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted' });
+      if (isVerificationTurn(turnProfile)) sendMessageArgs.executionBudget = verificationExecutionBudget(sendMessageArgs.executionBudget);
       const streamId = sendMessageArgs.streamId || randomUUID();
       const abort = () => llmChatService.abort?.(streamId);
-      signal?.addEventListener('abort', abort, { once: true });
-      return Promise.resolve().then(() => signal?.aborted
-        ? { ok: false, terminalStatus: 'aborted' }
-        : llmChatService.sendMessage({
-        ...sendMessageArgs,
-        streamId,
-        webContents: sink,
-        turnProfile,
-      })).finally(() => signal?.removeEventListener('abort', abort));
+      const invoke = turnSignal => {
+        turnSignal?.addEventListener('abort', abort, { once: true });
+        return Promise.resolve().then(() => turnSignal?.aborted
+          ? { ok: false, terminalStatus: 'aborted' }
+          : llmChatService.sendMessage({
+            ...sendMessageArgs,
+            streamId,
+            webContents: sink,
+            turnProfile,
+          })).finally(() => turnSignal?.removeEventListener('abort', abort));
+      };
+      return isVerificationTurn(turnProfile)
+        ? runBoundedVerification({ signal, run: invoke }).catch(error => {
+          if (error?.code === 'verifier_cancelled') return { ok: false, terminalStatus: 'aborted', error: error.code };
+          throw error;
+        }) : invoke(signal);
     }
     if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' });
     // A project-agent call contains its own provider loop. Enforce the outer

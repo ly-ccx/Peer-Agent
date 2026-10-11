@@ -1,3 +1,5 @@
+import { runBoundedVerification } from './verifier-lifecycle.mjs';
+
 const MAX_TEXT = 100_000;
 const MAX_REPAIR_TEXT = 4000;
 
@@ -76,21 +78,30 @@ export function decodeVerifierReport(text) {
   };
 }
 
-export async function runVerifierWithReport({ run, signal, allowedEvidenceRefs = null } = {}) {
+export function runVerifierWithReport({ run, signal, timeoutMs, allowedEvidenceRefs = null } = {}) {
+  const denial = new AbortController();
+  const onToolResult = result => {
+    if (deniedResult(result)) denial.abort(Object.assign(new Error('Verifier permission denied'), { code: 'verifier_permission_denied' }));
+  };
+  return runBoundedVerification({ signal: AbortSignal.any([signal, denial.signal].filter(Boolean)), timeoutMs,
+    run: verificationSignal => collectVerifierReport({ run, signal: verificationSignal, allowedEvidenceRefs, onToolResult }) });
+}
+
+async function collectVerifierReport({ run, signal, allowedEvidenceRefs, onToolResult }) {
   let previousText = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (signal?.aborted) throw new DOMException('Verifier aborted', 'AbortError');
-    const { events = [], outcome } = await run({ attempt, previousText });
+    const { events = [], outcome } = await run({ attempt, previousText, signal, onToolResult });
     if (signal?.aborted) throw new DOMException('Verifier aborted', 'AbortError');
+    if (events.some(event => event?.channel === 'chat:stream:tool-result' && deniedResult(event.payload?.result))) {
+      throw Object.assign(new Error('Verifier permission denied'), { code: 'verifier_permission_denied' });
+    }
     const failedEvent = events.find(event => ['chat:stream:error', 'chat:stream:aborted'].includes(event?.channel));
     if (failedEvent || outcome?.ok === false || ['error', 'aborted', 'interrupted'].includes(outcome?.terminalStatus)) {
       throw new Error(failedEvent?.payload?.error || outcome?.error || 'Verifier stream failed or aborted');
     }
     const text = finalVerifierText(events);
     const report = decodeVerifierReport(text);
-    if (events.some(event => event?.channel === 'chat:stream:tool-result' && deniedResult(event.payload?.result))) {
-      throw new Error('Verifier permission denied');
-    }
     const allowed = new Set(allowedEvidenceRefs || []);
     for (const event of events) {
       if (event?.channel !== 'chat:stream:tool-result') continue;

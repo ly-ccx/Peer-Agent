@@ -743,3 +743,78 @@ test('production inline verifier shares the only round lease and a cancelled wai
     assert.equal(executor.executionScheduler.stats().active,0);
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+
+test('a stuck inline verifier returns a timeout, frees its lease, and preserves the requested focus', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verifier-stall-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  const model = { modelProviderId: 'frozen-verifier', providerId: 'test', modelId: 'review', family: 'test' };
+  const plan = store.createPlan({ conversationId: 'c', title: 'Review', goal: 'Review', tasks: [],
+    delegationOrigin: { anchorMessageId: 'u', inputId: 'i', workspaceId: 'w', sessionId: 's', phase: 'running', depth: 1,
+      modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() } } });
+  let host, aborted = 0, verifierContent = '';
+  const executor = createAgentTurnExecutor({ llmChatService: {
+    abort() { aborted++; },
+    async sendMessage(input) {
+      if (input.turnProfile.role === 'project_agent') {
+        await assert.rejects(host.goalRunner.verifyDelegatedSession({ plan, focus: 'Inspect four images; do not rewrite the implementation.' }),
+          { code: 'verifier_timeout' });
+        assert.equal(executor.executionScheduler.stats().active, 1);
+        return { terminalStatus: 'done' };
+      }
+      assert.equal(input.turnProfile.role, 'work_session');
+      assert.equal(input.turnProfile.agentKind, 'verifier');
+      assert.equal(input.executionBudget.maxTurns, 12);
+      assert.equal(input.executionBudget.maxToolCalls, 128);
+      verifierContent = input.messages[0].content;
+      return new Promise(() => {});
+    },
+  } });
+  executor.executionScheduler.configure({ getConcurrency: () => 1 });
+  host = createDesktopGoalRunnerHost({ goalPlanStore: store, agentTurnExecutor: executor,
+    conversationStore: { getConversation: () => ({ id: 'c', messages: [] }) }, broadcast() {}, llmChatService: {},
+    resolveConversationModelProviderId: () => 'test', workspaceRoot: root, getMainWindows: () => [], verificationTimeoutMs: 20 });
+  await executor.runTurn({ turnProfile: { role: 'project_agent' }, plan: { kind: 'user' }, sink: { send() {} } });
+  assert.equal(aborted, 1);
+  assert.match(verifierContent, /Inspect four images; do not rewrite/);
+  assert.equal(executor.executionScheduler.stats().active, 0);
+  assert.equal(executor.executionScheduler.stats().waiting, 0);
+});
+
+test('a visual verifier that ignores cancellation cannot retain the scheduler lease', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'visual-verifier-stall-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  const plan = store.createPlan({ title: 'Visual review', goal: 'Visual review', tasks: [] });
+  let signal;
+  const host = createDesktopGoalRunnerHost({ goalPlanStore: store, agentTurnExecutor: { runTurn: async () => ({}) },
+    broadcast() {}, llmChatService: {}, resolveConversationModelProviderId: () => 'test', workspaceRoot: root,
+    getMainWindows: () => [], verificationTimeoutMs: 20,
+    runPlanVisualVerifier: input => { signal = input.signal; return new Promise(() => {}); } });
+  await assert.rejects(host.verifierRunner.runVerifier({ plan, verifierRunId: 'v', stage: 'visual' }), { code: 'verifier_timeout' });
+  assert.equal(signal.aborted, true);
+  assert.equal(host.goalRunner.executionScheduler.stats().active, 0);
+});
+
+test('live permission denial stops the production reviewer before an unresponsive model can keep checking', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verifier-denial-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  const plan = store.createPlan({ conversationId: 'c', title: 'Review', goal: 'Review', tasks: [] });
+  let aborted = 0, requests = 0;
+  const executor = createAgentTurnExecutor({ llmChatService: {
+    abort() { aborted++; },
+    sendMessage(input) {
+      requests++;
+      input.webContents.send('chat:stream:tool-result', { result: JSON.stringify({ status: 'denied', reason: 'image_outside_read_scope' }) });
+      return new Promise(() => {});
+    },
+  } });
+  const host = createDesktopGoalRunnerHost({ goalPlanStore: store, agentTurnExecutor: executor, broadcast() {}, llmChatService: {},
+    resolveConversationModelProviderId: () => 'test', workspaceRoot: root, getMainWindows: () => [] });
+  await assert.rejects(host.goalRunner.verifyDelegatedSession({ plan }), { code: 'verifier_permission_denied' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests, 1);
+  assert.equal(aborted, 1);
+  assert.equal(executor.executionScheduler.stats().active, 0);
+});

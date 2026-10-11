@@ -116,6 +116,19 @@ test('scheduler cancellation aborts a running provider and waits for the old str
   expect(stopped).toBe(true);expect(outcome.terminalStatus).toBe('aborted');
 });
 
+test('a delegated readonly verifier releases its slot when an unresponsive provider ignores cancellation', async () => {
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const env = harness({ stream() { started(); return new Promise(() => {}); } });
+  const pending = env.executor.runTurn({ ...env.input, mode: 'explorer',
+    turnProfile: { role: 'work_session', agentKind: 'verifier', planId: 'review', workspaceId: 'workspace' } });
+  await ready;
+  env.scheduler.cancelPlan('review');
+  expect((await pending).terminalStatus).toBe('aborted');
+  expect(env.requests[0].signal.aborted).toBe(true);
+  expect(env.scheduler.stats().active).toBe(0);
+});
+
 test('delegated TUI turns receive their current plan admission and keep readonly capability gates', async () => {
   const env = harness({ async stream() { return { content: 'task facts checked', toolCalls: [] }; } });
   await env.executor.runTurn({ ...env.input, mode: 'goal', turnProfile: { role: 'work_session', workspaceId: 'workspace',
