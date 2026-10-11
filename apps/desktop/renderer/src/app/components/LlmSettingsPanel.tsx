@@ -1617,9 +1617,7 @@ export function LlmSettingsPanel({
                 <LlmBrandIcon channelId={head.channelId} providerName={head.name} serviceTemplateId={head.serviceTemplateId} />
                 <span className="llm-service-copy">
                   <strong>{head.name || head.provider}</strong>
-                  <span className="llm-group-count">
-                    {`${accessMethodLabel(head, zh)} · ${g.models.length} ${zh ? '个模型' : 'models'}${defaultModel ? ` · ${zh ? '默认' : 'default'} ${defaultModel.modelLabel || defaultModel.model}` : ''}`}
-                  </span>
+                  <span className="llm-group-count">{`${accessMethodLabel(head, zh)} · ${g.models.length} ${zh ? '个模型' : 'models'}${defaultModel ? ` · ${zh ? '默认' : 'default'} ${defaultModel.modelLabel || defaultModel.model}` : ''}`}</span>
                 </span>
                 <PeerIcon name="chevronDown" size={14} className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`} />
               </button>
