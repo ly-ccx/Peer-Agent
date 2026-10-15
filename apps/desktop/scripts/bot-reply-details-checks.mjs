@@ -31,7 +31,7 @@ export async function openReplyDetails(page, message) {
   if (placement.gap !== null) assert.ok(placement.gap >= 24, 'running status and details action have separate sides');
   // Move the pointer over the visible reply. Locator.hover() would first center
   // the whole element with scrollIntoView, scrolling the document at narrow widths.
-  const hoverPoint = await message.evaluate(node => {
+  const visibleHoverPoint = () => message.evaluate(node => {
     const thread = node.closest('.bot-thread').getBoundingClientRect();
     // The floating "latest reply" control may cover the center of a short reply.
     const areas = [...node.querySelectorAll('.bot-reply-body'), node];
@@ -47,9 +47,21 @@ export async function openReplyDetails(page, message) {
     }
     return { visible: false };
   });
-  assert.equal(hoverPoint.visible, true, 'the reply is visible before a real pointer hovers it');
-  await page.mouse.move(hoverPoint.x, hoverPoint.y);
-  await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
+  // Virtual row measurements may still move a reply after its CSS animations
+  // finish. Recompute real pointer coordinates until Chromium confirms :hover;
+  // do not retry the scenario or force the details button visible.
+  const deadline = Date.now() + 15000;
+  let revealed = false;
+  while (!revealed && Date.now() < deadline) {
+    const point = await visibleHoverPoint();
+    assert.equal(point.visible, true, 'the reply is visible before a real pointer hovers it');
+    await page.mouse.move(1, 1);
+    await page.mouse.move(point.x, point.y, { steps: 2 });
+    revealed = await button.evaluate(node => getComputedStyle(node).opacity === '1'
+      && node.closest('.bot-reply, .bot-system').matches(':hover'));
+    if (!revealed) await page.waitForTimeout(50);
+  }
+  assert.equal(revealed, true, 'a real pointer over the current reply reveals its details');
   assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'hovering the reply reveals its details');
   await page.mouse.move(1, 1);
   await button.focus(); await button.press('Enter');
