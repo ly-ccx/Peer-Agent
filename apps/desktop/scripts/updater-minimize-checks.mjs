@@ -29,7 +29,7 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
       await page.waitForTimeout(250);
       if (!reduced) await page.screenshot({ path: path.join(captureDirectory, `updater-minimize-${width}-${appearance}-before.png`) });
       const button = dialog.getByRole('button', { name: '更新', exact: true });
-      await button.evaluate(node => {
+      await button.evaluate((node, injectFrameGap) => {
         const panel = node.closest('.updater-modal');
         window.rcUpdateFrames = null;
         node.addEventListener('click', () => {
@@ -55,17 +55,40 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
             if (event.target === panel && event.animationName === 'motion-exit-to-target') sampleFrame('animationend');
           };
           panel.addEventListener('animationend', completed, { capture: true });
+          let inspected = false;
+          const inspectMidpoint = event => {
+            if (inspected || event.target !== panel || event.animationName !== 'motion-exit-to-target') return;
+            inspected = true;
+            const animation = panel.getAnimations().find(item => item.animationName === event.animationName);
+            const duration = animation?.effect?.getComputedTiming().duration;
+            if (!animation || typeof duration !== 'number' || duration <= 0) return;
+            // Inspect real CSS geometry at a fixed animation time. Restore its
+            // clock synchronously; endpoint/unmount checks still run naturally.
+            // Trace capture can otherwise skip the whole middle of a 320ms exit.
+            const time = animation.currentTime, startTime = animation.startTime;
+            animation.pause(); animation.currentTime = duration / 2;
+            sampleFrame('animation-midpoint');
+            animation.currentTime = time; animation.play();
+            if (startTime !== null) animation.startTime = startTime;
+            // Retain the CI failure as renderer load in the narrow-window case.
+            if (injectFrameGap) setTimeout(() => {
+              const end = performance.now() + 360;
+              while (performance.now() < end) { /* isolated renderer stall */ }
+            }, 20);
+          };
+          panel.addEventListener('animationstart', inspectMidpoint, { capture: true });
           const sample = () => {
             sampleFrame('raf');
             if (performance.now() - started < 850) requestAnimationFrame(sample);
             else {
               panel.removeEventListener('animationend', completed, { capture: true });
+              panel.removeEventListener('animationstart', inspectMidpoint, { capture: true });
               window.rcUpdateFrames = frames;
             }
           };
           sample();
         }, { once: true });
-      });
+      }, width === 760 && !reduced);
       await button.click();
       const frames = await page.waitForFunction(() => window.rcUpdateFrames).then(handle => handle.jsonValue());
       const active = frames.filter(frame => frame.connected && frame.target);
@@ -74,7 +97,8 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
       report.updaterMinimize = { cases };
       assert.equal(frames.at(-1).connected, false, 'dialog must close after its exit completes');
       if (!reduced) {
-        assert.ok(active.some(frame => frame.time > 30 && frame.panel.width < original.width * 0.9
+        assert.ok(active.some(frame => frame.event === 'animation-midpoint'), 'native CSS midpoint must be inspectable before unmount');
+        assert.ok(active.some(frame => (frame.animations.find(item => item.name === 'motion-exit-to-target')?.currentTime ?? 0) > 30 && frame.panel.width < original.width * 0.9
           && frame.panel.width > frame.target.width + 10), 'dialog must stay mounted while shrinking toward the footer');
         assert.ok(active.some(frame => frame.panel.left + frame.panel.width / 2 < original.left + original.width / 2 - 15
           && frame.panel.top + frame.panel.height / 2 > original.top + original.height / 2 + 15), 'exit must head to the actual bottom-left target');
