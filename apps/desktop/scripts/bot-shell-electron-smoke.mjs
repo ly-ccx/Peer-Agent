@@ -265,9 +265,14 @@ if (workSurfaces) {
       if(state.cancelMode==='fail')return {ok:false,code:'CONTROLLED_CANCEL_FAILURE'};
       const session=globalThis.rcBotWorkSessions.find(item=>item.sessionId===payload.sessionId);
       if(!session)return {ok:false,code:'NOT_FOUND'};
-      const next={...session,status:'cancelled',statusLabel:'已取消'};
+      const deferred=state.cancelMode==='deferred-status';
+      const next={...session,status:deferred?'stopping':'cancelled',statusLabel:deferred?'正在停止':'已取消'};
       globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?next:item);
       queueChanged(payload.workspaceId);
+      if(deferred)setTimeout(()=>{
+        globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?{...item,status:'cancelled',statusLabel:'已取消'}:item);
+        queueChanged(payload.workspaceId);
+      },500);
       return {ok:true,session:next};
     }`);
   const confirmationSeam = 'async function confirmResult(payload = {}) {';

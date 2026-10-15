@@ -57,7 +57,9 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   assert.ok(receipts.every(call => call.sessionId === first.sessionId && call.workspaceId === initial.workspaceId));
   await page.screenshot({ path: path.join(captureDirectory, 'task-cancelled-dark.png'), animations: 'disabled' });
   await closeReplyDetails(page);
-  update({ sessions: [first, other], cancelMode: 'success' });
+  // A successful stop receipt may precede the final host fact/React commit.
+  // Keep the production button mounted in stopping state across several frames.
+  update({ sessions: [first, other], cancelMode: 'deferred-status' });
   await until(() => background.locator('.bot-work-row[data-status=waiting_user]').count(), count => count === 1);
   const restored = background.locator('.bot-work-row[data-status=waiting_user]');
   if (await restored.getAttribute('open') === null) await restored.locator(':scope > summary').click();
@@ -73,14 +75,25 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   assert.equal(fits, true);
   await page.screenshot({ path: path.join(captureDirectory, 'task-cancel-detail-760-light.png'), animations: 'disabled' });
   await detailCancel.focus(); await page.keyboard.press('Enter');
+  await until(() => detail.getAttribute('data-status'), value => value === 'stopping');
+  assert.equal(await detailCancel.count(), 1, 'the stop receipt does not remove the action before the final host fact');
   await until(() => detail.getAttribute('data-status'), value => value === 'cancelled');
   assert.equal(await detail.locator('.bot-task-cancel button').count(), 0);
   await until(() => detail.locator('.bot-task-back').evaluate(node => node === document.activeElement), Boolean);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  update({ sessions: [first, other], cancelMode: 'deferred-status' });
+  await until(() => detail.getAttribute('data-status'), value => value === 'waiting_user');
+  await detailCancel.focus(); await page.keyboard.press('Enter');
+  const close = page.getByRole('button', { name: '关闭', exact: true });
+  await close.focus();
+  await until(() => detail.getAttribute('data-status'), value => value === 'cancelled');
+  assert.equal(await close.evaluate(node => node === document.activeElement), true,
+    'finishing cancellation must preserve focus deliberately moved during the request');
+  await close.click();
   await page.setViewportSize(originalViewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
   update({ ...initial, cancelMode: undefined, cancelCalls: undefined });
   await until(() => background.locator('.bot-work-row[data-status=running]').count(), count => count === 1);
   report.taskCancellation = { directWaitingAction: true, keyboard: true, detailAction: true, sharedPending: true,
-    failureRetry: true, latestReceipt: true, noDuplicate: true, unrelatedPreserved: true, narrowFits: true, focusReturned: true };
+    failureRetry: true, latestReceipt: true, noDuplicate: true, unrelatedPreserved: true, narrowFits: true,
+    deferredStopReceipt: true, focusReturned: true, focusPreserved: true };
 }

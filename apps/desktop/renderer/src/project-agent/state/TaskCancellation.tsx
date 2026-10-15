@@ -3,6 +3,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { canCancelTask } from './botWorkState';
+import { taskCancellationFocus } from './taskCancellationFocus';
 import '../styles/bot-task-cancel.css';
 
 type CancellationState = { readonly pending: boolean; readonly failed: boolean };
@@ -53,14 +54,9 @@ export function TaskCancelButton({ sessionId, status, title, i18n }: {
   return <div className="bot-task-cancel">
     <button type="button" disabled={stopping} aria-busy={stopping}
       aria-label={`${i18n.t('projectAgent.task.cancel')} ${title}`} onClick={async event => {
-        const trigger = event.currentTarget;
-        const returnTo = trigger.closest('.bot-task-detail')?.querySelector<HTMLElement>('.bot-task-back')
-          ?? trigger.closest('.bot-work-row')?.querySelector<HTMLElement>('summary');
-        if (await control.cancel(sessionId)) requestAnimationFrame(() => {
-          if (trigger.isConnected || document.activeElement !== document.body) return;
-          const target = returnTo?.isConnected ? returnTo : document.querySelector<HTMLElement>('.bot-background-work > summary, .bot-composer textarea');
-          target?.focus({ preventScroll: true });
-        });
+        const finishFocus = taskCancellationFocus(event.currentTarget);
+        try { finishFocus(await control.cancel(sessionId)); }
+        catch { finishFocus(false); }
       }}><PeerIcon name="stop" size={13} />{i18n.t(stopping ? 'projectAgent.task.cancelling' : 'projectAgent.task.cancel')}</button>
     {state?.failed && <p role="alert">{i18n.t('projectAgent.task.cancelFailed')}</p>}
   </div>;
