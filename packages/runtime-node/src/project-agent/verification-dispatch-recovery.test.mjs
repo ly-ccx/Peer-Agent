@@ -29,13 +29,15 @@ function fixture({ legacy = false, capabilityId = 'verify_session', state = 'blo
   const reconcileVerification = input => { queries++; return query ? query(input, { loseLease: () => { epoch = 'replacement'; } })
     : { status: 'inactive', ...input, planId: 'plan', sourceRevision: 'current' }; };
   let context;
+  const kinds = [];
   const ports = { workspaceId: 'w', conversationId: 'c', inbox, coordinationStore: store, reconcileVerification,
     holdsLease: () => owned, readMessages: () => messages, appendMessage: (_id, row) => messages.push(row),
     resolveModel: () => ({ modelProviderId: 'm' }), retryDelays: [], executeTurn: async input => { const guard = createWorkBudgetGuard(input.turnProfile);
-      try { guard.beforeRequest(); calls++; context = input.turnProfile.context; return { toolCalls: [] }; } finally { guard.finish(); } } };
+      try { guard.beforeRequest(); calls++; context = input.turnProfile.context; kinds.push(input.plan.kind);
+        return input.plan.kind === 'user' ? { text: '新问题已答复。' } : { toolCalls: [] }; } finally { guard.finish(); } } };
   let runner = createProjectAgentRunner(ports);
   return { root, store, messages, inbox, get runner() { return runner; }, get calls() { return calls; }, get queries() { return queries; },
-    get context() { return context; }, work: () => store.read().works.work,
+    get context() { return context; }, kinds, work: () => store.read().works.work,
     restart() { runner.dispose(); runner = createProjectAgentRunner({ ...ports, coordinationStore: createWorkCoordinationStore(options) }); },
     close() { runner.dispose(); release(); rmSync(root, { recursive: true, force: true }); } };
 }
@@ -119,7 +121,7 @@ test('a reconciliation write failure retains uncertainty and does not start exec
   const save = env.store.saveWork;
   try {
     env.store.saveWork = () => { throw Error('disk full'); };
-    await env.runner.kick();
+    await assert.rejects(env.runner.kick(), /disk full/);
     assert.equal(env.calls, 0);
     assert.equal(env.work().budget.uncertainDispatches.length, 1);
   } finally { env.store.saveWork = save; env.close(); }
@@ -207,5 +209,25 @@ test('a live unrelated worker keeps its pending call while the interrupted paren
     assert.equal(env.calls, 1);
     assert.equal(env.work().budget.attempts.child.pendingTools[0].toolCallId, 'child-write');
     assert.equal(workBudgetBinding('w').activeAttempts.has('child'), true);
+  } finally { env.close(); }
+});
+
+test('startup continuation discovery reconciles an old review even without a new inbox event', async () => {
+  const env = fixture();
+  try {
+    assert.equal(env.runner.hasContinuation(), true);
+    await env.runner.kick();
+    assert.equal(env.calls, 1);
+    assert.equal(env.queries, 1);
+  } finally { env.close(); }
+});
+
+test('a fresh user goal retains priority over an old system-blocked review that has just been reconciled', async () => {
+  const env = fixture();
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'new-input', text: '处理新的独立问题' }]);
+    assert.deepEqual(env.kinds, ['user', 'wake'], 'the new input runs before the independent recovered work');
+    assert.equal(Object.keys(env.store.read().works).length, 2, 'new input never inherits the old work');
+    assert.equal(env.work().state, 'delivered');
   } finally { env.close(); }
 });

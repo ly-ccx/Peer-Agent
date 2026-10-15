@@ -106,6 +106,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         .map(work => work.recovery.retryAt).filter(at => Number.isFinite(Date.parse(at))).sort()[0] || null;
     },
     recoverJob() {
+      dispatchRecovery.reconcileAll();
       expireReservations();
       const work = Object.values(store.read().works).sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt))).find(row => row.state === 'runnable' && row.checkpointRef)
         || Object.values(store.read().works).find(row => row.checkpointRef && recoveryReservationDue(row, now()))
