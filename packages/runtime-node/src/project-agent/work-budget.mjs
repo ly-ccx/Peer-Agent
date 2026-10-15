@@ -1,3 +1,4 @@
+import { verificationDispatchTarget } from './verification-dispatch-recovery.mjs';
 import { randomUUID } from 'node:crypto';
 import { executionBindingCurrent } from './coordination-kernel.mjs';
 
@@ -74,7 +75,8 @@ export function createWorkBudgetGuard(profile) {
       budget.toolCalls++;
       const attempt = budget.attempts[attemptId] || { role: profile.role, planId: profile.planId, sessionId: profile.sessionId };
       budget.attempts[attemptId] = { ...attempt, pendingTools: [...(attempt.pendingTools || []),
-        { toolCallId: call.toolCallId || call.id || null, capabilityId: call.capabilityId || call.name || call.tool || null }] };
+        { toolCallId: call.toolCallId || call.id || null, capabilityId: call.capabilityId || call.name || call.tool || null,
+          ...(verificationDispatchTarget(call) ? { verificationSessionId: verificationDispatchTarget(call) } : {}) }] };
     }); },
     observeUsage(usage, fingerprint) {
       change(budget => {

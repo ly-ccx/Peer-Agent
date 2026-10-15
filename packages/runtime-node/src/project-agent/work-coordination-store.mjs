@@ -69,6 +69,19 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   }
   return {
     read, append, assertOwner, recover,
+    dispatchOrigin(workId, attemptId, toolCallId) {
+      let body;
+      try { body = readFileSync(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+      for (const line of body.split('\n').filter(Boolean)) {
+        const record = JSON.parse(line), work = record.work;
+        const attempt = work?.budget?.attempts?.[attemptId];
+        if (work?.workId === workId && work.attemptId && attempt?.role === 'project_agent'
+          && attempt.pendingTools?.some(row => row.toolCallId === toolCallId)) {
+          return { turnId: work.attemptId, epoch: record.epoch, at: record.at };
+        }
+      }
+      return null;
+    },
     decide(decision, host) {
       assertOwner();
       const admitted = admitCoordinationDecision(read(), decision, { ...host, workspaceId, holdsLease: true, now: now() });

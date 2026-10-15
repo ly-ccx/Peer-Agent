@@ -176,8 +176,9 @@ export function createRuntimePipeline<
           }
 
           state = await options.model.applyToolResults(state, executions, currentContext);
-          throwIfAborted(signal);
+          // Completed results remain durable even when cancellation arrived during execution.
           await options.model.checkpoint?.(state, executions, currentContext);
+          throwIfAborted(signal);
           try {
             await options.lifecycle?.toolResultsApplied?.(state, executions, currentContext);
           } catch {

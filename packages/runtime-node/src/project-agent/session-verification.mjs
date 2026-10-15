@@ -1,4 +1,4 @@
-import { beginVerificationAttempt } from './session-facts.mjs';
+import { beginVerificationAttempt, sessionFactsFromPlan } from './session-facts.mjs';
 import { randomUUID } from 'node:crypto';
 import { currentModelReview, criterionSourceRevision } from './criterion-review.mjs';
 /**
@@ -106,6 +106,14 @@ export function createSessionVerification({
   }
 
   return {
+    reconcileInterrupted({ workspaceId, parentConversationId, sessionId }) {
+      const plan = findPlan(sessionId);
+      if (!plan || plan.delegationOrigin?.workspaceId !== workspaceId
+        || plan.delegationOrigin?.parentConversationId !== parentConversationId) return { status: 'unavailable' };
+      if (sessionFactsFromPlan(plan).verificationActive) return { status: 'active' };
+      return { status: 'inactive', workspaceId, parentConversationId, sessionId,
+        planId: plan.planId, sourceRevision: criterionSourceRevision(plan) };
+    },
     facts(sessionId) {
       const plan = findPlan(sessionId);
       if (!plan) return null;

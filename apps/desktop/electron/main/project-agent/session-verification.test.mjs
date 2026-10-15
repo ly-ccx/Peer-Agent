@@ -226,3 +226,29 @@ test('semantic review is bound to indexed evidence and the current report, overr
     assert.equal((await changed.run({ sessionId: 'session-1' })).error, 'verification_source_changed');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('the production reconciliation port checks host ownership and liveness without inventing a verdict', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-reconcile-'));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  try {
+    const plan = store.createPlan({ conversationId: 'child-1', title: 'Review', goal: 'Review', tasks: [],
+      delegationOrigin: origin({ verifying: true }), hostVerification: { independentVerifier: 'missing' } });
+    let requests = 0;
+    const verification = createSessionVerification({ goalPlanStore: store, verifySession: () => { requests++; } });
+    const input = { workspaceId: 'ws-1', parentConversationId: 'parent-1', sessionId: 'session-1' };
+    const before = store.getPlan(plan.planId);
+    const receipt = verification.reconcileInterrupted(input);
+    assert.equal(receipt.status, 'inactive');
+    assert.equal(receipt.planId, plan.planId);
+    assert.equal(typeof receipt.sourceRevision, 'string');
+    assert.deepEqual(store.getPlan(plan.planId), before, 'querying liveness does not mutate plan, quality or acceptance');
+    assert.equal(verification.reconcileInterrupted({ ...input, workspaceId: 'other' }).status, 'unavailable');
+    assert.equal(verification.reconcileInterrupted({ ...input, parentConversationId: 'other' }).status, 'unavailable');
+    await verification.markVerifying('session-1');
+    assert.equal(verification.reconcileInterrupted(input).status, 'active');
+    await verification.finish('session-1');
+    assert.equal(verification.reconcileInterrupted(input).status, 'inactive');
+    assert.equal(requests, 0);
+    assert.notEqual(store.getPlan(plan.planId).hostVerification?.independentVerifier, 'passed');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

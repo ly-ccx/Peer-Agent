@@ -161,6 +161,7 @@ export function createTuiProjectHost(options: {
     resolveRoster:(id: string)=>supervisor.list({workspaceId:id}), restoreQueue:(id: string)=>{applyStartupApprovalRecovery({approvalStore:approvals,goalPlanStore:plans,canRecover:row=>row.workspaceId===id});return supervisor.recoverQueue(id);},
     recoverTasks:(id: string)=>goalRunner.recoverContextCheckpoints({workspaceId:id,deferPump:true} as never), activateSessions:supervisor.resumeRecovered,
     restoreWatches:watches.restore,stopWatches:watches.stopWorkspace, reconcileSessions:supervisor.reconcile,
+    reconcileVerification: (input: any) => verification.reconcileInterrupted(input),
     readSettings:getSettings, inputQueue:inputs, inbox, onStatus:changed,
     onCurator:(input: any)=>curator.consider(input), onMaintenance:(input: any)=>{if(holds(input.workspaceId)&&memoryEnabled(input.workspaceId))maintenance.runDue(input);},
     readFacts:(id: string)=>delegationFactsForWorkspace(plans.listPlans().map((row: any)=>plans.getPlan(row.planId)),id),

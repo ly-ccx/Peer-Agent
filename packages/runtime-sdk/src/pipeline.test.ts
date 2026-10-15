@@ -583,3 +583,23 @@ test('interjection yields after tool results and checkpoint, never during a writ
   assert.equal(result.status, 'yielded'); assert.equal(result.state, 1);
   assert.deepEqual(order, ['write-1','write-2','applied','durable','yield']);
 });
+
+test('cancellation after a known tool result commits its native checkpoint before stopping', async () => {
+  const controller = new AbortController();
+  const order: string[] = [];
+  let requests = 0;
+  const pipeline = createRuntimePipeline({
+    model: {
+      initialize: () => 0,
+      runTurn: async state => { requests++; return { kind: 'tool_calls' as const, state, calls: [{ toolCallId: 'known', name: 'verify_session' }] }; },
+      applyToolResults: (state, executions) => { assert.deepEqual(executions[0].result, { error: 'verifier_cancelled' }); order.push('applied'); return state; },
+      checkpoint: () => { order.push('durable'); },
+      onCancelled: () => { order.push('cancelled'); },
+    },
+    tools: { execute: async call => { controller.abort(); return { call, result: { error: 'verifier_cancelled' } }; } },
+  });
+  const result = await pipeline.run({ sessionId: 'cancel-known', input: null }, { signal: controller.signal });
+  assert.equal(result.status, 'cancelled');
+  assert.equal(requests, 1);
+  assert.deepEqual(order, ['applied', 'durable', 'cancelled']);
+});
