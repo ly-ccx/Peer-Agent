@@ -479,6 +479,10 @@ try {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+  } else if (process.argv.includes('--fallback-vision-only')) {
+    await page.locator('.bot-app-menu-button').click();
+    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--updater-only')) {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
   } else if (process.argv.includes('--task-cancel-only')) {
