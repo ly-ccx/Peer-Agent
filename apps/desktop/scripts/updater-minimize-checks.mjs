@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 /** The disposable main entry replaces only the network download response, never downloads a release. */
-export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report, captureDirectory }) {
+export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report, captureDirectory, injectFrameGap = false }) {
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   await app.evaluate(({ ipcMain }) => {
@@ -88,7 +88,7 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
           };
           sample();
         }, { once: true });
-      }, width === 760 && !reduced);
+      }, injectFrameGap && width === 760 && !reduced);
       await button.click();
       const frames = await page.waitForFunction(() => window.rcUpdateFrames).then(handle => handle.jsonValue());
       const active = frames.filter(frame => frame.connected && frame.target);

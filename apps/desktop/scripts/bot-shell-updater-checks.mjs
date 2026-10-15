@@ -170,5 +170,6 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
     await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-idle-dark.png') });
   }
   checks.push('reload restores production update state and persisted channel without duplicate badges');
-  await checkUpdaterMinimize({ page, app, emitUpdaterEvent, report, captureDirectory });
+  await checkUpdaterMinimize({ page, app, emitUpdaterEvent, report, captureDirectory,
+    injectFrameGap: process.argv.includes('--updater-frame-gap') });
 }
