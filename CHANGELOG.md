@@ -8,6 +8,25 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.15] - 2026-10-16
+
+### Fixed
+
+- Honor full local access consistently for Bot, delegated work and verification image reads; retain exact-image approval lifecycles in ask mode.
+- Preserve authorized image pixels across cooperative continuation, recheck current authorization and prevent revoked or unrelated context reuse.
+- Persist returned tool results before cancellation, and safely reconcile interrupted historical verification without replaying unknown side effects or resetting budgets.
+- Restore focus after task cancellation when the original control actually unmounts, without stealing an intentionally moved focus.
+
+### Changed
+
+- Refine the macOS template menu-bar icon as a Retina cat outline, preserving the pending count.
+- Synchronize bilingual release notes, README guidance, permission documentation and generated site changelog for RC15.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; cloud model quality, full platform installation coverage and GA remain separate gates.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
 ## [0.1.0-rc.14] - 2026-10-11
 
 ### Fixed
