@@ -1,4 +1,5 @@
 import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
+import { checkBotFullAccessImages } from './bot-full-access-image-checks.mjs';
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 import { seedUiAutomation, seedClassicUiFixture, checkSharedUiConventions } from './shared-ui-convention-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
@@ -264,9 +265,14 @@ if (workSurfaces) {
       if(state.cancelMode==='fail')return {ok:false,code:'CONTROLLED_CANCEL_FAILURE'};
       const session=globalThis.rcBotWorkSessions.find(item=>item.sessionId===payload.sessionId);
       if(!session)return {ok:false,code:'NOT_FOUND'};
-      const next={...session,status:'cancelled',statusLabel:'已取消'};
+      const deferred=state.cancelMode==='deferred-status';
+      const next={...session,status:deferred?'stopping':'cancelled',statusLabel:deferred?'正在停止':'已取消'};
       globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?next:item);
       queueChanged(payload.workspaceId);
+      if(deferred)setTimeout(()=>{
+        globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?{...item,status:'cancelled',statusLabel:'已取消'}:item);
+        queueChanged(payload.workspaceId);
+      },500);
       return {ok:true,session:next};
     }`);
   const confirmationSeam = 'async function confirmResult(payload = {}) {';
@@ -438,6 +444,7 @@ try {
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
   if (process.argv.includes('--image-permission-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
   } else if (sharedUiOnly) {
     await page.locator('.bot-app-menu-button').click();
@@ -472,6 +479,10 @@ try {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+  } else if (process.argv.includes('--fallback-vision-only')) {
+    await page.locator('.bot-app-menu-button').click();
+    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--updater-only')) {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
   } else if (process.argv.includes('--task-cancel-only')) {
@@ -675,6 +686,7 @@ try {
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
+    await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });

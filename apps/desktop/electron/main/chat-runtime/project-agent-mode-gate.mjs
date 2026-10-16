@@ -44,35 +44,6 @@ export function buildProjectAgentModeDenial({
   };
 }
 
-/**
- * 共享 permission-gate 的 accessLevel 不能按回合切换。
- * Provider 越界请求直接拒绝，避免进入没有人工 approver 的代理流。
- * 其他请求若收到 full/session 自动授权，同样拒绝，避免全局级别漏进本回合。
- */
-export function restrictProjectAgentPermission(requestPermission) {
-  if (typeof requestPermission !== 'function') return requestPermission;
-  return async (request) => {
-    // File Provider only asks here after checking its admitted workspace scope.
-    if (typeof request?.filePath === 'string' && typeof request?.workspacePath === 'string') {
-      return { granted: false, reason: 'project_agent_capability_denied' };
-    }
-    const decision = await requestPermission(request);
-    if (
-      decision?.reason === 'local_access_level_full'
-      || decision?.reason === 'local_access_level_session'
-    ) {
-      return {
-        granted: false,
-        reason: 'project_agent_capability_denied',
-        grant: decision.grant
-          ? { ...decision.grant, granted: false, duration: 'denied' }
-          : undefined,
-      };
-    }
-    return decision;
-  };
-}
-
 /** 副作用闸拒绝时补上同一条 Evidence 路径，不另开记录通道。 */
 export function attachProjectAgentDenialEvidence(denial, { call, locale = 'zh-CN', reason }) {
   if (denial?.execution?.result?.evidence) return denial;

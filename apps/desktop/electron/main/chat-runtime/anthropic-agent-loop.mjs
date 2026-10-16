@@ -1,4 +1,4 @@
-import { checkpointWithoutLocalImagePixels } from '@peer-agent/runtime-node';
+import { localImageContinuations } from '@peer-agent/runtime-node';
 import { sendAnthropicMessagesStream } from '../provider-adapters/anthropic-messages-adapter.mjs';
 import { countAnthropicCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -69,10 +69,12 @@ export async function agentLoopAnthropic({
   let effectiveSystemPrompt = systemPrompt;
   let effectiveSystem = effectiveSystemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
+  const imageScope = { conversationId, workspacePath, planId: toolContext?.planId, provider: 'anthropic', providerId, model };
+  let nativeCheckpoint;
   const saved = executionBudget?.providerCheckpoint;
   if (saved && (saved.provider !== 'anthropic' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
   if (saved && saved.provider === 'anthropic' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
-    apiMessages = structuredClone(saved.messages);
+    apiMessages = localImageContinuations.restore(saved, imageScope);
   }
   const loop = createAgentLoopKernel({
     executionBudget,
@@ -121,7 +123,10 @@ export async function agentLoopAnthropic({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
-      checkpoint: (_state, executions) => executionBudget?.guard?.checkpoint?.({ provider: 'anthropic', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages) }, executions),
+      checkpoint: (_state, executions) => {
+        nativeCheckpoint = localImageContinuations.checkpoint({ provider: 'anthropic', providerId, model, messages: apiMessages }, imageScope);
+        return executionBudget?.guard?.checkpoint?.(nativeCheckpoint, executions);
+      },
       initialize: () => ({ provider: 'anthropic' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -301,7 +306,7 @@ export async function agentLoopAnthropic({
         return state;
       },
       onYield: (_state, context) => {
-        executionBudget?.onYield?.({ provider: 'anthropic', providerId, model, messages: checkpointWithoutLocalImagePixels(apiMessages),
+        executionBudget?.onYield?.({ ...(nativeCheckpoint ?? localImageContinuations.checkpoint({ provider: 'anthropic', providerId, model, messages: apiMessages }, imageScope)),
           turns: context.turn, usage: loop.usage });
         loop.sendDone();
       },

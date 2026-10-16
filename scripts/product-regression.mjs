@@ -44,6 +44,7 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'selection-quote-1280-dark.png', 'selection-quote-760-light.png', 'selection-quote-docked-light.png',
   'completion-review-card.png', 'completion-review-report.png', 'completion-review-760-light.png',
   'image-live-wait-1280-dark.png', 'image-live-wait-760-light.png',
+  'image-full-1280-dark.png', 'image-full-760-light.png',
   ...['allow', 'deny', 'cancel', 'stop', 'timeout'].map(state => `image-live-${state}-1280-dark.png`),
   'image-approval-1280-dark.png', 'image-approval-760-light.png',
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
@@ -55,6 +56,9 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
   if (!machine.imagePermissionLifecycle?.realCalls || machine.imagePermissionLifecycle?.cases?.length !== 6
     || !machine.imagePermissionLifecycle.cases.every(row => row.realProjection && row.evidence && row.ended && row.cardAutomatic && row.fits)) throw new Error('Real image permission lifecycle regression failed');
+  if (!machine.imageFullAccess?.realCalls || machine.imageFullAccess.images !== 4
+    || !machine.imageFullAccess.pixels || !machine.imageFullAccess.evidence || !machine.imageFullAccess.noPermissionCards
+    || !machine.imageFullAccess.noApprovalRecords) throw new Error('Full access image regression failed');
   if (!machine.imageApproval?.persisted || !machine.imageApproval?.unrelatedUnapproved || !machine.imageApproval?.keyboard || !machine.imageApproval?.narrowFits) throw new Error('Image approval scope regression failed');
   if (machine.autonomousCoordination?.cases?.length !== 8 || !machine.autonomousCoordination.cases.every(item=>item.truthful && item.humanQuestionAbsent)) throw new Error('Autonomous coordination projection failed');
   if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
@@ -101,7 +105,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label && sample.shimmer))
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp
-    || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned'].every(check => machine.taskCancellation?.[check] === true)
+    || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
       .every(check => machine.taskDetails?.[check] === true)
     || !['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)
@@ -137,7 +141,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
     checks: { historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
-      chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
+      chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,

@@ -42,26 +42,30 @@ export async function checkFallbackVisionLayout({ page, until, report, captureDi
   await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
   await page.locator('.settings-provider-page').screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'providers-1280-dark.png') });
   // Measure actual intermediate rendered heights in both directions, then keyboard access.
-  const motion = async () => {
-    await page.evaluate(() => {
+  const motion = async (delay = 0) => {
+    await toggle.evaluate(node => {
       window.rcDisclosureSamples = [];
       window.rcDisclosureDone = false;
-      const start = performance.now();
-      const sample = () => {
-        window.rcDisclosureSamples.push(document.querySelector('.llm-fallback-vision .llm-settings-disclosure').getBoundingClientRect().height);
-        if (performance.now() - start < 320) requestAnimationFrame(sample);
-        else window.rcDisclosureDone = true;
-      };
-      requestAnimationFrame(sample);
+      node.addEventListener('click', () => {
+        const start = performance.now();
+        const sample = () => {
+          window.rcDisclosureSamples.push(document.querySelector('.llm-fallback-vision .llm-settings-disclosure').getBoundingClientRect().height);
+          if (performance.now() - start < 320) requestAnimationFrame(sample);
+          else window.rcDisclosureDone = true;
+        };
+        requestAnimationFrame(sample);
+      }, { once: true });
     });
-    await toggle.click();
+    await toggle.click({ delay });
     await page.waitForFunction(() => window.rcDisclosureDone);
     const values = await page.evaluate(() => window.rcDisclosureSamples);
     const max = Math.max(...values);
     assert.ok(max > 20 && values.some(height => height > 1 && height < max - 1), `intermediate heights required: ${values}`);
     return true;
   };
-  const openingAnimated = await motion();
+  // Press-and-hold is a real input sequence. Sampling must start on click,
+  // rather than before Playwright's actionability checks or the pointer hold.
+  const openingAnimated = await motion(400);
   await selector.waitFor();
   await page.locator('.settings-provider-page').screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'providers-expanded-1280-dark.png') });
   await selector.focus(); await page.keyboard.press('Enter');
