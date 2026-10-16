@@ -386,6 +386,7 @@ export function registerDesktopProjectAgent({
     resolveContext:({workspaceId})=>({coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId)),objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
     reconcileSessions: () => supervisor.reconcile(),
+    reconcileVerification: input => verification.reconcileInterrupted(input),
     ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
       memoryEnabled: workspaceId => memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(workspaceId) }),
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),

@@ -252,6 +252,13 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.setViewportSize({ width: 760, height: 780 });
+  // setViewportSize acknowledges the native window resize before React's resize
+  // listener necessarily replaces the pushed drawer. Measure the narrow layout
+  // after that mode switch; the outgoing dock still occupies 414px in between.
+  if (workCommandFile) {
+    await page.locator('.bot-drawer-dock').waitFor({ state: 'detached' });
+    await page.locator('.bot-drawer-panel').waitFor({ state: 'visible' });
+  }
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);

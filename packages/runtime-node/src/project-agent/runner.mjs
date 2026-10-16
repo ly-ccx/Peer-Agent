@@ -40,6 +40,7 @@ export function createProjectAgentRunner({
   onCurator = null,
   onReplied = null,
   coordinationStore = null,
+  reconcileVerification = null,
   circuitBreaker = null,
   onInputsCompleted = null,
   onActivity = null,
@@ -104,7 +105,7 @@ export function createProjectAgentRunner({
   }
 
   const coordination = coordinationStore ? createRunnerCoordination({ store: coordinationStore, inbox,
-    workspaceId: workspace, conversationId: conversation, readMessages, remember, onReplied, resolveRoster, now: stamp }) : null;
+    workspaceId: workspace, conversationId: conversation, readMessages, remember, onReplied, resolveRoster, reconcileVerification, now: stamp }) : null;
 
   function armRecoveryTimer() {
     const at = !disposed && holdsLease() === true ? coordination?.nextRetryAt() : null;
@@ -441,6 +442,8 @@ export function createProjectAgentRunner({
     if (checkpoint?.providerCheckpoint) plan.turnProfile.providerCheckpoint = checkpoint.providerCheckpoint;
     if (checkpoint) plan.turnProfile.context = { ...plan.turnProfile.context,
       retryContinuity: readRetryContinuity([{ id: checkpoint.turnId, kind: 'agent_turn', rounds: checkpoint.rounds }], checkpoint.turnId) };
+    const dispatchRecovery = job.workId ? coordination?.dispatchRecoveryFacts(job.workId) : [];
+    if (dispatchRecovery?.length) plan.turnProfile.context = { ...plan.turnProfile.context, dispatchRecovery };
     const rounds = [];
     let toolCallsUsed = 0;
     let memoryIds = [];

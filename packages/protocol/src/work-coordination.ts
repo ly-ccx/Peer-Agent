@@ -9,6 +9,7 @@ export interface ProjectWorkRecovery {
   readonly retryAt?: string;
   readonly reservationId?: string;
   readonly deadlineAt?: string;
+  readonly dispatchesReconciled?: boolean;
   readonly blockedCode?: 'RECOVERY_CHECKPOINT_UNAVAILABLE';
 }
 
@@ -16,6 +17,18 @@ export type ProjectWorkState = 'runnable' | 'waiting_children' | 'waiting_user' 
   | 'budget_limited' | 'blocked_system' | 'delivered' | 'cancelled';
 export type ProjectTurnEnd = 'reply_committed' | 'awaiting_children' | 'yielded' | 'awaiting_user'
   | 'budget_limited' | 'provider_retryable' | 'no_progress' | 'user_stopped' | 'fatal';
+/** Host reconciliation closes an interrupted review, never supplies its verdict. */
+export interface VerificationDispatchReconciliation {
+  readonly attemptId: string;
+  readonly toolCallId: string;
+  readonly capabilityId: 'verify_session' | 'local.delegation.verify_session';
+  readonly sessionId: string;
+  readonly planId: string;
+  readonly sourceRevision: string;
+  readonly outcome: 'verification_interrupted';
+  readonly at: string;
+}
+
 export interface ProjectWorkReceipt {
   readonly schemaVersion: 1;
   readonly workId: string;
@@ -42,9 +55,10 @@ export interface ProjectWorkReceipt {
     readonly limits: { readonly maxModelRequests: number; readonly maxToolCalls: number; readonly maxTokens?: number; readonly maxCostUsd?: number; readonly source: string };
     readonly attempts: Readonly<Record<string, { readonly role: string; readonly requests?: number; readonly modelProviderId?: string;
       readonly checkpointRef?: string;
-      readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null }[] }>>;
+      readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[] }>>;
+    readonly reconciledDispatches?: readonly VerificationDispatchReconciliation[];
     readonly uncertainDispatches?: readonly { readonly attemptId: string; readonly role: string;
-      readonly toolCallId: string | null; readonly capabilityId: string | null }[];
+      readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[];
   };
   readonly stopScope: 'reply' | 'work';
   readonly updatedAt: string;

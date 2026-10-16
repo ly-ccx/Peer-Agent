@@ -1,3 +1,4 @@
+import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
 import { createReplyDelivery } from './reply-delivery.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
 import { continuationDecision } from './continuation-policy.mjs';
@@ -5,7 +6,9 @@ import { workBudgetBinding, workBudgetCanResume } from './work-budget.mjs';
 import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue } from './recovery-policy.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
-export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, now = () => new Date().toISOString() }) {
+export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
+  const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
+    activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const rows = () => { const roster = resolveRoster?.(); return Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []; };
   const delivery = createReplyDelivery({ store, readMessages, appendMessage: remember, accept: onReplied,
     validate: message => (message.meta?.sessionStates || []).every(source => {
@@ -84,7 +87,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const missing = (events || []).filter(event => !known[event.eventId]);
       if (missing.length) store.transfer(missing);
     },
-    transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, recover: delivery.recover, hasPendingDelivery: delivery.pending,
+    transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     pending() {
       const works = Object.values(store.read().works);
       // An owned batch continues through its durable job, never through a new
@@ -103,16 +106,20 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         .map(work => work.recovery.retryAt).filter(at => Number.isFinite(Date.parse(at))).sort()[0] || null;
     },
     recoverJob() {
+      dispatchRecovery.reconcileAll();
       expireReservations();
       const work = Object.values(store.read().works).sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt))).find(row => row.state === 'runnable' && row.checkpointRef)
-        || Object.values(store.read().works).find(row => row.checkpointRef && recoveryReservationDue(row, now()));
+        || Object.values(store.read().works).find(row => row.checkpointRef && recoveryReservationDue(row, now()))
+        || Object.values(store.read().works).find(row => row.state === 'blocked_system' && row.stopScope !== 'work' && row.recovery?.dispatchesReconciled && !row.recovery.blockedCode && !hasUnsettledDispatch(row));
       if (!work) return null;
       const checkpoint = readProtectedWork(work);
       if (!recoveryCheckpointAvailable(work, checkpoint, store.readCheckpoint)) { blockMissingCheckpoint(work); return null; }
+      if (work.state === 'blocked_system') store.saveWork({ ...work, state: 'runnable' });
       return { ...checkpoint.job, workId: work.workId, continuation: true,
         ...(work.state === 'retry_wait' ? { recoveryReservationId: work.recovery.reservationId, recoveryRevision: work.revision } : {}) };
     },
     retryJob(turnId) {
+      dispatchRecovery.reconcileAll();
       const work = Object.values(store.read().works).find(work => work.parentConversationId === conversationId && work.checkpointRef
         && (work.recovery?.failedTurnId === turnId || work.attemptId === turnId));
       if (!work || ['delivered', 'cancelled', 'waiting_user'].includes(work.state)) return { ok: false, code: 'STALE_TURN' };
@@ -151,7 +158,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const linked = Object.values(store.read().works).find(work => !['runnable', 'retry_wait'].includes(work.state)
         && events.some(event => work.sessionIds?.includes(event.sessionId)));
       job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
+      dispatchRecovery.reconcile(job.workId);
       const existing = store.read().works[job.workId];
+      if (existing?.recovery?.dispatchesReconciled) job.continuation = true;
       const checkpointRef = existing?.checkpointRef || store.checkpoint(job.workId, { job: { ...job, continuation: true }, outcome: { rounds: [] } });
       const recovery = job.manualRecovery ? manualRecovery(existing?.recovery, now())
         : existing?.recovery ? { ...existing.recovery, retryAt: undefined, reservationId: undefined,
@@ -194,6 +203,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (!outcome.failed && !outcome.yielded && !outcome.deliveryPending) store.handled((job.events || []).map(row => row.eventId));
       return { ...decision, state };
     },
+    dispatchRecoveryFacts: dispatchRecovery.facts,
     resume(job) {
       const work = store.read().works[job.workId];
       if (hasUnsettledDispatch(work)) throw new Error('execution_outcome_unknown');
