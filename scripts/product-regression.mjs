@@ -49,7 +49,8 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'image-approval-1280-dark.png', 'image-approval-760-light.png',
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
-  'work-verifying.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png'];
+  'work-verifying.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
+  'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
@@ -127,7 +128,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !requiredErrorLayouts.every(expected => machine.messageLayout.cases?.some(item =>
       item.viewportWidth === expected.width && item.docked === expected.docked && item.appearance === expected.appearance
       && item.textFits && item.cardFits && item.conversationFits))
-    || !requiredStates.every(status => machine.taskDetails.states?.includes(status))) {
+    || !requiredStates.every(status => machine.taskDetails.states?.includes(status))
+    || machine.yieldFeedback?.passed !== true) {
     throw new Error('Machine regression failed or required product scenarios did not run');
   }
   mkdirSync(path.join(output, 'screenshots'), { recursive: true });

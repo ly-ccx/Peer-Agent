@@ -21,7 +21,8 @@ import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
 import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
-import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
+import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture, writeStreamingCommand } from '../../../scripts/rc-response-interaction-smoke.mjs';
+import { checkBotYieldFeedback } from './bot-yield-feedback-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, not live-model latency. The image
 // lifecycle scenarios additionally execute the production view_image Provider.
@@ -463,6 +464,12 @@ try {
     await page.setViewportSize({ width: 1280, height: 780 });
     await checkManualWakeRetry({ page, until, report, captureDirectory: root, commandFile: streamCommand,
       readFixtureTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--yield-feedback-only')) {
+    assert.ok(process.argv.includes('--streaming'), '--yield-feedback-only requires the isolated --streaming cognition fixture');
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotYieldFeedback({ page, until, report, captureDirectory: root,
+      advance: (scenario, phase) => writeStreamingCommand(streamCommand, scenario, phase), readFixtureTurns: () => readObserved('turns') });
   } else if (process.argv.includes('--streaming-only')) {
     assert.ok(process.argv.includes('--streaming'), '--streaming-only requires the isolated --streaming cognition fixture');
     await page.setViewportSize({ width: 1280, height: 780 });
@@ -666,6 +673,8 @@ try {
   if (process.argv.includes('--streaming')) {
     await checkResponseInteraction({ page, until, report, captureDirectory: root, commandFile: streamCommand, workCommandFile: workSurfaces ? workCommand : null, readFixtureTurns: () => readObserved('turns') });
     await checkBotChatDetails({ page, app, until, report, captureDirectory: root, conversationFile: fixtureConversation });
+    await checkBotYieldFeedback({ page, until, report, captureDirectory: root,
+      advance: (scenario, phase) => writeStreamingCommand(streamCommand, scenario, phase), readFixtureTurns: () => readObserved('turns') });
   }
   if (workSurfaces) {
     // The quote-send check adds a real exchange. Reach the older work reply

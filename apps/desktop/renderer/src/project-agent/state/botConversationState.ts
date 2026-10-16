@@ -240,9 +240,12 @@ function readImages(value: unknown): { id: string; name: string; dataUrl: string
   return images;
 }
 
-/** 只留下用户输入、锚定回复和系统卡片。agent_turn 与其它内部回合丢掉。 */
+/** Public updates survive a scheduling yield; internal rounds never become chat text. */
 export function visibleBotMessages(messages: readonly BotChatMessage[]): BotChatMessage[] {
-  return messages.filter((message) => VISIBLE_KINDS.has(message.kind));
+  const deliveredTurns = new Set(messages.filter(message => ['agent_reply', 'system_card'].includes(message.kind))
+    .map(message => message.turnId).filter(Boolean));
+  return messages.filter(message => VISIBLE_KINDS.has(message.kind) || message.kind === 'agent_turn'
+    && Boolean(message.publicUpdates?.some(update => update.text.trim())) && !deliveredTurns.has(message.id));
 }
 
 /**

@@ -109,6 +109,7 @@ export function agentTurnMessage({ turnId, plan, rounds = [], publicUpdates = []
     turnId,
     turnKind: plan?.kind === 'wake' ? 'wake' : 'user',
     userInputs: Array.isArray(plan?.userInputs) ? plan.userInputs : [],
+    replyTo: replyTargets(plan?.userInputs),
     content: '',
     rounds: normalizeRounds(rounds),
     ...(plan?.kind === 'user' || plan?.interactive === true ? { publicUpdates: boundedPublicUpdates(publicUpdates) } : {}),

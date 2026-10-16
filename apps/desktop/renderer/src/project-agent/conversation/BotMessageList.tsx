@@ -137,7 +137,7 @@ export function BotMessageList({
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
         <div key={conversationRowKey(row)} className="bot-thread-row" data-conversation-row={conversationRowKey(row)}>
-        {row.type === 'activity' || row.type === 'message' && (row.message.kind === 'agent_reply'
+        {row.type === 'activity' || row.type === 'message' && (['agent_reply', 'agent_turn'].includes(row.message.kind)
           || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /><span>{label}</span></div>
         ) : null}
@@ -155,6 +155,11 @@ export function BotMessageList({
             onRetry={onRetry}
             onLocateSession={onLocateSession}
           />
+        ) : row.message.kind === 'agent_turn' ? (
+          <article className="bot-reply" id={`bot-msg-${row.message.id}`}>
+            <BotNarration segments={row.narration ?? []} />
+            <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined} />
+          </article>
         ) : row.message.kind === 'agent_activity' ? (
           row.message.agentActivity ? <AgentActivityRow messageId={row.message.id} activity={row.message.agentActivity} i18n={i18n} onOpen={onLocateSession} /> : null
         ) : row.message.kind === 'system_card' ? (

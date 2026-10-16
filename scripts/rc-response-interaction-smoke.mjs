@@ -1,5 +1,6 @@
 import { openReplyDetails, closeReplyDetails } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
 import { checkReplyPresence } from '../apps/desktop/scripts/bot-reply-presence-checks.mjs';
+import { runYieldFeedbackFixture } from '../apps/desktop/scripts/bot-yield-feedback-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -27,6 +28,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
       const text = input.messages?.findLast(message => message.role === 'user')?.content || '';
       record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId, scenario: text, streamId: input.streamId });
       const interactive = input.turnProfile?.role === 'project_agent';
+      if (interactive && text === 'RC_YIELD_PROGRESS') return runYieldFeedbackFixture({ input, active, commandFile, record });
       if (interactive && input.plan?.kind === 'wake' && input.plan.events.some(event => event.eventId === 'rc-manual-retry-event')) {
         const guard = input.executionBudget?.guard, saved = input.executionBudget?.providerCheckpoint;
         assert.ok(guard && saved, 'manual wake retry must load the real guarded native checkpoint');

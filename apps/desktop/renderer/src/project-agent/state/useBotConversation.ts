@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { ProjectAgentActivity, ProjectInputAttachment } from '@peer-agent/protocol';
-import { attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
+import { attachBotProcesses, hasReplyForInput, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
 import { createConversationPager } from './conversationPager.ts';
@@ -66,7 +66,7 @@ export function useBotConversation(workspaceId: string) {
   const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
   const [pending, setPending] = useState<readonly PendingBotInput[]>([]);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
-  const [awaitingSince, setAwaitingSince] = useState<string | null>(null);
+  const [awaitingReply, setAwaitingReply] = useState<{ inputId: string; createdAt: string } | null>(null);
   const [hasOlder, setHasOlder] = useState(false);
   const [olderError, setOlderError] = useState(false);
   const [activity, setActivity] = useState<ProjectAgentActivity | null>(null);
@@ -88,7 +88,7 @@ export function useBotConversation(workspaceId: string) {
     setMessages([]);
     setFamiliarizeOffer(null);
     setPending([]);
-    setAwaitingSince(null);
+    setAwaitingReply(null);
     setHasOlder(false);
     setOlderError(false);
     setStatus('loading');
@@ -150,12 +150,8 @@ export function useBotConversation(workspaceId: string) {
   }, []);
 
   useEffect(() => {
-    if (!awaitingSince) return;
-    const arrived = messages.some((message) => (
-      message.kind !== 'user_input' && message.createdAt >= awaitingSince && !message.pending
-    ));
-    if (arrived) setAwaitingSince(null);
-  }, [awaitingSince, messages]);
+    if (awaitingReply && hasReplyForInput(messages, awaitingReply.inputId)) setAwaitingReply(null);
+  }, [awaitingReply, messages]);
 
   const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string, answerTo?: string, attachments: readonly ProjectInputAttachment[] = []) => {
     const ticket = generationRef.current;
@@ -181,7 +177,7 @@ export function useBotConversation(workspaceId: string) {
         return result;
       }
       setPending(current => acknowledgeInput(current, inputId));
-      setAwaitingSince(createdAt);
+      setAwaitingReply(current => current && current.createdAt > createdAt ? current : { inputId, createdAt });
       return result;
     } catch {
       if (generationRef.current !== ticket) return { ok: false, code: 'STALE_INPUT' };
@@ -240,7 +236,7 @@ export function useBotConversation(workspaceId: string) {
     status,
     messages: shown,
     rows,
-    thinking: !live && !isActivityRunning(activity) && showAgentThinking(pending, awaitingSince !== null),
+    thinking: !live && !isActivityRunning(activity) && showAgentThinking(pending, awaitingReply !== null),
     generating: isActivityRunning(activity),
     activeModelSelection: isActivityRunning(activity) ? activity?.modelSelection : undefined,
     stopping, stopError, stop, followRequestId,
