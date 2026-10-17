@@ -7,7 +7,7 @@ const OPENING = '我先核对这项工作的最新进展。';
 const ANSWER = '最新记录已核对，目前等待稳定源码后补完验收，无需重复授权。';
 
 /** Controlled cognition at the existing service seam; real Runner yield, storage and UI. */
-export async function runYieldFeedbackFixture({ input, active, commandFile, record }) {
+export async function runYieldFeedbackFixture({ input, active, commandFile, record, phaseTimeoutMs }) {
   const guard = input.executionBudget?.guard;
   assert.ok(guard, 'yield scenario uses the normal durable work budget');
   guard.beforeRequest({ accounting: 'physical_dispatch' });
@@ -38,7 +38,7 @@ export async function runYieldFeedbackFixture({ input, active, commandFile, reco
   record('turns', { kind: 'yield-feedback', stage: 'resumed', streamId: input.streamId });
   const turn = { aborted: false }; active.set(input.streamId, turn);
   try {
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + phaseTimeoutMs;
     while (Date.now() < deadline && !turn.aborted) {
       const command = JSON.parse(readFileSync(commandFile, 'utf8'));
       if (command.scenario === SCENARIO && command.phase >= 1) {

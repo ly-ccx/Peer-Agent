@@ -19,7 +19,7 @@ export function writeStreamingCommand(commandFile, scenario, phase) {
  * RC_STREAM_FAIL uses the real local budget/checkpoint port with synthetic
  * OpenAI-format history. It does not call a provider or read an actual README.
  */
-export function createStreamingFixture({ commandFile, record, resolveGoalRole }) {
+export function createStreamingFixture({ commandFile, record, resolveGoalRole, phaseTimeoutMs = 120_000 }) {
   const active = new Map(), attempts = new Map();
   return {
     resolveGoalRole,
@@ -28,7 +28,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
       const text = input.messages?.findLast(message => message.role === 'user')?.content || '';
       record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId, scenario: text, streamId: input.streamId });
       const interactive = input.turnProfile?.role === 'project_agent';
-      if (interactive && text === 'RC_YIELD_PROGRESS') return runYieldFeedbackFixture({ input, active, commandFile, record });
+      if (interactive && text === 'RC_YIELD_PROGRESS') return runYieldFeedbackFixture({ input, active, commandFile, record, phaseTimeoutMs });
       if (interactive && input.plan?.kind === 'wake' && input.plan.events.some(event => event.eventId === 'rc-manual-retry-event')) {
         const guard = input.executionBudget?.guard, saved = input.executionBudget?.providerCheckpoint;
         assert.ok(guard && saved, 'manual wake retry must load the real guarded native checkpoint');
@@ -42,7 +42,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         const turn = { aborted: false }; active.set(input.streamId, turn);
         const send = (channel, payload) => input.webContents.send(channel, { streamId: input.streamId, ...payload });
         try {
-          const deadline = Date.now() + 30000;
+          const deadline = Date.now() + phaseTimeoutMs;
           send('chat:stream:thinking', { content: 'PRIVATE_RETRY_THINKING' });
           send('chat:stream:delta', { content: '正在重试，我会接着核对已有进展。' });
           while (!turn.aborted && Date.now() < deadline) {
@@ -110,13 +110,15 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         sink.send(channel, { streamId, ...payload });
       } };
       const wait = async phase => {
-        const deadline = Date.now() + 30000;
+        // The test driver inspects several themes, widths and drawers before
+        // advancing a phase. Its watchdog is separate from provider deadlines.
+        const deadline = Date.now() + phaseTimeoutMs;
         while (!turn.aborted && Date.now() < deadline) {
           const command = JSON.parse(readFileSync(commandFile, 'utf8'));
           if (command.scenario === text && command.phase >= phase) return true;
           await new Promise(resolve => setTimeout(resolve, 25));
         }
-        if (!turn.aborted) throw Error('Controlled stream was not advanced');
+        if (!turn.aborted) throw Error(`Controlled stream ${text} phase ${phase} was not advanced within ${phaseTimeoutMs}ms`);
         return false;
       };
       const aborted = () => ({ terminalStatus: 'aborted', text: turn.text, toolCalls: [] });

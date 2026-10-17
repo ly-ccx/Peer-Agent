@@ -9,6 +9,31 @@ import { coordinationWorkId } from '../../../../packages/runtime-node/src/projec
 import { createAgentTurnExecutor } from './agent-host/agent-turn-executor.mjs';
 import { createStreamingFixture, writeStreamingCommand } from '../../../../scripts/rc-response-interaction-smoke.mjs';
 
+test('controlled UI phase survives screenshot work beyond 30 seconds and still has a finite watchdog', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-stream-phase-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const commandFile = path.join(root, 'command.json');
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const input = { streamId: 'phase-test', messages: [{ role: 'user', content: 'RC_STREAM_TEXT' }],
+    turnProfile: { role: 'project_agent', context: { inputAnchors: [] } }, webContents: { send() {} } };
+  const fixture = createStreamingFixture({ commandFile, record() {} });
+  writeStreamingCommand(commandFile, 'RC_STREAM_TEXT', 0);
+  let finished = false;
+  const first = fixture.sendMessage(input).finally(() => { finished = true; });
+  t.mock.timers.tick(31_000);
+  await Promise.resolve();
+  assert.equal(finished, false, 'layout inspection must not exhaust a simulated provider at 30s');
+  writeStreamingCommand(commandFile, 'RC_STREAM_TEXT', 3);
+  t.mock.timers.tick(25);
+  assert.equal((await first).terminalStatus, 'done');
+
+  writeStreamingCommand(commandFile, 'RC_STREAM_TEXT', 0);
+  const timedOut = assert.rejects(fixture.sendMessage({ ...input, streamId: 'watchdog-test' }),
+    /RC_STREAM_TEXT phase 1 was not advanced within 120000ms/);
+  t.mock.timers.tick(120_001);
+  await timedOut;
+});
+
 test('streaming fixture explicitly resumes a real native checkpoint without repeating the completed read', async t => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-streaming-checkpoint-'));
   const now = () => '2026-10-10T06:00:00.000Z';
