@@ -1,10 +1,49 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import { attachBotProcesses, mergeBotActivity, visibleBotActivity, isActivityRunning } from './botActivityState.ts';
+import { attachBotProcesses, hasReplyForInput, mergeBotActivity, visibleBotActivity, isActivityRunning } from './botActivityState.ts';
 import { normalizeBotMessage, roundsForReply, conversationRows } from './botConversationState.ts';
 const activity: ProjectAgentActivity = { workspaceId: 'w', conversationId: 'c', turnId: 't', revision: 3,
   startedAt: '2026-10-04T01:00:00Z', phase: 'responding', replyTo: ['u'], segments: [], replyText: 'draft' };
+
+test('received input and yielded internal records keep waiting until that input has a real reply or failure', () => {
+  const messages = [
+    normalizeBotMessage({ id: 'input-i', kind: 'user_input', inputId: 'i', content: '进展如何？' })!,
+    normalizeBotMessage({ id: 'slice', turnId: 'slice', kind: 'agent_turn', replyTo: ['input-i'],
+      publicUpdates: [{ id: 'text-1', text: '我先核对最新进展。' }] })!,
+    normalizeBotMessage({ id: 'wake', kind: 'agent_turn', turnKind: 'wake', rounds: [{ text: 'INTERNAL_ONLY' }] })!,
+    normalizeBotMessage({ id: 'other-reply', kind: 'agent_reply', replyTo: ['input-other'], content: '别的任务完成。' })!,
+  ];
+  assert.equal(hasReplyForInput(messages, 'i'), false);
+  const reply = normalizeBotMessage({ id: 'answer', kind: 'agent_reply', replyTo: ['input-i'], content: '当前等待源码稳定。' })!;
+  assert.equal(hasReplyForInput([...messages, reply], 'i'), true);
+  assert.equal(hasReplyForInput([...messages, reply], 'new'), false);
+  const failed = normalizeBotMessage({ id: 'failure', kind: 'system_card', turnId: 'slice', cards: [{ cardId: 'failed', kind: 'agent_unavailable' }] })!;
+  assert.equal(hasReplyForInput([...messages, failed], 'i'), true, 'an anchored failure settles waiting without inventing a successful answer');
+});
+
+test('yielded public paragraphs remain visible through quiet wakes, without duplicating the live or canonical row', () => {
+  const turn = normalizeBotMessage({ id: 't', turnId: 't', kind: 'agent_turn', turnKind: 'user',
+    publicUpdates: [{ id: 'text-1', text: '我先核对最新进展。' }], rounds: [{ text: 'PRIVATE_LEGACY_TEXT' }] })!;
+  const wake = normalizeBotMessage({ id: 'wake', kind: 'agent_turn', turnKind: 'wake', rounds: [{ text: 'PRIVATE_WAKE_TEXT' }] })!;
+  const messages = [turn, wake];
+  const rows = attachBotProcesses(conversationRows(messages), messages, null);
+  const update = rows.find(row => row.type === 'message');
+  assert.equal(update?.type, 'message');
+  if (update?.type !== 'message') throw Error('public update missing');
+  assert.equal(update.message.id, 't');
+  assert.deepEqual(update.narration, turn.publicUpdates);
+  assert.equal(rows.filter(row => row.type === 'message').length, 1);
+  assert.equal(attachBotProcesses(conversationRows(messages), messages, activity).filter(row => row.type === 'message').length, 0,
+    'the active preview owns its paragraph until its slice ends');
+  const reply = normalizeBotMessage({ id: 'answer', kind: 'agent_reply', turnId: 't', content: '已核对。' })!;
+  const answered = [...messages, reply];
+  const delivered = attachBotProcesses(conversationRows(answered), answered, null).filter(row => row.type === 'message');
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].message.id, 'answer');
+  assert.deepEqual(delivered[0].narration, turn.publicUpdates);
+  assert.equal(hasReplyForInput(messages, 'i'), false);
+});
 
 test('new input clears legacy process association without disturbing exact recovery or active turns', () => {
   const old = normalizeBotMessage({ id: 'old', kind: 'agent_turn', rounds: [{ toolCalls: [{ name: 'read_file' }] }] })!;

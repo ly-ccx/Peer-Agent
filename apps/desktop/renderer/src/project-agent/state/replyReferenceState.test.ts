@@ -12,6 +12,17 @@ function activity(replyTo: string[]): ConversationDisplayRow {
 }
 const separator: ConversationDisplayRow = { type: 'separator', id: 'time', at: '2026-10-05T01:00:00Z', proactive: false, label: '' };
 
+test('public scheduling-slice paragraphs do not make continuation look like a user-selected quote', () => {
+  const user = message('u', 'user_input');
+  const progress = message('slice', 'agent_turn', ['u'], { publicUpdates: [{ id: 'text-1', text: '我先核对。' }] });
+  const live = activity(['u']);
+  const refs = replyReferencesForRows([user, progress, live]);
+  assert.deepEqual(refs.get(progress), []);
+  assert.deepEqual(refs.get(live), []);
+  const other = message('other', 'user_input');
+  assert.deepEqual(replyReferencesForRows([user, other, progress, live]).get(live), ['u']);
+});
+
 test('adjacent normal waiting, streaming, canonical, historical and terminal replies do not repeat the user message', () => {
   const user = message('u', 'user_input');
   for (const reply of [activity(['u']), message('r', 'agent_reply', ['u']), message('stopped', 'system_card', ['u']), message('failed', 'system_card', ['u'])]) {

@@ -1,5 +1,6 @@
 import { openReplyDetails, closeReplyDetails } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
 import { checkReplyPresence } from '../apps/desktop/scripts/bot-reply-presence-checks.mjs';
+import { runYieldFeedbackFixture } from '../apps/desktop/scripts/bot-yield-feedback-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -18,7 +19,7 @@ export function writeStreamingCommand(commandFile, scenario, phase) {
  * RC_STREAM_FAIL uses the real local budget/checkpoint port with synthetic
  * OpenAI-format history. It does not call a provider or read an actual README.
  */
-export function createStreamingFixture({ commandFile, record, resolveGoalRole }) {
+export function createStreamingFixture({ commandFile, record, resolveGoalRole, phaseTimeoutMs = 120_000 }) {
   const active = new Map(), attempts = new Map();
   return {
     resolveGoalRole,
@@ -27,6 +28,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
       const text = input.messages?.findLast(message => message.role === 'user')?.content || '';
       record('turns', { role: input.turnProfile?.role, workspaceId: input.turnProfile?.workspaceId, scenario: text, streamId: input.streamId });
       const interactive = input.turnProfile?.role === 'project_agent';
+      if (interactive && text === 'RC_YIELD_PROGRESS') return runYieldFeedbackFixture({ input, active, commandFile, record, phaseTimeoutMs });
       if (interactive && input.plan?.kind === 'wake' && input.plan.events.some(event => event.eventId === 'rc-manual-retry-event')) {
         const guard = input.executionBudget?.guard, saved = input.executionBudget?.providerCheckpoint;
         assert.ok(guard && saved, 'manual wake retry must load the real guarded native checkpoint');
@@ -40,7 +42,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         const turn = { aborted: false }; active.set(input.streamId, turn);
         const send = (channel, payload) => input.webContents.send(channel, { streamId: input.streamId, ...payload });
         try {
-          const deadline = Date.now() + 30000;
+          const deadline = Date.now() + phaseTimeoutMs;
           send('chat:stream:thinking', { content: 'PRIVATE_RETRY_THINKING' });
           send('chat:stream:delta', { content: '正在重试，我会接着核对已有进展。' });
           while (!turn.aborted && Date.now() < deadline) {
@@ -83,7 +85,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         return { terminalStatus: 'done', text: 'RC scripted reply: ' + text };
       }
       const attempt = (attempts.get(text) || 0) + 1; attempts.set(text, attempt);
-      const recoveryFixture = text === 'RC_STREAM_FAIL';
+      const recoveryFixture = text === 'RC_STREAM_FAIL' || text === 'RC_STREAM_FAIL_AGAIN';
       const guard = recoveryFixture ? input.executionBudget?.guard : null;
       const saved = recoveryFixture && attempt > 1 ? input.executionBudget?.providerCheckpoint : null;
       if (recoveryFixture && attempt > 1) {
@@ -108,18 +110,27 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         sink.send(channel, { streamId, ...payload });
       } };
       const wait = async phase => {
-        const deadline = Date.now() + 30000;
+        // The test driver inspects several themes, widths and drawers before
+        // advancing a phase. Its watchdog is separate from provider deadlines.
+        const deadline = Date.now() + phaseTimeoutMs;
         while (!turn.aborted && Date.now() < deadline) {
           const command = JSON.parse(readFileSync(commandFile, 'utf8'));
           if (command.scenario === text && command.phase >= phase) return true;
           await new Promise(resolve => setTimeout(resolve, 25));
         }
-        if (!turn.aborted) throw Error('Controlled stream was not advanced');
+        if (!turn.aborted) throw Error(`Controlled stream ${text} phase ${phase} was not advanced within ${phaseTimeoutMs}ms`);
         return false;
       };
       const aborted = () => ({ terminalStatus: 'aborted', text: turn.text, toolCalls: [] });
       try {
         if (saved) {
+          if (text === 'RC_STREAM_FAIL_AGAIN' && attempt === 2) {
+            const providerRecovery = { kind: 'stream_interrupted', phase: 'stream', attempts: 1, maxAttempts: 1,
+              exhausted: true, retryable: true, replaySafe: false };
+            send('chat:stream:error', { error: '受控恢复再次失败', providerRecovery });
+            record('turns', { kind: 'repeated-failure-ended', scenario: text });
+            return { terminalStatus: 'error', error: '受控恢复再次失败', providerRecovery };
+          }
           const args = { text: '**项目概况**看清楚了。\n\n- 界面展示结果，本地负责执行能力。\n- 开始修改前，先核对项目规则。',
             replyTo: input.turnProfile.context.inputAnchors.map(anchor => anchor.messageId) };
           guard.beforeTool({ toolCallId: 'reply', capabilityId: 'post_reply' });

@@ -22,6 +22,14 @@ export function visibleBotActivity(activity: ProjectAgentActivity | null, messag
   return activity;
 }
 
+/** Durable receipt, internal slices and unrelated wakes cannot answer a user input. */
+export function hasReplyForInput(messages: readonly BotChatMessage[], inputId: string): boolean {
+  const target = `input-${inputId}`;
+  const turns = new Set(messages.filter(message => message.kind === 'agent_turn' && message.replyTo.includes(target)).map(message => message.id));
+  return messages.some(message => ['agent_reply', 'system_card'].includes(message.kind)
+    && (message.replyTo.includes(target) || Boolean(message.turnId && turns.has(message.turnId))));
+}
+
 /** Linear handoff projection: streaming updates must not scan history once per reply. */
 export function attachBotProcesses(rows: readonly ConversationRow[], messages: readonly BotChatMessage[], activity: ProjectAgentActivity | null): ConversationRow[] {
   const byTurn = new Map(messages.filter(message => message.kind === 'agent_turn').map(message => [message.id, message]));
@@ -33,7 +41,8 @@ export function attachBotProcesses(rows: readonly ConversationRow[], messages: r
     else if (message.kind === 'agent_reply' && !message.turnId) legacy.set(message.id, preceding);
   }
   const narrated = new Set<string>();
-  return rows.map(row => {
+  return rows.filter(row => row.type !== 'message' || row.message.kind !== 'agent_turn'
+    || row.message.id !== activity?.turnId || !isActivityRunning(activity)).map(row => {
     if (row.type !== 'message' || row.message.kind === 'user_input') return row;
     const turn = row.message.turnId ? byTurn.get(row.message.turnId) : undefined;
     const processRounds = turn?.rounds ?? legacy.get(row.message.id) ?? [];

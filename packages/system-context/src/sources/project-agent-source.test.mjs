@@ -77,6 +77,8 @@ test('主 Bot 的表达规则覆盖委托、结果和受阻，不让内部状态
   assert.match(content, /result reply should lead with what you learned or accomplished/);
   assert.match(content, /the reason you actually know/);
   assert.match(content, /Ask a specific question only if a user decision is truly needed/);
+  assert.match(content, /When the user asks only for current progress/);
+  assert.match(content, /Do not turn a status question into a new verification run/);
   assert.match(content, /not fixed scripts or facts to reuse/);
   assert.match(content, /我先看看项目的整体情况/);
   assert.match(content, /host-validated post_reply with sources and current statusClaims/);
