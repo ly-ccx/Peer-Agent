@@ -50,7 +50,7 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
   'work-verifying.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
-  'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png'];
+  'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
@@ -129,7 +129,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       item.viewportWidth === expected.width && item.docked === expected.docked && item.appearance === expected.appearance
       && item.textFits && item.cardFits && item.conversationFits))
     || !requiredStates.every(status => machine.taskDetails.states?.includes(status))
-    || machine.yieldFeedback?.passed !== true) {
+    || machine.yieldFeedback?.passed !== true
+    || !['passed', 'realRetryIPC', 'realCheckpointPort', 'controlledCognition', 'failedReceiptRetired', 'historyCollapsed', 'keyboard', 'diagnosticsRetained', 'noReadReplay', 'canonicalReplyDelivered'].every(check => machine.retryRetirement?.[check] === true)) {
     throw new Error('Machine regression failed or required product scenarios did not run');
   }
   mkdirSync(path.join(output, 'screenshots'), { recursive: true });
@@ -148,7 +149,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
-      selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote },
+      selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote, retryRetirement: machine.retryRetirement },
     supplementalCoverage: machine.sharedUiConventions,
     reviewCriteria: [
       '默认内容能回答任务目标、当前进展和下一步；动作写明去向，主机器人负责对用户传达。',

@@ -23,6 +23,7 @@ import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture, writeStreamingCommand } from '../../../scripts/rc-response-interaction-smoke.mjs';
 import { checkBotYieldFeedback } from './bot-yield-feedback-checks.mjs';
+import { checkRetryRetirement } from './bot-retry-retirement-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, not live-model latency. The image
 // lifecycle scenarios additionally execute the production view_image Provider.
@@ -464,6 +465,11 @@ try {
     await page.setViewportSize({ width: 1280, height: 780 });
     await checkManualWakeRetry({ page, until, report, captureDirectory: root, commandFile: streamCommand,
       readFixtureTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--retry-retirement-only')) {
+    assert.ok(process.argv.includes('--streaming'));
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await checkRetryRetirement({ page, until, report, captureDirectory: root, commandFile: streamCommand,
+      readFixtureTurns: () => readObserved('turns') });
   } else if (process.argv.includes('--yield-feedback-only')) {
     assert.ok(process.argv.includes('--streaming'), '--yield-feedback-only requires the isolated --streaming cognition fixture');
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
@@ -676,6 +682,8 @@ try {
     await checkBotYieldFeedback({ page, until, report, captureDirectory: root,
       advance: (scenario, phase) => writeStreamingCommand(streamCommand, scenario, phase), readFixtureTurns: () => readObserved('turns') });
   }
+  if (process.argv.includes('--streaming')) await checkRetryRetirement({ page, until, report, captureDirectory: root,
+    commandFile: streamCommand, readFixtureTurns: () => readObserved('turns') });
   if (workSurfaces) {
     // The quote-send check adds a real exchange. Reach the older work reply
     // through scrolling instead of assuming virtualization kept it mounted.

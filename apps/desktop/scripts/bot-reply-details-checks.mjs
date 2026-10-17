@@ -2,6 +2,17 @@ import assert from 'node:assert/strict';
 
 /** Enter the actual reply drawer by keyboard, never an inline disclosure. */
 export async function openReplyDetails(page, message) {
+  const history = message.locator('.bot-recovery-history');
+  if (await history.count()) {
+    if (!await history.evaluate(node => node.open)) {
+      await history.locator(':scope > summary').focus(); await history.locator(':scope > summary').press('Enter');
+    }
+    const action = history.getByRole('button', { name: '查看详情', exact: true });
+    await action.focus(); await action.press('Enter');
+    await page.locator('.bot-reply-details').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
+    return;
+  }
   const button = message.locator('.bot-reply-context > button');
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
   await page.locator('.bot-composer textarea').focus();
@@ -76,5 +87,5 @@ export async function openReplyDetails(page, message) {
 export async function closeReplyDetails(page) {
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
-  assert.equal(await page.evaluate(() => document.activeElement?.matches('.bot-reply-context > button')), true, 'close restores the current reply footer without scrolling it into view');
+  assert.equal(await page.evaluate(() => document.activeElement?.matches('.bot-reply-context > button, .bot-recovery-history-body > button')), true, 'close restores the current reply details trigger without scrolling it into view');
 }

@@ -8,6 +8,8 @@ test('stale task actions explain state changes without exposing backend codes', 
 });
 
 test('recovery refusal explains the required next step without raw error codes', () => {
+  assert.equal(cardActionErrorKey('TURN_FAILED'), 'projectAgent.chat.recoveryAttemptFailed');
+  assert.equal(cardActionErrorKey('RECOVERY_FAILED'), 'projectAgent.chat.recoveryAttemptFailed');
   assert.equal(cardActionErrorKey('EXECUTION_OUTCOME_UNKNOWN'), 'projectAgent.chat.recoveryUnknownOutcome');
   assert.equal(cardActionErrorKey('STALE_TURN'), 'projectAgent.chat.recoveryStale');
   assert.equal(cardActionErrorKey('NO_CONTINUATION_CHECKPOINT'), 'projectAgent.chat.recoveryMissingCheckpoint');

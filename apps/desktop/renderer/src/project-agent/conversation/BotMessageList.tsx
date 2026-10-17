@@ -26,6 +26,8 @@ import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyContext } from './ReplyContext';
 import { AgentActivityRow } from './AgentActivityRow';
+import { RecoveryHistory } from './RecoveryHistory';
+import { isRetiredRecovery } from '../state/recoveryPresentation';
 
 export function BotMessageList({
   workspaceId,
@@ -136,9 +138,10 @@ export function BotMessageList({
       ) : null}
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
-        <div key={conversationRowKey(row)} className="bot-thread-row" data-conversation-row={conversationRowKey(row)}>
+        <div key={conversationRowKey(row)} className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`} data-conversation-row={conversationRowKey(row)}>
         {row.type === 'activity' || row.type === 'message' && (['agent_reply', 'agent_turn'].includes(row.message.kind)
-          || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ? (
+          || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')
+            && (!isRetiredRecovery(row.message.cards) || Boolean(row.narration?.length))) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /><span>{label}</span></div>
         ) : null}
         {row.type === 'activity' ? <LiveReply referenceIds={references.get(row) ?? []} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} onOpenDetails={onOpenDetails ? () => onOpenDetails(row.activity.turnId) : undefined} /> : row.type === 'separator' ? (
@@ -244,13 +247,15 @@ function SystemCard({
   const cards = message.cards.length > 0
     ? message.cards
     : [{ cardId: message.id, kind: 'system_card', content: message.content, actions: [] }];
+  const retired = isRetiredRecovery(cards);
   return (
     <div className={`bot-system${welcome ? ' bot-system-welcome' : ''}${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
       {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
       <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
       <BotNarration segments={narration} />
-      <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
-      {!welcome && (activity || processRounds?.length || cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ?
+      {retired ? <RecoveryHistory createdAt={message.createdAt} highlighted={highlighted} i18n={i18n} onOpenDetails={onOpenDetails} />
+        : <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />}
+      {!welcome && !retired && (activity || processRounds?.length || cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ?
         <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} /> : null}
     </div>
   );

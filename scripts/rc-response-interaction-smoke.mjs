@@ -85,7 +85,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole, p
         return { terminalStatus: 'done', text: 'RC scripted reply: ' + text };
       }
       const attempt = (attempts.get(text) || 0) + 1; attempts.set(text, attempt);
-      const recoveryFixture = text === 'RC_STREAM_FAIL';
+      const recoveryFixture = text === 'RC_STREAM_FAIL' || text === 'RC_STREAM_FAIL_AGAIN';
       const guard = recoveryFixture ? input.executionBudget?.guard : null;
       const saved = recoveryFixture && attempt > 1 ? input.executionBudget?.providerCheckpoint : null;
       if (recoveryFixture && attempt > 1) {
@@ -124,6 +124,13 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole, p
       const aborted = () => ({ terminalStatus: 'aborted', text: turn.text, toolCalls: [] });
       try {
         if (saved) {
+          if (text === 'RC_STREAM_FAIL_AGAIN' && attempt === 2) {
+            const providerRecovery = { kind: 'stream_interrupted', phase: 'stream', attempts: 1, maxAttempts: 1,
+              exhausted: true, retryable: true, replaySafe: false };
+            send('chat:stream:error', { error: '受控恢复再次失败', providerRecovery });
+            record('turns', { kind: 'repeated-failure-ended', scenario: text });
+            return { terminalStatus: 'error', error: '受控恢复再次失败', providerRecovery };
+          }
           const args = { text: '**项目概况**看清楚了。\n\n- 界面展示结果，本地负责执行能力。\n- 开始修改前，先核对项目规则。',
             replyTo: input.turnProfile.context.inputAnchors.map(anchor => anchor.messageId) };
           guard.beforeTool({ toolCallId: 'reply', capabilityId: 'post_reply' });
