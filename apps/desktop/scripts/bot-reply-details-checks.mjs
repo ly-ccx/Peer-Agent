@@ -1,7 +1,27 @@
 import assert from 'node:assert/strict';
 
+/** Reach an unmounted row through the real scroller; never disable virtualization. */
+export async function scrollToBotMessage(page, message) {
+  if (!await message.count()) {
+    const thread = page.locator('.bot-thread');
+    await thread.evaluate(node => { node.scrollTop = 0; });
+    for (let step = 0; step < 200; step++) {
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      if (await message.count()) break;
+      const moved = await thread.evaluate(node => {
+        const before = node.scrollTop;
+        node.scrollTop += Math.max(80, node.clientHeight * 0.65);
+        return node.scrollTop > before;
+      });
+      if (!moved) break;
+    }
+  }
+  await message.scrollIntoViewIfNeeded();
+}
+
 /** Enter the actual reply drawer by keyboard, never an inline disclosure. */
 export async function openReplyDetails(page, message) {
+  await scrollToBotMessage(page, message);
   const history = message.locator('.bot-recovery-history');
   if (await history.count()) {
     if (!await history.evaluate(node => node.open)) {

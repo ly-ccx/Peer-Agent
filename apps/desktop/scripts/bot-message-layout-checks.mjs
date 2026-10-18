@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { BUDGET_RECOVERY_CASES } from './work-budget-fixture.mjs';
@@ -15,7 +15,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     await page.setViewportSize({ width, height: 780 });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
-    await budgetMessage.scrollIntoViewIfNeeded();
+    await scrollToBotMessage(page, budgetMessage);
     assert.equal(await budgetMessage.locator('.bot-card > p').first().textContent(), '这项工作已达到配置的预算限制，已有进展已保留。调整限制后可继续。');
     assert.equal(await budgetMessage.getByRole('button', { name: '继续尝试', exact: true }).count(), 0);
     assert.match(await budgetMessage.innerText(), /模型请求：已用 256 次，上限 256 次。.*来源：执行预算设置。/s);
@@ -24,7 +24,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     await openReplyDetails(page, budgetMessage);
     assert.match(await rawError.textContent(), /^代理暂时不可用：work_budget_limited/);
     await closeReplyDetails(page);
-    await budgetMessage.scrollIntoViewIfNeeded();
+    await scrollToBotMessage(page, budgetMessage);
     await page.screenshot({ path: path.join(captureDirectory, `budget-exhausted-${appearance}.png`), animations: 'disabled' });
   }
   report.budgetFailure = { reasonVisible: true, diagnosticInDrawer: true, retrySuppressed: true, limitVisible: true, narrowFits: true };
@@ -48,7 +48,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
     for (const [state, id, expected, retryVisible] of recoveryCases) {
       const recoveryMessage = page.locator(`#bot-msg-rc-message-${id}`);
-      await recoveryMessage.scrollIntoViewIfNeeded();
+      await scrollToBotMessage(page, recoveryMessage);
       if (state === 'resolved' && !await recoveryMessage.locator('.bot-recovery-history').evaluate(node => node.open)) {
         await recoveryMessage.locator('.bot-recovery-history > summary').click();
       }
@@ -112,7 +112,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
           await page.locator('.bot-drawer-dock.is-open').waitFor();
           await until(() => page.locator('.bot-convo').evaluate(node => node.getBoundingClientRect().width < 700), Boolean);
         }
-        await card.scrollIntoViewIfNeeded();
+        await scrollToBotMessage(page, card);
         if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) {
           await page.getByRole('button', { name: '关闭', exact: true }).click();
           await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
@@ -148,7 +148,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
   }
   await page.setViewportSize(viewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-  await page.locator('#bot-msg-rc-message-9999').scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
   assert.equal(await message.locator('.bot-reply-context > button').count(), 1);
   report.messageLayout = { completeText: true, fitBounds: true, diagnosticsCollapsed: true, detailsKeyboard: true, cases,
     scope: 'Production system-card rendering from isolated canonical conversation data, including long JSON, URL and unbroken ID; no provider network' };
