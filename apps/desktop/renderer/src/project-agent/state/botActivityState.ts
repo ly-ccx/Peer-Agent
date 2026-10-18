@@ -27,10 +27,13 @@ export function replyDetailsRow(id: string | null, rows: readonly ConversationDi
   if (!id) return undefined;
   const exact = rows.find(row => row.type === 'message' && row.message.id === id);
   if (exact) return exact;
-  const canonical = messages.find(message => message.id === id);
+  const canonical = messages.find(message => message.id === id && message.kind !== 'agent_turn');
   if (canonical) return attachBotProcesses([{ type: 'message', message: canonical }], messages, null)[0];
-  return [...rows].reverse().find(row => row.type === 'activity' ? row.activity.turnId === id
+  const handoff = [...rows].reverse().find(row => row.type === 'activity' ? row.activity.turnId === id
     : row.type === 'message' && row.message.turnId === id);
+  if (handoff) return handoff;
+  const delivered = messages.findLast(message => message.turnId === id && message.kind !== 'agent_turn');
+  return delivered ? attachBotProcesses([{ type: 'message', message: delivered }], messages, null)[0] : undefined;
 }
 
 /** Durable receipt, internal slices and unrelated wakes cannot answer a user input. */
