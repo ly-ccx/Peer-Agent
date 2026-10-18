@@ -1,33 +1,21 @@
 import { createHash } from 'node:crypto';
-import { openSync, closeSync, fsyncSync, writeSync, readFileSync, mkdirSync, renameSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { openSync, closeSync, fsyncSync, writeSync, readFileSync, mkdirSync, renameSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { admitCoordinationDecision } from './coordination-kernel.mjs';
+import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
 
-export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString() }) {
+export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString(), onJournalRead }) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)) throw new Error('invalid_workspace');
   const dir = path.join(rootDir || pathOf('projectRuntime'), workspaceId);
   const file = path.join(dir, 'coordination.jsonl');
   const epoch = leaseEpoch();
-  let cached = null, cacheStamp = '';
-  const stamp = () => { const info = statSync(file); return `${info.ino}:${info.size}:${info.mtimeMs}`; };
+  const reader = createCoordinationJournalReader({ file, onRead: onJournalRead });
   function assertOwner() {
     if (holdsLease() !== true || !epoch || leaseEpoch() !== epoch) throw new Error('coordination_lease_lost');
   }
-  function read() {
-    let body;
-    let currentStamp;
-    try { currentStamp = stamp(); if (cached && currentStamp === cacheStamp) return structuredClone(cached); body = readFileSync(file, 'utf8'); }
-    catch (error) { cached = null; if (error.code === 'ENOENT') return reduceEmpty(); throw error; }
-    let state = reduceEmpty();
-    for (const line of body.split('\n')) {
-      if (!line) continue;
-      state = reduceCoordination(state, JSON.parse(line));
-    }
-    cached = state; cacheStamp = currentStamp;
-    return structuredClone(state);
-  }
+  const read = reader.read;
   function recover() {
     assertOwner();
     let body;
@@ -61,14 +49,14 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     try { writeSync(fd, JSON.stringify(record) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
     const directory = openSync(dir, 'r');
     try { fsyncSync(directory); } finally { closeSync(directory); }
-    cached = next; cacheStamp = stamp();
+    reader.committed(next);
     // A failed/replaced snapshot cannot lose truth: read() always replays the journal.
     const snapshot = path.join(dir, 'coordination-snapshot.json');
     try { writeFileSync(snapshot + '.tmp', JSON.stringify(next), { mode: 0o600 }); renameSync(snapshot + '.tmp', snapshot); } catch { /* rebuildable cache */ }
     return next;
   }
   return {
-    read, append, assertOwner, recover,
+    read, append, assertOwner, recover, journalFile: file,
     dispatchOrigin(workId, attemptId, toolCallId) {
       let body;
       try { body = readFileSync(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }

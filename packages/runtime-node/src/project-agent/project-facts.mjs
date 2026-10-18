@@ -4,12 +4,25 @@ import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { replyFailureStatus } from './reply-failure-facts.mjs';
 import { replyRecoveryAdmission } from './reply-recovery-admission.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
+import { pathOf } from '../data-store.mjs';
+import path from 'node:path';
 
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
 export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[],
-  readCoordination = workspaceId => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).read(), now = () => new Date().toISOString(),
+  readCoordination, now = () => new Date().toISOString(),
   readCoordinationCheckpoint = (workspaceId, ref) => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).readCheckpoint(ref) }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
+  const readers = new Map();
+  const coordinationFor = workspaceId => {
+    if (readCoordination) return readCoordination(workspaceId);
+    const file = path.join(runtimeRoot || pathOf('projectRuntime'), workspaceId, 'coordination.jsonl');
+    const owner = workBudgetBinding(workspaceId)?.store;
+    if (owner?.journalFile === file) return owner.read();
+    const reader = readers.get(workspaceId) || createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId });
+    readers.delete(workspaceId); readers.set(workspaceId, reader);
+    if (readers.size > 16) readers.delete(readers.keys().next().value);
+    return reader.read();
+  };
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
     const rows = sessions(workspaceId);
@@ -70,7 +83,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
         }];
       })).slice(-1);
     });
-    const coordination = readCoordination(workspaceId) || {};
+    const coordination = coordinationFor(workspaceId) || {};
     const works = Object.values(coordination.works || {});
     const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => {
       const turn = messages.find(turn => turn.id === message.turnId && turn.kind === 'agent_turn');
