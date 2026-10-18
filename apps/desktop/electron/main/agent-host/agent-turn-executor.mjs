@@ -1,6 +1,7 @@
 import { createExecutionScheduler, USER_TURN_LIMITS, createWorkBudgetGuard, runBoundedVerification, isVerificationTurn, verificationExecutionBudget } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 
 /**
  * Runs one agent turn through an existing chat service.
@@ -37,10 +38,11 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       if (input.signal?.aborted) abort();
       const done = executionScheduler.withTurn({ planId: profile?.planId, workspaceId: profile?.workspaceId || input.workspaceId,
         lane: profile?.role === 'project_agent' ? 'coordination' : 'work', priority, signal: controller.signal }, async signal => {
+        await yieldToEventLoop();
         const guard = createWorkBudgetGuard(profile);
         let outcome;
         try { outcome = await runTurn({ ...input, budgetGuard: guard, signal }); return outcome; }
-        finally { guard?.finish(outcome?.usage); }
+        finally { guard?.finish(outcome?.usage); await yieldToEventLoop(); }
       })
         .finally(() => { input.signal?.removeEventListener('abort', abort); active.delete(id); });
       active.set(id, { workspaceId: profile?.workspaceId || input.workspaceId, controller, done });

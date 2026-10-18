@@ -165,20 +165,25 @@ test('project cancellation aborts the existing stream and detaches after complet
 
 test('all executor roles share the cap; cancelled waiters never reach sendMessage and errors release leases', async () => {
   const gates=[]; const seen=[];
+  let workerStarted,userStarted;
+  const workerReady=new Promise(resolve=>{workerStarted=resolve;});
+  const userReady=new Promise(resolve=>{userStarted=resolve;});
   const executor=createAgentTurnExecutor({llmChatService:{sendMessage(input) {
-    seen.push(input.turnProfile.role); return new Promise((resolve,reject)=>gates.push({resolve,reject}));
+    seen.push(input.turnProfile.role);
+    if(input.turnProfile.role==='work_session')workerStarted();else if(input.turnProfile.role==='project_agent')userStarted();
+    return new Promise((resolve,reject)=>gates.push({resolve,reject}));
   }}});
   executor.executionScheduler.configure({getConcurrency:()=>1});
   const sink={send(){}};
   const worker=executor.runTurn({turnProfile:{role:'work_session'},sink});
-  await Promise.resolve();
+  await workerReady;
   const controller=new AbortController();
   const cancelled=executor.runTurn({turnProfile:{role:'verifier'},sink,signal:controller.signal});
   const user=executor.runTurn({turnProfile:{role:'project_agent'},plan:{kind:'user'},sink});
   controller.abort(); assert.equal((await cancelled).terminalStatus,'aborted');
   assert.deepEqual(seen,['work_session']);
   const failure=assert.rejects(worker,/failed/);gates.shift().reject(Error('failed'));await failure;
-  await Promise.resolve();assert.deepEqual(seen,['work_session','project_agent']);
+  await userReady;assert.deepEqual(seen,['work_session','project_agent']);
   gates.shift().resolve({terminalStatus:'done'});await user;
   assert.deepEqual(executor.executionScheduler.stats(),{active:0,waiting:0,limit:1});
 });
@@ -241,4 +246,12 @@ for (const invalid of ['grant_denied', 'wrong_id', 'wrong_capability', 'failed_r
   const result = await executor.runTurn({ mode: 'project_agent', sink: { send() {} } });
   const { acceptedReplyResult } = await import('../../../../../packages/runtime-node/src/project-agent/agent-turn-plan.mjs');
   assert.equal(acceptedReplyResult(result.toolCalls[0].result), false);
+});
+
+test('executor admits UI heartbeats before cognition and after settled accounting', async () => {
+  let before=false,after=false;
+  const executor=createAgentTurnExecutor({llmChatService:{async sendMessage(){assert.equal(before,true);setImmediate(()=>{after=true;});return{terminalStatus:'done',toolCallCount:0};}}});
+  setImmediate(()=>{before=true;});
+  await executor.runTurn({turnProfile:{role:'goal_runner'},sink:{send(){}}});
+  assert.equal(after,true);
 });

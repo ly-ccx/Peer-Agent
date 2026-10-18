@@ -180,3 +180,22 @@ describe('Desktop Runtime Pipeline adapter', () => {
     );
   });
 });
+
+it('lets an event-loop turn run only after the paired checkpoint is committed', async () => {
+  let committed=false,heartbeat=false;
+  await runDesktopRuntimePipeline({sessionId:'fair-checkpoint',streamId:'fair-checkpoint',
+    model:{initialize:()=>({phase:0}),applyToolResults:state=>({...state,phase:1}),
+      runTurn:state=>{if(state.phase===1){assert.equal(committed,true);assert.equal(heartbeat,true);}return state.phase===0?{kind:'tool_calls',state,calls:[{name:'read_file',toolCallId:'read'}]}:{kind:'completed',state};},
+      checkpoint(){committed=true;setImmediate(()=>{heartbeat=true;});}},
+    tools:{execute:async call=>({call,result:{output:'paired'}})}});
+});
+
+it('cancellation at a completed checkpoint cannot start another provider request', async () => {
+  const controller=new AbortController();let requests=0,committed=false;
+  await assert.rejects(runDesktopRuntimePipeline({sessionId:'cancel-checkpoint',streamId:'cancel-checkpoint',signal:controller.signal,
+    model:{initialize:()=>({phase:0}),applyToolResults:state=>({...state,phase:1}),
+      runTurn:state=>{requests++;return state.phase===0?{kind:'tool_calls',state,calls:[{name:'read_file',toolCallId:'read'}]}:{kind:'completed',state};},
+      checkpoint(){committed=true;setImmediate(()=>controller.abort());}},
+    tools:{execute:async call=>({call,result:{output:'paired'}})}}),error=>error.name==='AbortError'&&!error.providerRecovery);
+  assert.equal(committed,true);assert.equal(requests,1);
+});
