@@ -413,3 +413,27 @@ test('new result batches never overwrite a yielded result checkpoint; each survi
     assert.equal(seen.length, 4);
   } finally { env.close(); }
 });
+
+test('a suppressed delivered report waits without polling; a new user and changed result still receive replies', async () => {
+ let requests = 0;
+ const roster = [{ sessionId:'s',status:'waiting_agent',sourceRevision:'r1' }];
+ const old = {id:'old-report',kind:'agent_reply',role:'assistant',content:'Already explained',sources:['s'],meta:{sessionStates:[{...roster[0]}]}};
+ const env=world(async ({plan})=>{
+  requests++;
+  if (plan.kind==='wake' && roster[0].sourceRevision==='r1') return {toolCalls:[{name:'post_reply',input:{replyTo:[]},
+   result:{ok:true,suppressed:true,reportedReplyIds:['old-report'],sessionStates:[{...roster[0]}]}}]};
+  return {text:'NEW_REPLY',toolCalls:[{name:'post_reply',input:{text:'NEW_REPLY',replyTo:plan.kind==='user'?['input-query']:[]},result:{ok:true}}]};
+ },{resolveRoster:()=>roster});
+ try {
+  env.messages.push(old); env.store.append({kind:'reply_prepared',message:old});env.store.append({kind:'reply_delivered',messageId:old.id});
+  env.inbox.append('w',[event('same-report','report_available')]);await env.runner.kick();
+  assert.equal(requests,1);let work=Object.values(env.store.read().works)[0];
+  assert.equal(work.state,'waiting_children');assert.deepEqual(work.reportedWait.replyIds,['old-report']);
+  env.restart();await env.runner.kick();await env.runner.kick();assert.equal(requests,1,'no model polling after restart');
+  await env.runner.enqueueUserInputs([{inputId:'query',text:'What is happening?'}]);
+  assert.equal(requests,2);assert.ok(env.messages.some(row=>row.kind==='agent_reply'&&row.replyTo?.includes('input-query')));
+  roster[0]={...roster[0],status:'accepted',sourceRevision:'r2'};
+  env.inbox.append('w',[event('changed','report_available')]);await env.runner.kick();
+  assert.equal(requests,3);assert.equal(Object.values(env.store.read().works).find(row=>row.workId===work.workId).state,'delivered');
+ } finally {env.close();}
+});

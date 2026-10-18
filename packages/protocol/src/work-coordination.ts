@@ -51,9 +51,9 @@ export interface ProjectWorkRecovery {
 }
 
 export type ProjectWorkState = 'runnable' | 'waiting_children' | 'waiting_user' | 'retry_wait' | 'paused'
-  | 'budget_limited' | 'blocked_system' | 'delivered' | 'cancelled';
+  | 'budget_limited' | 'blocked_system' | 'delivered' | 'cancelled' | 'coalesced';
 export type ProjectTurnEnd = 'reply_committed' | 'awaiting_children' | 'yielded' | 'awaiting_user'
-  | 'budget_limited' | 'provider_retryable' | 'no_progress' | 'user_stopped' | 'fatal';
+  | 'budget_limited' | 'provider_retryable' | 'no_progress' | 'user_stopped' | 'fatal' | 'coalesced';
 /** Host reconciliation closes an interrupted review, never supplies its verdict. */
 export interface VerificationDispatchReconciliation {
   readonly attemptId: string;
@@ -80,6 +80,10 @@ export interface ProjectWorkReceipt {
   readonly revision: number;
   readonly checkpointRef?: string;
   readonly nativeCheckpointRef?: string;
+  /** Only duplicate background observations transfer custody; all history remains. */
+  readonly continuationOwnerWorkId?: string;
+  readonly reportedWait?: { readonly replyIds: readonly string[]; readonly waitingUser: boolean;
+    readonly sessionStates: readonly { readonly sessionId: string; readonly status: string; readonly sourceRevision: string; readonly observationRevision?: string }[] };
   readonly recovery?: ProjectWorkRecovery;
   readonly end?: ProjectTurnEnd;
   readonly attemptId?: string;

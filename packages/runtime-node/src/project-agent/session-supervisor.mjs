@@ -28,6 +28,7 @@ import { digestApprovalArgs } from './approval-store.mjs';
 import { readLocalPlanApproval } from './local-plan-approval.mjs';
 import { spawnIdentity, identityFromPlan } from './spawn-identity.mjs';
 import { buildSessionReport } from './session-report.mjs';
+import { sessionObservationRevision } from './session-observation-revision.mjs';
 import { resultCanBeAccepted, needsCompletionReview, projectCompletionReview, confirmCompletionReview } from './session-completion.mjs';
 
 /**
@@ -276,6 +277,7 @@ export function createSessionSupervisor({
         ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
     session.sourceRevision = verificationContentHash(plan, (({ status, ...report }) => report)(buildReport(plan, session)));
+    session.observationRevision = sessionObservationRevision(plan, session.sourceRevision);
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;
   }

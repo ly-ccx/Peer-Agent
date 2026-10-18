@@ -5,7 +5,7 @@ import { budgetBoundary, budgetReservationBoundary, effectiveWorkLimits, legacyB
 /** Shared by the command handler and read-only card projection. */
 export function replyRecoveryAdmission(work, checkpoint, { limits, readCheckpoint } = {}) {
   const fail = (code, budget) => ({ ok: false, code, ...(budget ? { budget } : {}) });
-  if (!work || ['delivered', 'cancelled', 'waiting_user'].includes(work.state)) return fail('STALE_TURN');
+  if (!work || ['delivered', 'cancelled', 'waiting_user', 'coalesced'].includes(work.state)) return fail('STALE_TURN');
   if (work.state === 'waiting_children' && !(work.stopScope === 'reply' && checkpoint?.outcome?.stopped === true)) return fail('STALE_TURN');
   if (hasUnsettledDispatch(work) || work.recovery?.failureKind === 'execution_outcome_unknown') return fail('EXECUTION_OUTCOME_UNKNOWN');
   const effective = effectiveWorkLimits(work.budget, limits || work.budget?.limits);

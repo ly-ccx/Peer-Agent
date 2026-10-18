@@ -169,6 +169,8 @@ export function createProjectAgentRunner({
     if (manualJobs.length) return manualJobs.shift();
     const digest = takeDigestTimer();
     if (digest) return digest;
+    const userContinuation = coordination?.recoverUserJob?.();
+    if (userContinuation) return userContinuation;
     const batch = inbox.takeBatch(workspace);
     const events = coordination ? coordination.pending() : Array.isArray(batch?.events) ? batch.events : [];
     if (events.length === 0) return coordination?.recoverJob() || null;

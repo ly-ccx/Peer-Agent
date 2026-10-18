@@ -48,7 +48,8 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
       const report = prepareReplyReport({ workspaceId: view?.workspaceId, message: composed.message,
         currentInputAnchors: view?.currentInputAnchors || [],
         reportedMessages: delivery.reportedMessages || view?.messages || [], toolCalls: view?.turnToolCalls || [] });
-      if (report.suppressed) return { ok: true, suppressed: true, reason: 'facts_already_reported' };
+      if (report.suppressed) return { ok: true, suppressed: true, reason: 'facts_already_reported',
+        reportedReplyIds: report.reportedReplyIds, sessionStates: composed.meta.sessionStates, question: composed.message.question };
       if (report.keys.length) composed.meta.reportFactKeys = report.keys;
       return {
         messageId: composed.message.id,

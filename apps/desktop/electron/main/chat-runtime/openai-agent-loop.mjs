@@ -267,6 +267,7 @@ export async function agentLoopOpenAI({
         apiMessages.push({
           role: 'assistant',
           content: content || null,
+          ...(!useResponses ? { reasoning_content: thinkingContent ?? '' } : {}),
           tool_calls: toolCalls.map((toolCall) => ({
             id: toolCall.id,
             type: 'function',
