@@ -25,6 +25,8 @@ export function replyReferencesForRows(rows: readonly ConversationDisplayRow[]):
     const continuation = !explicit && ids.length === 1 && preceding?.type === 'message'
       && preceding.message.kind === 'user_input' && preceding.message.id === ids[0];
     references.set(row, continuation ? [] : ids);
+    // Public slice paragraphs still belong to the same user input.
+    if (row.type === 'message' && row.message.kind === 'agent_turn') continue;
     preceding = row;
   }
   return references;
