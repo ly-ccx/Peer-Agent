@@ -451,7 +451,7 @@ for (const policy of ['auto', 'confirm', 'write-failed']) test(`desktop reportin
     const reply = env.history().find(message => message.content === 'Verified result');
     assert.ok(reply); assert.equal(env.history().some(message => message.content === 'unvalidated text'), false);
     assert.equal(reply.marks[0].outcome, 'passed');
-    assert.deepEqual(reply.meta.sessionStates, [{sessionId,status:policy === 'auto' ? 'accepted' : 'result_ready',sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision}]);
+    assert.deepEqual(reply.meta.sessionStates, [{sessionId,status:policy === 'auto' ? 'accepted' : 'result_ready',sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision,observationRevision:env.api.supervisor.get({sessionId}).observationRevision}]);
     const learned = createMemoryStore({ rootDir: env.home }).list({ workspaceId: env.bot.workspaceId }).find(item => item.text === 'Verified result');
     assert.equal(learned?.trust, 'verified');
     assert.deepEqual(learned.sourceRefs, ['ev-pass']);
@@ -466,7 +466,7 @@ for (const policy of ['auto', 'confirm', 'write-failed']) test(`desktop reportin
       const result = await env.invoke('confirm-result', { sessionId }); assert.equal(result.ok, true);
       assert.equal(env.plans.getPlan(planId).resultAcceptance.acceptedBy, 'user');
       const currentReply=(await env.invoke('read-conversation')).messages.find(message=>message.id===reply.id);
-      assert.deepEqual(currentReply.meta.sessionStates,[{sessionId,status:'accepted',sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision}]);
+      assert.deepEqual(currentReply.meta.sessionStates,[{sessionId,status:'accepted',sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision,observationRevision:env.api.supervisor.get({sessionId}).observationRevision}]);
       assert.equal((await env.invoke('confirm-result', { sessionId })).alreadyAccepted, true);
       assert.equal((await env.invoke('read-conversation')).messages.flatMap(message => message.cards || []).some(card => card.kind === 'confirm_result' && card.resolvedState === 'open'), false);
     }
@@ -490,7 +490,7 @@ test('host rejects acceptance claims on blocked tasks and returns authoritative 
     assert.equal(reply.success,false);
     const output=JSON.parse(reply.output);
     assert.equal(output.error,'status_claim_mismatch');
-    assert.deepEqual(output.sessionStates,[{sessionId,status:actual,sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision}]);
+    assert.deepEqual(output.sessionStates,[{sessionId,status:actual,sourceRevision:env.api.supervisor.get({sessionId}).sourceRevision,observationRevision:env.api.supervisor.get({sessionId}).observationRevision}]);
     assert.equal(env.plans.getPlan(planId).resultAcceptance,undefined);
     assert.equal(env.history().some(message=>message.content==='Already accepted'),false);
     assert.equal(reply.execution.result.status,'failed');

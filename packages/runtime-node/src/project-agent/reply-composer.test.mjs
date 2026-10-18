@@ -34,8 +34,8 @@ test('核验通过但任务仍阻塞时不能声明已签收', () => {
 
 test('状态声明必须覆盖来源，待确认不能声明已签收，真实签收可汇报', () => {
   for (const status of ['waiting_user', 'result_ready', 'accepted']) {
-    const facts = { sources: ['sess-1'], sessionStates: [{sessionId:'sess-1',status}] };
-    const matched = reply({...facts,statusClaims:[{sessionId:'sess-1',status}]});
+    const facts = { sources: ['sess-1'], sessionStates: [{sessionId:'sess-1',status,sourceRevision:'source-1',observationRevision:'host-observation'}] };
+    const matched = reply({...facts,statusClaims:[{sessionId:'sess-1',status,observationRevision:'forged-model-observation'}]});
     assert.equal(matched.ok,true);assert.deepEqual(matched.meta.sessionStates,facts.sessionStates);
     if (status !== 'accepted') assert.equal(reply({...facts,statusClaims:[{sessionId:'sess-1',status:'accepted'}]}).error,'status_claim_mismatch');
     for (const claims of [undefined,[],[{sessionId:'sess-2',status}], [{sessionId:'sess-1',status},{sessionId:'sess-1',status}]]) {

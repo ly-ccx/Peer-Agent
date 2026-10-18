@@ -34,7 +34,8 @@ export function createProjectLifecycleEffects({ profileStore, lifecycle, supervi
       if (message.sources?.length) {
         const sessionStates = message.sources.flatMap(sessionId => {
           const session = supervisor.get({ sessionId });
-          return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status, sourceRevision: session.sourceRevision }] : [];
+          return session?.workspaceId === workspaceId ? [{ sessionId, status: session.status, sourceRevision: session.sourceRevision,
+            ...(session.observationRevision ? { observationRevision: session.observationRevision } : {}) }] : [];
         });
         const settled = { ...replyMeta, sessionStates };
         if (Array.isArray(replyMeta?.reportFactKeys)) {
