@@ -266,21 +266,10 @@ if (workSurfaces) {
   assert.equal(observedService.split(cancelSeam).length, 2);
   observedService = observedService.replace(cancelSeam, `${cancelSeam}
     if (payload.workspaceId === globalThis.rcBotWorkWorkspace) {
-      const file=${JSON.stringify(workCommand)}, state=JSON.parse(readFileSync(file,'utf8'));
-      writeFileSync(file,JSON.stringify({...state,cancelCalls:[...(state.cancelCalls??[]),payload]}));
-      await new Promise(resolve=>setTimeout(resolve,650));
-      if(state.cancelMode==='fail')return {ok:false,code:'CONTROLLED_CANCEL_FAILURE'};
-      const session=globalThis.rcBotWorkSessions.find(item=>item.sessionId===payload.sessionId);
-      if(!session)return {ok:false,code:'NOT_FOUND'};
-      const deferred=state.cancelMode==='deferred-status';
-      const next={...session,status:deferred?'stopping':'cancelled',statusLabel:deferred?'正在停止':'已取消'};
-      globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?next:item);
-      queueChanged(payload.workspaceId);
-      if(deferred)setTimeout(()=>{
-        globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?{...item,status:'cancelled',statusLabel:'已取消'}:item);
-        queueChanged(payload.workspaceId);
-      },500);
-      return {ok:true,session:next};
+      const { controlledCancelSession } = await import(${JSON.stringify(new URL('./bot-cancel-fixture.mjs', import.meta.url).href)});
+      return controlledCancelSession({ file: ${JSON.stringify(workCommand)}, payload,
+        getSessions: () => globalThis.rcBotWorkSessions,
+        setSessions: sessions => { globalThis.rcBotWorkSessions = sessions; }, queueChanged });
     }`);
   const confirmationSeam = 'async function confirmResult(payload = {}) {';
   assert.equal(observedService.split(confirmationSeam).length, 2);
