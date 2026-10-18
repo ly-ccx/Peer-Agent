@@ -92,6 +92,20 @@ try {
     document.addEventListener('input', event => { if (!event.target.matches('.bot-composer textarea')) return; const at=event.timeStamp; requestAnimationFrame(() => state.inputs.push(performance.now()-at)); }, true);
     document.addEventListener('wheel', event => { if (!event.target.closest('.bot-thread')) return; const at=event.timeStamp; requestAnimationFrame(() => state.wheels.push(performance.now()-at)); }, { passive: true });
   });
+  const sampleInteraction = async () => {
+    const composer = page.locator('.bot-composer textarea');
+    if (await composer.isVisible()) {
+      await composer.click(); const keyAt = performance.now(); await composer.press('a');
+      await page.evaluate(() => new Promise(requestAnimationFrame)); keyRoundTrips.push(performance.now()-keyAt);
+      report.interactions++; if (report.interactions % 12 === 0) await composer.fill('');
+    }
+    const scroller = page.locator('.bot-thread'), box = await scroller.boundingBox();
+    const beforeTop = await scroller.evaluate(node => node.scrollTop);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const wheelAt = performance.now(); await page.mouse.wheel(0, beforeTop > 180 ? -120 : 120);
+    await page.evaluate(() => new Promise(requestAnimationFrame)); wheelRoundTrips.push(performance.now()-wheelAt);
+    const afterTop = await scroller.evaluate(node => node.scrollTop); scrollChanges.push(Math.abs(afterTop-beforeTop));
+  };
   report.taskStartedAt = new Date().toISOString();
   const text = largeHistory
     ? '这是已授权的隔离项目多文件修复任务。请让一个独立子 Agent 接手：读取 README.md 和所有测试，修复 src/sum.mjs、src/group-events.mjs、src/render-csv.mjs，保留全部测试断言，实际运行 node --test。只设置一个成功标准 existing-tests-pass：实际运行 node --test，现有18项测试全部通过（command标准）。先读测试、保留全部测试断言、只改本项目 src 下的实现是执行约束，不添加为额外成功标准。继续经过系统原有独立复核门禁。若复核失败，读取具体失败原因并在原任务继续修复，不要开重复补救任务。主 Bot 在实际验收后交付结果。'
@@ -115,18 +129,7 @@ try {
     const progress = JSON.stringify({ turns: turns.length, calls: calls.map(call=>call.name), replies: replied.length });
     if (progress !== lastEvent) { console.log(progress); lastEvent = progress; }
     if (finished && !await page.locator('.bot-live-reply').count() && (!largeHistory || Date.now()-start >= 120000)) break;
-    const composer = page.locator('.bot-composer textarea');
-    if (await composer.isVisible()) {
-      await composer.click(); const keyAt = performance.now(); await composer.press('a');
-      await page.evaluate(() => new Promise(requestAnimationFrame)); keyRoundTrips.push(performance.now()-keyAt);
-      report.interactions++; if (report.interactions % 12 === 0) await composer.fill('');
-    }
-    const scroller = page.locator('.bot-thread'), box = await scroller.boundingBox();
-    const beforeTop = await scroller.evaluate(node => node.scrollTop);
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    const wheelAt = performance.now(); await page.mouse.wheel(0, beforeTop > 180 ? -120 : 120);
-    await page.evaluate(() => new Promise(requestAnimationFrame)); wheelRoundTrips.push(performance.now()-wheelAt);
-    const afterTop = await scroller.evaluate(node => node.scrollTop); scrollChanges.push(Math.abs(afterTop-beforeTop));
+    await sampleInteraction();
     if (!drawerOpened) {
       for (const selector of ['.bot-background-work:not([open]) > summary','.bot-work-row:not([open]) > summary']) { const trigger=page.locator(selector).first(); if(await trigger.isVisible()) await trigger.click(); }
     }
@@ -149,12 +152,29 @@ try {
     assert.equal(view.effort,session.origin.modelSelection.worker.reasoningEffort);
   }
   if(finished) {
-    if (largeHistory) report.largeTerminal = await app.evaluate(async ({ app }, { home, id }) => {
+    if (largeHistory) {
+      const before = report.interactions; let mutationsDone=false;
+      const mutations = (async () => {
+        const commits=[];
+        for (let iteration=0; iteration<4; iteration++) {
+        const result = await app.evaluate(async ({ app }, { home, id }) => {
       const require = process.getBuiltinModule('node:module').createRequire(app.getAppPath() + '/package.json');
       const store = require('@peer-agent/conversation-store').createConversationStore({ storeDir: home + '/conversations' });
       const at = performance.now(); const receipt = await store.commitStreamingMessage(id, 'scale-report', { content: 'Synthetic historical report after a durable performance test commit.' });
       return { durationMs: performance.now()-at, messageId: receipt.messageId, contentRevision: receipt.contentRevision };
-    }, { home, id: report.historyScale.sessions[0].conversationId });
+        }, { home, id: report.historyScale.sessions[0].conversationId });
+          commits.push(result);
+          await page.evaluate(async workspaceId => {
+            await window.peerAgent.projectAgentReadConversation({workspaceId,latest:true,limit:50});
+            await window.peerAgent.projectAgentListSessions({workspaceId});
+          },bot.workspaceId);
+        }
+        return commits;
+      })().finally(()=>{mutationsDone=true;});
+      while(!mutationsDone) await sampleInteraction();
+      report.largeTerminal={commits:await mutations,concurrentInteractions:report.interactions-before};
+      assert.ok(report.largeTerminal.concurrentInteractions>0,'large terminal commits require concurrent input and wheel samples');
+    }
     const send=async text=>{const composer=page.locator('.bot-composer textarea');await composer.fill(text);await composer.press('Enter');};
     const list=()=>page.evaluate(workspaceId=>window.peerAgent.projectAgentListSessions({workspaceId,limit:20}),bot.workspaceId);
     const oldIds=new Set(doneSessions.sessions.map(s=>s.sessionId));
