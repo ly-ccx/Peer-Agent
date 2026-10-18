@@ -672,6 +672,7 @@ try {
   await tracePaging('quoted old message located inside viewport with temporary fill and no outline');
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
+  await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
   await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
   await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
