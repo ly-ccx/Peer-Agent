@@ -29,6 +29,8 @@ const rows = file => existsSync(file) ? readFileSync(file, 'utf8').trim().split(
 const distribution = values => { const sorted = [...values].sort((a,b) => a-b); return { n: sorted.length, p50: sorted[Math.floor(sorted.length*.5)] ?? null, p95: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.95))] ?? null, p99: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.99))] ?? null, max: sorted.at(-1) ?? null }; };
 const largeHistory = process.argv.includes('--large-history');
 const keyRoundTrips = [], wheelRoundTrips = [], scrollChanges = [];
+const scrollCoverage = { topVisits: 0, bottomVisits: 0, liveReplyVisibleSamples: 0 };
+let scrollDirection = -1;
 const contractHashes = project => Object.fromEntries(readdirSync(project).filter(name => name.endsWith('.test.mjs')).sort()
   .map(name => [name, createHash('sha256').update(readFileSync(path.join(project, name))).digest('hex')]));
 try {
@@ -100,9 +102,14 @@ try {
       report.interactions++; if (report.interactions % 12 === 0) await composer.fill('');
     }
     const scroller = page.locator('.bot-thread'), box = await scroller.boundingBox();
-    const beforeTop = await scroller.evaluate(node => node.scrollTop);
+    const position = await scroller.evaluate(node => ({ top: node.scrollTop, max: node.scrollHeight-node.clientHeight,
+      liveVisible: [...node.querySelectorAll('.bot-live-reply')].some(reply => { const r=reply.getBoundingClientRect(),v=node.getBoundingClientRect();return r.bottom>v.top && r.top<v.bottom; }) }));
+    const beforeTop = position.top;
+    if (position.top <= 2) { scrollDirection=1; scrollCoverage.topVisits++; }
+    if (position.top >= position.max-2) { scrollDirection=-1; scrollCoverage.bottomVisits++; }
+    if (position.liveVisible) scrollCoverage.liveReplyVisibleSamples++;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    const wheelAt = performance.now(); await page.mouse.wheel(0, beforeTop > 180 ? -120 : 120);
+    const wheelAt = performance.now(); await page.mouse.wheel(0, scrollDirection*240);
     await page.evaluate(() => new Promise(requestAnimationFrame)); wheelRoundTrips.push(performance.now()-wheelAt);
     const afterTop = await scroller.evaluate(node => node.scrollTop); scrollChanges.push(Math.abs(afterTop-beforeTop));
   };
@@ -195,7 +202,7 @@ try {
   report.elapsedMs = Date.now()-start;
   const perf = await page.evaluate(() => { const s=globalThis.executionPerf; s.stop=true;s.observer.disconnect();return { frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks, mountedRows:document.querySelectorAll('[data-conversation-row]').length, hidden:document.hidden,focused:document.hasFocus(),avatars:[...document.querySelectorAll('.bot-avatar')].map(n=>({animated:n.dataset.avatarAnimated, animation:getComputedStyle(n).animationName})) }; });
   report.mainLoop = await app.evaluate(() => { const h=globalThis.executionMainLoop; h.disable(); return { p95:h.percentile(95)/1e6,p99:h.percentile(99)/1e6,max:h.max/1e6 }; });
-  report.interaction = { keyRoundTripMs:distribution(keyRoundTrips), wheelRoundTripMs:distribution(wheelRoundTrips), scrollMovedSamples:scrollChanges.filter(n=>n>0).length,
+  report.interaction = { keyRoundTripMs:distribution(keyRoundTrips), wheelRoundTripMs:distribution(wheelRoundTrips), scrollMovedSamples:scrollChanges.filter(n=>n>0).length, scrollCoverage,
     scope:'Automation dispatch through Browser and renderer to rAF, includes transport cost, not hardware latency. Wheel events target the actual bot-thread scroller.' };
   report.renderer = { frames: distribution(perf.frames), inputPaintMs: distribution(perf.inputs), wheelPaintMs:distribution(perf.wheels), longTasks: perf.longTasks, mountedRows:perf.mountedRows, hidden:perf.hidden, focused:perf.focused, avatars:perf.avatars };
   const cpuEnd = await metrics(); report.cpu = cpuEnd.map(m => ({ type:m.type,cpuPercent:100000*(m.cpu-(cpuStart.find(p=>p.pid===m.pid)?.cpu ?? m.cpu))/report.elapsedMs }));
@@ -205,6 +212,7 @@ try {
   if (largeHistory) report.ok &&= report.historyScale.actualPlans >= 1100 && report.historyScale.parentBytes >= 9_500_000
     && report.historyScale.childBytes >= 46_300_000 && report.historyScale.journalBytes >= 185_000_000
     && report.elapsedMs >= 120000 && report.interactions >= 100 && report.interaction.scrollMovedSamples >= 100
+    && scrollCoverage.topVisits > 0 && scrollCoverage.bottomVisits > 0 && scrollCoverage.liveReplyVisibleSamples > 0
     && report.interaction.keyRoundTripMs.p95 < 100 && report.interaction.keyRoundTripMs.p99 < 200 && report.interaction.keyRoundTripMs.max < 500
     && report.interaction.wheelRoundTripMs.p95 < 100 && report.renderer.wheelPaintMs.p95 < 100;
 } catch (error) { report.ok=false; report.error=error.stack || error.message; }
