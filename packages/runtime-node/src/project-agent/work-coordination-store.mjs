@@ -67,7 +67,8 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     return next;
   }
   return {
-    read, readWork: reader.readWork, append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint,
+    read, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
+    append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint,
     coalesceWorks(owner, retired) {
       const state = read();
       const stamp = work => ({ ...work, revision: (state.works[work.workId]?.revision || 0) + 1, updatedAt: now() });

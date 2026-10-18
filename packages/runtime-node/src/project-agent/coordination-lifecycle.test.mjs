@@ -157,3 +157,17 @@ test('a fulfilled mandate cannot create work from a late event; a fresh human co
   assert.equal(corrected.phase,'completed'); assert.equal(f.sessions.get(a.sessionId).status,'accepted');
   assert.equal(f.cancellations.length,0); assert.equal(f.spawns.length,2);
 });
+
+test('session lifecycle queries do not clone execution history or authorize from compact facts', async t => {
+  const f=fixture(t);
+  const a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  f.sessions.get(a.sessionId).status='accepted';
+  const original=f.store.read;f.store.read=()=>{throw Error('full-state probe');};
+  try {
+    assert.equal(f.lifecycle.forSession('w',a.sessionId).phase,'completed');
+    assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'fulfilled');
+    f.store.saveWork({workId:'goal',state:'cancelled',stopScope:'work'});
+    assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'cancelled');
+    await assert.rejects(f.lifecycle.coordinate({action:'parallel',reason:'B',task:f.task('u2')},f.context('u2','b')),/full-state probe/);
+  } finally {f.store.read=original;}
+});

@@ -62,5 +62,11 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
   }
   return { read: () => structuredClone(readState()),
     readWork(id) { const works = readState().works; return Object.hasOwn(works, id) ? structuredClone(works[id]) : undefined; },
+    readLifecycleFacts() {
+      const state = readState();
+      return structuredClone({ revision: state.revision, mandates: state.mandates || {},
+        transitions: state.transitions || {}, decisions: state.decisions || {},
+        workStates: Object.fromEntries(Object.entries(state.works).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])) });
+    },
     committed, clear };
 }

@@ -9,15 +9,16 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
+  const lifecycleFacts = store => typeof store?.readLifecycleFacts === 'function' ? store.readLifecycleFacts() : store?.read();
   function lifecycleOf(state, mandate) {
-    const work=state.works[mandate.workId];
+    const work=(state.workStates || state.works)[mandate.workId];
     if (work?.stopScope === 'work' && ['paused','cancelled'].includes(work.state)) return 'cancelled';
     const sessions=mandate.sessionIds.map(sessionId=>readSession({sessionId}));
     const pending=Object.values(state.transitions || {}).some(row=>row.workId===mandate.workId && !['completed','blocked'].includes(row.phase));
     return sessions.length && sessions.every(row=>row && ['accepted','cancelled'].includes(row.status)) && !pending ? 'fulfilled' : mandate.lifecycle;
   }
   function facts(workspaceId, parentConversationId) {
-    const state = storeFor(workspaceId)?.read();
+    const state = lifecycleFacts(storeFor(workspaceId));
     return Object.values(state?.mandates || {}).filter(row => row.parentConversationId === parentConversationId)
       .slice(-24).map(row => ({ workId: row.workId, goalRevision: row.goalRevision, lifecycle: lifecycleOf(state,row),
         sessionIds: row.sessionIds.filter(id => !row.revokedSessionIds?.includes(id)), rootInputIds: row.rootInputIds,
@@ -186,7 +187,7 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
     drains.set(workspaceId, promise); return promise;
   }
   function forSession(workspaceId, sessionId) {
-    const state=storeFor(workspaceId)?.read();
+    const state=lifecycleFacts(storeFor(workspaceId));
     const related=Object.values(state?.transitions || {}).filter(row=>row.action!=='query' && (row.oldSessionId===sessionId || row.replacementSessionId===sessionId));
     const transition=related.at(-1);
     if (!transition) return undefined;

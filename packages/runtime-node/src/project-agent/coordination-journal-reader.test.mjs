@@ -72,3 +72,19 @@ test('single-work reads validate the same journal without cloning or exposing un
     writeFileSync(w.file, ''); assert.equal(w.reader.readWork('x'), undefined);
   } finally { w.close(); }
 });
+
+test('lifecycle facts exclude historical work bodies while retaining fresh control and stop states', () => {
+  const w=world();
+  try {
+    const facts=w.reader.readLifecycleFacts();
+    assert.equal(facts.workStates.x.state,'runnable');
+    assert.equal(facts.works,undefined);assert.equal(facts.events,undefined);assert.equal(facts.deliveries,undefined);
+    assert.ok(!JSON.stringify(facts).includes('中'.repeat(4000)));
+    facts.workStates.x.state='mutated';
+    assert.equal(w.reader.readLifecycleFacts().workStates.x.state,'runnable');
+    w.writer.saveWork({workId:'x',state:'cancelled',stopScope:'work'});
+    assert.equal(w.reader.readLifecycleFacts().workStates.x.state,'cancelled');
+    assert.equal(w.reader.readLifecycleFacts().workStates.x.stopScope,'work');
+    appendFileSync(w.file,'{broken\n');assert.throws(()=>w.reader.readLifecycleFacts(),SyntaxError);
+  }finally{w.close();}
+});
