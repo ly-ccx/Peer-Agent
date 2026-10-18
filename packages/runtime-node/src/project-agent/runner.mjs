@@ -311,6 +311,9 @@ export function createProjectAgentRunner({
         pendingLearned.unshift(...learned);
         return completeStoppedTurn(job, outcome, diagnosticTiming('stopped'));
       }
+      if (!outcome.failed && coordination?.stalls(job, outcome, readSlot(resolveRoster, job.kind))) {
+        outcome.failed = true; outcome.reason = 'agent_no_progress'; job.explicitRetryOnly = true;
+      }
       const finished = finishAgentTurn({
         turnId: outcome.turnId,
         plan: outcome.plan,

@@ -1,8 +1,7 @@
 import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
 import { createReplyDelivery } from './reply-delivery.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
-import { continuationDecision } from './continuation-policy.mjs';
-import { repairOwnership, stateAfterReply } from './repair-ownership.mjs';
+import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
 import { workBudgetBinding, workBudgetCanResume } from './work-budget.mjs';
 import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue } from './recovery-policy.mjs';
 
@@ -180,17 +179,18 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         ...existing, workId: job.workId, attemptId: job.attemptId, pendingEventIds: events.map(event => event.eventId), state: 'runnable', recovery,
         waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') });
     },
+    stalls(job, outcome, roster) {
+      const previous = store.read().works[job.workId];
+      const sources = ownedSessions(previous, job, roster);
+      return repairOwnership(sources).repairSessionIds.length > 0
+        && repairProgressDecision(previous, outcome, roster, sources).end === 'no_progress';
+    },
     finish(job, outcome, roster) {
       const previous = store.read().works[job.workId];
-      const sources = (Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []).filter(row =>
-        previous.sessionIds.includes(row.sessionId) || (job.events || []).some(event => event.sessionId === row.sessionId)
-        || row.origin?.anchorMessageId && previous.anchorInputIds.some(id => `input-${id}` === row.origin.anchorMessageId));
+      const sources = ownedSessions(previous, job, roster);
       const sessionIds = [...new Set([...previous.sessionIds, ...sources.map(row => row.sessionId)])];
       const ownership = repairOwnership(sources);
-      // Rephrasing the same public update is not progress on a technical blocker.
-      const materialRounds = ownership.repairSessionIds.length ? (outcome.rounds || []).map(round => ({ ...round,
-        toolCalls: (round.toolCalls || []).filter(call => !['post_reply', 'local.delegation.post_reply'].includes(call.name)) })) : outcome.rounds;
-      const decision = continuationDecision({ previous, rounds: materialRounds, roster, yielded: outcome.yielded });
+      const decision = repairProgressDecision(previous, outcome, roster, sources);
       const waiting = ownership.waiting;
       let state = decision.state;
       if (!outcome.yielded && waiting.length && decision.state !== 'blocked_system') state = 'waiting_children';

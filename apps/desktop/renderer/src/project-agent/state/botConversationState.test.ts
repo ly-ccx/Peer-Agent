@@ -46,6 +46,11 @@ test('failure presentation preserves typed host recovery and only promises a rea
   assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: undefined }).recovering, false);
 });
 
+test('a no-progress host receipt explains why repetition stopped', () => {
+  const card = normalizeBotMessage({ id: 'no-progress', kind: 'system_card', cards: [{ cardId: 'no-progress', kind: 'agent_unavailable', content: '代理暂时不可用：agent_no_progress' }] })!.cards[0]!;
+  assert.deepEqual(agentFailurePresentation(card), { messageKey: 'projectAgent.chat.noProgress', recovering: false, retryAllowed: true });
+});
+
 test('host failure types override legacy diagnostics and unsafe retries remain unavailable', () => {
   const base = { cardId: 'failure', kind: 'agent_unavailable', content: 'connect timeout after 20000ms (ConnectTimeoutError)' };
   const recovery = { failureKind: 'authentication' as const, retryable: false, autoAttempts: 0, failedTurnId: 'turn-1' };

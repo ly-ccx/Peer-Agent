@@ -98,12 +98,13 @@ const recoveryCases = [
   { key: 'authentication', failureKind: 'authentication', retryable: false, recoveryWorkState: 'blocked_system', reason: 'HTTP 401: fixture credential expired' },
   { key: 'unknown', failureKind: 'execution_outcome_unknown', retryable: false, recoveryWorkState: 'blocked_system', reason: 'execution_outcome_unknown: fixture result not recorded' },
   { key: 'resolved', failureKind: 'network', retryable: true, recoveryWorkState: 'delivered', resolvedState: 'resolved', reason: 'net::ERR_CONNECTION_CLOSED' },
+  { key: 'no-progress', index: 9979, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'agent_no_progress' },
 ];
 for (const [offset, entry] of recoveryCases.entries()) {
-  const { key, reason, recoveryWorkState, resolvedState, ...recovery } = entry;
+  const { key, index, reason, recoveryWorkState, resolvedState, ...recovery } = entry;
   const turnId = key === 'scheduled' ? 'rc-recovery-progress-turn' : `rc-recovery-${key}-turn`;
   const content = `代理暂时不可用：${reason}`;
-  seededMessages[9984 + offset] = { ...seededMessages[9984 + offset], role: 'assistant', kind: 'system_card', turnId, content,
+  seededMessages[index ?? 9984 + offset] = { ...seededMessages[index ?? 9984 + offset], role: 'assistant', kind: 'system_card', turnId, content,
     cards: [{ cardId: `rc-recovery-${key}`, kind: 'agent_unavailable', content, recoveryWorkState, ...(resolvedState ? { resolvedState } : {}),
       recovery: { ...recovery, autoAttempts: 2, failedTurnId: turnId, deadlineAt: '2026-10-10T03:05:00.000Z' },
       actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId } }] }] };

@@ -264,6 +264,7 @@ export type TranslationKey =
   | 'projectAgent.chat.recoveryStale'
   | 'projectAgent.chat.recoveryMissingCheckpoint'
   | 'projectAgent.chat.unavailable'
+  | 'projectAgent.chat.noProgress'
   | 'projectAgent.chat.budgetExhausted'
   | 'projectAgent.chat.context.error'
   | 'projectAgent.chat.replied'
@@ -1779,6 +1780,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.recoveryStale': '这条回复的状态已更新，请查看最新进展。',
     'projectAgent.chat.recoveryMissingCheckpoint': '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。',
     'projectAgent.chat.unavailable': '暂时无法完成回复。',
+    'projectAgent.chat.noProgress': '连续检查没有取得新进展，已停止重复执行。已有结果已保留。',
     'projectAgent.chat.budgetExhausted': '这项工作的执行额度已用完，已有进展已保留。你可以先发新消息。',
     'projectAgent.chat.context.error': '原始报错',
     'projectAgent.chat.replied': '已回复',
@@ -3082,6 +3084,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.recoveryStale': 'The state of this reply has changed. Please check the latest progress.',
     'projectAgent.chat.recoveryMissingCheckpoint': 'The saved progress has no complete recovery record. It needs to be checked before executing again.',
     'projectAgent.chat.unavailable': 'This reply could not be completed.',
+    'projectAgent.chat.noProgress': 'Repeated checks produced no new progress, so repetition has stopped. Existing results are saved.',
     'projectAgent.chat.budgetExhausted': 'This work has used its execution allowance. Progress was saved. You can send a new message.',
     'projectAgent.chat.context.error': 'Original error',
     'projectAgent.chat.replied': 'Replied',

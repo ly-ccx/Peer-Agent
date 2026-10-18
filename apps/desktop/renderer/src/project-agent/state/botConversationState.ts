@@ -67,6 +67,9 @@ export function agentFailurePresentation(card: BotChatCard): { messageKey: Trans
   const recovering = failure.retryable && card.recoveryWorkState === 'retry_wait'
     && Boolean(card.recovery?.reservationId && card.recovery.retryAt);
   if (recovering) return { messageKey: 'projectAgent.chat.recoveryScheduled', recovering: true, retryAllowed: false };
+  if (failure.kind === 'fatal' && /^代理暂时不可用：\s*agent_no_progress$/.test(card.content)) {
+    return { messageKey: 'projectAgent.chat.noProgress', recovering: false, retryAllowed: true };
+  }
   const keys: Partial<Record<ProjectRecoveryFailureKind, TranslationKey>> = {
     response_headers_timeout: 'projectAgent.chat.recoveryExhausted',
     network: 'projectAgent.chat.recoveryExhausted',

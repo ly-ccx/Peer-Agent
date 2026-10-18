@@ -33,6 +33,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     ['authentication', 9987, '连接的身份验证未通过。请重新登录或检查连接配置，再继续尝试。', true],
     ['unknown', 9988, '有操作的结果尚未确认，需要先核对，已有进展已保留。', false],
     ['resolved', 9989, '这次中断已结束，后续进展见最新回复。', false],
+    ['no-progress', 9979, '连续检查没有取得新进展，已停止重复执行。已有结果已保留。', true],
   ];
   const recoverySamples = [];
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {

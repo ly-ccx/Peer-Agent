@@ -44,6 +44,20 @@ test('a public progress reply automatically advances to the next reasoning step 
     await env.runner.kick(); assert.equal(requests, 2);
   } finally { env.close(); }
 });
+
+test('repeated paraphrases of a stalled repair produce one explicit stop receipt instead of silent idleness', async () => {
+  let requests = 0;
+  const env = world(async () => ({ toolCalls: [{ name: 'post_reply', input: { text: `仍在检查 ${++requests}`, replyTo: [] }, result: { ok: true } }] }),
+    { resolveRoster: () => [{ sessionId: 's', status: 'waiting_agent', sourceRevision: 'r1' }] });
+  try {
+    env.inbox.append('w', [event('repair', 'report_available')]); await env.runner.kick();
+    assert.equal(requests, 3);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'blocked_system');
+    const cards = env.messages.filter(row => row.card === 'agent_unavailable');
+    assert.equal(cards.length, 1); assert.match(cards[0].content, /agent_no_progress/);
+    await env.runner.kick(); assert.equal(requests, 3);
+  } finally { env.close(); }
+});
 test('routine events never call a model; completed result wakes once without fresh user input', async () => {
   let requests = 0;
   const env = world(async () => { requests++; return { toolCalls: [] }; });

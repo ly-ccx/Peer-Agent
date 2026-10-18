@@ -48,7 +48,7 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   ...['allow', 'deny', 'cancel', 'stop', 'timeout'].map(state => `image-live-${state}-1280-dark.png`),
   'image-approval-1280-dark.png', 'image-approval-760-light.png',
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
-  ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
+  ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
@@ -85,7 +85,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['subsecond', 'seconds', 'persisted', 'unknownHidden', 'narrowFits'].every(check => machine.processTiming?.[check] === true)
     || !['reasonVisible', 'diagnosticInDrawer', 'retryVisible', 'narrowFits'].every(check => machine.budgetFailure?.[check] === true)
     || !['publicProgressRetained', 'bubbleSpacing', 'reservationTruth', 'resolvedReservationRetired', 'unknownHasNoReplay', 'checkpointHasNoReplay'].every(check => machine.replyRecovery?.[check] === true)
-    || !['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved'].every(state => [[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
+    || !['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress'].every(state => [[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
       machine.replyRecovery?.cases?.some(item => item.state === state && item.width === width && item.appearance === appearance
         && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication'].includes(state))))
     || !['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationRetained', 'noPrivateThinking', 'narrowFits', 'nativeLoaded', 'persistedEventBatch'].every(check => machine.manualWakeRetry?.[check] === true)
