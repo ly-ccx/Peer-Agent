@@ -120,6 +120,9 @@ export function registerDesktopProjectAgent({
   configurePermissions = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
+  const messageIds = conversationStore.createHistoryProjection?.(history => history.messages.map(message => message.id));
+  const readCanonicalMessages = id => botHistory ? botHistory(id) || [] : conversationStore.getPersistedConversationHistory(id)?.messages || [];
   let host = null;
   let objectiveWatches=null;
   const runtimeEnabled = () => enabled() && readRuntimePolicy()?.projectAgent?.shell !== 'classic';
@@ -193,7 +196,7 @@ export function registerDesktopProjectAgent({
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
   objectiveService = createObjectiveService({store:objectiveStore,actions:objectiveActions,readSessions:workspaceId=>supervisor.sessionsForProject(workspaceId),canManageWorkspace:ownsProject,resolveConversationId,
-    readConversation: id => conversationStore.getPersistedConversationHistory(id)?.messages || [],
+    readConversation: readCanonicalMessages,
     readSession: id => { const session=supervisor.get({sessionId:id,detail:'report'}); return session ? {...session,evidenceRefs:session.report?.evidenceRefs || []} : null; },
     resolveEvidence: ref => {
       const record=goalPlanStore.findEvidenceIndexRecords?.([ref])?.[0];
@@ -275,14 +278,11 @@ export function registerDesktopProjectAgent({
     onWrote: memoryChanged,
   });
   const classicGoals = createClassicGoalProjection({ registry, conversationStore, goalPlanStore });
-  const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
   const summaryHistory = createBotSummaryHistory(conversationStore);
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
-    readMessages: (conversationId) => (
-      botHistory ? botHistory(conversationId) || [] : conversationStore.getPersistedConversationHistory(conversationId)?.messages || []
-    ),
+    readMessages: readCanonicalMessages,
     readSummaryMessages: summaryHistory,
     readSummaryMessagesBatch: ids => new Map(ids.map(id => [id, summaryHistory(id) || []])),
     readMessagesBatch: botHistory ? ids => new Map(ids.map(id => [id, botHistory(id) || []]))
@@ -342,8 +342,8 @@ export function registerDesktopProjectAgent({
   }
 
   function hasMessage(conversationId, messageId) {
-    const history = conversationStore.getPersistedConversationHistory(conversationId);
-    return history?.messages?.some((message) => message?.id === messageId) === true;
+    return messageIds ? (messageIds(conversationId) || []).includes(messageId)
+      : readCanonicalMessages(conversationId).some(message => message?.id === messageId);
   }
 
   function appendMessage(conversationId, message) {
@@ -377,7 +377,7 @@ export function registerDesktopProjectAgent({
     readLeaseEpoch,
     holdsLease: ownsProject,
     acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
-    readMessages: conversationId => conversationStore.getPersistedConversationHistory(conversationId)?.messages || [],
+    readMessages: readCanonicalMessages,
     restoreQueue: workspaceId => { applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
     recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,

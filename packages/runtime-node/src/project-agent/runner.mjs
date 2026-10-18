@@ -29,6 +29,7 @@ export function createProjectAgentRunner({
   executeTurn,
   appendMessage,
   readMessages = () => [],
+  hasMessage = null,
   resolveModel = () => ({ ok: false, missing: '没有可用的模型' }),
   resolveContext = () => null,
   resolveRoster = () => null,
@@ -104,7 +105,8 @@ export function createProjectAgentRunner({
   }
 
   function remember(message) {
-    if (!readMessages().some(row => row.id === message.id)) return appendMessage(conversation, { ...message, createdAt: stamp() });
+    const exists = typeof hasMessage === 'function' ? hasMessage(conversation, message.id) : readMessages().some(row => row.id === message.id);
+    if (!exists) return appendMessage(conversation, { ...message, createdAt: stamp() });
   }
 
   const coordination = coordinationStore ? createRunnerCoordination({ store: coordinationStore, inbox,

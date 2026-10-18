@@ -19,7 +19,7 @@ export function createProjectAgentHost({
   listWorkspaceIds = () => [],
   readOwnedWorkspaceIds = null,
   resolveConversationId = () => '',
-  hasMessage = () => false,
+  hasMessage = null,
   appendMessage = () => {},
   executeTurn,
   resolveModel = null,
@@ -65,7 +65,7 @@ export function createProjectAgentHost({
     now,
     holdsLease,
     resolveConversationId,
-    hasMessage,
+    hasMessage: typeof hasMessage === 'function' ? hasMessage : () => false,
     appendMessage,
   });
   const runners = new Map();
@@ -141,6 +141,7 @@ export function createProjectAgentHost({
       reconcileVerification,
       appendMessage,
       readMessages: () => typeof readMessages === 'function' ? readMessages(conversationId) : [],
+      hasMessage,
       resolveModel: () => resolveTurnModel(workspaceId, conversationId),
       resolveContext: (info) => (
         typeof resolveContext === 'function'
