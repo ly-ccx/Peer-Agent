@@ -32,15 +32,20 @@ try {
   const config = json(path.join(personal, 'llm-providers.json'));
   const model = config.models.find(row => row.id === arg('--model-id')); assert.ok(model);
   const channel = config.channels.find(row => row.id === model.groupId); assert.ok(channel);
+  const mainModel = config.models.find(row => row.id === (arg('--main-model-id') || model.id)); assert.ok(mainModel);
+  const selectedModels = [...new Map([model, mainModel].map(row => [row.id, row])).values()];
   report.model = model.model; report.provider = channel.provider;
-  writeFileSync(path.join(home, 'llm-providers.json'), JSON.stringify({ version: config.version, channels: [channel], models: [{ ...model, isDefault: true, effort: 'medium' }] }), { mode: 0o600 });
+  report.mainModel = mainModel.model; report.effort = arg('--effort') || 'medium (worker max)';
+  writeFileSync(path.join(home, 'llm-providers.json'), JSON.stringify({ version: config.version,
+    channels: config.channels.filter(row => selectedModels.some(model => model.groupId === row.id)),
+    models: selectedModels.map(row => ({ ...row, isDefault: row.id === mainModel.id, effort: arg('--effort') || 'medium' })) }), { mode: 0o600 });
   for (const file of ['credentials.vault.json', 'device-identity.json']) if (existsSync(path.join(personal, file))) cpSync(path.join(personal, file), path.join(home, file));
   const settings = json(path.join(home, 'settings.json'));
   settings.memory = { enabled: false }; settings.localAccessLevel = 'full_local';
   settings.modelRouting = { tiers: Object.fromEntries(['strong', 'fast', 'economy', 'vision'].map(tier => [tier, { primary: model.id, fallbacks: [] }])) };
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
   const profileFile = path.join(home, 'projects', bot.workspaceId, 'profile.json');
-  writeFileSync(profileFile, JSON.stringify({ ...json(profileFile), planApproval: 'never', acceptancePolicy: 'auto', autonomyPolicy: 'full_local', modelPolicy: { overrides: Object.fromEntries(['project_agent','session_worker','verifier','explorer','visual_verifier'].map(role=>[role,{mode:'fixed',modelProviderId:model.id,reasoningEffort:role==='session_worker'?'max':'medium'}])) } }));
+  writeFileSync(profileFile, JSON.stringify({ ...json(profileFile), planApproval: 'never', acceptancePolicy: 'auto', autonomyPolicy: 'full_local', modelPolicy: { overrides: Object.fromEntries(['project_agent','session_worker','verifier','explorer','visual_verifier'].map(role=>[role,{mode:'fixed',modelProviderId:role==='project_agent'?mainModel.id:model.id,reasoningEffort:arg('--effort') || (role==='session_worker'?'max':'medium')}])) } }));
   mkdirSync(path.join(project, 'src'));
   writeFileSync(path.join(project, 'README.md'), '# Isolated performance acceptance\nImplement sumNumbers(values). Empty arrays return 0, finite numbers sum, non-number/nonfinite input throws TypeError. Fix implementation and run node --test.\n');
   writeFileSync(path.join(project, 'src/sum.mjs'), 'export function sumNumbers(values) { return values.reduce((a,b) => a+b); }\n');
