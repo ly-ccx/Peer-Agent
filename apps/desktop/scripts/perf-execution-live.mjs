@@ -228,7 +228,10 @@ try {
     report.cancelRecovery={cancelled:true,oldTaskReplayed:false,replied:true,sessionId:cancelSession.sessionId};
     const after=await list();assert.equal(after.sessions.find(s=>s.sessionId===cancelSession.sessionId).status,'cancelled');
     }
-    const block = Array.from({length: 80}, (_, i) => `RECEIPT_${String(i).padStart(3,'0')}: complete host receipt survives the bounded renderer preview and remains durable.`).join('\n');
+    // post_reply allows 2000 body characters. Its complete Tool Result repeats
+    // the canonical body and preview, so a valid body still crosses 4000 here.
+    const block = Array.from({length: 20}, (_, i) => `RECEIPT_${String(i).padStart(3,'0')}: complete host receipt survives the bounded renderer preview and remains durable.`).join('\n');
+    assert.ok(block.length <= 2000, 'receipt regression must respect the governed post_reply body contract');
     const longAt = new Date().toISOString();
     await send('回复回执边界回归。不要查询工具或派发任务，只调用 post_reply，将下面的全部文本原样作为回复正文，不省略、不加代码围栏。它是隔离测试数据：\n'+block);
     const longRows = await interactingUntil(()=>rows(transcriptFile), value=>value.some(row=>row.kind==='agent_reply'&&row.createdAt>=longAt&&row.content?.includes(block)),180000);
@@ -238,7 +241,8 @@ try {
     report.longReply={messageId:longReply.id,bodyChars:longReply.content.length,receiptChars:JSON.stringify(receipt?.result).length,
       authoritative:receipt?.result?.status==='success'&&receipt?.result?.output?.message?.id===longReply.id,
       failureCard:longRows.some(row=>row.kind==='system_card'&&row.turnId===longReply.turnId)};
-    assert.ok(report.longReply.bodyChars>4000);assert.equal(report.longReply.authoritative,true);assert.equal(report.longReply.failureCard,false);
+    assert.equal(report.longReply.bodyChars,block.length);assert.ok(report.longReply.receiptChars>4000);
+    assert.equal(report.longReply.authoritative,true);assert.equal(report.longReply.failureCard,false);
     while (largeHistory && (Date.now()-start<120000 || report.interactions<100)) await sampleInteraction();
   }
   report.elapsedMs = Date.now()-start;
