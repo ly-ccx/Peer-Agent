@@ -94,7 +94,7 @@ try {
   });
   report.taskStartedAt = new Date().toISOString();
   const text = largeHistory
-    ? '这是已授权的隔离项目多文件修复任务。请让一个独立子 Agent 接手：读取 README.md 和所有测试，修复 src/sum.mjs、src/group-events.mjs、src/render-csv.mjs，保留全部测试断言，实际运行 node --test。完成标准为现有可执行测试全部通过和系统原有独立复核门禁，不另加没有可执行检查方式的业务要求。只改本项目 src 下的实现。若复核失败，读取具体失败原因并在原任务继续修复，不要开重复补救任务。主 Bot 在实际验收后交付结果。'
+    ? '这是已授权的隔离项目多文件修复任务。请让一个独立子 Agent 接手：读取 README.md 和所有测试，修复 src/sum.mjs、src/group-events.mjs、src/render-csv.mjs，保留全部测试断言，实际运行 node --test。只设置一个成功标准 existing-tests-pass：实际运行 node --test，现有18项测试全部通过（command标准）。先读测试、保留全部测试断言、只改本项目 src 下的实现是执行约束，不添加为额外成功标准。继续经过系统原有独立复核门禁。若复核失败，读取具体失败原因并在原任务继续修复，不要开重复补救任务。主 Bot 在实际验收后交付结果。'
     : '这是已授权的隔离项目修复任务。请让一个独立子 Agent 接手：读取 README.md、src/sum.mjs 和 sum.test.mjs，修复 sumNumbers，运行 node --test，按结果完成验收。只改这个测试项目。主 Bot 收到结果后交付总结，不要停在调研或方案。';
   await page.locator('.bot-composer textarea').fill(text); await page.locator('.bot-composer textarea').press('Enter');
   const transcriptFile = path.join(home, 'conversations', bot.conversationId + '.jsonl');
