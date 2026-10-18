@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
@@ -6,7 +6,7 @@ import path from 'node:path';
 export async function checkBotShellReply({ page, until, report, captureDirectory }) {
   const checks = report.replyInteraction = [];
   const reply = page.locator('#bot-msg-rc-message-9999');
-  await reply.scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, reply);
   const quote = reply.locator('.bot-reply-bar');
   assert.equal(await quote.evaluate(node => Boolean(node.closest('.bot-reply-body'))), true,
     'reply reference must belong to the reply bubble, rather than a detached short-text card');
@@ -81,7 +81,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await quote.press('Enter');
   await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
-  await reply.scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, reply);
   await quote.focus();
   await quote.press('Tab');
   assert.equal(await reply.locator('.bot-reply-context > button').first().evaluate(node => node === document.activeElement), true);
@@ -132,7 +132,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await composer.fill('保留我的草稿');
   const originalViewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   await page.setViewportSize({ width: 760, height: 780 });
-  await reply.scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, reply);
   assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);
   const quoteLayout = await composerQuote.evaluate(node => ({ width: node.clientWidth, overflow: node.scrollWidth, height: node.getBoundingClientRect().height }));
   assert.ok(quoteLayout.overflow <= quoteLayout.width); assert.ok(quoteLayout.height <= 74);
@@ -189,7 +189,7 @@ async function checkShortReplyQuote({ page, report, captureDirectory }) {
   for (const width of [1280, 760]) for (const appearance of ['dark', 'light']) {
     await page.setViewportSize({ width, height: 860 });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
-    await reply.locator('..').scrollIntoViewIfNeeded();
+    await scrollToBotMessage(page, reply.locator('..'));
     assert.equal(await quote.locator('.bot-reply-bar-excerpt').innerText(), '熟悉仓库');
     const shape = await quote.evaluate(node => {
       const row = node.getBoundingClientRect(), body = node.closest('.bot-reply-body')?.getBoundingClientRect();
@@ -205,5 +205,5 @@ async function checkShortReplyQuote({ page, report, captureDirectory }) {
   }
   await page.setViewportSize(viewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-  await page.locator('#bot-msg-rc-message-9999').scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
 }

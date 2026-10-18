@@ -1,3 +1,4 @@
+import { scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
@@ -12,6 +13,7 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
   const draft = await input.inputValue();
   const phrase = '叶子证据和独立校验都通过了';
   const select = async (mouseUp = true) => {
+    await scrollToBotMessage(page, reply);
     await body.locator('p').first().scrollIntoViewIfNeeded();
     await body.evaluate((node, params) => {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);

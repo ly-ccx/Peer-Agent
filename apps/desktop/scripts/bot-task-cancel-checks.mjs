@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
-import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 
 /** Controlled cancellation receipts at the existing application-service seam; production IPC/UI. */
 export async function checkBotTaskCancellation({ page, until, report, captureDirectory, commandFile }) {
@@ -38,7 +38,7 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   assert.equal(await waiting.getByRole('button', { name: `取消任务 ${first.title}`, exact: true }).count(), 1,
     'waiting work must offer a direct cancellation action');
   const reply = page.locator('#bot-msg-rc-message-9999');
-  await reply.scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, reply);
   await openReplyDetails(page, reply);
   const historical = page.locator('.bot-reply-details .bot-work-row');
   if (await historical.getAttribute('open') === null) await historical.locator(':scope > summary').click();
