@@ -32,7 +32,7 @@ export function replyDetailsRow(id: string | null, rows: readonly ConversationDi
   const handoff = [...rows].reverse().find(row => row.type === 'activity' ? row.activity.turnId === id
     : row.type === 'message' && row.message.turnId === id);
   if (handoff) return handoff;
-  const delivered = messages.findLast(message => message.turnId === id && message.kind !== 'agent_turn');
+  const delivered = [...messages].reverse().find(message => message.turnId === id && message.kind !== 'agent_turn');
   return delivered ? attachBotProcesses([{ type: 'message', message: delivered }], messages, null)[0] : undefined;
 }
 
