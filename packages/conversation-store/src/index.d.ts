@@ -150,6 +150,8 @@ export interface ConversationStore {
     workspaceId?: string;
     mode?: string;
     modelProviderId?: string | null;
+    /** Frozen worker effort for delegated tasks; omitted ordinary children inherit their parent. */
+    effort?: string;
     delegation?: { sessionId: string; anchorMessageId: string; inputId: string };
     runtimeState?: SelectionChildRequest['runtimeState'];
     capturedAt?: string;
@@ -207,6 +209,11 @@ export interface ConversationStore {
     workspaceId?: string;
   }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
+  /** Worker preparation followed by a version-checked atomic commit; resolves before terminal delivery. */
+  commitStreamingMessage(id: string, messageId: string, patch: Readonly<Record<string, unknown>>): Promise<{
+    readonly id: string; readonly messageId: string; readonly contentRevision: number;
+  }>;
+  drainPendingCommits(): Promise<readonly PromiseSettledResult<unknown>[]>;
   /**
    * 标记会话已读。只推进 lastReadAt，不修改 updatedAt。
    * options.at 可显式传入水位时间；默认 now。水位只前进不回退。

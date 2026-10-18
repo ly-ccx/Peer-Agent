@@ -142,7 +142,8 @@ export function BotMessageList({
         {row.type === 'activity' || row.type === 'message' && (['agent_reply', 'agent_turn'].includes(row.message.kind)
           || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')
             && (!isRetiredRecovery(row.message.cards) || Boolean(row.narration?.length))) ? (
-          <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /><span>{label}</span></div>
+          <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId}
+            animate={row.type === 'activity'} mood={row.type === 'activity' ? avatarMood : 'idle'} /><span>{label}</span></div>
         ) : null}
         {row.type === 'activity' ? <LiveReply referenceIds={references.get(row) ?? []} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} onOpenDetails={onOpenDetails ? () => onOpenDetails(row.activity.turnId) : undefined} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>

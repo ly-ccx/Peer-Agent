@@ -197,10 +197,10 @@ test('frozen effort is passed to the existing chat service for bot and task turn
   const calls = [];
   const executor = createAgentTurnExecutor({ llmChatService: { sendMessage: async input => { calls.push(input); return { terminalStatus: 'done' }; } } });
   for (const role of ['project_agent', 'session_worker', 'verifier']) {
-    await executor.runTurn({ turnProfile: { role, modelSelection: { modelProviderId: 'm', reasoningEffort: 'high' } },
+    await executor.runTurn({ turnProfile: { role, modelSelection: { modelProviderId: 'm', reasoningEffort: 'max' } },
       modelProviderId: 'm', effort: 'default', sink: { send() {} } });
   }
-  assert.deepEqual(calls.map(call => call.effort), ['high', 'high', 'high']);
+  assert.deepEqual(calls.map(call => call.effort), ['max', 'max', 'max']);
   await executor.runTurn({ effort: 'low', sink: { send() {} } });
   assert.equal(calls.at(-1).effort, 'low');
 });

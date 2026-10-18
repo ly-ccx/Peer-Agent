@@ -7,6 +7,8 @@ import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
+import { withFileLock, withFileLockAsync } from './conversation-file-lock.mjs';
+import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -68,24 +70,6 @@ function writeChangeEvent(storeDir, event) {
     writerPid: process.pid,
     changedAt: new Date().toISOString(),
   }), 'utf8');
-}
-
-function withFileLock(filePath, operation) {
-  const lockDir = `${filePath}.lock`;
-  const deadline = Date.now() + 5_000;
-  while (true) {
-    try {
-      mkdirSync(lockDir);
-      break;
-    } catch (error) {
-      if (error?.code !== 'EEXIST' || Date.now() >= deadline) throw error;
-    }
-  }
-  try {
-    return operation();
-  } finally {
-    rmSync(lockDir, { recursive: true, force: true });
-  }
 }
 
 // 对话模式归一化。wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:
@@ -923,7 +907,7 @@ export function createConversationStore(options = {}) {
         mode: input.mode || 'chat',
         fastMode: false,
         modelProviderId: input.modelProviderId ?? parent.modelProviderId,
-        effort: parent.effort,
+        effort: input.effort ?? parent.effort,
         status: 'active',
         messageCount: 0,
         contentRevision: 0,
@@ -1436,6 +1420,27 @@ export function createConversationStore(options = {}) {
     return meta ? { ...meta, messages } : null;
   }
 
+  const terminalCommitter = createTerminalMessageCommitter({ storeDir,
+    commitPrepared: async prepared => {
+      const result = await withFileLockAsync(indexFile, () => withFileLockAsync(prepared.historyFile, () => {
+      const index = readIndex(), meta = index.find(row => row.id === prepared.id);
+      if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
+      if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
+      renameSync(prepared.temporaryFile, prepared.historyFile);
+      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+      meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
+      writeJsonl(indexFile, index);
+      if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
+      return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
+      }));
+      if (result === false) return false;
+      // Subscribers may write again. Notify only after both locks have been released.
+      publishChange(result.meta, 'messages-updated');
+      return result.receipt;
+    },
+  });
+  const messageWrite = operation => (...args) => withFileLock(indexFile, () => withFileLock(convFile(args[0]), () => operation(...args)));
+
   // 会话级累计用量账本。独立挂在 index meta 上（不在消息 jsonl 里），
   // 因此压缩（replaceMessages 仅重写消息文件）不会触及它 —— 这是修复
   // "压缩后右下角计费被清零" 的核心：累计 usage 不再依附于会被删除的消息。
@@ -1858,12 +1863,14 @@ export function createConversationStore(options = {}) {
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
     updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),
     appendMessage: changed(appendMessage, 'messages-updated'),
-    updateLastMessage: changed(updateLastMessage, 'messages-updated'),
-    updateMessageById: changed(updateMessageById, 'messages-updated'),
+    updateLastMessage: changed(messageWrite(updateLastMessage), 'messages-updated'),
+    updateMessageById: changed(messageWrite(updateMessageById), 'messages-updated'),
+    commitStreamingMessage: terminalCommitter.commit,
+    drainPendingCommits: terminalCommitter.drain,
     // 流式 sidecar 通道：高频、无广播（终态由 updateMessageById 收口并清理）。
     patchStreamingMessage,
     clearStreamPatch,
-    replaceMessages: changed(replaceMessages, 'messages-updated'),
+    replaceMessages: changed(messageWrite(replaceMessages), 'messages-updated'),
     addUsage: changed(addUsage, 'metadata-updated'),
     recordRuntimeTurnUsage: changed(recordRuntimeTurnUsage, 'metadata-updated'),
     archiveConversation: changed(archiveConversation, 'metadata-updated'),
@@ -1872,8 +1879,8 @@ export function createConversationStore(options = {}) {
     unpinConversation: changed(unpinConversation, 'metadata-updated'),
     reorderPinnedConversations,
     autoArchiveConversations,
-    deleteConversation: changed(deleteConversation, 'deleted'),
-    deleteConversationsByWorkspace,
+    deleteConversation: changed(messageWrite(deleteConversation), 'deleted'),
+    deleteConversationsByWorkspace: (...args) => withFileLock(indexFile, () => deleteConversationsByWorkspace(...args)),
     subscribeChanges,
   };
 }

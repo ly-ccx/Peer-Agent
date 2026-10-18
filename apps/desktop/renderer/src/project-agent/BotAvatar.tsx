@@ -2,13 +2,14 @@ import { generateAvatar, type BotAvatar as BotAvatarModel } from '@peer-agent/pr
 import { useEffect, useState, type PointerEvent } from 'react';
 import { clientApi } from '../clientApi';
 import { useAvatarMotion } from './state/useAvatarMotion';
-import type { BotAvatarMood } from './state/botAvatarState';
+import { botAvatarMotion, type BotAvatarMood } from './state/botAvatarState';
 
 interface BotAvatarProps {
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly workspaceId: string;
   readonly mood?: BotAvatarMood;
+  readonly animate?: boolean;
 }
 
 const BODIES: Readonly<Record<string, string>> = {
@@ -70,8 +71,8 @@ function resetEyes(event: PointerEvent<HTMLSpanElement>) {
   event.currentTarget.style.removeProperty('--bot-gaze-y');
 }
 
-export function BotAvatar({ avatar, label, workspaceId, mood = 'idle' }: BotAvatarProps) {
-  const motion = useAvatarMotion();
+export function BotAvatar({ avatar, label, workspaceId, mood = 'idle', animate = false }: BotAvatarProps) {
+  const motion = useAvatarMotion(botAvatarMotion(mood, animate));
   const [imageData, setImageData] = useState<{ key: string; dataUrl: string } | null>(null);
   const imageKey = avatar.kind === 'image' ? `${workspaceId}:${avatar.ref}` : '';
   const dataUrl = imageData?.key === imageKey ? imageData.dataUrl : null;

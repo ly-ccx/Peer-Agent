@@ -12,8 +12,11 @@ const registry = createAvatarMotionRegistry<Element>({
     return () => { document.removeEventListener('visibilitychange', update); preference.removeEventListener('change', update); };
   },
 });
-export function useAvatarMotion() {
+export function useAvatarMotion(eligible = false) {
   const ref = useRef<HTMLSpanElement>(null), [active, setActive] = useState(false);
-  useEffect(() => ref.current ? registry.observe(ref.current, setActive) : undefined, []);
-  return { ref, active };
+  useEffect(() => {
+    if (!eligible) { setActive(false); return; }
+    return ref.current ? registry.observe(ref.current, setActive) : undefined;
+  }, [eligible]);
+  return { ref, active: eligible && active };
 }

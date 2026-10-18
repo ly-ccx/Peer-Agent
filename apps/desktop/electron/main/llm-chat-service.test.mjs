@@ -3407,3 +3407,44 @@ describe('force-complete final persist', () => {
     }
   });
 });
+
+// Exercise the actual chat adapter, rather than only the terminal seam in isolation.
+describe('asynchronous terminal commit barrier', () => {
+  for (const fail of [false, true]) it(`waits for storage before SDK/UI completion (${fail ? 'disk failure' : 'success'})`, async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch, events = [];
+    let finish, admitted;
+    const admission = new Promise(resolve => { admitted = resolve; });
+    const pending = new Promise((resolve, reject) => { finish = fail ? () => reject(Object.assign(Error('disk full'), { code: 'ENOSPC' })) : resolve; });
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'durable answer' } }] }, '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({ llmConfigStore: { listProviders: () => [{ id: 'p1', provider: 'openai', baseUrl: 'https://example.test/v1', model: 'test-model', isDefault: true, apiKeyConfigured: true }], getDecryptedApiKey: () => 'test-key' },
+        emitRuntimeEvent: event => events.push(event.type),
+        conversationStore: { addUsage: () => null, updateMessageById() {}, patchStreamingMessage() {},
+          commitStreamingMessage(id, messageId, patch) { assert.equal(patch.content, 'durable answer'); admitted(); return pending; } },
+      });
+      let released = false;
+      const turn = service.sendMessage({ messages: [{ role: 'user', content: 'hi' }],
+        conversationId: 'async-terminal', assistantMessageId: 'answer', streamId: 'async-terminal',
+        webContents: { send: channel => events.push(channel) },
+      }).then(outcome => { released = true; return outcome; });
+      await admission;
+      assert.equal(released, false);
+      assert.equal(events.includes('message.completed'), false);
+      assert.equal(events.includes('chat:stream:done'), false);
+      finish(); const outcome = await turn;
+      assert.equal(released, true);
+      if (fail) {
+        assert.equal(outcome.terminalStatus, 'error');
+        assert.equal(events.includes('message.completed'), false);
+        assert.equal(events.includes('chat:stream:done'), false);
+        assert.ok(events.includes('chat:stream:error'));
+      } else {
+        assert.equal(outcome.terminalStatus, 'done');
+        assert.ok(events.indexOf('message.completed') < events.indexOf('chat:stream:done'));
+      }
+    } finally { finish(); globalThis.fetch = previousFetch; }
+  });
+});
