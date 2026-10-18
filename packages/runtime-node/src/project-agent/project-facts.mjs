@@ -117,5 +117,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       memories: memoryStore?.list({ workspaceId }) || [],
       handoffs: rows.flatMap(row => { const facts = supervisor.deliveryFacts?.(row.sessionId); return facts ? [facts] : []; }) });
   }
-  return { delivery, cards, resolve: (workspaceId, cardId) => projection.resolve(workspaceId, cardId, { resolution: 'retried' }) };
+  const query = read => typeof supervisor.readQuery === 'function' ? supervisor.readQuery(read) : read();
+  return { delivery: id => query(() => delivery(id)), cards: id => query(() => cards(id)),
+    resolve: (workspaceId, cardId) => projection.resolve(workspaceId, cardId, { resolution: 'retried' }) };
 }
