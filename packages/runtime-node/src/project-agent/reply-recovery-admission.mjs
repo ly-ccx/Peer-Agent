@@ -28,7 +28,7 @@ export function recoverLegacyBudgetWorks({ store, workspaceId, conversationId, r
   for (const work of Object.values(store.read().works)) {
     if (work.state !== 'budget_limited' || work.stopScope === 'work' || work.parentConversationId !== conversationId) continue;
     const budget = legacyBudgetMigration(work, binding.limits, now());
-    if (!budget || rows.some(row => work.sessionIds?.includes(row.sessionId)
+    if (!budget || (typeof rows === 'function' ? rows() : rows).some(row => work.sessionIds?.includes(row.sessionId)
       && (row.needsUser || row.status === 'waiting_user'))) continue;
     let checkpoint;
     try { checkpoint = store.readCheckpoint(work.checkpointRef); } catch { continue; }

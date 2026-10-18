@@ -5,6 +5,8 @@ import { workBudgetBinding } from './work-budget.mjs';
 /** One automatic observer for each child-result scope. Never transfers execution authority. */
 export function reconcileContinuationCustody({ store, conversationId, sessions }) {
   const state = store.read(), groups = new Map();
+  let snapshot;
+  const roster = () => snapshot ??= typeof sessions === 'function' ? sessions() : sessions;
   const prepared = new Set(Object.values(state.deliveries || {}).filter(row => row.state === 'prepared').map(row => row.message.meta?.workId));
   for (const work of Object.values(state.works)) {
     if (work.parentConversationId !== conversationId || work.anchorInputIds?.length || work.stopScope === 'work'
@@ -18,13 +20,13 @@ export function reconcileContinuationCustody({ store, conversationId, sessions }
     if (checkpoint.job?.kind !== 'wake' || checkpoint.job?.userInputs?.length || checkpoint.job?.interactive
       || !events.length || events.some(event => event.kind !== 'report_available' || !event.sessionId)) continue;
     const ids = [...new Set([...(work.sessionIds || []), ...events.map(event => event.sessionId)])].sort();
-    if (!ids.length || !ids.every(id => sessions.some(row => row.sessionId === id))) continue;
+    if (!ids.length || !ids.every(id => roster().some(row => row.sessionId === id))) continue;
     const key = JSON.stringify(ids);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push({ work, checkpoint, ids });
   }
   for (const group of groups.values()) {
-    group.sort((a, b) => Number(reportedWaitCurrent(b.work.reportedWait, sessions)) - Number(reportedWaitCurrent(a.work.reportedWait, sessions))
+    group.sort((a, b) => Number(reportedWaitCurrent(b.work.reportedWait, roster())) - Number(reportedWaitCurrent(a.work.reportedWait, roster()))
       || String(b.work.updatedAt).localeCompare(String(a.work.updatedAt)) || a.work.workId.localeCompare(b.work.workId));
     const owner = group[0], duplicates = group.slice(1);
     const owned = new Set(Object.values(state.works).flatMap(work => [...(work.pendingEventIds || []), ...(work.consumedEventIds || [])]));
@@ -34,7 +36,7 @@ export function reconcileContinuationCustody({ store, conversationId, sessions }
     const events = [...new Map([...group.flatMap(row => row.checkpoint.job.events), ...fresh].map(event => [event.eventId, event])).values()];
     const checkpointRef = store.checkpoint(owner.work.workId, { ...owner.checkpoint,
       job: { ...owner.checkpoint.job, events, continuation: true } });
-    const waiting = reportedWaitCurrent(owner.work.reportedWait, sessions);
+    const waiting = reportedWaitCurrent(owner.work.reportedWait, roster());
     const next = { ...owner.work, checkpointRef,
       sessionIds: owner.ids, pendingEventIds: events.map(event => event.eventId),
       progressFacts: [...new Set(group.flatMap(row => row.work.progressFacts || []))].slice(-512),

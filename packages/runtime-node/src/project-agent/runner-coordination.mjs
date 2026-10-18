@@ -97,7 +97,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     pending() {
-      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows() });
+      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows });
       const works = Object.values(store.read().works);
       // An owned batch continues through its durable job, never through a new
       // wake merely because failure has left its delivery unacknowledged.
@@ -118,23 +118,29 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverJob({ userOnly = false } = {}) {
       dispatchRecovery.reconcileAll();
       expireReservations();
-      recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: rows(), now });
-      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows() });
+      let snapshot;
+      const roster = () => snapshot ??= rows();
+      recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: roster, now });
+      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: roster });
       for (const work of Object.values(store.read().works)) {
         if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
-        if (!reportedWaitCurrent(work.reportedWait, rows())) store.saveWork({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
+        if (!reportedWaitCurrent(work.reportedWait, roster())) store.saveWork({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
       }
       // Older releases persisted technical blocks as human waits. Only current
       // owned facts plus an existing protected checkpoint can reclaim custody.
       for (const work of Object.values(store.read().works)) {
         if (work.state !== 'waiting_user' || work.reportedWait || work.stopScope === 'work' || !work.checkpointRef
           || work.parentConversationId !== conversationId) continue;
-        const related = rows().filter(row => work.sessionIds?.includes(row.sessionId));
+        const related = roster().filter(row => work.sessionIds?.includes(row.sessionId));
         const ownership = repairOwnership(related);
         if (!ownership.needsUser && ownership.repairSessionIds.length) store.saveWork({ ...work,
           state: 'runnable', end: 'yielded', repairSessionIds: ownership.repairSessionIds });
       }
-      const candidates = Object.values(store.read().works).filter(work => !userOnly || work.anchorInputIds?.length);
+      const candidates = Object.values(store.read().works).filter(work => (!userOnly || work.anchorInputIds?.length)
+        && (work.state === 'runnable' && work.checkpointRef
+          || work.checkpointRef && recoveryReservationDue(work, now())
+          || work.state === 'blocked_system' && work.stopScope !== 'work' && work.recovery?.dispatchesReconciled
+            && !work.recovery.blockedCode && !hasUnsettledDispatch(work)));
       const inputPriority = new Map(candidates.filter(work => work.anchorInputIds?.length).map(work => {
         const inputs = readProtectedWork(work)?.job?.userInputs || [];
         return [work.workId, Math.max(0, ...inputs.map(input => Date.parse(input.createdAt) || 0)) || Date.parse(work.updatedAt) || 0];
