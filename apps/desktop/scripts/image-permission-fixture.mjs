@@ -29,7 +29,9 @@ export async function withImagePermissionFixture(service, { mainRoot, imageRoot,
       const streams = new Map([[input.streamId, { turnProfile: input.turnProfile, runtimeTurn: { signal: controller.signal } }]]);
       const gate = createChatPermissionGate({ activeStreams: streams, approvalStore,
         accessLevel: scenario === 'FULL' ? 'full_local' : 'ask_before_local',
-        permissionWaitMs: scenario === 'TIMEOUT' ? 2500 : 60_000,
+        // Keep the pending card inspectable under traced CI renderer load;
+        // the production gate still performs the eventual expiry itself.
+        permissionWaitMs: scenario === 'TIMEOUT' ? 10_000 : 60_000,
         resolveApprovalScope: () => ({ workspaceId: input.turnProfile.workspaceId, conversationId: input.conversationId }) });
       const image = path.join(imageRoot, `permission-check-${scenario.toLowerCase()}.png`);
       if (!existsSync(image)) writeFileSync(image, nativeImage.createFromBitmap(Buffer.from([90, 80, 220, 255]), { width: 1, height: 1 }).toPNG());

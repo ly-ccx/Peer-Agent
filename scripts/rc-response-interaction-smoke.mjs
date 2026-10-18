@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { emitToolArgProgress } from '../packages/runtime-node/dist/index.js';
 
+// The driver deliberately holds each phase while inspecting multiple window,
+// theme and dock layouts. This is a fixture deadlock guard, not a provider or
+// product timeout; a loaded CI renderer can take over 30s before advancing it.
+const CONTROLLED_PHASE_WAIT_MS = 120_000;
+
 // Electron polls from another process. Replacing the complete file prevents a
 // truncated JSON read from becoming a provider error and replaying the stream.
 export function writeStreamingCommand(commandFile, scenario, phase) {
@@ -40,7 +45,7 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         const turn = { aborted: false }; active.set(input.streamId, turn);
         const send = (channel, payload) => input.webContents.send(channel, { streamId: input.streamId, ...payload });
         try {
-          const deadline = Date.now() + 30000;
+          const deadline = Date.now() + CONTROLLED_PHASE_WAIT_MS;
           send('chat:stream:thinking', { content: 'PRIVATE_RETRY_THINKING' });
           send('chat:stream:delta', { content: '正在重试，我会接着核对已有进展。' });
           while (!turn.aborted && Date.now() < deadline) {
@@ -108,13 +113,13 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole })
         sink.send(channel, { streamId, ...payload });
       } };
       const wait = async phase => {
-        const deadline = Date.now() + 30000;
+        const deadline = Date.now() + CONTROLLED_PHASE_WAIT_MS;
         while (!turn.aborted && Date.now() < deadline) {
           const command = JSON.parse(readFileSync(commandFile, 'utf8'));
           if (command.scenario === text && command.phase >= phase) return true;
           await new Promise(resolve => setTimeout(resolve, 25));
         }
-        if (!turn.aborted) throw Error('Controlled stream was not advanced');
+        if (!turn.aborted) throw Error(`Controlled stream ${text} was not advanced to phase ${phase} within ${CONTROLLED_PHASE_WAIT_MS}ms`);
         return false;
       };
       const aborted = () => ({ terminalStatus: 'aborted', text: turn.text, toolCalls: [] });
