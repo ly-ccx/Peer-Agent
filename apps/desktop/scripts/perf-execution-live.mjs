@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
 import { prepareLabIsolation } from './lab-workspace-isolate.mjs';
 import { seedBotShellHome } from './seed-bot-shell-home.mjs';
+import { seedExecutionHistory } from './seed-execution-history.mjs';
 const arg = flag => { const i = process.argv.indexOf(flag); return i < 0 ? null : process.argv[i + 1]; };
 assert.ok(arg('--model-id'), 'Explicit configured --model-id required');
 const source = fileURLToPath(new URL('../../..', import.meta.url));
@@ -22,7 +23,9 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const until = async (read, accept, timeout = 30000) => { const end = Date.now() + timeout; while (Date.now() < end) { const value = await read(); if (accept(value)) return value; await pause(100); } throw Error('ACCEPTANCE_TIMEOUT'); };
 const json = file => JSON.parse(readFileSync(file, 'utf8'));
 const rows = file => existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
-const distribution = values => { const sorted = [...values].sort((a,b) => a-b); return { n: sorted.length, p50: sorted[Math.floor(sorted.length*.5)] ?? null, p95: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.95))] ?? null, max: sorted.at(-1) ?? null }; };
+const distribution = values => { const sorted = [...values].sort((a,b) => a-b); return { n: sorted.length, p50: sorted[Math.floor(sorted.length*.5)] ?? null, p95: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.95))] ?? null, p99: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.99))] ?? null, max: sorted.at(-1) ?? null }; };
+const largeHistory = process.argv.includes('--large-history');
+const keyRoundTrips = [], wheelRoundTrips = [], scrollChanges = [];
 try {
   const fixture = seedBotShellHome({ home, scale: { bots: 12, messages: 100, inboxEvents: 0, memories: 0 } });
   const bot = fixture.bots[0], project = bot.path;
@@ -42,6 +45,7 @@ try {
   writeFileSync(path.join(project, 'README.md'), '# Isolated performance acceptance\nImplement sumNumbers(values). Empty arrays return 0, finite numbers sum, non-number/nonfinite input throws TypeError. Fix implementation and run node --test.\n');
   writeFileSync(path.join(project, 'src/sum.mjs'), 'export function sumNumbers(values) { return values.reduce((a,b) => a+b); }\n');
   writeFileSync(path.join(project, 'sum.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; import {sumNumbers} from './src/sum.mjs'; test('sum',()=>{assert.equal(sumNumbers([1,2,3]),6);assert.equal(sumNumbers([]),0);assert.throws(()=>sumNumbers([1,'2']),TypeError);assert.throws(()=>sumNumbers([Infinity]),TypeError);});\n");
+  if (largeHistory) report.historyScale = seedExecutionHistory({ home, bot });
   const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
   cpSync(path.join(source, 'apps/desktop/dist'), isolation.launch.distDir, { recursive: true });
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
@@ -51,17 +55,30 @@ try {
   app = await _electron.launch({ args: [isolation.launch.desktopDir, '--user-data-dir=' + path.join(root, 'chromium')], cwd: isolation.launch.desktopDir, env, timeout: 30000 });
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean);
   page.on('pageerror', error => report.pageErrors.push(error.message));
-  await page.setViewportSize({ width: 1280, height: 860 });
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('/dist/index.html') && !w.webContents.getURL().includes('window='));
+    window.setSize(1280, 860);
+  });
   await until(() => page.locator('.bot-row').count(), count => count === 12);
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
   await page.locator('.bot-composer textarea').waitFor(); await pause(1500);
+  report.display = await page.evaluate(() => ({ dpr: devicePixelRatio, width: innerWidth, height: innerHeight }));
+  if (largeHistory) {
+    for (let i = 0; i < 2; i++) {
+      await page.locator('.bot-thread-older').click(); await pause(300);
+      await page.locator('.bot-thread').evaluate(node => { node.scrollTop = node.scrollHeight; });
+    }
+  }
+  await app.evaluate(() => { const { monitorEventLoopDelay } = process.getBuiltinModule('node:perf_hooks');
+    globalThis.executionMainLoop = monitorEventLoopDelay({ resolution: 1 }); globalThis.executionMainLoop.enable(); });
   const metrics = () => app.evaluate(({ app }) => app.getAppMetrics().map(m => ({ pid: m.pid, type: m.type, cpu: m.cpu.cumulativeCPUUsage })));
   const cpuStart = await metrics(), start = Date.now();
   await page.evaluate(() => {
-    const state = globalThis.executionPerf = { frames: [], inputs: [], longTasks: [], stop: false, last: performance.now() };
+    const state = globalThis.executionPerf = { frames: [], inputs: [], wheels: [], longTasks: [], stop: false, last: performance.now() };
     const frame = now => { state.frames.push(now-state.last); state.last=now; if (!state.stop) requestAnimationFrame(frame); }; requestAnimationFrame(frame);
     state.observer = new PerformanceObserver(list => state.longTasks.push(...list.getEntries().map(entry => ({ duration: entry.duration, start: entry.startTime })))); state.observer.observe({ type: 'longtask', buffered: false });
     document.addEventListener('input', event => { if (!event.target.matches('.bot-composer textarea')) return; const at=event.timeStamp; requestAnimationFrame(() => state.inputs.push(performance.now()-at)); }, true);
+    document.addEventListener('wheel', event => { if (!event.target.closest('.bot-thread')) return; const at=event.timeStamp; requestAnimationFrame(() => state.wheels.push(performance.now()-at)); }, { passive: true });
   });
   report.taskStartedAt = new Date().toISOString();
   const text = '这是已授权的隔离项目修复任务。请让一个独立子 Agent 接手：读取 README.md、src/sum.mjs 和 sum.test.mjs，修复 sumNumbers，运行 node --test，按结果完成验收。只改这个测试项目。主 Bot 收到结果后交付总结，不要停在调研或方案。';
@@ -83,10 +100,19 @@ try {
     }
     const progress = JSON.stringify({ turns: turns.length, calls: calls.map(call=>call.name), replies: replied.length });
     if (progress !== lastEvent) { console.log(progress); lastEvent = progress; }
-    if (finished && !await page.locator('.bot-live-reply').count()) break;
+    if (finished && !await page.locator('.bot-live-reply').count() && (!largeHistory || Date.now()-start >= 120000)) break;
     const composer = page.locator('.bot-composer textarea');
-    if (await composer.isVisible()) { await composer.click(); await composer.press('a'); report.interactions++; if (report.interactions % 12 === 0) await composer.fill(''); }
-    await page.locator('.bot-convo').evaluate(node => { node.scrollTop = Math.max(0, node.scrollTop - 120); });
+    if (await composer.isVisible()) {
+      await composer.click(); const keyAt = performance.now(); await composer.press('a');
+      await page.evaluate(() => new Promise(requestAnimationFrame)); keyRoundTrips.push(performance.now()-keyAt);
+      report.interactions++; if (report.interactions % 12 === 0) await composer.fill('');
+    }
+    const scroller = page.locator('.bot-thread'), box = await scroller.boundingBox();
+    const beforeTop = await scroller.evaluate(node => node.scrollTop);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const wheelAt = performance.now(); await page.mouse.wheel(0, beforeTop > 180 ? -120 : 120);
+    await page.evaluate(() => new Promise(requestAnimationFrame)); wheelRoundTrips.push(performance.now()-wheelAt);
+    const afterTop = await scroller.evaluate(node => node.scrollTop); scrollChanges.push(Math.abs(afterTop-beforeTop));
     if (!drawerOpened) {
       for (const selector of ['.bot-background-work:not([open]) > summary','.bot-work-row:not([open]) > summary']) { const trigger=page.locator(selector).first(); if(await trigger.isVisible()) await trigger.click(); }
     }
@@ -94,7 +120,7 @@ try {
       await page.getByRole('button', { name: /查看任务详情/ }).last().click(); drawerOpened = true;
     }
     if (drawerOpened && report.interactions % 10 === 0) { const close = page.getByRole('button', { name: '关闭', exact: true }); if (await close.count()) await close.last().click(); }
-    await pause(450);
+    await pause(largeHistory ? 150 : 450);
   }
   await page.screenshot({ path: path.join(root, 'real-task.png') });
   report.taskPassed = finished; report.taskDrawerOpened = drawerOpened;
@@ -106,6 +132,12 @@ try {
     assert.equal(view.effort,session.origin.modelSelection.worker.reasoningEffort);
   }
   if(finished) {
+    if (largeHistory) report.largeTerminal = await app.evaluate(async ({ app }, { home, id }) => {
+      const require = process.getBuiltinModule('node:module').createRequire(app.getAppPath() + '/package.json');
+      const store = require('@peer-agent/conversation-store').createConversationStore({ storeDir: home + '/conversations' });
+      const at = performance.now(); const receipt = await store.commitStreamingMessage(id, 'scale-report', { content: 'Synthetic historical report after a durable performance test commit.' });
+      return { durationMs: performance.now()-at, messageId: receipt.messageId, contentRevision: receipt.contentRevision };
+    }, { home, id: report.historyScale.sessions[0].conversationId });
     const send=async text=>{const composer=page.locator('.bot-composer textarea');await composer.fill(text);await composer.press('Enter');};
     const list=()=>page.evaluate(workspaceId=>window.peerAgent.projectAgentListSessions({workspaceId,limit:20}),bot.workspaceId);
     const oldIds=new Set(doneSessions.sessions.map(s=>s.sessionId));
@@ -122,12 +154,20 @@ try {
     const after=await list();assert.equal(after.sessions.find(s=>s.sessionId===cancelSession.sessionId).status,'cancelled');
   }
   report.elapsedMs = Date.now()-start;
-  const perf = await page.evaluate(() => { const s=globalThis.executionPerf; s.stop=true;s.observer.disconnect();return { frames:s.frames,inputs:s.inputs,longTasks:s.longTasks, hidden:document.hidden,focused:document.hasFocus(),avatars:[...document.querySelectorAll('.bot-avatar')].map(n=>({animated:n.dataset.avatarAnimated, animation:getComputedStyle(n).animationName})) }; });
-  report.renderer = { frames: distribution(perf.frames), inputPaintMs: distribution(perf.inputs), longTasks: perf.longTasks, hidden:perf.hidden, focused:perf.focused, avatars:perf.avatars };
+  const perf = await page.evaluate(() => { const s=globalThis.executionPerf; s.stop=true;s.observer.disconnect();return { frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks, mountedRows:document.querySelectorAll('[data-conversation-row]').length, hidden:document.hidden,focused:document.hasFocus(),avatars:[...document.querySelectorAll('.bot-avatar')].map(n=>({animated:n.dataset.avatarAnimated, animation:getComputedStyle(n).animationName})) }; });
+  report.mainLoop = await app.evaluate(() => { const h=globalThis.executionMainLoop; h.disable(); return { p95:h.percentile(95)/1e6,p99:h.percentile(99)/1e6,max:h.max/1e6 }; });
+  report.interaction = { keyRoundTripMs:distribution(keyRoundTrips), wheelRoundTripMs:distribution(wheelRoundTrips), scrollMovedSamples:scrollChanges.filter(n=>n>0).length,
+    scope:'Automation dispatch through Browser and renderer to rAF, includes transport cost, not hardware latency. Wheel events target the actual bot-thread scroller.' };
+  report.renderer = { frames: distribution(perf.frames), inputPaintMs: distribution(perf.inputs), wheelPaintMs:distribution(perf.wheels), longTasks: perf.longTasks, mountedRows:perf.mountedRows, hidden:perf.hidden, focused:perf.focused, avatars:perf.avatars };
   const cpuEnd = await metrics(); report.cpu = cpuEnd.map(m => ({ type:m.type,cpuPercent:100000*(m.cpu-(cpuStart.find(p=>p.pid===m.pid)?.cpu ?? m.cpu))/report.elapsedMs }));
   const history = rows(transcriptFile); report.toolCalls = history.filter(r=>r.kind==='agent_turn').flatMap(t=>t.rounds?.flatMap(r=>r.toolCalls?.map(c=>c.name)||[])||[]);
   report.sessionsFile = existsSync(sessionsFile) ? sessionsFile : null;
   report.ok = finished && drawerOpened && report.cancelRecovery?.replied === true && report.interactions >= 5 && report.renderer.inputPaintMs.p95 < 100 && report.renderer.frames.p95 < 32 && report.pageErrors.length === 0;
+  if (largeHistory) report.ok &&= report.historyScale.actualPlans >= 1100 && report.historyScale.parentBytes >= 9_500_000
+    && report.historyScale.childBytes >= 46_300_000 && report.historyScale.journalBytes >= 185_000_000
+    && report.elapsedMs >= 120000 && report.interactions >= 100 && report.interaction.scrollMovedSamples >= 100
+    && report.interaction.keyRoundTripMs.p95 < 100 && report.interaction.keyRoundTripMs.p99 < 200 && report.interaction.keyRoundTripMs.max < 500
+    && report.interaction.wheelRoundTripMs.p95 < 100 && report.renderer.wheelPaintMs.p95 < 100;
 } catch (error) { report.ok=false; report.error=error.message; }
 finally {
   if (app) await app.close().catch(()=>{});

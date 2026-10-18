@@ -2,11 +2,13 @@
 export function createSessionReadQuery() {
   let current = null;
   return {
+    /** @template T @param {string} key @param {() => T} load @returns {T} */
     memo(key, load) {
       if (!current) return load();
       if (!current.has(key)) current.set(key, load());
       return current.get(key);
     },
+    /** @template T @param {() => T} read @returns {T} */
     run(read) {
       const owner = !current;
       if (owner) current = new Map();

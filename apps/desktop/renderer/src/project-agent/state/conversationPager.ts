@@ -1,4 +1,5 @@
 import { CONVERSATION_PAGE_SIZE, normalizeBotMessage, type BotChatMessage } from './botConversationState.ts';
+import { conversationValuesEqual } from './conversationValueEquality.ts';
 
 interface Page {
   readonly ok: boolean;
@@ -39,7 +40,8 @@ export function createConversationPager({ read, publish }: {
       first ??= result;
       const incoming = (result.messages ?? []).flatMap(raw => {
         const message = normalizeBotMessage(raw);
-        return message ? [message] : [];
+        const previous = message && messages.find(row => row.id === message.id);
+        return message ? [previous && conversationValuesEqual(previous, message) ? previous : message] : [];
       });
       fetched = [...incoming, ...fetched];
       if (before || !initialized || !known.size || incoming.some(message => known.has(message.id)) || !result.nextCursor) break;
@@ -54,7 +56,8 @@ export function createConversationPager({ read, publish }: {
       && !message.createdAt && message.cards.some(card => card.cardId === message.id)));
     const byId = new Map([...retained, ...fetched].map(message => [message.id, message]));
     const order = before ? [...fetched, ...retained] : [...retained.filter(message => !freshIds.has(message.id)), ...fetched];
-    messages = [...new Set(order.map(message => message.id))].map(id => byId.get(id)!);
+    const nextMessages = [...new Set(order.map(message => message.id))].map(id => byId.get(id)!);
+    if (nextMessages.length !== messages.length || nextMessages.some((message, index) => message !== messages[index])) messages = nextMessages;
     if (before || !initialized || !known.size) cursor = first!.nextCursor ?? null;
     initialized = true;
     publish({ messages, hasOlder: cursor !== null, ...(!before ? { familiarizeOffer: first!.familiarizeOffer, activity: first!.activity } : {}) });

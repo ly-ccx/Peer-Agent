@@ -24,11 +24,11 @@ export function conversationRowAt(offsets: readonly number[], top: number): numb
 
 export function conversationViewport(offsets: readonly number[], top: number, height: number) {
   const count = offsets.length - 1;
-  if (count <= 200) return { start: 0, end: count, before: 0, after: 0 };
+  if (count <= 40) return { start: 0, end: count, before: 0, after: 0 };
   const first = conversationRowAt(offsets, Math.max(0, top));
   const last = conversationRowAt(offsets, Math.max(0, top) + height);
-  const start = Math.max(0, first - 20);
-  const end = Math.min(count, Math.max(start + 80, last + 21));
+  const start = Math.max(0, first - 6);
+  const end = Math.min(count, Math.max(start + 24, last + 7));
   return { start, end, before: offsets[start]!, after: offsets[count]! - offsets[end]! };
 }
 

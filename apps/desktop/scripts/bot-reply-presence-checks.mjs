@@ -7,8 +7,9 @@ export async function checkReplyPresence({ page, reply, report, until, state, la
   const footer = reply.locator('.bot-reply-context');
   if (label) {
     await until(() => footer.locator('.bot-context-running').textContent(), text => text === label);
-    assert.equal(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
-    samples.labels.push({ state, label, shimmer: true });
+    assert.equal(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).animationName), 'none');
+    assert.notEqual(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).webkitTextFillColor), 'rgba(0, 0, 0, 0)');
+    samples.labels.push({ state, label, shimmer: false, readableWithoutRepaintAnimation: true });
   }
   const bounds = await until(() => reply.evaluate(node => {
     const bubbles = [...node.querySelectorAll(':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '

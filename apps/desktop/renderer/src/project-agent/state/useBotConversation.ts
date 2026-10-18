@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { ProjectAgentActivity, ProjectInputAttachment } from '@peer-agent/protocol';
 import { attachBotProcesses, hasReplyForInput, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
@@ -112,7 +112,7 @@ export function useBotConversation(workspaceId: string) {
       if (generationRef.current === ticket) {
         void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
       }
-    });
+    }, { delayMs: 80 });
     const onChange = (event: { workspaceIds?: readonly string[] }) => {
       const ids = event?.workspaceIds ?? [];
       if (ids.length > 0 && !ids.includes(workspaceId)) return;
@@ -212,13 +212,18 @@ export function useBotConversation(workspaceId: string) {
 
   useEffect(() => { if (!isActivityRunning(activity)) setStopping(false); }, [activity]);
 
-  const offered = familiarizeOffer && !messages.some(message => ['user_input', 'agent_reply'].includes(message.kind))
+  const offered = useMemo(() => familiarizeOffer && !messages.some(message => ['user_input', 'agent_reply'].includes(message.kind))
     ? [...messages, familiarizeMessage(familiarizeOffer, messages[messages.length - 1]?.createdAt || '')]
-    : messages;
-  const shown = hideAcknowledgedQuestions(applyOptimistic(offered, pending));
-  const rows: ConversationDisplayRow[] = attachBotProcesses(conversationRows(shown), shown, activity);
+    : messages, [familiarizeOffer, messages]);
+  const shown = useMemo(() => hideAcknowledgedQuestions(applyOptimistic(offered, pending)), [offered, pending]);
+  const historyRows = useMemo(() => conversationRows(shown), [shown]);
   const live = visibleBotActivity(activity, shown);
-  if (live) rows.push({ type: 'activity', activity: live });
+  const rows: ConversationDisplayRow[] = useMemo(() => {
+    const next: ConversationDisplayRow[] = attachBotProcesses(historyRows, shown, activity);
+    const current = visibleBotActivity(activity, shown);
+    if (current) next.push({ type: 'activity', activity: current });
+    return next;
+  }, [historyRows, shown, activity]);
   const stop = async () => {
     if (!isActivityRunning(activity) || !activity || stopping) return;
     const ticket = generationRef.current;

@@ -130,7 +130,7 @@ test('200-bot search reads classic conversation and Goal catalogs once per proje
     assert.equal(env.invoke('search', { query: 'test' }).ok, true);
     assert.equal(conversationReads, 1, 'one canonical metadata read for the projection');
     assert.ok(planReads <= 2, 'one projection read and at most one corpus rebuild read');
-    assert.equal(batchReads, 2, 'one directory read and one initial corpus read');
+    assert.equal(batchReads, 1, 'only corpus uses the raw batch; directory uses versioned presentation views');
     assert.equal(singleReads, 0, 'no repeated index read for each bot');
   } finally { env.dispose(); }
 });

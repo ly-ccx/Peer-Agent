@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createConversationPager } from './conversationPager.ts';
 
+test('unchanged refresh retains historical message identity but publishes a changed source status', async () => {
+  let raw = { id: 'reply', role: 'assistant', kind: 'agent_reply', content: 'actual reply', createdAt: '2026-01-01',
+    sources: ['s'], meta: { sessionStates: [{ sessionId: 's', status: 'running' }] } };
+  const snapshots: { messages: readonly import('./botConversationState').BotChatMessage[] }[] = [];
+  const pager = createConversationPager({ read: async () => ({ ok: true, messages: [structuredClone(raw)] }), publish: value => snapshots.push(value) });
+  await pager.refresh(); await pager.refresh();
+  assert.equal(snapshots[0]!.messages, snapshots[1]!.messages);
+  raw = { ...raw, meta: { sessionStates: [{ sessionId: 's', status: 'cancelled' }] } };
+  await pager.refresh();
+  assert.notEqual(snapshots[1]!.messages[0], snapshots[2]!.messages[0]);
+});
+
 test('latest host refresh retires a disappeared confirmation while preserving loaded history and real system messages', async () => {
   let shown = true;
   let snapshot: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0];

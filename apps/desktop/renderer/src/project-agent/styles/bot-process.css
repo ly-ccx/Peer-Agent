@@ -34,10 +34,7 @@
 .bot-tool-preview pre { margin: 6px 0; padding: 8px 10px; max-height: 220px; overflow: auto; font: 11px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--paper-sheet); border-radius: var(--ui-radius-control-compact); color: var(--graphite-soft); }
 .bot-tool-metadata code { font: 11px/1.6 var(--font-mono); }
 .bot-process-current.is-running, .bot-tool-step-label.is-running {
-  background: linear-gradient(100deg, var(--graphite-soft) 35%, var(--graphite-base) 50%, var(--graphite-soft) 65%);
-  background-size: 200% 100%; background-clip: text; -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent; --motion-shimmer-from: 100%; --motion-shimmer-x: -100%;
-  animation: motion-shimmer 1.8s linear infinite;
+  color: var(--graphite-base);
 }
 .bot-turn-process { interpolate-size: allow-keywords; }
 .bot-turn-process::details-content { height: 0; overflow: hidden; opacity: 0; transition: height var(--za-motion-medium) var(--za-ease-standard), opacity var(--za-motion-medium) var(--za-ease-standard), content-visibility var(--za-motion-medium) allow-discrete; }

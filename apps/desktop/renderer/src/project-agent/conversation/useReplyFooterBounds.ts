@@ -7,7 +7,9 @@ export function useReplyFooterBounds() {
     const footer = ref.current, reply = footer?.parentElement;
     if (!footer || !reply) return;
     let observed: Element[] = [];
-    const resize = new ResizeObserver(update);
+    let frame: number | null = null;
+    const schedule = () => { if (frame === null) frame = requestAnimationFrame(() => { frame = null; update(); }); };
+    const resize = new ResizeObserver(schedule);
     function update() {
       if (!footer || !reply) return;
       const bubbles = [...reply.querySelectorAll<HTMLElement>(
@@ -26,10 +28,10 @@ export function useReplyFooterBounds() {
       }
     }
     resize.observe(reply);
-    const mutation = new MutationObserver(update);
+    const mutation = new MutationObserver(schedule);
     mutation.observe(reply, { childList: true, subtree: true });
     update();
-    return () => { resize.disconnect(); mutation.disconnect(); };
+    return () => { if (frame !== null) cancelAnimationFrame(frame); resize.disconnect(); mutation.disconnect(); };
   }, []);
   return ref;
 }

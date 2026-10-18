@@ -22,13 +22,13 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.match(await backgroundSummary.textContent(), /核查历史任务完成情况[\s\S]*正在运行中/);
   assert.equal(await backgroundSummary.isVisible(), true);
   assert.equal(await page.locator('.bot-background-work').getAttribute('open'), null);
-  assert.equal(await backgroundSummary.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
+  assert.equal(await backgroundSummary.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'none');
   checks.push('collapsed background summary exposes named running work before any expansion');
   await closeReplyDetails(page);
   await checkBackgroundWorkAlignment({ page, report, captureDirectory });
   await openReplyDetails(page, reply);
   assert.match(await work.locator(':scope > summary').textContent(), /核查历史任务完成情况.*正在运行中/);
-  assert.equal(await work.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
+  assert.equal(await work.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'none');
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
   const keyboardFocus = await work.locator(':scope > summary').evaluate(node => {
     const style = getComputedStyle(node);
