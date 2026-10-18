@@ -2,7 +2,7 @@
 export function createHistoryProjectionReader({ describe, load, project, maxEntries = 32, maxBytes = 8 * 1024 * 1024 }) {
   const entries = new Map(); let bytes = 0;
   const drop = id => { const row = entries.get(id); if (row) bytes -= row.bytes; entries.delete(id); };
-  return id => {
+  const attempt = id => {
     let description;
     try { description = describe(id); }
     catch (error) { drop(id); throw error; }
@@ -13,7 +13,12 @@ export function createHistoryProjectionReader({ describe, load, project, maxEntr
       return structuredClone(cached.value);
     }
     drop(id);
-    const value = structuredClone(project({ ...load(description), createdAt: description.createdAt }));
+    let value;
+    try { value = structuredClone(project({ ...load(description), createdAt: description.createdAt })); }
+    catch (error) {
+      if (describe(id)?.version !== description.version) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED', { cause: error }), { code: 'BACKGROUND_VERSION_CHANGED' });
+      throw error;
+    }
     if (describe(id)?.version !== description.version) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED'), { code: 'BACKGROUND_VERSION_CHANGED' });
     const size = Buffer.byteLength(JSON.stringify(value) ?? 'null');
     if (maxEntries > 0 && size <= maxBytes) {
@@ -21,5 +26,11 @@ export function createHistoryProjectionReader({ describe, load, project, maxEntr
       while (entries.size > maxEntries || bytes > maxBytes) drop(entries.keys().next().value);
     }
     return structuredClone(value);
+  };
+  return id => {
+    for (let count = 0; ; count++) {
+      try { return attempt(id); }
+      catch (error) { if (error.code !== 'BACKGROUND_VERSION_CHANGED' || count === 2) throw error; }
+    }
   };
 }

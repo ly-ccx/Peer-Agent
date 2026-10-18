@@ -43,7 +43,7 @@ test('projection caches are bounded and reject changes during a read, including 
   assert.deepEqual(read('a'), { value: 'fact' }); read('b'); read('a'); assert.equal(loads, 3);
   revision++; fail = true; assert.throws(() => read('a'), /corrupt/);
   fail = false; change = true; assert.throws(() => read('a'), { code: 'BACKGROUND_VERSION_CHANGED' });
-  change = false; assert.deepEqual(read('a'), { value: 'fact' }); assert.equal(loads, 6);
+  change = false; assert.deepEqual(read('a'), { value: 'fact' }); assert.equal(loads, 8, 'continuous conflicts stop after three attempts, then a fresh read can succeed');
 });
 
 
@@ -64,4 +64,12 @@ test('metadata-only append preserves durable mutations without rereading histori
   assert.equal(legacy.messages.length, 3, 'default API remains compatible');
   const empty = store.appendMessage(meta.id, { id: 'empty', role: 'user', content: '' }, { returnMessages: false });
   assert.equal(empty.messageCount, 3); assert.equal(empty.contentRevision, 3);
+});
+
+test('a racing external commit is retried from its new version without publishing the discarded value', () => {
+  let revision=0, loads=0;
+  const read=createHistoryProjectionReader({describe:()=>({version:revision}),load:()=>{
+    loads++;const value=revision?'current':'discarded';if(loads===1)revision++;return{value};
+  },project:row=>row.value});
+  assert.equal(read('a'),'current');assert.equal(loads,2);assert.equal(read('a'),'current');assert.equal(loads,2);
 });
