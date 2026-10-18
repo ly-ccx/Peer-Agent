@@ -8,6 +8,25 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.18] - 2026-10-18
+
+### Fixed
+
+- Preserve genuine DeepSeek reasoning beside native tool calls and refresh current System Context on checkpoint restore.
+- Coalesce equivalent background continuations under one durable owner, prioritizing new user input and preserving execution and permission boundaries.
+- Settle already delivered results into durable quiet waiting until real source or verification observations change.
+- Carry host observation revisions through delivery and settlement without invalidating acceptance with its own receipt.
+- Avoid full journal scans before normal incremental reads while retaining strict recovery checks.
+
+### Changed
+
+- Synchronize bilingual release notes, README version links and generated documentation changelog.
+
+### Release scope
+
+- Real DeepSeek task execution, verification, delivery, cancellation and restart recovery are covered; mixed-model verifier protocol errors and successful explicit recovery are recorded separately.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Older versions may reject new coordination events; rollback requires the pre-upgrade backup. Stable remains 0.0.18.
+
 ## [0.1.0-rc.17] - 2026-10-18
 
 ### Fixed
