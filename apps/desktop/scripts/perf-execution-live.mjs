@@ -14,8 +14,12 @@ import { seedExecutionWorkload } from './seed-execution-workload.mjs';
 const arg = flag => { const i = process.argv.indexOf(flag); return i < 0 ? null : process.argv[i + 1]; };
 assert.ok(arg('--model-id'), 'Explicit configured --model-id required');
 const source = fileURLToPath(new URL('../../..', import.meta.url));
-const root = mkdtempSync(path.join(tmpdir(), 'peer-execution-live-')); chmodSync(root, 0o700);
+const previous = arg('--resume-report') ? JSON.parse(readFileSync(arg('--resume-report'), 'utf8')) : null;
+assert.ok(!previous || previous.taskPassed && previous.contractIntegrity?.unchanged && previous.credentialCopiesRemoved,
+  'resume requires a completed isolated task with unchanged tests and removed credentials');
+const root = previous?.root || mkdtempSync(path.join(tmpdir(), 'peer-execution-live-')); chmodSync(root, 0o700);
 const home = path.join(root, 'data'), personal = path.join(homedir(), '.peer-agent');
+assert.ok(path.resolve(home) !== personal && !path.resolve(home).startsWith(personal + path.sep), 'personal data is forbidden');
 const report = { schemaVersion: 1, syntheticCognition: false, installedBuild: false, root,
   sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8' }).trim(),
   sourceDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: source, encoding: 'utf8' }).trim()),
@@ -34,7 +38,8 @@ let scrollDirection = -1;
 const contractHashes = project => Object.fromEntries(readdirSync(project).filter(name => name.endsWith('.test.mjs')).sort()
   .map(name => [name, createHash('sha256').update(readFileSync(path.join(project, name))).digest('hex')]));
 try {
-  const fixture = seedBotShellHome({ home, scale: { bots: 12, messages: 100, inboxEvents: 0, memories: 0 } });
+  const fixture = previous ? json(path.join(home, 'rc-fixture.json')) : seedBotShellHome({ home, scale: { bots: 12, messages: 100, inboxEvents: 0, memories: 0 } });
+  assert.equal(fixture.fixture, true, 'only a generated isolated fixture may be resumed');
   const bot = fixture.bots[0], project = bot.path;
   const config = json(path.join(personal, 'llm-providers.json'));
   const model = config.models.find(row => row.id === arg('--model-id')); assert.ok(model);
@@ -53,13 +58,15 @@ try {
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
   const profileFile = path.join(home, 'projects', bot.workspaceId, 'profile.json');
   writeFileSync(profileFile, JSON.stringify({ ...json(profileFile), planApproval: 'never', acceptancePolicy: 'auto', autonomyPolicy: 'full_local', modelPolicy: { overrides: Object.fromEntries(['project_agent','session_worker','verifier','explorer','visual_verifier'].map(role=>[role,{mode:'fixed',modelProviderId:role==='project_agent'?mainModel.id:model.id,reasoningEffort:arg('--effort') || (role==='session_worker'?'max':'medium')}])) } }));
+  if (!previous) {
   mkdirSync(path.join(project, 'src'));
   writeFileSync(path.join(project, 'README.md'), '# Isolated performance acceptance\nImplement sumNumbers(values). Empty arrays return 0, finite numbers sum, non-number/nonfinite input throws TypeError. Fix implementation and run node --test.\n');
   writeFileSync(path.join(project, 'src/sum.mjs'), 'export function sumNumbers(values) { return values.reduce((a,b) => a+b); }\n');
   writeFileSync(path.join(project, 'sum.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; import {sumNumbers} from './src/sum.mjs'; test('sum',()=>{assert.equal(sumNumbers([1,2,3]),6);assert.equal(sumNumbers([]),0);assert.throws(()=>sumNumbers([1,'2']),TypeError);assert.throws(()=>sumNumbers([Infinity]),TypeError);});\n");
   if (largeHistory) { report.historyScale = seedExecutionHistory({ home, bot }); seedExecutionWorkload(project); report.workload = 'three implementation files; 18 test cases including 20000-row aggregation and CSV integration'; }
+  } else { report.historyScale = previous.historyScale; report.workload = previous.workload; report.resumedTask = true; }
   const initialContracts = contractHashes(project);
-  const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
+  const isolation = prepareLabIsolation({ sourceRoot: source, labHome: previous ? path.join(root, 'recovery-launch-' + Date.now()) : home });
   cpSync(path.join(source, 'apps/desktop/dist'), isolation.launch.distDir, { recursive: true });
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
   const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1', PEER_WORKSPACE_ROOT: project,
@@ -117,12 +124,12 @@ try {
   const text = largeHistory
     ? '这是已授权的隔离项目多文件修复任务。请让一个独立子 Agent 接手：读取 README.md 和所有测试，修复 src/sum.mjs、src/group-events.mjs、src/render-csv.mjs，保留全部测试断言，实际运行 node --test。只设置一个成功标准 existing-tests-pass：实际运行 node --test，现有18项测试全部通过（command标准）。先读测试、保留全部测试断言、只改本项目 src 下的实现是执行约束，不添加为额外成功标准。继续经过系统原有独立复核门禁。若复核失败，读取具体失败原因并在原任务继续修复，不要开重复补救任务。主 Bot 在实际验收后交付结果。'
     : '这是已授权的隔离项目修复任务。请让一个独立子 Agent 接手：读取 README.md、src/sum.mjs 和 sum.test.mjs，修复 sumNumbers，运行 node --test，按结果完成验收。只改这个测试项目。主 Bot 收到结果后交付总结，不要停在调研或方案。';
-  await page.locator('.bot-composer textarea').fill(text); await page.locator('.bot-composer textarea').press('Enter');
+  if (!previous) { await page.locator('.bot-composer textarea').fill(text); await page.locator('.bot-composer textarea').press('Enter'); }
   const transcriptFile = path.join(home, 'conversations', bot.conversationId + '.jsonl');
   const sessionsFile = path.join(home, 'project-runtime', bot.workspaceId, 'work-sessions.json');
-  let finished = false, lastEvent = '', drawerOpened = false;
+  let finished = previous?.taskPassed === true, lastEvent = '', drawerOpened = false;
   const deadline = Date.now() + Number(arg('--timeout-ms') || 480000);
-  while (Date.now() < deadline) {
+  while (!previous && Date.now() < deadline) {
     const transcript = rows(transcriptFile);
     const turns = transcript.filter(row => row.kind === 'agent_turn');
     const calls = turns.flatMap(turn => turn.rounds?.flatMap(round => round.toolCalls || []) || []);
@@ -186,22 +193,23 @@ try {
     }
     const send=async text=>{const composer=page.locator('.bot-composer textarea');await composer.fill(text);await composer.press('Enter');};
     const list=()=>page.evaluate(workspaceId=>window.peerAgent.projectAgentListSessions({workspaceId,limit:20}),bot.workspaceId);
-    const oldIds=new Set(doneSessions.sessions.map(s=>s.sessionId));
-    await send('再开一个独立只读子任务用于取消验收：执行 node -e "setTimeout(()=>console.log(123),60000)"，然后读取 README.md 汇报。只读，不修改文件。我会主动取消这项任务。');
-    const pending=await until(list,value=>value.sessions?.some(s=>!oldIds.has(s.sessionId)&&s.status==='running'),120000);
+    const interactingUntil=async (read, accept, timeout)=>{const end=Date.now()+timeout;while(Date.now()<end){const value=await read();if(accept(value))return value;await sampleInteraction();await pause(150);}throw Error('ACCEPTANCE_TIMEOUT');};
+    const oldIds=new Set((previous?.sessions || doneSessions.sessions).map(s=>s.sessionId));
+    if (!previous) await send('再开一个独立只读子任务用于取消验收：执行 node -e "setTimeout(()=>console.log(123),60000)"，然后读取 README.md 汇报。只读，不修改文件。我会主动取消这项任务。');
+    const pending=await interactingUntil(list,value=>value.sessions?.some(s=>!oldIds.has(s.sessionId)&&s.status==='running'),120000);
     const cancelSession=pending.sessions.find(s=>!oldIds.has(s.sessionId)&&s.status==='running');
     const cancelled=await page.evaluate(params=>window.peerAgent.projectAgentCancelSession(params),{sessionId:cancelSession.sessionId,workspaceId:bot.workspaceId,reason:'User cancels isolated performance acceptance task'});
     assert.equal(cancelled.ok,true);
     await until(list,value=>value.sessions.some(s=>s.sessionId===cancelSession.sessionId&&s.status==='cancelled'),30000);
     const recoveryAt=new Date().toISOString();
     await send('上一项取消是我的主动操作，不要重跑它。现在只需回复 CANCEL_RECOVERY_OK，说明已取消并能继续对话，不要开新任务。');
-    await until(()=>rows(transcriptFile),value=>value.some(r=>r.kind==='agent_reply'&&r.createdAt>=recoveryAt&&r.content?.includes('CANCEL_RECOVERY_OK')),120000);
+    await interactingUntil(()=>rows(transcriptFile),value=>value.some(r=>r.kind==='agent_reply'&&r.createdAt>=recoveryAt&&r.content?.includes('CANCEL_RECOVERY_OK')),120000);
     report.cancelRecovery={cancelled:true,oldTaskReplayed:false,replied:true,sessionId:cancelSession.sessionId};
     const after=await list();assert.equal(after.sessions.find(s=>s.sessionId===cancelSession.sessionId).status,'cancelled');
     const block = Array.from({length: 80}, (_, i) => `RECEIPT_${String(i).padStart(3,'0')}: complete host receipt survives the bounded renderer preview and remains durable.`).join('\n');
     const longAt = new Date().toISOString();
     await send('回复回执边界回归。不要查询工具或派发任务，只调用 post_reply，将下面的全部文本原样作为回复正文，不省略、不加代码围栏。它是隔离测试数据：\n'+block);
-    const longRows = await until(()=>rows(transcriptFile), value=>value.some(row=>row.kind==='agent_reply'&&row.createdAt>=longAt&&row.content?.includes(block)),180000);
+    const longRows = await interactingUntil(()=>rows(transcriptFile), value=>value.some(row=>row.kind==='agent_reply'&&row.createdAt>=longAt&&row.content?.includes(block)),180000);
     const longReply=longRows.find(row=>row.kind==='agent_reply'&&row.createdAt>=longAt&&row.content?.includes(block));
     const longTurn=longRows.find(row=>row.id===longReply.turnId);
     const receipt=longTurn?.rounds.flatMap(round=>round.toolCalls||[]).find(call=>call.name==='post_reply');
@@ -209,6 +217,7 @@ try {
       authoritative:receipt?.result?.status==='success'&&receipt?.result?.output?.message?.id===longReply.id,
       failureCard:longRows.some(row=>row.kind==='system_card'&&row.turnId===longReply.turnId)};
     assert.ok(report.longReply.bodyChars>4000);assert.equal(report.longReply.authoritative,true);assert.equal(report.longReply.failureCard,false);
+    while (largeHistory && (Date.now()-start<120000 || report.interactions<100)) await sampleInteraction();
   }
   report.elapsedMs = Date.now()-start;
   const perf = await page.evaluate(() => { const s=globalThis.executionPerf; s.stop=true;s.observer.disconnect();return { frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks, mountedRows:document.querySelectorAll('[data-conversation-row]').length, hidden:document.hidden,focused:document.hasFocus(),avatars:[...document.querySelectorAll('.bot-avatar')].map(n=>({animated:n.dataset.avatarAnimated, animation:getComputedStyle(n).animationName})) }; });
