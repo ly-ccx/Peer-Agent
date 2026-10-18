@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 /** Production Quick Chat and profile IPC; native popup delivery is controlled in the isolated app. */
-export async function checkQuickChatBots({ app, quick, fixture, until, report, captureDirectory, failNext }) {
+export async function checkQuickChatBots({ app, quick, native, fixture, until, report, captureDirectory, failNext }) {
   const getBot = workspaceId => quick.evaluate(async id => (await window.peerAgent.projectAgentGet({ workspaceId: id })).item.profile, workspaceId);
   const bot = quick.getByRole('button', { name: '选择机器人', exact: true });
   const model = quick.getByRole('button', { name: '选择机器人模型', exact: true });
@@ -11,28 +11,17 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
   // window being inspected visible when the shared desktop changes focus; do
   // not inject a shown event, which would refresh/reset the state under test.
   const focusQuick = async () => {
-    await app.evaluate(({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows().find(win => new URL(win.webContents.getURL()).searchParams.get('window') === 'quick-chat');
-      if (!win) throw Error('Quick Chat window missing');
-      win.show(); win.focus();
-    });
+    await native('focus');
     await quick.bringToFront();
   };
   // Keep the real Menu construction and selection callbacks, avoiding OS focus in deterministic tests.
-  await app.evaluate(({ Menu }) => {
-    globalThis.rcQuickOriginalPopup = Menu.prototype.popup;
-    Menu.prototype.popup = function (options) { globalThis.rcQuickMenu = this; globalThis.rcQuickMenuOptions = options; };
-  });
+  await native('installMenu');
   const selectNative = async (trigger, label) => {
     await focusQuick();
-    await app.evaluate(() => { delete globalThis.rcQuickMenu; return true; });
+    await native('clearMenu');
     await trigger.focus(); await trigger.press('Enter');
-    await until(() => app.evaluate(() => Boolean(globalThis.rcQuickMenu)), Boolean);
-    await app.evaluate((_electron, label) => {
-      const item = globalThis.rcQuickMenu.items.find(item => item.label === label);
-      if (!item) throw Error('Quick Chat native choice missing: ' + label);
-      item.click(); globalThis.rcQuickMenuOptions.callback(); return true;
-    }, label);
+    await until(() => native('menuReady'), Boolean);
+    await native('selectMenu', label);
   };
   const selectBot = async index => {
     await selectNative(bot, `project-${String(index).padStart(3, '0')}`);
@@ -99,6 +88,6 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
       failedSaveRetained: Boolean(failNext), keyboardTrigger: true, aligned: true,
       scope: 'Actual window and durable Bot profile IPC; native popup callbacks controlled, scripted model only' };
   } finally {
-    await app.evaluate(({ Menu }) => { Menu.prototype.popup = globalThis.rcQuickOriginalPopup; delete globalThis.rcQuickMenu; delete globalThis.rcQuickMenuOptions; });
+    await native('restoreMenu');
   }
 }

@@ -21,6 +21,7 @@ import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
 import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
+import { createQuickChatNativeController } from './quick-chat-native-fixture.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, not live-model latency. The image
@@ -335,10 +336,16 @@ const imageReceipt = path.join(root, 'image-receipt.json');
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
 const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
+const quickCommand = path.join(root, 'quick-command.json');
+const quickReceipt = path.join(root, 'quick-receipt.json');
+writeFileSync(quickCommand, JSON.stringify({ seq: 0 }));
+writeFileSync(quickReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterReceipt, JSON.stringify({ seq: 0 }));
-writeFileSync(entry, `import {app,dialog,BrowserWindow} from 'electron';
+writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu} from 'electron';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
+import {installQuickChatNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/quick-chat-native-fixture.mjs')).href)};
+installQuickChatNativeFixture({BrowserWindow,Menu,commandFile:${JSON.stringify(quickCommand)},receiptFile:${JSON.stringify(quickReceipt)}});
 import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/lab-main-thread-probe.mjs')).href)};
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
@@ -426,6 +433,7 @@ const until = async (read, predicate, timeout = 30000) => {
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
   throw Error('Shell acceptance timed out');
 };
+const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 let updaterSequence = 0;
 const emitUpdaterEvent = async event => {
   const seq = ++updaterSequence;
@@ -613,16 +621,13 @@ try {
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_UI_RECEIPT_4', { exact: true }).waitFor();
   report.checks.push('five real UI sends, visible durable Received under budget, scripted replies');
   const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
-  await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows().find(window => new URL(window.webContents.getURL()).searchParams.get('window') === 'quick-chat');
-    window.show(); window.webContents.send('quick-chat:shown');
-  });
-  await checkQuickChatBots({ app, quick, fixture, until, report, captureDirectory: root,
+  await quickNative('open');
+  await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
     failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
   await quick.getByLabel('快速会话内容', { exact: true }).fill('RC_QUICK_INPUT');
   await quick.getByRole('button', { name: '发送', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
-  const quickExecution = await app.evaluate(() => globalThis.rcQuickExecution);
+  const quickExecution = await quickNative('execution');
   assert.equal(quickExecution.modelProviderId, botModelFixtures[1].id);
   assert.equal(quickExecution.effort, botModelFixtures[1].reasoningEffortLevels.at(-1));
   report.quickChatBots.sentSelection = true;
