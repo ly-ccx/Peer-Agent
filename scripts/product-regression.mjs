@@ -87,7 +87,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['publicProgressRetained', 'bubbleSpacing', 'reservationTruth', 'resolvedReservationRetired', 'unknownHasNoReplay', 'checkpointHasNoReplay'].every(check => machine.replyRecovery?.[check] === true)
     || !['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress'].every(state => [[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
       machine.replyRecovery?.cases?.some(item => item.state === state && item.width === width && item.appearance === appearance
-        && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication'].includes(state))))
+        && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication', 'no-progress'].includes(state))))
     || !['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationRetained', 'noPrivateThinking', 'narrowFits', 'nativeLoaded', 'persistedEventBatch'].every(check => machine.manualWakeRetry?.[check] === true)
     || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(item => item.width === width && item.appearance === appearance && item.named && item.svg && item.stableIdentity && item.taskDestination && item.humanWaitDistinct && item.fits))
     || machine.manualWakeRetry?.guardedCognitionDispatches !== 1
