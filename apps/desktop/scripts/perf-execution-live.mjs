@@ -1,6 +1,6 @@
 /** Opt-in real Provider → Bot → child → tools acceptance. Never launches against personal data. */
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, existsSync, rmSync, chmodSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, existsSync, rmSync, chmodSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
@@ -29,10 +29,23 @@ let app, page;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const until = async (read, accept, timeout = 30000) => { const end = Date.now() + timeout; while (Date.now() < end) { const value = await read(); if (accept(value)) return value; await pause(100); } throw Error('ACCEPTANCE_TIMEOUT'); };
 const json = file => JSON.parse(readFileSync(file, 'utf8'));
-const rows = file => existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+// The sampler must not repeatedly parse its own 9MB transcript while measuring
+// Chromium input acknowledgements. Refresh only when the canonical file changes.
+const transcriptCache = new Map();
+const transcriptVersion = file => { const s=statSync(file,{bigint:true}); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; };
+const rows = file => {
+  if (!existsSync(file)) return [];
+  const version=transcriptVersion(file), saved=transcriptCache.get(file);
+  if (saved?.version===version) return saved.rows;
+  const body=readFileSync(file,'utf8');
+  if (transcriptVersion(file)!==version || body && !body.endsWith('\n')) return saved?.rows || [];
+  const result=body.trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
+  transcriptCache.set(file,{version,rows:result});return result;
+};
 const distribution = values => { const sorted = [...values].sort((a,b) => a-b); return { n: sorted.length, p50: sorted[Math.floor(sorted.length*.5)] ?? null, p95: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.95))] ?? null, p99: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.99))] ?? null, max: sorted.at(-1) ?? null }; };
 const largeHistory = process.argv.includes('--large-history');
 const keyRoundTrips = [], wheelRoundTrips = [], scrollChanges = [];
+const wheelOutliers = [];
 const scrollCoverage = { topVisits: 0, bottomVisits: 0, liveReplyVisibleSamples: 0 };
 let scrollDirection = -1;
 const contractHashes = project => Object.fromEntries(readdirSync(project).filter(name => name.endsWith('.test.mjs')).sort()
@@ -117,7 +130,9 @@ try {
     if (position.liveVisible) scrollCoverage.liveReplyVisibleSamples++;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     const wheelAt = performance.now(); await page.mouse.wheel(0, scrollDirection*240);
-    await page.evaluate(() => new Promise(requestAnimationFrame)); wheelRoundTrips.push(performance.now()-wheelAt);
+    const dispatchMs=performance.now()-wheelAt;
+    await page.evaluate(() => new Promise(requestAnimationFrame)); const wheelMs=performance.now()-wheelAt; wheelRoundTrips.push(wheelMs);
+    if(wheelMs>100)wheelOutliers.push({at:new Date().toISOString(),dispatchMs,paintWaitMs:wheelMs-dispatchMs,totalMs:wheelMs});
     const afterTop = await scroller.evaluate(node => node.scrollTop); scrollChanges.push(Math.abs(afterTop-beforeTop));
   };
   report.taskStartedAt = new Date().toISOString();
@@ -229,7 +244,7 @@ try {
   report.elapsedMs = Date.now()-start;
   const perf = await page.evaluate(() => { const s=globalThis.executionPerf; s.stop=true;s.observer.disconnect();return { frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks, mountedRows:document.querySelectorAll('[data-conversation-row]').length, hidden:document.hidden,focused:document.hasFocus(),avatars:[...document.querySelectorAll('.bot-avatar')].map(n=>({animated:n.dataset.avatarAnimated, animation:getComputedStyle(n).animationName})) }; });
   report.mainLoop = await app.evaluate(() => { const h=globalThis.executionMainLoop; h.disable(); return { p95:h.percentile(95)/1e6,p99:h.percentile(99)/1e6,max:h.max/1e6 }; });
-  report.interaction = { keyRoundTripMs:distribution(keyRoundTrips), wheelRoundTripMs:distribution(wheelRoundTrips), scrollMovedSamples:scrollChanges.filter(n=>n>0).length, scrollCoverage,
+  report.interaction = { keyRoundTripMs:distribution(keyRoundTrips), wheelRoundTripMs:distribution(wheelRoundTrips), wheelOutliers, scrollMovedSamples:scrollChanges.filter(n=>n>0).length, scrollCoverage,
     scope:'Automation dispatch through Browser and renderer to rAF, includes transport cost, not hardware latency. Wheel events target the actual bot-thread scroller.' };
   report.renderer = { frames: distribution(perf.frames), inputPaintMs: distribution(perf.inputs), wheelPaintMs:distribution(perf.wheels), longTasks: perf.longTasks, mountedRows:perf.mountedRows, hidden:perf.hidden, focused:perf.focused, avatars:perf.avatars };
   const cpuEnd = await metrics(); report.cpu = cpuEnd.map(m => ({ type:m.type,cpuPercent:100000*(m.cpu-(cpuStart.find(p=>p.pid===m.pid)?.cpu ?? m.cpu))/report.elapsedMs }));
@@ -250,7 +265,7 @@ finally {
         return {frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks,hidden:document.hidden,focused:document.hasFocus()}; });
       if (perf) {
         report.renderer = {frames:distribution(perf.frames),inputPaintMs:distribution(perf.inputs),wheelPaintMs:distribution(perf.wheels),longTasks:perf.longTasks,hidden:perf.hidden,focused:perf.focused};
-        report.interaction = {keyRoundTripMs:distribution(keyRoundTrips),wheelRoundTripMs:distribution(wheelRoundTrips),scrollMovedSamples:scrollChanges.filter(n=>n>0).length};
+        report.interaction = {keyRoundTripMs:distribution(keyRoundTrips),wheelRoundTripMs:distribution(wheelRoundTrips),wheelOutliers,scrollMovedSamples:scrollChanges.filter(n=>n>0).length};
         report.elapsedMs = Date.now()-Date.parse(report.taskStartedAt);
       }
     } catch(error) { report.perfCaptureError=error.message; }
