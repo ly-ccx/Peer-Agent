@@ -15,6 +15,7 @@ import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
 import { checkBotCoordination } from './bot-coordination-checks.mjs';
 import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
 import { checkBotAgentActivity } from './bot-agent-activity-checks.mjs';
+import { scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import { checkBotMessageLayout } from './bot-message-layout-checks.mjs';
 import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
@@ -637,6 +638,7 @@ try {
   report.checks.push('real Quick Chat window lists bots and submits one canonical quick_chat input');
   await page.bringToFront();
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = 0; });
+  await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9900'));
   await page.locator('#bot-msg-rc-message-9900').waitFor();
   await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   await tracePaging('initial older page');
@@ -644,12 +646,14 @@ try {
     await page.locator('.bot-thread').hover();
     await page.mouse.wheel(0, -30000);
     await tracePaging(`request ${older + 30}`);
+    await scrollToBotMessage(page, page.locator(`#bot-msg-rc-message-${older + 30}`));
     await page.locator(`#bot-msg-rc-message-${older + 30}`).waitFor();
     await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   }
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
+  await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
   const unloadedQuote = page.locator('#bot-msg-rc-message-9999 .bot-reply-bar');
   assert.equal(await unloadedQuote.locator('.bot-reply-bar-label').textContent(), '引用');
   assert.equal((await unloadedQuote.getAttribute('aria-label')).includes('rc-message-9500'), false);
