@@ -127,7 +127,8 @@ try {
   if (!previous) { await page.locator('.bot-composer textarea').fill(text); await page.locator('.bot-composer textarea').press('Enter'); }
   const transcriptFile = path.join(home, 'conversations', bot.conversationId + '.jsonl');
   const sessionsFile = path.join(home, 'project-runtime', bot.workspaceId, 'work-sessions.json');
-  let finished = previous?.taskPassed === true, lastEvent = '', drawerOpened = false;
+  let finished = previous?.taskPassed === true, lastEvent = '', drawerOpened = previous?.taskDrawerOpened === true;
+  if (previous) report.taskDrawerEvidence = 'Retained from the prior isolated task report; this launch resumes its later acceptance stages.';
   const deadline = Date.now() + Number(arg('--timeout-ms') || 480000);
   while (!previous && Date.now() < deadline) {
     const transcript = rows(transcriptFile);
@@ -194,6 +195,11 @@ try {
     const send=async text=>{const composer=page.locator('.bot-composer textarea');await composer.fill(text);await composer.press('Enter');};
     const list=()=>page.evaluate(workspaceId=>window.peerAgent.projectAgentListSessions({workspaceId,limit:20}),bot.workspaceId);
     const interactingUntil=async (read, accept, timeout)=>{const end=Date.now()+timeout;while(Date.now()<end){const value=await read();if(accept(value))return value;await sampleInteraction();await pause(150);}throw Error('ACCEPTANCE_TIMEOUT');};
+    if (previous?.cancelRecovery?.replied) {
+      const current = await list();
+      assert.equal(current.sessions.find(s=>s.sessionId===previous.cancelRecovery.sessionId)?.status,'cancelled');
+      report.cancelRecovery={...previous.cancelRecovery,retainedFromPreviousRun:true};
+    } else {
     const oldIds=new Set((previous?.sessions || doneSessions.sessions).map(s=>s.sessionId));
     if (!previous) await send('再开一个独立只读子任务用于取消验收：执行 node -e "setTimeout(()=>console.log(123),60000)"，然后读取 README.md 汇报。只读，不修改文件。我会主动取消这项任务。');
     const pending=await interactingUntil(list,value=>value.sessions?.some(s=>!oldIds.has(s.sessionId)&&s.status==='running'),120000);
@@ -206,6 +212,7 @@ try {
     await interactingUntil(()=>rows(transcriptFile),value=>value.some(r=>r.kind==='agent_reply'&&r.createdAt>=recoveryAt&&r.content?.includes('CANCEL_RECOVERY_OK')),120000);
     report.cancelRecovery={cancelled:true,oldTaskReplayed:false,replied:true,sessionId:cancelSession.sessionId};
     const after=await list();assert.equal(after.sessions.find(s=>s.sessionId===cancelSession.sessionId).status,'cancelled');
+    }
     const block = Array.from({length: 80}, (_, i) => `RECEIPT_${String(i).padStart(3,'0')}: complete host receipt survives the bounded renderer preview and remains durable.`).join('\n');
     const longAt = new Date().toISOString();
     await send('回复回执边界回归。不要查询工具或派发任务，只调用 post_reply，将下面的全部文本原样作为回复正文，不省略、不加代码围栏。它是隔离测试数据：\n'+block);
