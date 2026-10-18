@@ -6,6 +6,7 @@ import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
 import { createDelegatedPlanCatalog } from './delegated-plan-catalog.mjs';
 import { createSessionReadQuery } from './session-read-query.mjs';
+import { createSessionParentFacts } from './session-parent-facts.mjs';
 import { createSessionConversationFacts } from './session-conversation-facts.mjs';
 import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
@@ -123,6 +124,7 @@ export function createSessionSupervisor({
   const readQuery = createSessionReadQuery();
   const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id) });
   const conversationFacts = createSessionConversationFacts(conversationStore);
+  const parentFacts = createSessionParentFacts(conversationStore);
   const readConversationFacts = id => readQuery.memo(`conversation:${id}`, () => conversationFacts(id));
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
@@ -684,8 +686,8 @@ export function createSessionSupervisor({
   }
 
   function parentMessages(plan) {
-    const history = conversationStore.getPersistedConversationHistory?.(plan?.delegationOrigin?.parentConversationId);
-    return Array.isArray(history?.messages) ? history.messages : [];
+    const id = plan?.delegationOrigin?.parentConversationId;
+    return readQuery.memo(`parent:${id}`, () => parentFacts(id)) || [];
   }
 
   function replyCites(message, sessionId) {

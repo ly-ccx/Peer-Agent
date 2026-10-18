@@ -30,12 +30,13 @@ export function createWorkBudgetGuard(profile) {
   const binding = stores.get(profile.workspaceId);
   if (!binding) throw new Error('work_budget_host_unavailable');
   const { store } = binding;
+  const readWork = () => typeof store.readWork === 'function' ? store.readWork(profile.workId) : store.read().works[profile.workId];
   const attemptId = randomUUID();
   binding.activeAttempts.add(attemptId);
   let requests = 0, finished = false, observed = 0, physicalDispatchAccounting = false;
   function change(update, requireActive = true) {
     store.assertOwner();
-    const work = store.read().works[profile.workId];
+    const work = readWork();
     const stopped = work && ['paused', 'cancelled', 'budget_limited', 'blocked_system', 'coalesced'].includes(work.state);
     const stopsExecutor = profile.role === 'project_agent' || work?.stopScope !== 'reply' || ['budget_limited', 'coalesced'].includes(work?.state);
     if (!work || requireActive && stopped && stopsExecutor) throw new Error('work_execution_stopped');
@@ -99,7 +100,6 @@ export function createWorkBudgetGuard(profile) {
     },
     checkpoint(native, executions) {
       change(budget => {
-        const work = store.read().works[profile.workId];
         const ref = store.checkpoint(`${profile.workId}:${attemptId}`, native);
         // A paired unknown result records the interruption, not the side effect's
         // outcome. Successful persistence cannot erase that uncertainty.
@@ -119,7 +119,7 @@ export function createWorkBudgetGuard(profile) {
       finished = true; binding.activeAttempts.delete(attemptId);
       if (!requests) return;
       store.assertOwner();
-      const work = store.read().works[profile.workId];
+      const work = readWork();
       if (!work) return;
       const budget = structuredClone(work.budget);
       // Unknown billable usage is retained explicitly, including after cancellation/failure.

@@ -55,3 +55,20 @@ test('same-length rewrites, file replacement and truncation invalidate retained 
     assert.throws(() => w.reader.read(), /schema_unsupported/);
   } finally { w.close(); }
 });
+
+test('single-work reads validate the same journal without cloning or exposing unrelated work', () => {
+  const w = world();
+  try {
+    const work = w.reader.readWork('x');
+    assert.equal(work.text, '中'.repeat(4000));
+    work.text = 'caller mutation'; w.clear();
+    assert.notEqual(w.reader.readWork('x').text, 'caller mutation'); assert.equal(w.bytes(), 0);
+    assert.equal(w.reader.readWork('absent'), undefined);
+    assert.equal(w.reader.readWork('__proto__'), undefined);
+    w.writer.saveWork({ workId: 'x', text: 'external append' });
+    assert.equal(w.reader.readWork('x').text, 'external append');
+    appendFileSync(w.file, '{broken\n');
+    assert.throws(() => w.reader.readWork('x'), SyntaxError, 'a cached work cannot hide journal corruption');
+    writeFileSync(w.file, ''); assert.equal(w.reader.readWork('x'), undefined);
+  } finally { w.close(); }
+});

@@ -104,3 +104,20 @@ test('custody accepts a lazy roster and does not read it for ineligible work',()
   assert.equal(reads,1);assert.equal(Object.values(f.store.read().works).filter(w=>w.state==='coalesced').length,1);
  }finally{f.close();}
 });
+
+test('one recovery decision shares its post-reconciliation work snapshot', () => {
+ const f=fixture();let reads=0;const original=f.store.read;f.store.read=()=>{reads++;return original();};
+ const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
+ try {assert.equal(c.recoverJob(),null);assert.equal(reads,4,'three preparation readers plus one decision snapshot');}
+ finally{f.close();}
+});
+
+test('a recovery write invalidates the decision snapshot before selecting the next job', () => {
+ const f=fixture();
+ try {
+  f.seed('changed',{state:'waiting_children',reportedWait:{sessionStates:[{sessionId:'missing',status:'running',sourceRevision:'old'}]}});
+  const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>f.sessions});
+  assert.equal(c.recoverJob()?.workId,'changed');
+  assert.equal(f.store.read().works.changed.state,'runnable');
+ }finally{f.close();}
+});

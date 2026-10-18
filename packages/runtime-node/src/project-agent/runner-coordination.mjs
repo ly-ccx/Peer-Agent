@@ -123,25 +123,27 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverJob({ userOnly = false } = {}) {
       dispatchRecovery.reconcileAll();
       expireReservations();
-      let snapshot;
+      let snapshot, decisionSnapshot;
       const roster = () => snapshot ??= rows();
+      const decision = () => decisionSnapshot ??= store.read();
+      const update = work => { store.saveWork(work); decisionSnapshot = undefined; };
       recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: roster, now });
       if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: roster });
-      for (const work of Object.values(store.read().works)) {
+      for (const work of Object.values(decision().works)) {
         if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
-        if (!reportedWaitCurrent(work.reportedWait, roster())) store.saveWork({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
+        if (!reportedWaitCurrent(work.reportedWait, roster())) update({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
       }
       // Older releases persisted technical blocks as human waits. Only current
       // owned facts plus an existing protected checkpoint can reclaim custody.
-      for (const work of Object.values(store.read().works)) {
+      for (const work of Object.values(decision().works)) {
         if (work.state !== 'waiting_user' || work.reportedWait || work.stopScope === 'work' || !work.checkpointRef
           || work.parentConversationId !== conversationId) continue;
         const related = roster().filter(row => work.sessionIds?.includes(row.sessionId));
         const ownership = repairOwnership(related);
-        if (!ownership.needsUser && ownership.repairSessionIds.length) store.saveWork({ ...work,
+        if (!ownership.needsUser && ownership.repairSessionIds.length) update({ ...work,
           state: 'runnable', end: 'yielded', repairSessionIds: ownership.repairSessionIds });
       }
-      const candidates = Object.values(store.read().works).filter(work => (!userOnly || work.anchorInputIds?.length)
+      const candidates = Object.values(decision().works).filter(work => (!userOnly || work.anchorInputIds?.length)
         && (work.state === 'runnable' && work.checkpointRef
           || work.checkpointRef && recoveryReservationDue(work, now())
           || work.state === 'blocked_system' && work.stopScope !== 'work' && work.recovery?.dispatchesReconciled

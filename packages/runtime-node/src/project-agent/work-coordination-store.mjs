@@ -67,7 +67,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     return next;
   }
   return {
-    read, append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint,
+    read, readWork: reader.readWork, append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint,
     coalesceWorks(owner, retired) {
       const state = read();
       const stamp = work => ({ ...work, revision: (state.works[work.workId]?.revision || 0) + 1, updatedAt: now() });
@@ -116,7 +116,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     transfer(events) { return append({ kind: 'transfer', events }); },
     handled(eventIds) { return append({ kind: 'handled', eventIds }); },
     pendingEvents() { return Object.values(read().events).filter(row => !row.handled).map(row => row.event); },
-    saveWork(work) { const old = read().works[work.workId]; return append({ kind: 'work', work: { ...old, ...work,
+    saveWork(work) { const old = reader.readWork(work.workId); return append({ kind: 'work', work: { ...old, ...work,
       revision: (old?.revision || 0) + 1, updatedAt: now() } }); },
   };
 }

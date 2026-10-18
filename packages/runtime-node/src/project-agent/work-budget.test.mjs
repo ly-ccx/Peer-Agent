@@ -67,3 +67,20 @@ test('a stopped parent reply cannot revoke its admitted children; root and budge
     }
   } finally {release();rmSync(root,{recursive:true,force:true});}
 });
+
+test('budget changes read only the owned work when the host provides an isolated work reader', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'single-work-budget-'));
+  const store = createWorkCoordinationStore({ rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one' });
+  store.saveWork({ workId: 'goal', state: 'runnable' });
+  let fullReads = 0;
+  const release = registerWorkBudget('w', { ...store, read() { fullReads++; return store.read(); } });
+  try {
+    const guard = createWorkBudgetGuard({ workspaceId: 'w', workId: 'goal', role: 'project_agent' });
+    guard.beforeRequest(); guard.beforeTool({ toolCallId: 'read' });
+    guard.checkpoint({}, [{ call: { toolCallId: 'read' }, result: { ok: true } }]);
+    guard.finish({ totalTokens: 2, estimatedCostUsd: 0 });
+    assert.equal(fullReads, 0, 'per-work accounting must not clone the full historical roster');
+    assert.equal(store.read().works.goal.budget.toolCalls, 1);
+    assert.equal(store.read().works.goal.budget.tokens, 2);
+  } finally { release(); rmSync(root, { recursive: true, force: true }); }
+});

@@ -2286,3 +2286,20 @@ test('rollback does not promote an already queued replacement and never revives 
     assert.equal(replaced.error,undefined);
   } finally {release();await env.cleanup();}
 });
+
+test('acceptance shares compact parent facts and rechecks later replies and corruption', async () => {
+  const env = await harness();
+  try {
+    const session = await completedSession(env);
+    let parentReads = 0;
+    const original = env.conversationStore.getPersistedConversationHistory;
+    env.conversationStore.getPersistedConversationHistory = id => { if (id === env.parent.id) parentReads++; return original(id); };
+    env.supervisor.readQuery(() => { for (let n = 0; n < 8; n++) assert.equal(env.supervisor.acceptance(session.sessionId).reported, false); });
+    assert.ok(parentReads <= 1, `one parent was fully read ${parentReads} times in a single acceptance query`);
+    env.conversationStore.appendMessage(env.parent.id, { id: 'reported', role: 'assistant', kind: 'agent_reply', content: 'reported', meta: { sources: [session.sessionId] } });
+    assert.equal(env.supervisor.acceptance(session.sessionId).reported, true, 'a new query must observe the new formal source reference');
+    const file = path.join(env.root, 'conversations', env.parent.id + '.jsonl');
+    const { appendFileSync } = await import('node:fs'); appendFileSync(file, '{broken\n');
+    assert.throws(() => env.supervisor.acceptance(session.sessionId), /BACKGROUND_HISTORY_CORRUPT/, 'cached parent facts cannot hide current corruption');
+  } finally { await env.cleanup(); }
+});
