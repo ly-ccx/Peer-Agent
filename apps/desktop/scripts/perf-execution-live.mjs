@@ -17,6 +17,7 @@ const root = mkdtempSync(path.join(tmpdir(), 'peer-execution-live-')); chmodSync
 const home = path.join(root, 'data'), personal = path.join(homedir(), '.peer-agent');
 const report = { schemaVersion: 1, syntheticCognition: false, installedBuild: false, root,
   sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8' }).trim(),
+  sourceDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: source, encoding: 'utf8' }).trim()),
   scope: 'Production source Electron; isolated fixture project; real configured Provider and governed delegation/tools. No injected Tool Results.',
   startedAt: new Date().toISOString(), pageErrors: [], interactions: 0 };
 let app, page;
