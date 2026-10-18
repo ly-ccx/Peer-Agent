@@ -59,6 +59,7 @@ try {
     PEER_CREDENTIAL_HELPER_PATH: path.join(source, 'target/release/peer-credential-helper') };
   delete env.ELECTRON_RUN_AS_NODE;
   app = await _electron.launch({ args: [isolation.launch.desktopDir, '--user-data-dir=' + path.join(root, 'chromium')], cwd: isolation.launch.desktopDir, env, timeout: 30000 });
+  app.process().once('exit', (code, signal) => { report.processExit = { code, signal }; });
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean);
   page.on('pageerror', error => report.pageErrors.push(error.message));
   await app.evaluate(({ BrowserWindow }) => {
@@ -177,7 +178,7 @@ try {
     && report.elapsedMs >= 120000 && report.interactions >= 100 && report.interaction.scrollMovedSamples >= 100
     && report.interaction.keyRoundTripMs.p95 < 100 && report.interaction.keyRoundTripMs.p99 < 200 && report.interaction.keyRoundTripMs.max < 500
     && report.interaction.wheelRoundTripMs.p95 < 100 && report.renderer.wheelPaintMs.p95 < 100;
-} catch (error) { report.ok=false; report.error=error.message; }
+} catch (error) { report.ok=false; report.error=error.stack || error.message; }
 finally {
   if (page && !report.renderer) {
     try {
