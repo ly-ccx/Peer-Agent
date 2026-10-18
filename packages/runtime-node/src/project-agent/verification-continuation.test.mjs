@@ -37,19 +37,19 @@ test('a review crosses 12 turns with paired context and may cite real evidence f
   assert.equal(port.state().modelRequests, 25); assert.equal(port.state().toolCalls, 24);
 });
 
-test('restart retains original checkpoint, deadline and spent requests without repeating completed tools', async () => {
-  const port = storage(); let first = true;
+test('restart retains original checkpoint and spent requests while renewing its slice deadline', async () => {
+  const port = storage(); let first = true, clock = Date.now();
   await assert.rejects(runContinuedVerification({ identity, port, run: async ({ executionBudget }) => {
     if (first) { first = false; return slice(executionBudget, 12, 1); }
     executionBudget.guard.beforeRequest(); throw Error('transport lost');
   } }), /transport lost/);
-  const deadline = port.state().deadlineAt;
-  const result = await runContinuedVerification({ identity, port, run: async ({ executionBudget }) => {
+  const deadline = port.state().deadlineAt; clock = Date.parse(deadline) + 1000;
+  const result = await runContinuedVerification({ identity, port, now: () => clock, run: async ({ executionBudget }) => {
     assert.equal(executionBudget.providerCheckpoint.messages[0].content, 'paired 1');
     executionBudget.guard.beforeRequest();
     return { events: text({ passed: true, evidenceRefs: ['ev-1-0'] }) };
   } });
-  assert.equal(result.passed, true); assert.equal(port.state().deadlineAt, deadline);
+  assert.equal(result.passed, true); assert.ok(Date.parse(port.state().deadlineAt) > Date.parse(deadline));
   assert.equal(port.state().modelRequests, 14); assert.equal(port.state().toolCalls, 12);
 });
 
@@ -60,8 +60,8 @@ test('format repair shares the original request allowance and cannot reset it', 
   assert.equal(calls, 1); assert.equal(port.state().modelRequests, 1);
 });
 
-test('tool uncertainty, missing checkpoint, changed model and expired deadline fail before dispatch', async () => {
-  for (const kind of ['tools', 'missing', 'model', 'deadline']) {
+test('tool uncertainty, missing checkpoint and changed model fail before dispatch', async () => {
+  for (const kind of ['tools', 'missing', 'model']) {
     const port = storage();
     port.save({ schemaVersion: 1, continuationId: 'id', ...identity, modelRequests: 12, toolCalls: 12,
       formatAttempt: 0, evidenceRefs: [], phase: kind === 'tools' ? 'tools' : 'ready',
@@ -99,4 +99,36 @@ test('checkpoint persistence failure stops the review; concurrent calls cannot t
   const port = storage(); port.writeCheckpoint = () => { throw Error('disk full'); };
   await assert.rejects(runContinuedVerification({ identity, port, run: ({ executionBudget }) => slice(executionBudget, 1, 1) }), /disk full/);
   assert.equal(port.state().phase, 'tools');
+});
+
+test('continued useful review crosses 96 requests, 512 tools and five cumulative minutes without a total cap', async () => {
+  const port = storage(); let calls = 0, clock = Date.now();
+  const result = await runContinuedVerification({ identity, port, now: () => clock, run: async ({ executionBudget }) => {
+    calls++;
+    if (calls <= 24) {
+      const result = slice(executionBudget, 12, calls);
+      for (let i = 0; i < 84; i++) {
+        executionBudget.guard.beforeTool();
+        result.events.push({ channel: 'chat:stream:tool-call', payload: { tool: 'read_file', args: { path: `extra-${calls}-${i}` } } },
+          { channel: 'chat:stream:tool-result', payload: { evidenceRefs: [`extra-${calls}-${i}`], result: { content: `new fact ${calls}-${i}` } } });
+      }
+      executionBudget.guard.checkpoint(result.outcome.providerCheckpoint, []);
+      clock += 60_000;
+      return result;
+    }
+    executionBudget.guard.beforeRequest();
+    return { events: text({ passed: true, evidenceRefs: ['ev-1-0'] }) };
+  } });
+  assert.equal(result.passed, true); assert.equal(port.state().modelRequests, 289);
+  assert.equal(port.state().toolCalls, 2304); assert.equal(port.state().policyVersion, 2);
+});
+
+test('alternating old observations stop review and retired slice callbacks cannot mutate later work', async () => {
+  const port = storage(); let calls = 0, prior;
+  await assert.rejects(runContinuedVerification({ identity, port, run: async ({ executionBudget }) => {
+    if (prior) assert.throws(() => prior.beforeRequest(), { code: 'work_execution_stopped' });
+    prior = executionBudget.guard;
+    return slice(executionBudget, 1, ++calls % 2);
+  } }), { code: 'verifier_no_progress' });
+  assert.equal(calls, 4);
 });

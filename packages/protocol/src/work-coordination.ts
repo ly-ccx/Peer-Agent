@@ -1,5 +1,27 @@
 import type { ProjectRecoveryFailureKind } from './project-agent-failure.ts';
 
+export interface ProjectWorkBudgetLimits {
+  readonly schemaVersion?: 2;
+  readonly source: string;
+  readonly maxModelRequests?: number;
+  readonly maxToolCalls?: number;
+  readonly maxTokens?: number;
+  readonly maxCostUsd?: number;
+}
+export interface ProjectWorkBudgetBoundary {
+  readonly metric: 'modelRequests' | 'toolCalls' | 'tokens' | 'costUsd';
+  readonly used: number | null;
+  readonly limit: number;
+  readonly source: string;
+  readonly reason: 'limit_reached' | 'usage_unknown' | 'reservation_pending';
+}
+/** Current host admission; a card action never grants execution authority. */
+export interface ProjectReplyRecoveryAction {
+  readonly canContinue: boolean;
+  readonly blockedReason?: string;
+  readonly budget?: ProjectWorkBudgetBoundary;
+}
+
 /** A reply attempt and delegated execution have independent outcomes. Host facts only. */
 export interface ProjectReplyFailureStatus {
   readonly phase: 'current' | 'retrying' | 'superseded' | 'recovered' | 'cancelled' | 'paused';
@@ -53,6 +75,7 @@ export interface ProjectWorkReceipt {
   readonly sessionIds: readonly string[];
   /** Current owned technical blockers; a public progress update does not discharge them. */
   readonly repairSessionIds?: readonly string[];
+  readonly progressFacts?: readonly string[];
   readonly state: ProjectWorkState;
   readonly revision: number;
   readonly checkpointRef?: string;
@@ -69,7 +92,10 @@ export interface ProjectWorkReceipt {
   readonly budget?: {
     readonly modelRequests: number; readonly toolCalls: number; readonly tokens: number; readonly costUsd: number;
     readonly unknownUsage: boolean; readonly unknownCost: boolean;
-    readonly limits: { readonly maxModelRequests: number; readonly maxToolCalls: number; readonly maxTokens?: number; readonly maxCostUsd?: number; readonly source: string };
+    readonly limits: ProjectWorkBudgetLimits;
+    readonly policyMigration?: { readonly version: 2; readonly reason: 'legacy_system_default_removed';
+      readonly previousLimits: ProjectWorkBudgetLimits; readonly at: string };
+    readonly lastBoundary?: ProjectWorkBudgetBoundary;
     readonly attempts: Readonly<Record<string, { readonly role: string; readonly requests?: number; readonly modelProviderId?: string;
       readonly checkpointRef?: string;
       readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[] }>>;

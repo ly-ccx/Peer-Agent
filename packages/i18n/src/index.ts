@@ -270,6 +270,18 @@ export type TranslationKey =
   | 'projectAgent.chat.unavailable'
   | 'projectAgent.chat.noProgress'
   | 'projectAgent.chat.budgetExhausted'
+  | 'projectAgent.chat.budgetUsageUnknown'
+  | 'projectAgent.chat.budgetRequests'
+  | 'projectAgent.chat.budgetTools'
+  | 'projectAgent.chat.budgetTokens'
+  | 'projectAgent.chat.budgetCost'
+  | 'projectAgent.chat.budgetReady'
+  | 'projectAgent.chat.recoveryLegacyLimit'
+  | 'projectAgent.chat.budgetSourceSettings'
+  | 'projectAgent.chat.budgetSourceStored'
+  | 'projectAgent.chat.budgetUnconfirmed'
+  | 'projectAgent.chat.budgetCostUnknown'
+  | 'projectAgent.chat.budgetTokensUnknown'
   | 'projectAgent.chat.context.error'
   | 'projectAgent.chat.replied'
   | 'projectAgent.chat.disposition.answered'
@@ -1789,7 +1801,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.recoveryMissingCheckpoint': '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。',
     'projectAgent.chat.unavailable': '主 Bot 本次回复未完成。',
     'projectAgent.chat.noProgress': '连续检查没有取得新进展，已停止重复执行。已有结果已保留。',
-    'projectAgent.chat.budgetExhausted': '这项工作的执行额度已用完，已有进展已保留。你可以先发新消息。',
+    'projectAgent.chat.budgetExhausted': '这项工作已达到配置的预算限制，已有进展已保留。调整限制后可继续。',
+    'projectAgent.chat.budgetReady': '预算限制已调整，可以接着已有进展继续。',
+    'projectAgent.chat.recoveryLegacyLimit': '旧版本的执行限制曾中断这次回复，已有进展已保留。',
+    'projectAgent.chat.budgetSourceSettings': '来源：执行预算设置。',
+    'projectAgent.chat.budgetSourceStored': '来源：保留的预算配置。',
+    'projectAgent.chat.budgetUnconfirmed': '暂时无法确认能否在配置的预算内继续，已有进展已保留。',
+    'projectAgent.chat.budgetCostUnknown': '费用上限为 {limit} 美元，当前用量无法准确确认；不会把未知用量当作零。',
+    'projectAgent.chat.budgetTokensUnknown': 'Token 上限为 {limit}，当前用量无法准确确认；不会把未知用量当作零。',
+    'projectAgent.chat.budgetUsageUnknown': '当前用量无法准确确认，暂不能在预算内继续；不会把未知用量当作零。',
+    'projectAgent.chat.budgetRequests': '模型请求：已用 {used} 次，上限 {limit} 次。',
+    'projectAgent.chat.budgetTools': '工具调用：已用 {used} 次，上限 {limit} 次。',
+    'projectAgent.chat.budgetTokens': 'Token：已用 {used}，上限 {limit}。',
+    'projectAgent.chat.budgetCost': '估算费用：已用 {used} 美元，上限 {limit} 美元。',
     'projectAgent.chat.context.error': '原始报错',
     'projectAgent.chat.replied': '已回复',
     'projectAgent.chat.disposition.answered': '已回答',
@@ -3097,7 +3121,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.recoveryMissingCheckpoint': 'The saved progress has no complete recovery record. It needs to be checked before executing again.',
     'projectAgent.chat.unavailable': 'This main bot reply could not be completed.',
     'projectAgent.chat.noProgress': 'Repeated checks produced no new progress, so repetition has stopped. Existing results are saved.',
-    'projectAgent.chat.budgetExhausted': 'This work has used its execution allowance. Progress was saved. You can send a new message.',
+    'projectAgent.chat.budgetExhausted': 'This work reached its configured budget limit. Progress was saved. Adjust the limit to continue.',
+    'projectAgent.chat.budgetReady': 'The budget limit was adjusted. You can continue from saved progress.',
+    'projectAgent.chat.recoveryLegacyLimit': 'An older execution limit interrupted this reply. Progress was saved.',
+    'projectAgent.chat.budgetSourceSettings': 'Source: execution budget settings.',
+    'projectAgent.chat.budgetSourceStored': 'Source: retained budget configuration.',
+    'projectAgent.chat.budgetUnconfirmed': 'Execution cannot yet be confirmed to fit the configured budget. Progress was saved.',
+    'projectAgent.chat.budgetCostUnknown': 'The cost limit is USD {limit}, but usage cannot be confirmed. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetTokensUnknown': 'The token limit is {limit}, but usage cannot be confirmed. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetUsageUnknown': 'Usage cannot be confirmed accurately, so execution cannot continue within the budget. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetRequests': 'Model requests: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetTools': 'Tool calls: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetTokens': 'Tokens: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetCost': 'Estimated cost: USD {used} used, limit USD {limit}.',
     'projectAgent.chat.context.error': 'Original error',
     'projectAgent.chat.replied': 'Replied',
     'projectAgent.chat.disposition.answered': 'Answered',

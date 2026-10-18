@@ -2,9 +2,10 @@ import { createVerificationDispatchRecovery } from './verification-dispatch-reco
 import { createReplyDelivery } from './reply-delivery.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
 import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
-import { workBudgetBinding, workBudgetCanResume } from './work-budget.mjs';
+import { workBudgetBinding } from './work-budget.mjs';
 import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue } from './recovery-policy.mjs';
 import { hostWakeWait } from './wake-wait.mjs';
+import { replyRecoveryAdmission, recoverLegacyBudgetWorks } from './reply-recovery-admission.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
 export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
@@ -112,6 +113,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverJob() {
       dispatchRecovery.reconcileAll();
       expireReservations();
+      recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: rows(), now });
       // Older releases persisted technical blocks as human waits. Only current
       // owned facts plus an existing protected checkpoint can reclaim custody.
       for (const work of Object.values(store.read().works)) {
@@ -136,13 +138,12 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       dispatchRecovery.reconcileAll();
       const work = Object.values(store.read().works).find(work => work.parentConversationId === conversationId && work.checkpointRef
         && (work.recovery?.failedTurnId === turnId || work.attemptId === turnId));
-      if (!work || ['delivered', 'cancelled', 'waiting_user'].includes(work.state)) return { ok: false, code: 'STALE_TURN' };
       const checkpoint = readProtectedWork(work);
-      if (work.state === 'waiting_children' && !(work.stopScope === 'reply' && checkpoint?.outcome?.stopped === true)) return { ok: false, code: 'STALE_TURN' };
-      if (hasUnsettledDispatch(work) || work.recovery?.failureKind === 'execution_outcome_unknown') return { ok: false, code: 'EXECUTION_OUTCOME_UNKNOWN' };
-      if (work.state === 'budget_limited' && !workBudgetCanResume(work, workBudgetBinding(workspaceId)?.limits)) return { ok: false, code: 'WORK_BUDGET_EXHAUSTED' };
-      if (!recoveryCheckpointAvailable(work, checkpoint, store.readCheckpoint)) { blockMissingCheckpoint(work); return { ok: false, code: 'RECOVERY_CHECKPOINT_UNAVAILABLE' }; }
-      if (checkpoint.job?.workId !== work.workId) return { ok: false, code: 'STALE_TURN' };
+      const admission = replyRecoveryAdmission(work, checkpoint, { limits: workBudgetBinding(workspaceId)?.limits, readCheckpoint: store.readCheckpoint });
+      if (!admission.ok) {
+        if (work && admission.code === 'RECOVERY_CHECKPOINT_UNAVAILABLE') blockMissingCheckpoint(work);
+        return { ok: false, code: admission.code };
+      }
       return { ok: true, job: { ...checkpoint.job, workId: work.workId, continuation: true, interactive: true,
         recoveryRevision: work.revision, manualRecovery: true } };
     },

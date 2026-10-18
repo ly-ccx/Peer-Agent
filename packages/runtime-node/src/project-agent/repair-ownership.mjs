@@ -25,5 +25,5 @@ export function repairProgressDecision(previous, outcome, roster, sources) {
   // Rephrasing the same public update is not progress on a technical blocker.
   const materialRounds = repairOwnership(sources).repairSessionIds.length ? (outcome.rounds || []).map(round => ({ ...round,
     toolCalls: (round.toolCalls || []).filter(call => !['post_reply', 'local.delegation.post_reply'].includes(call.name)) })) : outcome.rounds;
-  return continuationDecision({ previous, rounds: materialRounds, roster, yielded: outcome.yielded });
+  return continuationDecision({ previous, rounds: materialRounds, roster: sources, yielded: outcome.yielded });
 }

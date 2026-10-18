@@ -2,10 +2,13 @@ import { createCardProjection, replyQuestionAnswered } from './card-projection.m
 import { verdictRefFor } from './acceptance.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { replyFailureStatus } from './reply-failure-facts.mjs';
+import { replyRecoveryAdmission } from './reply-recovery-admission.mjs';
+import { workBudgetBinding } from './work-budget.mjs';
 
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
 export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[],
-  readCoordination = workspaceId => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).read(), now = () => new Date().toISOString() }) {
+  readCoordination = workspaceId => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).read(), now = () => new Date().toISOString(),
+  readCoordinationCheckpoint = (workspaceId, ref) => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).readCheckpoint(ref) }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
@@ -75,6 +78,12 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
         || works.find(work => work.recovery?.failedTurnId === message.turnId || work.attemptId === message.turnId);
       const failureStatus = replyFailureStatus(message, messages, works, coordination.deliveries || {}, rows, now());
       const superseded = ['superseded', 'recovered', 'cancelled', 'paused'].includes(failureStatus.phase);
+      let checkpoint;
+      try { if (work?.checkpointRef) checkpoint = readCoordinationCheckpoint(workspaceId, work.checkpointRef); } catch { /* admission reports unavailable */ }
+      const admission = replyRecoveryAdmission(work, checkpoint, { limits: workBudgetBinding(workspaceId)?.limits,
+        readCheckpoint: ref => readCoordinationCheckpoint(workspaceId, ref) });
+      const recoveryAction = { canContinue: !superseded && admission.ok,
+        ...(!admission.ok ? { blockedReason: admission.code } : {}), ...(admission.budget ? { budget: admission.budget } : {}) };
       let recovery = !superseded ? work?.recovery : undefined;
       if (recovery?.reservationId && (work.state !== 'retry_wait'
         || !work.waitFor?.some(wait => wait.kind === 'retry_timer' && wait.id === recovery.reservationId)
@@ -82,7 +91,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
         recovery = { ...recovery, retryAt: undefined, reservationId: undefined };
       }
       return { turnId: message.turnId, reason: message.content?.replace(/^代理暂时不可用：/, ''), superseded,
-        recovery, recoveryWorkState: work?.state, failureStatus };
+        recovery, recoveryWorkState: work?.state, failureStatus, recoveryAction };
     });
     const stopped = messages.filter(message => message.card === 'agent_stopped').map(message => ({
       turnId: message.turnId, text: message.content,

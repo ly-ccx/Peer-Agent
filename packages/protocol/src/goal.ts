@@ -1014,12 +1014,14 @@ export interface GoalRunnerState {
   /** Host-owned readonly review continuity. Native messages stay in registered checkpoint storage. */
   readonly verificationContinuation?: {
     readonly schemaVersion: 1;
+    readonly policyVersion?: 2;
     readonly planId: string;
     readonly continuationId: string;
     readonly sourceRevision: string;
     readonly modelKey: string;
     readonly workId?: string;
     readonly phase: 'ready' | 'requesting' | 'tools' | 'completed';
+    /** Current slice deadline; legacy review-wide deadlines are renewed only on safe admission. */
     readonly deadlineAt: string;
     readonly modelRequests: number;
     readonly toolCalls: number;
@@ -1029,6 +1031,7 @@ export interface GoalRunnerState {
     readonly evidenceRefs: readonly string[];
     readonly fingerprint?: string;
     readonly repeats?: number;
+    readonly progressFacts?: readonly string[];
   };
   readonly enabled: boolean;
   readonly status: GoalRunnerStatus;

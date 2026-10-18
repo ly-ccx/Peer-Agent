@@ -20,6 +20,7 @@ import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
 import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
+import { seedWorkBudgetMessages } from './work-budget-fixture.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { createQuickChatNativeController } from './quick-chat-native-fixture.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture } from '../../../scripts/rc-response-interaction-smoke.mjs';
@@ -81,10 +82,7 @@ const longErrorText = '代理暂时不可用：HTTP 400: ' + JSON.stringify({ er
 } });
 seededMessages[9998] = { ...seededMessages[9998], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: longErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-long-error', kind: 'agent_unavailable', content: longErrorText, actions: [] }] };
-const budgetErrorText = '代理暂时不可用：agent_tool_budget_exhausted: 本轮工具调用额度已用完，回复尚未完成，已停止继续执行。';
-seededMessages[9997] = { ...seededMessages[9997], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
-  content: budgetErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-budget', kind: 'agent_unavailable', content: budgetErrorText,
-    actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId: 'rc-budget' } }] }] };
+seedWorkBudgetMessages(seededMessages, fixture.bots[0].workspaceId);
 for (const [offset, state] of ['started', 'question', 'reported', 'started'].entries()) {
   seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
     agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 3 ? 'rc-work-2' : 'rc-work-1', name: offset === 3 ? '独立核验' : '实现检查', state} };

@@ -21,9 +21,11 @@ import {
   type ProjectWorkRecovery,
   type ProjectWorkState,
   type ProjectReplyFailureStatus,
+  type ProjectReplyRecoveryAction,
 } from '@peer-agent/protocol';
 
 import { readAgentActivity } from './agentActivityState.ts';
+import { readReplyRecoveryAction } from './replyRecoveryState.ts';
 
 export const CONVERSATION_PAGE_SIZE = 50;
 export const CONVERSATION_GAP_MS = 10 * 60 * 1000;
@@ -54,6 +56,7 @@ export interface BotChatCard {
   readonly recovery?: ProjectWorkRecovery;
   readonly recoveryWorkState?: ProjectWorkState;
   readonly failureStatus?: ProjectReplyFailureStatus;
+  readonly recoveryAction?: ProjectReplyRecoveryAction;
 }
 
 /** Current host projection, never a local retry scheduler or a promise inferred from prose. */
@@ -74,7 +77,7 @@ export function agentFailurePresentation(card: BotChatCard): { messageKey: Trans
     && Boolean(card.recovery?.reservationId && card.recovery.retryAt);
   if (recovering) return { messageKey: 'projectAgent.chat.recoveryScheduled', recovering: true, retryAllowed: false };
   if (failure.kind === 'fatal' && /^代理暂时不可用：\s*agent_no_progress$/.test(card.content)) {
-    return { messageKey: 'projectAgent.chat.noProgress', recovering: false, retryAllowed: true };
+    return { messageKey: 'projectAgent.chat.noProgress', recovering: false, retryAllowed: card.recoveryAction?.canContinue !== false };
   }
   const keys: Partial<Record<ProjectRecoveryFailureKind, TranslationKey>> = {
     response_headers_timeout: 'projectAgent.chat.recoveryExhausted',
@@ -86,12 +89,16 @@ export function agentFailurePresentation(card: BotChatCard): { messageKey: Trans
     configuration: 'projectAgent.chat.recoveryConfiguration',
     invalid_request: 'projectAgent.chat.recoveryInvalidRequest',
     permission: 'projectAgent.chat.recoveryPermission',
-    budget_exhausted: 'projectAgent.chat.budgetExhausted',
+    budget_exhausted: card.recoveryAction?.canContinue ? 'projectAgent.chat.budgetReady'
+      : card.recoveryAction?.budget?.reason === 'usage_unknown' ? 'projectAgent.chat.budgetUnconfirmed'
+      : card.recoveryAction?.budget ? 'projectAgent.chat.budgetExhausted' : 'projectAgent.chat.recoveryLegacyLimit',
     execution_outcome_unknown: 'projectAgent.chat.recoveryUnknownOutcome',
     cancelled: 'projectAgent.chat.stopped',
   };
   return { messageKey: keys[failure.kind] ?? 'projectAgent.chat.unavailable',
-    recovering: false, retryAllowed: failure.kind !== 'execution_outcome_unknown' && failure.kind !== 'cancelled' };
+    recovering: false, retryAllowed: card.recoveryAction?.canContinue !== false
+      && (failure.kind !== 'budget_exhausted' || card.recoveryAction?.canContinue === true)
+      && failure.kind !== 'execution_outcome_unknown' && failure.kind !== 'cancelled' };
 }
 
 export interface BotChatMeta {
@@ -642,6 +649,7 @@ function readCards(value: unknown): BotChatCard[] {
       ...(readRecovery(record.recovery) ? { recovery: readRecovery(record.recovery)! } : {}),
       ...(readRecoveryWorkState(record.recoveryWorkState) ? { recoveryWorkState: readRecoveryWorkState(record.recoveryWorkState)! } : {}),
       ...(readFailureStatus(record.failureStatus) ? { failureStatus: readFailureStatus(record.failureStatus)! } : {}),
+      ...(readReplyRecoveryAction(record.recoveryAction) ? { recoveryAction: readReplyRecoveryAction(record.recoveryAction)! } : {}),
       actions: readActions(record.actions),
       ...(record.refs && typeof record.refs === 'object' ? { refs: {
         sessionId: readString((record.refs as Record<string, unknown>).sessionId),

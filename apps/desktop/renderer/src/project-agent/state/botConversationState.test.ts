@@ -77,7 +77,7 @@ test('host failure types override legacy diagnostics and unsafe retries remain u
     'projectAgent.chat.recoveryUnknownOutcome');
   assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'execution_outcome_unknown' } }).retryAllowed, false);
   assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'budget_exhausted' } }).messageKey,
-    'projectAgent.chat.budgetExhausted');
+    'projectAgent.chat.recoveryLegacyLimit');
   assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'permission' } }).messageKey,
     'projectAgent.chat.recoveryPermission');
   assert.equal(agentFailurePresentation({ ...base, recovery: { ...recovery, failureKind: 'stream_interrupted' } }).messageKey,

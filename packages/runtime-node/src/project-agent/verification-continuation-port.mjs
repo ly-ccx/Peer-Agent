@@ -5,6 +5,7 @@ const failure = (code, message = code) => Object.assign(new Error(message), { co
 const phases = new Set(['ready', 'requesting', 'tools', 'completed']);
 export function validateVerificationContinuation(value) {
   if (!value || value.schemaVersion !== 1 || typeof value.planId !== 'string' || !value.planId || typeof value.continuationId !== 'string' || !value.continuationId
+    || value.policyVersion !== undefined && value.policyVersion !== 2
     || typeof value.sourceRevision !== 'string' || !value.sourceRevision || typeof value.modelKey !== 'string' || !value.modelKey
     || !phases.has(value.phase) || !Number.isFinite(Date.parse(value.deadlineAt))
     || ![value.modelRequests, value.toolCalls, value.formatAttempt].every(n => Number.isSafeInteger(n) && n >= 0)

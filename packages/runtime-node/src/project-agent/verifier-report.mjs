@@ -87,7 +87,7 @@ export function runVerifierWithReport({ run, signal, timeoutMs, allowedEvidenceR
     run: verificationSignal => collectVerifierReport({ run, signal: verificationSignal, allowedEvidenceRefs, onToolResult, initialAttempt, initialText }) });
 }
 
-async function collectVerifierReport({ run, signal, allowedEvidenceRefs, onToolResult, initialAttempt, initialText }) {
+export async function collectVerifierReport({ run, signal, allowedEvidenceRefs, onToolResult, initialAttempt, initialText }) {
   let previousText = initialText;
   const allowed = allowedEvidenceRefs instanceof Set ? allowedEvidenceRefs : new Set(allowedEvidenceRefs || []);
   for (let attempt = initialAttempt; attempt < 2; attempt += 1) {
@@ -120,7 +120,7 @@ async function collectVerifierReport({ run, signal, allowedEvidenceRefs, onToolR
     summary: 'Verifier report format invalid after one retry.', recommendedNextAction: 'retry_verification' };
 }
 
-function deniedResult(value) {
+export function deniedResult(value) {
   let result = value;
   if (typeof value === 'string') { try { result = JSON.parse(value); } catch { return false; } }
   return result?.status === 'denied' || result?.execution?.result?.status === 'denied'
