@@ -451,7 +451,7 @@ export function createProjectAgentRunner({
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };
     }
-    const checkpoint = job.continuation && coordination ? coordination.resume(job) : null;
+    const checkpoint = job.continuation && coordination ? coordination.resume(job, model.selection) : null;
     if (checkpoint?.providerCheckpoint) plan.turnProfile.providerCheckpoint = checkpoint.providerCheckpoint;
     if (checkpoint) plan.turnProfile.context = { ...plan.turnProfile.context,
       retryContinuity: readRetryContinuity([{ id: checkpoint.turnId, kind: 'agent_turn', rounds: checkpoint.rounds }], checkpoint.turnId) };

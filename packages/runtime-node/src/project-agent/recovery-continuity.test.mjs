@@ -524,3 +524,42 @@ test('a new user input interrupts a long user slice without pausing its independ
     assert.ok(Object.values(env.store.read().works).every(work => work.state === 'delivered'));
   } finally { env.close(); }
 });
+
+test('changing the configured model continues the same work from completed facts without replaying the old native tail', async () => {
+  let requests = 0;
+  let selection = { modelProviderId: 'old', modelId: 'old-model', family: 'openai' };
+  const env = world(async ({ turnProfile }) => {
+    const guard = createWorkBudgetGuard(turnProfile);
+    try {
+      guard.beforeRequest({ accounting: 'physical_dispatch' });
+      if (++requests === 1) {
+        guard.checkpoint({ provider: 'openai', providerId: 'old', model: 'old-model', messages: [{ role: 'tool', content: 'already done' }] });
+        return { ...timeout, toolCalls: [{ name: 'read_file', input: { path: 'report' }, result: { ok: true, content: 'already done', evidenceRefs: ['tool-result://completed'] } }] };
+      }
+      assert.equal(turnProfile.providerCheckpoint, undefined);
+      assert.equal(turnProfile.modelSelection.modelProviderId, 'new');
+      assert.match(turnProfile.context.retryContinuity.tools[0].resultPreview, /already done/);
+      return { text: '新模型根据已完成的真实结果继续。' };
+    } finally { guard.finish(); }
+  }, { resolveModel: () => ({ modelProviderId: selection.modelProviderId, selection }) });
+  try {
+    await env.runner.enqueueUserInputs([input('switch')]);
+    const workId = env.work().workId;
+    selection = { modelProviderId: 'new', modelId: 'new-model', family: 'openai' };
+    await env.advance(2000);
+    await env.runner.kick();
+    assert.equal(env.work().workId, workId);
+    assert.equal(requests, 2);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+  } finally { env.close(); }
+});
+
+test('model rebasing preserves matching checkpoints and refuses unpaired tool facts', async () => {
+  const { replyCheckpointForModel } = await import('./recovery-policy.mjs');
+  const checkpoint = { provider: 'openai', providerId: 'old', model: 'model', messages: [] };
+  const outcome = { providerCheckpoint: checkpoint, rounds: [{ toolCalls: [{ name: 'bash', result: null }] }] };
+  assert.equal(replyCheckpointForModel(outcome, { modelProviderId: 'new', modelId: 'model' }), outcome);
+  const completed = { ...outcome, rounds: [{ toolCalls: [{ name: 'read_file', result: { ok: true } }] }] };
+  assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'old', modelId: 'model', family: 'openai' }), completed);
+  assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'new', modelId: 'model', family: 'openai' }).providerCheckpoint, undefined);
+});

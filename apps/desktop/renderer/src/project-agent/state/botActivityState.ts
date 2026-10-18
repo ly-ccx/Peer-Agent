@@ -1,5 +1,5 @@
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import type { BotChatMessage, BotToolRound, ConversationRow } from './botConversationState';
+import type { BotChatMessage, BotToolRound, ConversationRow, ConversationDisplayRow } from './botConversationState';
 import { botNarration } from './botNarrationState.ts';
 
 const TERMINAL = new Set(['done', 'error', 'stopped', 'disposed']);
@@ -20,6 +20,17 @@ export function visibleBotActivity(activity: ProjectAgentActivity | null, messag
   if (messages.some(message => message.turnId === activity.turnId && ['agent_reply', 'system_card'].includes(message.kind))) return null;
   if (TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
   return activity;
+}
+
+/** Folding a historical failure changes the thread, never the identity of its detail record. */
+export function replyDetailsRow(id: string | null, rows: readonly ConversationDisplayRow[], messages: readonly BotChatMessage[]): ConversationDisplayRow | undefined {
+  if (!id) return undefined;
+  const exact = rows.find(row => row.type === 'message' && row.message.id === id);
+  if (exact) return exact;
+  const canonical = messages.find(message => message.id === id);
+  if (canonical) return attachBotProcesses([{ type: 'message', message: canonical }], messages, null)[0];
+  return [...rows].reverse().find(row => row.type === 'activity' ? row.activity.turnId === id
+    : row.type === 'message' && row.message.turnId === id);
 }
 
 /** Durable receipt, internal slices and unrelated wakes cannot answer a user input. */

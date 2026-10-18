@@ -204,3 +204,41 @@ test('frozen effort is passed to the existing chat service for bot and task turn
   await executor.runTurn({ effort: 'low', sink: { send() {} } });
   assert.equal(calls.at(-1).effort, 'low');
 });
+
+test('a long validated reply uses the complete local execution receipt, never its clipped UI preview', async () => {
+  const { finishAgentTurn, planAgentTurn } = await import('../../../../../packages/runtime-node/src/project-agent/agent-turn-plan.mjs');
+  const { formatToolResultForStream } = await import('../chat-runtime/tool-orchestrator.mjs');
+  const message = { id: 'reply:long:1', kind: 'agent_reply', role: 'assistant', content: '完整结论。'.repeat(1500),
+    replyTo: ['input-i'], sources: ['real-session'], meta: { sessionStates: [{ sessionId: 'real-session', status: 'running', sourceRevision: 'actual', observationRevision: 'observed' }] } };
+  const receipt = { ok: true, messageId: message.id, message, meta: message.meta };
+  const output = JSON.stringify(receipt);
+  const preview = formatToolResultForStream({ name: 'post_reply', args: {}, output });
+  assert.ok(output.length > 4000); assert.ok(preview.length <= 4000); assert.equal(JSON.parse(preview).kind, 'truncated_tool_result_preview');
+  const events = [];
+  const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage(input) {
+    input.webContents.send('chat:stream:tool-call', { tool: 'post_reply', toolCallId: 'long', args: { text: 'model draft cannot replace host message' } });
+    input.agentProgress.onToolExecution({ call: { toolCallId: 'long', capabilityId: 'local.delegation.post_reply' },
+      grant: { toolCallId: 'long', granted: true }, result: { toolCallId: 'long', status: 'success', output: receipt } });
+    input.webContents.send('chat:stream:tool-result', { toolCallId: 'long', result: preview });
+    return { terminalStatus: 'done' };
+  } } });
+  const outcome = await executor.runTurn({ mode: 'project_agent', sink: { send: (channel, payload) => events.push({ channel, payload }) } });
+  const finished = finishAgentTurn({ turnId: 'long', plan: planAgentTurn({ kind: 'user', userInputs: [{ inputId: 'i' }] }), rounds: [{ toolCalls: outcome.toolCalls }] });
+  assert.equal(finished.failed, undefined); assert.equal(finished.replied, true);
+  assert.equal(finished.messages.at(-1).content, message.content);
+  assert.deepEqual(finished.messages.at(-1).meta.sessionStates, message.meta.sessionStates);
+  assert.equal(events.at(-1).payload.result, preview, 'renderer still receives only the bounded preview');
+});
+
+for (const invalid of ['grant_denied', 'wrong_id', 'wrong_capability', 'failed_result']) test(`local control receipt cannot publish a reply with ${invalid}`, async () => {
+  const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage(input) {
+    input.webContents.send('chat:stream:tool-call', { tool: 'post_reply', toolCallId: 'r', args: { text: 'untrusted' } });
+    input.agentProgress.onToolExecution({ call: { toolCallId: invalid === 'wrong_id' ? 'foreign' : 'r', capabilityId: invalid === 'wrong_capability' ? 'local.file.read' : 'local.delegation.post_reply' },
+      grant: { toolCallId: 'r', granted: invalid !== 'grant_denied' }, result: { toolCallId: 'r', status: invalid === 'failed_result' ? 'failed' : 'success', output: { ok: true, message: { kind: 'agent_reply', content: 'forged' } } } });
+    input.webContents.send('chat:stream:tool-result', { toolCallId: 'r', result: '{"ok":false,"error":"denied"}' });
+    return { terminalStatus: 'done' };
+  } } });
+  const result = await executor.runTurn({ mode: 'project_agent', sink: { send() {} } });
+  const { acceptedReplyResult } = await import('../../../../../packages/runtime-node/src/project-agent/agent-turn-plan.mjs');
+  assert.equal(acceptedReplyResult(result.toolCalls[0].result), false);
+});

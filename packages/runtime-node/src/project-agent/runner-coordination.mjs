@@ -3,7 +3,7 @@ import { createReplyDelivery } from './reply-delivery.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
 import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
-import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue } from './recovery-policy.mjs';
+import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue, replyCheckpointForModel } from './recovery-policy.mjs';
 import { hostWakeWait } from './wake-wait.mjs';
 import { replyRecoveryAdmission, recoverLegacyBudgetWorks } from './reply-recovery-admission.mjs';
 import { reconcileContinuationCustody } from './continuation-custody.mjs';
@@ -254,7 +254,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       return { ...decision, state };
     },
     dispatchRecoveryFacts: dispatchRecovery.facts,
-    resume(job) {
+    resume(job, selection) {
       const work = store.read().works[job.workId];
       if (hasUnsettledDispatch(work)) throw new Error('execution_outcome_unknown');
       const checkpoint = readProtectedWork(work);
@@ -262,8 +262,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const outcome = checkpoint?.outcome;
       // A finished public update starts the next reasoning step with current
       // roster facts. Only an actual yield resumes a native Provider slice.
-      return outcome && work.nativeCheckpointRef && (!work.repairSessionIds?.length || outcome.yielded)
+      const resumed = outcome && work.nativeCheckpointRef && (!work.repairSessionIds?.length || outcome.yielded)
         ? { ...outcome, providerCheckpoint: store.readCheckpoint(work.nativeCheckpointRef) } : outcome;
+      return replyCheckpointForModel(resumed, selection);
     },
   };
 }

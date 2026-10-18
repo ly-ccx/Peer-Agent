@@ -128,3 +128,15 @@ test('inline history hands off to exact-turn tools before/after persistence with
     assert.equal(interruptedRow.activity, interrupted, 'interrupted activity preserves preparing calls that never dispatched');
   }
 });
+
+test('folded historical failures retain their canonical detail identity and original tool process', async () => {
+  const { replyDetailsRow } = await import('./botActivityState.ts');
+  const turn = normalizeBotMessage({ id: 't-old', kind: 'agent_turn', turnId: 't-old', rounds: [{ toolCalls: [{ name: 'verify_session', input: {}, result: { ok: false, error: 'verifier_timeout' } }] }] })!;
+  const failure = normalizeBotMessage({ id: 't-old-card', kind: 'system_card', turnId: 't-old', content: '真实原始错误', cards: [{ cardId: 'failed', kind: 'agent_unavailable', content: 'verifier_timeout', actions: [] }] })!;
+  const row = replyDetailsRow(failure.id, [], [turn, failure]);
+  assert.equal(row?.type, 'message');
+  if (row?.type !== 'message') return;
+  assert.equal(row.message.id, failure.id);
+  assert.equal(row.processRounds?.[0]?.toolCalls[0]?.name, 'verify_session');
+  assert.equal(replyDetailsRow('absent', [], [turn, failure]), undefined);
+});

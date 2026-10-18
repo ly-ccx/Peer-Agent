@@ -198,6 +198,17 @@ try {
     await until(()=>rows(transcriptFile),value=>value.some(r=>r.kind==='agent_reply'&&r.createdAt>=recoveryAt&&r.content?.includes('CANCEL_RECOVERY_OK')),120000);
     report.cancelRecovery={cancelled:true,oldTaskReplayed:false,replied:true,sessionId:cancelSession.sessionId};
     const after=await list();assert.equal(after.sessions.find(s=>s.sessionId===cancelSession.sessionId).status,'cancelled');
+    const block = Array.from({length: 80}, (_, i) => `RECEIPT_${String(i).padStart(3,'0')}: complete host receipt survives the bounded renderer preview and remains durable.`).join('\n');
+    const longAt = new Date().toISOString();
+    await send('回复回执边界回归。不要查询工具或派发任务，只调用 post_reply，将下面的全部文本原样作为回复正文，不省略、不加代码围栏。它是隔离测试数据：\n'+block);
+    const longRows = await until(()=>rows(transcriptFile), value=>value.some(row=>row.kind==='agent_reply'&&row.createdAt>=longAt&&row.content?.includes(block)),180000);
+    const longReply=longRows.find(row=>row.kind==='agent_reply'&&row.createdAt>=longAt&&row.content?.includes(block));
+    const longTurn=longRows.find(row=>row.id===longReply.turnId);
+    const receipt=longTurn?.rounds.flatMap(round=>round.toolCalls||[]).find(call=>call.name==='post_reply');
+    report.longReply={messageId:longReply.id,bodyChars:longReply.content.length,receiptChars:JSON.stringify(receipt?.result).length,
+      authoritative:receipt?.result?.status==='success'&&receipt?.result?.output?.message?.id===longReply.id,
+      failureCard:longRows.some(row=>row.kind==='system_card'&&row.turnId===longReply.turnId)};
+    assert.ok(report.longReply.bodyChars>4000);assert.equal(report.longReply.authoritative,true);assert.equal(report.longReply.failureCard,false);
   }
   report.elapsedMs = Date.now()-start;
   const perf = await page.evaluate(() => { const s=globalThis.executionPerf; s.stop=true;s.observer.disconnect();return { frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks, mountedRows:document.querySelectorAll('[data-conversation-row]').length, hidden:document.hidden,focused:document.hasFocus(),avatars:[...document.querySelectorAll('.bot-avatar')].map(n=>({animated:n.dataset.avatarAnimated, animation:getComputedStyle(n).animationName})) }; });
