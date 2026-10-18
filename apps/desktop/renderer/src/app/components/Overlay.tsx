@@ -138,14 +138,28 @@ export function Overlay({
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [anchor, closeOnBackdrop, requestClose]);
 
-  // 进入退场态后启动兜底定时器；时长略大于退场动画（--za-motion-fast=120ms）。
+  // Start the duration fallback after the native animation is ready. Under
+  // renderer load its pending start may outlast the old duration-only timer.
   useEffect(() => {
     if (!closing) return undefined;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) { finishClose(); return undefined; }
-    const durations = panelRef.current?.getAnimations().map(animation => animation.effect?.getComputedTiming().endTime)
-      .filter((duration): duration is number => typeof duration === 'number' && Number.isFinite(duration)) ?? [];
-    fallbackTimer.current = setTimeout(finishClose, Math.max(240, ...durations.map(duration => duration + 60)));
+    let current = true;
+    const animations = panelRef.current?.getAnimations() ?? [];
+    // A broken/never-started animation must still release the overlay.
+    fallbackTimer.current = setTimeout(finishClose, 2000);
+    void Promise.allSettled(animations.map(animation => animation.ready)).then(() => {
+      if (!current) return;
+      const remaining = animations.map(animation => {
+        const end = animation.effect?.getComputedTiming().endTime;
+        const time = typeof animation.currentTime === 'number' ? animation.currentTime : 0;
+        return typeof end === 'number' && Number.isFinite(end)
+          ? Math.max(0, end - time) / (Math.abs(animation.playbackRate) || 1) : 0;
+      });
+      if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
+      fallbackTimer.current = setTimeout(finishClose, Math.max(240, ...remaining.map(duration => duration + 60)));
+    });
     return () => {
+      current = false;
       if (fallbackTimer.current) {
         clearTimeout(fallbackTimer.current);
         fallbackTimer.current = null;
