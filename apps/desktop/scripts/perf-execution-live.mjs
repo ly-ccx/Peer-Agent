@@ -87,6 +87,9 @@ try {
     const composer = page.locator('.bot-composer textarea');
     if (await composer.isVisible()) { await composer.click(); await composer.press('a'); report.interactions++; if (report.interactions % 12 === 0) await composer.fill(''); }
     await page.locator('.bot-convo').evaluate(node => { node.scrollTop = Math.max(0, node.scrollTop - 120); });
+    if (!drawerOpened) {
+      for (const selector of ['.bot-background-work:not([open]) > summary','.bot-work-row:not([open]) > summary']) { const trigger=page.locator(selector).first(); if(await trigger.isVisible()) await trigger.click(); }
+    }
     if (!drawerOpened && await page.getByRole('button', { name: /查看任务详情/ }).count()) {
       await page.getByRole('button', { name: /查看任务详情/ }).last().click(); drawerOpened = true;
     }
@@ -124,7 +127,7 @@ try {
   const cpuEnd = await metrics(); report.cpu = cpuEnd.map(m => ({ type:m.type,cpuPercent:100000*(m.cpu-(cpuStart.find(p=>p.pid===m.pid)?.cpu ?? m.cpu))/report.elapsedMs }));
   const history = rows(transcriptFile); report.toolCalls = history.filter(r=>r.kind==='agent_turn').flatMap(t=>t.rounds?.flatMap(r=>r.toolCalls?.map(c=>c.name)||[])||[]);
   report.sessionsFile = existsSync(sessionsFile) ? sessionsFile : null;
-  report.ok = finished && report.cancelRecovery?.replied === true && report.interactions >= 5 && report.renderer.inputPaintMs.p95 < 100 && report.renderer.frames.p95 < 32 && report.pageErrors.length === 0;
+  report.ok = finished && drawerOpened && report.cancelRecovery?.replied === true && report.interactions >= 5 && report.renderer.inputPaintMs.p95 < 100 && report.renderer.frames.p95 < 32 && report.pageErrors.length === 0;
 } catch (error) { report.ok=false; report.error=error.message; }
 finally {
   if (app) await app.close().catch(()=>{});
