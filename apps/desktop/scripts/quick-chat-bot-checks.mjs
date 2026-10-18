@@ -7,12 +7,24 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
   const bot = quick.getByRole('button', { name: '选择机器人', exact: true });
   const model = quick.getByRole('button', { name: '选择机器人模型', exact: true });
   const strength = quick.getByRole('button', { name: '思考强度', exact: true });
+  // This real native window intentionally hides on external blur. Keep the
+  // window being inspected visible when the shared desktop changes focus; do
+  // not inject a shown event, which would refresh/reset the state under test.
+  const focusQuick = async () => {
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find(win => new URL(win.webContents.getURL()).searchParams.get('window') === 'quick-chat');
+      if (!win) throw Error('Quick Chat window missing');
+      win.show(); win.focus();
+    });
+    await quick.bringToFront();
+  };
   // Keep the real Menu construction and selection callbacks, avoiding OS focus in deterministic tests.
   await app.evaluate(({ Menu }) => {
     globalThis.rcQuickOriginalPopup = Menu.prototype.popup;
     Menu.prototype.popup = function (options) { globalThis.rcQuickMenu = this; globalThis.rcQuickMenuOptions = options; };
   });
   const selectNative = async (trigger, label) => {
+    await focusQuick();
     await app.evaluate(() => { delete globalThis.rcQuickMenu; return true; });
     await trigger.focus(); await trigger.press('Enter');
     await until(() => app.evaluate(() => Boolean(globalThis.rcQuickMenu)), Boolean);
@@ -28,9 +40,11 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
     await until(() => model.isEnabled(), Boolean);
   };
   const selectModel = async label => {
+    await focusQuick();
     await model.click();
     const pop = await until(() => app.windows().find(page => new URL(page.url()).searchParams.get('window') === 'quick-chat-popover'), Boolean);
     await pop.getByRole('button', { name: label, exact: true }).click();
+    await focusQuick();
     await until(() => model.isEnabled(), Boolean);
   };
   try {
@@ -50,6 +64,7 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
     assert.equal(saved.modelPolicy.overrides.project_agent.modelProviderId, second.id);
     if (failNext) {
       failNext(); await selectModel('RC Bot model A');
+      await focusQuick();
       await quick.getByRole('alert').getByText('模型设置未保存，请重试。', { exact: true }).waitFor();
       assert.equal(await model.textContent(), 'RC Bot model B');
       assert.deepEqual(await getBot(fixture.bots[0].workspaceId), saved);
@@ -63,6 +78,7 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
     await quick.locator('textarea').focus();
     await quick.mouse.move(700, 2);
     for (const appearance of ['dark', 'light']) {
+      await focusQuick();
       await quick.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
       await until(() => quick.locator('.quick-chat-selectors button').evaluateAll(buttons =>
         buttons.every(button => getComputedStyle(button).backgroundColor === 'rgba(0, 0, 0, 0)')), Boolean);
