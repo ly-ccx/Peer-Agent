@@ -9,6 +9,7 @@ import { _electron } from 'playwright-core';
 import { prepareLabIsolation } from './lab-workspace-isolate.mjs';
 import { seedBotShellHome } from './seed-bot-shell-home.mjs';
 import { seedExecutionHistory } from './seed-execution-history.mjs';
+import { seedExecutionWorkload } from './seed-execution-workload.mjs';
 const arg = flag => { const i = process.argv.indexOf(flag); return i < 0 ? null : process.argv[i + 1]; };
 assert.ok(arg('--model-id'), 'Explicit configured --model-id required');
 const source = fileURLToPath(new URL('../../..', import.meta.url));
@@ -50,7 +51,7 @@ try {
   writeFileSync(path.join(project, 'README.md'), '# Isolated performance acceptance\nImplement sumNumbers(values). Empty arrays return 0, finite numbers sum, non-number/nonfinite input throws TypeError. Fix implementation and run node --test.\n');
   writeFileSync(path.join(project, 'src/sum.mjs'), 'export function sumNumbers(values) { return values.reduce((a,b) => a+b); }\n');
   writeFileSync(path.join(project, 'sum.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; import {sumNumbers} from './src/sum.mjs'; test('sum',()=>{assert.equal(sumNumbers([1,2,3]),6);assert.equal(sumNumbers([]),0);assert.throws(()=>sumNumbers([1,'2']),TypeError);assert.throws(()=>sumNumbers([Infinity]),TypeError);});\n");
-  if (largeHistory) report.historyScale = seedExecutionHistory({ home, bot });
+  if (largeHistory) { report.historyScale = seedExecutionHistory({ home, bot }); seedExecutionWorkload(project); report.workload = 'three implementation files; 18 test cases including 20000-row aggregation and CSV integration'; }
   const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
   cpSync(path.join(source, 'apps/desktop/dist'), isolation.launch.distDir, { recursive: true });
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
@@ -86,7 +87,9 @@ try {
     document.addEventListener('wheel', event => { if (!event.target.closest('.bot-thread')) return; const at=event.timeStamp; requestAnimationFrame(() => state.wheels.push(performance.now()-at)); }, { passive: true });
   });
   report.taskStartedAt = new Date().toISOString();
-  const text = '这是已授权的隔离项目修复任务。请让一个独立子 Agent 接手：读取 README.md、src/sum.mjs 和 sum.test.mjs，修复 sumNumbers，运行 node --test，按结果完成验收。只改这个测试项目。主 Bot 收到结果后交付总结，不要停在调研或方案。';
+  const text = largeHistory
+    ? '这是已授权的隔离项目多文件修复任务。请让一个独立子 Agent 接手：读取 README.md 和所有测试，修复 src/sum.mjs、src/group-events.mjs、src/render-csv.mjs，保留全部测试断言，实际运行 node --test。完成标准为现有可执行测试全部通过和系统原有独立复核门禁，不另加没有可执行检查方式的业务要求。只改本项目 src 下的实现。若复核失败，读取具体失败原因并在原任务继续修复，不要开重复补救任务。主 Bot 在实际验收后交付结果。'
+    : '这是已授权的隔离项目修复任务。请让一个独立子 Agent 接手：读取 README.md、src/sum.mjs 和 sum.test.mjs，修复 sumNumbers，运行 node --test，按结果完成验收。只改这个测试项目。主 Bot 收到结果后交付总结，不要停在调研或方案。';
   await page.locator('.bot-composer textarea').fill(text); await page.locator('.bot-composer textarea').press('Enter');
   const transcriptFile = path.join(home, 'conversations', bot.conversationId + '.jsonl');
   const sessionsFile = path.join(home, 'project-runtime', bot.workspaceId, 'work-sessions.json');
@@ -132,6 +135,7 @@ try {
   const doneSessions = await page.evaluate(workspaceId=>window.peerAgent.projectAgentListSessions({workspaceId}),bot.workspaceId);
   report.sessions=doneSessions.sessions?.map(s=>({sessionId:s.sessionId,status:s.status,conversationId:s.conversationId}));
   for(const session of doneSessions.sessions||[]) {
+    if (report.historyScale?.sessions.some(row => row.sessionId === session.sessionId)) continue;
     const view=await page.evaluate(id=>window.peerAgent.conversationsGet({id}),session.conversationId);
     report.frozenEffort={worker:session.origin?.modelSelection?.worker?.reasoningEffort,conversation:view.effort};
     assert.equal(view.effort,session.origin.modelSelection.worker.reasoningEffort);
@@ -175,6 +179,17 @@ try {
     && report.interaction.wheelRoundTripMs.p95 < 100 && report.renderer.wheelPaintMs.p95 < 100;
 } catch (error) { report.ok=false; report.error=error.message; }
 finally {
+  if (page && !report.renderer) {
+    try {
+      const perf = await page.evaluate(() => { const s=globalThis.executionPerf; if(!s)return null;s.stop=true;s.observer.disconnect();
+        return {frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks,hidden:document.hidden,focused:document.hasFocus()}; });
+      if (perf) {
+        report.renderer = {frames:distribution(perf.frames),inputPaintMs:distribution(perf.inputs),wheelPaintMs:distribution(perf.wheels),longTasks:perf.longTasks,hidden:perf.hidden,focused:perf.focused};
+        report.interaction = {keyRoundTripMs:distribution(keyRoundTrips),wheelRoundTripMs:distribution(wheelRoundTrips),scrollMovedSamples:scrollChanges.filter(n=>n>0).length};
+        report.elapsedMs = Date.now()-Date.parse(report.taskStartedAt);
+      }
+    } catch(error) { report.perfCaptureError=error.message; }
+  }
   if (app) await app.close().catch(()=>{});
   for (const file of ['credentials.vault.json','credentials.vault.lock','device-identity.json','llm-providers.json']) rmSync(path.join(home,file),{force:true});
   report.credentialCopiesRemoved = true; report.finishedAt=new Date().toISOString();

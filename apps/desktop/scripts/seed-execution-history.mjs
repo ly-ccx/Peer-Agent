@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync, openSync, writeSync, closeSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { createGoalPlanStore } from '@peer-agent/runtime-node';
 
@@ -9,6 +10,10 @@ export const EXECUTION_HISTORY_SCALE = Object.freeze({ plans: 1100, sessions: 8,
 
 /** Synthetic historical load only. Never seeds results for the new real task. */
 export function seedExecutionHistory({ home, bot, scale = EXECUTION_HISTORY_SCALE }) {
+  const personal = path.join(homedir(), '.peer-agent');
+  assert.ok(path.resolve(home) !== personal && !path.resolve(home).startsWith(personal + path.sep), 'personal home is forbidden');
+  const fixture = JSON.parse(readFileSync(path.join(home, 'rc-fixture.json'), 'utf8'));
+  assert.ok(fixture.fixture === true && fixture.bots.some(row => row.workspaceId === bot.workspaceId && row.conversationId === bot.conversationId), 'existing isolated fixture identity required');
   const conversations = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const plans = createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') });
   const at = '2026-01-01T00:00:00.000Z', sessions = [];
