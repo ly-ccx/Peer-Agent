@@ -1,7 +1,7 @@
 import { verificationDispatchTarget } from './verification-dispatch-recovery.mjs';
 import { randomUUID } from 'node:crypto';
 import { executionBindingCurrent } from './coordination-kernel.mjs';
-import { resolveWorkBudgetPolicy, effectiveWorkLimits, budgetBoundary, legacyBudgetMigration } from './work-budget-policy.mjs';
+import { resolveWorkBudgetPolicy, effectiveWorkLimits, budgetBoundary, budgetReservationBoundary, legacyBudgetMigration } from './work-budget-policy.mjs';
 export { DEFAULT_WORK_BUDGET } from './work-budget-policy.mjs';
 
 // Host registry contains local ports, never model supplied policy. Desktop and TUI share this seam.
@@ -22,7 +22,8 @@ export function workBudgetCanResume(work, limits) {
   const current = effectiveWorkLimits(budget, limits);
   const increased = Boolean(legacyBudgetMigration(work, limits)) || caps.some(([cap]) =>
     Number.isFinite(previous[cap]) && Number.isFinite(current[cap]) && current[cap] > previous[cap]);
-  return increased && !budgetBoundary(budget, current);
+  const reservationReleased = budget.lastBoundary?.reason === 'reservation_pending' && !Object.keys(budget.attempts || {}).length;
+  return (increased || reservationReleased) && !budgetBoundary(budget, current);
 }
 export function createWorkBudgetGuard(profile) {
   if (!profile?.workId) return null;
@@ -67,7 +68,7 @@ export function createWorkBudgetGuard(profile) {
         // A token/cost cap reserves the remaining measurable allowance for one attempt.
         // Other roles cannot concurrently read and spend that same allowance.
         if ((limits.maxTokens !== undefined || limits.maxCostUsd !== undefined)
-          && Object.keys(budget.attempts).some(id => id !== attemptId)) limited();
+          && Object.keys(budget.attempts).some(id => id !== attemptId)) limited(budgetReservationBoundary(budget));
         budget.modelRequests++;
         if (metadata?.accounting === 'physical_dispatch') physicalDispatchAccounting = true;
         budget.attempts[attemptId] = { ...budget.attempts[attemptId], role: profile.role, planId: profile.planId, sessionId: profile.sessionId,

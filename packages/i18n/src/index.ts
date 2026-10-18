@@ -276,6 +276,8 @@ export type TranslationKey =
   | 'projectAgent.chat.budgetTokens'
   | 'projectAgent.chat.budgetCost'
   | 'projectAgent.chat.budgetReady'
+  | 'projectAgent.chat.budgetReserved'
+  | 'projectAgent.chat.budgetAvailable'
   | 'projectAgent.chat.recoveryLegacyLimit'
   | 'projectAgent.chat.budgetSourceSettings'
   | 'projectAgent.chat.budgetSourceStored'
@@ -1803,6 +1805,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.noProgress': '连续检查没有取得新进展，已停止重复执行。已有结果已保留。',
     'projectAgent.chat.budgetExhausted': '这项工作已达到配置的预算限制，已有进展已保留。调整限制后可继续。',
     'projectAgent.chat.budgetReady': '预算限制已调整，可以接着已有进展继续。',
+    'projectAgent.chat.budgetReserved': '预算暂由另一项执行占用，已有进展已保留。',
+    'projectAgent.chat.budgetAvailable': '预算占用已释放，可以接着已有进展继续。',
     'projectAgent.chat.recoveryLegacyLimit': '旧版本的执行限制曾中断这次回复，已有进展已保留。',
     'projectAgent.chat.budgetSourceSettings': '来源：执行预算设置。',
     'projectAgent.chat.budgetSourceStored': '来源：保留的预算配置。',
@@ -3123,6 +3127,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.noProgress': 'Repeated checks produced no new progress, so repetition has stopped. Existing results are saved.',
     'projectAgent.chat.budgetExhausted': 'This work reached its configured budget limit. Progress was saved. Adjust the limit to continue.',
     'projectAgent.chat.budgetReady': 'The budget limit was adjusted. You can continue from saved progress.',
+    'projectAgent.chat.budgetReserved': 'Another execution currently reserves the budget. Progress was saved.',
+    'projectAgent.chat.budgetAvailable': 'The budget reservation was released. You can continue from saved progress.',
     'projectAgent.chat.recoveryLegacyLimit': 'An older execution limit interrupted this reply. Progress was saved.',
     'projectAgent.chat.budgetSourceSettings': 'Source: execution budget settings.',
     'projectAgent.chat.budgetSourceStored': 'Source: retained budget configuration.',

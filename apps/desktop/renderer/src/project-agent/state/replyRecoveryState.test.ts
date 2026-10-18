@@ -14,6 +14,9 @@ test('explicit limit facts explain usage and never offer an inadmissible retry',
   assert.equal(agentFailurePresentation({ ...card, recoveryAction: { canContinue: true } }).messageKey, 'projectAgent.chat.budgetReady');
   assert.equal(agentFailurePresentation({ ...card, recoveryAction: { canContinue: true } }).retryAllowed, true);
   assert.equal(agentFailurePresentation({ ...card, recoveryAction: undefined }).retryAllowed, false);
+  const reserved = { ...action, budget: { ...action.budget!, metric: 'costUsd' as const, used: 3, limit: 10, reason: 'reservation_pending' as const } };
+  assert.equal(agentFailurePresentation({ ...card, recoveryAction: reserved }).messageKey, 'projectAgent.chat.budgetReserved');
+  assert.equal(agentFailurePresentation({ ...card, recoveryAction: { ...reserved, canContinue: true } }).messageKey, 'projectAgent.chat.budgetAvailable');
 });
 
 test('unknown usage is not zero and malformed host diagnostics do not become public budget facts', () => {

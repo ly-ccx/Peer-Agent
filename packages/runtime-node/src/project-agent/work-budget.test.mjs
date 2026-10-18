@@ -4,7 +4,28 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
-import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
+import { registerWorkBudget, createWorkBudgetGuard, workBudgetCanResume, workBudgetBinding } from './work-budget.mjs';
+
+test('an explicit cost reservation is temporary and release can resume without raising the limit', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'reserved-work-budget-'));
+  const store = createWorkCoordinationStore({ rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one' });
+  const release = registerWorkBudget('w', store, { maxCostUsd: 10 });
+  store.saveWork({ workId: 'goal', state: 'runnable' });
+  const profile = { workspaceId: 'w', workId: 'goal', role: 'work_session' };
+  try {
+    const first = createWorkBudgetGuard(profile), second = createWorkBudgetGuard(profile);
+    first.beforeRequest();
+    assert.throws(() => second.beforeRequest(), error => error.boundary.reason === 'reservation_pending');
+    second.finish();
+    store.saveWork({ ...store.read().works.goal, state: 'budget_limited' });
+    const limits = workBudgetBinding('w').limits;
+    assert.equal(workBudgetCanResume(store.read().works.goal, limits), false);
+    first.finish({ totalTokens: 2, estimatedCostUsd: 3 });
+    const saved = store.read().works.goal;
+    assert.equal(saved.budget.modelRequests, 1); assert.equal(saved.budget.costUsd, 3);
+    assert.equal(workBudgetCanResume(saved, limits), true);
+  } finally { release(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test('unknown child effects fence that executor while coordinator and unrelated child retain compute',()=>{
   const root=mkdtempSync(path.join(os.tmpdir(),'scoped-work-budget-'));

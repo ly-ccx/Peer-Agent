@@ -39,6 +39,14 @@ export function budgetBoundary(budget = {}, limits = DEFAULT_WORK_BUDGET, keys =
   return null;
 }
 
+export function budgetReservationBoundary(budget) {
+  const limits = budget.limits;
+  if (limits.maxCostUsd === undefined && limits.maxTokens === undefined) return undefined;
+  const metric = limits.maxCostUsd !== undefined ? 'costUsd' : 'tokens';
+  return { metric, used: budget[metric] ?? 0, limit: limits[metric === 'costUsd' ? 'maxCostUsd' : 'maxTokens'],
+    source: limits.source, reason: 'reservation_pending' };
+}
+
 /** Adds policy provenance only. The coordinator must separately admit a stopped work. */
 export function legacyBudgetMigration(work, policy, at = new Date().toISOString()) {
   const budget = work?.budget;

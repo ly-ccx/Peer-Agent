@@ -89,7 +89,9 @@ export function agentFailurePresentation(card: BotChatCard): { messageKey: Trans
     configuration: 'projectAgent.chat.recoveryConfiguration',
     invalid_request: 'projectAgent.chat.recoveryInvalidRequest',
     permission: 'projectAgent.chat.recoveryPermission',
-    budget_exhausted: card.recoveryAction?.canContinue ? 'projectAgent.chat.budgetReady'
+    budget_exhausted: card.recoveryAction?.budget?.reason === 'reservation_pending'
+      ? card.recoveryAction.canContinue ? 'projectAgent.chat.budgetAvailable' : 'projectAgent.chat.budgetReserved'
+      : card.recoveryAction?.canContinue ? 'projectAgent.chat.budgetReady'
       : card.recoveryAction?.budget?.reason === 'usage_unknown' ? 'projectAgent.chat.budgetUnconfirmed'
       : card.recoveryAction?.budget ? 'projectAgent.chat.budgetExhausted' : 'projectAgent.chat.recoveryLegacyLimit',
     execution_outcome_unknown: 'projectAgent.chat.recoveryUnknownOutcome',
