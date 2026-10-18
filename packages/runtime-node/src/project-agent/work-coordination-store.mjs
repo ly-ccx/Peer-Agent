@@ -5,6 +5,7 @@ import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { admitCoordinationDecision } from './coordination-kernel.mjs';
 import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
+import { createRecoveryCheckpointView } from './recovery-checkpoint-view.mjs';
 
 export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString(), onJournalRead }) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)) throw new Error('invalid_workspace');
@@ -12,6 +13,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   const file = path.join(dir, 'coordination.jsonl');
   const epoch = leaseEpoch();
   const reader = createCoordinationJournalReader({ file, onRead: onJournalRead });
+  const readRecoveryCheckpoint = createRecoveryCheckpointView(path.join(dir, 'checkpoints'));
   function assertOwner() {
     if (holdsLease() !== true || !epoch || leaseEpoch() !== epoch) throw new Error('coordination_lease_lost');
   }
@@ -65,7 +67,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     return next;
   }
   return {
-    read, append, assertOwner, recover, journalFile: file,
+    read, append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint,
     coalesceWorks(owner, retired) {
       const state = read();
       const stamp = work => ({ ...work, revision: (state.works[work.workId]?.revision || 0) + 1, updatedAt: now() });

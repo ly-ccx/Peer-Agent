@@ -6,6 +6,7 @@ import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
 import { createDelegatedPlanCatalog } from './delegated-plan-catalog.mjs';
 import { createSessionReadQuery } from './session-read-query.mjs';
+import { createSessionConversationFacts } from './session-conversation-facts.mjs';
 import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
@@ -121,6 +122,8 @@ export function createSessionSupervisor({
   }
   const readQuery = createSessionReadQuery();
   const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id) });
+  const conversationFacts = createSessionConversationFacts(conversationStore);
+  const readConversationFacts = id => readQuery.memo(`conversation:${id}`, () => conversationFacts(id));
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
   const communication = createAgentCommunication({ conversationStore, goalPlanStore, goalRunner, findSession: findBySession,
@@ -247,7 +250,7 @@ export function createSessionSupervisor({
   function project(plan, plans = null) {
     const origin = plan.delegationOrigin;
     const coordinationFacts = coordination?.forSession(origin.workspaceId, origin.sessionId);
-    const conversation = conversationStore.getConversation?.(plan.conversationId);
+    const conversation = readConversationFacts(plan.conversationId);
     const session = projectWorkSession(snapshotOf(plan), {
       sessionId: origin.sessionId,
       workspaceId: origin.workspaceId || '',
@@ -270,15 +273,11 @@ export function createSessionSupervisor({
   }
 
   function interventionsOf(conversationId) {
-    const history = conversationStore.getPersistedConversationHistory?.(conversationId);
-    const messages = Array.isArray(history?.messages) ? history.messages : [];
-    return messages
-      .filter((message) => typeof message?.answerTo === 'string' && message.answerTo && message.id)
-      .map((message) => ({ id: message.id }));
+    return readConversationFacts(conversationId)?.interventions || [];
   }
 
   function buildReport(plan, session) {
-    const history = conversationStore.getPersistedConversationHistory?.(plan.conversationId);
+    const history = readConversationFacts(plan.conversationId);
     return buildSessionReport(plan, session, history);
   }
 

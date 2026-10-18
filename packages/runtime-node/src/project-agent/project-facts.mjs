@@ -10,24 +10,31 @@ import path from 'node:path';
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
 export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[],
   readCoordination, now = () => new Date().toISOString(),
-  readCoordinationCheckpoint = (workspaceId, ref) => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).readCheckpoint(ref) }) {
+  readCoordinationCheckpoint = null }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
   const readers = new Map();
-  const coordinationFor = workspaceId => {
-    if (readCoordination) return readCoordination(workspaceId);
+  const storeFor = workspaceId => {
     const file = path.join(runtimeRoot || pathOf('projectRuntime'), workspaceId, 'coordination.jsonl');
     const owner = workBudgetBinding(workspaceId)?.store;
-    if (owner?.journalFile === file) return owner.read();
+    if (owner?.journalFile === file) return owner;
     const reader = readers.get(workspaceId) || createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId });
     readers.delete(workspaceId); readers.set(workspaceId, reader);
     if (readers.size > 16) readers.delete(readers.keys().next().value);
-    return reader.read();
+    return reader;
   };
+  const coordinationFor = workspaceId => readCoordination ? readCoordination(workspaceId) : storeFor(workspaceId).read();
+  const checkpointFor = (workspaceId, ref) => readCoordinationCheckpoint
+    ? readCoordinationCheckpoint(workspaceId, ref) : storeFor(workspaceId).readRecoveryCheckpoint(ref);
+  const messageFacts = typeof conversationStore.createHistoryProjection === 'function'
+    ? conversationStore.createHistoryProjection(history => history.messages.map(message => message.kind === 'agent_turn'
+      ? { id: message.id, kind: message.kind, meta: message.meta, turnKind: message.turnKind }
+      : (({ attachments, ...fact }) => fact)(message)))
+    : id => conversationStore.getPersistedConversationHistory(id)?.messages || [];
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
     const rows = sessions(workspaceId);
     const profile = profileStore.read(workspaceId);
-    const messages = conversationStore.getPersistedConversationHistory(profile?.agentConversationId)?.messages || [];
+    const messages = messageFacts(profile?.agentConversationId) || [];
     return {
       reportedMessages: messages.filter(message => message.kind === 'agent_reply'),
       sessionIds: rows.map((row) => row.sessionId),
@@ -48,7 +55,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
   }
   function cards(workspaceId) {
     const profile = profileStore.read(workspaceId);
-    const messages = conversationStore.getPersistedConversationHistory(profile?.agentConversationId)?.messages || [];
+    const messages = messageFacts(profile?.agentConversationId) || [];
     const replies = messages.filter((message) => message.kind === 'agent_reply').map((message) => ({
       ...message,
       ...(message.question ? { question: { ...message.question,
@@ -94,9 +101,11 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       const failureStatus = replyFailureStatus(message, messages, works, coordination.deliveries || {}, rows, now());
       const superseded = ['superseded', 'recovered', 'cancelled', 'paused'].includes(failureStatus.phase);
       let checkpoint;
-      try { if (work?.checkpointRef) checkpoint = readCoordinationCheckpoint(workspaceId, work.checkpointRef); } catch { /* admission reports unavailable */ }
-      const admission = replyRecoveryAdmission(work, checkpoint, { limits: workBudgetBinding(workspaceId)?.limits,
-        readCheckpoint: ref => readCoordinationCheckpoint(workspaceId, ref) });
+      const terminal = ['delivered', 'cancelled', 'waiting_user', 'coalesced'].includes(work?.state);
+      try { if (!superseded && !terminal && work?.checkpointRef) checkpoint = checkpointFor(workspaceId, work.checkpointRef); } catch { /* admission reports unavailable */ }
+      const admission = superseded || terminal ? { ok: false, code: 'STALE_TURN' }
+        : replyRecoveryAdmission(work, checkpoint, { limits: workBudgetBinding(workspaceId)?.limits,
+          readCheckpoint: ref => checkpointFor(workspaceId, ref) });
       const recoveryAction = { canContinue: !superseded && admission.ok,
         ...(!admission.ok ? { blockedReason: admission.code } : {}), ...(admission.budget ? { budget: admission.budget } : {}) };
       let recovery = !superseded ? work?.recovery : undefined;

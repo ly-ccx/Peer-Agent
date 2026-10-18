@@ -177,6 +177,9 @@ export interface ConversationStore {
   readInheritedBackground?(snapshotId: string): InheritedBackgroundSnapshot;
   /** Persisted records before any streaming sidecar target; still requires runtime liveness checks. */
   getPersistedConversationHistory?(id: string): PersistedConversationHistory | null;
+  /** Compact presentation cache; does not attest permissions, runtime liveness or acceptance. */
+  createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
+    options?: { maxEntries?: number; maxBytes?: number }): (id: string) => T | null;
   /** Current index batch; no cross-file transaction or permission/liveness attestation. */
   getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;

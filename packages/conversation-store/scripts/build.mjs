@@ -11,6 +11,7 @@ const runtimeFiles = [
   'index.d.ts',
   'selection-reference.mjs',
   'persisted-history.mjs',
+  'history-projection-reader.mjs',
   'inherited-background.mjs',
   'background-snapshot-store.mjs',
   'conversation-file-lock.mjs',

@@ -274,14 +274,16 @@ export function registerDesktopProjectAgent({
     onWrote: memoryChanged,
   });
   const classicGoals = createClassicGoalProjection({ registry, conversationStore, goalPlanStore });
+  const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
     readMessages: (conversationId) => (
-      conversationStore.getPersistedConversationHistory(conversationId)?.messages || []
+      botHistory ? botHistory(conversationId) || [] : conversationStore.getPersistedConversationHistory(conversationId)?.messages || []
     ),
-    readMessagesBatch: typeof conversationStore.getPersistedConversationHistories === 'function'
-      ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
+    readMessagesBatch: botHistory ? ids => new Map(ids.map(id => [id, botHistory(id) || []]))
+      : typeof conversationStore.getPersistedConversationHistories === 'function'
+        ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
     readSessionsBatch: ids => supervisor.listByWorkspaceIds(ids),
     getSession: (sessionId) => supervisor.get({ sessionId }),
