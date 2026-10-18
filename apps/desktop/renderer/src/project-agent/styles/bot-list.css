@@ -437,8 +437,7 @@
   width: 100%;
   height: 100%;
   overflow: visible;
-  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--bot-avatar-accent) 24%, transparent));
-  animation: bot-avatar-breathe 4.6s ease-in-out infinite;
+  filter: none;
 }
 
 .bot-avatar-body,
@@ -476,7 +475,6 @@
 .bot-avatar-eye {
   transform-box: fill-box;
   transform-origin: center;
-  animation: bot-avatar-blink 5.8s ease-in-out infinite;
 }
 
 .bot-avatar-mouth {
@@ -528,7 +526,7 @@
 
 .bot-avatar:hover svg,
 .bot-row:hover .bot-avatar svg {
-  filter: drop-shadow(0 3px 5px color-mix(in srgb, var(--bot-avatar-accent) 42%, transparent));
+  opacity: 0.94;
 }
 
 .bot-avatar:active svg,
@@ -1147,6 +1145,7 @@
   opacity: 0.45;
 }
 
+.bot-avatar[data-avatar-animated="false"],
 .bot-avatar[data-avatar-animated="false"] svg,
 .bot-avatar[data-avatar-animated="false"] .bot-avatar-eye,
 .bot-avatar[data-avatar-animated="false"] .bot-avatar-thought { animation: none; }

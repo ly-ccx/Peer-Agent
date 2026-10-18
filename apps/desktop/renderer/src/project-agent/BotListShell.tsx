@@ -421,7 +421,7 @@ export function BotListShell({
           <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
               <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
-                mood={replyFlash === opened.workspaceId ? 'reply' : botAvatarMood(opened.state)} />
+                animate mood={replyFlash === opened.workspaceId ? 'reply' : botAvatarMood(opened.state)} />
               <p className="bot-main-title">{opened.profile.displayName}</p>
               <button
                 ref={profileButtonRef}
