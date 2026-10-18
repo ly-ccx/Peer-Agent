@@ -360,11 +360,11 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const readingStep = detail.locator('.bot-tool-step[data-status="running"]');
   await readingStep.waitFor();
   await checkReplyPresence({ page, reply: live, report, until, state: 'reading-docked', label: '正在阅读 README.md' });
-  const shine = readingStep.locator('.bot-tool-step-label');
-  assert.equal(await shine.evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
-  const position = await shine.evaluate(node => getComputedStyle(node).backgroundPosition);
+  const runningLabel = readingStep.locator('.bot-tool-step-label');
+  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).animationName), 'none');
+  const position = await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition);
   await page.waitForTimeout(200);
-  assert.notEqual(await shine.evaluate(node => getComputedStyle(node).backgroundPosition), position);
+  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition), position);
   await readingStep.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
   await readingStep.locator('.bot-tool-preview > summary').click();
   await readingStep.getByText('调用正在进行，返回内容到达后会显示在这里。', { exact: true }).waitFor();
@@ -375,10 +375,10 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await live.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'stream-tool-running-expanded.png') });
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'conversation-details.png') });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  assert.equal(await shine.evaluate(node => getComputedStyle(node).animationName), 'none');
-  assert.notEqual(await shine.evaluate(node => getComputedStyle(node).opacity), '0');
+  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).animationName), 'none');
+  assert.notEqual(await runningLabel.evaluate(node => getComputedStyle(node).opacity), '0');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  checks.push('running tool scans over actual target; keyboard opens step and parameters before result; reduced motion remains readable');
+  checks.push('running tool shows its actual target without continuous paint animation; keyboard opens step and parameters before result; reduced motion remains readable');
   if (await page.locator('.bot-thread-latest').count()) await page.locator('.bot-thread-latest').click();
   // Keyboard focus may leave us near the end (within the follow threshold),
   // without a latest button. Scroll to the actual end before testing history.
