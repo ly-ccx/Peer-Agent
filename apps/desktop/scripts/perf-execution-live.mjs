@@ -157,12 +157,13 @@ try {
       const mutations = (async () => {
         const commits=[];
         for (let iteration=0; iteration<4; iteration++) {
-        const result = await app.evaluate(async ({ app }, { home, id }) => {
-      const require = process.getBuiltinModule('node:module').createRequire(app.getAppPath() + '/package.json');
-      const store = require('@peer-agent/conversation-store').createConversationStore({ storeDir: home + '/conversations' });
-      const at = performance.now(); const receipt = await store.commitStreamingMessage(id, 'scale-report', { content: 'Synthetic historical report after a durable performance test commit.' });
-      return { durationMs: performance.now()-at, messageId: receipt.messageId, contentRevision: receipt.contentRevision };
-        }, { home, id: report.historyScale.sessions[0].conversationId });
+          const result = await app.evaluate(async ({ app }, { home, id }) => {
+            const require = process.getBuiltinModule('node:module').createRequire(app.getAppPath() + '/package.json');
+            const store = require('@peer-agent/conversation-store').createConversationStore({ storeDir: home + '/conversations' });
+            const at = performance.now();
+            const receipt = await store.commitStreamingMessage(id, 'scale-report', { content: 'Synthetic historical report after a durable performance test commit.' });
+            return { durationMs: performance.now()-at, messageId: receipt.messageId, contentRevision: receipt.contentRevision };
+          }, { home, id: report.historyScale.sessions[0].conversationId });
           commits.push(result);
           await page.evaluate(async workspaceId => {
             await window.peerAgent.projectAgentReadConversation({workspaceId,latest:true,limit:50});
@@ -171,6 +172,7 @@ try {
         }
         return commits;
       })().finally(()=>{mutationsDone=true;});
+      void mutations.catch(()=>{}); // Re-throw after the concurrent interaction loop joins.
       while(!mutationsDone) await sampleInteraction();
       report.largeTerminal={commits:await mutations,concurrentInteractions:report.interactions-before};
       assert.ok(report.largeTerminal.concurrentInteractions>0,'large terminal commits require concurrent input and wheel samples');
