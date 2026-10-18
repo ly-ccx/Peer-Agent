@@ -24,7 +24,10 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     sendScroll.current = null;
   };
   useEffect(() => stopSendScroll, []);
-  const keys = useMemo(() => rows.map(conversationRowKey), [rows]);
+  const previousKeys = useRef<readonly string[]>([]);
+  const nextKeys = rows.map(conversationRowKey);
+  if (nextKeys.length !== previousKeys.current.length || nextKeys.some((key, index) => key !== previousKeys.current[index])) previousKeys.current = nextKeys;
+  const keys = previousKeys.current;
   const offsets = useMemo(() => conversationOffsets(keys, heights.current), [keys, revision]);
   const origin = () => {
     const node = scrollerRef.current, marker = originRef.current;

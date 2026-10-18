@@ -3,7 +3,7 @@ import { createReplyDelivery } from './reply-delivery.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
 import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
-import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue } from './recovery-policy.mjs';
+import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue, replyCheckpointForModel } from './recovery-policy.mjs';
 import { hostWakeWait } from './wake-wait.mjs';
 import { replyRecoveryAdmission, recoverLegacyBudgetWorks } from './reply-recovery-admission.mjs';
 import { reconcileContinuationCustody } from './continuation-custody.mjs';
@@ -97,7 +97,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     pending() {
-      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows() });
+      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows });
       const works = Object.values(store.read().works);
       // An owned batch continues through its durable job, never through a new
       // wake merely because failure has left its delivery unacknowledged.
@@ -106,6 +106,11 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         && !works.some(work => work.sessionIds?.includes(event.sessionId) && work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)));
     },
     ownsInput(inputId) { return Object.values(store.read().works).some(work => work.anchorInputIds?.includes(inputId)); },
+    canPreemptRequest(workId) {
+      const work = store.read().works[workId];
+      return Boolean(work && !hasUnsettledDispatch(work)
+        && Object.values(work.budget?.attempts || {}).every(attempt => !attempt.pendingTools?.length));
+    },
     nextRetryAt() {
       expireReservations();
       const at = now();
@@ -118,23 +123,31 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverJob({ userOnly = false } = {}) {
       dispatchRecovery.reconcileAll();
       expireReservations();
-      recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: rows(), now });
-      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows() });
-      for (const work of Object.values(store.read().works)) {
+      let snapshot, decisionSnapshot;
+      const roster = () => snapshot ??= rows();
+      const decision = () => decisionSnapshot ??= store.read();
+      const update = work => { store.saveWork(work); decisionSnapshot = undefined; };
+      recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: roster, now });
+      if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: roster });
+      for (const work of Object.values(decision().works)) {
         if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
-        if (!reportedWaitCurrent(work.reportedWait, rows())) store.saveWork({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
+        if (!reportedWaitCurrent(work.reportedWait, roster())) update({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
       }
       // Older releases persisted technical blocks as human waits. Only current
       // owned facts plus an existing protected checkpoint can reclaim custody.
-      for (const work of Object.values(store.read().works)) {
+      for (const work of Object.values(decision().works)) {
         if (work.state !== 'waiting_user' || work.reportedWait || work.stopScope === 'work' || !work.checkpointRef
           || work.parentConversationId !== conversationId) continue;
-        const related = rows().filter(row => work.sessionIds?.includes(row.sessionId));
+        const related = roster().filter(row => work.sessionIds?.includes(row.sessionId));
         const ownership = repairOwnership(related);
-        if (!ownership.needsUser && ownership.repairSessionIds.length) store.saveWork({ ...work,
+        if (!ownership.needsUser && ownership.repairSessionIds.length) update({ ...work,
           state: 'runnable', end: 'yielded', repairSessionIds: ownership.repairSessionIds });
       }
-      const candidates = Object.values(store.read().works).filter(work => !userOnly || work.anchorInputIds?.length);
+      const candidates = Object.values(decision().works).filter(work => (!userOnly || work.anchorInputIds?.length)
+        && (work.state === 'runnable' && work.checkpointRef
+          || work.checkpointRef && recoveryReservationDue(work, now())
+          || work.state === 'blocked_system' && work.stopScope !== 'work' && work.recovery?.dispatchesReconciled
+            && !work.recovery.blockedCode && !hasUnsettledDispatch(work)));
       const inputPriority = new Map(candidates.filter(work => work.anchorInputIds?.length).map(work => {
         const inputs = readProtectedWork(work)?.job?.userInputs || [];
         return [work.workId, Math.max(0, ...inputs.map(input => Date.parse(input.createdAt) || 0)) || Date.parse(work.updatedAt) || 0];
@@ -248,7 +261,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       return { ...decision, state };
     },
     dispatchRecoveryFacts: dispatchRecovery.facts,
-    resume(job) {
+    resume(job, selection) {
       const work = store.read().works[job.workId];
       if (hasUnsettledDispatch(work)) throw new Error('execution_outcome_unknown');
       const checkpoint = readProtectedWork(work);
@@ -256,8 +269,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const outcome = checkpoint?.outcome;
       // A finished public update starts the next reasoning step with current
       // roster facts. Only an actual yield resumes a native Provider slice.
-      return outcome && work.nativeCheckpointRef && (!work.repairSessionIds?.length || outcome.yielded)
+      const resumed = outcome && work.nativeCheckpointRef && (!work.repairSessionIds?.length || outcome.yielded)
         ? { ...outcome, providerCheckpoint: store.readCheckpoint(work.nativeCheckpointRef) } : outcome;
+      return replyCheckpointForModel(resumed, selection);
     },
   };
 }

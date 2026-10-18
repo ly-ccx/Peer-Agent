@@ -17,7 +17,7 @@ const WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /**
  * 每个项目一个单线程代理。用户输入开用户回合，收件箱开唤醒回合。
- * 用户输入会在下一处安全点中止唤醒；用户回合本身不抢占。
+ * 用户输入会在下一处安全点中止唤醒或旧回合的自动续接；首次用户回合不抢占。
  * 一轮 executeTurn 是一次模型会话。只有 `continued === true` 且本轮有工具调用、
  * 还没有 post_reply、也没到预算时，才开始下一轮。
  */
@@ -29,6 +29,7 @@ export function createProjectAgentRunner({
   executeTurn,
   appendMessage,
   readMessages = () => [],
+  hasMessage = null,
   resolveModel = () => ({ ok: false, missing: '没有可用的模型' }),
   resolveContext = () => null,
   resolveRoster = () => null,
@@ -79,6 +80,8 @@ export function createProjectAgentRunner({
   let turnKind = null;
   let acceptingStop = false;
   let abortController = null;
+  let activeWorkId = null;
+  let activeContinuation = false;
   let statusValue = 'idle';
   let curatorFlight = null;
   let curatorTimer = null;
@@ -102,7 +105,8 @@ export function createProjectAgentRunner({
   }
 
   function remember(message) {
-    if (!readMessages().some(row => row.id === message.id)) return appendMessage(conversation, { ...message, createdAt: stamp() });
+    const exists = typeof hasMessage === 'function' ? hasMessage(conversation, message.id) : readMessages().some(row => row.id === message.id);
+    if (!exists) return appendMessage(conversation, { ...message, createdAt: stamp() });
   }
 
   const coordination = coordinationStore ? createRunnerCoordination({ store: coordinationStore, inbox,
@@ -256,6 +260,7 @@ export function createProjectAgentRunner({
     const controller = new AbortController();
     abortController = controller;
     turnKind = job.kind; acceptingStop = job.kind === 'user' || job.interactive === true;
+    activeContinuation = coordination !== null && job.continuation === true;
     const signal = controller.signal;
     setStatus('thinking');
     try {
@@ -276,6 +281,7 @@ export function createProjectAgentRunner({
       job.attemptId = `turn-${randomUUID()}`;
       if (coordination && failedJob?.workId === job.workId) failedJob = null;
       coordination?.start(job);
+      activeWorkId = job.workId || null;
       if (coordination && job.manualRecovery) executedManualJobs.set(job, { ok: true, workId: job.workId, turnId: job.attemptId });
       const startedAt = stamp(), started = performance.now();
       const diagnosticTiming = outcome => ({ startedAt, finishedAt: stamp(), durationMs: performance.now() - started, outcome });
@@ -298,7 +304,9 @@ export function createProjectAgentRunner({
           message.meta = { ...message.meta, diagnosticTiming: diagnosticTiming('preempted') };
           remember(message);
         }
-        preempted.push({ events: job.events, throughSeq: job.throughSeq });
+        if (coordination) coordination.finish(job, { ...outcome, yielded: true,
+          preserveCheckpoint: outcome.rounds.length === 0 }, readSlot(resolveRoster, job.kind));
+        else preempted.push({ events: job.events, throughSeq: job.throughSeq });
         return 'preempted';
       }
       if (outcome.yielded && coordination) {
@@ -395,7 +403,7 @@ export function createProjectAgentRunner({
       if (!outcome.silentWait && (job.kind === 'user' || job.kind === 'wake')) scheduleCurator(job);
       return 'ok';
     } finally {
-      if (abortController === controller) abortController = null;
+      if (abortController === controller) { abortController = null; activeWorkId = null; activeContinuation = false; }
       turnKind = null; acceptingStop = false;
     }
   }
@@ -451,7 +459,7 @@ export function createProjectAgentRunner({
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };
     }
-    const checkpoint = job.continuation && coordination ? coordination.resume(job) : null;
+    const checkpoint = job.continuation && coordination ? coordination.resume(job, model.selection) : null;
     if (checkpoint?.providerCheckpoint) plan.turnProfile.providerCheckpoint = checkpoint.providerCheckpoint;
     if (checkpoint) plan.turnProfile.context = { ...plan.turnProfile.context,
       retryContinuity: readRetryContinuity([{ id: checkpoint.turnId, kind: 'agent_turn', rounds: checkpoint.rounds }], checkpoint.turnId) };
@@ -531,7 +539,7 @@ export function createProjectAgentRunner({
         if (disposed || error?.name === 'AbortError') {
           if (disposed) return { disposed: true };
           if (signal.reason === 'user-stop') return { stopped: true };
-          if (job.kind === 'wake') return { preempted: true };
+          if (job.kind === 'wake' || signal.reason === 'foreground-input') return { preempted: true };
         }
         raw = {
           ok: false,
@@ -543,7 +551,7 @@ export function createProjectAgentRunner({
       setStatus('thinking');
       if (disposed) return { disposed: true };
       if (signal.aborted && signal.reason === 'user-stop') return { stopped: true, round: roundFrom(raw) };
-      if (raw?.preempted === true || (job.kind === 'wake' && signal.aborted)) {
+      if (raw?.preempted === true || (signal.aborted && (job.kind === 'wake' || signal.reason === 'foreground-input'))) {
         return { preempted: true, round: roundFrom(raw) };
       }
       const failure = raw?.ok === false || raw?.retryable === true
@@ -625,8 +633,9 @@ export function createProjectAgentRunner({
       if (failedJob.throughSeq > 0) preempted.push({ events: failedJob.events, throughSeq: failedJob.throughSeq });
       failedJob = null; retryArmed = false;
     }
-    if (!coordination && turnKind === 'wake' && abortController && !abortController.signal.aborted) {
-      abortController.abort();
+    if (list.length && (turnKind === 'wake' || activeContinuation) && abortController && !abortController.signal.aborted
+      && (!coordination || coordination.canPreemptRequest(activeWorkId))) {
+      abortController.abort('foreground-input');
     }
     if (!coordination && failedJob && !retryArmed) return kick().then(result => ({ ...result, queued: list.length }));
     return kick();

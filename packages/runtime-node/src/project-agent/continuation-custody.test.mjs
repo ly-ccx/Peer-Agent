@@ -77,3 +77,47 @@ test('newest unresolved user input resumes before older user and background cont
   assert.equal(c.recoverUserJob().workId,'new');
  }finally{f.close();}
 });
+
+test('idle and terminal recovery never discover the task roster; eligible custody reads it once', () => {
+ const f=fixture(); let reads=0, checkpointReads=0;
+ const readCheckpoint=f.store.readCheckpoint;f.store.readCheckpoint=ref=>{checkpointReads++;return readCheckpoint(ref);};
+ const resolveRoster=()=>{reads++;return f.sessions;};
+ const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster});
+ try {
+  assert.equal(c.recoverJob(),null);assert.deepEqual(c.pending(),[]);assert.equal(reads,0);
+  for(let n=0;n<12;n++) f.seed('paused'+n,{state:'paused',stopScope:'work',anchorInputIds:['historical-user-'+n]});
+  assert.equal(c.recoverJob(),null);c.pending();assert.equal(reads,0,'historical paused work must not trigger all-plan discovery');
+  assert.equal(checkpointReads,0,'terminal user history must not be read merely to sort recovery priority');
+  for(let n=0;n<12;n++) f.seed('wake'+n);
+  const job=c.recoverJob();assert.ok(job);assert.equal(reads,1,'one synchronous recovery uses one current roster');
+  assert.equal(Object.values(f.store.read().works).filter(w=>w.state==='coalesced').length,11);
+  reads=0; f.sessions.length=0;c.recoverJob();assert.equal(reads,1,'next recovery rechecks changed child facts');
+ }finally{f.close();}
+});
+
+test('custody accepts a lazy roster and does not read it for ineligible work',()=>{
+ const f=fixture();let reads=0;const sessions=()=>{reads++;return f.sessions;};
+ try{
+  f.seed('paused',{state:'paused',stopScope:'work'});
+  reconcileContinuationCustody({store:f.store,conversationId:'c',sessions});assert.equal(reads,0);
+  f.seed('a');f.seed('b');reconcileContinuationCustody({store:f.store,conversationId:'c',sessions});
+  assert.equal(reads,1);assert.equal(Object.values(f.store.read().works).filter(w=>w.state==='coalesced').length,1);
+ }finally{f.close();}
+});
+
+test('one recovery decision shares its post-reconciliation work snapshot', () => {
+ const f=fixture();let reads=0;const original=f.store.read;f.store.read=()=>{reads++;return original();};
+ const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
+ try {assert.equal(c.recoverJob(),null);assert.equal(reads,4,'three preparation readers plus one decision snapshot');}
+ finally{f.close();}
+});
+
+test('a recovery write invalidates the decision snapshot before selecting the next job', () => {
+ const f=fixture();
+ try {
+  f.seed('changed',{state:'waiting_children',reportedWait:{sessionStates:[{sessionId:'missing',status:'running',sourceRevision:'old'}]}});
+  const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>f.sessions});
+  assert.equal(c.recoverJob()?.workId,'changed');
+  assert.equal(f.store.read().works.changed.state,'runnable');
+ }finally{f.close();}
+});

@@ -1046,3 +1046,13 @@ test('restart repairs a circuit card interrupted after failure persistence witho
     assert.equal(calls, 0);
   } finally { runner?.dispose(); box.cleanup(); }
 });
+
+test('completion identity checks use the host ID port without reloading model history', async () => {
+  const box=world();let reads=0,admittedReads=0,identityChecks=0;
+  const runner=runnerFor(box,async()=>{admittedReads=reads;return{toolCalls:[{name:'post_reply',input:{text:'Done',replyTo:['input-identity']},result:{ok:true}}]};},{
+    readMessages:()=>{reads++;return box.messages;},
+    hasMessage:(_id,messageId)=>{identityChecks++;return box.messages.some(row=>row.id===messageId);},
+  });
+  try {await runner.enqueueUserInputs([input('identity','Check this')]);assert.ok(identityChecks>0);assert.equal(reads,admittedReads);}
+  finally{runner.dispose();box.cleanup();}
+});

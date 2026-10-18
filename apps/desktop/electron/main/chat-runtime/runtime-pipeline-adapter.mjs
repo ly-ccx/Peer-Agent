@@ -1,4 +1,5 @@
 import { createRuntimePipeline } from '@peer-agent/runtime-sdk';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 
 export function createDesktopAbortError() {
   const error = new Error('Aborted');
@@ -49,7 +50,8 @@ export async function runDesktopRuntimePipeline({
   let modelFailure = null;
   const pipeline = createRuntimePipeline({
     model: { ...model, ...(typeof model.checkpoint === 'function' ? { async checkpoint(state, executions, context) {
-      try { return await model.checkpoint(state, executions, context); }
+      let checkpoint;
+      try { checkpoint = await model.checkpoint(state, executions, context); }
       catch (cause) {
         // A readonly review's version/stop check is a known boundary, not an
         // unknown external side effect or a failed disk write.
@@ -62,6 +64,9 @@ export async function runDesktopRuntimePipeline({
         modelFailure = error;
         throw error;
       }
+      // The whole batch is paired and durable before admitting UI/cancellation.
+      await yieldToEventLoop();
+      return checkpoint;
     } } : {}), async runTurn(state, context) {
       try { return await model.runTurn(state, context); }
       catch (error) { modelFailure = error; throw error; }

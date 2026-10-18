@@ -177,6 +177,9 @@ export interface ConversationStore {
   readInheritedBackground?(snapshotId: string): InheritedBackgroundSnapshot;
   /** Persisted records before any streaming sidecar target; still requires runtime liveness checks. */
   getPersistedConversationHistory?(id: string): PersistedConversationHistory | null;
+  /** Compact presentation cache; does not attest permissions, runtime liveness or acceptance. */
+  createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
+    options?: { maxEntries?: number; maxBytes?: number }): (id: string) => T | null;
   /** Current index batch; no cross-file transaction or permission/liveness attestation. */
   getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
@@ -208,7 +211,7 @@ export interface ConversationStore {
     role?: 'project_agent' | 'work_session';
     workspaceId?: string;
   }): ConversationMeta;
-  appendMessage(id: string, message: object): unknown;
+  appendMessage(id: string, message: object, options?: { returnMessages?: boolean }): unknown;
   /** Worker preparation followed by a version-checked atomic commit; resolves before terminal delivery. */
   commitStreamingMessage(id: string, messageId: string, patch: Readonly<Record<string, unknown>>): Promise<{
     readonly id: string; readonly messageId: string; readonly contentRevision: number;

@@ -27,8 +27,8 @@ function fail(code) {
   return { ok: false, code };
 }
 
-function clip(value) {
-  return Array.from(String(value ?? '').replace(/\s+/g, ' ').trim()).slice(0, PREVIEW_MAX).join('');
+function clip(value, limit = PREVIEW_MAX) {
+  return Array.from(String(value ?? '').replace(/\s+/g, ' ').trim()).slice(0, limit).join('');
 }
 
 function messageKind(message) {
@@ -57,13 +57,13 @@ export function isVisibleBotMessage(message) {
   return false;
 }
 
-function toListMessage(message) {
+export function projectBotListMessage(message, previewLength = PREVIEW_MAX) {
   const kind = messageKind(message);
   const role = kind === 'user_input' || message?.role === 'user' ? 'user' : 'assistant';
   const surfacing = message?.kind === 'agent_activity' ? 'silent' : message?.meta?.surfacing || message?.surfacing;
   return {
     role,
-    text: clip(messageText(message)),
+    text: clip(messageText(message), previewLength),
     at: messageAt(message),
     ...(surfacing === 'silent' || message?.meta?.unread === false ? { countUnread: false } : {}),
   };
@@ -90,6 +90,8 @@ export function createBotDirectory({
   registry = null,
   readMessages = () => [],
   readMessagesBatch = null,
+  readSummaryMessages = null,
+  readSummaryMessagesBatch = null,
   listSessions = () => [],
   readSessionsBatch = null,
   getSession = () => null,
@@ -137,6 +139,11 @@ export function createBotDirectory({
       : readMessages(profile.agentConversationId, profile.workspaceId);
     return Array.isArray(messages) ? messages : [];
   }
+  function summaryMessagesOf(profile, batch = null) {
+    const messages = batch instanceof Map && batch.has(profile?.agentConversationId) ? batch.get(profile.agentConversationId)
+      : readSummaryMessages && profile?.agentConversationId ? readSummaryMessages(profile.agentConversationId) : messagesOf(profile);
+    return Array.isArray(messages) ? messages : [];
+  }
 
   function readCursor(workspaceId) {
     const file = cursorFile(workspaceId);
@@ -168,9 +175,9 @@ export function createBotDirectory({
   }
 
   function projectRow(profile, classicBatch = null, messageBatch = null, approvalBatch = null, sessionBatch = null) {
-    const messages = messagesOf(profile, messageBatch);
+    const messages = summaryMessagesOf(profile, messageBatch);
     const visible = messages.filter(message => isVisibleBotMessage(message) && messageKind(message) !== 'agent_activity');
-    const last = visible.length ? toListMessage(visible[visible.length - 1]) : null;
+    const last = visible.length ? projectBotListMessage(visible[visible.length - 1]) : null;
     const sessions = sessionsOf(profile.workspaceId, sessionBatch);
     const questions = questionsIn(messages);
     const confirmations = listConfirmations(profile.workspaceId);
@@ -220,7 +227,7 @@ export function createBotDirectory({
     try { batch = readClassicGoalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
     catch { /* Legacy per-project reads remain available. */ }
     let messages = null;
-    try { messages = readMessagesBatch?.(current.map(profile => profile.agentConversationId).filter(Boolean)) ?? null; }
+    try { messages = (readSummaryMessagesBatch || readMessagesBatch)?.(current.map(profile => profile.agentConversationId).filter(Boolean)) ?? null; }
     catch { /* Existing single reads retain their normal failure behavior. */ }
     let approvals = null;
     try { approvals = readApprovalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
@@ -320,7 +327,7 @@ export function createBotDirectory({
   function markRead(workspaceId) {
     const profile = profiles.read(workspaceId);
     if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
-    const visible = messagesOf(profile).filter(isVisibleBotMessage);
+    const visible = summaryMessagesOf(profile).filter(isVisibleBotMessage);
     const last = visible.length ? visible[visible.length - 1] : null;
     const current = readCursor(workspaceId);
     const messageId = typeof last?.id === 'string' ? last.id : null;

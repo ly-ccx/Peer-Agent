@@ -10,6 +10,15 @@ test('the provisional input and durable receipt share one row identity', () => {
   assert.notEqual(conversationRowKey({ type: 'message', message: receipt }), conversationRowKey({ type: 'message', message: { ...receipt, inputId: 'b' } }));
 });
 
+test('dense histories below 200 rows mount only the viewport and bounded overscan', () => {
+  for (const count of [50, 150, 199]) {
+    const offsets = conversationOffsets(Array.from({ length: count }, (_, i) => String(i)), new Map());
+    const view = conversationViewport(offsets, 3000, 800);
+    assert.ok(view.end - view.start <= 30);
+    assert.ok(view.end < count || view.start > 0);
+  }
+});
+
 test('variable heights cover the actual viewport with bounded overscan', () => {
   const keys = Array.from({ length: 1000 }, (_, i) => String(i));
   const heights = new Map(keys.map((key, i) => [key, i % 7 === 0 ? 1200 : 44]));

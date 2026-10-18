@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import { checkBotEvidence } from './bot-evidence-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { projectWorkSession } from '@peer-agent/protocol';
 export async function checkBotWorkSurfaces({ page, until, report, captureDirectory, commandFile }) {
   const checks = report.workSurfaces = [];
   const reply = page.locator('#bot-msg-rc-message-9999');
-  await reply.scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, reply);
   await reply.locator('.bot-reply-body').click();
   const context = page.locator('.bot-reply-details');
   assert.equal(await reply.locator('.bot-reply-context > button').innerText(), '查看详情');
@@ -22,13 +22,13 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.match(await backgroundSummary.textContent(), /核查历史任务完成情况[\s\S]*正在运行中/);
   assert.equal(await backgroundSummary.isVisible(), true);
   assert.equal(await page.locator('.bot-background-work').getAttribute('open'), null);
-  assert.equal(await backgroundSummary.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
+  assert.equal(await backgroundSummary.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'none');
   checks.push('collapsed background summary exposes named running work before any expansion');
   await closeReplyDetails(page);
   await checkBackgroundWorkAlignment({ page, report, captureDirectory });
   await openReplyDetails(page, reply);
   assert.match(await work.locator(':scope > summary').textContent(), /核查历史任务完成情况.*正在运行中/);
-  assert.equal(await work.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
+  assert.equal(await work.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'none');
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
   const keyboardFocus = await work.locator(':scope > summary').evaluate(node => {
     const style = getComputedStyle(node);
@@ -272,7 +272,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.setViewportSize({ width: 760, height: 780 });
-  await reply.scrollIntoViewIfNeeded();
+  await scrollToBotMessage(page, reply);
   for (const value of ['dark', 'light']) {
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, value);
     assert.equal(await reply.evaluate(node => node.scrollWidth <= node.clientWidth), true);

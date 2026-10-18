@@ -1,5 +1,7 @@
 import { createExecutionScheduler, USER_TURN_LIMITS, createWorkBudgetGuard, runBoundedVerification, isVerificationTurn, verificationExecutionBudget } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
+import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 
 /**
  * Runs one agent turn through an existing chat service.
@@ -36,10 +38,11 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       if (input.signal?.aborted) abort();
       const done = executionScheduler.withTurn({ planId: profile?.planId, workspaceId: profile?.workspaceId || input.workspaceId,
         lane: profile?.role === 'project_agent' ? 'coordination' : 'work', priority, signal: controller.signal }, async signal => {
+        await yieldToEventLoop();
         const guard = createWorkBudgetGuard(profile);
         let outcome;
         try { outcome = await runTurn({ ...input, budgetGuard: guard, signal }); return outcome; }
-        finally { guard?.finish(outcome?.usage); }
+        finally { guard?.finish(outcome?.usage); await yieldToEventLoop(); }
       })
         .finally(() => { input.signal?.removeEventListener('abort', abort); active.delete(id); });
       active.set(id, { workspaceId: profile?.workspaceId || input.workspaceId, controller, done });
@@ -106,6 +109,11 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
       onYield: checkpoint => { yieldedCheckpoint = checkpoint; },
     };
     const collected = collectTurn(sink);
+    const progress = sendMessageArgs.agentProgress;
+    sendMessageArgs.agentProgress = { ...progress, onToolExecution(execution) {
+      collected.acceptExecution(execution);
+      progress?.onToolExecution?.(execution);
+    } };
     const streamId = sendMessageArgs.streamId || randomUUID();
     const abort = () => llmChatService.abort?.(streamId);
     signal?.addEventListener('abort', abort, { once: true });
@@ -122,7 +130,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
         ? { ok: false, retryable: false, error: outcome?.error || collected.error() || outcome.terminalStatus }
         : {}),
       text: typeof outcome?.text === 'string' && outcome.text ? outcome.text : collected.text(),
-      toolCalls: Array.isArray(outcome?.toolCalls) ? outcome.toolCalls : collected.toolCalls(),
+      toolCalls: collected.toolCalls(outcome?.toolCalls),
     })).finally(() => signal?.removeEventListener('abort', abort));
   }
 }
@@ -130,6 +138,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
 function collectTurn(sink) {
   const calls = [];
   const byId = new Map();
+  const receipts = new Map();
   let text = '';
   let error = '';
   let providerRecovery = null;
@@ -168,10 +177,27 @@ function collectTurn(sink) {
   if (sink.approver != null) wrapped.approver = sink.approver;
   return {
     sink: wrapped,
+    // This is an in-process CapabilityExecution callback, not a renderer event.
+    // Long UI previews cannot carry authoritative control or delivery facts.
+    acceptExecution(execution) {
+      const id = execution?.call?.toolCallId;
+      const call = byId.get(id);
+      if (!call || !['post_reply', 'wait_for_sessions'].includes(call.name)
+        || execution.call.capabilityId !== `local.delegation.${call.name}`
+        || execution.result?.toolCallId !== id || execution.grant?.toolCallId !== id) return;
+      receipts.set(call, { ...execution.result,
+        evidenceRefs: collectToolEvidenceRefs({ toolCallId: id, execution }),
+        ...(execution.grant.granted !== true ? { status: 'denied' } : {}) });
+    },
     text: () => text,
     error: () => error,
     providerRecovery: () => providerRecovery,
-    toolCalls: () => calls.map((call) => ({ ...call })),
+    toolCalls: supplied => {
+      // Older injected hosts may return their own calls. Production calls are
+      // collected by ID above, and only their local receipt replaces a preview.
+      if (Array.isArray(supplied) && !receipts.size) return supplied;
+      return calls.map(call => ({ ...call, result: receipts.get(call) ?? call.result }));
+    },
   };
 }
 

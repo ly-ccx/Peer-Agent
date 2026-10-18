@@ -22,3 +22,16 @@ test('cards reuse the restored owner reader only for the same journal location',
     assert.equal(reads, 2, 'a matching workspace id in another data root cannot borrow owner facts');
   } finally { remove(); rmSync(rootDir, { recursive: true, force: true }); }
 });
+
+test('recovered and terminal historical errors never read recovery checkpoint bodies', () => {
+  let checkpointReads = 0;
+  const messages = [{ id: 'turn', kind: 'agent_turn', meta: { workId: 'w' } },
+    { id: 'error', kind: 'system_card', card: 'agent_unavailable', turnId: 'turn', content: '代理暂时不可用：failure' },
+    { id: 'reply', kind: 'agent_reply', turnId: 'later', meta: { workId: 'w' }, content: 'recovered' }];
+  const facts = createDesktopProjectFacts({ supervisor: { sessionsForProject: () => [] },
+    approvalStore: { list: () => [] }, profileStore: { read: () => ({ agentConversationId: 'c' }) },
+    conversationStore: { getPersistedConversationHistory: () => ({ messages }) },
+    readCoordination: () => ({ works: { w: { workId: 'w', state: 'delivered', checkpointRef: 'large' } }, deliveries: { reply: { state: 'delivered' } } }),
+    readCoordinationCheckpoint: () => { checkpointReads++; throw Error('must not read historical checkpoint'); } });
+  facts.cards('workspace'); assert.equal(checkpointReads, 0);
+});

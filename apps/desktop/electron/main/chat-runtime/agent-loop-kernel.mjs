@@ -279,7 +279,7 @@ export function handleTerminalTextResponse({
     return { action: 'stop', reason: 'empty-response' };
   }
 
-  if (responseGuard.shouldRetryNoToolResponse(content)) {
+  if (responseGuard.shouldRetryNoToolResponse(content, { hasToolResults: Array.isArray(apiMessages) && apiMessages.some(isToolResultMessage) })) {
     if (loop.claimUnsupportedToolRetry()) {
       apiMessages.push({
         role: 'user',

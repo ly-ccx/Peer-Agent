@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {readFileSync, writeFileSync, renameSync} from 'node:fs';
+import {scrollToBotMessage} from './bot-reply-details-checks.mjs';
 
 /** Actual production renderer and task navigation over explicit isolated host facts. */
 export async function checkBotAgentActivity({page, until, report, captureDirectory, commandFile}) {
@@ -15,7 +16,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     await page.setViewportSize({width, height: 780});
     await page.evaluate(theme => {document.documentElement.dataset.theme = theme;}, appearance);
     const row = page.locator('#bot-msg-rc-message-9981.bot-agent-activity');
-    await row.scrollIntoViewIfNeeded();
+    await scrollToBotMessage(page, row);
     assert.match(await row.innerText(), /实现检查.*发来问题/s);
     assert.equal(await row.locator('svg').count(), 2);
     const tone = await row.locator('.bot-agent-marker').getAttribute('data-tone');

@@ -23,11 +23,11 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
     return [bytes(fd, 0, Math.min(ANCHOR, size)), bytes(fd, Math.max(0, size - ANCHOR), Math.min(ANCHOR, size))];
   }
   function clear() { cached = null; previous = null; anchors = null; }
-  function read() {
+  function readState() {
     let fd;
     try {
       const info = statSync(file, { bigint: true });
-      if (cached && version(info) === version(previous)) return structuredClone(cached);
+      if (cached && version(info) === version(previous)) return cached;
       fd = openSync(file, 'r');
       const opened = fstatSync(fd, { bigint: true });
       const size = Number(opened.size), offset = previous ? Number(previous.size) : 0;
@@ -45,7 +45,7 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
       if (version(fstatSync(fd, { bigint: true })) !== version(opened)
         || version(statSync(file, { bigint: true })) !== version(opened)) throw new Error('coordination_read_changed');
       cached = state; previous = opened; anchors = nextAnchors;
-      return structuredClone(cached);
+      return cached;
     } catch (error) {
       if (error.code === 'ENOENT') { clear(); return empty(); }
       // Keep the validated prefix privately for retry, never return it as current facts on error.
@@ -60,5 +60,13 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
       cached = structuredClone(state); previous = info; anchors = nextAnchors;
     } finally { closeSync(fd); }
   }
-  return { read, committed, clear };
+  return { read: () => structuredClone(readState()),
+    readWork(id) { const works = readState().works; return Object.hasOwn(works, id) ? structuredClone(works[id]) : undefined; },
+    readLifecycleFacts() {
+      const state = readState();
+      return structuredClone({ revision: state.revision, mandates: state.mandates || {},
+        transitions: state.transitions || {}, decisions: state.decisions || {},
+        workStates: Object.fromEntries(Object.entries(state.works).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])) });
+    },
+    committed, clear };
 }

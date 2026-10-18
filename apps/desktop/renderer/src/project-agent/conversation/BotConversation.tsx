@@ -6,6 +6,7 @@ import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
 import { quoteRefsFor } from '../state/botConversationState';
+import { replyDetailsRow } from '../state/botActivityState';
 import { replyAnchorsForMessages } from '../state/replyReferenceState';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
@@ -103,9 +104,11 @@ export function BotConversation({
 
   const background = useMemo(() => backgroundWork(workIndex), [workIndex]);
   const runningWork = background.rows.find(row => ['starting', 'running', 'verifying'].includes(row.status ?? ''));
-  const detailsRow = conversation.rows.find(row => row.type === 'message' && row.message.id === replyDetailsId)
-    ?? [...conversation.rows].reverse().find(row => row.type === 'activity' ? row.activity.turnId === replyDetailsId
-      : row.type === 'message' && row.message.turnId === replyDetailsId);
+  const detailsRow = useMemo(() => replyDetailsRow(replyDetailsId, conversation.rows, conversation.messages),
+    [replyDetailsId, conversation.rows, conversation.messages]);
+  useEffect(() => {
+    if (replyDetailsId && !detailsRow) void conversation.locateMessage(replyDetailsId);
+  }, [replyDetailsId, detailsRow, conversation.locateMessage]);
   const detailsKey = detailsRow?.type === 'activity' ? detailsRow.activity.turnId
     : detailsRow?.type === 'message' ? detailsRow.message.turnId ?? detailsRow.message.id : replyDetailsId ?? '';
   const [detailsOpen, setDetailsOpen] = useState<Record<string, Record<string, boolean>>>({});

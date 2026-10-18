@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { filterBotList, type BotListItem, type BotProfile } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { readBotDetails } from './botDetails';
+import { createConversationRefresh } from './conversationRefresh';
 import { PROJECT_AGENT_SHELL_EVENT, projectAgentShellOf } from '../onboarding/botShell';
 import {
   applyBotRefresh,
@@ -124,13 +125,23 @@ export function useBotList() {
   }, [reload, replaceCatalog]);
 
   useEffect(() => {
+    const pending = new Set<string>();
+    let all = false;
+    const refresh = createConversationRefresh(async () => {
+      const ids = all ? [] : [...pending];
+      pending.clear(); all = false;
+      await refreshIds(ids).catch(() => {});
+    }, { delayMs: 80 });
     const onChange = (event: { workspaceIds?: readonly string[] }) => {
-      void refreshIds(event?.workspaceIds ?? []).catch(() => {});
+      if (!event?.workspaceIds?.length) all = true;
+      else event.workspaceIds.forEach(id => pending.add(id));
+      void refresh.request();
     };
     const offChanged = clientApi.onProjectAgentChanged(onChange);
     // 新消息只发 conversation-changed。预览和未读靠同一条局部刷新跟上。
     const offConversation = clientApi.onProjectAgentConversationChanged(onChange);
     return () => {
+      refresh.stop();
       offChanged?.();
       offConversation?.();
     };

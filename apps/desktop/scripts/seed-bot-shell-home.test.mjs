@@ -4,14 +4,43 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync,
 import os from 'node:os';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
-import { createBotDirectory, createMemoryStore, createProjectInbox, createProjectRegistry } from '@peer-agent/runtime-node';
+import { createBotDirectory, createMemoryStore, createProjectInbox, createProjectRegistry, createGoalPlanStore, createSessionSupervisor } from '@peer-agent/runtime-node';
 import { assertIsolatedHome, seedBotShellHome, RC_SCALE } from './seed-bot-shell-home.mjs';
+import { seedExecutionHistory, EXECUTION_HISTORY_SCALE } from './seed-execution-history.mjs';
+import { seedExecutionWorkload } from './seed-execution-workload.mjs';
+import { execFileSync } from 'node:child_process';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-rc-seed-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
+
+test('execution history represents cancelled real-shaped sessions and refuses a foreign home', t => {
+  const root = fixture(t), home = path.join(root, 'data');
+  const small = seedBotShellHome({ home, scale: { bots: 1, messages: 0, memories: 0, inboxEvents: 0 } });
+  const bot = small.bots[0];
+  assert.throws(() => seedExecutionHistory({ home: os.homedir(), bot }));
+  const result = seedExecutionHistory({ home, bot, scale: { plans: 16, sessions: 8, parentBytes: 20000, childBytes: 20000, journalBytes: 20000, failures: 8 } });
+  assert.equal(result.actualPlans, 16);
+  const supervisor = createSessionSupervisor({ conversationStore: createConversationStore({ storeDir: path.join(home, 'conversations') }),
+    goalPlanStore: createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') }), deferRecovery: true, canManageWorkspace: () => false });
+  const sessions = supervisor.sessionsForProject(bot.workspaceId);
+  assert.equal(sessions.length, 8); assert.ok(sessions.every(row => row.status === 'cancelled'));
+  assert.equal(EXECUTION_HISTORY_SCALE.plans, 1100);
+  assert.ok(EXECUTION_HISTORY_SCALE.childBytes >= 46_300_000 && EXECUTION_HISTORY_SCALE.journalBytes >= 185_000_000);
+});
+
+test('multi-file live workload starts with 18 valid failing contracts, rather than a passing canned result', t => {
+  const root = fixture(t); mkdirSync(path.join(root, 'src'));
+  writeFileSync(path.join(root, 'src/sum.mjs'), 'export function sumNumbers(values){return values.reduce((a,b)=>a+b)}');
+  writeFileSync(path.join(root, 'sum.test.mjs'), "import test from 'node:test';import assert from 'node:assert/strict';import{sumNumbers}from'./src/sum.mjs';test('sum',()=>assert.equal(sumNumbers([]),0));");
+  seedExecutionWorkload(root);
+  const childEnv = { ...process.env }; delete childEnv.NODE_TEST_CONTEXT;
+  assert.throws(() => execFileSync(process.execPath, ['--test', '--test-reporter=tap'], { cwd: root, env: childEnv, encoding: 'utf8' }), error => {
+    assert.match(error.stdout, /# tests 18/); assert.doesNotMatch(error.stdout, /SyntaxError/); return error.status === 1;
+  });
+});
 
 test('scaled fixture is accepted by production bot, conversation, inbox and memory readers', t => {
   const root = fixture(t), home = path.join(root, 'data');

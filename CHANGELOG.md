@@ -2,6 +2,12 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.19
+
+- Keep authoritative long-reply receipts separate from bounded UI previews.
+- Accept factual verifier summaries after real tool results and recover safe model changes.
+- Reduce large-history execution overhead, coalesce refreshes and preserve historical error details.
+
 ## Unreleased
 
 ### Notes

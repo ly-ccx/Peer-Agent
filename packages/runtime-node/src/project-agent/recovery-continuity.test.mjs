@@ -28,7 +28,7 @@ function world(executeTurn, extra = {}) {
   let budgetPolicy = extra.workBudget || {};
   let release = registerWorkBudget('w', store, budgetPolicy);
   let runner = createProjectAgentRunner({ ...ports, coordinationStore: store });
-  return { messages, get store() { return store; }, get runner() { return runner; },
+  return { messages, inbox, get store() { return store; }, get runner() { return runner; },
     work: () => Object.values(store.read().works)[0],
     loseLease: () => { owned = false; },
     async advance(ms) { clock += ms; for (const [id, timer] of [...timers]) if (timer.at <= clock) { timers.delete(id); await timer.fn(); } },
@@ -523,4 +523,115 @@ test('a new user input interrupts a long user slice without pausing its independ
     assert.deepEqual(seen, ['a','b','c','a']);
     assert.ok(Object.values(env.store.read().works).every(work => work.state === 'delivered'));
   } finally { env.close(); }
+});
+
+test('changing the configured model continues the same work from completed facts without replaying the old native tail', async () => {
+  let requests = 0;
+  let selection = { modelProviderId: 'old', modelId: 'old-model', family: 'openai' };
+  const env = world(async ({ turnProfile }) => {
+    const guard = createWorkBudgetGuard(turnProfile);
+    try {
+      guard.beforeRequest({ accounting: 'physical_dispatch' });
+      if (++requests === 1) {
+        guard.checkpoint({ provider: 'openai', providerId: 'old', model: 'old-model', messages: [{ role: 'tool', content: 'already done' }] });
+        return { ...timeout, toolCalls: [{ name: 'read_file', input: { path: 'report' }, result: { ok: true, content: 'already done', evidenceRefs: ['tool-result://completed'] } }] };
+      }
+      assert.equal(turnProfile.providerCheckpoint, undefined);
+      assert.equal(turnProfile.modelSelection.modelProviderId, 'new');
+      assert.match(turnProfile.context.retryContinuity.tools[0].resultPreview, /already done/);
+      return { text: '新模型根据已完成的真实结果继续。' };
+    } finally { guard.finish(); }
+  }, { resolveModel: () => ({ modelProviderId: selection.modelProviderId, selection }) });
+  try {
+    await env.runner.enqueueUserInputs([input('switch')]);
+    const workId = env.work().workId;
+    selection = { modelProviderId: 'new', modelId: 'new-model', family: 'openai' };
+    await env.advance(2000);
+    await env.runner.kick();
+    assert.equal(env.work().workId, workId);
+    assert.equal(requests, 2);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+  } finally { env.close(); }
+});
+
+test('model rebasing preserves matching checkpoints and refuses unpaired tool facts', async () => {
+  const { replyCheckpointForModel } = await import('./recovery-policy.mjs');
+  const checkpoint = { provider: 'openai', providerId: 'old', model: 'model', messages: [] };
+  const outcome = { providerCheckpoint: checkpoint, rounds: [{ toolCalls: [{ name: 'bash', result: null }] }] };
+  assert.equal(replyCheckpointForModel(outcome, { modelProviderId: 'new', modelId: 'model' }), outcome);
+  const completed = { ...outcome, rounds: [{ toolCalls: [{ name: 'read_file', result: { ok: true } }] }] };
+  assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'old', modelId: 'model', family: 'openai' }), completed);
+  assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'new', modelId: 'model', family: 'openai' }).providerCheckpoint, undefined);
+});
+
+test('foreground input waits for an active tool result instead of cancelling a dispatched capability', async () => {
+  let started, finish;
+  const ready = new Promise(resolve => { started = resolve; });
+  const gate = new Promise(resolve => { finish = resolve; });
+  const seen = [];
+  let wake = true, oldSignal;
+  const env = world(async ({ plan, turnProfile, signal }) => {
+    const guard = createWorkBudgetGuard(turnProfile);
+    try {
+      if (plan.kind === 'wake' && wake) {
+        wake = false; oldSignal = signal;
+        guard.beforeTool({ toolCallId: 'active-write', capabilityId: 'write_file' });
+        started(); await gate;
+        guard.checkpoint({ provider: 'openai', providerId: 'm', model: 'model', messages: [] }, [{ call: { toolCallId: 'active-write' }, result: { status: 'success' } }]);
+        return { toolCalls: [{ name: 'write_file', result: { ok: true } }], continued: false };
+      }
+      if (plan.kind === 'user') seen.push(plan.userInputs[0].inputId);
+      return { text: plan.kind === 'user' ? '已回复新输入。' : '' };
+    } finally { guard.finish(); }
+  });
+  try {
+    env.inbox.append('w', [{ eventId: 'active-tool-wake', kind: 'report_available', sessionId: 's', at: new Date().toISOString(), payload: {} }]);
+    const background = env.runner.kick();
+    await ready;
+    const foreground = env.runner.enqueueUserInputs([input('after-write')]);
+    assert.equal(oldSignal.aborted, false);
+    assert.deepEqual(seen, []);
+    finish(); await Promise.all([background, foreground]);
+    assert.deepEqual(seen, ['after-write']);
+  } finally { finish(); env.close(); }
+});
+
+test('fresh input preempts an automatically resumed user request and preserves its completed facts', { timeout: 5000 }, async () => {
+  let entered, release, oldSignal;
+  const started = new Promise(resolve => { entered = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const seen = [];
+  let oldCalls = 0;
+  const env = world(async ({ plan, signal, turnProfile }) => {
+    const id = plan.userInputs[0]?.inputId;
+    seen.push(id);
+    if (id !== 'old') return { text: 'new input answered' };
+    if (++oldCalls === 1) {
+      const guard = createWorkBudgetGuard(turnProfile);
+      try {
+        guard.beforeRequest({ accounting: 'physical_dispatch' });
+        guard.checkpoint({ provider: 'openai', providerId: 'm', model: 'model', messages: [] });
+        return { ...timeout, toolCalls: [{ name: 'read_file', result: { ok: true, content: 'durable result' } }] };
+      } finally { guard.finish(); }
+    }
+    assert.match(turnProfile.context.retryContinuity.tools[0].resultPreview, /durable result/);
+    if (oldCalls === 2) {
+      oldSignal = signal; entered();
+      await Promise.race([blocked, new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))]);
+      if (signal.aborted) throw Object.assign(new Error('request aborted'), { name: 'AbortError' });
+    }
+    return { text: 'old work delivered from saved facts' };
+  });
+  let background, foreground;
+  try {
+    await env.runner.enqueueUserInputs([input('old')]);
+    assert.equal(env.work().state, 'retry_wait');
+    background = env.advance(2000); await started;
+    foreground = env.runner.enqueueUserInputs([input('new')]);
+    await Promise.race([foreground, new Promise(resolve => setTimeout(resolve, 150))]);
+    assert.equal(oldSignal.aborted, true);
+    assert.deepEqual(seen.slice(0, 4), ['old', 'old', 'new', 'old']);
+    assert.equal(env.messages.filter(row => row.card === 'agent_unavailable').length, 1, 'only the initial authentic timeout is an error');
+    assert.ok(Object.values(env.store.read().works).every(work => work.state === 'delivered'));
+  } finally { release(); await Promise.allSettled([background, foreground]); env.close(); }
 });

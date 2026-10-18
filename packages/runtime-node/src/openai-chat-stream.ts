@@ -1,3 +1,4 @@
+import { readSseChunk, cancelSseReader } from './provider-adapters/sse-line.mjs';
 import type {
   ModelProviderResult,
   ModelStreamEvent,
@@ -136,32 +137,6 @@ function normalizeToolCalls(toolCalls: ReadonlyMap<number, MutableToolCall>): Mo
     .map(([, call]) => ({ ...call }));
 }
 
-function idleTimeoutError(ms: number): Error {
-  const error = new Error(`provider_stream_idle_timeout: no SSE data received for ${ms}ms`);
-  error.name = 'ProviderStreamIdleTimeoutError';
-  return error;
-}
-
-async function readChunk(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  idleTimeoutMs: number | undefined,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
-  if (!idleTimeoutMs || !Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
-    return reader.read();
-  }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      reader.read(),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(idleTimeoutError(idleTimeoutMs)), idleTimeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 export async function consumeOpenAIChatStream(
   options: ConsumeOpenAIChatStreamOptions,
 ): Promise<OpenAIChatStreamResult> {
@@ -181,7 +156,7 @@ export async function consumeOpenAIChatStream(
 
   const abortReader = () => {
     stopped = true;
-    void reader.cancel(options.signal?.reason).catch(() => {});
+    cancelSseReader(reader, options.signal?.reason);
   };
   options.signal?.addEventListener('abort', abortReader, { once: true });
 
@@ -256,7 +231,7 @@ export async function consumeOpenAIChatStream(
 
   try {
     while (!stopped) {
-      const { done, value } = await readChunk(reader, options.idleTimeoutMs);
+      const { done, value } = await readSseChunk(reader, options.signal, options.idleTimeoutMs ?? 0);
       if (options.signal?.aborted) {
         throw options.signal.reason ?? new Error('Model stream aborted.');
       }
@@ -277,7 +252,8 @@ export async function consumeOpenAIChatStream(
     throw error;
   } finally {
     options.signal?.removeEventListener('abort', abortReader);
-    reader.releaseLock();
+    if (stopped) cancelSseReader(reader);
+    try { reader.releaseLock(); } catch { /* a cancelled transport may retain its read lease */ }
   }
 
   const completedCalls = normalizeToolCalls(toolCalls);

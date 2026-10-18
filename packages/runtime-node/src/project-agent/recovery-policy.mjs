@@ -58,3 +58,16 @@ export function manualRecovery(previous, at) {
   return previous ? { ...previous, autoAttempts: 0, retryAt: undefined, reservationId: undefined, blockedCode: undefined,
     deadlineAt: new Date(Date.parse(at) + WORK_RECOVERY_PERIOD_MS).toISOString() } : undefined;
 }
+
+/** A new configured model reasons over completed facts; it never replays another model's native tail. */
+export function replyCheckpointForModel(outcome, selection) {
+  const saved = outcome?.providerCheckpoint;
+  if (!saved || !selection?.modelProviderId || !selection?.modelId) return outcome;
+  const same = saved.providerId === selection.modelProviderId && saved.model === selection.modelId
+    && (!selection.family || saved.provider === selection.family);
+  if (same) return outcome;
+  // The caller first reconciles the durable dispatch ledger. Do not discard an
+  // unpaired result even if the old Provider would subsequently reject it.
+  if ((outcome.rounds || []).some(round => (round.toolCalls || []).some(call => call.result == null))) return outcome;
+  return { ...outcome, providerCheckpoint: undefined };
+}

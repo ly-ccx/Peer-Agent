@@ -128,3 +128,27 @@ test('inline history hands off to exact-turn tools before/after persistence with
     assert.equal(interruptedRow.activity, interrupted, 'interrupted activity preserves preparing calls that never dispatched');
   }
 });
+
+test('folded historical failures retain their canonical detail identity and original tool process', async () => {
+  const { replyDetailsRow } = await import('./botActivityState.ts');
+  const turn = normalizeBotMessage({ id: 't-old', kind: 'agent_turn', turnId: 't-old', rounds: [{ toolCalls: [{ name: 'verify_session', input: {}, result: { ok: false, error: 'verifier_timeout' } }] }] })!;
+  const failure = normalizeBotMessage({ id: 't-old-card', kind: 'system_card', turnId: 't-old', content: '真实原始错误', cards: [{ cardId: 'failed', kind: 'agent_unavailable', content: 'verifier_timeout', actions: [] }] })!;
+  const row = replyDetailsRow(failure.id, [], [turn, failure]);
+  assert.equal(row?.type, 'message');
+  if (row?.type !== 'message') return;
+  assert.equal(row.message.id, failure.id);
+  assert.equal(row.processRounds?.[0]?.toolCalls[0]?.name, 'verify_session');
+  assert.equal(replyDetailsRow('absent', [], [turn, failure]), undefined);
+});
+
+test('a streaming details identity hands off to its canonical reply rather than the internal turn', async () => {
+  const { replyDetailsRow } = await import('./botActivityState.ts');
+  const turn = normalizeBotMessage({ id: 't-live', kind: 'agent_turn', turnId: 't-live', rounds: [{ toolCalls: [{ name: 'read_file', result: { ok: true } }] }] })!;
+  const reply = normalizeBotMessage({ id: 'reply-live', kind: 'agent_reply', turnId: 't-live', content: 'Complete reply' })!;
+  for (const rows of [[{ type: 'message' as const, message: reply }], []]) {
+    const row = replyDetailsRow(turn.id, rows, [turn, reply]);
+    assert.equal(row?.type, 'message');
+    if (row?.type !== 'message') throw Error('reply missing');
+    assert.equal(row.message.id, reply.id);
+  }
+});

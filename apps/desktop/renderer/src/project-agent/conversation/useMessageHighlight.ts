@@ -5,7 +5,7 @@ export function useMessageHighlight(id: string | null, requestId: number, visibl
   const shown = useRef({ request: '', until: 0 });
   const [active, setActive] = useState<string | null>(null);
   useEffect(() => {
-    if (!id || !visible) { setActive(null); shown.current.until = 0; return; }
+    if (!id || !visible) { setActive(null); return; }
     const request = `${requestId}:${id}`;
     if (shown.current.request !== request) shown.current = { request, until: Date.now() + 1800 };
     const remaining = shown.current.until - Date.now();

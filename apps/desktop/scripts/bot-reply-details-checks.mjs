@@ -1,7 +1,38 @@
 import assert from 'node:assert/strict';
 
+/** Reach an unmounted row through the real scroller; never disable virtualization. */
+export async function scrollToBotMessage(page, message) {
+  if (!await message.count()) {
+    const thread = page.locator('.bot-thread');
+    // Numeric IDs belong to this ordered 10,000-message fixture, not production identity.
+    const match = /#bot-msg-rc-message-(\d+)/.exec(message.toString());
+    const target = match ? Number(match[1]) : null;
+    if (target === null) await thread.evaluate(node => { node.scrollTop = 0; });
+    for (let step = 0; step < 240; step++) {
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      if (await message.count()) break;
+      const state = await thread.evaluate(node => ({ busy: node.getAttribute('aria-busy') === 'true',
+        ids: [...node.querySelectorAll('[id^="bot-msg-rc-message-"]')].map(row => Number(row.id.match(/(\d+)$/)?.[1])).filter(Number.isFinite) }));
+      if (state.busy) { await page.locator('.bot-thread[aria-busy="false"]').waitFor(); continue; }
+      const direction = target === null ? 1 : !state.ids.length || target < Math.min(...state.ids) ? -1 : 1;
+      const moved = await thread.evaluate((node, direction) => {
+        const before = node.scrollTop;
+        node.scrollTop += direction * Math.max(80, node.clientHeight * 0.65);
+        return node.scrollTop !== before;
+      }, direction);
+      if (!moved) {
+        const older = page.locator('.bot-thread-older');
+        if (direction < 0 && await older.count() && await older.isEnabled()) { await older.click(); continue; }
+        break;
+      }
+    }
+  }
+  await message.scrollIntoViewIfNeeded();
+}
+
 /** Enter the actual reply drawer by keyboard, never an inline disclosure. */
 export async function openReplyDetails(page, message) {
+  await scrollToBotMessage(page, message);
   const history = message.locator('.bot-recovery-history');
   if (await history.count()) {
     if (!await history.evaluate(node => node.open)) {

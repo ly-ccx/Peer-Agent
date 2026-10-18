@@ -4,6 +4,10 @@ import { createSessionTakeover } from './session-takeover.mjs';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
+import { createDelegatedPlanCatalog } from './delegated-plan-catalog.mjs';
+import { createSessionReadQuery } from './session-read-query.mjs';
+import { createSessionParentFacts } from './session-parent-facts.mjs';
+import { createSessionConversationFacts } from './session-conversation-facts.mjs';
 import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
@@ -14,7 +18,6 @@ import { hasCurrentUserUrgency } from './user-priority.mjs';
 import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
-import { readdirSync } from 'node:fs';
 
 import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
@@ -118,6 +121,11 @@ export function createSessionSupervisor({
   if (!conversationStore || !goalPlanStore) {
     throw new Error('createSessionSupervisor requires conversationStore and goalPlanStore');
   }
+  const readQuery = createSessionReadQuery();
+  const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id) });
+  const conversationFacts = createSessionConversationFacts(conversationStore);
+  const parentFacts = createSessionParentFacts(conversationStore);
+  const readConversationFacts = id => readQuery.memo(`conversation:${id}`, () => conversationFacts(id));
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
   const communication = createAgentCommunication({ conversationStore, goalPlanStore, goalRunner, findSession: findBySession,
@@ -167,23 +175,7 @@ export function createSessionSupervisor({
     holdsLease: canManageWorkspace, isEnabled: autonomousCoordinationEnabled, now });
 
   function delegatedPlans() {
-    let names = [];
-    try {
-      names = readdirSync(goalPlanStore.getStoreDir());
-    } catch {
-      return [];
-    }
-    const plans = [];
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue;
-      try {
-        const plan = goalPlanStore.getPlan(name.slice(0, -5));
-        if (plan?.delegationOrigin?.sessionId) plans.push(plan);
-      } catch {
-        // 目录里的非计划文件跳过。
-      }
-    }
-    return plans;
+    return readQuery.memo('delegated-plans', () => planCatalog.read());
   }
 
   function findBySession(sessionId) {
@@ -260,7 +252,7 @@ export function createSessionSupervisor({
   function project(plan, plans = null) {
     const origin = plan.delegationOrigin;
     const coordinationFacts = coordination?.forSession(origin.workspaceId, origin.sessionId);
-    const conversation = conversationStore.getConversation?.(plan.conversationId);
+    const conversation = readConversationFacts(plan.conversationId);
     const session = projectWorkSession(snapshotOf(plan), {
       sessionId: origin.sessionId,
       workspaceId: origin.workspaceId || '',
@@ -283,15 +275,11 @@ export function createSessionSupervisor({
   }
 
   function interventionsOf(conversationId) {
-    const history = conversationStore.getPersistedConversationHistory?.(conversationId);
-    const messages = Array.isArray(history?.messages) ? history.messages : [];
-    return messages
-      .filter((message) => typeof message?.answerTo === 'string' && message.answerTo && message.id)
-      .map((message) => ({ id: message.id }));
+    return readConversationFacts(conversationId)?.interventions || [];
   }
 
   function buildReport(plan, session) {
-    const history = conversationStore.getPersistedConversationHistory?.(plan.conversationId);
+    const history = readConversationFacts(plan.conversationId);
     return buildSessionReport(plan, session, history);
   }
 
@@ -698,8 +686,8 @@ export function createSessionSupervisor({
   }
 
   function parentMessages(plan) {
-    const history = conversationStore.getPersistedConversationHistory?.(plan?.delegationOrigin?.parentConversationId);
-    return Array.isArray(history?.messages) ? history.messages : [];
+    const id = plan?.delegationOrigin?.parentConversationId;
+    return readQuery.memo(`parent:${id}`, () => parentFacts(id)) || [];
   }
 
   function replyCites(message, sessionId) {
@@ -1110,9 +1098,11 @@ export function createSessionSupervisor({
       if (controlled.ok && input.action === 'resume') await exclusive(() => promote());
       return controlled;
     },
-    list,
+    readQuery: readQuery.run,
+    list: input => readQuery.run(() => list(input)),
     /** One fresh plan read for a presentation query; same default bound/order as list(). */
     listByWorkspaceIds(workspaceIds) {
+      return readQuery.run(() => {
       const grouped = new Map(workspaceIds.map(id => [id, []]));
       if (!grouped.size) return grouped;
       const plans = delegatedPlans();
@@ -1121,14 +1111,17 @@ export function createSessionSupervisor({
         if (rows && rows.length < 50) rows.push(project(plan, plans));
       }
       return grouped;
+      });
     },
     /** Complete project facts for the host; model-facing list() remains bounded. */
     sessionsForProject(workspaceId) {
+      return readQuery.run(() => {
       const workspace = text(workspaceId);
       return workspace ? delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspace).map(project) : [];
+      });
     },
-    get,
-    deliveryFacts: handoff.facts,
+    get: input => readQuery.run(() => get(input)),
+    deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
     cancel(input) {
       return cancellation.cancel(input || {});
@@ -1148,13 +1141,17 @@ export function createSessionSupervisor({
       return exclusive(() => settleLocked(sessionId));
     },
     acceptance(sessionId) {
+      return readQuery.run(() => {
       const plan = findBySession(text(sessionId));
       return resultCanBeAccepted(plan) ? decideSessionAcceptance(acceptanceFacts(plan)) : null;
+      });
     },
     completionReview(sessionId) {
+      return readQuery.run(() => {
       const plan = findBySession(text(sessionId));
       return needsCompletionReview(plan) ? projectCompletionReview(plan, buildSessionReport(plan, project(plan),
         conversationStore.getPersistedConversationHistory(plan.conversationId))) : null;
+      });
     },
     confirmCompletion(input) {
       return exclusive(async () => {

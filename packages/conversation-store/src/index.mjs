@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, ren
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
+import { createHistoryProjectionReader } from './history-projection-reader.mjs';
 import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
@@ -1125,6 +1126,31 @@ export function createConversationStore(options = {}) {
     return getPersistedConversationHistories([id]).get(id) ?? null;
   }
 
+  /** Presentation facts only; execution and authority reads retain their existing strict APIs. */
+  function createHistoryProjection(project, options = {}) {
+    let metadataVersion, metadata = new Map();
+    const fileVersion = file => {
+      try { return conversationFileVersion(file); }
+      catch (error) { if (error.code === 'ENOENT') return 'missing'; throw error; }
+    };
+    return createHistoryProjectionReader({ ...options, project,
+      describe(id) {
+        const token = fileVersion(indexFile);
+        if (token !== metadataVersion) {
+          const next = new Map(readIndex().map(row => [row.id, row]));
+          if (fileVersion(indexFile) !== token) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED'), { code: 'BACKGROUND_VERSION_CHANGED' });
+          metadata = next; metadataVersion = token;
+        }
+        const meta = metadata.get(id);
+        if (!meta) return null;
+        const historyFile = convFile(id), sidecarFile = streamPatchFile(id);
+        return { conversationId: id, contentRevision: meta.contentRevision, createdAt: meta.createdAt, historyFile, sidecarFile,
+          version: JSON.stringify([meta.contentRevision, meta.createdAt, fileVersion(historyFile), fileVersion(sidecarFile)]) };
+      },
+      load: readPersistedHistoryFiles,
+    });
+  }
+
   function getPersistedConversationHistories(ids) {
     const wanted = new Set((Array.isArray(ids) ? ids : []).filter(id => typeof id === 'string' && id));
     const result = new Map();
@@ -1310,7 +1336,7 @@ export function createConversationStore(options = {}) {
     return messages.filter((message) => !isEmptyUserMessage(message));
   }
 
-  function appendMessage(id, message) {
+  function appendMessage(id, message, { returnMessages = true } = {}) {
     return withFileLock(indexFile, () => {
       const index = readIndex();
       const meta = index.find((c) => c.id === id);
@@ -1346,7 +1372,7 @@ export function createConversationStore(options = {}) {
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
-      return { ...meta, messages: readJsonl(convFile(id)) };
+      return returnMessages ? { ...meta, messages: readJsonl(convFile(id)) } : { ...meta };
     });
   }
 
@@ -1844,6 +1870,7 @@ export function createConversationStore(options = {}) {
     createConversation: changed(createConversation, 'created'),
     getConversation,
     getPersistedConversationHistory,
+    createHistoryProjection,
     getPersistedConversationHistories,
     resolveSelectionReference,
     createSelectionChild: changed(createSelectionChild, 'created'),

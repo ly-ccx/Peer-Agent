@@ -9,7 +9,7 @@ function completedLeaves(tasks) {
   return leaves;
 }
 
-function visibleResult(message) {
+export function visibleResult(message) {
   // Persisted content may concatenate narration around tools. Prefer the last
   // visible text segment; never project thinking or tool claims as a report.
   const segments = Array.isArray(message?.segments) ? message.segments : [];
