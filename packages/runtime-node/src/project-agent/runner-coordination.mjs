@@ -4,6 +4,7 @@ import { coordinationWorkId } from './work-coordination.mjs';
 import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
 import { workBudgetBinding, workBudgetCanResume } from './work-budget.mjs';
 import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue } from './recovery-policy.mjs';
+import { hostWakeWait } from './wake-wait.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
 export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
@@ -42,9 +43,13 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       inbox.commitBatch(workspaceId, { throughSeq: batch.throughSeq, ok: true });
     }
     const pending = store.pendingEvents();
-    const routine = pending.filter(event => ROUTINE.has(event.kind));
+    // Child execution acknowledgements do not restart a failed parent reply or
+    // erase its protected checkpoint. A result/exception remains a real wake.
+    const works = Object.values(store.read().works);
+    const routine = pending.filter(event => ROUTINE.has(event.kind) || works.some(work => work.recovery
+      && !hasUnsettledDispatch(work) && hostWakeWait({ kind: 'wake', events: [event] }, { ...work, recovery: undefined }, rows())));
     if (routine.length) store.handled(routine.map(event => event.eventId));
-    return pending.filter(event => !ROUTINE.has(event.kind));
+    return pending.filter(event => !routine.includes(event));
   }
   function expireReservations() {
     for (const work of Object.values(store.read().works)) if (work.state === 'retry_wait' && work.recovery?.reservationId
@@ -142,6 +147,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         recoveryRevision: work.revision, manualRecovery: true } };
     },
     recoveryFor(job, outcome) { return recoveryForFailure(store.read().works[job.workId], outcome, now()); },
+    silentWaitFor(job, roster) {
+      const work = store.read().works[job.workId];
+      return hasUnsettledDispatch(work) ? null : hostWakeWait(job, work, Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []);
+    },
     previousOutcome(job) { return readProtectedWork(store.read().works[job.workId])?.outcome; },
     blockReservation(job) {
       const work = store.read().works[job.workId];

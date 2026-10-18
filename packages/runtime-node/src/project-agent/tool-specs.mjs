@@ -142,6 +142,10 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     required: ['level', 'anchorMessageId'],
     additionalProperties: false,
   }),
+  spec('wait_for_sessions', 'local.delegation.wait_for_sessions', {
+    type: 'object', properties: { sessionIds: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string' } } },
+    required: ['sessionIds'], additionalProperties: false,
+  }),
   spec('post_reply', 'local.delegation.post_reply', {
     type: 'object',
     properties: {
@@ -230,6 +234,11 @@ export function validateDelegationInput(name, raw) {
   if (name === 'get_verification_detail') return validateSessionOnly(input);
   if (name === 'verify_session') return validateVerify(input);
   if (name === 'set_proactivity') return validateProactivity(input);
+  if (name === 'wait_for_sessions') {
+    const sessionIds = stringList(input.sessionIds, { min: 1, max: 20 });
+    return Object.keys(input).length === 1 && sessionIds && new Set(sessionIds).size === sessionIds.length
+      ? { ok: true, value: { sessionIds } } : invalid('Select 1 to 20 distinct running sessions.');
+  }
   return validateReply(input);
 }
 

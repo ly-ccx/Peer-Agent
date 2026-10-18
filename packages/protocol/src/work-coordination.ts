@@ -1,5 +1,20 @@
 import type { ProjectRecoveryFailureKind } from './project-agent-failure.ts';
 
+/** A reply attempt and delegated execution have independent outcomes. Host facts only. */
+export interface ProjectReplyFailureStatus {
+  readonly phase: 'current' | 'retrying' | 'superseded' | 'recovered' | 'cancelled' | 'paused';
+  readonly turnKind: 'user' | 'wake';
+  readonly workId?: string;
+  readonly activeSessionIds: readonly string[];
+  readonly recoveredByReplyId?: string;
+}
+
+/** Persisted on agent_turn.meta and the protected outcome; not a delivered reply. */
+export interface ProjectAgentSilentWait {
+  readonly source: 'host' | 'tool';
+  readonly sessionIds: readonly string[];
+}
+
 /** Local host reservation; neither model text nor a UI timer owns recovery. */
 export interface ProjectWorkRecovery {
   readonly failureKind: ProjectRecoveryFailureKind;

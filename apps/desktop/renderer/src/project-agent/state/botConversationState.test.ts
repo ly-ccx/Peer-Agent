@@ -40,7 +40,7 @@ test('failure presentation preserves typed host recovery and only promises a rea
   assert.equal(agentFailurePresentation({ ...card, recovery: { ...card.recovery!, reservationId: undefined } }).messageKey,
     'projectAgent.chat.recoveryExhausted');
   assert.equal(agentFailurePresentation({ ...card, recovery: undefined }).messageKey, 'projectAgent.chat.recoveryExhausted');
-  assert.equal(agentFailurePresentation({ ...card, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryEnded');
+  assert.equal(agentFailurePresentation({ ...card, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryHistory');
   assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: 'runnable', recovery: { ...card.recovery!, reservationId: undefined } }).recovering, true);
   assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: 'blocked_system' }).recovering, false);
   assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: undefined }).recovering, false);
@@ -49,6 +49,23 @@ test('failure presentation preserves typed host recovery and only promises a rea
 test('a no-progress host receipt explains why repetition stopped', () => {
   const card = normalizeBotMessage({ id: 'no-progress', kind: 'system_card', cards: [{ cardId: 'no-progress', kind: 'agent_unavailable', content: '代理暂时不可用：agent_no_progress' }] })!.cards[0]!;
   assert.deepEqual(agentFailurePresentation(card), { messageKey: 'projectAgent.chat.noProgress', recovering: false, retryAllowed: true });
+});
+
+test('reply outcome and running children remain independent; only a delivered reply proves recovery', () => {
+  const raw = { cardId: 'f', kind: 'agent_unavailable', content: 'empty_model_response', resolvedState: 'resolved',
+    failureStatus: { phase: 'current', turnKind: 'wake', activeSessionIds: ['running-child'], workId: 'w' } };
+  const card = normalizeBotMessage({ id: 'f', cards: [raw] })!.cards[0]!;
+  assert.deepEqual(card.failureStatus?.activeSessionIds, ['running-child']);
+  assert.equal(agentFailurePresentation(card).messageKey, 'projectAgent.chat.unavailable');
+  for (const [phase, key] of [['superseded', 'recoveryHistory'], ['paused', 'recoveryPaused'], ['cancelled', 'recoveryCancelled']] as const) {
+    assert.equal(agentFailurePresentation({ ...card, failureStatus: { ...card.failureStatus!, phase } }).messageKey, `projectAgent.chat.${key}`);
+  }
+  const malformed = normalizeBotMessage({ id: 'f', cards: [{ ...raw, failureStatus: { ...raw.failureStatus, phase: 'recovered' } }] })!.cards[0]!;
+  assert.equal(malformed.failureStatus, undefined);
+  assert.equal(agentFailurePresentation(malformed).messageKey, 'projectAgent.chat.recoveryHistory');
+  const recovered = normalizeBotMessage({ id: 'f', cards: [{ ...raw,
+    failureStatus: { ...raw.failureStatus, phase: 'recovered', recoveredByReplyId: 'delivered' } }] })!.cards[0]!;
+  assert.equal(agentFailurePresentation(recovered).messageKey, 'projectAgent.chat.recoveryEnded');
 });
 
 test('host failure types override legacy diagnostics and unsafe retries remain unavailable', () => {

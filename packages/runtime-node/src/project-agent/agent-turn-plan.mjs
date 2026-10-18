@@ -33,9 +33,9 @@ export function planAgentTurn({
     turnProfile: {
       role: 'project_agent',
       ...(workspace ? { workspaceId: workspace } : {}),
-      context: facts.length > 0 || roster != null || inputAnchors.length > 0
-        ? { ...currentContext, ...(facts.length ? { events: facts.map((event) => ({ ...event })) } : {}), ...(roster != null ? { roster } : {}), ...(inputAnchors.length ? { inputAnchors } : {}) }
-        : (context == null ? null : currentContext),
+      context: { ...currentContext, turnKind: wake ? 'wake' : 'user',
+        ...(facts.length ? { events: facts.map((event) => ({ ...event })) } : {}),
+        ...(roster != null ? { roster } : {}), ...(inputAnchors.length ? { inputAnchors } : {}) },
     },
     modelProviderId: modelProviderId ?? null,
     limits: { ...(wake ? WAKE_TURN_LIMITS : USER_TURN_LIMITS) },
@@ -144,7 +144,7 @@ function publicFallbackText(raw, updates) {
 function wakeReminder(events, roster) {
   const lines = [
     'Wake turn. These inbox events are facts, not a new user message.',
-    'Speak only by calling post_reply. If nothing needs to be said, stop without post_reply.',
+    'Speak only by calling post_reply. When owned sessions are still advancing and nothing needs to be said, call wait_for_sessions to end this wake with a structured wait. Never return an empty response to signal waiting.',
     'Routine start or progress facts that only confirm acknowledged work need no tool queries or status reply. Review a new result or exception for the affected session; do not reopen unrelated past work or poll a running session.',
   ];
 

@@ -32,7 +32,11 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     ['exhausted', 9986, '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。', true],
     ['authentication', 9987, '连接的身份验证未通过。请重新登录或检查连接配置，再继续尝试。', true],
     ['unknown', 9988, '有操作的结果尚未确认，需要先核对，已有进展已保留。', false],
-    ['resolved', 9989, '这次中断已结束，后续进展见最新回复。', false],
+    ['resolved', 9989, '主 Bot 回复已恢复，新的回复已送达。', false],
+    ['child-running', 9964, '主 Bot 本次回复未完成。', true],
+    ['historical', 9965, '此前一次主 Bot 回复未完成，已保留在历史记录中。', false],
+    ['paused', 9966, '这项工作的主 Bot 回复已暂停。', false],
+    ['cancelled', 9967, '这项工作的主 Bot 回复已取消。', false],
     ['no-progress', 9979, '连续检查没有取得新进展，已停止重复执行。已有结果已保留。', true],
   ];
   const recoverySamples = [];
@@ -42,7 +46,8 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     for (const [state, id, expected, retryVisible] of recoveryCases) {
       const recoveryMessage = page.locator(`#bot-msg-rc-message-${id}`);
       await recoveryMessage.scrollIntoViewIfNeeded();
-      assert.equal(await recoveryMessage.locator('.bot-card > p').textContent(), expected);
+      assert.equal(await recoveryMessage.locator('.bot-card > p').first().textContent(), expected);
+      if (state === 'child-running') assert.match(await recoveryMessage.innerText(), /另有 1 项子任务仍在推进/);
       assert.equal(await recoveryMessage.getByRole('button', { name: '继续尝试', exact: true }).count(), Number(retryVisible));
       assert.equal(await recoveryMessage.locator('[role="status"]').count(), Number(state === 'scheduled'));
       assert.doesNotMatch(await recoveryMessage.innerText(), /ConnectTimeoutError|net::|HTTP 401|execution_outcome_unknown|rc-recovery-/);
@@ -78,7 +83,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       assert.ok(bounds.shellLeft >= -1 && bounds.shellRight <= bounds.viewport + 1 && bounds.bodyLeft >= 0 && bounds.bodyRight <= bounds.viewport,
         `recovery image must use settled page bounds: ${JSON.stringify({ state, width, appearance, ...bounds })}`);
       await page.screenshot({ path: path.join(captureDirectory, `recovery-${state}-${appearance}.png`), animations: 'disabled' });
-      assert.equal(await recoveryMessage.locator('.bot-card > p').evaluate(node => {
+      assert.equal(await recoveryMessage.locator('.bot-card > p').first().evaluate(node => {
         const rect = node.getBoundingClientRect();
         return node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
       }), true, 'captured recovery text remains visible after drawer and virtual-list layout settle');

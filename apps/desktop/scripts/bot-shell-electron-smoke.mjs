@@ -98,14 +98,19 @@ const recoveryCases = [
   { key: 'authentication', failureKind: 'authentication', retryable: false, recoveryWorkState: 'blocked_system', reason: 'HTTP 401: fixture credential expired' },
   { key: 'unknown', failureKind: 'execution_outcome_unknown', retryable: false, recoveryWorkState: 'blocked_system', reason: 'execution_outcome_unknown: fixture result not recorded' },
   { key: 'resolved', failureKind: 'network', retryable: true, recoveryWorkState: 'delivered', resolvedState: 'resolved', reason: 'net::ERR_CONNECTION_CLOSED' },
+  { key: 'child-running', index: 9964, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'empty_model_response', phase: 'current', activeSessionIds: ['rc-work-1'] },
+  { key: 'historical', index: 9965, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'empty_model_response', phase: 'superseded' },
+  { key: 'paused', index: 9966, failureKind: 'fatal', retryable: false, recoveryWorkState: 'paused', reason: 'empty_model_response', phase: 'paused' },
+  { key: 'cancelled', index: 9967, failureKind: 'fatal', retryable: false, recoveryWorkState: 'cancelled', reason: 'empty_model_response', phase: 'cancelled' },
   { key: 'no-progress', index: 9979, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'agent_no_progress' },
 ];
 for (const [offset, entry] of recoveryCases.entries()) {
-  const { key, index, reason, recoveryWorkState, resolvedState, ...recovery } = entry;
+  const { key, index, reason, recoveryWorkState, resolvedState, phase, activeSessionIds = [], ...recovery } = entry;
   const turnId = key === 'scheduled' ? 'rc-recovery-progress-turn' : `rc-recovery-${key}-turn`;
   const content = `代理暂时不可用：${reason}`;
   seededMessages[index ?? 9984 + offset] = { ...seededMessages[index ?? 9984 + offset], role: 'assistant', kind: 'system_card', turnId, content,
-    cards: [{ cardId: `rc-recovery-${key}`, kind: 'agent_unavailable', content, recoveryWorkState, ...(resolvedState ? { resolvedState } : {}),
+    cards: [{ cardId: `rc-recovery-${key}`, kind: 'agent_unavailable', content, recoveryWorkState,
+      ...((phase || key === 'resolved') ? { failureStatus: { phase: phase || 'recovered', turnKind: 'wake', activeSessionIds, ...(key === 'resolved' ? { recoveredByReplyId: 'rc-delivered-reply' } : {}) } } : {}), ...(resolvedState ? { resolvedState } : {}),
       recovery: { ...recovery, autoAttempts: 2, failedTurnId: turnId, deadlineAt: '2026-10-10T03:05:00.000Z' },
       actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId } }] }] };
 }

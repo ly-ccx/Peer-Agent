@@ -38,7 +38,9 @@ test('same-work success or pause resolves its old interruption while unrelated r
   try {
     env.messages.push({ id: 'unrelated', kind: 'agent_turn', role: 'assistant', meta: { workId: 'other' } });
     assert.equal(env.card().resolvedState, 'open');
-    for (const state of ['delivered', 'paused', 'cancelled']) {
+    env.work.state = 'delivered';
+    assert.equal(env.card().resolvedState, 'open', 'work settlement without delivery does not prove a recovered reply');
+    for (const state of ['paused', 'cancelled']) {
       env.work.state = state;
       assert.equal(env.card().resolvedState, 'resolved'); assert.equal(env.card().recovery, undefined);
     }

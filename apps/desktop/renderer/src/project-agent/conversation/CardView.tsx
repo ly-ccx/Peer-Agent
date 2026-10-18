@@ -83,7 +83,8 @@ function CardItem({
       {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
-      </> : failure ? <p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
+      </> : failure ? <><p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
+        {card.failureStatus?.activeSessionIds.length ? <p className="bot-live-status">{i18n.t('projectAgent.chat.childWorkContinues', { count: card.failureStatus.activeSessionIds.length })}</p> : null}</>
         : imageApproval ? <><p role="status">{i18n.t(imageNotice)}</p><p>{card.content}</p>{!resolved && card.refs?.deadlineAt ? <p className="bot-drawer-note">{i18n.t('projectAgent.chat.imageWaitLimit')}</p> : null}</>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved && !question || !actions?.length ? null : (

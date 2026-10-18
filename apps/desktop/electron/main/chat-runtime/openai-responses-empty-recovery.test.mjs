@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { agentLoopOpenAI } from './openai-agent-loop.mjs';
 import { createToolContext } from './tool-orchestrator.mjs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { installDelegation } from '../project-agent/delegation-port.mjs';
+import { createRuntimeToolRegistry, createRuntimeProjectionFromToolRegistry } from '../tools/index.mjs';
 
 const frames = values => new Response(values.map(value => `data: ${JSON.stringify(value)}\n\n`).join(''));
 const usage = { input_tokens: 100, output_tokens: 7 };
@@ -16,6 +21,41 @@ const answer = () => [
   { type: 'response.output_text.delta', delta: 'The task is still running.' },
   { type: 'response.completed', response: { status: 'completed', usage } },
 ];
+
+test('a projected waiting tool ends the actual Responses loop with a paired result instead of an empty-response retry', async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'peer-wait-responses-'));
+  const previousHome = process.env.PEER_AGENT_HOME;
+  process.env.PEER_AGENT_HOME = home;
+  const uninstall = installDelegation({ storeDir: home, supervisor: { get: () => ({ sessionId: 's', workspaceId: 'w', status: 'running',
+    origin: { workId: 'work', parentConversationId: 'c' } }) } });
+  try {
+    const registry = createRuntimeToolRegistry();
+    const runtimeProjection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'project_agent' });
+    assert.ok(runtimeProjection.capabilities.some(row => row.capabilityId === 'local.delegation.wait_for_sessions'));
+    const context = createToolContext({ conversationId: 'c', mode: 'project_agent' });
+    Object.assign(context, { workspaceId: 'w', currentInputAnchors: [], turnId: 'wait-turn',
+      turnProfile: { role: 'project_agent', workId: 'work', context: { turnKind: 'wake', events: [{ kind: 'report_available', sessionId: 's' }] } } });
+    const wait = () => [
+      { type: 'response.output_item.added', item: { id: 'wait-item', type: 'function_call', call_id: 'real-wait-call', name: 'wait_for_sessions' } },
+      { type: 'response.function_call_arguments.done', item_id: 'wait-item', arguments: '{"sessionIds":["s"]}' },
+      { type: 'response.completed', response: { status: 'completed', usage } },
+    ];
+    const { requests, events } = await runFixture([wait], { registry, runtimeProjection, workspacePath: home, conversationId: 'c', toolContext: context,
+      tools: [{ type: 'function', function: { name: 'wait_for_sessions', parameters: { type: 'object', properties: { sessionIds: { type: 'array', items: { type: 'string' } } } } } }],
+      permissionGate: { createFilePermissionRequester: () => async () => ({ granted: true }),
+        createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }), createShellApprovalDecider: () => async () => ({ approved: true }) } });
+    assert.equal(requests.length, 1);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:tool-call').length, 1);
+    const result = events.find(event => event.channel === 'chat:stream:tool-result');
+    assert.ok(result); assert.match(JSON.stringify(result.payload), /project_agent_wait/);
+    assert.equal(events.filter(event => event.channel === 'chat:stream:done').length, 1);
+    assert.equal(events.some(event => event.channel === 'chat:stream:error'), false);
+  } finally {
+    uninstall();
+    if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 async function runFixture(responses, options = {}, expectAbort = false) {
   const previousFetch = globalThis.fetch;

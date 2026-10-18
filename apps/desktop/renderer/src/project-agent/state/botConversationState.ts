@@ -20,6 +20,7 @@ import {
   type ProjectRecoveryFailureKind,
   type ProjectWorkRecovery,
   type ProjectWorkState,
+  type ProjectReplyFailureStatus,
 } from '@peer-agent/protocol';
 
 import { readAgentActivity } from './agentActivityState.ts';
@@ -52,12 +53,17 @@ export interface BotChatCard {
   readonly resolution?: { readonly state: string };
   readonly recovery?: ProjectWorkRecovery;
   readonly recoveryWorkState?: ProjectWorkState;
+  readonly failureStatus?: ProjectReplyFailureStatus;
 }
 
 /** Current host projection, never a local retry scheduler or a promise inferred from prose. */
 export function agentFailurePresentation(card: BotChatCard): { messageKey: TranslationKey; recovering: boolean; retryAllowed: boolean } {
   const failure = classifyProjectAgentFailure(card.content, card.recovery ? { kind: card.recovery.failureKind, retryable: card.recovery.retryable } : undefined);
-  if (card.resolvedState === 'resolved') return { messageKey: 'projectAgent.chat.recoveryEnded', recovering: false, retryAllowed: false };
+  const phaseKeys = { recovered: 'projectAgent.chat.recoveryEnded', superseded: 'projectAgent.chat.recoveryHistory',
+    cancelled: 'projectAgent.chat.recoveryCancelled', paused: 'projectAgent.chat.recoveryPaused', retrying: 'projectAgent.chat.recoveryContinuing' } as const;
+  const phase = card.failureStatus?.phase;
+  if (phase && phase !== 'current') return { messageKey: phaseKeys[phase], recovering: phase === 'retrying', retryAllowed: false };
+  if (!phase && card.resolvedState === 'resolved') return { messageKey: 'projectAgent.chat.recoveryHistory', recovering: false, retryAllowed: false };
   if (card.recovery?.blockedCode === 'RECOVERY_CHECKPOINT_UNAVAILABLE') {
     return { messageKey: 'projectAgent.chat.recoveryMissingCheckpoint', recovering: false, retryAllowed: false };
   }
@@ -635,6 +641,7 @@ function readCards(value: unknown): BotChatCard[] {
       ...(resolved ? { resolvedState: resolved } : {}),
       ...(readRecovery(record.recovery) ? { recovery: readRecovery(record.recovery)! } : {}),
       ...(readRecoveryWorkState(record.recoveryWorkState) ? { recoveryWorkState: readRecoveryWorkState(record.recoveryWorkState)! } : {}),
+      ...(readFailureStatus(record.failureStatus) ? { failureStatus: readFailureStatus(record.failureStatus)! } : {}),
       actions: readActions(record.actions),
       ...(record.refs && typeof record.refs === 'object' ? { refs: {
         sessionId: readString((record.refs as Record<string, unknown>).sessionId),
@@ -646,6 +653,17 @@ function readCards(value: unknown): BotChatCard[] {
     });
   }
   return cards;
+}
+
+function readFailureStatus(value: unknown): ProjectReplyFailureStatus | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const row = value as Record<string, unknown>;
+  if (!['current', 'retrying', 'superseded', 'recovered', 'cancelled', 'paused'].includes(readString(row.phase))
+    || !['user', 'wake'].includes(readString(row.turnKind)) || !Array.isArray(row.activeSessionIds)
+    || row.phase === 'recovered' && !readString(row.recoveredByReplyId)) return undefined;
+  return { phase: row.phase as ProjectReplyFailureStatus['phase'], turnKind: row.turnKind as 'user' | 'wake',
+    activeSessionIds: readStringList(row.activeSessionIds), ...(readString(row.workId) ? { workId: readString(row.workId) } : {}),
+    ...(readString(row.recoveredByReplyId) ? { recoveredByReplyId: readString(row.recoveredByReplyId) } : {}) };
 }
 
 function readRecovery(value: unknown): BotChatCard['recovery'] {
