@@ -87,7 +87,9 @@ export async function agentLoopOpenAI({
   const saved = executionBudget?.providerCheckpoint;
   if (saved && (saved.provider !== 'openai' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
   if (saved && saved.provider === 'openai' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
-    apiMessages = localImageContinuations.restore(saved, imageScope);
+    // Native history preserves execution facts, never stale System Context.
+    const restored = localImageContinuations.restore(saved, imageScope);
+    apiMessages = [{ role: 'system', content: effectiveSystemPrompt }, ...restored.filter(message => message.role !== 'system')];
   }
   const loop = createAgentLoopKernel({
     executionBudget,
