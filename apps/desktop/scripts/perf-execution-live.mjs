@@ -1,6 +1,7 @@
 /** Opt-in real Provider → Bot → child → tools acceptance. Never launches against personal data. */
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, existsSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, existsSync, rmSync, chmodSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +29,8 @@ const rows = file => existsSync(file) ? readFileSync(file, 'utf8').trim().split(
 const distribution = values => { const sorted = [...values].sort((a,b) => a-b); return { n: sorted.length, p50: sorted[Math.floor(sorted.length*.5)] ?? null, p95: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.95))] ?? null, p99: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.99))] ?? null, max: sorted.at(-1) ?? null }; };
 const largeHistory = process.argv.includes('--large-history');
 const keyRoundTrips = [], wheelRoundTrips = [], scrollChanges = [];
+const contractHashes = project => Object.fromEntries(readdirSync(project).filter(name => name.endsWith('.test.mjs')).sort()
+  .map(name => [name, createHash('sha256').update(readFileSync(path.join(project, name))).digest('hex')]));
 try {
   const fixture = seedBotShellHome({ home, scale: { bots: 12, messages: 100, inboxEvents: 0, memories: 0 } });
   const bot = fixture.bots[0], project = bot.path;
@@ -53,6 +56,7 @@ try {
   writeFileSync(path.join(project, 'src/sum.mjs'), 'export function sumNumbers(values) { return values.reduce((a,b) => a+b); }\n');
   writeFileSync(path.join(project, 'sum.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; import {sumNumbers} from './src/sum.mjs'; test('sum',()=>{assert.equal(sumNumbers([1,2,3]),6);assert.equal(sumNumbers([]),0);assert.throws(()=>sumNumbers([1,'2']),TypeError);assert.throws(()=>sumNumbers([Infinity]),TypeError);});\n");
   if (largeHistory) { report.historyScale = seedExecutionHistory({ home, bot }); seedExecutionWorkload(project); report.workload = 'three implementation files; 18 test cases including 20000-row aggregation and CSV integration'; }
+  const initialContracts = contractHashes(project);
   const isolation = prepareLabIsolation({ sourceRoot: source, labHome: home });
   cpSync(path.join(source, 'apps/desktop/dist'), isolation.launch.distDir, { recursive: true });
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
@@ -134,6 +138,8 @@ try {
   }
   await page.screenshot({ path: path.join(root, 'real-task.png') });
   report.taskPassed = finished; report.taskDrawerOpened = drawerOpened;
+  report.contractIntegrity = { files:Object.keys(initialContracts), unchanged:JSON.stringify(initialContracts) === JSON.stringify(contractHashes(project)) };
+  assert.equal(report.contractIntegrity.unchanged, true, 'the worker may not weaken or rewrite the existing acceptance tests');
   const doneSessions = await page.evaluate(workspaceId=>window.peerAgent.projectAgentListSessions({workspaceId}),bot.workspaceId);
   report.sessions=doneSessions.sessions?.map(s=>({sessionId:s.sessionId,status:s.status,conversationId:s.conversationId}));
   for(const session of doneSessions.sessions||[]) {
