@@ -36,10 +36,11 @@ test('settling a new reply records its accepted facts for the next wake', async 
   let saved;
   const message={id:'reply',kind:'agent_reply',sources:['s1'],marks:[{sessionId:'s1',outcome:'passed',verdictRef:'verdict:s1:passed'}],meta:{sessionStates:[{sessionId:'s1',status:'result_ready'}]}};
   message.meta.reportFactKeys=prepareReplyReport({workspaceId:'w1',message}).keys;
-  const effects=createProjectLifecycleEffects({profileStore:{read:()=>({})},supervisor:{get:()=>({workspaceId:'w1',status:'accepted'}),settle:async()=>{}},
+  const effects=createProjectLifecycleEffects({profileStore:{read:()=>({})},supervisor:{get:()=>({workspaceId:'w1',status:'accepted',observationRevision:'stable-host-observation'}),settle:async()=>{}},
     conversationStore:{updateMessageById:(_c,_id,patch)=>{saved={...message,...patch};}},resolveConversationId:()=> 'parent'});
   await effects.onReplied('w1',message);
   assert.equal(saved.meta.sessionStates[0].status,'accepted');
+  assert.equal(saved.meta.sessionStates[0].observationRevision,'stable-host-observation');
   assert.equal(prepareReplyReport({workspaceId:'w1',message:{...message,meta:{sessionStates:saved.meta.sessionStates}},reportedMessages:[saved]}).suppressed,true);
 });
 

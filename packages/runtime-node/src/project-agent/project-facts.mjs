@@ -31,11 +31,13 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     return {
       reportedMessages: messages.filter(message => message.kind === 'agent_reply'),
       sessionIds: rows.map((row) => row.sessionId),
-      sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status, sourceRevision: row.sourceRevision })),
+      sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status, sourceRevision: row.sourceRevision,
+        ...(row.observationRevision ? { observationRevision: row.observationRevision } : {}) })),
       unreportedResults: rows.filter(row => row.status === 'result_ready'
         && !messages.some(message => message.kind === 'agent_reply' && message.sources?.includes(row.sessionId)
           && message.meta?.sessionStates?.some(state => state.sessionId === row.sessionId
-            && state.sourceRevision === row.sourceRevision && ['result_ready', 'accepted'].includes(state.status))))
+            && state.sourceRevision === row.sourceRevision && state.observationRevision === row.observationRevision
+            && ['result_ready', 'accepted'].includes(state.status))))
         .map(row => ({sessionId:row.sessionId,anchorMessageId:row.origin?.anchorMessageId})),
       verdicts: rows.flatMap((row) => {
         const decision = supervisor.acceptance(row.sessionId);

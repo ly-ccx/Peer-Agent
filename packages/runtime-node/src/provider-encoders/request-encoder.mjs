@@ -3,6 +3,7 @@ import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
 } from './message-normalizer.mjs';
+import { admitDeepSeekChatHistory } from './reasoning-replay.mjs';
 
 // OpenAI GPT-5.5 原生 reasoning_effort 支持 none/low/medium/high/xhigh。
 // Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
@@ -113,7 +114,7 @@ export function encodeOpenAIChatRequest({
   // 承载。Gemini wire 依赖消息级 name 转换 native tool_name，不受影响。
   const body = {
     model,
-    messages: normalizeOpenAIMessages(messages).map(stripOpenAIMessageName),
+    messages: admitDeepSeekChatHistory(normalizeOpenAIMessages(messages).map(stripOpenAIMessageName), { model, tools, supportsReasoning, effort }),
     stream: true,
     stream_options: { include_usage: true },
     tools,

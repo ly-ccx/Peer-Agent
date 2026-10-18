@@ -95,7 +95,8 @@ export function composeReply(input = {}) {
 
   const actualStates = new Map((Array.isArray(input.sessionStates) ? input.sessionStates : [])
     .filter(item => item && typeof item.sessionId === 'string' && SESSION_STATUSES.has(item.status))
-    .map(item => [item.sessionId, { sessionId: item.sessionId, status: item.status, ...(item.sourceRevision ? { sourceRevision: item.sourceRevision } : {}) }]));
+    .map(item => [item.sessionId, { sessionId: item.sessionId, status: item.status, ...(item.sourceRevision ? { sourceRevision: item.sourceRevision } : {}),
+      ...(item.observationRevision ? { observationRevision: item.observationRevision } : {}) }]));
   const missingSources = (Array.isArray(input.unreportedResults) ? input.unreportedResults : [])
     .filter(item => anchors.includes(item?.anchorMessageId) && !sources.ids.includes(item.sessionId));
   if (missingSources.length) {

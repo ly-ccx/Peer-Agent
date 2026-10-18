@@ -21,6 +21,10 @@ export function reduceCoordination(state, entry) {
     }
   } else if (entry.kind === 'work') {
     next.works[entry.work.workId] = structuredClone(entry.work);
+  } else if (entry.kind === 'continuations_coalesced') {
+    if (!entry.owner?.workId || !Array.isArray(entry.retired) || entry.retired.some(work => work.state !== 'coalesced'
+      || work.continuationOwnerWorkId !== entry.owner.workId || work.workId === entry.owner.workId)) throw new Error('invalid_continuation_custody');
+    for (const work of [entry.owner, ...entry.retired]) next.works[work.workId] = structuredClone(work);
   } else if (entry.kind === 'reply_prepared') {
     next.deliveries[entry.message.id] ||= { message: structuredClone(entry.message), state: 'prepared' };
   } else if (entry.kind === 'reply_delivered') {

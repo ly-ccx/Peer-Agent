@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { openSync, closeSync, fsyncSync, writeSync, readFileSync, mkdirSync, renameSync, writeFileSync, existsSync } from 'node:fs';
+import { openSync, closeSync, fsyncSync, writeSync, readSync, fstatSync, readFileSync, mkdirSync, renameSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
@@ -18,6 +18,15 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   const read = reader.read;
   function recover() {
     assertOwner();
+    // Most kicks see a complete append-only journal. Do not read its entire
+    // body merely to inspect its last separator; the reader validates changes.
+    let fd;
+    try {
+      fd = openSync(file, 'r');
+      const size = fstatSync(fd).size, tail = Buffer.alloc(1);
+      if (!size || readSync(fd, tail, 0, 1, size - 1) === 1 && tail[0] === 10) { read(); return; }
+    } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    finally { if (fd !== undefined) closeSync(fd); }
     let body;
     try { body = readFileSync(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
     if (!body || body.endsWith('\n')) { read(); return; }
@@ -35,8 +44,8 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     }
     read(); // Validate a complete final record before merely adding its missing separator.
     assertOwner();
-    const fd = openSync(file, 'a', 0o600);
-    try { writeSync(fd, '\n'); fsyncSync(fd); } finally { closeSync(fd); }
+    const appendFd = openSync(file, 'a', 0o600);
+    try { writeSync(appendFd, '\n'); fsyncSync(appendFd); } finally { closeSync(appendFd); }
   }
   function append(entry) {
     assertOwner();
@@ -57,6 +66,12 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   }
   return {
     read, append, assertOwner, recover, journalFile: file,
+    coalesceWorks(owner, retired) {
+      const state = read();
+      const stamp = work => ({ ...work, revision: (state.works[work.workId]?.revision || 0) + 1, updatedAt: now() });
+      return append({ kind: 'continuations_coalesced', owner: stamp(owner), retired: retired.map(work => stamp({ ...work,
+        state: 'coalesced', end: 'coalesced', continuationOwnerWorkId: owner.workId })) });
+    },
     dispatchOrigin(workId, attemptId, toolCallId) {
       let body;
       try { body = readFileSync(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }

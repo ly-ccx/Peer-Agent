@@ -10,7 +10,7 @@ export async function controlProjectWork({ session, action, anchorMessageId, con
   const receiptKey = `${action}:${anchorMessageId}`;
   if (work.lastControl?.receiptKey === receiptKey) return { ok: true, replayed: true, workId: work.workId, state: work.state };
   const pendingSame = work.pendingControl?.action === action && work.pendingControl?.anchorMessageId === anchorMessageId;
-  if (['cancelled', 'delivered'].includes(work.state) && !pendingSame) return { error: 'work_already_ended' };
+  if (['cancelled', 'delivered', 'coalesced'].includes(work.state) && !pendingSame) return { error: 'work_already_ended' };
   if (action === 'resume' && (work.state !== 'paused' || work.stopScope !== 'work')) return { error: 'work_not_paused' };
   const targets = sessions().filter(row => row.origin?.workId === work.workId && !work.pendingControl?.completedSessionIds?.includes(row.sessionId)
     && !['accepted', 'result_ready', 'cancelled', 'failed', 'superseded'].includes(row.status));

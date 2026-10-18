@@ -7,7 +7,8 @@ function material(value) {
     .filter(key => !VOLATILE.test(key)).map(key => [key, material(value[key])]));
   if (typeof value === 'string') {
     try { const parsed = JSON.parse(value); if (parsed && typeof parsed === 'object') return material(parsed); } catch { /* ordinary factual text */ }
-    return value.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, '<id>');
+    return value.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, '<id>')
+      .replace(/\bcall_[A-Za-z0-9_-]{12,}/g, 'call_<id>');
   }
   return value;
 }
@@ -28,7 +29,8 @@ export function progressFacts(rounds, roster) {
     // Retrying the same failed operation with another path or call ID is not new evidence.
     const failed = result?.ok === false || result?.success === false || ['failed', 'denied', 'cancelled'].includes(result?.status);
     return failed ? { name: call.name, error: result.error || result.code || result.status || 'failed' }
-      : { name: call.name, input: call.input, result };
+      : { name: call.name, input: ['get_session', 'get_verification_detail'].includes(call.name)
+        || call.name === 'coordinate_work' && call.input?.action === 'query' ? undefined : call.input, result };
   });
   return [...new Set([...observations, ...rows].map(row => createHash('sha256').update(JSON.stringify(material(row))).digest('hex')))].sort();
 }

@@ -7,10 +7,13 @@ export function prepareReplyReport({ workspaceId, message, currentInputAnchors =
   const keys = factKeys(workspaceId, message);
   if (!keys.length) return { suppressed: false, keys };
   const seen = new Set();
+  const reportedReplyIds = [];
   if (!currentInputAnchors.length) {
-    for (const reply of reportedMessages) {
+    for (const reply of [...reportedMessages].reverse()) {
       if (reply?.kind !== 'agent_reply') continue;
-      for (const id of storedKeys(workspaceId, reply)) seen.add(id);
+      const stored = storedKeys(workspaceId, reply);
+      if (keys.some(id => stored.includes(id) && !seen.has(id))) reportedReplyIds.push(reply.id);
+      for (const id of stored) seen.add(id);
     }
   }
   for (const call of toolCalls) {
@@ -19,7 +22,11 @@ export function prepareReplyReport({ workspaceId, message, currentInputAnchors =
     if (!receipt?.message || receipt.message.kind !== 'agent_reply') continue;
     for (const id of storedKeys(workspaceId, receipt.message)) seen.add(id);
   }
-  return { keys, suppressed: keys.every(id => seen.has(id)) };
+  // A different human decision is not a duplicate task-status observation.
+  const question = message.question || message.meta?.question;
+  const sameQuestion = !question || reportedMessages.some(reply => reportedReplyIds.includes(reply.id)
+    && JSON.stringify(reply.question || reply.meta?.question) === JSON.stringify(question));
+  return { keys, suppressed: sameQuestion && keys.every(id => seen.has(id)), reportedReplyIds };
 }
 
 function factKeys(workspaceId, message) {
@@ -27,7 +34,7 @@ function factKeys(workspaceId, message) {
   const keys = (message?.meta?.sessionStates || []).flatMap(state => {
     if (!message.sources?.includes(state.sessionId)) return [];
     const mark = message.marks?.find(item => item.sessionId === state.sessionId);
-    return [key([workspaceId, 'session', state.sessionId, state.sourceRevision || '', state.status, mark?.outcome || '', mark?.verdictRef || ''])];
+    return [key([workspaceId, 'session', state.sessionId, state.sourceRevision || '', state.status, mark?.outcome || '', mark?.verdictRef || '', state.observationRevision || ''])];
   });
   for (const ref of message?.meta?.evidenceRefs || []) {
     if (typeof ref === 'string' && ref.startsWith('objective-probe:')) keys.push(key([workspaceId, 'observation', ref]));

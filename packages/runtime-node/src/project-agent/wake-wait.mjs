@@ -1,4 +1,5 @@
 /** Waiting is a host decision over current owned facts, never inferred from empty prose. */
+import { workBudgetBinding } from './work-budget.mjs';
 const ADVANCING = new Set(['queued', 'starting', 'running', 'verifying']);
 const ROUTINE = new Set(['session_started', 'session_spawned', 'session_running', 'session_resumed', 'progress', 'session_progress']);
 
@@ -19,8 +20,15 @@ export async function admitSessionWait(input, view, getSession) {
     || typeof getSession !== 'function') return { ok: false, error: 'background_wait_required' };
   for (const sessionId of input.sessionIds) {
     const row = await getSession({ sessionId });
+    const state = workBudgetBinding(view.workspaceId)?.store?.read?.();
+    const work = state?.works?.[view.workId];
+    // A result wake has its own work ID, distinct from the task's spawning
+    // work. Only durable host event custody can authorize that observer wait.
+    const observer = work?.parentConversationId === view.conversationId && work.stopScope !== 'work'
+      && work.state === 'runnable' && work.pendingEventIds?.some(id => state.events[id]?.event.sessionId === sessionId
+        && view.events.some(event => event.eventId === id && event.sessionId === sessionId));
     if (!row || row.workspaceId !== view.workspaceId || row.origin?.parentConversationId !== view.conversationId
-      || row.origin?.workId !== view.workId) return { ok: false, error: 'out_of_scope' };
+      || row.origin?.workId !== view.workId && !observer) return { ok: false, error: 'out_of_scope' };
     if (!ADVANCING.has(row.status) || row.needsUser) return { ok: false, error: 'session_not_advancing', sessionId, status: row.status };
   }
   return { ok: true, kind: 'project_agent_wait', sessionIds: input.sessionIds };

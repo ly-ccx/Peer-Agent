@@ -31,7 +31,7 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
   function reconcile(workId) {
     if (typeof reconcileVerification !== 'function') return;
     const work = store.read().works[workId];
-    if (!work || ['cancelled', 'delivered', 'budget_limited'].includes(work.state)) return;
+    if (!work || ['cancelled', 'delivered', 'budget_limited', 'coalesced'].includes(work.state)) return;
     const attempts = work.budget?.attempts || {};
     const unsettled = [...(work.budget?.uncertainDispatches || []), ...Object.entries(attempts).flatMap(([attemptId, attempt]) =>
       activeAttempts()?.has(attemptId) ? [] : (attempt.pendingTools || []).map(row => ({ ...row, attemptId, role: attempt.role })))];

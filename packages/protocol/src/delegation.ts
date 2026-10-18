@@ -180,6 +180,8 @@ export interface AgentReplyMeta {
 
 export interface ReplySessionState {
   readonly sourceRevision?: string;
+  /** Stable reporting facts, including a changed verifier failure; not acceptance authority. */
+  readonly observationRevision?: string;
   readonly sessionId: string;
   readonly status: WorkSessionStatus;
 }
