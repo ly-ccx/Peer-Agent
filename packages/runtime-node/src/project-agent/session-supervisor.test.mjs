@@ -245,18 +245,21 @@ function contextOf(env, extra = {}) {
 
 test('task role efforts are frozen at spawn and survive later bot changes and store reload', async () => {
   const policy = { overrides: {
-    session_worker: { mode: 'fixed', modelProviderId: 'worker-1', reasoningEffort: 'high' },
+    session_worker: { mode: 'fixed', modelProviderId: 'worker-1', reasoningEffort: 'max' },
     verifier: { mode: 'fixed', modelProviderId: 'worker-1', reasoningEffort: 'low' },
   } };
   const env = await harness({ projectPolicy: policy,
-    catalog: visionCatalog().map(item => ({ ...item, reasoningEffortLevels: ['low', 'high'] })) });
+    catalog: visionCatalog().map(item => ({ ...item, reasoningEffortLevels: ['low', 'high', 'max'] })) });
   try {
+    env.conversationStore.updateModelEffort(env.parent.id, {effort:'high'});
     const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
     const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
+    const childId = env.supervisor.get({sessionId:opened.sessionId}).conversationId;
+    assert.equal(env.conversationStore.getConversation(childId).effort, 'max', 'task UI metadata must match its frozen worker');
     policy.overrides.session_worker.reasoningEffort = 'low';
     policy.overrides.verifier.reasoningEffort = 'high';
     const saved = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() }).getPlan(planId);
-    assert.equal(saved.delegationOrigin.modelSelection.worker.reasoningEffort, 'high');
+    assert.equal(saved.delegationOrigin.modelSelection.worker.reasoningEffort, 'max');
     assert.equal(saved.delegationOrigin.modelSelection.verifier.reasoningEffort, 'low');
     const next = await env.supervisor.spawn(spawnInput({ title: 'new task', brief: 'different task' }),
       contextOf(env, { inputId: 'input-next' }));

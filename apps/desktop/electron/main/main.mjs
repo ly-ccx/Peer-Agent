@@ -204,6 +204,7 @@ import { createBrowserFdaDragApplicationService } from './browser-fda-drag-appli
 import { createBrowserSessionImportApplicationService } from './browser-session-import-application-service.mjs';
 import { createChatStreamApplicationService } from './chat-stream-application-service.mjs';
 import { createConversationApplicationService } from './conversation-application-service.mjs';
+import { createConversationReadProjection } from './conversation-read-projection.mjs';
 import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
 import { createGoalApplicationService } from './goal-application-service.mjs';
@@ -1443,23 +1444,7 @@ const conversationApplicationService = createConversationApplicationService({
     conversationStore.listConversationsByWorkspace(workspacePath, params),
   searchConversations: (params) => conversationStore.searchConversations(params),
   createConversation: (params) => conversationStore.createConversation(params),
-  getConversation: (id) => {
-    const conv = conversationStore.getConversation(id);
-    if (!conv?.contextSnapshot || conv.contextSnapshot.version !== 1) return conv;
-    const providers = llmConfigStore.listProviders();
-    const boundId = conv.modelProviderId;
-    const provider = (boundId && providers.find((p) => p.id === boundId))
-      || providers.find((p) => p.isDefault)
-      || providers[0]
-      || null;
-    if (!provider?.contextWindow) return conv;
-    const projected = reprojectContextAccountingWindow(
-      conv.contextSnapshot,
-      provider.contextWindow,
-    );
-    if (!projected || projected === conv.contextSnapshot) return conv;
-    return { ...conv, contextSnapshot: projected };
-  },
+  getConversation: createConversationReadProjection({ conversationStore, goalPlanStore, llmConfigStore }),
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
   updateFastMode: (id, fastMode) => conversationStore.updateFastMode(id, fastMode),

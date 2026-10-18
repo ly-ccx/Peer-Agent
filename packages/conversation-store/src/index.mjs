@@ -907,7 +907,7 @@ export function createConversationStore(options = {}) {
         mode: input.mode || 'chat',
         fastMode: false,
         modelProviderId: input.modelProviderId ?? parent.modelProviderId,
-        effort: parent.effort,
+        effort: input.effort ?? parent.effort,
         status: 'active',
         messageCount: 0,
         contentRevision: 0,

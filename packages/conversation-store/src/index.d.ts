@@ -150,6 +150,8 @@ export interface ConversationStore {
     workspaceId?: string;
     mode?: string;
     modelProviderId?: string | null;
+    /** Frozen worker effort for delegated tasks; omitted ordinary children inherit their parent. */
+    effort?: string;
     delegation?: { sessionId: string; anchorMessageId: string; inputId: string };
     runtimeState?: SelectionChildRequest['runtimeState'];
     capturedAt?: string;

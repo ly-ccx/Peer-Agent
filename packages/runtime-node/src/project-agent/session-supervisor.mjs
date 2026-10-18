@@ -458,6 +458,7 @@ export function createSessionSupervisor({
         workspaceId,
         mode: 'goal',
         modelProviderId: frozen.snapshot.worker.modelProviderId,
+        effort: frozen.snapshot.worker.reasoningEffort ?? 'default',
         delegation: { sessionId, anchorMessageId, inputId },
         runtimeState: {
           conversationId: parentConversationId,
