@@ -15,3 +15,12 @@ test('ordinary conversations, absent snapshots and foreign task identities retai
   assert.equal(read({...child,role:'project_agent'}).effort,'high');
   for(const plan of [null,{...frozen,conversationId:'foreign'}, {...frozen,delegationOrigin:{...frozen.delegationOrigin,workspaceId:'other'}}, {...frozen,delegationOrigin:{...frozen.delegationOrigin,sessionId:'other'}}]) assert.equal(read(child,plan),child);
 });
+
+test('context accounting follows the frozen worker window, retaining occupied-token truth',()=>{
+  const snapshot={version:1,contextWindow:100,inputBudget:100,compactionThresholdTokens:80,percent:24,authoritativeInputTokens:24};
+  const projection=createConversationReadProjection({conversationStore:{getConversation:()=>({...child,contextSnapshot:snapshot})},
+    goalPlanStore:{listPlansByConversation:()=>[{planId:'p'}],getPlan:()=>frozen},
+    llmConfigStore:{listProviders:()=>[{id:'old',contextWindow:100},{id:'worker',contextWindow:200}]}});
+  const view=projection('child');assert.equal(view.modelProviderId,'worker');assert.equal(view.contextSnapshot.contextWindow,200);
+  assert.equal(view.contextSnapshot.percent,12);assert.equal(view.contextSnapshot.authoritativeInputTokens,24);assert.equal(snapshot.contextWindow,100);
+});
