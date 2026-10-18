@@ -40,7 +40,7 @@ test('failure presentation preserves typed host recovery and only promises a rea
   assert.equal(agentFailurePresentation({ ...card, recovery: { ...card.recovery!, reservationId: undefined } }).messageKey,
     'projectAgent.chat.recoveryExhausted');
   assert.equal(agentFailurePresentation({ ...card, recovery: undefined }).messageKey, 'projectAgent.chat.recoveryExhausted');
-  assert.equal(agentFailurePresentation({ ...card, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryHistory');
+  assert.equal(agentFailurePresentation({ ...card, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryEarlierReply');
   assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: 'runnable', recovery: { ...card.recovery!, reservationId: undefined } }).recovering, true);
   assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: 'blocked_system' }).recovering, false);
   assert.equal(agentFailurePresentation({ ...card, recoveryWorkState: undefined }).recovering, false);
@@ -56,13 +56,13 @@ test('reply outcome and running children remain independent; only a delivered re
     failureStatus: { phase: 'current', turnKind: 'wake', activeSessionIds: ['running-child'], workId: 'w' } };
   const card = normalizeBotMessage({ id: 'f', cards: [raw] })!.cards[0]!;
   assert.deepEqual(card.failureStatus?.activeSessionIds, ['running-child']);
-  assert.equal(agentFailurePresentation(card).messageKey, 'projectAgent.chat.unavailable');
-  for (const [phase, key] of [['superseded', 'recoveryHistory'], ['paused', 'recoveryPaused'], ['cancelled', 'recoveryCancelled']] as const) {
+  assert.equal(agentFailurePresentation(card).messageKey, 'projectAgent.chat.recoveryEmptyResponse');
+  for (const [phase, key] of [['superseded', 'recoveryEarlierReply'], ['paused', 'recoveryPaused'], ['cancelled', 'recoveryCancelled']] as const) {
     assert.equal(agentFailurePresentation({ ...card, failureStatus: { ...card.failureStatus!, phase } }).messageKey, `projectAgent.chat.${key}`);
   }
   const malformed = normalizeBotMessage({ id: 'f', cards: [{ ...raw, failureStatus: { ...raw.failureStatus, phase: 'recovered' } }] })!.cards[0]!;
   assert.equal(malformed.failureStatus, undefined);
-  assert.equal(agentFailurePresentation(malformed).messageKey, 'projectAgent.chat.recoveryHistory');
+  assert.equal(agentFailurePresentation(malformed).messageKey, 'projectAgent.chat.recoveryEarlierReply');
   const recovered = normalizeBotMessage({ id: 'f', cards: [{ ...raw,
     failureStatus: { ...raw.failureStatus, phase: 'recovered', recoveredByReplyId: 'delivered' } }] })!.cards[0]!;
   assert.equal(agentFailurePresentation(recovered).messageKey, 'projectAgent.chat.recoveryEnded');

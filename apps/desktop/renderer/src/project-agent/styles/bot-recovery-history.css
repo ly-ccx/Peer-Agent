@@ -1,0 +1,19 @@
+.bot-thread-row.is-recovery-history { padding-bottom: 8px; }
+.bot-recovery-history { max-width: min(680px, 100%); color: var(--graphite-soft); }
+.bot-recovery-history > summary {
+  display: flex; align-items: center; gap: 7px; width: fit-content; max-width: 100%;
+  padding: 5px 0; cursor: pointer; list-style: none; font-size: 12px;
+}
+.bot-recovery-history > summary::-webkit-details-marker { display: none; }
+.bot-recovery-history > summary time { font-variant-numeric: tabular-nums; }
+.bot-recovery-history > summary > svg:last-child { transform: rotate(-90deg); }
+.bot-recovery-history[open] > summary > svg:last-child { transform: none; }
+.bot-recovery-history > summary:focus-visible,
+.bot-recovery-history-body > button:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
+.bot-recovery-history-body { padding: 4px 0 8px 21px; }
+.bot-recovery-history-body > p { margin: 0 0 8px; font-size: 12px; color: var(--graphite-soft); }
+.bot-recovery-history-body > button {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 0;
+  border: 0; background: transparent; color: var(--graphite-soft); font: inherit; font-size: 12px; cursor: pointer;
+}
+.bot-recovery-history-body > button:hover { color: var(--graphite-base); }

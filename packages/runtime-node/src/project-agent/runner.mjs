@@ -301,7 +301,10 @@ export function createProjectAgentRunner({
       }
       if (outcome.yielded && coordination) {
         const decision = coordination.finish(job, outcome, readSlot(resolveRoster, job.kind));
-        remember(agentTurnMessage({ turnId: outcome.turnId, plan: outcome.plan, rounds: outcome.rounds }));
+        const message = agentTurnMessage({ turnId: outcome.turnId, plan: outcome.plan, rounds: outcome.rounds,
+          publicUpdates: activity.snapshot()?.segments.filter(segment => segment.kind === 'text') ?? [] });
+        message.meta = { workId: job.workId, diagnosticTiming: diagnosticTiming('yielded') };
+        remember(message);
         activity.finish('done');
         if (decision.end !== 'no_progress') { setStatus('idle'); return 'yielded'; }
         outcome.failed = true; outcome.reason = 'agent_no_progress'; job.explicitRetryOnly = true;

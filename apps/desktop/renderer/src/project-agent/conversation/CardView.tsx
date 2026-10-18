@@ -80,7 +80,7 @@ function CardItem({
   const dismissal = useQuestionDismissal(question && resolved, onClosed);
   if (question && !dismissal.present) return null;
   return (
-    <section ref={dismissal.ref} inert={question && resolved ? true : undefined} aria-hidden={question && resolved ? true : undefined}
+    <section ref={dismissal.ref} aria-busy={busy} inert={question && resolved ? true : undefined} aria-hidden={question && resolved ? true : undefined}
       className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
       {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
@@ -119,7 +119,7 @@ function CardItem({
           ))}
         </div>
       )}
-      {error ? <p role="alert" className="bot-drawer-note">{error}</p> : null}
+      {!resolved && error ? <p role="alert" className="bot-drawer-note">{error}</p> : null}
     </section>
   );
 }

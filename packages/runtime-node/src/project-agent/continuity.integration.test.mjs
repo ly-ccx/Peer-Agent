@@ -130,6 +130,42 @@ test('repeated paraphrases of a stalled repair produce one explicit stop receipt
     await env.runner.kick(); assert.equal(requests, 3);
   } finally { env.close(); }
 });
+
+test('user progress survives a cooperative yield, a quiet wake and restart until the anchored answer', async () => {
+  let userSlices = 0;
+  const env = world(async ({ plan, sink, streamId }) => {
+    if (plan.kind === 'wake') {
+      sink.send('chat:stream:delta', { streamId, content: 'PRIVATE_WAKE_TEXT' });
+      return { toolCalls: [] };
+    }
+    if (++userSlices === 1) {
+      sink.send('chat:stream:delta', { streamId, content: '我先核对最新进展。' });
+      return { turnEnd: 'yielded', text: '我先核对最新进展。',
+        toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'waiting_user' } }],
+        providerCheckpoint: { messages: [{ thinking: 'PRIVATE_REASONING' }] } };
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: '当前等待稳定源码后补验收，无需重复授权。', replyTo: ['input-i'] }, result: { ok: true } }] };
+  });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '现在进展如何？' }]);
+    const yielded = env.messages.find(row => row.kind === 'agent_turn');
+    assert.deepEqual(yielded.publicUpdates, [{ id: 'text-1', text: '我先核对最新进展。' }]);
+    assert.deepEqual(yielded.replyTo, ['input-i']);
+    assert.equal(yielded.meta.diagnosticTiming.outcome, 'yielded');
+    assert.equal(env.messages.some(row => row.kind === 'agent_reply'), false, 'a scheduling yield cannot deliver an answer');
+    env.restart();
+    env.inbox.append('w', [event('unrelated-result', 'result_ready', 'other')]);
+    await env.runner.kick();
+    assert.deepEqual(env.messages.find(row => row.id === yielded.id).publicUpdates, yielded.publicUpdates);
+    const wake = env.messages.find(row => row.kind === 'agent_turn' && row.turnKind === 'wake');
+    assert.equal(wake.publicUpdates, undefined);
+    const replies = env.messages.filter(row => row.kind === 'agent_reply');
+    assert.equal(replies.length, 1);
+    assert.deepEqual(replies[0].replyTo, ['input-i']);
+    assert.doesNotMatch(JSON.stringify(env.messages.map(row => row.publicUpdates)), /PRIVATE_WAKE_TEXT|PRIVATE_REASONING/);
+    assert.equal(Object.values(env.store.read().works).find(row => row.anchorInputIds?.includes('i')).state, 'delivered');
+  } finally { env.close(); }
+});
 test('routine events never call a model; completed result wakes once without fresh user input', async () => {
   let requests = 0;
   const env = world(async () => { requests++; return { toolCalls: [] }; });

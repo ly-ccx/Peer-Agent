@@ -261,9 +261,13 @@ export type TranslationKey =
   | 'projectAgent.chat.recoveryPermission'
   | 'projectAgent.chat.recoveryUnknownOutcome'
   | 'projectAgent.chat.recoveryHistory'
+  | 'projectAgent.chat.recoveryEarlierReply'
   | 'projectAgent.chat.recoveryCancelled'
   | 'projectAgent.chat.recoveryPaused'
   | 'projectAgent.chat.childWorkContinues'
+  | 'projectAgent.chat.recoveryAttemptFailed'
+  | 'projectAgent.chat.recoveryEmptyResponse'
+  | 'projectAgent.chat.recoveryModelChanged'
   | 'projectAgent.chat.recoveryEnded'
   | 'projectAgent.chat.recoveryStale'
   | 'projectAgent.chat.recoveryMissingCheckpoint'
@@ -1795,10 +1799,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.recoveryPermission': '继续处理需要的授权已失效。请先确认授权，已有进展已保留。',
     'projectAgent.chat.recoveryUnknownOutcome': '有操作的结果尚未确认，需要先核对，已有进展已保留。',
     'projectAgent.chat.recoveryEnded': '主 Bot 回复已恢复，新的回复已送达。',
-    'projectAgent.chat.recoveryHistory': '此前一次主 Bot 回复未完成，已保留在历史记录中。',
+    'projectAgent.chat.recoveryEarlierReply': '此前一次主 Bot 回复未完成，已保留在历史记录中。',
     'projectAgent.chat.recoveryCancelled': '这项工作的主 Bot 回复已取消。',
     'projectAgent.chat.recoveryPaused': '这项工作的主 Bot 回复已暂停。',
     'projectAgent.chat.childWorkContinues': '另有 {count} 项子任务仍在推进，其执行状态单独显示。',
+    'projectAgent.chat.recoveryHistory': '先前的中断',
+    'projectAgent.chat.recoveryAttemptFailed': '本次继续未完成，具体原因见最新进展。',
+    'projectAgent.chat.recoveryEmptyResponse': '模型未返回可用内容，已有进展已保留。你可以继续尝试。',
+    'projectAgent.chat.recoveryModelChanged': '当前模型或连接配置已变化，无法直接续接这次回复。已有进展已保留。',
     'projectAgent.chat.recoveryStale': '这条回复的状态已更新，请查看最新进展。',
     'projectAgent.chat.recoveryMissingCheckpoint': '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。',
     'projectAgent.chat.unavailable': '主 Bot 本次回复未完成。',
@@ -3117,10 +3125,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.recoveryPermission': 'The authorization needed to continue is no longer valid. Confirm authorization first. Progress was saved.',
     'projectAgent.chat.recoveryUnknownOutcome': 'The result of an operation has not been confirmed. It needs to be checked first. Progress was saved.',
     'projectAgent.chat.recoveryEnded': 'The main bot has recovered and delivered a new reply.',
-    'projectAgent.chat.recoveryHistory': 'An earlier main bot reply failed. Its diagnostic record has been kept.',
+    'projectAgent.chat.recoveryEarlierReply': 'An earlier main bot reply failed. Its diagnostic record has been kept.',
     'projectAgent.chat.recoveryCancelled': 'The main bot reply for this work was cancelled.',
     'projectAgent.chat.recoveryPaused': 'The main bot reply for this work is paused.',
     'projectAgent.chat.childWorkContinues': '{count} child tasks are still advancing. Their execution status is shown separately.',
+    'projectAgent.chat.recoveryHistory': 'Earlier interruption',
+    'projectAgent.chat.recoveryAttemptFailed': 'This attempt did not finish. Check the latest progress for the reason.',
+    'projectAgent.chat.recoveryEmptyResponse': 'The model returned no usable content. Progress was saved. You can try again.',
+    'projectAgent.chat.recoveryModelChanged': 'The model or connection configuration has changed, so this reply cannot resume directly. Progress was saved.',
     'projectAgent.chat.recoveryStale': 'The state of this reply has changed. Please check the latest progress.',
     'projectAgent.chat.recoveryMissingCheckpoint': 'The saved progress has no complete recovery record. It needs to be checked before executing again.',
     'projectAgent.chat.unavailable': 'This main bot reply could not be completed.',

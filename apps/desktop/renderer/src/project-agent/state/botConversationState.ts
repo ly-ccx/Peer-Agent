@@ -16,7 +16,6 @@ import {
   type DispositionMessage,
   type DispositionToolCall,
   type MessageDisposition,
-  classifyProjectAgentFailure,
   type ProjectRecoveryFailureKind,
   type ProjectWorkRecovery,
   type ProjectWorkState,
@@ -59,49 +58,7 @@ export interface BotChatCard {
   readonly recoveryAction?: ProjectReplyRecoveryAction;
 }
 
-/** Current host projection, never a local retry scheduler or a promise inferred from prose. */
-export function agentFailurePresentation(card: BotChatCard): { messageKey: TranslationKey; recovering: boolean; retryAllowed: boolean } {
-  const failure = classifyProjectAgentFailure(card.content, card.recovery ? { kind: card.recovery.failureKind, retryable: card.recovery.retryable } : undefined);
-  const phaseKeys = { recovered: 'projectAgent.chat.recoveryEnded', superseded: 'projectAgent.chat.recoveryHistory',
-    cancelled: 'projectAgent.chat.recoveryCancelled', paused: 'projectAgent.chat.recoveryPaused', retrying: 'projectAgent.chat.recoveryContinuing' } as const;
-  const phase = card.failureStatus?.phase;
-  if (phase && phase !== 'current') return { messageKey: phaseKeys[phase], recovering: phase === 'retrying', retryAllowed: false };
-  if (!phase && card.resolvedState === 'resolved') return { messageKey: 'projectAgent.chat.recoveryHistory', recovering: false, retryAllowed: false };
-  if (card.recovery?.blockedCode === 'RECOVERY_CHECKPOINT_UNAVAILABLE') {
-    return { messageKey: 'projectAgent.chat.recoveryMissingCheckpoint', recovering: false, retryAllowed: false };
-  }
-  const continuing = Boolean(card.recovery) && card.recoveryWorkState === 'runnable'
-    && failure.kind !== 'execution_outcome_unknown' && failure.kind !== 'cancelled';
-  if (continuing) return { messageKey: 'projectAgent.chat.recoveryContinuing', recovering: true, retryAllowed: false };
-  const recovering = failure.retryable && card.recoveryWorkState === 'retry_wait'
-    && Boolean(card.recovery?.reservationId && card.recovery.retryAt);
-  if (recovering) return { messageKey: 'projectAgent.chat.recoveryScheduled', recovering: true, retryAllowed: false };
-  if (failure.kind === 'fatal' && /^代理暂时不可用：\s*agent_no_progress$/.test(card.content)) {
-    return { messageKey: 'projectAgent.chat.noProgress', recovering: false, retryAllowed: card.recoveryAction?.canContinue !== false };
-  }
-  const keys: Partial<Record<ProjectRecoveryFailureKind, TranslationKey>> = {
-    response_headers_timeout: 'projectAgent.chat.recoveryExhausted',
-    network: 'projectAgent.chat.recoveryExhausted',
-    stream_interrupted: 'projectAgent.chat.recoveryExhausted',
-    provider_transient: 'projectAgent.chat.recoveryExhausted',
-    rate_limited: 'projectAgent.chat.recoveryExhausted',
-    authentication: 'projectAgent.chat.recoveryAuthentication',
-    configuration: 'projectAgent.chat.recoveryConfiguration',
-    invalid_request: 'projectAgent.chat.recoveryInvalidRequest',
-    permission: 'projectAgent.chat.recoveryPermission',
-    budget_exhausted: card.recoveryAction?.budget?.reason === 'reservation_pending'
-      ? card.recoveryAction.canContinue ? 'projectAgent.chat.budgetAvailable' : 'projectAgent.chat.budgetReserved'
-      : card.recoveryAction?.canContinue ? 'projectAgent.chat.budgetReady'
-      : card.recoveryAction?.budget?.reason === 'usage_unknown' ? 'projectAgent.chat.budgetUnconfirmed'
-      : card.recoveryAction?.budget ? 'projectAgent.chat.budgetExhausted' : 'projectAgent.chat.recoveryLegacyLimit',
-    execution_outcome_unknown: 'projectAgent.chat.recoveryUnknownOutcome',
-    cancelled: 'projectAgent.chat.stopped',
-  };
-  return { messageKey: keys[failure.kind] ?? 'projectAgent.chat.unavailable',
-    recovering: false, retryAllowed: card.recoveryAction?.canContinue !== false
-      && (failure.kind !== 'budget_exhausted' || card.recoveryAction?.canContinue === true)
-      && failure.kind !== 'execution_outcome_unknown' && failure.kind !== 'cancelled' };
-}
+export { agentFailurePresentation } from './recoveryPresentation.ts';
 
 export interface BotChatMeta {
   readonly sessionStates?: readonly ReplySessionState[];
@@ -258,9 +215,12 @@ function readImages(value: unknown): { id: string; name: string; dataUrl: string
   return images;
 }
 
-/** 只留下用户输入、锚定回复和系统卡片。agent_turn 与其它内部回合丢掉。 */
+/** Public updates survive a scheduling yield; internal rounds never become chat text. */
 export function visibleBotMessages(messages: readonly BotChatMessage[]): BotChatMessage[] {
-  return messages.filter((message) => VISIBLE_KINDS.has(message.kind));
+  const deliveredTurns = new Set(messages.filter(message => ['agent_reply', 'system_card'].includes(message.kind))
+    .map(message => message.turnId).filter(Boolean));
+  return messages.filter(message => VISIBLE_KINDS.has(message.kind) || message.kind === 'agent_turn'
+    && Boolean(message.publicUpdates?.some(update => update.text.trim())) && !deliveredTurns.has(message.id));
 }
 
 /**
