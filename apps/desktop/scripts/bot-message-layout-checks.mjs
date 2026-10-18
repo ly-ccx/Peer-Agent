@@ -49,10 +49,10 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     for (const [state, id, expected, retryVisible] of recoveryCases) {
       const recoveryMessage = page.locator(`#bot-msg-rc-message-${id}`);
       await recoveryMessage.scrollIntoViewIfNeeded();
-      if (['resolved', 'historical'].includes(state) && !await recoveryMessage.locator('.bot-recovery-history').evaluate(node => node.open)) {
+      if (state === 'resolved' && !await recoveryMessage.locator('.bot-recovery-history').evaluate(node => node.open)) {
         await recoveryMessage.locator('.bot-recovery-history > summary').click();
       }
-      const text = ['resolved', 'historical'].includes(state) ? recoveryMessage.locator('.bot-recovery-history .bot-reply-body') : recoveryMessage.locator('.bot-card > p');
+      const text = state === 'resolved' ? recoveryMessage.locator('.bot-recovery-history .bot-reply-body') : recoveryMessage.locator('.bot-card > p');
       assert.equal(await text.first().textContent(), expected);
       if (state === 'child-running') assert.match(await recoveryMessage.innerText(), /另有 1 项子任务仍在推进/);
       if (state === 'budget-unknown') assert.match(await recoveryMessage.innerText(), /费用上限为 10 美元，当前用量无法准确确认；不会把未知用量当作零。.*来源：执行预算设置。/s);
