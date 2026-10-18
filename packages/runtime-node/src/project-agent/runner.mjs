@@ -79,6 +79,7 @@ export function createProjectAgentRunner({
   let turnKind = null;
   let acceptingStop = false;
   let abortController = null;
+  let activeWorkId = null;
   let statusValue = 'idle';
   let curatorFlight = null;
   let curatorTimer = null;
@@ -276,6 +277,7 @@ export function createProjectAgentRunner({
       job.attemptId = `turn-${randomUUID()}`;
       if (coordination && failedJob?.workId === job.workId) failedJob = null;
       coordination?.start(job);
+      activeWorkId = job.workId || null;
       if (coordination && job.manualRecovery) executedManualJobs.set(job, { ok: true, workId: job.workId, turnId: job.attemptId });
       const startedAt = stamp(), started = performance.now();
       const diagnosticTiming = outcome => ({ startedAt, finishedAt: stamp(), durationMs: performance.now() - started, outcome });
@@ -298,7 +300,9 @@ export function createProjectAgentRunner({
           message.meta = { ...message.meta, diagnosticTiming: diagnosticTiming('preempted') };
           remember(message);
         }
-        preempted.push({ events: job.events, throughSeq: job.throughSeq });
+        if (coordination) coordination.finish(job, { ...outcome, yielded: true,
+          preserveCheckpoint: outcome.rounds.length === 0 }, readSlot(resolveRoster, job.kind));
+        else preempted.push({ events: job.events, throughSeq: job.throughSeq });
         return 'preempted';
       }
       if (outcome.yielded && coordination) {
@@ -395,7 +399,7 @@ export function createProjectAgentRunner({
       if (!outcome.silentWait && (job.kind === 'user' || job.kind === 'wake')) scheduleCurator(job);
       return 'ok';
     } finally {
-      if (abortController === controller) abortController = null;
+      if (abortController === controller) { abortController = null; activeWorkId = null; }
       turnKind = null; acceptingStop = false;
     }
   }
@@ -625,8 +629,9 @@ export function createProjectAgentRunner({
       if (failedJob.throughSeq > 0) preempted.push({ events: failedJob.events, throughSeq: failedJob.throughSeq });
       failedJob = null; retryArmed = false;
     }
-    if (!coordination && turnKind === 'wake' && abortController && !abortController.signal.aborted) {
-      abortController.abort();
+    if (list.length && turnKind === 'wake' && abortController && !abortController.signal.aborted
+      && (!coordination || coordination.canPreemptRequest(activeWorkId))) {
+      abortController.abort('foreground-input');
     }
     if (!coordination && failedJob && !retryArmed) return kick().then(result => ({ ...result, queued: list.length }));
     return kick();

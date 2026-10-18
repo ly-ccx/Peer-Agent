@@ -115,3 +115,31 @@ test('a stopped response is never replayed after lease recovery, even if executi
     assert.equal(h.host.runnerFor('a').activity(), null);
   } finally { h.close(); }
 });
+
+test('new input preempts a background model request after delivery without waiting for its response or replaying its events', async () => {
+  let start, release, wakeCalls = 0;
+  const started = new Promise(resolve => { start = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const seen = [];
+  const h = harness(async ({ plan, signal }) => {
+    if (plan.kind === 'wake' && ++wakeCalls === 1) {
+      start();
+      await Promise.race([blocked, new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))]);
+      return signal.aborted ? { preempted: true } : { text: '' };
+    }
+    if (plan.kind === 'user') { seen.push(plan.userInputs[0].inputId); assert.equal(plan.events.length, 0); return { text: '已接手新问题。' }; }
+    return { text: '' };
+  });
+  let background, foreground;
+  try {
+    await h.host.sync(['a']);
+    h.host.inbox.append('a', [{ eventId: 'completed-event', kind: 'report_available', sessionId: 'old-session', at: new Date().toISOString(), payload: {} }]);
+    background = h.host.sync(['a']);
+    await started;
+    h.host.inputQueue.submitInput({ workspaceId: 'a', inputId: 'new-priority', text: '新的问题', surface: 'desktop' });
+    foreground = h.host.sync(['a']);
+    await Promise.race([foreground, new Promise(resolve => setTimeout(resolve, 150))]);
+    assert.deepEqual(seen, ['new-priority']);
+    assert.equal(h.messages.some(row => row.card === 'agent_unavailable'), false);
+  } finally { release(); await Promise.allSettled([background, foreground]); h.close(); }
+});

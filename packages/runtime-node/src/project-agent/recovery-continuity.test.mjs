@@ -28,7 +28,7 @@ function world(executeTurn, extra = {}) {
   let budgetPolicy = extra.workBudget || {};
   let release = registerWorkBudget('w', store, budgetPolicy);
   let runner = createProjectAgentRunner({ ...ports, coordinationStore: store });
-  return { messages, get store() { return store; }, get runner() { return runner; },
+  return { messages, inbox, get store() { return store; }, get runner() { return runner; },
     work: () => Object.values(store.read().works)[0],
     loseLease: () => { owned = false; },
     async advance(ms) { clock += ms; for (const [id, timer] of [...timers]) if (timer.at <= clock) { timers.delete(id); await timer.fn(); } },
@@ -562,4 +562,36 @@ test('model rebasing preserves matching checkpoints and refuses unpaired tool fa
   const completed = { ...outcome, rounds: [{ toolCalls: [{ name: 'read_file', result: { ok: true } }] }] };
   assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'old', modelId: 'model', family: 'openai' }), completed);
   assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'new', modelId: 'model', family: 'openai' }).providerCheckpoint, undefined);
+});
+
+test('foreground input waits for an active tool result instead of cancelling a dispatched capability', async () => {
+  let started, finish;
+  const ready = new Promise(resolve => { started = resolve; });
+  const gate = new Promise(resolve => { finish = resolve; });
+  const seen = [];
+  let wake = true, oldSignal;
+  const env = world(async ({ plan, turnProfile, signal }) => {
+    const guard = createWorkBudgetGuard(turnProfile);
+    try {
+      if (plan.kind === 'wake' && wake) {
+        wake = false; oldSignal = signal;
+        guard.beforeTool({ toolCallId: 'active-write', capabilityId: 'write_file' });
+        started(); await gate;
+        guard.checkpoint({ provider: 'openai', providerId: 'm', model: 'model', messages: [] }, [{ call: { toolCallId: 'active-write' }, result: { status: 'success' } }]);
+        return { toolCalls: [{ name: 'write_file', result: { ok: true } }], continued: false };
+      }
+      if (plan.kind === 'user') seen.push(plan.userInputs[0].inputId);
+      return { text: plan.kind === 'user' ? '已回复新输入。' : '' };
+    } finally { guard.finish(); }
+  });
+  try {
+    env.inbox.append('w', [{ eventId: 'active-tool-wake', kind: 'report_available', sessionId: 's', at: new Date().toISOString(), payload: {} }]);
+    const background = env.runner.kick();
+    await ready;
+    const foreground = env.runner.enqueueUserInputs([input('after-write')]);
+    assert.equal(oldSignal.aborted, false);
+    assert.deepEqual(seen, []);
+    finish(); await Promise.all([background, foreground]);
+    assert.deepEqual(seen, ['after-write']);
+  } finally { finish(); env.close(); }
 });

@@ -106,6 +106,11 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         && !works.some(work => work.sessionIds?.includes(event.sessionId) && work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)));
     },
     ownsInput(inputId) { return Object.values(store.read().works).some(work => work.anchorInputIds?.includes(inputId)); },
+    canPreemptRequest(workId) {
+      const work = store.read().works[workId];
+      return Boolean(work && !hasUnsettledDispatch(work)
+        && Object.values(work.budget?.attempts || {}).every(attempt => !attempt.pendingTools?.length));
+    },
     nextRetryAt() {
       expireReservations();
       const at = now();
