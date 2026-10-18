@@ -19,5 +19,13 @@ test('empty provider content and incompatible continuation have distinct user-fa
   const changed = { ...card, content: '代理暂时不可用：continuity_model_changed' };
   assert.equal(agentFailurePresentation(changed).messageKey, 'projectAgent.chat.recoveryModelChanged');
   assert.equal(agentFailurePresentation(changed).retryAllowed, false);
-  assert.equal(agentFailurePresentation({ ...changed, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryEnded');
+  assert.equal(agentFailurePresentation({ ...changed, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryEarlierReply');
+});
+
+test('folded history distinguishes actual recovery from a superseded reply', () => {
+  const base = { cardId: 'old', kind: 'agent_unavailable', content: 'old failure', resolvedState: 'resolved' as const };
+  const status = { phase: 'recovered' as const, turnKind: 'user' as const, activeSessionIds: [] };
+  assert.equal(isRetiredRecovery([{ ...base, failureStatus: { ...status, phase: 'current' } }]), false);
+  assert.equal(agentFailurePresentation({ ...base, failureStatus: status }).messageKey, 'projectAgent.chat.recoveryEnded');
+  assert.equal(agentFailurePresentation({ ...base, failureStatus: { ...status, phase: 'superseded' } }).messageKey, 'projectAgent.chat.recoveryEarlierReply');
 });

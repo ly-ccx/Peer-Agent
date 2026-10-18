@@ -1,4 +1,5 @@
 import { OBJECTIVE_TOOL_SPECS } from './objective-tool-specs.mjs';
+import { admitSessionWait } from './wake-wait.mjs';
 import { createHash } from 'node:crypto';
 
 import { createEvidenceBundle } from '@peer-agent/runtime-core';
@@ -222,7 +223,7 @@ export function createDelegationProvider({
       input,
     });
     const book = ledgerFor({ ...context, workspaceId: view.workspaceId, conversationId: view.conversationId });
-    const previous = readResult(book?.get?.(key));
+    const previous = item.name === 'wait_for_sessions' ? null : readResult(book?.get?.(key));
     if (previous && item.name !== 'send_agent_message') {
       return finish({
         call,
@@ -263,6 +264,10 @@ export function createDelegationProvider({
   }
 
   async function dispatch(name, input, view) {
+    if (name === 'wait_for_sessions') {
+      const output = await admitSessionWait(input, view, supervisor?.get);
+      return { ok: output.ok, output };
+    }
     if (name === 'coordinate_work') {
       const scope = resolveAnchorScope({ messages: view.messages, quoteRefs: view.quoteRefs, replyTo: view.replyTo });
       return accepted(await callPort(supervisor?.coordinateWork, input, 'coordination_unavailable', { ...view,
@@ -304,7 +309,7 @@ export function createDelegationProvider({
     if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable'));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable', view));
     if (name === 'get_verification_detail') return readVerification(input);
-    if (name === 'verify_session') return verifySession(input);
+    if (name === 'verify_session') return verifySession(input, view);
     if (name === 'set_proactivity') return setProactivity(input, view);
     if (name === 'post_reply') {
       const post = replyComposer?.postReply;
@@ -334,7 +339,7 @@ export function createDelegationProvider({
     return { ok: true, output: { ok: true, ...buildVerificationDetail({ ...facts, sessionId: input.sessionId }) } };
   }
 
-  async function verifySession(input) {
+  async function verifySession(input, view) {
     if (!verificationAvailable() || typeof verification?.run !== 'function') {
       return { ok: false, output: { ok: false, error: 'verifier_unavailable', message: 'verifier_unavailable' } };
     }
@@ -346,12 +351,14 @@ export function createDelegationProvider({
         sessionId: input.sessionId,
         ...(input.focus ? { focus: input.focus } : {}),
         role: 'verifier',
+        workId: view.workId,
         preferDifferentSource: true,
       });
       if (!reviewed || reviewed.ok === false || !reviewed.facts) {
         return {
           ok: false,
-          output: { ok: false, error: reviewed?.error || 'verifier_failed', message: reviewed?.error || 'verifier_failed' },
+          output: { ok: false, error: reviewed?.error || 'verifier_failed', message: reviewed?.message || reviewed?.error || 'verifier_failed',
+            ...(reviewed?.nextAction ? { nextAction: reviewed.nextAction } : {}) },
         };
       }
       const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });
@@ -428,6 +435,7 @@ function executionView(context) {
     sessionId: text(context?.turnProfile?.sessionId) || text(nested.turnProfile?.sessionId),
     planId: text(context?.turnProfile?.planId) || text(nested.turnProfile?.planId),
     agentKind: context?.turnProfile?.agentKind ?? nested.turnProfile?.agentKind,
+    turnKind: context?.turnProfile?.context?.turnKind ?? nested.turnProfile?.context?.turnKind,
     manualCriterionAuthorities: context?.manualCriterionAuthorities ?? nested.manualCriterionAuthorities,
     mode: context?.mode ?? nested.mode,
     role: context?.role ?? context?.turnProfile?.role ?? nested.role ?? nested.turnRole ?? nested.turnProfile?.role,
@@ -692,8 +700,8 @@ function finish({ call, capabilityId, name, locale, status, output }) {
         status,
         tool: name,
         legacyResult: { success: granted, output: outputText },
-        ...(granted && name === 'post_reply'
-          ? { control: { terminal: true, reason: 'project_agent_reply' } }
+        ...(granted && (name === 'post_reply' || name === 'wait_for_sessions')
+          ? { control: { terminal: true, reason: name === 'post_reply' ? 'project_agent_reply' : 'project_agent_wait' } }
           : {}),
         ...(granted && name === 'send_agent_message' && output.waitingForParent === true
           ? { control: { terminal: true, reason: 'agent_message_wait' } } : {}),

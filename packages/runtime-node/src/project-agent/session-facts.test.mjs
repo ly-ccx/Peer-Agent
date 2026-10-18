@@ -4,9 +4,9 @@ import { beginVerificationAttempt, sessionFactsFromPlan } from './session-facts.
 
 test('stale verifying flags cannot hide a blocker or survive verifier termination', () => {
   const plan = { planId: 'p', status: 'executing', delegationOrigin: { phase: 'running', verifying: true }, runner: { status: 'blocked', blockedReason: 'verifier_failed' } };
-  assert.equal(sessionFactsFromPlan(plan).status, 'waiting_user');
+  assert.equal(sessionFactsFromPlan(plan).status, 'waiting_agent');
   const end = beginVerificationAttempt('p', 'a');
-  assert.equal(sessionFactsFromPlan(plan).status, 'waiting_user');
+  assert.equal(sessionFactsFromPlan(plan).status, 'verifying');
   plan.runner.status = 'running';
   assert.equal(sessionFactsFromPlan(plan).status, 'verifying');
   end();
@@ -41,7 +41,7 @@ test('overlapping verification attempts retain their own lifetime even behind a 
     runner:{status:'blocked'},tasks:[{taskId:'read',status:'completed',result:'report'}] };
   const endA=beginVerificationAttempt(plan.planId,'a'),endB=beginVerificationAttempt(plan.planId,'b');
   endB();
-  assert.equal(sessionFactsFromPlan(plan).status,'waiting_user');
+  assert.equal(sessionFactsFromPlan(plan).status,'verifying');
   assert.equal(sessionFactsFromPlan(plan).verificationActive,true);
   assert.equal(watchFactsFromPlan(plan).reportRevision,undefined);
   endA();assert.equal(sessionFactsFromPlan(plan).verificationActive,false);

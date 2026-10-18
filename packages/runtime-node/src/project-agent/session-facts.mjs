@@ -17,7 +17,9 @@ export function sessionFactsFromPlan(plan) {
     phase: plan?.delegationOrigin?.phase, superseded: Boolean(plan?.delegationOrigin?.supersededBy),
     cancellationPhase: plan?.delegationOrigin?.cancellation?.phase, takeoverPhase: plan?.delegationOrigin?.takeover?.phase,
     accepted: Boolean(plan?.resultAcceptance?.acceptedAt),
-    needsUser: plan?.delegationOrigin?.phase === 'awaiting_approval',
+    needsUser: plan?.delegationOrigin?.phase === 'awaiting_approval' || plan?.status === 'awaiting_approval'
+      || plan?.runner?.waitingOnUser === true && plan?.runner?.status !== 'paused' && !plan?.delegationOrigin?.supersededBy
+      || plan?.runner?.status === 'blocked' && plan?.runner?.blockedReason === 'manual_dod_confirmation_required',
     blockedReason: plan?.delegationOrigin?.agentWaitMessageId && plan?.runner?.status !== 'waiting_user'
       ? 'waiting_parent_agent' : plan?.runner?.blockedReason,
     verificationActive,

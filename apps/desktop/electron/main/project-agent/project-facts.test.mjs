@@ -89,7 +89,7 @@ test('failed dependency facts produce a stable decision card without a fabricate
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 
-test('later actual turns retire stale unavailable actions while assistant claims cannot resolve them', () => {
+test('unbound legacy failures are not marked recovered by unrelated turns or assistant claims', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b4-stale-error-card-'));
   const messages = [{ id: 'a', role: 'assistant', kind: 'system_card', card: 'agent_unavailable', turnId: 't1', content: '代理暂时不可用：离线' }];
   try {
@@ -102,8 +102,8 @@ test('later actual turns retire stale unavailable actions while assistant claims
     messages.push({ id: 't2', role: 'assistant', kind: 'agent_turn' },
       { id: 'b', role: 'assistant', kind: 'system_card', card: 'agent_unavailable', turnId: 't2', content: '代理暂时不可用：仍离线' });
     const cards = facts.cards('w');
-    assert.equal(cards.find(card => card.refs.turnId === 't1').resolvedState, 'resolved');
-    assert.deepEqual(cards.find(card => card.refs.turnId === 't1').actions, []);
+    assert.equal(cards.find(card => card.refs.turnId === 't1').resolvedState, 'open');
+    assert.equal(cards.find(card => card.refs.turnId === 't1').failureStatus.phase, 'current');
     assert.equal(cards.find(card => card.refs.turnId === 't2').resolvedState, 'open');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

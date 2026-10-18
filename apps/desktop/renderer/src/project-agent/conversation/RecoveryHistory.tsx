@@ -1,11 +1,11 @@
-import type { I18nRuntime } from '@peer-agent/i18n';
+import type { TranslationKey, I18nRuntime } from '@peer-agent/i18n';
 import { useEffect, useRef } from 'react';
 import { PeerIcon } from '../../ui/icons';
 import '../styles/bot-recovery-history.css';
 
 /** Ended attempts remain inspectable without becoming another bot reply. */
-export function RecoveryHistory({ createdAt, highlighted, i18n, onOpenDetails }: {
-  readonly createdAt: string; readonly highlighted: boolean; readonly i18n: I18nRuntime;
+export function RecoveryHistory({ createdAt, highlighted, i18n, messageKey, onOpenDetails }: {
+  readonly messageKey: TranslationKey; readonly createdAt: string; readonly highlighted: boolean; readonly i18n: I18nRuntime;
   readonly onOpenDetails?: () => void;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -16,7 +16,7 @@ export function RecoveryHistory({ createdAt, highlighted, i18n, onOpenDetails }:
       {valid ? <time dateTime={createdAt}>{date.toLocaleString(i18n.locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time> : null}
       <PeerIcon name="chevronDown" size={12} /></summary>
     <div className="bot-recovery-history-body">
-      <p className="bot-reply-body">{i18n.t('projectAgent.chat.recoveryEnded')}</p>
+      <p className="bot-reply-body">{i18n.t(messageKey)}</p>
       {onOpenDetails ? <button type="button" onClick={event => {
         event.currentTarget.focus({ preventScroll: true }); onOpenDetails();
       }}>{i18n.t('projectAgent.chat.context.details')}<PeerIcon name="arrowUpRight" size={12} /></button> : null}

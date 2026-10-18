@@ -8,6 +8,8 @@ import { createProjectInbox } from './project-inbox.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
 import { createReplyDelivery } from './reply-delivery.mjs';
+import { createDelegationProvider } from './delegation-provider.mjs';
+import { createDesktopProjectFacts } from './project-facts.mjs';
 function world(executeTurn, extra = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'r88-flow-'));
   const inbox = createProjectInbox({ rootDir: root });
@@ -22,6 +24,113 @@ function world(executeTurn, extra = {}) {
     close() { runner.dispose(); rmSync(root, { recursive: true, force: true }); } };
 }
 const event = (id, kind, sessionId = 's') => ({ eventId: id, kind, sessionId, workspaceId: 'w', at: '2026-10-07T00:00:00Z', payload: {} });
+
+test('main reply failure, continuing child, quiet restart and successful delivery remain separate', async () => {
+  let requests = 0, fail = false;
+  const roster = [{ sessionId: 's', status: 'running', sourceRevision: 'r1', origin: { anchorMessageId: 'input-i' } }];
+  const env = world(async () => {
+    requests++;
+    return fail ? { ok: false, error: 'empty_model_response', retryable: false }
+      : { toolCalls: [{ name: 'post_reply', input: { text: '工作进展已核对。', replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => roster });
+  const facts = createDesktopProjectFacts({ runtimeRoot: env.root,
+    supervisor: { sessionsForProject: () => roster, acceptance: () => null }, approvalStore: { list: () => [] },
+    profileStore: { read: () => ({ agentConversationId: 'c' }) },
+    conversationStore: { getPersistedConversationHistory: () => ({ messages: env.messages }) }, readCoordination: () => env.store.read() });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '推进工作' }]);
+    assert.equal(requests, 1); assert.equal(Object.values(env.store.read().works)[0].state, 'waiting_children');
+    env.inbox.append('w', [event('resumed', 'session_resumed'), event('running', 'session_running')]);
+    await env.runner.kick(); assert.equal(requests, 1, 'routine wake requires no model response');
+    assert.equal(env.messages.at(-1).meta.silentWait.source, 'host');
+    assert.equal(env.runner.activity(), null, 'a quiet wake must retire the previous visible reply activity');
+    assert.equal(env.messages.at(-1).publicUpdates, undefined, 'a quiet wake must not persist the previous turn public narration');
+    assert.deepEqual(Object.values(env.store.read().works)[0].waitFor, [{ kind: 'session', id: 's' }]);
+    env.restart(); await env.runner.kick(); assert.equal(requests, 1, 'restart preserves waiting without polling');
+    fail = true;
+    env.inbox.append('w', [event('exception', 'report_available')]); await env.runner.kick();
+    assert.equal(requests, 2); assert.equal(roster[0].status, 'running');
+    let cards = facts.cards('w').filter(row => row.kind === 'agent_unavailable');
+    assert.equal(cards.length, 1); assert.equal(cards[0].failureStatus.phase, 'current');
+    assert.deepEqual(cards[0].failureStatus.activeSessionIds, ['s']);
+    const firstTurn = env.messages.findLast(row => row.kind === 'agent_turn');
+    env.inbox.append('w', [event('after-failure-running', 'session_running')]); await env.runner.kick();
+    assert.equal(requests, 2, 'child acknowledgements cannot trigger another failed reply attempt');
+    assert.equal(facts.cards('w').find(row => row.kind === 'agent_unavailable').failureStatus.phase, 'current');
+    await env.runner.retry(firstTurn.id);
+    cards = facts.cards('w').filter(row => row.kind === 'agent_unavailable');
+    assert.equal(cards.length, 2); assert.equal(cards.find(card => card.refs.turnId === firstTurn.id).failureStatus.phase, 'superseded');
+    assert.equal(cards.find(card => card.refs.turnId !== firstTurn.id).failureStatus.phase, 'current');
+    fail = false; roster[0] = { ...roster[0], status: 'accepted', sourceRevision: 'r2' };
+    env.inbox.append('w', [event('done', 'result_ready')]); await env.runner.kick();
+    cards = facts.cards('w').filter(row => row.kind === 'agent_unavailable');
+    assert.ok(cards.every(card => card.failureStatus.phase === 'recovered'));
+    assert.ok(cards.every(card => env.store.read().deliveries[card.failureStatus.recoveredByReplyId].state === 'delivered'));
+    assert.equal(Object.values(env.store.read().works)[0].state, 'delivered');
+  } finally { env.close(); }
+});
+
+test('a model can end observation with a real waiting Tool Result and the result event wakes it later', async () => {
+  let requests = 0;
+  const roster = [{ sessionId: 's', workspaceId: 'w', status: 'running', origin: { parentConversationId: 'c' } }];
+  const provider = createDelegationProvider({ supervisor: { get: () => roster[0] } });
+  const env = world(async ({ turnProfile }) => {
+    requests++;
+    if (requests === 1) {
+      roster[0].origin.workId = turnProfile.workId;
+      const receipt = await provider.executeCapability({ call: { toolCallId: 'real-wait', capabilityId: 'local.delegation.wait_for_sessions', arguments: { sessionIds: ['s'] } } },
+        { mode: 'project_agent', workspaceId: 'w', conversationId: 'c', currentInputAnchors: [], turnProfile });
+      assert.equal(receipt.grant.granted, true);
+      return { continued: true, toolCalls: [{ name: 'wait_for_sessions', input: { sessionIds: ['s'] }, result: receipt.result }] };
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: '结果已核对。', replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => roster });
+  try {
+    env.inbox.append('w', [event('observation', 'report_available')]); await env.runner.kick();
+    assert.equal(requests, 1); assert.equal(env.messages.at(-1).meta.silentWait.source, 'tool');
+    assert.equal(env.messages.some(row => row.card === 'agent_unavailable' || row.kind === 'agent_reply'), false);
+    env.restart(); await env.runner.kick(); assert.equal(requests, 1);
+    roster[0].status = 'accepted'; env.inbox.append('w', [event('done', 'result_ready')]); await env.runner.kick();
+    assert.equal(requests, 2); assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+  } finally { env.close(); }
+});
+test('a public progress reply automatically advances to the next reasoning step and closes its verified result', async () => {
+  let requests = 0;
+  const roster = [{ sessionId: 's', status: 'waiting_agent', sourceRevision: 'r1' }];
+  const env = world(async input => {
+    requests++;
+    if (requests === 2) {
+      assert.equal(input.turnProfile.providerCheckpoint, undefined, 'a finished update uses fresh current facts');
+      roster[0] = { sessionId: 's', status: 'accepted', sourceRevision: 'r2' };
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: requests === 1 ? '复核还未完成，我继续检查原因。' : '复核已通过，结果已交付。', replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => roster });
+  try {
+    env.inbox.append('w', [event('repair', 'report_available')]);
+    await env.runner.kick();
+    const work = Object.values(env.store.read().works)[0];
+    assert.equal(env.store.read().events.repair.handled, true, 'event custody moved into the unfinished receipt');
+    assert.equal(requests, 2);
+    assert.equal(work.state, 'delivered');
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 2);
+    await env.runner.kick(); assert.equal(requests, 2);
+  } finally { env.close(); }
+});
+
+test('repeated paraphrases of a stalled repair produce one explicit stop receipt instead of silent idleness', async () => {
+  let requests = 0;
+  const env = world(async () => ({ toolCalls: [{ name: 'post_reply', input: { text: `仍在检查 ${++requests}`, replyTo: [] }, result: { ok: true } }] }),
+    { resolveRoster: () => [{ sessionId: 's', status: 'waiting_agent', sourceRevision: 'r1' }] });
+  try {
+    env.inbox.append('w', [event('repair', 'report_available')]); await env.runner.kick();
+    assert.equal(requests, 3);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'blocked_system');
+    const cards = env.messages.filter(row => row.card === 'agent_unavailable');
+    assert.equal(cards.length, 1); assert.match(cards[0].content, /agent_no_progress/);
+    await env.runner.kick(); assert.equal(requests, 3);
+  } finally { env.close(); }
+});
+
 test('user progress survives a cooperative yield, a quiet wake and restart until the anchored answer', async () => {
   let userSlices = 0;
   const env = world(async ({ plan, sink, streamId }) => {

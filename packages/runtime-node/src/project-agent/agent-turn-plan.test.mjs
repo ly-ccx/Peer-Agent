@@ -56,7 +56,7 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.equal(user.mode, 'project_agent');
   assert.equal(user.turnProfile.role, 'project_agent');
   assert.equal(user.turnProfile.workspaceId, undefined);
-  assert.deepEqual(user.turnProfile.context, { sources: ['memory-1'], events: [event], inputAnchors: [{ messageId: 'input-in1', text: '你好' }] });
+  assert.deepEqual(user.turnProfile.context, { sources: ['memory-1'], turnKind: 'user', events: [event], inputAnchors: [{ messageId: 'input-in1', text: '你好' }] });
   assert.equal(planAgentTurn({ kind: 'user', workspaceId: ' ws-1 ' }).turnProfile.workspaceId, 'ws-1');
   assert.equal(user.modelProviderId, 'model-pa');
   assert.deepEqual(user.limits, { maxRounds: 10, maxToolCalls: 20 });
@@ -85,7 +85,7 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.match(wake.reminder.content, /Review a new result or exception for the affected session/);
   assert.match(wake.reminder.content, /do not reopen unrelated past work or poll a running session/);
   assert.doesNotMatch(wake.reminder.content, /Roster:/);
-  assert.deepEqual(wake.turnProfile.context, { events: [{eventId:'evt-1',seq:1,kind:'session_verified'}], roster: {sessions:['sess-1']} });
+  assert.deepEqual(wake.turnProfile.context, { turnKind: 'wake', events: [{eventId:'evt-1',seq:1,kind:'session_verified'}], roster: {sessions:['sess-1']} });
 });
 
 test('没有 post_reply 的用户回合兜底挂到全部输入，唤醒沉默不写回复', () => {
@@ -237,7 +237,7 @@ test('回复上的记忆 id 来自宿主结果，模型参数里的 id 不进入
 test('current input anchors cannot be inherited from context on wake or later user turns', () => {
   const context = { inputAnchors: [{ messageId: 'old', text: 'urgent' }], sources: ['memory'] };
   const wake = planAgentTurn({ kind: 'wake', context });
-  assert.deepEqual(wake.turnProfile.context, { sources: ['memory'] });
+  assert.deepEqual(wake.turnProfile.context, { sources: ['memory'], turnKind: 'wake' });
   const user = planAgentTurn({ kind: 'user', context, userInputs: [{ inputId: 'new', text: 'ordinary' }] });
   assert.deepEqual(user.turnProfile.context.inputAnchors, [{ messageId: 'input-new', text: 'ordinary' }]);
   assert.equal(context.inputAnchors[0].messageId, 'old');

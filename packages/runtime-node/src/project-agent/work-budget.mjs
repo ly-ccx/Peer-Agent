@@ -1,37 +1,35 @@
 import { verificationDispatchTarget } from './verification-dispatch-recovery.mjs';
 import { randomUUID } from 'node:crypto';
 import { executionBindingCurrent } from './coordination-kernel.mjs';
+import { resolveWorkBudgetPolicy, effectiveWorkLimits, budgetBoundary, budgetReservationBoundary, legacyBudgetMigration } from './work-budget-policy.mjs';
+export { DEFAULT_WORK_BUDGET } from './work-budget-policy.mjs';
 
 // Host registry contains local ports, never model supplied policy. Desktop and TUI share this seam.
 const stores = new Map();
-export const DEFAULT_WORK_BUDGET = Object.freeze({ maxModelRequests: 256, maxToolCalls: 2048, source: 'system:execution-continuity-v1' });
 export function registerWorkBudget(workspaceId, store, policy = {}) {
-  const limits = { ...DEFAULT_WORK_BUDGET };
-  for (const key of ['maxModelRequests', 'maxToolCalls', 'maxTokens', 'maxCostUsd']) {
-    if (Number.isFinite(policy[key]) && policy[key] >= 0) limits[key] = policy[key];
-  }
+  const limits = resolveWorkBudgetPolicy(policy);
   const binding = { store, limits, activeAttempts: new Set() };
   stores.set(workspaceId, binding);
   return () => { if (stores.get(workspaceId) === binding) stores.delete(workspaceId); };
 }
 export function workBudgetBinding(workspaceId) { return stores.get(workspaceId); }
 
-/** A fresh manual recovery period never creates a fresh allowance. */
+/** Configuration can reopen a boundary; retries never reset actual usage. */
 export function workBudgetCanResume(work, limits) {
   const budget = work?.budget, previous = budget?.limits;
   if (!budget || !previous || !limits) return false;
   const caps = [['maxModelRequests', 'modelRequests'], ['maxToolCalls', 'toolCalls'], ['maxTokens', 'tokens'], ['maxCostUsd', 'costUsd']];
-  const increased = caps.some(([cap]) => Number.isFinite(previous[cap]) && Number.isFinite(limits[cap]) && limits[cap] > previous[cap]);
-  return increased && caps.every(([cap, count]) => limits[cap] === undefined
-    || Number.isFinite(budget[count]) && budget[count] >= 0 && budget[count] < limits[cap])
-    && !(limits.maxTokens !== undefined && budget.unknownUsage)
-    && !(limits.maxCostUsd !== undefined && budget.unknownCost);
+  const current = effectiveWorkLimits(budget, limits);
+  const increased = Boolean(legacyBudgetMigration(work, limits)) || caps.some(([cap]) =>
+    Number.isFinite(previous[cap]) && Number.isFinite(current[cap]) && current[cap] > previous[cap]);
+  const reservationReleased = budget.lastBoundary?.reason === 'reservation_pending' && !Object.keys(budget.attempts || {}).length;
+  return (increased || reservationReleased) && !budgetBoundary(budget, current);
 }
 export function createWorkBudgetGuard(profile) {
   if (!profile?.workId) return null;
   const binding = stores.get(profile.workspaceId);
   if (!binding) throw new Error('work_budget_host_unavailable');
-  const { store, limits } = binding;
+  const { store } = binding;
   const attemptId = randomUUID();
   binding.activeAttempts.add(attemptId);
   let requests = 0, finished = false, observed = 0, physicalDispatchAccounting = false;
@@ -46,24 +44,31 @@ export function createWorkBudgetGuard(profile) {
       const transition = Object.values(state.transitions || {}).find(row => row.executionEpoch === profile.coordinationBinding.executionEpoch);
       if (!executionBindingCurrent(mandate, transition, profile.coordinationBinding)) throw new Error('execution_revision_stale');
     }
-    const budget = { modelRequests: 0, toolCalls: 0, tokens: 0, costUsd: 0, unknownUsage: false, unknownCost: false, attempts: {}, ...work.budget, limits };
-    const patch = update(budget);
+    const limits = effectiveWorkLimits(work.budget, binding.limits);
+    const budget = { modelRequests: 0, toolCalls: 0, tokens: 0, costUsd: 0, unknownUsage: false, unknownCost: false, attempts: {},
+      ...(legacyBudgetMigration(work, binding.limits) || work.budget), limits };
+    let patch;
+    try { patch = update(budget); } catch (error) {
+      if (error?.message === 'work_budget_limited') store.saveWork({ ...work, budget: { ...budget,
+        lastBoundary: error.boundary || budgetBoundary(budget, limits) || undefined } });
+      throw error;
+    }
     store.saveWork({ ...work, ...patch, budget });
     return budget;
   }
   const relevantOutcome = row => !row.planId || row.planId === profile.planId;
-  function limited() { throw new Error('work_budget_limited'); }
+  function limited(boundary) { throw Object.assign(new Error('work_budget_limited'), { boundary }); }
   return {
     beforeRequest(metadata) {
       change(budget => {
+        const limits = budget.limits;
         if (budget.uncertainDispatches?.some(relevantOutcome) || Object.entries(budget.attempts).some(([id, row]) => relevantOutcome(row) && row.pendingTools?.length && (id === attemptId || !binding.activeAttempts.has(id)))) throw new Error('execution_outcome_unknown');
-        if (budget.modelRequests >= limits.maxModelRequests) limited();
-        if (limits.maxTokens !== undefined && (budget.unknownUsage || budget.tokens >= limits.maxTokens)) limited();
-        if (limits.maxCostUsd !== undefined && (budget.unknownCost || budget.costUsd >= limits.maxCostUsd)) limited();
+        const boundary = budgetBoundary(budget, limits, ['maxModelRequests', 'maxTokens', 'maxCostUsd']);
+        if (boundary) limited(boundary);
         // A token/cost cap reserves the remaining measurable allowance for one attempt.
         // Other roles cannot concurrently read and spend that same allowance.
         if ((limits.maxTokens !== undefined || limits.maxCostUsd !== undefined)
-          && Object.keys(budget.attempts).some(id => id !== attemptId)) limited();
+          && Object.keys(budget.attempts).some(id => id !== attemptId)) limited(budgetReservationBoundary(budget));
         budget.modelRequests++;
         if (metadata?.accounting === 'physical_dispatch') physicalDispatchAccounting = true;
         budget.attempts[attemptId] = { ...budget.attempts[attemptId], role: profile.role, planId: profile.planId, sessionId: profile.sessionId,
@@ -71,7 +76,8 @@ export function createWorkBudgetGuard(profile) {
       });
     },
     beforeTool(call = {}) { change(budget => {
-      if (budget.toolCalls >= limits.maxToolCalls) limited();
+      const boundary = budgetBoundary(budget, budget.limits, ['maxToolCalls']);
+      if (boundary) limited(boundary);
       budget.toolCalls++;
       const attempt = budget.attempts[attemptId] || { role: profile.role, planId: profile.planId, sessionId: profile.sessionId };
       budget.attempts[attemptId] = { ...attempt, pendingTools: [...(attempt.pendingTools || []),

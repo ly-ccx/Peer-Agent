@@ -41,6 +41,11 @@ export function recoveryReservationDue(work, at) {
 export function recoveryCheckpointAvailable(work, checkpoint, readCheckpoint) {
   if (!checkpoint || typeof checkpoint !== 'object') return false;
   const rounds = checkpoint?.outcome?.rounds || [];
+  // A fully committed progress reply starts a fresh reasoning step over current
+  // child facts. It does not replay this turn's tools and needs no native tail.
+  if (work.repairSessionIds?.length && checkpoint.outcome?.failed !== true
+    && checkpoint.outcome?.yielded !== true && checkpoint.outcome?.stopped !== true
+    && !hasUnsettledDispatch(work) && rounds.every(round => (round.toolCalls || []).every(call => call.result !== undefined))) return true;
   const executed = rounds.some(round => round.toolCalls?.length);
   if (work.nativeCheckpointRef && readCheckpoint) {
     try { const native = readCheckpoint(work.nativeCheckpointRef); return Boolean(native && typeof native === 'object'); }

@@ -19,9 +19,12 @@ import {
   type ProjectRecoveryFailureKind,
   type ProjectWorkRecovery,
   type ProjectWorkState,
+  type ProjectReplyFailureStatus,
+  type ProjectReplyRecoveryAction,
 } from '@peer-agent/protocol';
 
 import { readAgentActivity } from './agentActivityState.ts';
+import { readReplyRecoveryAction } from './replyRecoveryState.ts';
 
 export const CONVERSATION_PAGE_SIZE = 50;
 export const CONVERSATION_GAP_MS = 10 * 60 * 1000;
@@ -51,6 +54,8 @@ export interface BotChatCard {
   readonly resolution?: { readonly state: string };
   readonly recovery?: ProjectWorkRecovery;
   readonly recoveryWorkState?: ProjectWorkState;
+  readonly failureStatus?: ProjectReplyFailureStatus;
+  readonly recoveryAction?: ProjectReplyRecoveryAction;
 }
 
 export { agentFailurePresentation } from './recoveryPresentation.ts';
@@ -605,6 +610,8 @@ function readCards(value: unknown): BotChatCard[] {
       ...(resolved ? { resolvedState: resolved } : {}),
       ...(readRecovery(record.recovery) ? { recovery: readRecovery(record.recovery)! } : {}),
       ...(readRecoveryWorkState(record.recoveryWorkState) ? { recoveryWorkState: readRecoveryWorkState(record.recoveryWorkState)! } : {}),
+      ...(readFailureStatus(record.failureStatus) ? { failureStatus: readFailureStatus(record.failureStatus)! } : {}),
+      ...(readReplyRecoveryAction(record.recoveryAction) ? { recoveryAction: readReplyRecoveryAction(record.recoveryAction)! } : {}),
       actions: readActions(record.actions),
       ...(record.refs && typeof record.refs === 'object' ? { refs: {
         sessionId: readString((record.refs as Record<string, unknown>).sessionId),
@@ -616,6 +623,17 @@ function readCards(value: unknown): BotChatCard[] {
     });
   }
   return cards;
+}
+
+function readFailureStatus(value: unknown): ProjectReplyFailureStatus | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const row = value as Record<string, unknown>;
+  if (!['current', 'retrying', 'superseded', 'recovered', 'cancelled', 'paused'].includes(readString(row.phase))
+    || !['user', 'wake'].includes(readString(row.turnKind)) || !Array.isArray(row.activeSessionIds)
+    || row.phase === 'recovered' && !readString(row.recoveredByReplyId)) return undefined;
+  return { phase: row.phase as ProjectReplyFailureStatus['phase'], turnKind: row.turnKind as 'user' | 'wake',
+    activeSessionIds: readStringList(row.activeSessionIds), ...(readString(row.workId) ? { workId: readString(row.workId) } : {}),
+    ...(readString(row.recoveredByReplyId) ? { recoveredByReplyId: readString(row.recoveredByReplyId) } : {}) };
 }
 
 function readRecovery(value: unknown): BotChatCard['recovery'] {

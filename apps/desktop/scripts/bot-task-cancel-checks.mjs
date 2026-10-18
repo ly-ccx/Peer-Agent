@@ -12,12 +12,19 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   const first = { ...initial.sessions[0], status: 'waiting_user', statusLabel: '等待你的选择', report: { summary: '等待你的选择' } };
   const other = { ...first, sessionId: 'rc-unrelated-work', title: '另一件正在进行的工作', status: 'running', statusLabel: '正在执行',
     origin: { ...first.origin, anchorMessageId: 'rc-other-input' }, report: { summary: '正在执行另一件工作' } };
-  const update = patch => {
+  const update = (patch, refreshFacts = true) => {
     const current = JSON.parse(readFileSync(commandFile, 'utf8'));
-    writeFileSync(commandFile + '.next', JSON.stringify({ ...current, ...patch, seq: current.seq + 1 }));
+    writeFileSync(commandFile + '.next', JSON.stringify({ ...current, ...patch, seq: current.seq + Number(refreshFacts) }));
     renameSync(commandFile + '.next', commandFile);
   };
-  update({ sessions: [first, other], cancelMode: 'fail', cancelCalls: [] });
+  const release = async (sequence, final = false) => {
+    await until(() => JSON.parse(readFileSync(commandFile, 'utf8')).cancelCalls?.length ?? 0, count => count >= sequence);
+    const current = JSON.parse(readFileSync(commandFile, 'utf8'));
+    const key = final ? 'cancelFinalize' : 'cancelRelease';
+    // Stage acknowledgements do not reseed task facts or rewind stopping to waiting.
+    update({ [key]: [...(current[key] ?? []), sequence] }, false);
+  };
+  update({ sessions: [first, other], cancelMode: 'fail', cancelCalls: [], cancelHandshake: true, cancelRelease: [], cancelFinalize: [] });
   const background = page.locator('.bot-background-work');
   // The preceding scenario may leave the outer disclosure closed. Wait for
   // current session facts in the DOM before checking visible actions below.
@@ -37,6 +44,8 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   if (await historical.getAttribute('open') === null) await historical.locator(':scope > summary').click();
   const cancel = waiting.locator('.bot-task-cancel button');
   await cancel.focus(); await page.keyboard.press('Enter');
+  await until(() => cancel.isDisabled(), Boolean);
+  await release(1);
   await until(() => historical.locator('[role=alert]').innerText(), text => text.includes('取消未完成'));
   assert.equal(await waiting.getAttribute('data-status'), 'waiting_user');
   assert.equal(await cancel.isEnabled(), true);
@@ -46,6 +55,7 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   await until(() => waiting.locator('.bot-task-cancel button').isDisabled(), Boolean);
   assert.equal(await cancel.isDisabled(), true, 'both copies share pending state');
   await cancel.evaluate(button => { button.click(); button.click(); });
+  await release(2);
   await until(() => historical.getAttribute('data-status'), value => value === 'cancelled');
   assert.match(await historical.innerText(), /已取消/);
   assert.doesNotMatch(await historical.innerText(), /等待你的选择|等待跟进|主对话中跟进/);
@@ -75,8 +85,11 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   assert.equal(fits, true);
   await page.screenshot({ path: path.join(captureDirectory, 'task-cancel-detail-760-light.png'), animations: 'disabled' });
   await detailCancel.focus(); await page.keyboard.press('Enter');
+  await until(() => detailCancel.isDisabled(), Boolean);
+  await release(3);
   await until(() => detail.getAttribute('data-status'), value => value === 'stopping');
   assert.equal(await detailCancel.count(), 1, 'the stop receipt does not remove the action before the final host fact');
+  await release(3, true);
   await until(() => detail.getAttribute('data-status'), value => value === 'cancelled');
   assert.equal(await detail.locator('.bot-task-cancel button').count(), 0);
   await until(() => detail.locator('.bot-task-back').evaluate(node => node === document.activeElement), Boolean);
@@ -85,13 +98,15 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   await detailCancel.focus(); await page.keyboard.press('Enter');
   const close = page.getByRole('button', { name: '关闭', exact: true });
   await close.focus();
+  await release(4);
+  await release(4, true);
   await until(() => detail.getAttribute('data-status'), value => value === 'cancelled');
   assert.equal(await close.evaluate(node => node === document.activeElement), true,
     'finishing cancellation must preserve focus deliberately moved during the request');
   await close.click();
   await page.setViewportSize(originalViewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
-  update({ ...initial, cancelMode: undefined, cancelCalls: undefined });
+  update({ ...initial, cancelMode: undefined, cancelCalls: undefined, cancelHandshake: undefined, cancelRelease: undefined, cancelFinalize: undefined });
   await until(() => background.locator('.bot-work-row[data-status=running]').count(), count => count === 1);
   report.taskCancellation = { directWaitingAction: true, keyboard: true, detailAction: true, sharedPending: true,
     failureRetry: true, latestReceipt: true, noDuplicate: true, unrelatedPreserved: true, narrowFits: true,

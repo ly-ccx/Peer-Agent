@@ -5,6 +5,7 @@ import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage'
 import { PeerIcon } from '../../ui/icons';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
 import { agentFailurePresentation } from '../state/botConversationState';
+import { budgetFailureDetail } from '../state/replyRecoveryState';
 import { cardActionErrorKey } from '../state/cardActionError';
 import { CompletionReview } from './CompletionReview';
 import { BotInputContext } from './BotInputContext';
@@ -66,6 +67,7 @@ function CardItem({
   const submitInput = useContext(BotInputContext);
   const resolved = done || card.resolvedState === 'resolved';
   const failure = card.kind === 'agent_unavailable' ? agentFailurePresentation(card) : undefined;
+  const budgetDetail = failure && !failure.recovering ? budgetFailureDetail(card.recoveryAction) : null;
   const actions = card.actions?.filter(action => action.id !== 'retry' || failure?.retryAllowed !== false);
   const imageApproval = card.kind === 'approval' && (card.refs?.capabilityId === 'local.image.read' || actions?.some(a => a.payload?.capabilityId === 'local.image.read'));
   const imageState = card.resolution?.state;
@@ -83,7 +85,9 @@ function CardItem({
       {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
-      </> : failure ? <p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
+      </> : failure ? <><p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
+        {budgetDetail ? <p className="bot-live-status">{i18n.t(budgetDetail.key, budgetDetail.params)} {i18n.t(budgetDetail.sourceKey)}</p> : null}
+        {card.failureStatus?.activeSessionIds.length ? <p className="bot-live-status">{i18n.t('projectAgent.chat.childWorkContinues', { count: card.failureStatus.activeSessionIds.length })}</p> : null}</>
         : imageApproval ? <><p role="status">{i18n.t(imageNotice)}</p><p>{card.content}</p>{!resolved && card.refs?.deadlineAt ? <p className="bot-drawer-note">{i18n.t('projectAgent.chat.imageWaitLimit')}</p> : null}</>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved && !question || !actions?.length ? null : (

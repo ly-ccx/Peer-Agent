@@ -296,6 +296,8 @@ export interface ConversationProjectionSnapshot {
 }
 
 export interface GoalPlanProjectionSnapshot {
+  readonly needsUser?: boolean;
+  readonly blockedReason?: string;
   readonly planId: string;
   readonly status: GoalPlanStatus;
   /** Runner 实时态；Plan 未进入自驱时为 undefined。 */

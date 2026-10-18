@@ -150,7 +150,14 @@ test('verifying, result_ready, starting, and superseded are delegation statuses'
     meta({ verifying: true, phase: 'verifying' }),
   );
   assert.equal(draftingReview.status, 'verifying');
-  assert.equal(draftingReview.actionRight, projectGoalPlan(plan({ status: 'drafting' })).actionRight);
+  assert.equal(draftingReview.actionRight, 'peer_advancing');
+  assert.equal(draftingReview.nextAction, 'none');
+  const technical = projectWorkSession(plan({ runnerStatus: 'blocked' }), meta());
+  assert.equal(technical.status, 'waiting_agent');
+  assert.equal(technical.actionRight, 'peer_advancing');
+  assert.equal(technical.nextAction, 'none');
+  assert.equal(technical.needsYouReason, undefined);
+  assert.equal(technical.statusLabel, '由主 Bot 跟进');
   assert.equal(
     projectWorkSession(plan({ runnerStatus: 'running' }), meta({ phase: 'starting' })).status,
     'starting',
@@ -159,7 +166,7 @@ test('verifying, result_ready, starting, and superseded are delegation statuses'
   assert.equal(superseded.status, 'superseded');
   assert.equal(superseded.supersededBy, 'plan-2');
   assert.equal(superseded.actionRight, 'peer_advancing');
-  assert.equal(projectWorkSession(plan({ status: 'completed', runnerStatus: 'blocked' }), meta({ acceptance: 'confirm' })).status, 'waiting_user');
+  assert.equal(projectWorkSession(plan({ status: 'completed', runnerStatus: 'blocked' }), meta({ acceptance: 'confirm' })).status, 'waiting_agent');
   assert.equal(projectWorkSession(plan({ status: 'completed' }), meta({ accepted: true, verifying: true })).status, 'accepted');
 });
 

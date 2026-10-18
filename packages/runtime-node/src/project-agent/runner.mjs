@@ -2,6 +2,7 @@ import { createRunnerCoordination } from './runner-coordination.mjs';
 import { randomUUID } from 'node:crypto';
 import { classifyProjectAgentFailure, projectAgentFailureKind } from '@peer-agent/protocol';
 import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn, unavailableCard } from './agent-turn-plan.mjs';
+import { waitResult } from './wake-wait.mjs';
 import { createTurnActivity } from './turn-activity.mjs';
 import { readRetryContinuity } from './retry-continuity.mjs';
 
@@ -314,6 +315,9 @@ export function createProjectAgentRunner({
         pendingLearned.unshift(...learned);
         return completeStoppedTurn(job, outcome, diagnosticTiming('stopped'));
       }
+      if (!outcome.failed && coordination?.stalls(job, outcome, readSlot(resolveRoster, job.kind))) {
+        outcome.failed = true; outcome.reason = 'agent_no_progress'; job.explicitRetryOnly = true;
+      }
       const finished = finishAgentTurn({
         turnId: outcome.turnId,
         plan: outcome.plan,
@@ -331,7 +335,7 @@ export function createProjectAgentRunner({
           for (const card of message.cards || []) card.recovery = outcome.recovery;
         }
       }
-      if (exhausted) circuitBreaker?.abandonTrial();
+      if (exhausted || outcome.silentWait) circuitBreaker?.abandonTrial();
       else if (outcome.failed || finished.failed) {
         const failure = circuitBreaker?.failure({ turnId: outcome.turnId, reason: outcome.reason || 'invalid reply', retry: { kind: job.kind, userInputs: job.userInputs } });
         if (failure?.opened) for (const message of finished.messages) if (message.card === 'agent_unavailable') {
@@ -351,7 +355,9 @@ export function createProjectAgentRunner({
       }
       for (const message of finished.messages) {
         if (coordination) message.meta = { ...message.meta, workId: job.workId };
-        if (message?.kind === 'agent_turn') message.meta = { ...message.meta, diagnosticTiming: diagnosticTiming(outcome.failed || finished.failed ? 'error' : 'done') };
+        if (message?.kind === 'agent_turn') message.meta = { ...message.meta,
+          ...(outcome.silentWait ? { silentWait: outcome.silentWait } : {}),
+          diagnosticTiming: diagnosticTiming(outcome.failed || finished.failed ? 'error' : 'done') };
         if (exhausted && message?.kind === 'agent_turn') message.meta.recovery = {
           events: job.events, throughSeq: job.throughSeq,
         };
@@ -377,14 +383,14 @@ export function createProjectAgentRunner({
       if (coordination) coordination.finish(job, { ...outcome, failed: outcome.failed || finished.failed, deliveryPending, budgetLimited: exhausted }, readSlot(resolveRoster, job.kind));
       activity.finish(outcome.failed || finished.failed ? 'error' : 'done');
       if ((outcome.failed || finished.failed) && !exhausted) return 'error';
-      if (!exhausted) circuitBreaker?.success();
+      if (!exhausted && !outcome.silentWait) circuitBreaker?.success();
       commit(job.throughSeq);
       if (job.kind === 'user' && typeof onInputsCompleted === 'function') {
         try { await onInputsCompleted(job.userInputs); } catch { /* Canonical replies let the host repair a missing execution acknowledgement. */ }
       }
       if (deliveryPending) return 'yielded';
       if (exhausted) return 'exhausted';
-      if (job.kind === 'user' || job.kind === 'wake') scheduleCurator(job);
+      if (!outcome.silentWait && (job.kind === 'user' || job.kind === 'wake')) scheduleCurator(job);
       return 'ok';
     } finally {
       if (abortController === controller) abortController = null;
@@ -438,6 +444,8 @@ export function createProjectAgentRunner({
     if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
     activity.begin({ turnId, modelSelection: model.selection, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
       startedAt: stamp(), visible: job.kind === 'user' || job.interactive === true });
+    const silentWait = coordination?.silentWaitFor(job, readSlot(resolveRoster, job.kind));
+    if (silentWait) return { turnId, plan, rounds: [], silentWait, memoryIds: [] };
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };
     }
@@ -478,6 +486,7 @@ export function createProjectAgentRunner({
         return { turnId, plan, rounds, stopped: true, memoryIds };
       }
       rounds.push(result.round);
+      if (result.silentWait) return { turnId, plan, rounds, silentWait: result.silentWait, memoryIds };
       if (result.yielded) return { turnId, plan, rounds, yielded: true, providerCheckpoint: result.providerCheckpoint, memoryIds };
       if (result.memoryIds?.length) memoryIds = result.memoryIds;
       toolCallsUsed += result.toolCallCount;
@@ -544,6 +553,8 @@ export function createProjectAgentRunner({
           round: { text: typeof raw?.text === 'string' ? raw.text : '', toolCalls },
           toolCallCount,
           hasPostReply: toolCalls.some((call) => call.name === 'post_reply' && acceptedReplyResult(call.result)),
+          silentWait: toolCalls.filter(call => call.name === 'wait_for_sessions').map(call => waitResult(call.result))
+            .filter(Boolean).map(result => ({ source: 'tool', sessionIds: result.sessionIds }))[0],
           continued: raw?.continued,
           memoryIds: memoryIdsOf(raw),
           yielded: raw?.turnEnd === 'yielded', providerCheckpoint: raw?.providerCheckpoint,

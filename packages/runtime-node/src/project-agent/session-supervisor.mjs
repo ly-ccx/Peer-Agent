@@ -233,6 +233,8 @@ export function createSessionSupervisor({
         && plan.runner.blockedReason === 'manual_dod_confirmation_required' ? 'executing' : plan.status,
       title: typeof plan.title === 'string' ? plan.title : '',
       runnerStatus: plan.runner?.status,
+      needsUser: sessionFactsFromPlan(plan).needsUser,
+      blockedReason: plan.runner?.blockedReason,
       agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
       updatedAt: plan.updatedAt,
       conversationId: plan.conversationId,

@@ -27,7 +27,7 @@ import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyContext } from './ReplyContext';
 import { AgentActivityRow } from './AgentActivityRow';
 import { RecoveryHistory } from './RecoveryHistory';
-import { isRetiredRecovery } from '../state/recoveryPresentation';
+import { isRetiredRecovery, agentFailurePresentation } from '../state/recoveryPresentation';
 
 export function BotMessageList({
   workspaceId,
@@ -253,7 +253,7 @@ function SystemCard({
       {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
       <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
       <BotNarration segments={narration} />
-      {retired ? <RecoveryHistory createdAt={message.createdAt} highlighted={highlighted} i18n={i18n} onOpenDetails={onOpenDetails} />
+      {retired ? <RecoveryHistory messageKey={agentFailurePresentation(cards[0]).messageKey} createdAt={message.createdAt} highlighted={highlighted} i18n={i18n} onOpenDetails={onOpenDetails} />
         : <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />}
       {!welcome && !retired && (activity || processRounds?.length || cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ?
         <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} /> : null}

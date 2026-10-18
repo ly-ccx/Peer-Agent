@@ -3,6 +3,7 @@ import { checkBotEvidence } from './bot-evidence-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
+import { projectWorkSession } from '@peer-agent/protocol';
 
 /** Disposable main-side session facts, delivered through the production read and notification IPC. */
 export async function checkBotWorkSurfaces({ page, until, report, captureDirectory, commandFile }) {
@@ -58,6 +59,24 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.doesNotMatch(await work.innerText(), /已完成/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-verifying.png') });
   report.verificationPresentation = { currentPhaseWins: true };
+  const technical = projectWorkSession({ planId: 'technical-review', title: initial.sessions[0].title,
+    status: 'executing', runnerStatus: 'blocked', blockedReason: 'Verification gate failed: quality:criterion_unverified' },
+  { ...initial.sessions[0], origin: { ...initial.sessions[0].origin, phase: 'running' }, acceptance: 'confirm' });
+  change([{ ...initial.sessions[0], ...technical, report: { summary: '独立复核未完成，主机器人正在检查原因。' } }]);
+  await until(() => work.getAttribute('data-status'), value => value === 'waiting_agent');
+  assert.match(await work.innerText(), /由主 Bot 跟进/);
+  assert.doesNotMatch(await work.innerText(), /需要你的选择|需要你处理|确认已达成/);
+  const repairViewport = page.viewportSize();
+  const repairTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+  for (const [width, theme] of [[1280, 'dark'], [760, 'light']]) {
+    await page.setViewportSize({ width, height: 860 });
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+    await work.scrollIntoViewIfNeeded();
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `work-repair-${width}-${theme}.png`) });
+  }
+  await page.setViewportSize(repairViewport);
+  await page.evaluate(value => { document.documentElement.dataset.theme = value; }, repairTheme);
+  report.verificationPresentation.technicalOwnedByBot = true;
   change([{ ...initial.sessions[0], status: 'waiting_user', report: { summary: '需要确认是否只使用可读取的历史记录。' } }]);
   await until(() => work.getAttribute('data-status'), value => value === 'waiting_user');
   assert.doesNotMatch(await work.innerText(), /正在核对执行结果/);

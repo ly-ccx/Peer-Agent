@@ -7,6 +7,7 @@ import { currentModelReview, criterionSourceRevision } from './criterion-review.
  */
 import { readdirSync } from 'node:fs';
 import { verificationContentHash } from './verification-completion.mjs';
+import { verificationFailure } from './verification-failure.mjs';
 
 export function createSessionVerification({
   goalPlanStore,
@@ -120,9 +121,9 @@ export function createSessionVerification({
       return factsFor(plan);
     },
     async markVerifying(sessionId) {
+      if (active.has(sessionId)) throw Object.assign(new Error('This session already has an active independent review'), { code: 'verifier_in_progress' });
       const plan = findPlan(sessionId);
       if (!plan?.delegationOrigin || typeof goalPlanStore?.revisePlan !== 'function') return null;
-      active.get(sessionId)?.();
       active.set(sessionId, beginVerificationAttempt(plan.planId, `session:${sessionId}`));
       try {
         return goalPlanStore.revisePlan(plan.planId, {
@@ -148,14 +149,16 @@ export function createSessionVerification({
       const contentHash = verificationContentHash(plan, readReport(plan));
       const sourceRevision = criterionSourceRevision(plan);
       try {
-        report = await verifySession(plan, input.focus);
+        report = await verifySession(plan, input.focus, { workId: input.workId });
       } catch (error) {
-        const code = ['verifier_timeout', 'verifier_cancelled', 'verifier_permission_denied'].includes(error?.code)
-          ? error.code : error?.name === 'AbortError' ? 'verifier_cancelled' : 'verifier_failed';
-        return { ok: false, error: code };
+        const failure = verificationFailure(error);
+        goalPlanStore.recordVerifierRun?.(plan.planId, { verifierRunId: `delegated-failure:${randomUUID()}`,
+          target: { kind: 'plan' }, status: 'failed', summary: failure.message, failureReason: failure.message,
+          report: { passed: false, risks: [failure.error, failure.message], evidenceRefs: [], recommendedNextAction: failure.nextAction } });
+        return failure;
       }
       if (!report || report.ok === false || typeof report.passed !== 'boolean') {
-        return { ok: false, error: report?.error || 'verifier_failed' };
+        return { ...verificationFailure(report), error: report?.error || 'verifier_failed' };
       }
       if ((plan.successCriteria || []).some(row => row.kind === 'model_review')) {
         const fresh = goalPlanStore.getPlan(plan.planId);

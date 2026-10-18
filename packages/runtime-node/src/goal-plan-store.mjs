@@ -1586,6 +1586,9 @@ function normalizeRunnerState(runner, planId) {
   if (RUNNER_INTENTS.has(runner.intent)) {
     next.intent = runner.intent;
   }
+  // Preserve malformed metadata for fail-closed validation at the continuation
+  // seam. Dropping it here could silently create a fresh execution allowance.
+  if (runner.verificationContinuation !== undefined) next.verificationContinuation = structuredClone(runner.verificationContinuation);
   if (GOAL_RUNNER_PHASES.has(runner.phase)) {
     next.phase = runner.phase;
   }

@@ -2,25 +2,26 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 /** Production Quick Chat and profile IPC; native popup delivery is controlled in the isolated app. */
-export async function checkQuickChatBots({ app, quick, fixture, until, report, captureDirectory, failNext }) {
+export async function checkQuickChatBots({ app, quick, native, fixture, until, report, captureDirectory, failNext }) {
   const getBot = workspaceId => quick.evaluate(async id => (await window.peerAgent.projectAgentGet({ workspaceId: id })).item.profile, workspaceId);
   const bot = quick.getByRole('button', { name: '选择机器人', exact: true });
   const model = quick.getByRole('button', { name: '选择机器人模型', exact: true });
   const strength = quick.getByRole('button', { name: '思考强度', exact: true });
+  // This real native window intentionally hides on external blur. Keep the
+  // window being inspected visible when the shared desktop changes focus; do
+  // not inject a shown event, which would refresh/reset the state under test.
+  const focusQuick = async () => {
+    await native('focus');
+    await quick.bringToFront();
+  };
   // Keep the real Menu construction and selection callbacks, avoiding OS focus in deterministic tests.
-  await app.evaluate(({ Menu }) => {
-    globalThis.rcQuickOriginalPopup = Menu.prototype.popup;
-    Menu.prototype.popup = function (options) { globalThis.rcQuickMenu = this; globalThis.rcQuickMenuOptions = options; };
-  });
+  await native('installMenu');
   const selectNative = async (trigger, label) => {
-    await app.evaluate(() => { delete globalThis.rcQuickMenu; return true; });
+    await focusQuick();
+    await native('clearMenu');
     await trigger.focus(); await trigger.press('Enter');
-    await until(() => app.evaluate(() => Boolean(globalThis.rcQuickMenu)), Boolean);
-    await app.evaluate((_electron, label) => {
-      const item = globalThis.rcQuickMenu.items.find(item => item.label === label);
-      if (!item) throw Error('Quick Chat native choice missing: ' + label);
-      item.click(); globalThis.rcQuickMenuOptions.callback(); return true;
-    }, label);
+    await until(() => native('menuReady'), Boolean);
+    await native('selectMenu', label);
   };
   const selectBot = async index => {
     await selectNative(bot, `project-${String(index).padStart(3, '0')}`);
@@ -28,9 +29,11 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
     await until(() => model.isEnabled(), Boolean);
   };
   const selectModel = async label => {
+    await focusQuick();
     await model.click();
     const pop = await until(() => app.windows().find(page => new URL(page.url()).searchParams.get('window') === 'quick-chat-popover'), Boolean);
     await pop.getByRole('button', { name: label, exact: true }).click();
+    await focusQuick();
     await until(() => model.isEnabled(), Boolean);
   };
   try {
@@ -50,6 +53,7 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
     assert.equal(saved.modelPolicy.overrides.project_agent.modelProviderId, second.id);
     if (failNext) {
       failNext(); await selectModel('RC Bot model A');
+      await focusQuick();
       await quick.getByRole('alert').getByText('模型设置未保存，请重试。', { exact: true }).waitFor();
       assert.equal(await model.textContent(), 'RC Bot model B');
       assert.deepEqual(await getBot(fixture.bots[0].workspaceId), saved);
@@ -63,6 +67,7 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
     await quick.locator('textarea').focus();
     await quick.mouse.move(700, 2);
     for (const appearance of ['dark', 'light']) {
+      await focusQuick();
       await quick.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
       await until(() => quick.locator('.quick-chat-selectors button').evaluateAll(buttons =>
         buttons.every(button => getComputedStyle(button).backgroundColor === 'rgba(0, 0, 0, 0)')), Boolean);
@@ -83,6 +88,6 @@ export async function checkQuickChatBots({ app, quick, fixture, until, report, c
       failedSaveRetained: Boolean(failNext), keyboardTrigger: true, aligned: true,
       scope: 'Actual window and durable Bot profile IPC; native popup callbacks controlled, scripted model only' };
   } finally {
-    await app.evaluate(({ Menu }) => { Menu.prototype.popup = globalThis.rcQuickOriginalPopup; delete globalThis.rcQuickMenu; delete globalThis.rcQuickMenuOptions; });
+    await native('restoreMenu');
   }
 }

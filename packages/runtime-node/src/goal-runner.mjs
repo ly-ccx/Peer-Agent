@@ -2781,14 +2781,14 @@ export function createGoalRunner({
     setOnPlanTerminal,
     completeRecheck({ planId, contentHash, currentHash } = {}) {
       const plan = goalPlanStore.getPlan(planId);
-      if (!plan || canRunPlan && !canRunPlan(plan)) return { completed: false };
+      if (!plan || canSettlePlan && !canSettlePlan(plan)) return { completed: false };
       if (!canCompleteAfterRecheck({ plan, contentHash, currentHash,
         active: Boolean(getSession(planId) || starting.has(planId)), gate: evaluatePlanVerificationGate(plan) })) return { completed: false };
       recordPassedQualityReview(plan);
       goalPlanStore.revisePlan(planId, { status: 'completed', runner: { ...plan.runner,
         enabled: false, status: 'completed', intent: 'synthesize', phase: 'synthesize',
         blockedReason: undefined, blockerAudit: null, updatedAt: now() } },
-      { reason: 'readonly verifier blocker resolved', changedBy: 'goal-runner' });
+      { reason: 'verification blocker resolved without worker replay', changedBy: 'goal-runner' });
       emit('goalRunner:completed', { planId });
       return { completed: true };
     },

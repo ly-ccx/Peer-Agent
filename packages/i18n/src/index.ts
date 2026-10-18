@@ -261,6 +261,10 @@ export type TranslationKey =
   | 'projectAgent.chat.recoveryPermission'
   | 'projectAgent.chat.recoveryUnknownOutcome'
   | 'projectAgent.chat.recoveryHistory'
+  | 'projectAgent.chat.recoveryEarlierReply'
+  | 'projectAgent.chat.recoveryCancelled'
+  | 'projectAgent.chat.recoveryPaused'
+  | 'projectAgent.chat.childWorkContinues'
   | 'projectAgent.chat.recoveryAttemptFailed'
   | 'projectAgent.chat.recoveryEmptyResponse'
   | 'projectAgent.chat.recoveryModelChanged'
@@ -268,7 +272,22 @@ export type TranslationKey =
   | 'projectAgent.chat.recoveryStale'
   | 'projectAgent.chat.recoveryMissingCheckpoint'
   | 'projectAgent.chat.unavailable'
+  | 'projectAgent.chat.noProgress'
   | 'projectAgent.chat.budgetExhausted'
+  | 'projectAgent.chat.budgetUsageUnknown'
+  | 'projectAgent.chat.budgetRequests'
+  | 'projectAgent.chat.budgetTools'
+  | 'projectAgent.chat.budgetTokens'
+  | 'projectAgent.chat.budgetCost'
+  | 'projectAgent.chat.budgetReady'
+  | 'projectAgent.chat.budgetReserved'
+  | 'projectAgent.chat.budgetAvailable'
+  | 'projectAgent.chat.recoveryLegacyLimit'
+  | 'projectAgent.chat.budgetSourceSettings'
+  | 'projectAgent.chat.budgetSourceStored'
+  | 'projectAgent.chat.budgetUnconfirmed'
+  | 'projectAgent.chat.budgetCostUnknown'
+  | 'projectAgent.chat.budgetTokensUnknown'
   | 'projectAgent.chat.context.error'
   | 'projectAgent.chat.replied'
   | 'projectAgent.chat.disposition.answered'
@@ -1772,22 +1791,41 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.agent.ended': '已结束',
     'projectAgent.chat.agent.cancelled': '已取消',
     'projectAgent.chat.agent.blocked': '执行受阻',
-    'projectAgent.chat.recoveryContinuing': '我正在接着刚才的进度继续处理。',
+    'projectAgent.chat.recoveryContinuing': '已安排继续主 Bot 的回复。',
     'projectAgent.chat.recoveryExhausted': '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。',
     'projectAgent.chat.recoveryAuthentication': '连接的身份验证未通过。请重新登录或检查连接配置，再继续尝试。',
     'projectAgent.chat.recoveryConfiguration': '连接配置需要检查。修正后可以继续尝试，已有进展已保留。',
     'projectAgent.chat.recoveryInvalidRequest': '服务未接受这次请求。需要先检查模型或连接配置，已有进展已保留。',
     'projectAgent.chat.recoveryPermission': '继续处理需要的授权已失效。请先确认授权，已有进展已保留。',
     'projectAgent.chat.recoveryUnknownOutcome': '有操作的结果尚未确认，需要先核对，已有进展已保留。',
+    'projectAgent.chat.recoveryEnded': '主 Bot 回复已恢复，新的回复已送达。',
+    'projectAgent.chat.recoveryEarlierReply': '此前一次主 Bot 回复未完成，已保留在历史记录中。',
+    'projectAgent.chat.recoveryCancelled': '这项工作的主 Bot 回复已取消。',
+    'projectAgent.chat.recoveryPaused': '这项工作的主 Bot 回复已暂停。',
+    'projectAgent.chat.childWorkContinues': '另有 {count} 项子任务仍在推进，其执行状态单独显示。',
     'projectAgent.chat.recoveryHistory': '先前的中断',
     'projectAgent.chat.recoveryAttemptFailed': '本次继续未完成，具体原因见最新进展。',
     'projectAgent.chat.recoveryEmptyResponse': '模型未返回可用内容，已有进展已保留。你可以继续尝试。',
     'projectAgent.chat.recoveryModelChanged': '当前模型或连接配置已变化，无法直接续接这次回复。已有进展已保留。',
-    'projectAgent.chat.recoveryEnded': '这次中断已结束，后续进展见最新回复。',
     'projectAgent.chat.recoveryStale': '这条回复的状态已更新，请查看最新进展。',
     'projectAgent.chat.recoveryMissingCheckpoint': '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。',
-    'projectAgent.chat.unavailable': '暂时无法完成回复。',
-    'projectAgent.chat.budgetExhausted': '这项工作的执行额度已用完，已有进展已保留。你可以先发新消息。',
+    'projectAgent.chat.unavailable': '主 Bot 本次回复未完成。',
+    'projectAgent.chat.noProgress': '连续检查没有取得新进展，已停止重复执行。已有结果已保留。',
+    'projectAgent.chat.budgetExhausted': '这项工作已达到配置的预算限制，已有进展已保留。调整限制后可继续。',
+    'projectAgent.chat.budgetReady': '预算限制已调整，可以接着已有进展继续。',
+    'projectAgent.chat.budgetReserved': '预算暂由另一项执行占用，已有进展已保留。',
+    'projectAgent.chat.budgetAvailable': '预算占用已释放，可以接着已有进展继续。',
+    'projectAgent.chat.recoveryLegacyLimit': '旧版本的执行限制曾中断这次回复，已有进展已保留。',
+    'projectAgent.chat.budgetSourceSettings': '来源：执行预算设置。',
+    'projectAgent.chat.budgetSourceStored': '来源：保留的预算配置。',
+    'projectAgent.chat.budgetUnconfirmed': '暂时无法确认能否在配置的预算内继续，已有进展已保留。',
+    'projectAgent.chat.budgetCostUnknown': '费用上限为 {limit} 美元，当前用量无法准确确认；不会把未知用量当作零。',
+    'projectAgent.chat.budgetTokensUnknown': 'Token 上限为 {limit}，当前用量无法准确确认；不会把未知用量当作零。',
+    'projectAgent.chat.budgetUsageUnknown': '当前用量无法准确确认，暂不能在预算内继续；不会把未知用量当作零。',
+    'projectAgent.chat.budgetRequests': '模型请求：已用 {used} 次，上限 {limit} 次。',
+    'projectAgent.chat.budgetTools': '工具调用：已用 {used} 次，上限 {limit} 次。',
+    'projectAgent.chat.budgetTokens': 'Token：已用 {used}，上限 {limit}。',
+    'projectAgent.chat.budgetCost': '估算费用：已用 {used} 美元，上限 {limit} 美元。',
     'projectAgent.chat.context.error': '原始报错',
     'projectAgent.chat.replied': '已回复',
     'projectAgent.chat.disposition.answered': '已回答',
@@ -1918,7 +1956,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.details': '记忆详情',
     'projectAgent.chat.sessionState.running': '正在运行中',
     'projectAgent.chat.sessionState.waiting_user': '需要你处理',
-    'projectAgent.chat.sessionState.waiting_agent': '等待主 Bot 答复',
+    'projectAgent.chat.sessionState.waiting_agent': '由主 Bot 跟进',
     'projectAgent.chat.sessionState.verifying': '核验中',
     'projectAgent.chat.sessionState.result_ready': '待你确认',
     'projectAgent.chat.sessionState.accepted': '已签收',
@@ -3079,22 +3117,41 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.agent.ended': 'finished',
     'projectAgent.chat.agent.cancelled': 'cancelled',
     'projectAgent.chat.agent.blocked': 'blocked',
-    'projectAgent.chat.recoveryContinuing': 'I am continuing from the progress already made.',
+    'projectAgent.chat.recoveryContinuing': 'The main bot reply is scheduled to continue.',
     'projectAgent.chat.recoveryExhausted': 'The connection has not recovered yet. Progress was saved. You can continue trying or send a new message.',
     'projectAgent.chat.recoveryAuthentication': 'The connection could not be authenticated. Sign in again or check the connection settings, then continue trying.',
     'projectAgent.chat.recoveryConfiguration': 'The connection settings need attention. You can continue after correcting them. Progress was saved.',
     'projectAgent.chat.recoveryInvalidRequest': 'The service did not accept this request. Check the model or connection settings first. Progress was saved.',
     'projectAgent.chat.recoveryPermission': 'The authorization needed to continue is no longer valid. Confirm authorization first. Progress was saved.',
     'projectAgent.chat.recoveryUnknownOutcome': 'The result of an operation has not been confirmed. It needs to be checked first. Progress was saved.',
+    'projectAgent.chat.recoveryEnded': 'The main bot has recovered and delivered a new reply.',
+    'projectAgent.chat.recoveryEarlierReply': 'An earlier main bot reply failed. Its diagnostic record has been kept.',
+    'projectAgent.chat.recoveryCancelled': 'The main bot reply for this work was cancelled.',
+    'projectAgent.chat.recoveryPaused': 'The main bot reply for this work is paused.',
+    'projectAgent.chat.childWorkContinues': '{count} child tasks are still advancing. Their execution status is shown separately.',
     'projectAgent.chat.recoveryHistory': 'Earlier interruption',
     'projectAgent.chat.recoveryAttemptFailed': 'This attempt did not finish. Check the latest progress for the reason.',
     'projectAgent.chat.recoveryEmptyResponse': 'The model returned no usable content. Progress was saved. You can try again.',
     'projectAgent.chat.recoveryModelChanged': 'The model or connection configuration has changed, so this reply cannot resume directly. Progress was saved.',
-    'projectAgent.chat.recoveryEnded': 'This interruption has ended. See the latest reply for further progress.',
     'projectAgent.chat.recoveryStale': 'The state of this reply has changed. Please check the latest progress.',
     'projectAgent.chat.recoveryMissingCheckpoint': 'The saved progress has no complete recovery record. It needs to be checked before executing again.',
-    'projectAgent.chat.unavailable': 'This reply could not be completed.',
-    'projectAgent.chat.budgetExhausted': 'This work has used its execution allowance. Progress was saved. You can send a new message.',
+    'projectAgent.chat.unavailable': 'This main bot reply could not be completed.',
+    'projectAgent.chat.noProgress': 'Repeated checks produced no new progress, so repetition has stopped. Existing results are saved.',
+    'projectAgent.chat.budgetExhausted': 'This work reached its configured budget limit. Progress was saved. Adjust the limit to continue.',
+    'projectAgent.chat.budgetReady': 'The budget limit was adjusted. You can continue from saved progress.',
+    'projectAgent.chat.budgetReserved': 'Another execution currently reserves the budget. Progress was saved.',
+    'projectAgent.chat.budgetAvailable': 'The budget reservation was released. You can continue from saved progress.',
+    'projectAgent.chat.recoveryLegacyLimit': 'An older execution limit interrupted this reply. Progress was saved.',
+    'projectAgent.chat.budgetSourceSettings': 'Source: execution budget settings.',
+    'projectAgent.chat.budgetSourceStored': 'Source: retained budget configuration.',
+    'projectAgent.chat.budgetUnconfirmed': 'Execution cannot yet be confirmed to fit the configured budget. Progress was saved.',
+    'projectAgent.chat.budgetCostUnknown': 'The cost limit is USD {limit}, but usage cannot be confirmed. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetTokensUnknown': 'The token limit is {limit}, but usage cannot be confirmed. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetUsageUnknown': 'Usage cannot be confirmed accurately, so execution cannot continue within the budget. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetRequests': 'Model requests: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetTools': 'Tool calls: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetTokens': 'Tokens: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetCost': 'Estimated cost: USD {used} used, limit USD {limit}.',
     'projectAgent.chat.context.error': 'Original error',
     'projectAgent.chat.replied': 'Replied',
     'projectAgent.chat.disposition.answered': 'Answered',
@@ -3225,7 +3282,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.details': 'Memory details',
     'projectAgent.chat.sessionState.running': 'Running',
     'projectAgent.chat.sessionState.waiting_user': 'Needs your input',
-    'projectAgent.chat.sessionState.waiting_agent': 'Waiting for the main Bot',
+    'projectAgent.chat.sessionState.waiting_agent': 'With the main Bot',
     'projectAgent.chat.sessionState.verifying': 'Verifying',
     'projectAgent.chat.sessionState.result_ready': 'Awaiting your confirmation',
     'projectAgent.chat.sessionState.accepted': 'Accepted',

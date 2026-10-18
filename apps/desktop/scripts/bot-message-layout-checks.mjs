@@ -1,6 +1,7 @@
 import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { BUDGET_RECOVERY_CASES } from './work-budget-fixture.mjs';
 
 /** Failures stay visible; long provider diagnostics are readable on request. */
 export async function checkBotMessageLayout({ page, until, report, captureDirectory, expectedText }) {
@@ -15,24 +16,31 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     await page.setViewportSize({ width, height: 780 });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
     await budgetMessage.scrollIntoViewIfNeeded();
-    assert.equal(await budgetMessage.locator('.bot-card > p').textContent(), '这项工作的执行额度已用完，已有进展已保留。你可以先发新消息。');
-    assert.equal(await budgetMessage.getByRole('button', { name: '继续尝试', exact: true }).count(), 1);
+    assert.equal(await budgetMessage.locator('.bot-card > p').first().textContent(), '这项工作已达到配置的预算限制，已有进展已保留。调整限制后可继续。');
+    assert.equal(await budgetMessage.getByRole('button', { name: '继续尝试', exact: true }).count(), 0);
+    assert.match(await budgetMessage.innerText(), /模型请求：已用 256 次，上限 256 次。.*来源：执行预算设置。/s);
     assert.equal(await budgetMessage.evaluate(node => node.scrollWidth <= node.clientWidth), true);
-    assert.doesNotMatch(await budgetMessage.innerText(), /agent_tool_budget_exhausted/);
+    assert.doesNotMatch(await budgetMessage.innerText(), /work_budget_limited/);
     await openReplyDetails(page, budgetMessage);
-    assert.match(await rawError.textContent(), /^代理暂时不可用：agent_tool_budget_exhausted:/);
+    assert.match(await rawError.textContent(), /^代理暂时不可用：work_budget_limited/);
     await closeReplyDetails(page);
     await budgetMessage.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(captureDirectory, `budget-exhausted-${appearance}.png`), animations: 'disabled' });
   }
-  report.budgetFailure = { reasonVisible: true, diagnosticInDrawer: true, retryVisible: true, narrowFits: true };
+  report.budgetFailure = { reasonVisible: true, diagnosticInDrawer: true, retrySuppressed: true, limitVisible: true, narrowFits: true };
   const recoveryCases = [
+    ...BUDGET_RECOVERY_CASES,
     ['missing-checkpoint', 9984, '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。', false],
     ['scheduled', 9985, '连接暂时中断，我会接着刚才的进度继续。', false],
     ['exhausted', 9986, '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。', true],
     ['authentication', 9987, '连接的身份验证未通过。请重新登录或检查连接配置，再继续尝试。', true],
     ['unknown', 9988, '有操作的结果尚未确认，需要先核对，已有进展已保留。', false],
-    ['resolved', 9989, '这次中断已结束，后续进展见最新回复。', false],
+    ['resolved', 9989, '主 Bot 回复已恢复，新的回复已送达。', false],
+    ['child-running', 9964, '模型未返回可用内容，已有进展已保留。你可以继续尝试。', true],
+    ['historical', 9965, '此前一次主 Bot 回复未完成，已保留在历史记录中。', false],
+    ['paused', 9966, '这项工作的主 Bot 回复已暂停。', false],
+    ['cancelled', 9967, '这项工作的主 Bot 回复已取消。', false],
+    ['no-progress', 9979, '连续检查没有取得新进展，已停止重复执行。已有结果已保留。', true],
   ];
   const recoverySamples = [];
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
@@ -45,9 +53,11 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
         await recoveryMessage.locator('.bot-recovery-history > summary').click();
       }
       const text = state === 'resolved' ? recoveryMessage.locator('.bot-recovery-history .bot-reply-body') : recoveryMessage.locator('.bot-card > p');
-      assert.equal(await text.textContent(), expected);
+      assert.equal(await text.first().textContent(), expected);
+      if (state === 'child-running') assert.match(await recoveryMessage.innerText(), /另有 1 项子任务仍在推进/);
+      if (state === 'budget-unknown') assert.match(await recoveryMessage.innerText(), /费用上限为 10 美元，当前用量无法准确确认；不会把未知用量当作零。.*来源：执行预算设置。/s);
       assert.equal(await recoveryMessage.getByRole('button', { name: '继续尝试', exact: true }).count(), Number(retryVisible));
-      assert.equal(await recoveryMessage.locator('[role="status"]').count(), Number(state === 'scheduled'));
+      assert.equal(await recoveryMessage.locator('[role="status"]').count(), Number(state === 'scheduled' || state === 'budget-migrating'));
       assert.doesNotMatch(await recoveryMessage.innerText(), /ConnectTimeoutError|net::|HTTP 401|execution_outcome_unknown|rc-recovery-/);
       assert.equal(await recoveryMessage.evaluate(node => node.scrollWidth <= node.clientWidth), true);
       if (state === 'scheduled') {
@@ -81,7 +91,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       assert.ok(bounds.shellLeft >= -1 && bounds.shellRight <= bounds.viewport + 1 && bounds.bodyLeft >= 0 && bounds.bodyRight <= bounds.viewport,
         `recovery image must use settled page bounds: ${JSON.stringify({ state, width, appearance, ...bounds })}`);
       await page.screenshot({ path: path.join(captureDirectory, `recovery-${state}-${appearance}.png`), animations: 'disabled' });
-      assert.equal(await text.evaluate(node => {
+      assert.equal(await text.first().evaluate(node => {
         const rect = node.getBoundingClientRect();
         return node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
       }), true, 'captured recovery text remains visible after drawer and virtual-list layout settle');

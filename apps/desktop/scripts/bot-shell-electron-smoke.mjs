@@ -20,7 +20,9 @@ import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
 import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
+import { seedWorkBudgetMessages } from './work-budget-fixture.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
+import { createQuickChatNativeController } from './quick-chat-native-fixture.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture, writeStreamingCommand } from '../../../scripts/rc-response-interaction-smoke.mjs';
 import { checkBotYieldFeedback } from './bot-yield-feedback-checks.mjs';
 import { checkRetryRetirement } from './bot-retry-retirement-checks.mjs';
@@ -82,10 +84,7 @@ const longErrorText = '代理暂时不可用：HTTP 400: ' + JSON.stringify({ er
 } });
 seededMessages[9998] = { ...seededMessages[9998], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: longErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-long-error', kind: 'agent_unavailable', content: longErrorText, actions: [] }] };
-const budgetErrorText = '代理暂时不可用：agent_tool_budget_exhausted: 本轮工具调用额度已用完，回复尚未完成，已停止继续执行。';
-seededMessages[9997] = { ...seededMessages[9997], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
-  content: budgetErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-budget', kind: 'agent_unavailable', content: budgetErrorText,
-    actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId: 'rc-budget' } }] }] };
+seedWorkBudgetMessages(seededMessages, fixture.bots[0].workspaceId);
 for (const [offset, state] of ['started', 'question', 'reported', 'started'].entries()) {
   seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
     agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 3 ? 'rc-work-2' : 'rc-work-1', name: offset === 3 ? '独立核验' : '实现检查', state} };
@@ -100,13 +99,19 @@ const recoveryCases = [
   { key: 'authentication', failureKind: 'authentication', retryable: false, recoveryWorkState: 'blocked_system', reason: 'HTTP 401: fixture credential expired' },
   { key: 'unknown', failureKind: 'execution_outcome_unknown', retryable: false, recoveryWorkState: 'blocked_system', reason: 'execution_outcome_unknown: fixture result not recorded' },
   { key: 'resolved', failureKind: 'network', retryable: true, recoveryWorkState: 'delivered', resolvedState: 'resolved', reason: 'net::ERR_CONNECTION_CLOSED' },
+  { key: 'child-running', index: 9964, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'empty_model_response', phase: 'current', activeSessionIds: ['rc-work-1'] },
+  { key: 'historical', index: 9965, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'empty_model_response', phase: 'superseded' },
+  { key: 'paused', index: 9966, failureKind: 'fatal', retryable: false, recoveryWorkState: 'paused', reason: 'empty_model_response', phase: 'paused' },
+  { key: 'cancelled', index: 9967, failureKind: 'fatal', retryable: false, recoveryWorkState: 'cancelled', reason: 'empty_model_response', phase: 'cancelled' },
+  { key: 'no-progress', index: 9979, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'agent_no_progress' },
 ];
 for (const [offset, entry] of recoveryCases.entries()) {
-  const { key, reason, recoveryWorkState, resolvedState, ...recovery } = entry;
+  const { key, index, reason, recoveryWorkState, resolvedState, phase, activeSessionIds = [], ...recovery } = entry;
   const turnId = key === 'scheduled' ? 'rc-recovery-progress-turn' : `rc-recovery-${key}-turn`;
   const content = `代理暂时不可用：${reason}`;
-  seededMessages[9984 + offset] = { ...seededMessages[9984 + offset], role: 'assistant', kind: 'system_card', turnId, content,
-    cards: [{ cardId: `rc-recovery-${key}`, kind: 'agent_unavailable', content, recoveryWorkState, ...(resolvedState ? { resolvedState } : {}),
+  seededMessages[index ?? 9984 + offset] = { ...seededMessages[index ?? 9984 + offset], role: 'assistant', kind: 'system_card', turnId, content,
+    cards: [{ cardId: `rc-recovery-${key}`, kind: 'agent_unavailable', content, recoveryWorkState,
+      ...((phase || key === 'resolved') ? { failureStatus: { phase: phase || 'recovered', turnKind: 'wake', activeSessionIds, ...(key === 'resolved' ? { recoveredByReplyId: 'rc-delivered-reply' } : {}) } } : {}), ...(resolvedState ? { resolvedState } : {}),
       recovery: { ...recovery, autoAttempts: 2, failedTurnId: turnId, deadlineAt: '2026-10-10T03:05:00.000Z' },
       actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId } }] }] };
 }
@@ -261,21 +266,10 @@ if (workSurfaces) {
   assert.equal(observedService.split(cancelSeam).length, 2);
   observedService = observedService.replace(cancelSeam, `${cancelSeam}
     if (payload.workspaceId === globalThis.rcBotWorkWorkspace) {
-      const file=${JSON.stringify(workCommand)}, state=JSON.parse(readFileSync(file,'utf8'));
-      writeFileSync(file,JSON.stringify({...state,cancelCalls:[...(state.cancelCalls??[]),payload]}));
-      await new Promise(resolve=>setTimeout(resolve,650));
-      if(state.cancelMode==='fail')return {ok:false,code:'CONTROLLED_CANCEL_FAILURE'};
-      const session=globalThis.rcBotWorkSessions.find(item=>item.sessionId===payload.sessionId);
-      if(!session)return {ok:false,code:'NOT_FOUND'};
-      const deferred=state.cancelMode==='deferred-status';
-      const next={...session,status:deferred?'stopping':'cancelled',statusLabel:deferred?'正在停止':'已取消'};
-      globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?next:item);
-      queueChanged(payload.workspaceId);
-      if(deferred)setTimeout(()=>{
-        globalThis.rcBotWorkSessions=globalThis.rcBotWorkSessions.map(item=>item.sessionId===payload.sessionId?{...item,status:'cancelled',statusLabel:'已取消'}:item);
-        queueChanged(payload.workspaceId);
-      },500);
-      return {ok:true,session:next};
+      const { controlledCancelSession } = await import(${JSON.stringify(new URL('./bot-cancel-fixture.mjs', import.meta.url).href)});
+      return controlledCancelSession({ file: ${JSON.stringify(workCommand)}, payload,
+        getSessions: () => globalThis.rcBotWorkSessions,
+        setSessions: sessions => { globalThis.rcBotWorkSessions = sessions; }, queueChanged });
     }`);
   const confirmationSeam = 'async function confirmResult(payload = {}) {';
   assert.equal(observedService.split(confirmationSeam).length, 2);
@@ -331,10 +325,16 @@ const imageReceipt = path.join(root, 'image-receipt.json');
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
 const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
+const quickCommand = path.join(root, 'quick-command.json');
+const quickReceipt = path.join(root, 'quick-receipt.json');
+writeFileSync(quickCommand, JSON.stringify({ seq: 0 }));
+writeFileSync(quickReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterReceipt, JSON.stringify({ seq: 0 }));
-writeFileSync(entry, `import {app,dialog,BrowserWindow} from 'electron';
+writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu} from 'electron';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
+import {installQuickChatNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/quick-chat-native-fixture.mjs')).href)};
+installQuickChatNativeFixture({BrowserWindow,Menu,commandFile:${JSON.stringify(quickCommand)},receiptFile:${JSON.stringify(quickReceipt)}});
 import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/lab-main-thread-probe.mjs')).href)};
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
@@ -422,6 +422,7 @@ const until = async (read, predicate, timeout = 30000) => {
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
   throw Error('Shell acceptance timed out');
 };
+const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 let updaterSequence = 0;
 const emitUpdaterEvent = async event => {
   const seq = ++updaterSequence;
@@ -620,16 +621,13 @@ try {
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_UI_RECEIPT_4', { exact: true }).waitFor();
   report.checks.push('five real UI sends, visible durable Received under budget, scripted replies');
   const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
-  await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows().find(window => new URL(window.webContents.getURL()).searchParams.get('window') === 'quick-chat');
-    window.show(); window.webContents.send('quick-chat:shown');
-  });
-  await checkQuickChatBots({ app, quick, fixture, until, report, captureDirectory: root,
+  await quickNative('open');
+  await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
     failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
   await quick.getByLabel('快速会话内容', { exact: true }).fill('RC_QUICK_INPUT');
   await quick.getByRole('button', { name: '发送', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
-  const quickExecution = await app.evaluate(() => globalThis.rcQuickExecution);
+  const quickExecution = await quickNative('execution');
   assert.equal(quickExecution.modelProviderId, botModelFixtures[1].id);
   assert.equal(quickExecution.effort, botModelFixtures[1].reasoningEffortLevels.at(-1));
   report.quickChatBots.sentSelection = true;

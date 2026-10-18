@@ -48,6 +48,10 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
     events.push(event(session, { kind: 'report_available', version: session.reportRevision, at,
       payload: { reportRevision: session.reportRevision, verification: 'unverified' } }));
   }
+  if (session.repairRevision && session.repairRevision !== prior?.repairRevision) {
+    events.push(event(session, { kind: 'report_available', version: `repair:${session.repairRevision}`, at,
+      payload: { status: 'waiting_agent', owner: 'parent_agent', reason: session.blockedReason || 'technical_blocker' } }));
+  }
   const progress = progressEvent(prior, session, { at, progressThrottleMs });
   if (progress) events.push(progress);
   for (const item of newNeeds(prior, session)) {

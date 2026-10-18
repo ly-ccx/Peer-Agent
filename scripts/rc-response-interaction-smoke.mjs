@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { emitToolArgProgress } from '../packages/runtime-node/dist/index.js';
 
+// The driver deliberately holds each phase while inspecting multiple window,
+// theme and dock layouts. This is a fixture deadlock guard, not a provider or
+// product timeout; a loaded CI renderer can take over 30s before advancing it.
+
 // Electron polls from another process. Replacing the complete file prevents a
 // truncated JSON read from becoming a provider error and replaying the stream.
 export function writeStreamingCommand(commandFile, scenario, phase) {

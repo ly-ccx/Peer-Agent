@@ -7,6 +7,14 @@ import {
 } from './runtime-pipeline-adapter.mjs';
 
 describe('Desktop Runtime Pipeline adapter', () => {
+  it('readonly source drift remains a concrete boundary instead of execution uncertainty', async () => {
+    await assert.rejects(runDesktopRuntimePipeline({ sessionId: 'changed-review', streamId: 'changed-review',
+      model: { initialize: () => ({}), applyToolResults: state => state,
+        runTurn: state => ({ kind: 'tool_calls', state, calls: [{ name: 'read_file', toolCallId: 'read' }] }),
+        checkpoint() { throw Object.assign(Error('Review source changed'), { code: 'verification_source_changed' }); } },
+      tools: { execute: async call => ({ call, result: { output: 'paired result' } }) },
+    }), error => error.code === 'verification_source_changed' && !error.providerRecovery);
+  });
   it('forwards paired tool executions and run context to the critical checkpoint', async () => {
     const call = { name: 'write_file', toolCallId: 'tool-write' };
     const execution = { call, result: { output: 'saved' } };

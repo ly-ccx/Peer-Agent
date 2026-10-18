@@ -1,9 +1,11 @@
 import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
 import { createReplyDelivery } from './reply-delivery.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
-import { continuationDecision } from './continuation-policy.mjs';
-import { workBudgetBinding, workBudgetCanResume } from './work-budget.mjs';
+import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
+import { workBudgetBinding } from './work-budget.mjs';
 import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue } from './recovery-policy.mjs';
+import { hostWakeWait } from './wake-wait.mjs';
+import { replyRecoveryAdmission, recoverLegacyBudgetWorks } from './reply-recovery-admission.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
 export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
@@ -20,8 +22,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const work = store.read().works[message.meta?.workId];
       if (!work || !['runnable', 'retry_wait'].includes(work.state) || work.attemptId && work.attemptId !== message.turnId) return;
       const related = rows().filter(row => work.sessionIds?.includes(row.sessionId));
-      const waiting = related.some(row => ['queued', 'starting', 'running', 'verifying'].includes(row.status));
-      store.saveWork({ ...work, state: related.some(row => row.status === 'waiting_user') ? 'waiting_user' : waiting ? 'waiting_children' : 'delivered' });
+      store.saveWork({ ...work, state: stateAfterReply(related), repairSessionIds: repairOwnership(related).repairSessionIds });
       store.handled(work.pendingEventIds || []);
     },
     onInvalidated: message => {
@@ -43,9 +44,13 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       inbox.commitBatch(workspaceId, { throughSeq: batch.throughSeq, ok: true });
     }
     const pending = store.pendingEvents();
-    const routine = pending.filter(event => ROUTINE.has(event.kind));
+    // Child execution acknowledgements do not restart a failed parent reply or
+    // erase its protected checkpoint. A result/exception remains a real wake.
+    const works = Object.values(store.read().works);
+    const routine = pending.filter(event => ROUTINE.has(event.kind) || works.some(work => work.recovery
+      && !hasUnsettledDispatch(work) && hostWakeWait({ kind: 'wake', events: [event] }, { ...work, recovery: undefined }, rows())));
     if (routine.length) store.handled(routine.map(event => event.eventId));
-    return pending.filter(event => !ROUTINE.has(event.kind));
+    return pending.filter(event => !routine.includes(event));
   }
   function expireReservations() {
     for (const work of Object.values(store.read().works)) if (work.state === 'retry_wait' && work.recovery?.reservationId
@@ -108,6 +113,17 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverJob() {
       dispatchRecovery.reconcileAll();
       expireReservations();
+      recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: rows(), now });
+      // Older releases persisted technical blocks as human waits. Only current
+      // owned facts plus an existing protected checkpoint can reclaim custody.
+      for (const work of Object.values(store.read().works)) {
+        if (work.state !== 'waiting_user' || work.stopScope === 'work' || !work.checkpointRef
+          || work.parentConversationId !== conversationId) continue;
+        const related = rows().filter(row => work.sessionIds?.includes(row.sessionId));
+        const ownership = repairOwnership(related);
+        if (!ownership.needsUser && ownership.repairSessionIds.length) store.saveWork({ ...work,
+          state: 'runnable', end: 'yielded', repairSessionIds: ownership.repairSessionIds });
+      }
       const work = Object.values(store.read().works).sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt))).find(row => row.state === 'runnable' && row.checkpointRef)
         || Object.values(store.read().works).find(row => row.checkpointRef && recoveryReservationDue(row, now()))
         || Object.values(store.read().works).find(row => row.state === 'blocked_system' && row.stopScope !== 'work' && row.recovery?.dispatchesReconciled && !row.recovery.blockedCode && !hasUnsettledDispatch(row));
@@ -122,17 +138,20 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       dispatchRecovery.reconcileAll();
       const work = Object.values(store.read().works).find(work => work.parentConversationId === conversationId && work.checkpointRef
         && (work.recovery?.failedTurnId === turnId || work.attemptId === turnId));
-      if (!work || ['delivered', 'cancelled', 'waiting_user'].includes(work.state)) return { ok: false, code: 'STALE_TURN' };
       const checkpoint = readProtectedWork(work);
-      if (work.state === 'waiting_children' && !(work.stopScope === 'reply' && checkpoint?.outcome?.stopped === true)) return { ok: false, code: 'STALE_TURN' };
-      if (hasUnsettledDispatch(work) || work.recovery?.failureKind === 'execution_outcome_unknown') return { ok: false, code: 'EXECUTION_OUTCOME_UNKNOWN' };
-      if (work.state === 'budget_limited' && !workBudgetCanResume(work, workBudgetBinding(workspaceId)?.limits)) return { ok: false, code: 'WORK_BUDGET_EXHAUSTED' };
-      if (!recoveryCheckpointAvailable(work, checkpoint, store.readCheckpoint)) { blockMissingCheckpoint(work); return { ok: false, code: 'RECOVERY_CHECKPOINT_UNAVAILABLE' }; }
-      if (checkpoint.job?.workId !== work.workId) return { ok: false, code: 'STALE_TURN' };
+      const admission = replyRecoveryAdmission(work, checkpoint, { limits: workBudgetBinding(workspaceId)?.limits, readCheckpoint: store.readCheckpoint });
+      if (!admission.ok) {
+        if (work && admission.code === 'RECOVERY_CHECKPOINT_UNAVAILABLE') blockMissingCheckpoint(work);
+        return { ok: false, code: admission.code };
+      }
       return { ok: true, job: { ...checkpoint.job, workId: work.workId, continuation: true, interactive: true,
         recoveryRevision: work.revision, manualRecovery: true } };
     },
     recoveryFor(job, outcome) { return recoveryForFailure(store.read().works[job.workId], outcome, now()); },
+    silentWaitFor(job, roster) {
+      const work = store.read().works[job.workId];
+      return hasUnsettledDispatch(work) ? null : hostWakeWait(job, work, Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []);
+    },
     previousOutcome(job) { return readProtectedWork(store.read().works[job.workId])?.outcome; },
     blockReservation(job) {
       const work = store.read().works[job.workId];
@@ -170,33 +189,38 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         ...existing, workId: job.workId, attemptId: job.attemptId, pendingEventIds: events.map(event => event.eventId), state: 'runnable', recovery,
         waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') });
     },
+    stalls(job, outcome, roster) {
+      const previous = store.read().works[job.workId];
+      const sources = ownedSessions(previous, job, roster);
+      return repairOwnership(sources).repairSessionIds.length > 0
+        && repairProgressDecision(previous, outcome, roster, sources).end === 'no_progress';
+    },
     finish(job, outcome, roster) {
       const previous = store.read().works[job.workId];
-      const decision = continuationDecision({ previous, rounds: outcome.rounds, roster, yielded: outcome.yielded });
-      const sources = (Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []).filter(row =>
-        previous.sessionIds.includes(row.sessionId) || (job.events || []).some(event => event.sessionId === row.sessionId)
-        || row.origin?.anchorMessageId && previous.anchorInputIds.some(id => `input-${id}` === row.origin.anchorMessageId));
+      const sources = ownedSessions(previous, job, roster);
       const sessionIds = [...new Set([...previous.sessionIds, ...sources.map(row => row.sessionId)])];
-      const waiting = sources.filter(row => ['queued', 'starting', 'running', 'verifying'].includes(row.status));
+      const ownership = repairOwnership(sources);
+      const decision = repairProgressDecision(previous, outcome, roster, sources);
+      const waiting = ownership.waiting;
       let state = decision.state;
-      if (!outcome.yielded && waiting.length) state = 'waiting_children';
+      if (!outcome.yielded && waiting.length && decision.state !== 'blocked_system') state = 'waiting_children';
       const recovery = outcome.failed ? outcome.recovery || recoveryForFailure(previous, outcome, now()) : undefined;
       if (outcome.failed) state = recovery?.reservationId ? 'retry_wait' : 'blocked_system';
       if (outcome.stopped) state = waiting.length ? 'waiting_children' : 'paused';
       // A child question does not finish the parent reply that still needs to
       // bring that question into the main conversation. Keep a yielded parent
       // runnable until its public reply is committed.
-      if (!outcome.failed && !outcome.yielded && sources.some(row => row.status === 'waiting_user')) state = 'waiting_user';
+      if (!outcome.failed && !outcome.yielded && !outcome.stopped && decision.state !== 'blocked_system') state = stateAfterReply(sources);
       if (outcome.budgetLimited) state = 'budget_limited';
       if (outcome.deliveryPending) state = 'retry_wait';
-      const end = state === 'waiting_children' ? 'awaiting_children' : state === 'waiting_user' ? 'awaiting_user'
+      const end = state === 'runnable' ? 'yielded' : state === 'waiting_children' ? 'awaiting_children' : state === 'waiting_user' ? 'awaiting_user'
         : state === 'budget_limited' ? 'budget_limited' : outcome.reason === 'agent_no_progress' ? 'no_progress'
         : outcome.stopped ? 'user_stopped' : outcome.failed ? recovery?.retryable ? 'provider_retryable' : 'fatal'
         : state === 'retry_wait' ? 'provider_retryable' : decision.end;
       const { recoveryRevision, recoveryReservationId, manualRecovery: _manual, ...durableJob } = job;
       const checkpointRef = outcome.preserveCheckpoint ? previous.checkpointRef
         : store.checkpoint(job.workId, { job: { ...durableJob, continuation: true }, outcome });
-      store.saveWork({ ...previous, ...decision, state, end, sessionIds, checkpointRef, recovery,
+      store.saveWork({ ...previous, ...decision, state, end, sessionIds, checkpointRef, recovery, repairSessionIds: ownership.repairSessionIds,
         waitFor: [...waiting.map(row => ({ kind: 'session', id: row.sessionId })),
           ...(state === 'retry_wait' && recovery?.reservationId ? [{ kind: 'retry_timer', id: recovery.reservationId }] : [])],
         consumedEventIds: [...new Set([...previous.consumedEventIds, ...(job.events || []).map(row => row.eventId)])].slice(-64) });
@@ -210,7 +234,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const checkpoint = readProtectedWork(work);
       if (!recoveryCheckpointAvailable(work, checkpoint, store.readCheckpoint)) throw new Error('continuity_checkpoint_missing');
       const outcome = checkpoint?.outcome;
-      return outcome && work.nativeCheckpointRef ? { ...outcome, providerCheckpoint: store.readCheckpoint(work.nativeCheckpointRef) } : outcome;
+      // A finished public update starts the next reasoning step with current
+      // roster facts. Only an actual yield resumes a native Provider slice.
+      return outcome && work.nativeCheckpointRef && (!work.repairSessionIds?.length || outcome.yielded)
+        ? { ...outcome, providerCheckpoint: store.readCheckpoint(work.nativeCheckpointRef) } : outcome;
     },
   };
 }

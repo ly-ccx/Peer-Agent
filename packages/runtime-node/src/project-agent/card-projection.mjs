@@ -330,9 +330,11 @@ function unavailableCards(facts) {
       cardId,
       kind: 'agent_unavailable',
       content: `代理暂时不可用：${reason}`,
+      ...(item.failureStatus ? { failureStatus: item.failureStatus } : {}),
+      ...(item.recoveryAction ? { recoveryAction: item.recoveryAction } : {}),
       factResolved: item.superseded === true,
-      factState: item.superseded === true ? 'superseded' : '',
-      actions: item.superseded === true ? [] : [ipcAction('retry', 'project-agent:retry', { turnId, cardId })],
+      factState: item.superseded === true ? item.failureStatus?.phase || 'superseded' : '',
+      actions: item.superseded === true || item.recoveryAction?.canContinue === false ? [] : [ipcAction('retry', 'project-agent:retry', { turnId, cardId })],
       refs: refs({ turnId }),
       ...(item.recovery ? { recovery: item.recovery, recoveryWorkState: item.recoveryWorkState } : {}),
     }));
@@ -401,7 +403,7 @@ function applyResolution(card, stored) {
   // Keep that receipt, but require the subsequent canonical turn to back it.
   const unsupportedRetry = stored?.resolution === 'retried' && !card.factResolved
     && ['agent_unavailable', 'agent_stopped'].includes(card.kind);
-  const storeResolved = stored?.resolvedState === 'resolved' && !unsupportedRetry;
+  const storeResolved = stored?.resolvedState === 'resolved' && !unsupportedRetry && !card.failureStatus;
   const resolved = card.factResolved || storeResolved;
   const resolution = card.factResolved
     ? { source: 'fact', state: card.factState }
@@ -414,6 +416,8 @@ function applyResolution(card, stored) {
     resolvedState: resolved ? 'resolved' : 'open',
     ...(resolution ? { resolution } : {}),
     content: card.content,
+    ...(card.failureStatus ? { failureStatus: card.failureStatus } : {}),
+    ...(card.recoveryAction ? { recoveryAction: card.recoveryAction } : {}),
     ...(card.completionReview ? { completionReview: card.completionReview } : {}),
     ...(!resolved && card.recovery ? { recovery: card.recovery, recoveryWorkState: card.recoveryWorkState } : {}),
     actions: resolved ? [] : card.actions,

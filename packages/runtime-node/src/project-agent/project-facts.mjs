@@ -1,10 +1,14 @@
 import { createCardProjection, replyQuestionAnswered } from './card-projection.mjs';
 import { verdictRefFor } from './acceptance.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { replyFailureStatus } from './reply-failure-facts.mjs';
+import { replyRecoveryAdmission } from './reply-recovery-admission.mjs';
+import { workBudgetBinding } from './work-budget.mjs';
 
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
 export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[],
-  readCoordination = workspaceId => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).read(), now = () => new Date().toISOString() }) {
+  readCoordination = workspaceId => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).read(), now = () => new Date().toISOString(),
+  readCoordinationCheckpoint = (workspaceId, ref) => createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId }).readCheckpoint(ref) }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
@@ -66,15 +70,20 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
         }];
       })).slice(-1);
     });
-    const works = Object.values(readCoordination(workspaceId)?.works || {});
+    const coordination = readCoordination(workspaceId) || {};
+    const works = Object.values(coordination.works || {});
     const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => {
       const turn = messages.find(turn => turn.id === message.turnId && turn.kind === 'agent_turn');
       const work = works.find(work => work.workId === (message.meta?.workId || turn?.meta?.workId))
         || works.find(work => work.recovery?.failedTurnId === message.turnId || work.attemptId === message.turnId);
-      const superseded = work ? ['delivered', 'cancelled', 'paused'].includes(work.state)
-        || Boolean(work.recovery?.failedTurnId && work.recovery.failedTurnId !== message.turnId)
-        || Boolean(!work.recovery && work.attemptId && work.attemptId !== message.turnId)
-        : messages.slice(messages.indexOf(message) + 1).some(later => later.role === 'assistant' && later.kind === 'agent_turn');
+      const failureStatus = replyFailureStatus(message, messages, works, coordination.deliveries || {}, rows, now());
+      const superseded = ['superseded', 'recovered', 'cancelled', 'paused'].includes(failureStatus.phase);
+      let checkpoint;
+      try { if (work?.checkpointRef) checkpoint = readCoordinationCheckpoint(workspaceId, work.checkpointRef); } catch { /* admission reports unavailable */ }
+      const admission = replyRecoveryAdmission(work, checkpoint, { limits: workBudgetBinding(workspaceId)?.limits,
+        readCheckpoint: ref => readCoordinationCheckpoint(workspaceId, ref) });
+      const recoveryAction = { canContinue: !superseded && admission.ok,
+        ...(!admission.ok ? { blockedReason: admission.code } : {}), ...(admission.budget ? { budget: admission.budget } : {}) };
       let recovery = !superseded ? work?.recovery : undefined;
       if (recovery?.reservationId && (work.state !== 'retry_wait'
         || !work.waitFor?.some(wait => wait.kind === 'retry_timer' && wait.id === recovery.reservationId)
@@ -82,7 +91,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
         recovery = { ...recovery, retryAt: undefined, reservationId: undefined };
       }
       return { turnId: message.turnId, reason: message.content?.replace(/^代理暂时不可用：/, ''), superseded,
-        recovery, recoveryWorkState: work?.state };
+        recovery, recoveryWorkState: work?.state, failureStatus, recoveryAction };
     });
     const stopped = messages.filter(message => message.card === 'agent_stopped').map(message => ({
       turnId: message.turnId, text: message.content,

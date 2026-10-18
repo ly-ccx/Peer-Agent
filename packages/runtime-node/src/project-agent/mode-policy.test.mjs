@@ -34,6 +34,7 @@ test('project agent whitelist is the read capabilities plus delegation', () => {
     'local.delegation.get_verification_detail',
     'local.delegation.verify_session',
     'local.delegation.set_proactivity',
+    'local.delegation.wait_for_sessions',
     'local.delegation.post_reply',
     'local.memory.search',
     'local.memory.remember',

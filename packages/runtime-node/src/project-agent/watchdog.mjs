@@ -131,6 +131,11 @@ export function watchFactsFromPlan(plan) {
     ...(text(plan?.runner?.currentTaskId) ? { taskId: text(plan.runner.currentTaskId) } : {}),
     version: text(plan?.updatedAt) || text(plan?.planId) || sessionId,
     status: plan.status === 'interrupted' && plan.runner?.status === 'failed' ? 'interrupted' : sessionFactsFromPlan(plan).status,
+    ...(facts.status === 'waiting_agent' && plan.runner?.status === 'blocked' ? {
+      blockedReason: text(plan.runner.blockedReason),
+      repairRevision: createHash('sha256').update(JSON.stringify([plan.runner.blockedReason,
+        terminalVerifierRevision(plan), reportMaterial(plan.tasks)])).digest('hex'),
+    } : {}),
     ...(plan.status === 'completed' ? { completedAt: text(plan.timing?.completedAt) || text(plan.updatedAt) } : {}),
     ...(terminalVerifierRevision(plan) ? { resultRevision: terminalVerifierRevision(plan) } : {}),
     ...(startedAt ? { startedAt } : {}),
@@ -165,8 +170,9 @@ export function delegationFactsForWorkspace(plans, workspaceId) {
 function terminalVerifierRevision(plan) {
   const runs = Array.isArray(plan?.runner?.verifierRuns) ? plan.runner.verifierRuns : [];
   const latest = runs.at(-1);
-  if (!['passed', 'failed'].includes(latest?.status) || !text(latest?.completedAt)) return '';
-  return JSON.stringify([text(latest.verifierRunId), latest.status, latest.completedAt]);
+  const endedAt = text(latest?.completedAt) || text(latest?.updatedAt);
+  if (!['passed', 'failed'].includes(latest?.status) || !endedAt) return '';
+  return JSON.stringify([text(latest.verifierRunId), latest.status, endedAt]);
 }
 
 function needsFromPlan(plan, sessionId) {
@@ -174,7 +180,7 @@ function needsFromPlan(plan, sessionId) {
   if (plan?.delegationOrigin?.phase === 'awaiting_approval') {
     needs.push({ approvalId: `${sessionId}:plan_approval`, kind: 'plan_approval' });
   }
-  if (['waiting_user', 'blocked'].includes(plan?.runner?.status)) {
+  if (sessionFactsFromPlan(plan).needsUser && plan?.delegationOrigin?.phase !== 'awaiting_approval') {
     needs.push({ approvalId: `${sessionId}:question`, kind: 'question' });
   }
   return needs;

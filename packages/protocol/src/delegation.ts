@@ -410,8 +410,8 @@ function delegationStatus(
     accepted: meta.accepted === true || (snapshot.status === 'completed' && meta.acceptance !== 'confirm'
       && meta.accepted === undefined && !meta.verifying && !snapshot.runnerStatus),
     superseded: Boolean(meta.supersededBy), phase: meta.phase,
-    needsUser: snapshot.status === 'awaiting_approval', verificationActive: meta.verifying === true,
-    ...(snapshot.agentWaiting ? { blockedReason: 'waiting_parent_agent' } : {}),
+    needsUser: snapshot.status === 'awaiting_approval' || snapshot.needsUser === true, verificationActive: meta.verifying === true,
+    blockedReason: snapshot.agentWaiting ? 'waiting_parent_agent' : snapshot.blockedReason,
   }).status;
 }
 
@@ -426,6 +426,7 @@ export function projectWorkSession(
 ): WorkSession {
   const projected = projectGoalPlan(plan);
   const status = delegationStatus(plan, conversationMeta, projected);
+  const parentFollowing = status === 'waiting_agent' || status === 'verifying';
   const transitioning = ['stopping','awaiting_outcome'].includes(status) || conversationMeta.origin.takeover?.phase === 'stopping';
   return {
     sessionId: conversationMeta.sessionId ?? plan.conversationId ?? plan.planId,
@@ -433,11 +434,12 @@ export function projectWorkSession(
     title: plan.title,
     planId: plan.planId,
     status,
-    actionRight: transitioning ? 'peer_advancing' : projected.actionRight,
-    nextAction: transitioning ? 'none' : projected.nextAction,
+    actionRight: transitioning || parentFollowing ? 'peer_advancing' : projected.actionRight,
+    nextAction: transitioning || parentFollowing ? 'none' : projected.nextAction,
     statusLabel: status === 'stopping' ? '正在停止' : status === 'awaiting_outcome' ? '执行结果待核实'
-      : conversationMeta.origin.takeover?.phase === 'stopping' ? '正在接手' : projected.statusLabel,
-    ...(!transitioning && projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
+      : conversationMeta.origin.takeover?.phase === 'stopping' ? '正在接手'
+      : status === 'waiting_agent' ? '由主 Bot 跟进' : status === 'verifying' ? '核验中' : projected.statusLabel,
+    ...(!transitioning && !parentFollowing && projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
     ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
     ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
