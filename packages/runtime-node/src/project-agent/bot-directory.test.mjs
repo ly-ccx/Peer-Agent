@@ -386,3 +386,18 @@ test('an attachment-only user message previews its filename instead of an empty 
     assert.equal(directory.get(entry.workspaceId).item.preview, 'diagram.png');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('list and cursor use summary messages while conversation details retain complete rounds', () => {
+  const root=tempRoot();let fullReads=0,summaryReads=0,batchReads=0;let history;
+  try {
+    const summary=()=>{summaryReads++;return history.map(({rounds,segments,...row})=>row);};
+    const env=harness(root,{readMessages:()=>{fullReads++;return history;},readSummaryMessages:summary,
+      readSummaryMessagesBatch:ids=>{batchReads++;return new Map(ids.map(id=>[id,summary()]));}});
+    history=env.conversationStore.getPersistedConversationHistory(env.conversationId).messages;
+    history.push({id:'internal',kind:'agent_turn',role:'assistant',rounds:[{text:'complete original details'}],createdAt:'2026-09-27T02:30:00Z'});
+    env.directory.get(env.entry.workspaceId);env.directory.list();env.directory.markRead(env.entry.workspaceId);
+    assert.equal(fullReads,0,'metadata requests must not clone complete rounds');assert.ok(summaryReads>=3);assert.equal(batchReads,1);
+    const page=env.directory.readConversation(env.entry.workspaceId,{latest:true,limit:100});
+    assert.equal(fullReads,1);assert.equal(page.messages.find(m=>m.id==='internal').rounds[0].text,'complete original details');
+  }finally{rmSync(root,{recursive:true,force:true});}
+});

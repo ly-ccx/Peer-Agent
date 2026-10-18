@@ -13,6 +13,7 @@ import {
   createObjectiveActions,
   createObjectiveService,
   createBotDirectory,
+  createBotSummaryHistory,
   createBotLifecycle,
   createBotProfileStore,
   createInputQueue,
@@ -275,12 +276,15 @@ export function registerDesktopProjectAgent({
   });
   const classicGoals = createClassicGoalProjection({ registry, conversationStore, goalPlanStore });
   const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
+  const summaryHistory = createBotSummaryHistory(conversationStore);
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
     readMessages: (conversationId) => (
       botHistory ? botHistory(conversationId) || [] : conversationStore.getPersistedConversationHistory(conversationId)?.messages || []
     ),
+    readSummaryMessages: summaryHistory,
+    readSummaryMessagesBatch: ids => new Map(ids.map(id => [id, summaryHistory(id) || []])),
     readMessagesBatch: botHistory ? ids => new Map(ids.map(id => [id, botHistory(id) || []]))
       : typeof conversationStore.getPersistedConversationHistories === 'function'
         ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
