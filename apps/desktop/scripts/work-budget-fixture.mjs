@@ -10,8 +10,10 @@ export function seedWorkBudgetMessages(messages, workspaceId) {
   ];
   for (const item of cases) {
     const turnId = `rc-budget-${item.key}`, content = '代理暂时不可用：work_budget_limited';
-    messages[item.index] = { ...messages[item.index], role: 'assistant', kind: 'system_card', card: 'agent_unavailable', turnId, content,
-      cards: [{ cardId: `card:agent_unavailable:${turnId}`, kind: 'agent_unavailable', content, recoveryAction: item.action,
+    // Like the other presentation fixtures, these carry supplied host facts rather
+    // than asking the live projector to resolve a nonexistent coordination work.
+    messages[item.index] = { ...messages[item.index], role: 'assistant', kind: 'system_card', turnId, content,
+      cards: [{ cardId: `rc-recovery-budget-${item.key}`, kind: 'agent_unavailable', content, recoveryAction: item.action,
         failureStatus: { phase: item.phase || 'current', turnKind: 'wake', activeSessionIds: [] },
         recoveryWorkState: item.phase ? 'runnable' : 'budget_limited',
         recovery: { failureKind: 'budget_exhausted', retryable: false, autoAttempts: 0, failedTurnId: turnId },
