@@ -437,12 +437,12 @@ export function createProjectAgentRunner({
       if (retryContinuity) plan.turnProfile.context = { ...plan.turnProfile.context, retryContinuity };
     }
     if (job.workId) plan.turnProfile.workId = job.workId;
-    const silentWait = coordination?.silentWaitFor(job, readSlot(resolveRoster, job.kind));
-    if (silentWait) return { turnId, plan, rounds: [], silentWait, memoryIds: [] };
     if (model.selection) plan.turnProfile.modelSelection = model.selection;
     if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
     activity.begin({ turnId, modelSelection: model.selection, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
       startedAt: stamp(), visible: job.kind === 'user' || job.interactive === true });
+    const silentWait = coordination?.silentWaitFor(job, readSlot(resolveRoster, job.kind));
+    if (silentWait) return { turnId, plan, rounds: [], silentWait, memoryIds: [] };
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };
     }

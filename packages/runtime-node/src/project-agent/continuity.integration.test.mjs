@@ -43,6 +43,7 @@ test('main reply failure, continuing child, quiet restart and successful deliver
     env.inbox.append('w', [event('resumed', 'session_resumed'), event('running', 'session_running')]);
     await env.runner.kick(); assert.equal(requests, 1, 'routine wake requires no model response');
     assert.equal(env.messages.at(-1).meta.silentWait.source, 'host');
+    assert.equal(env.runner.activity().turnId, env.messages.at(-1).id, 'a quiet wake must not complete the previous reply activity');
     assert.deepEqual(Object.values(env.store.read().works)[0].waitFor, [{ kind: 'session', id: 's' }]);
     env.restart(); await env.runner.kick(); assert.equal(requests, 1, 'restart preserves waiting without polling');
     fail = true;
