@@ -1011,6 +1011,25 @@ export interface GoalExecutionCheckpoint {
 
 /** GoalPlan 内嵌的轻量 runner 状态；不代表工具执行事实，任务完成仍必须由 Evidence 回写。 */
 export interface GoalRunnerState {
+  /** Host-owned readonly review continuity. Native messages stay in registered checkpoint storage. */
+  readonly verificationContinuation?: {
+    readonly schemaVersion: 1;
+    readonly planId: string;
+    readonly continuationId: string;
+    readonly sourceRevision: string;
+    readonly modelKey: string;
+    readonly workId?: string;
+    readonly phase: 'ready' | 'requesting' | 'tools' | 'completed';
+    readonly deadlineAt: string;
+    readonly modelRequests: number;
+    readonly toolCalls: number;
+    readonly formatAttempt: number;
+    readonly previousText?: string;
+    readonly checkpointRef?: string;
+    readonly evidenceRefs: readonly string[];
+    readonly fingerprint?: string;
+    readonly repeats?: number;
+  };
   readonly enabled: boolean;
   readonly status: GoalRunnerStatus;
   readonly intent?: GoalRunnerIntent;

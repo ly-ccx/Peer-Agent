@@ -48,7 +48,7 @@ function fixture(t, { policy = 'auto', changeDuringReview = false } = {}) {
 
 test('a real recheck resolves the old readonly failure and policy accepts the reported result without a user card', async t => {
   const f = fixture(t);
-  assert.equal(f.supervisor.get({ sessionId: 's' }).status, 'waiting_user');
+  assert.equal(f.supervisor.get({ sessionId: 's' }).status, 'waiting_agent');
   assert.equal((await f.verify()).status, 'passed');
   assert.equal(f.plan().status, 'completed');
   assert.equal(f.plan().runner.status, 'completed');
@@ -104,12 +104,20 @@ test('existing manual confirmation remains effective after recheck, without aski
   assert.equal(f.plan().manualConfirmations.length, 1);
 });
 
-test('a recheck cannot finish a paused, active, writing or unrelated blocked task, nor bypass missing evidence or manual DoD', async t => {
-  for (const kind of ['paused', 'active', 'write', 'approval', 'evidence', 'manual']) {
+test('a completed writing task can settle its verification gate without replaying the worker', async t => {
+  const f = fixture(t), plan = f.plan();
+  f.store.revisePlan(plan.planId, { delegationOrigin: { ...plan.delegationOrigin, readOnly: false },
+    runner: { ...plan.runner, blockedReason: 'Verification gate failed: quality:criterion_unverified' } }, { reason: 'only verification remains' });
+  await f.verify();
+  assert.equal(f.plan().runner.status, 'completed');
+  assert.equal(f.events.filter(e => e.type === 'goalRunner:completed').length, 1);
+});
+
+test('a recheck cannot finish paused, active or unrelated blocked work, nor bypass missing evidence or manual DoD', async t => {
+  for (const kind of ['paused', 'active', 'approval', 'evidence', 'manual']) {
     await t.test(kind, async t => {
       const f = fixture(t), plan = f.plan();
       const patch = kind === 'paused' ? { delegationOrigin: { ...plan.delegationOrigin, phase: 'paused' } }
-        : kind === 'write' ? { delegationOrigin: { ...plan.delegationOrigin, readOnly: false } }
         : kind === 'active' ? { runner: { ...plan.runner, status: 'running' } }
         : kind === 'approval' ? { runner: { ...plan.runner, blockedReason: 'manual_dod_confirmation_required', blockerAudit: null } }
         : kind === 'manual' ? { successCriteria: [{ id: 'c', kind: 'manual', description: '必须由用户核对' }], activation: { enabled: true } }

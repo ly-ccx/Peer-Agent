@@ -54,10 +54,22 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
     const effort = turnProfile?.modelSelection?.reasoningEffort ?? sendMessageArgs.effort;
     if (effort !== undefined) sendMessageArgs.effort = effort;
     const projectAgent = turnProfile?.role === 'project_agent' || sendMessageArgs.mode === 'project_agent';
-    if (budgetGuard) sendMessageArgs.executionBudget = { guard: budgetGuard };
+    if (budgetGuard) {
+      const inner = sendMessageArgs.executionBudget?.guard;
+      const guard = inner ? { ...budgetGuard,
+        beforeRequest(...args) { inner.beforeRequest?.(...args); return budgetGuard.beforeRequest(...args); },
+        beforeTool(...args) { inner.beforeTool?.(...args); return budgetGuard.beforeTool(...args); },
+        checkpoint(...args) { budgetGuard.checkpoint(...args); return inner.checkpoint?.(...args); } } : budgetGuard;
+      sendMessageArgs.executionBudget = { ...sendMessageArgs.executionBudget, guard };
+    }
     if (!projectAgent) {
       if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted' });
-      if (isVerificationTurn(turnProfile)) sendMessageArgs.executionBudget = verificationExecutionBudget(sendMessageArgs.executionBudget);
+      let yieldedCheckpoint = null;
+      if (isVerificationTurn(turnProfile)) {
+        const priorYield = sendMessageArgs.executionBudget?.onYield;
+        sendMessageArgs.executionBudget = { ...verificationExecutionBudget(sendMessageArgs.executionBudget),
+          onYield(checkpoint) { yieldedCheckpoint = checkpoint; priorYield?.(checkpoint); } };
+      }
       const streamId = sendMessageArgs.streamId || randomUUID();
       const abort = () => llmChatService.abort?.(streamId);
       const invoke = turnSignal => {
@@ -72,7 +84,8 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
           })).finally(() => turnSignal?.removeEventListener('abort', abort));
       };
       return isVerificationTurn(turnProfile)
-        ? runBoundedVerification({ signal, run: invoke }).catch(error => {
+        ? runBoundedVerification({ signal, run: invoke }).then(outcome => ({ ...outcome,
+          ...(yieldedCheckpoint ? { turnEnd: 'yielded', providerCheckpoint: yieldedCheckpoint } : {}) })).catch(error => {
           if (error?.code === 'verifier_cancelled') return { ok: false, terminalStatus: 'aborted', error: error.code };
           throw error;
         }) : invoke(signal);

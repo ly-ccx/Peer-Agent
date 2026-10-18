@@ -20,14 +20,15 @@ export function deriveSessionFacts(input: {
   else if (input.cancellationPhase === 'awaiting_outcome' || input.takeoverPhase === 'awaiting_outcome') status = 'awaiting_outcome';
   else if (input.cancellationPhase === 'stopping') status = 'stopping';
   else if (input.takeoverPhase === 'stopping') status = 'starting';
+  else if (input.superseded && input.status !== 'completed') status = 'superseded';
+  else if ((input.phase === 'paused' || input.runnerStatus === 'paused') && input.status !== 'completed') status = 'paused';
   else if (input.needsUser || input.runnerStatus === 'waiting_user') status = 'waiting_user';
   else if (input.blockedReason === 'waiting_parent_agent' && input.phase !== 'paused' && !input.superseded && input.runnerStatus !== 'paused') status = 'waiting_agent';
-  else if (input.runnerStatus === 'blocked') status = 'waiting_user';
   else if (verificationActive) status = 'verifying';
+  // A technical blocker is work for the parent Agent. It is not a human question.
+  else if (input.runnerStatus === 'blocked') status = 'waiting_agent';
   else if (input.status === 'completed' && ['running', 'starting', 'waiting_provider', 'resuming_after_compaction'].includes(input.runnerStatus || '')) status = 'running';
   else if (input.status === 'completed') status = 'result_ready';
-  else if (input.superseded) status = 'superseded';
-  else if (input.phase === 'paused') status = 'paused';
   else if (input.phase === 'starting') status = 'starting';
   else if (['approved', 'accepted', 'paused', 'interrupted'].includes(input.status || '') || input.phase === 'queued') status = 'queued';
   else status = 'running';

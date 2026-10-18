@@ -8,18 +8,22 @@ export function verificationContentHash(plan, report = '') {
   ])).digest('hex');
 }
 
-/** A passing recheck can resolve only an unchanged, idle readonly verifier failure. */
+/** Resolve an unchanged idle verification blocker, never replay its completed worker. */
 export function canCompleteAfterRecheck({ plan, contentHash, currentHash, gate, active = false }) {
   const verifierBlocked = plan?.status === 'executing' && plan.runner?.status === 'blocked'
     && (plan.runner.blockerAudit?.reason === 'verifier_failed'
-      || plan.runner.blockedReason?.startsWith('Verifier failed:'));
+      || plan.runner.blockerAudit?.reason === 'verification_gate_failed'
+      || plan.runner.blockedReason?.startsWith('Verifier failed:')
+      || plan.runner.blockedReason?.startsWith('Verification gate failed:'));
   // A verifier exception can leave completed worker facts with a failed runner.
   // Fresh, version-bound host verification and the full gate must still pass.
   const completedAttemptFailed = plan?.status === 'completed' && plan.runner?.status === 'failed';
-  return Boolean(plan?.delegationOrigin?.readOnly === true && plan.delegationOrigin.phase === 'running'
+  const completeLeaves = nodes => Array.isArray(nodes) && nodes.length > 0 && nodes.every(node =>
+    node.subtasks?.length ? completeLeaves(node.subtasks) : node.status === 'completed');
+  return Boolean(plan?.delegationOrigin?.phase === 'running' && !plan.delegationOrigin.supersededBy
+    && !plan.delegationOrigin.cancellation && plan.runner?.waitingOnUser !== true && completeLeaves(plan.tasks)
     && (verifierBlocked || completedAttemptFailed) && !active
     && plan.hostVerification?.independentVerifier === 'passed'
     && contentHash && contentHash === plan.hostVerification.contentHash
-    && contentHash === currentHash && gate?.passed === true
-    && gate.uiDeliveryRequired !== true);
+    && contentHash === currentHash && gate?.passed === true);
 }

@@ -31,6 +31,14 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
     if (!store || !holdsLease(workspaceId)) return { ok: false, error: 'coordination_host_unavailable' };
     const operationId = context.deliveryKey || `coordination-${hash([context.turnId, context.toolCallOrdinal, input])}`;
     const state = store.read();
+    if (input.action === 'query') {
+      const session = readSession({ sessionId: input.sessionId, detail: 'report' });
+      if (!session || session.workspaceId !== workspaceId || session.origin?.parentConversationId !== parentConversationId
+        || context.scopedSessionIds && !context.scopedSessionIds.includes(session.sessionId)) return { ok: false, error: 'out_of_scope' };
+      const mandate = Object.values(state.mandates || {}).find(row => row.parentConversationId === parentConversationId && row.sessionIds.includes(session.sessionId));
+      return { ok: true, session, legacy: !mandate, goalRevision: mandate?.goalRevision ?? null,
+        ...(mandate ? { workId: mandate.workId } : {}), nextAction: mandate ? 'use_current_revision_for_changes' : 'legacy_session_requires_current_user_for_changes' };
+    }
     const current = readMessages(parentConversationId).filter(row => context.currentInputAnchors?.includes(row.id) && isCanonicalUserInput(row));
     const sourceInputIds = current.map(row => row.inputId || row.id);
     const events = context.events || [];

@@ -128,7 +128,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     type: 'object',
     properties: {
       sessionId: { type: 'string' },
-      focus: { type: 'string' },
+      focus: { type: 'string', maxLength: 500, description: 'Optional concise verification focus; at most 500 characters.' },
     },
     required: ['sessionId'],
     additionalProperties: false,
@@ -189,7 +189,8 @@ export function validateDelegationInput(name, raw) {
     if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task'].includes(key))
       || !['parallel','augment','revise','query','answer','cancel','replace','handoff'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
     if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200) || input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Malformed task identity or version.');
-    if (input.action !== 'parallel' && (!text(input.sessionId,200) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Select a real session and its current goalRevision.');
+    if (input.action === 'query' && !text(input.sessionId,200)) return invalid('Select a real session to discover its current facts and goalRevision.');
+    if (!['parallel','query'].includes(input.action) && (!text(input.sessionId,200) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Select a real session and its current goalRevision.');
     if (['parallel','replace'].includes(input.action) && (!input.task || input.task.supersedes || input.task.objectiveId)) return invalid('A task specification is required; objective and supersession authorities are host-owned.');
     if (['augment','revise','answer'].includes(input.action) && !text(input.text,4000)) return invalid('A bounded work instruction is required.');
     if (input.action === 'answer' && !text(input.replyTo,200)) return invalid('An actual Agent question id is required.');

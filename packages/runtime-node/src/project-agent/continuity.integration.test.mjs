@@ -22,6 +22,28 @@ function world(executeTurn, extra = {}) {
     close() { runner.dispose(); rmSync(root, { recursive: true, force: true }); } };
 }
 const event = (id, kind, sessionId = 's') => ({ eventId: id, kind, sessionId, workspaceId: 'w', at: '2026-10-07T00:00:00Z', payload: {} });
+test('a public progress reply automatically advances to the next reasoning step and closes its verified result', async () => {
+  let requests = 0;
+  const roster = [{ sessionId: 's', status: 'waiting_agent', sourceRevision: 'r1' }];
+  const env = world(async input => {
+    requests++;
+    if (requests === 2) {
+      assert.equal(input.turnProfile.providerCheckpoint, undefined, 'a finished update uses fresh current facts');
+      roster[0] = { sessionId: 's', status: 'accepted', sourceRevision: 'r2' };
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: requests === 1 ? '复核还未完成，我继续检查原因。' : '复核已通过，结果已交付。', replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => roster });
+  try {
+    env.inbox.append('w', [event('repair', 'report_available')]);
+    await env.runner.kick();
+    const work = Object.values(env.store.read().works)[0];
+    assert.equal(env.store.read().events.repair.handled, true, 'event custody moved into the unfinished receipt');
+    assert.equal(requests, 2);
+    assert.equal(work.state, 'delivered');
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 2);
+    await env.runner.kick(); assert.equal(requests, 2);
+  } finally { env.close(); }
+});
 test('routine events never call a model; completed result wakes once without fresh user input', async () => {
   let requests = 0;
   const env = world(async () => { requests++; return { toolCalls: [] }; });

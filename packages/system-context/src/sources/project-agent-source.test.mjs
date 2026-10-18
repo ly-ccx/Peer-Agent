@@ -18,7 +18,10 @@ test('项目代理规则只在 project_agent 角色进入 L1', () => {
   assert.match(section.content, /post_reply/);
   assert.match(section.content, /Hand code changes and other workspace writes to a work session/);
   assert.match(section.content, /Do not restate raw tool output/);
-  assert.match(section.content, /Use coordinate_work with the actual sessionId and expectedRevision/);
+  assert.match(section.content, /Use coordinate_work query with the actual sessionId/);
+  assert.match(section.content, /query needs no expectedRevision and grants no authority/);
+  assert.match(section.content, /For changes use the expectedRevision from host facts/);
+  assert.match(section.content, /a progress reply does not discharge that responsibility/);
   assert.match(section.content, /No second cancel confirmation/);
   assert.match(section.content, /no progress event arrived for 10 minutes/);
   assert.match(section.content, /not waiting on an approval or a question/);

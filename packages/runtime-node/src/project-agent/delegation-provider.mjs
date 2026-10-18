@@ -304,7 +304,7 @@ export function createDelegationProvider({
     if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable'));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable', view));
     if (name === 'get_verification_detail') return readVerification(input);
-    if (name === 'verify_session') return verifySession(input);
+    if (name === 'verify_session') return verifySession(input, view);
     if (name === 'set_proactivity') return setProactivity(input, view);
     if (name === 'post_reply') {
       const post = replyComposer?.postReply;
@@ -334,7 +334,7 @@ export function createDelegationProvider({
     return { ok: true, output: { ok: true, ...buildVerificationDetail({ ...facts, sessionId: input.sessionId }) } };
   }
 
-  async function verifySession(input) {
+  async function verifySession(input, view) {
     if (!verificationAvailable() || typeof verification?.run !== 'function') {
       return { ok: false, output: { ok: false, error: 'verifier_unavailable', message: 'verifier_unavailable' } };
     }
@@ -346,12 +346,14 @@ export function createDelegationProvider({
         sessionId: input.sessionId,
         ...(input.focus ? { focus: input.focus } : {}),
         role: 'verifier',
+        workId: view.workId,
         preferDifferentSource: true,
       });
       if (!reviewed || reviewed.ok === false || !reviewed.facts) {
         return {
           ok: false,
-          output: { ok: false, error: reviewed?.error || 'verifier_failed', message: reviewed?.error || 'verifier_failed' },
+          output: { ok: false, error: reviewed?.error || 'verifier_failed', message: reviewed?.message || reviewed?.error || 'verifier_failed',
+            ...(reviewed?.nextAction ? { nextAction: reviewed.nextAction } : {}) },
         };
       }
       const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });

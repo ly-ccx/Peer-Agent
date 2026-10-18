@@ -17,7 +17,9 @@ import {
 } from './goal-runner-message-persistence.mjs';
 import { createCollectingSink, createCallbackSink } from './turn-sinks.mjs';
 import { resolveDelegatedWorkTurn } from './work-session-profile.mjs';
-import { runVerifierWithReport } from './verifier-report.mjs';
+import { runContinuedVerification } from './verification-continuation.mjs';
+import { createVerificationContinuationPort } from './verification-continuation-port.mjs';
+import { verificationContentHash } from './verification-completion.mjs';
 import { runBoundedVerification } from './verifier-lifecycle.mjs';
 import { verifierEvidenceSnapshots, admitVerifierCommunicationEvidence } from './verifier-evidence.mjs';
 import { buildSessionReport } from './session-report.mjs';
@@ -540,7 +542,7 @@ export function createProjectGoalRunnerHost({
       },
     },
     verifierRunner: {
-      async runVerifier({ plan, verifierRunId, stage, signal, focus }) {
+      async runVerifier({ plan, verifierRunId, stage, signal, focus, workId }) {
         if (stage === 'visual') {
           const delegated = resolveDelegatedTurn(plan, 'visual_verifier');
           const routed = delegated ? null : routeRole('visual_verifier', plan);
@@ -573,8 +575,19 @@ export function createProjectGoalRunnerHost({
           conversationStore?.getPersistedConversationHistory?.(plan.conversationId));
         const workerReport = { summary: report.summary.slice(0, 30000), contentSource: report.contentSource ?? null,
           truncated: report.summary.length > 30000 };
-        return runVerifierWithReport({ signal, timeoutMs: verificationTimeoutMs, allowedEvidenceRefs: evidenceSnapshots.map(row => row.evidenceRef),
-          run: async ({ attempt, previousText, signal: verificationSignal, onToolResult }) => {
+        const readSourceRevision = current => verificationContentHash(current, buildSessionReport(current,
+          { sessionId: current.delegationOrigin?.sessionId || current.planId, status: current.status },
+          conversationStore?.getPersistedConversationHistory?.(current.conversationId)).summary);
+        const sourceRevision = readSourceRevision(plan);
+        const continuity = createVerificationContinuationPort({ plan, goalPlanStore, workId,
+          sourceRevision, readSourceRevision, ownsPlan: current => delegatedPlanRunsWithLease(current,
+            id => hostLeases?.holds?.(id) === true) ?? true });
+        const turnProfile = delegated?.turnProfile ?? { ...roleTurnProfile('verifier', routed), planId: plan.planId };
+        if (continuity?.workId && !turnProfile.workId) turnProfile.workId = continuity.workId;
+        return runContinuedVerification({ signal, timeoutMs: verificationTimeoutMs, port: continuity,
+          identity: { planId: plan.planId, sourceRevision, modelKey: delegated ? delegated.modelProviderId : routed.selection.modelProviderId },
+          allowedEvidenceRefs: evidenceSnapshots.map(row => row.evidenceRef),
+          run: async ({ attempt, previousText, signal: verificationSignal, onToolResult, executionBudget }) => {
           const streamId = randomUUID();
           const sink = createCollectingSink();
           broadcast('goalRunner:changed', {
@@ -583,7 +596,8 @@ export function createProjectGoalRunnerHost({
             verifierRunId, streamId, startedAt: Date.now(),
           });
           const outcome = await agentTurnExecutor.runTurn({
-            turnProfile: delegated?.turnProfile ?? { ...roleTurnProfile('verifier', routed), planId: plan.planId },
+            turnProfile,
+            executionBudget,
             sink: { ...sink, send(channel, payload) {
               sink.send(channel, payload);
               if (channel === 'chat:stream:tool-result') onToolResult(payload?.result);
@@ -626,12 +640,12 @@ export function createProjectGoalRunnerHost({
     executionScheduler.cancelPlan(planId);
     return pause(planId, reason);
   };
-  goalRunner.verifyDelegatedSession = async ({ plan, focus } = {}) => {
+  goalRunner.verifyDelegatedSession = async ({ plan, focus, workId } = {}) => {
     if (typeof goalRunnerOptions.verifierRunner?.runVerifier !== 'function') {
       return { ok: false, error: 'verifier_unavailable' };
     }
     return executionScheduler.yieldTurn(signal => goalRunnerOptions.verifierRunner.runVerifier({
-      plan, signal,
+      plan, signal, workId,
       verifierRunId: `delegated-verify-${plan?.planId || 'session'}`,
       stage: 'delegated',
       ...(typeof focus === 'string' && focus.trim() ? { focus: focus.trim() } : {}),

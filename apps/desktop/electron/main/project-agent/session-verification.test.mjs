@@ -98,7 +98,8 @@ test('a timed out verify_session clears verifying and never persists its late su
   await new Promise(resolve => setImmediate(resolve));
   const after = store.getPlan(plan.planId);
   assert.notEqual(after.hostVerification?.independentVerifier, 'passed');
-  assert.equal(after.runner?.verifierRuns?.length || 0, 0);
+  assert.equal(after.runner.verifierRuns.length, 1, 'the failed attempt keeps its timeout diagnosis');
+  assert.equal(after.runner.verifierRuns[0].status, 'failed');
 });
 
 test('verification failures retain cancellation and permission classifications', async t => {
@@ -111,6 +112,23 @@ test('verification failures retain cancellation and permission classifications',
       verifySession: () => { throw Object.assign(new Error('failed'), { code }); } });
     assert.equal((await verification.run({ sessionId: 'session-1' })).error, code);
   }
+});
+
+test('verify_session preserves the concrete failure and next action through the Provider and persisted history', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-diagnostic-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  const plan = store.createPlan({ conversationId: 'child-1', title: 'Review', goal: 'Review', tasks: [], delegationOrigin: origin() });
+  const verification = createSessionVerification({ goalPlanStore: store, verifySession: () => { throw Error('Review adapter disconnected after paired file results'); } });
+  const provider = createDelegationProvider({ verification });
+  const executed = await provider.executeCapability({ call: { toolCallId: 'failure', capabilityId: 'local.delegation.verify_session', arguments: { sessionId: 'session-1' } } },
+    { mode: 'project_agent', role: 'project_agent', messages: [] });
+  const result = JSON.parse(executed.result.outputPreview.legacyResult.output);
+  assert.equal(result.error, 'verifier_failed');
+  assert.match(result.message, /disconnected after paired file results/);
+  assert.equal(result.nextAction, 'inspect_and_repair');
+  assert.match(store.getPlan(plan.planId).runner.verifierRuns.at(-1).failureReason, /disconnected after paired file results/);
+  assert.notEqual(store.getPlan(plan.planId).hostVerification?.independentVerifier, 'passed');
 });
 
 test('桌面复核端口从宿主计划和证据索引取事实，复核完成后退出 verifying', async () => {

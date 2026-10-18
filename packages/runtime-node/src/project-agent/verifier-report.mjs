@@ -78,18 +78,19 @@ export function decodeVerifierReport(text) {
   };
 }
 
-export function runVerifierWithReport({ run, signal, timeoutMs, allowedEvidenceRefs = null } = {}) {
+export function runVerifierWithReport({ run, signal, timeoutMs, allowedEvidenceRefs = null, initialAttempt = 0, initialText = '' } = {}) {
   const denial = new AbortController();
   const onToolResult = result => {
     if (deniedResult(result)) denial.abort(Object.assign(new Error('Verifier permission denied'), { code: 'verifier_permission_denied' }));
   };
   return runBoundedVerification({ signal: AbortSignal.any([signal, denial.signal].filter(Boolean)), timeoutMs,
-    run: verificationSignal => collectVerifierReport({ run, signal: verificationSignal, allowedEvidenceRefs, onToolResult }) });
+    run: verificationSignal => collectVerifierReport({ run, signal: verificationSignal, allowedEvidenceRefs, onToolResult, initialAttempt, initialText }) });
 }
 
-async function collectVerifierReport({ run, signal, allowedEvidenceRefs, onToolResult }) {
-  let previousText = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+async function collectVerifierReport({ run, signal, allowedEvidenceRefs, onToolResult, initialAttempt, initialText }) {
+  let previousText = initialText;
+  const allowed = allowedEvidenceRefs instanceof Set ? allowedEvidenceRefs : new Set(allowedEvidenceRefs || []);
+  for (let attempt = initialAttempt; attempt < 2; attempt += 1) {
     if (signal?.aborted) throw new DOMException('Verifier aborted', 'AbortError');
     const { events = [], outcome } = await run({ attempt, previousText, signal, onToolResult });
     if (signal?.aborted) throw new DOMException('Verifier aborted', 'AbortError');
@@ -98,11 +99,11 @@ async function collectVerifierReport({ run, signal, allowedEvidenceRefs, onToolR
     }
     const failedEvent = events.find(event => ['chat:stream:error', 'chat:stream:aborted'].includes(event?.channel));
     if (failedEvent || outcome?.ok === false || ['error', 'aborted', 'interrupted'].includes(outcome?.terminalStatus)) {
-      throw new Error(failedEvent?.payload?.error || outcome?.error || 'Verifier stream failed or aborted');
+      const message = failedEvent?.payload?.error || outcome?.error || 'Verifier stream failed or aborted';
+      throw Object.assign(new Error(message), { code: outcome?.error || failedEvent?.payload?.code });
     }
     const text = finalVerifierText(events);
     const report = decodeVerifierReport(text);
-    const allowed = new Set(allowedEvidenceRefs || []);
     for (const event of events) {
       if (event?.channel !== 'chat:stream:tool-result') continue;
       for (const ref of Array.isArray(event.payload?.evidenceRefs) ? event.payload.evidenceRefs : []) {

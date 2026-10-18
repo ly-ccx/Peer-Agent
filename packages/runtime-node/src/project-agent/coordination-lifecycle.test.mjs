@@ -56,6 +56,18 @@ test('parallel work survives a sibling cancellation and cancellation events cann
   assert.equal(wake.error,'event_out_of_scope'); assert.equal(f.spawns.length,2);
 });
 
+test('query discovers an owned legacy session without a revision, mutation, mandate or execution', async t => {
+  const f = fixture(t);
+  f.sessions.set('legacy', { sessionId: 'legacy', workspaceId: 'w', status: 'waiting_agent', origin: { parentConversationId: 'parent' } });
+  const before = f.store.read();
+  const result = await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy', reason: 'discover current state' }, f.context('', 'query', { currentInputAnchors: [] }));
+  assert.equal(result.ok, true); assert.equal(result.legacy, true); assert.equal(result.goalRevision, null);
+  assert.equal(result.session.status, 'waiting_agent');
+  assert.deepEqual(f.store.read(), before); assert.equal(f.spawns.length, 0);
+  assert.equal((await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy' }, { ...f.context('', 'q'), conversationId: 'other' })).error, 'out_of_scope');
+  assert.equal((await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy' }, f.context('', 'q', { scopedSessionIds: ['unrelated'] }))).error, 'out_of_scope');
+});
+
 test('replacement replay and consecutive corrections follow durable lineage without duplicate tasks', async t => {
   const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const replace={action:'replace',reason:'correct direction',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')};

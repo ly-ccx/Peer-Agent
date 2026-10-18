@@ -6,7 +6,7 @@ import {readFileSync, writeFileSync, renameSync} from 'node:fs';
 export async function checkBotAgentActivity({page, until, report, captureDirectory, commandFile}) {
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const command = {...initial, seq: initial.seq + 1, sessions: [
-    {...initial.sessions[0], sessionId: 'rc-work-1', title: '实现检查', status: 'waiting_agent', statusLabel: '等待主 Bot 答复'},
+    {...initial.sessions[0], sessionId: 'rc-work-1', title: '实现检查', status: 'waiting_agent', statusLabel: '由主 Bot 跟进'},
     {...initial.sessions[0], sessionId: 'rc-work-2', title: '独立核验', status: 'running', statusLabel: '正在运行中'},
   ]};
   writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
@@ -24,7 +24,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-${width}-${appearance}.png`), animations: 'disabled'});
     await row.focus(); await page.keyboard.press('Enter');
     const detail = page.locator('.bot-task-detail'); await detail.waitFor();
-    await until(() => detail.innerText(), text => text.includes('实现检查') && text.includes('等待主 Bot 答复'));
+    await until(() => detail.innerText(), text => text.includes('实现检查') && text.includes('由主 Bot 跟进'));
     assert.doesNotMatch(await detail.innerText(), /需要你的选择/);
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-detail-${width}-${appearance}.png`), animations: 'disabled'});
     await page.getByRole('button', {name: '关闭', exact: true}).click();

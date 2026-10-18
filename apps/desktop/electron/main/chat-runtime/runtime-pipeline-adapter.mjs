@@ -51,6 +51,12 @@ export async function runDesktopRuntimePipeline({
     model: { ...model, ...(typeof model.checkpoint === 'function' ? { async checkpoint(state, executions, context) {
       try { return await model.checkpoint(state, executions, context); }
       catch (cause) {
+        // A readonly review's version/stop check is a known boundary, not an
+        // unknown external side effect or a failed disk write.
+        if (['verification_source_changed', 'work_execution_stopped', 'verifier_cancelled', 'verifier_timeout'].includes(cause?.code)) {
+          modelFailure = cause;
+          throw cause;
+        }
         const error = new Error('checkpoint_persistence_failed', { cause });
         error.providerRecovery = { kind: 'execution_outcome_unknown', phase: 'request', retryable: false };
         modelFailure = error;
@@ -92,6 +98,8 @@ export async function runDesktopRuntimePipeline({
   if (result.status === 'cancelled') throw createDesktopAbortError();
   if (result.status === 'failed') {
     const error = new Error(result.reason || 'runtime_pipeline_failed');
+    if (modelFailure?.code) error.code = modelFailure.code;
+    if (modelFailure?.cause) error.cause = modelFailure.cause;
     if (modelFailure?.providerRecovery) error.providerRecovery = modelFailure.providerRecovery;
     throw error;
   }

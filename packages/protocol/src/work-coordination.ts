@@ -36,6 +36,8 @@ export interface ProjectWorkReceipt {
   readonly parentConversationId: string;
   readonly anchorInputIds: readonly string[];
   readonly sessionIds: readonly string[];
+  /** Current owned technical blockers; a public progress update does not discharge them. */
+  readonly repairSessionIds?: readonly string[];
   readonly state: ProjectWorkState;
   readonly revision: number;
   readonly checkpointRef?: string;
