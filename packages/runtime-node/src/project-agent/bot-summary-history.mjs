@@ -15,7 +15,7 @@ export function projectBotSummaryHistory(history) {
 
 export function createBotSummaryHistory(conversationStore) {
   return typeof conversationStore.createHistoryProjection === 'function'
-    ? conversationStore.createHistoryProjection(projectBotSummaryHistory)
+    ? conversationStore.createHistoryProjection(projectBotSummaryHistory, { maxEntries: 512, maxBytes: 8 * 1024 * 1024 })
     : id => projectBotSummaryHistory(conversationStore.getPersistedConversationHistory?.(id));
 }
 import { isVisibleBotMessage, projectBotListMessage } from './bot-directory.mjs';

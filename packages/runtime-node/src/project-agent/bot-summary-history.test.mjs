@@ -16,3 +16,15 @@ test('summary records bound process bodies while preserving preview, question an
   assert.equal(replyQuestionAnswered(summary,summary[1]),replyQuestionAnswered(messages,messages[1]));
   assert.ok(JSON.stringify(summary).length<1500);assert.ok(!JSON.stringify(summary).includes('private'));
 });
+
+test('200 bot summaries stay warm within the bounded metadata cache and changed versions invalidate exactly one', () => {
+  const versions = new Map(Array.from({length:200},(_,i)=>[String(i),1])); let loads=0; let options;
+  const store={createHistoryProjection(project,opts){options=opts;return createHistoryProjectionReader({...opts,project,
+    describe:id=>({id,version:versions.get(id)}),load:({id})=>{loads++;return {messages:[{id,role:'assistant',kind:'agent_reply',content:'preview '+versions.get(id)}]};}});}};
+  const read=createBotSummaryHistory(store);
+  for(let round=0;round<5;round++)for(const id of versions.keys())assert.equal(read(id)[0].content,'preview 1');
+  assert.equal(loads,200);assert.equal(options.maxBytes,8*1024*1024);assert.ok(options.maxEntries<=512);
+  versions.set('73',2);assert.equal(read('73')[0].content,'preview 2');assert.equal(loads,201);
+});
+import { createBotSummaryHistory } from './bot-summary-history.mjs';
+import { createHistoryProjectionReader } from '../../../conversation-store/src/history-projection-reader.mjs';
