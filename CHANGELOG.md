@@ -8,6 +8,36 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-rc.17] - 2026-10-18
+
+### Fixed
+
+- Reuse validated coordination readers and replay appended journal bytes instead of full history on each progress read.
+- Keep historical avatars static and restrict motion to eligible current activity.
+- Prepare large terminal conversation rewrites off the main thread; retain durable completion, cancellation, failure and slot-release ordering.
+- Carry frozen worker reasoning effort into child conversations and project existing tasks from their own frozen configuration.
+
+### Changed
+
+- Synchronize bilingual release notes, README version links and generated documentation changelog.
+
+### Release scope
+
+- Real-model delegation, tools, verification, cancellation and subsequent conversation are covered; screenshot review is implementer self-review. Stable remains 0.0.18.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
+## [0.1.0-rc.16] - 2026-10-18
+
+### Fixed
+
+- Continue productive work after investigation and verification failures without default cumulative execution limits; preserve explicit budgets and cancellation.
+- Distinguish current main replies, running child tasks and superseded historical interruptions; persist public progress across cooperative yields.
+- Explain explicit budget usage and expose continuation only when the host permits it.
+
+### Release scope
+
+- Historical summary synchronized from the published RC16 notes. Stable remains 0.0.18; rollback requires the pre-upgrade data backup.
+
 ## [0.1.0-rc.15] - 2026-10-16
 
 ### Fixed
