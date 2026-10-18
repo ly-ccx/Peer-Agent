@@ -343,7 +343,7 @@ export function registerDesktopProjectAgent({
   }
 
   function appendMessage(conversationId, message) {
-    conversationStore.appendMessage(conversationId, message);
+    conversationStore.appendMessage(conversationId, message, { returnMessages: false });
     if (typeof onAppendedMessage !== 'function') return;
     try {
       onAppendedMessage({ conversationId, message });

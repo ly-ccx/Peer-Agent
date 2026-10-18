@@ -1336,7 +1336,7 @@ export function createConversationStore(options = {}) {
     return messages.filter((message) => !isEmptyUserMessage(message));
   }
 
-  function appendMessage(id, message) {
+  function appendMessage(id, message, { returnMessages = true } = {}) {
     return withFileLock(indexFile, () => {
       const index = readIndex();
       const meta = index.find((c) => c.id === id);
@@ -1372,7 +1372,7 @@ export function createConversationStore(options = {}) {
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
-      return { ...meta, messages: readJsonl(convFile(id)) };
+      return returnMessages ? { ...meta, messages: readJsonl(convFile(id)) } : { ...meta };
     });
   }
 

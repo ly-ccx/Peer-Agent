@@ -211,7 +211,7 @@ export interface ConversationStore {
     role?: 'project_agent' | 'work_session';
     workspaceId?: string;
   }): ConversationMeta;
-  appendMessage(id: string, message: object): unknown;
+  appendMessage(id: string, message: object, options?: { returnMessages?: boolean }): unknown;
   /** Worker preparation followed by a version-checked atomic commit; resolves before terminal delivery. */
   commitStreamingMessage(id: string, messageId: string, patch: Readonly<Record<string, unknown>>): Promise<{
     readonly id: string; readonly messageId: string; readonly contentRevision: number;

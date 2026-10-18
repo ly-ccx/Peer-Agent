@@ -45,3 +45,23 @@ test('projection caches are bounded and reject changes during a read, including 
   fail = false; change = true; assert.throws(() => read('a'), { code: 'BACKGROUND_VERSION_CHANGED' });
   change = false; assert.deepEqual(read('a'), { value: 'fact' }); assert.equal(loads, 6);
 });
+
+
+test('metadata-only append preserves durable mutations without rereading historical bodies', t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-append-receipt-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConversationStore({ storeDir: dir }), meta = store.createConversation({ title: 'receipt' });
+  store.appendMessage(meta.id, { id: 'old', role: 'assistant', content: 'historical body' });
+  const file = path.join(dir, meta.id + '.jsonl');
+  const original = fs.readFileSync; let reads = 0;
+  t.mock.method(fs, 'readFileSync', (...args) => { if (args[0] === file) reads++; return original(...args); });
+  syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const receipt = store.appendMessage(meta.id, { id: 'new', role: 'user', content: 'new input' }, { returnMessages: false });
+  assert.equal(reads, 0); assert.equal(receipt.messages, undefined);
+  assert.equal(receipt.messageCount, 2); assert.equal(receipt.contentRevision, 2);
+  assert.deepEqual(store.getPersistedConversationHistory(meta.id).messages.map(row => row.id), ['old', 'new']);
+  const legacy = store.appendMessage(meta.id, { id: 'next', role: 'assistant', content: 'reply' });
+  assert.equal(legacy.messages.length, 3, 'default API remains compatible');
+  const empty = store.appendMessage(meta.id, { id: 'empty', role: 'user', content: '' }, { returnMessages: false });
+  assert.equal(empty.messageCount, 3); assert.equal(empty.contentRevision, 3);
+});
