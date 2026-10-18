@@ -13,6 +13,9 @@ const runtimeFiles = [
   'persisted-history.mjs',
   'inherited-background.mjs',
   'background-snapshot-store.mjs',
+  'conversation-file-lock.mjs',
+  'terminal-message-committer.mjs',
+  'terminal-message-worker.cjs',
 ];
 await Promise.all(runtimeFiles.map((file) =>
   copyFile(new URL(file, sourceDirectory), new URL(file, outputDirectory))));

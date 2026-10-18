@@ -59,6 +59,7 @@ import { recordDetachedTurnUsage } from './background-turn-usage.mjs';
 import { estimateUsageCostUsd, startOfLocalDayMs, sumRoleSpendUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { persistContextAccounting } from './chat-runtime/persist-context-accounting.mjs';
+import { createStreamTerminalDelivery, afterTerminalCommit } from './chat-runtime/stream-terminal-delivery.mjs';
 import {
   createApprovalStore,
   createMemoryStore,
@@ -775,10 +776,11 @@ function wrapWebContentsForRuntimeEvents(
   // 「正文持久化真值下沉主进程」：把累积的 content/segments 直接 patch 到 store 里
   // 对应的 assistant 消息，不再依赖 renderer 在终态事件回写。后台会话（主界面已切走、
   // 该会话的 ChatSurface 不再消费事件）也能落盘完整正文，根治「切走即丢 → 看似自我中断」。
-  // 流式期间按时间节流写盘（默认 500ms），终结态强制 flush；写盘失败不影响事件透传。
+  // 流式期间按时间节流写 sidecar；终态在 worker 准备后提交，落盘完成才通知并释放 turn。
   const PERSIST_THROTTLE_MS = 500;
   let lastPersistAt = 0;
   const persistStreamRecord = ({ final = false, interrupted = false } = {}) => {
+    if (final && streamRecord.finalPersistence) return streamRecord.finalPersistence;
     // 终态收口：accounting 落盘是节流的，窗口内最后一次观测值可能还挂在 pending 上。
     // 在这里补写，保证 done/aborted/error 之后百分比不会停在旧值（非终态时是 no-op）。
     if (final) streamRecord?.flushPendingAccounting?.();
@@ -825,12 +827,12 @@ function wrapWebContentsForRuntimeEvents(
       patch.interrupted = false;
     }
     try {
-      // 观测：这是 persist 真正落地的一步（终态全量重写 JSONL；流式态写 sidecar）。
-      // 每 500ms 一次，是主进程主线程上最重的固定开销，必须单独计时——
-      // 只有当它确实很贵时，「降低写入频率」才是正确的修法。
-      streamProfiler.measure(final ? 'main.persist.write.final' : 'main.persist.write', () => {
-        if (final) {
-          // 终态：全量落盘（会同步重写整份 JSONL，一次性成本可接受）并清理流式 sidecar。
+      // 这里只计提交入队成本；异步终态的完成以 finalPersistence 为准。
+      const committed = streamProfiler.measure(final ? 'main.persist.write.final' : 'main.persist.write', () => {
+        if (final && typeof conversationStore.commitStreamingMessage === 'function') {
+          return conversationStore.commitStreamingMessage(streamRecord.conversationId, streamRecord.assistantMessageId, patch);
+        } else if (final) {
+          // 旧 store 适配器兼容路径；生产 Conversation Store 提供异步提交。
           conversationStore.updateMessageById(
             streamRecord.conversationId,
             streamRecord.assistantMessageId ?? null,
@@ -854,11 +856,14 @@ function wrapWebContentsForRuntimeEvents(
           );
         }
       });
+      if (committed?.then) { streamRecord.finalPersistence = committed; return committed; }
     } catch (err) {
       console.warn('[llm-chat] persist stream record failed:', err?.message || err);
     }
   };
   streamRecord.persist = persistStreamRecord;
+  const deliverTerminal = createStreamTerminalDelivery({ record: streamRecord,
+    send: (channel, payload) => realWebContents.send(channel, payload), failRuntimeTurn });
 
   const emitStreamRuntimeEvent = (event) => {
     if (typeof emitRuntimeEvent !== 'function') return null;
@@ -877,6 +882,9 @@ function wrapWebContentsForRuntimeEvents(
 
   return {
     send(channel, payload) {
+      const terminal = ['chat:stream:done', 'chat:stream:error', 'chat:stream:aborted'].includes(channel);
+      if (terminal && streamRecord.terminalNotificationRegistered) return false;
+      let terminalPersistence;
       // 终态守卫：一旦本轮已发出终态（done/error/aborted，含复读兜底自动 error），
       // 丢弃所有后续在途的正文/思考 delta，避免「已收口却仍继续转发残留」导致刷屏。
       if (
@@ -920,14 +928,14 @@ function wrapWebContentsForRuntimeEvents(
           streamRecord.terminalStatus = 'error';
           streamRecord.interrupted = true;
           if (lifetimeUsage) streamRecord.lifetimeUsage = lifetimeUsage;
-          persistStreamRecord({ final: true, interrupted: true });
+          terminalPersistence = persistStreamRecord({ final: true, interrupted: true });
           try {
             failRuntimeTurn?.('repetition_detected');
           } catch {
             /* 已中断时忽略 */
           }
           realWebContents.send('chat:stream:delta', payload);
-          return realWebContents.send('chat:stream:error', errorPayload);
+          return deliverTerminal(terminalPersistence, 'chat:stream:error', errorPayload);
         }
       } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
         const thinkingKind =
@@ -1016,16 +1024,8 @@ function wrapWebContentsForRuntimeEvents(
             message: typeof payload?.message === 'string' ? payload.message : undefined,
             details: payload,
           });
-        } else {
-          emitStreamRuntimeEvent({
-            type: 'message.completed',
-            content: streamRecord.accumulatedText || undefined,
-            usage: payload?.usage,
-            lifetimeUsage: payload?.lifetimeUsage,
-            finishReason: typeof payload?.finishReason === 'string' ? payload.finishReason : undefined,
-          });
         }
-        persistStreamRecord({ final: true, interrupted: erroredTerminal });
+        terminalPersistence = persistStreamRecord({ final: true, interrupted: erroredTerminal });
         if (payload?.contextAccounting?.version === 1
           && typeof conversationStore?.updateContextSnapshot === 'function'
           && streamRecord.conversationId
@@ -1052,7 +1052,7 @@ function wrapWebContentsForRuntimeEvents(
           recoverable: true,
           details: payload,
         });
-        persistStreamRecord({ final: true, interrupted: true });
+        terminalPersistence = persistStreamRecord({ final: true, interrupted: true });
       }
       const routedPayload = (
         channel === 'chat:stream:done'
@@ -1061,7 +1061,12 @@ function wrapWebContentsForRuntimeEvents(
       ) && streamRecord.conversationId
         ? { ...payload, conversationId: streamRecord.conversationId }
         : payload;
-      return realWebContents.send(channel, routedPayload);
+      return terminal ? deliverTerminal(terminalPersistence, channel, routedPayload,
+        channel === 'chat:stream:done' ? () => emitStreamRuntimeEvent({
+          type: 'message.completed', content: streamRecord.accumulatedText || undefined,
+          usage: payload?.usage, lifetimeUsage: payload?.lifetimeUsage,
+          finishReason: typeof payload?.finishReason === 'string' ? payload.finishReason : undefined,
+        }) : undefined) : realWebContents.send(channel, routedPayload);
     },
   };
 }
@@ -2221,6 +2226,7 @@ export function createLlmChatService({
         streamRecord.persist?.({ final: true, interrupted: true });
       }
       // Runtime SDK 持有 session/turn 终态真值；Desktop Adapter 只映射既有 UI 终态。
+      await streamRecord.terminalCommit;
       runtimeSessions.settleStream(
         streamId,
         streamRecord.terminalStatus || 'error',
@@ -2303,14 +2309,11 @@ export function createLlmChatService({
           granted: false,
           reason,
         });
-        try {
-          runtimeSessions.settleStream(streamId, 'completed', reason);
-        } catch {}
-        // Handoff waits on released; resolve here so Runner is not blocked if the
-        // original sendMessage finally path is delayed or never reached.
-        record.resolveReleased?.();
-        record.resolveReleased = null;
-        retireStream(streamId);
+        afterTerminalCommit(record, () => {
+          try { runtimeSessions.settleStream(streamId, record.terminalStatus === 'error' ? 'error' : 'completed', reason); } catch {}
+          record.resolveReleased?.(); record.resolveReleased = null;
+          retireStream(streamId);
+        });
       }, normalizedGraceMs);
     }
 
@@ -2329,20 +2332,20 @@ export function createLlmChatService({
       granted: false,
       reason: 'stream_aborted',
     });
-    active.webContents.send('chat:stream:aborted', {
+    (active.runtimeWebContents || active.webContents).send('chat:stream:aborted', {
       streamId,
       ...(active.conversationId ? { conversationId: active.conversationId } : {}),
     });
-    // abort 直接走真实 webContents，绕过累积代理；故在此显式收口终态并落盘，
-    // 再走保留期（不立即删除），让切回被中断的后台轮次也能回放已累积正文。
+    // 取消停止执行，但仍等待已累积正文提交，再释放并进入终态保留期。
     active.terminalEventSent = true;
     active.terminalStatus = 'aborted';
     active.interrupted = true;
     active.persist?.({ final: true, interrupted: true });
     // Ensure handoff / waiters do not hang if sendMessage finally is delayed.
-    active.resolveReleased?.();
-    active.resolveReleased = null;
-    retireStream(streamId);
+    afterTerminalCommit(active, () => {
+      active.resolveReleased?.(); active.resolveReleased = null;
+      retireStream(streamId);
+    });
     return { aborted: true };
   }
 
