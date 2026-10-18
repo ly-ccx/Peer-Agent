@@ -595,3 +595,43 @@ test('foreground input waits for an active tool result instead of cancelling a d
     assert.deepEqual(seen, ['after-write']);
   } finally { finish(); env.close(); }
 });
+
+test('fresh input preempts an automatically resumed user request and preserves its completed facts', { timeout: 5000 }, async () => {
+  let entered, release, oldSignal;
+  const started = new Promise(resolve => { entered = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const seen = [];
+  let oldCalls = 0;
+  const env = world(async ({ plan, signal, turnProfile }) => {
+    const id = plan.userInputs[0]?.inputId;
+    seen.push(id);
+    if (id !== 'old') return { text: 'new input answered' };
+    if (++oldCalls === 1) {
+      const guard = createWorkBudgetGuard(turnProfile);
+      try {
+        guard.beforeRequest({ accounting: 'physical_dispatch' });
+        guard.checkpoint({ provider: 'openai', providerId: 'm', model: 'model', messages: [] });
+        return { ...timeout, toolCalls: [{ name: 'read_file', result: { ok: true, content: 'durable result' } }] };
+      } finally { guard.finish(); }
+    }
+    assert.match(turnProfile.context.retryContinuity.tools[0].resultPreview, /durable result/);
+    if (oldCalls === 2) {
+      oldSignal = signal; entered();
+      await Promise.race([blocked, new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))]);
+      if (signal.aborted) throw Object.assign(new Error('request aborted'), { name: 'AbortError' });
+    }
+    return { text: 'old work delivered from saved facts' };
+  });
+  let background, foreground;
+  try {
+    await env.runner.enqueueUserInputs([input('old')]);
+    assert.equal(env.work().state, 'retry_wait');
+    background = env.advance(2000); await started;
+    foreground = env.runner.enqueueUserInputs([input('new')]);
+    await Promise.race([foreground, new Promise(resolve => setTimeout(resolve, 150))]);
+    assert.equal(oldSignal.aborted, true);
+    assert.deepEqual(seen.slice(0, 4), ['old', 'old', 'new', 'old']);
+    assert.equal(env.messages.filter(row => row.card === 'agent_unavailable').length, 1, 'only the initial authentic timeout is an error');
+    assert.ok(Object.values(env.store.read().works).every(work => work.state === 'delivered'));
+  } finally { release(); await Promise.allSettled([background, foreground]); env.close(); }
+});

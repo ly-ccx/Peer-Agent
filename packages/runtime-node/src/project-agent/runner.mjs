@@ -17,7 +17,7 @@ const WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /**
  * 每个项目一个单线程代理。用户输入开用户回合，收件箱开唤醒回合。
- * 用户输入会在下一处安全点中止唤醒；用户回合本身不抢占。
+ * 用户输入会在下一处安全点中止唤醒或旧回合的自动续接；首次用户回合不抢占。
  * 一轮 executeTurn 是一次模型会话。只有 `continued === true` 且本轮有工具调用、
  * 还没有 post_reply、也没到预算时，才开始下一轮。
  */
@@ -80,6 +80,7 @@ export function createProjectAgentRunner({
   let acceptingStop = false;
   let abortController = null;
   let activeWorkId = null;
+  let activeContinuation = false;
   let statusValue = 'idle';
   let curatorFlight = null;
   let curatorTimer = null;
@@ -257,6 +258,7 @@ export function createProjectAgentRunner({
     const controller = new AbortController();
     abortController = controller;
     turnKind = job.kind; acceptingStop = job.kind === 'user' || job.interactive === true;
+    activeContinuation = coordination !== null && job.continuation === true;
     const signal = controller.signal;
     setStatus('thinking');
     try {
@@ -399,7 +401,7 @@ export function createProjectAgentRunner({
       if (!outcome.silentWait && (job.kind === 'user' || job.kind === 'wake')) scheduleCurator(job);
       return 'ok';
     } finally {
-      if (abortController === controller) { abortController = null; activeWorkId = null; }
+      if (abortController === controller) { abortController = null; activeWorkId = null; activeContinuation = false; }
       turnKind = null; acceptingStop = false;
     }
   }
@@ -535,7 +537,7 @@ export function createProjectAgentRunner({
         if (disposed || error?.name === 'AbortError') {
           if (disposed) return { disposed: true };
           if (signal.reason === 'user-stop') return { stopped: true };
-          if (job.kind === 'wake') return { preempted: true };
+          if (job.kind === 'wake' || signal.reason === 'foreground-input') return { preempted: true };
         }
         raw = {
           ok: false,
@@ -547,7 +549,7 @@ export function createProjectAgentRunner({
       setStatus('thinking');
       if (disposed) return { disposed: true };
       if (signal.aborted && signal.reason === 'user-stop') return { stopped: true, round: roundFrom(raw) };
-      if (raw?.preempted === true || (job.kind === 'wake' && signal.aborted)) {
+      if (raw?.preempted === true || (signal.aborted && (job.kind === 'wake' || signal.reason === 'foreground-input'))) {
         return { preempted: true, round: roundFrom(raw) };
       }
       const failure = raw?.ok === false || raw?.retryable === true
@@ -629,7 +631,7 @@ export function createProjectAgentRunner({
       if (failedJob.throughSeq > 0) preempted.push({ events: failedJob.events, throughSeq: failedJob.throughSeq });
       failedJob = null; retryArmed = false;
     }
-    if (list.length && turnKind === 'wake' && abortController && !abortController.signal.aborted
+    if (list.length && (turnKind === 'wake' || activeContinuation) && abortController && !abortController.signal.aborted
       && (!coordination || coordination.canPreemptRequest(activeWorkId))) {
       abortController.abort('foreground-input');
     }
