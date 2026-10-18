@@ -1,7 +1,7 @@
 import { encodeAnthropicMessagesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
+import { parseSseDataPayload, throwIfSseReaderAborted, readSseChunk, cancelSseReader } from './sse-line.mjs';
 
 function parseNestedProviderErrorMessage(message) {
   if (typeof message !== 'string' || !message.trim()) return '';
@@ -36,6 +36,7 @@ function consumeAnthropicStreamLine(line, state, webContents, streamId, trace = 
   }
   if (payload === '[DONE]') {
     trace?.recordDoneMarker?.();
+    state.done = true;
     return;
   }
   try {
@@ -46,7 +47,9 @@ function consumeAnthropicStreamLine(line, state, webContents, streamId, trace = 
       state.streamError = streamError;
       return;
     }
-    if (parsed.type === 'content_block_start') {
+    if (parsed.type === 'message_stop') {
+      state.done = true;
+    } else if (parsed.type === 'content_block_start') {
       if (parsed.content_block?.type === 'tool_use') {
         state.currentToolIndex = state.toolUseBlocks.length;
         state.toolUseBlocks.push({ id: parsed.content_block.id, name: parsed.content_block.name, inputJson: '' });
@@ -125,7 +128,7 @@ async function consumeAnthropicStream(res, webContents, streamId, trace = null, 
     // 向渲染进程转发已在途的 delta。抛 AbortError 让上层走结构化 aborted 收口，
     // 而不是把 partial response 当作自然完成继续发送 done。
     await throwIfSseReaderAborted(signal, reader);
-    const { done, value } = await reader.read();
+    const { done, value } = await readSseChunk(reader, signal);
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
@@ -134,7 +137,9 @@ async function consumeAnthropicStream(res, webContents, streamId, trace = null, 
     for (const line of lines) {
       consumeAnthropicStreamLine(line, state, webContents, streamId, trace);
       await throwIfSseReaderAborted(signal, reader);
+      if (state.done || state.streamError) break;
     }
+    if (state.done || state.streamError) { cancelSseReader(reader); break; }
   }
   await throwIfSseReaderAborted(signal, reader);
   if (buffer.trim()) consumeAnthropicStreamLine(buffer, state, webContents, streamId, trace);

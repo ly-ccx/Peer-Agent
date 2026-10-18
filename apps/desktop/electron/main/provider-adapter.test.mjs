@@ -877,3 +877,22 @@ describe('Provider adapters', () => {
     }
   });
 });
+
+for (const [provider, run, frames] of [
+  ['chat', sendOpenAIChatStream, [{choices:[{delta:{content:'hi'}}]}, '[DONE]']],
+  ['anthropic', sendAnthropicMessagesStream, [{type:'content_block_delta',delta:{type:'text_delta',text:'hi'}},{type:'message_stop'}]],
+  ['gemini', sendGeminiStream, [{candidates:[{content:{parts:[{text:'hi'}]},finishReason:'STOP'}]}]],
+  ['responses', sendOpenAIResponsesStream, [{type:'response.output_text.delta',delta:'hi'},{type:'response.completed',response:{usage:{input_tokens:1,output_tokens:1}}}]],
+]) it(`${provider} settles its semantic terminal without waiting for EOF or a non-settling cancel`, async () => {
+  const prior=globalThis.fetch;let reads=0,cancelled=0;
+  const bytes=new TextEncoder().encode(sse(frames));
+  globalThis.fetch=async()=>({ok:true,status:200,headers:new Headers({'content-type':'text/event-stream'}),body:{getReader:()=>({
+    read:()=>++reads===1?Promise.resolve({done:false,value:bytes}):new Promise(()=>{}),
+    cancel:()=>{cancelled++;return new Promise(()=>{});},releaseLock(){},
+  })}});
+  try {
+    const pending=run({baseUrl:'https://example.test/v1',apiKey:'test',model:'test',systemPrompt:'test',messages:[{role:'user',content:'hi'}],tools:[],webContents:{send(){}},streamId:'terminal-'+provider});
+    const result=await Promise.race([pending,new Promise(resolve=>setTimeout(()=>resolve('HUNG'),100))]);
+    assert.notEqual(result,'HUNG');assert.equal(result.ok,true);assert.equal(reads,1);assert.ok(cancelled>0);
+  } finally {globalThis.fetch=prior;}
+});

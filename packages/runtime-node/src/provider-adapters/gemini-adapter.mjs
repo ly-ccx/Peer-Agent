@@ -1,7 +1,7 @@
 import { encodeGeminiGenerateContentRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
+import { parseSseDataPayload, throwIfSseReaderAborted, readSseChunk, cancelSseReader } from './sse-line.mjs';
 
 function extractGeminiStreamError(parsed) {
   const error = parsed?.error;
@@ -68,6 +68,7 @@ function consumeGeminiPayload(parsed, state, webContents, streamId, trace = null
     state.usage = usage;
     webContents.send('chat:stream:usage', { streamId, usage });
   }
+  if (candidates.length && candidates.every(candidate => candidate.finishReason && candidate.finishReason !== 'FINISH_REASON_UNSPECIFIED')) state.done = true;
 }
 
 function consumeGeminiStreamLine(line, state, webContents, streamId, trace = null) {
@@ -80,6 +81,7 @@ function consumeGeminiStreamLine(line, state, webContents, streamId, trace = nul
   }
   if (payload === '[DONE]') {
     trace?.recordDoneMarker?.();
+    state.done = true;
     return;
   }
   try {
@@ -103,7 +105,7 @@ async function consumeGeminiStream(res, webContents, streamId, trace = null, sig
 
   while (true) {
     await throwIfSseReaderAborted(signal, reader);
-    const { done, value } = await reader.read();
+    const { done, value } = await readSseChunk(reader, signal);
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
@@ -111,7 +113,9 @@ async function consumeGeminiStream(res, webContents, streamId, trace = null, sig
     for (const line of lines) {
       consumeGeminiStreamLine(line, state, webContents, streamId, trace);
       await throwIfSseReaderAborted(signal, reader);
+      if (state.done || state.streamError) break;
     }
+    if (state.done || state.streamError) { cancelSseReader(reader); break; }
   }
   await throwIfSseReaderAborted(signal, reader);
   if (buffer.trim()) consumeGeminiStreamLine(buffer, state, webContents, streamId, trace);

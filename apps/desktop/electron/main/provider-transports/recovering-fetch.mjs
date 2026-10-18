@@ -211,19 +211,16 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
       controller.abort();
     }, connectTimeoutMs);
     const upstreamSignal = attemptInit?.signal;
-    const onUpstreamAbort = () => controller.abort();
-    if (upstreamSignal) {
-      if (upstreamSignal.aborted) controller.abort();
-      else upstreamSignal.addEventListener('abort', onUpstreamAbort, { once: true });
-    }
+    // The caller owns the entire response body, not just the headers. Removing
+    // a manually forwarded listener here used to detach cancellation mid-stream.
+    const requestSignal = upstreamSignal ? AbortSignal.any([upstreamSignal, controller.signal]) : controller.signal;
     try {
-      return await dispatchProviderRequest(() => impl(url, { ...attemptInit, signal: controller.signal }), { connection: transport.label });
+      return await dispatchProviderRequest(() => impl(url, { ...attemptInit, signal: requestSignal }), { connection: transport.label });
     } catch (error) {
       if (timedOut && !upstreamSignal?.aborted) throw makeConnectTimeoutError(connectTimeoutMs);
       throw error;
     } finally {
       cancelTimer();
-      if (upstreamSignal) upstreamSignal.removeEventListener('abort', onUpstreamAbort);
     }
   };
 
