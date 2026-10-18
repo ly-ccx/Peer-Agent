@@ -56,12 +56,12 @@ export function hasLiteralToolCallSyntax(text) {
   return LITERAL_TOOL_CALL_SYNTAX_PATTERN.test(value);
 }
 
-export function shouldRetryNoToolResponse(text) {
+export function shouldRetryNoToolResponse(text, { hasToolResults = false } = {}) {
   // 无 tool_call 的正文默认不是终态：协议泄漏、空写声称、已执行声称、
   // 以及「我去读/搜」这类未完成行动，都必须在同一 loop 里重试。
   return hasLiteralToolCallSyntax(text)
     || hasEmptyWriteNarration(text)
-    || hasUnsupportedToolClaim(text)
+    || (!hasToolResults && hasUnsupportedToolClaim(text))
     || hasIncompleteActionNarration(text);
 }
 
