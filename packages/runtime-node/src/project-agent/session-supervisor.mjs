@@ -122,7 +122,7 @@ export function createSessionSupervisor({
     throw new Error('createSessionSupervisor requires conversationStore and goalPlanStore');
   }
   const readQuery = createSessionReadQuery();
-  const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id) });
+  const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id), incremental: true });
   const conversationFacts = createSessionConversationFacts(conversationStore);
   const parentFacts = createSessionParentFacts(conversationStore);
   const readConversationFacts = id => readQuery.memo(`conversation:${id}`, () => conversationFacts(id));
