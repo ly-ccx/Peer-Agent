@@ -8,8 +8,8 @@
 // 原则:It moves evidence out of prompt and keeps the route back.
 
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { pathOf } from './data-store.mjs';
 
 /** 与共享 microcompact triggerChars 同阈值:小结果 inline,大结果材料化。 */
 export const TOOL_RESULT_MATERIALIZE_CONFIG = Object.freeze({
@@ -41,7 +41,7 @@ function sanitizeSegment(value: string | null | undefined, fallback: string): st
 }
 
 export function resolveToolArtifactDir(options: { baseDir?: string; conversationId?: string | null } = {}): string {
-  const base = options.baseDir || join(homedir(), '.peer-agent', 'artifacts');
+  const base = options.baseDir || pathOf('toolArtifacts');
   return join(base, sanitizeSegment(options.conversationId, 'unscoped'));
 }
 

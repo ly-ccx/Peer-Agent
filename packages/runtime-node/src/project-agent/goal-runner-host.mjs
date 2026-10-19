@@ -259,7 +259,7 @@ export function createProjectGoalRunnerHost({
 } = {}) {
   const executionScheduler = agentTurnExecutor.executionScheduler ?? createExecutionScheduler();
   const deliveryHandoff = createGoalDeliveryHandoff({ goalPlanStore });
-  const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id) });
+  const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id), incremental: true });
   function currentPlans() {
     // Keep accepted dependencies in the scheduler without hydrating ordinary history.
     const root = goalPlanStore.getStoreDir?.();
