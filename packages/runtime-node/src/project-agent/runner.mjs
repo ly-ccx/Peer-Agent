@@ -1,5 +1,6 @@
 import { createRunnerCoordination } from './runner-coordination.mjs';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as yieldToEventLoop } from 'node:timers/promises';
 import { classifyProjectAgentFailure, projectAgentFailureKind } from '@peer-agent/protocol';
 import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn, unavailableCard } from './agent-turn-plan.mjs';
 import { waitResult } from './wake-wait.mjs';
@@ -133,12 +134,14 @@ export function createProjectAgentRunner({
   function restoreCircuitCard() {
     const state = circuitBreaker?.state();
     if (!state || state.status === 'closed' || !state.lastTurnId) return;
-    const messages = readMessages() || [], turnId = state.lastTurnId;
-    if (!messages.some(message => message.id === turnId)) {
+    const turnId = state.lastTurnId;
+    const messages = typeof hasMessage === 'function' ? null : readMessages() || [];
+    const exists = id => messages ? messages.some(message => message.id === id) : hasMessage(conversation, id);
+    if (!exists(turnId)) {
       const plan = planAgentTurn({ kind: state.retry?.kind || 'wake', userInputs: state.retry?.userInputs || [], workspaceId: workspace });
       remember(agentTurnMessage({ turnId, plan }));
     }
-    if (!messages.some(message => message.id === `${turnId}-card`)) {
+    if (!exists(`${turnId}-card`)) {
       const card = unavailableCard(turnId, state.reason, workspace);
       card.content = '代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。';
       card.meta = { circuitOpenUntil: state.openUntil };
@@ -147,7 +150,7 @@ export function createProjectAgentRunner({
     }
   }
 
-  function takeNext() {
+  async function takeNext() {
     if (!coordination && retryArmed && failedJob) {
       retryArmed = false;
       const job = failedJob;
@@ -173,11 +176,30 @@ export function createProjectAgentRunner({
     if (manualJobs.length) return manualJobs.shift();
     const digest = takeDigestTimer();
     if (digest) return digest;
+    if (coordination?.selectNext) {
+      const selected = coordination.selectNext();
+      if (selected.job) return selected.job;
+      if (!selected.events?.length) return null;
+      const batch = inbox.takeBatch(workspace);
+      return { kind: 'wake', userInputs: [], events: selected.events,
+        throughSeq: Number.isInteger(batch?.throughSeq) ? batch.throughSeq : 0, carried: [] };
+    }
     const userContinuation = coordination?.recoverUserJob?.();
     if (userContinuation) return userContinuation;
+    if (coordination) {
+      await yieldToEventLoop();
+      if (disposed || holdsLease() !== true) return null;
+      if (userInputs.length || manualJobs.length) return takeNext();
+    }
     const batch = inbox.takeBatch(workspace);
     const events = coordination ? coordination.pending() : Array.isArray(batch?.events) ? batch.events : [];
-    if (events.length === 0) return coordination?.recoverJob() || null;
+    if (events.length === 0) {
+      if (!coordination) return null;
+      await yieldToEventLoop();
+      if (disposed || holdsLease() !== true) return null;
+      if (userInputs.length || manualJobs.length) return takeNext();
+      return coordination.recoverJob();
+    }
     return {
       kind: 'wake',
       userInputs: [],
@@ -215,6 +237,8 @@ export function createProjectAgentRunner({
     if (coordination?.hasPendingDelivery()) { setStatus('idle'); return; }
     let drained = false;
     while (!disposed) {
+      await yieldToEventLoop();
+      if (disposed) return;
       if (holdsLease() !== true) {
         setStatus(failedJob ? 'error' : 'idle');
         return;
@@ -223,7 +247,8 @@ export function createProjectAgentRunner({
         setStatus('error');
         return;
       }
-      const job = takeNext();
+      const job = await takeNext();
+      if (disposed || holdsLease() !== true) return;
       if (!job) {
         if (!drained) {
           drained = true;
@@ -791,6 +816,7 @@ export function createProjectAgentRunner({
     },
     hasContinuation: () => holdsLease() === true && Boolean(coordination?.recoverJob() || coordination?.hasPendingDelivery()),
     ownsInput: inputId => coordination?.ownsInput(inputId) === true,
+    ownedInputIds: () => coordination?.ownedInputIds?.() || [],
     activity: activity.snapshot,
     dispose,
     status: () => statusValue,

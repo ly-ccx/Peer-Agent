@@ -121,3 +121,52 @@ test('a recovery write invalidates the decision snapshot before selecting the ne
   assert.equal(f.store.read().works.changed.state,'runnable');
  }finally{f.close();}
 });
+
+test('unchanged single custody discovers compact facts; merging rereads and preserves full checkpoint data', () => {
+ const f=fixture();
+ try {
+  f.seed('single');
+  const work=f.store.read().works.single, original=f.store.readCheckpoint(work.checkpointRef);
+  original.outcome.privateNativePayload='retain actual execution data';
+  original.job.events[0].payload={actual:'full event payload'};
+  f.store.saveWork({...work,checkpointRef:f.store.checkpoint('single',original)});
+  const read=f.store.readCheckpoint;let fullReads=0;
+  f.store.readCheckpoint=ref=>{fullReads++;return read(ref);};
+  f.reconcile();f.reconcile();assert.equal(fullReads,0,'steady discovery must not parse full execution history');
+  f.store.transfer([{eventId:'fresh',kind:'report_available',sessionId:'s',payload:{actual:'new full payload'}}]);
+  f.reconcile();assert.equal(fullReads,1,'a real merge reads the original checkpoint');
+  const result=read(f.store.read().works.single.checkpointRef);
+  assert.equal(result.outcome.privateNativePayload,original.outcome.privateNativePayload);
+  assert.deepEqual(result.job.events.map(event=>event.payload),[{actual:'full event payload'},{actual:'new full payload'}]);
+ }finally{f.close();}
+});
+
+test('one selection prepares once across user, event and background priority', () => {
+ const f=fixture();let reads=0;const original=f.store.read;f.store.read=()=>{reads++;return original();};
+ const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
+ try {
+  assert.deepEqual(c.selectNext(),{job:null});assert.equal(reads,4,'one preparation and one decision even when all three queues are empty');
+  f.seed('background');f.store.transfer([{eventId:'fresh',kind:'needs_user',sessionId:'other'}]);
+  assert.equal(c.selectNext().events[0].eventId,'fresh','an unowned event precedes a background continuation');
+  f.seed('human',{anchorInputIds:['i']});
+  assert.equal(c.selectNext().job.workId,'human','a user continuation precedes the unowned event');
+  const human=f.store.read().works.human;f.store.saveWork({...human,state:'cancelled',stopScope:'work'});
+  f.store.handled(['fresh']);
+  assert.equal(c.selectNext().job.workId,'background','new selection observes cancellation and event acknowledgement');
+ }finally{f.close();}
+});
+
+test('a missing user checkpoint is blocked and selection rereads before returning another job', () => {
+ const f=fixture();
+ try {
+  f.seed('missing',{anchorInputIds:['i'],updatedAt:'2026-10-19T23:59:00Z'});
+  f.seed('valid',{anchorInputIds:['other']});
+  const broken=f.store.read().works.missing, checkpoint=f.store.readCheckpoint(broken.checkpointRef);
+  checkpoint.job.userInputs=[{inputId:'i',createdAt:'2099-01-01T00:00:00Z'}];
+  f.store.saveWork({...broken,checkpointRef:f.store.checkpoint('missing',checkpoint)});
+  const read=f.store.readCheckpoint;f.store.readCheckpoint=ref=>ref===f.store.read().works.missing.checkpointRef?null:read(ref);
+  const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
+  assert.equal(c.selectNext().job.workId,'valid');
+  assert.equal(f.store.read().works.missing.recovery.blockedCode,'RECOVERY_CHECKPOINT_UNAVAILABLE');
+ }finally{f.close();}
+});

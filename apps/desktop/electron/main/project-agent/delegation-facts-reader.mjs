@@ -9,7 +9,7 @@ export function createDelegationFactsReader({ conversationStore, goalPlanStore }
       includeMessageCount: false,
     });
     const ownership = new Map(conversations.map(meta => [meta.id, meta.workspaceId]));
-    const plans = (goalPlanStore.listPlans?.() || [])
+    const plans = (goalPlanStore.listPlanMetadata?.() ?? goalPlanStore.listPlans?.() ?? [])
       .filter(meta => ownership.get(meta.conversationId) === workspaceId)
       .map(meta => goalPlanStore.getPlan(meta.planId))
       .filter(Boolean);

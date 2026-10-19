@@ -9,13 +9,15 @@ import { PeerIcon } from '../../ui/icons';
 import { AgentProcessView } from '../drawer/AgentProcessView';
 
 /** Uses the same live/history projection as the chat; it has no execution path. */
-export function ReplyDetails({ row, workspaceId, botName, workIndex, i18n, onOpenEvidence, onOpenWork, disclosure }: {
+export function ReplyDetails({ row, loading = false, workspaceId, botName, workIndex, i18n, onOpenEvidence, onOpenWork, disclosure }: {
   readonly row: ConversationDisplayRow | undefined;
+  readonly loading?: boolean;
   readonly workspaceId: string; readonly botName: string; readonly workIndex: BotWorkIndex;
   readonly i18n: I18nRuntime; readonly onOpenEvidence: (id: string) => void;
   readonly onOpenWork: (id: string) => void;
   readonly disclosure: ProcessDisclosure;
 }) {
+  if (loading) return <p className="bot-reply-details-note" role="status">{i18n.t('projectAgent.background.loading')}</p>;
   if (!row || row.type === 'separator') return <p className="bot-reply-details-note">{i18n.t('projectAgent.chat.context.unavailable')}</p>;
   const message = row.type === 'message' ? row.message : undefined;
   const work = replyWork(message ?? { sources: [], marks: [], meta: {}, replyTo: row.activity?.replyTo ?? [] }, workIndex);

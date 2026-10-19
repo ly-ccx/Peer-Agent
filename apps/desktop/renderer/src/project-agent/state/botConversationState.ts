@@ -108,6 +108,7 @@ export interface BotChatMessage {
   readonly marks: readonly BotChatMark[];
   readonly dispositions: readonly BotDispositionMark[];
   readonly rounds: readonly BotToolRound[];
+  readonly dispositionCalls?: readonly BotToolCall[];
   readonly meta: BotChatMeta;
   readonly proactive: boolean;
   readonly cards: readonly BotChatCard[];
@@ -172,6 +173,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     marks: readMarks(raw.marks),
     dispositions: [],
     rounds: readRounds(raw.rounds),
+    ...(Array.isArray(raw.dispositionCalls) ? { dispositionCalls: readRounds([{ toolCalls: raw.dispositionCalls }])[0]?.toolCalls ?? [] } : {}),
     meta,
     proactive: raw.proactive === true || meta.surfacing === 'digest',
     cards: readCards(raw.cards),
@@ -342,6 +344,7 @@ function scopeTitle(
 }
 
 function toolCallsOf(message: BotChatMessage): DispositionToolCall[] {
+  if (message.dispositionCalls) return [...message.dispositionCalls];
   const calls: DispositionToolCall[] = [];
   for (const round of message.rounds) {
     for (const call of round.toolCalls) calls.push(call);

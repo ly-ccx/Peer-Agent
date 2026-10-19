@@ -401,3 +401,48 @@ test('list and cursor use summary messages while conversation details retain com
     assert.equal(fullReads,1);assert.equal(page.messages.find(m=>m.id==='internal').rounds[0].text,'complete original details');
   }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('presentation pages omit internal rounds while targeted details retain exact and legacy process identities', () => {
+  const root=tempRoot();
+  try {
+    let store;
+    const env=harness(root,{readConversationMessages:id=>store.getPersistedConversationHistory(id).messages.map(({rounds,...message})=>message)});
+    store=env.conversationStore;
+    const messages=[
+      {id:'i1',role:'user',kind:'user_input',content:'first'},
+      {id:'t1',role:'assistant',kind:'agent_turn',rounds:[{toolCalls:[{name:'read_file',result:'FULL_RESULT'}]}]},
+      {id:'r1',role:'assistant',kind:'agent_reply',content:'legacy'},
+      {id:'i2',role:'user',kind:'user_input',content:'second'},
+      {id:'t2',role:'assistant',kind:'agent_turn',rounds:[{text:'FOREIGN_PROCESS'}]},
+      {id:'r2',role:'assistant',kind:'agent_reply',turnId:'t1',content:'exact'},
+    ];
+    store.replaceMessages(env.conversationId,messages);
+    const normal=env.directory.readConversation(env.entry.workspaceId,{presentationOnly:true});
+    assert.ok(normal.messages.every(message=>message.rounds===undefined));
+    assert.equal(normal.messages.find(message=>message.id==='r2').content,'exact');
+    assert.equal(env.directory.readConversation(env.entry.workspaceId).messages.find(message=>message.id==='t1').rounds[0].toolCalls[0].result,'FULL_RESULT','legacy callers retain complete pages');
+    for(const id of ['r1','r2']) {
+      const detail=env.directory.readConversation(env.entry.workspaceId,{processFor:id});
+      assert.deepEqual(detail.messages.map(message=>message.id),['t1',id]);
+      assert.equal(detail.messages[0].rounds[0].toolCalls[0].result,'FULL_RESULT');
+    }
+    assert.deepEqual(env.directory.readConversation(env.entry.workspaceId,{processFor:'missing'}).messages,[]);
+    assert.equal(env.directory.readConversation(env.entry.workspaceId,{processFor:'r1',presentationOnly:true}).code,'INVALID_INPUT');
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('projected failure cards resolve the canonical error message and exact original process', () => {
+ const root=tempRoot();
+ try {
+  const card={cardId:'projected-failure',kind:'agent_unavailable',content:'CURRENT_STATUS',refs:{turnId:'failed'},actions:[]};
+  const env=harness(root,{readCards:()=>[card]});
+  env.conversationStore.replaceMessages(env.conversationId,[
+   {id:'failed',kind:'agent_turn',role:'assistant',rounds:[{toolCalls:[{name:'read_file',result:'ORIGINAL_RESULT'}]}]},
+   {id:'failed-card',kind:'system_card',role:'assistant',turnId:'failed',card:'agent_unavailable',content:'ORIGINAL_ERROR'},
+  ]);
+  const result=env.directory.readConversation(env.entry.workspaceId,{processFor:'projected-failure'});
+  assert.equal(result.processMessageId,'failed-card');assert.deepEqual(result.messages.map(message=>message.id),['failed','failed-card']);
+  assert.equal(result.messages[0].rounds[0].toolCalls[0].result,'ORIGINAL_RESULT');
+  assert.equal(result.messages[1].content,'ORIGINAL_ERROR');
+ }finally{rmSync(root,{recursive:true,force:true});}
+});

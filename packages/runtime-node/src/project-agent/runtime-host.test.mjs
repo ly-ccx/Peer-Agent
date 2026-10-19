@@ -143,3 +143,29 @@ test('new input preempts a background model request after delivery without waiti
     assert.equal(h.messages.some(row => row.card === 'agent_unavailable'), false);
   } finally { release(); await Promise.allSettled([background, foreground]); h.close(); }
 });
+
+test('idle maintenance with no pending input never loads full conversation bodies', async () => {
+  let reads = 0;
+  const h = harness(undefined, { readMessages: () => { reads++; return []; } });
+  try {
+    await h.host.sync(); reads = 0;
+    await h.host.sync();
+    assert.equal(reads, 0);
+  } finally { h.close(); }
+});
+
+test('pending input acknowledgements use exact reply facts without loading model history', async () => {
+  let reads = 0, facts = 0, requests = 0, h;
+  h = harness(async () => { requests++; return { text: 'unexpected' }; }, {
+    readMessages: () => { reads++; return h?.messages || []; },
+    readInputFacts: id => { facts++; return h.messages.filter(message => message.conversationId === id); },
+  });
+  try {
+    await h.host.sync(); reads = 0;
+    h.messages.push({ conversationId: 'conv-a', id: 'reply', role: 'assistant', kind: 'agent_reply', replyTo: ['input-known'] });
+    h.host.inputQueue.submitInput({ workspaceId: 'a', inputId: 'known', text: 'already answered', surface: 'desktop' });
+    await h.host.sync(['a']);
+    assert.ok(facts > 0); assert.equal(reads, 0); assert.equal(requests, 0);
+    assert.deepEqual(h.host.inputQueue.pendingExecution('a'), []);
+  } finally { h.close(); }
+});

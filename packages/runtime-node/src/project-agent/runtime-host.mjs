@@ -52,6 +52,7 @@ export function createProjectAgentHost({
   activateSessions = null,
   acquireLease = null,
   readMessages = null,
+  readInputFacts = readMessages,
   continuityVersion = 1,
   readLeaseEpoch = null,
   onRecoveryPhase = null,
@@ -203,14 +204,16 @@ export function createProjectAgentHost({
 
   function pendingInputs(workspaceId, conversationId, consumed) {
     if (typeof queue.pendingExecution !== 'function') return consumed;
-    const messages = typeof readMessages === 'function' ? readMessages(conversationId) : [];
+    if (!queue.pendingExecution(workspaceId).length) return [];
+    const messages = typeof readInputFacts === 'function' ? readInputFacts(conversationId) : [];
     const repliedTo = messages.filter(message => message.role === 'assistant' && message.kind === 'agent_reply').flatMap(message => message.replyTo || message.meta?.replyTo || []);
     const stoppedTurns = new Set(messages.filter(message => message.card === 'agent_stopped').map(message => message.turnId));
     for (const turn of messages) if (turn.kind === 'agent_turn' && stoppedTurns.has(turn.id)) {
       repliedTo.push(...(turn.userInputs || []).map(input => `input-${input.inputId}`));
     }
     const runner = runners.get(workspaceId);
-    return queue.pendingExecution(workspaceId, { repliedTo }).filter(input => !runner?.ownsInput(input.inputId));
+    const owned = new Set(runner?.ownedInputIds() || []);
+    return queue.pendingExecution(workspaceId, { repliedTo }).filter(input => !owned.has(input.inputId));
   }
 
   async function sync(workspaceIds) {
@@ -236,7 +239,9 @@ export function createProjectAgentHost({
         const due = armDigest(runner, workspaceId);
         publishWatch(workspaceId);
         if (pending.length) await runner.enqueueUserInputs(pending);
-        else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) await runner.kick();
+        else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) {
+          await runner.kick();
+        }
         if (runner.hasContinuation()) scheduleSweepSoon();
         return { workspaceId, ok: true };
       } catch (error) { drop(workspaceId); try { recovery.fail(workspaceId, error); } catch { /* Returned failure still identifies the project. */ } return { workspaceId, ok: false, error: error?.message || String(error) }; }

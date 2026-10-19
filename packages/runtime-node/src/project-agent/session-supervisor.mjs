@@ -588,19 +588,23 @@ export function createSessionSupervisor({
       && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)
       && (autonomousCoordinationEnabled() || plan.delegationOrigin.phase !== 'queued'
         || coordination.forSession(plan.delegationOrigin.workspaceId, plan.delegationOrigin.sessionId)?.replacementSessionId !== plan.delegationOrigin.sessionId);
+    let observed = delegatedPlans();
     if (isolationPlanner) {
-      const virtual = delegatedPlans().filter(eligible);
+      const virtual = observed.filter(eligible);
+      let preparedAny = false;
       for (const plan of virtual) {
         if (plan.delegationOrigin.phase !== 'queued' || TERMINAL.has(plan.status) || plan.runner?.status === 'waiting_user') continue;
         const prepared = await isolationPlanner.prepare(plan, virtual);
+        preparedAny = true;
         const index = virtual.findIndex(item => item.planId === plan.planId);
         virtual[index] = prepared.plan;
         if (prepared.ok && executionScheduler.inspect(prepared.plan, virtual).allowed) {
           virtual[index] = { ...prepared.plan, delegationOrigin: { ...prepared.plan.delegationOrigin, phase: 'running' } };
         }
       }
+      if (preparedAny) observed = delegatedPlans();
     }
-    const plans = delegatedPlans().filter(eligible);
+    const plans = observed.filter(eligible);
     const { start, blocked } = executionScheduler.select(plans);
     for (const plan of blocked) {
       goalPlanStore.revisePlan(plan.planId, {
@@ -620,7 +624,7 @@ export function createSessionSupervisor({
         status: 'executing', delegationOrigin: { ...plan.delegationOrigin, phase: 'running' },
       }, { reason: 'scheduler admitted session', changedBy: 'session-supervisor' });
     }
-    executionScheduler.reconcile(delegatedPlans());
+    executionScheduler.reconcile(start.length || blocked.length ? delegatedPlans() : observed);
     let spawnError;
     let failedStart = false;
     for (const plan of start) {

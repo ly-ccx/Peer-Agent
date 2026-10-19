@@ -267,6 +267,7 @@ export {
 export { createInputQueue, inputMessageId } from './project-agent/input-queue.mjs';
 export { createBotDirectory } from './project-agent/bot-directory.mjs';
 export { createBotSummaryHistory, projectBotSummaryHistory } from './project-agent/bot-summary-history.mjs';
+export { createBotConversationHistory, projectBotConversationHistory } from './project-agent/bot-conversation-history.mjs';
 export {
   collectConversationSearchDocuments,
   createConversationSearchIndex,

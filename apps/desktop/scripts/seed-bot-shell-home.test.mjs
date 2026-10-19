@@ -9,6 +9,7 @@ import { assertIsolatedHome, seedBotShellHome, RC_SCALE } from './seed-bot-shell
 import { seedExecutionHistory, EXECUTION_HISTORY_SCALE } from './seed-execution-history.mjs';
 import { seedExecutionWorkload } from './seed-execution-workload.mjs';
 import { execFileSync } from 'node:child_process';
+import { reduceCoordination } from '../../../packages/runtime-node/src/project-agent/work-coordination.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-rc-seed-test-'));
@@ -21,8 +22,16 @@ test('execution history represents cancelled real-shaped sessions and refuses a 
   const small = seedBotShellHome({ home, scale: { bots: 1, messages: 0, memories: 0, inboxEvents: 0 } });
   const bot = small.bots[0];
   assert.throws(() => seedExecutionHistory({ home: os.homedir(), bot }));
-  const result = seedExecutionHistory({ home, bot, scale: { plans: 16, sessions: 8, parentBytes: 20000, childBytes: 20000, journalBytes: 20000, failures: 8 } });
+  const result = seedExecutionHistory({ home, bot, scale: { plans: 16, sessions: 8, parentBytes: 20000, childBytes: 20000, journalBytes: 20000, failures: 8, recoveryWorks: 20, deliveredWorks: 10 } });
   assert.equal(result.actualPlans, 16);
+  const state = readFileSync(path.join(home, 'project-runtime', bot.workspaceId, 'coordination.jsonl'), 'utf8')
+    .trim().split('\n').map(line=>JSON.parse(line)).reduce(reduceCoordination, undefined);
+  assert.equal(Object.keys(state.works).length, 20);
+  assert.equal(Object.values(state.works).filter(work => work.state === 'delivered').length, 10);
+  assert.equal(Object.values(state.deliveries).filter(row => row.state === 'delivered').length, 10);
+  const turns = createConversationStore({storeDir:path.join(home,'conversations')}).getPersistedConversationHistory(bot.conversationId).messages.filter(row=>row.kind==='agent_turn');
+  assert.ok(turns.length && turns.every(row=>row.turnId===row.id));
+  assert.equal(EXECUTION_HISTORY_SCALE.recoveryWorks, 200);
   const supervisor = createSessionSupervisor({ conversationStore: createConversationStore({ storeDir: path.join(home, 'conversations') }),
     goalPlanStore: createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') }), deferRecovery: true, canManageWorkspace: () => false });
   const sessions = supervisor.sessionsForProject(bot.workspaceId);

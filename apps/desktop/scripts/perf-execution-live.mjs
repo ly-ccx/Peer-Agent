@@ -83,7 +83,7 @@ try {
   cpSync(path.join(source, 'apps/desktop/dist'), isolation.launch.distDir, { recursive: true });
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify(settings));
   const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1', PEER_WORKSPACE_ROOT: project,
-    PEER_CREDENTIAL_HELPER_PATH: path.join(source, 'target/release/peer-credential-helper') };
+    PEER_CREDENTIAL_HELPER_PATH: arg('--credential-helper') || path.join(source, 'target/release/peer-credential-helper') };
   delete env.ELECTRON_RUN_AS_NODE;
   app = await _electron.launch({ args: [isolation.launch.desktopDir, '--user-data-dir=' + path.join(root, 'chromium')], cwd: isolation.launch.desktopDir, env, timeout: 30000 });
   app.process().once('exit', (code, signal) => { report.processExit = { code, signal }; });
@@ -256,11 +256,14 @@ try {
   report.sessionsFile = existsSync(sessionsFile) ? sessionsFile : null;
   report.ok = finished && drawerOpened && report.cancelRecovery?.replied === true && report.interactions >= 5 && report.renderer.inputPaintMs.p95 < 100 && report.renderer.frames.p95 < 32 && report.pageErrors.length === 0;
   if (largeHistory) report.ok &&= report.historyScale.actualPlans >= 1100 && report.historyScale.parentBytes >= 9_500_000
+    && report.historyScale.recoveryWorks >= 200 && report.historyScale.deliveredWorks >= 100
     && report.historyScale.childBytes >= 46_300_000 && report.historyScale.journalBytes >= 185_000_000
     && report.elapsedMs >= 120000 && report.interactions >= 100 && report.interaction.scrollMovedSamples >= 100
     && scrollCoverage.topVisits > 0 && scrollCoverage.bottomVisits > 0 && scrollCoverage.liveReplyVisibleSamples > 0
     && report.interaction.keyRoundTripMs.p95 < 100 && report.interaction.keyRoundTripMs.p99 < 200 && report.interaction.keyRoundTripMs.max < 500
-    && report.interaction.wheelRoundTripMs.p95 < 100 && report.renderer.wheelPaintMs.p95 < 100;
+    && report.interaction.wheelRoundTripMs.p95 < 100 && report.interaction.wheelRoundTripMs.p99 < 200
+    && report.interaction.wheelRoundTripMs.max < 500 && report.mainLoop.max < 500
+    && report.renderer.wheelPaintMs.p95 < 100;
 } catch (error) { report.ok=false; report.error=error.stack || error.message; }
 finally {
   if (page && !report.renderer) {
