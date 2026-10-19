@@ -28,7 +28,8 @@ function legacyTarget(work, row, messages, unsettled, origin) {
 
 /** Read-only reconciliation, never a tool executor or a success/verification authority. */
 export function createVerificationDispatchRecovery({ store, readMessages, activeAttempts, reconcileVerification, now }) {
-  const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : store.read().works[id];
+  const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : readSnapshot().works[id];
   function reconcile(workId) {
     if (typeof reconcileVerification !== 'function') return;
     const work = readWork(workId);
@@ -76,7 +77,7 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
   return {
     reconcile,
     reconcileAll() {
-      for (const work of Object.values(store.read().works)) {
+      for (const work of Object.values(readSnapshot().works)) {
         const pending = [...(work.budget?.uncertainDispatches || []),
           ...Object.entries(work.budget?.attempts || {}).flatMap(([attemptId, attempt]) =>
             activeAttempts()?.has(attemptId) ? [] : (attempt.pendingTools || []).map(row => ({ ...row, role: attempt.role })))];

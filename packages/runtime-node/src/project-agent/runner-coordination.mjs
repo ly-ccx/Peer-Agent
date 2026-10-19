@@ -13,7 +13,8 @@ const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'sess
 export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
-  const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : store.read().works[id];
+  const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : readSnapshot().works[id];
   const rows = () => { const roster = resolveRoster?.(); return Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []; };
   const delivery = createReplyDelivery({ store, readMessages, appendMessage: remember, accept: onReplied,
     validate: message => (message.meta?.sessionStates || []).every(source => {
@@ -50,7 +51,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     const pending = store.pendingEvents();
     // Child execution acknowledgements do not restart a failed parent reply or
     // erase its protected checkpoint. A result/exception remains a real wake.
-    const works = Object.values(store.read().works);
+    const works = Object.values(readSnapshot().works);
     let snapshot;
     const roster = () => snapshot ??= rows();
     const routine = pending.filter(event => ROUTINE.has(event.kind) || works.some(work => work.recovery
@@ -59,7 +60,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     return pending.filter(event => !routine.includes(event));
   }
   function expireReservations() {
-    for (const work of Object.values(store.read().works)) if (work.state === 'retry_wait' && work.recovery?.reservationId
+    for (const work of Object.values(readSnapshot().works)) if (work.state === 'retry_wait' && work.recovery?.reservationId
       && (Date.parse(work.recovery.deadlineAt) <= Date.parse(now()) || hasUnsettledDispatch(work))) {
       const unknown = hasUnsettledDispatch(work);
       store.saveWork({ ...work, state: 'blocked_system', ...(unknown ? { end: 'fatal' } : {}),
@@ -91,7 +92,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     expireReservations();
     let snapshot, decisionSnapshot;
     const roster = () => snapshot ??= rows();
-    const decision = () => decisionSnapshot ??= store.read();
+    const decision = () => decisionSnapshot ??= readSnapshot();
     const update = work => { store.saveWork(work, { returnState: false }); decisionSnapshot = undefined; };
     recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: roster, now });
     if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: roster });
@@ -145,7 +146,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const events = recovery.events || [];
       const workId = coordinationWorkId(conversationId, inputIds.length ? inputIds : events.map(event => event.eventId));
       if (readWork(workId)) return;
-      const missing = events.filter(event => !store.read().events[event.eventId]);
+      const missing = events.filter(event => !readSnapshot().events[event.eventId]);
       if (missing.length) store.transfer(missing);
       const job = { kind: turn.turnKind === 'wake' ? 'wake' : 'user', workId, turnId: turn.id, userInputs: turn.userInputs || [],
         events, throughSeq: recovery.throughSeq, carried: [], continuation: true };
@@ -155,17 +156,17 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         pendingEventIds: events.map(event => event.eventId), checkpointRef, stopScope: 'reply' }, { returnState: false });
     },
     admitRecoveredEvents(events) {
-      const known = store.read().events;
+      const known = readSnapshot().events;
       const missing = (events || []).filter(event => !known[event.eventId]);
       if (missing.length) store.transfer(missing);
     },
     transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     pending() {
       if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows });
-      return pendingFrom(Object.values(store.read().works));
+      return pendingFrom(Object.values(readSnapshot().works));
     },
-    ownedInputIds() { return [...new Set(Object.values(store.read().works).flatMap(work => work.anchorInputIds || []))]; },
-    ownsInput(inputId) { return Object.values(store.read().works).some(work => work.anchorInputIds?.includes(inputId)); },
+    ownedInputIds() { return [...new Set(Object.values(readSnapshot().works).flatMap(work => work.anchorInputIds || []))]; },
+    ownsInput(inputId) { return Object.values(readSnapshot().works).some(work => work.anchorInputIds?.includes(inputId)); },
     canPreemptRequest(workId) {
       const work = readWork(workId);
       return Boolean(work && !hasUnsettledDispatch(work)
@@ -174,7 +175,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     nextRetryAt() {
       expireReservations();
       const at = now();
-      return Object.values(store.read().works).filter(work => work.state === 'retry_wait' && work.recovery?.reservationId
+      return Object.values(readSnapshot().works).filter(work => work.state === 'retry_wait' && work.recovery?.reservationId
         && work.waitFor?.some(wait => wait.kind === 'retry_timer' && wait.id === work.recovery.reservationId)
         && Date.parse(work.recovery.deadlineAt) > Date.parse(at) && !hasUnsettledDispatch(work))
         .map(work => work.recovery.retryAt).filter(at => Number.isFinite(Date.parse(at))).sort()[0] || null;
@@ -190,7 +191,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     retryJob(turnId) {
       dispatchRecovery.reconcileAll();
-      const work = Object.values(store.read().works).find(work => work.parentConversationId === conversationId && work.checkpointRef
+      const work = Object.values(readSnapshot().works).find(work => work.parentConversationId === conversationId && work.checkpointRef
         && (work.recovery?.failedTurnId === turnId || work.attemptId === turnId));
       const checkpoint = readProtectedWork(work);
       const admission = replyRecoveryAdmission(work, checkpoint, { limits: workBudgetBinding(workspaceId)?.limits, readCheckpoint: store.readCheckpoint });
@@ -225,10 +226,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     start(job) {
       const inputs = (job.userInputs || []).map(input => input.inputId);
       const events = job.events || [];
-      const missing = events.filter(event => !store.read().events[event.eventId]);
+      const missing = events.filter(event => !readSnapshot().events[event.eventId]);
       if (missing.length) store.transfer(missing);
       // A fresh batch must not replace an unfinished slice's protected checkpoint.
-      const linked = Object.values(store.read().works).find(work => !['runnable', 'retry_wait', 'coalesced', 'paused', 'cancelled'].includes(work.state)
+      const linked = Object.values(readSnapshot().works).find(work => !['runnable', 'retry_wait', 'coalesced', 'paused', 'cancelled'].includes(work.state)
         && events.some(event => work.sessionIds?.includes(event.sessionId)));
       job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
       dispatchRecovery.reconcile(job.workId);
@@ -244,7 +245,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
     },
     stalls(job, outcome, roster) {
-      if (reportedWaitFor({ job, outcome, state: store.read(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] })) return false;
+      if (reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] })) return false;
       const previous = readWork(job.workId);
       const sources = ownedSessions(previous, job, roster);
       return repairOwnership(sources).repairSessionIds.length > 0
@@ -268,7 +269,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (!outcome.failed && !outcome.yielded && !outcome.stopped && decision.state !== 'blocked_system') state = stateAfterReply(sources);
       if (outcome.budgetLimited) state = 'budget_limited';
       if (outcome.deliveryPending) state = 'retry_wait';
-      const reportedWait = reportedWaitFor({ job, outcome, state: store.read(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] });
+      const reportedWait = reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] });
       if (reportedWait) state = reportedWait.waitingUser ? 'waiting_user' : 'waiting_children';
       const end = state === 'runnable' ? 'yielded' : state === 'waiting_children' ? 'awaiting_children' : state === 'waiting_user' ? 'awaiting_user'
         : state === 'budget_limited' ? 'budget_limited' : outcome.reason === 'agent_no_progress' ? 'no_progress'

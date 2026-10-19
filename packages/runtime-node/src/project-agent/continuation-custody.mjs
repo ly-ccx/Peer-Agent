@@ -4,7 +4,8 @@ import { workBudgetBinding } from './work-budget.mjs';
 
 /** One automatic observer for each child-result scope. Never transfers execution authority. */
 export function reconcileContinuationCustody({ store, conversationId, sessions }) {
-  const state = store.read(), groups = new Map();
+  const state = typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  const groups = new Map();
   let snapshot;
   const roster = () => snapshot ??= typeof sessions === 'function' ? sessions() : sessions;
   const prepared = new Set(Object.values(state.deliveries || {}).filter(row => row.state === 'prepared').map(row => row.message.meta?.workId));

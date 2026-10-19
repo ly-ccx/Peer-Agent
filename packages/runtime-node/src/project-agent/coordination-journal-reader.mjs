@@ -6,6 +6,17 @@ const version = info => `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${
 const identity = info => `${info.dev}:${info.ino}:${info.birthtimeNs}`;
 const ANCHOR = 192;
 
+function immutable(value) {
+  const pending = [value];
+  while (pending.length) {
+    const row = pending.pop();
+    if (!row || typeof row !== 'object' || Object.isFrozen(row)) continue;
+    Object.freeze(row);
+    for (const child of Object.values(row)) pending.push(child);
+  }
+  return value;
+}
+
 /** Append-only journal projection. Cache publication follows complete reducer validation. */
 export function createCoordinationJournalReader({ file, onRead = () => {} }) {
   let cached = null, previous = null, anchors = null;
@@ -44,7 +55,7 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
       const nextAnchors = boundaries(fd, size);
       if (version(fstatSync(fd, { bigint: true })) !== version(opened)
         || version(statSync(file, { bigint: true })) !== version(opened)) throw new Error('coordination_read_changed');
-      cached = state; previous = opened; anchors = nextAnchors;
+      cached = immutable(state); previous = opened; anchors = nextAnchors;
       return cached;
     } catch (error) {
       if (error.code === 'ENOENT') { clear(); return empty(); }
@@ -57,10 +68,13 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
     try {
       const info = fstatSync(fd, { bigint: true });
       const nextAnchors = boundaries(fd, Number(info.size));
-      cached = state; previous = info; anchors = nextAnchors;
+      cached = immutable(state); previous = info; anchors = nextAnchors;
     } finally { closeSync(fd); }
   }
   return { read: () => structuredClone(readState()),
+    // Complete immutable facts. Each call revalidates the file; observations
+    // held across a write or await are not a new check of current state.
+    readSnapshot: () => immutable(readState()),
     commitEntry(entry, persist, { returnState = true } = {}) {
       const state = readState();
       const record = { ...(typeof entry === 'function' ? entry() : entry), revision: state.revision + 1 };

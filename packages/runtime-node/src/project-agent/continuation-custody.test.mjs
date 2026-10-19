@@ -106,10 +106,15 @@ test('custody accepts a lazy roster and does not read it for ineligible work',()
 });
 
 test('one recovery decision shares its post-reconciliation work snapshot', () => {
- const f=fixture();let reads=0;const original=f.store.read;f.store.read=()=>{reads++;return original();};
+ for (const immutable of [false, true]) {
+ const f=fixture();let reads=0;const port=immutable?'readSnapshot':'read', original=f.store[port];
+ f.store[port]=()=>{reads++;return original();};
+ if (immutable) f.store.read=()=>assert.fail('recovery observation must not copy all work');
+ else f.store.readSnapshot=undefined;
  const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
  try {assert.equal(c.recoverJob(),null);assert.equal(reads,4,'three preparation readers plus one decision snapshot');}
  finally{f.close();}
+ }
 });
 
 test('a recovery write invalidates the decision snapshot before selecting the next job', () => {
@@ -142,10 +147,12 @@ test('unchanged single custody discovers compact facts; merging rereads and pres
 });
 
 test('one selection prepares once across user, event and background priority', () => {
- const f=fixture();let reads=0;const original=f.store.read;f.store.read=()=>{reads++;return original();};
+ const f=fixture();let reads=0, fullReads=0;const original=f.store.readSnapshot, fullRead=f.store.read;
+ f.store.readSnapshot=()=>{reads++;return original();};f.store.read=()=>{fullReads++;return fullRead();};
  const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
  try {
   assert.deepEqual(c.selectNext(),{job:null});assert.equal(reads,4,'one preparation and one decision even when all three queues are empty');
+  assert.equal(fullReads,0,'immutable observations must avoid unrelated payload copies');
   f.seed('background');f.store.transfer([{eventId:'fresh',kind:'needs_user',sessionId:'other'}]);
   assert.equal(c.selectNext().events[0].eventId,'fresh','an unowned event precedes a background continuation');
   f.seed('human',{anchorInputIds:['i']});

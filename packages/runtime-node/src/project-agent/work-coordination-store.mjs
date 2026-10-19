@@ -62,7 +62,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     }, options);
   }
   return {
-    read, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
+    read, readSnapshot: reader.readSnapshot, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
     append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
     coalesceWorks(owner, retired) {
       const state = read();
@@ -111,7 +111,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     },
     transfer(events) { return append({ kind: 'transfer', events }); },
     handled(eventIds) { return append({ kind: 'handled', eventIds }); },
-    pendingEvents() { return Object.values(read().events).filter(row => !row.handled).map(row => row.event); },
+    pendingEvents() { return structuredClone(Object.values(reader.readSnapshot().events).filter(row => !row.handled).map(row => row.event)); },
     saveWork(work, options = {}) { const old = reader.readWork(work.workId); return append({ kind: 'work', work: { ...old, ...work,
       revision: (old?.revision || 0) + 1, updatedAt: now() } }, options); },
   };

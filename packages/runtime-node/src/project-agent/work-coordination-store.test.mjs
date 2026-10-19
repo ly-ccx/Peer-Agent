@@ -74,3 +74,20 @@ test('durable journal recovery ignores legacy snapshot bytes without rewriting t
   assert.equal(readFileSync(file,'utf8'),journal);assert.equal(readFileSync(snapshot,'utf8'),legacy);
  }finally{env.cleanup();}
 });
+
+test('reply delivery uses current immutable facts and revalidates after an asynchronous stop', async () => {
+  const env = world(), messages = [];
+  try {
+    const store = { ...env.store, read() { assert.fail('reply facts must not clone all historical work'); } };
+    const delivery = createReplyDelivery({ store, readMessages: () => messages,
+      appendMessage: message => messages.push(message), onRecovered: message => { message.content = 'callback-owned copy'; } });
+    await delivery.deliver({ id: 'first', content: 'done' });
+    await delivery.recover(); assert.equal(delivery.pending(), false); assert.equal(messages.length, 1);
+    assert.equal(env.store.readSnapshot().deliveries.first.message.content, 'done');
+    let valid = true;
+    const stopped = createReplyDelivery({ store, readMessages: () => messages, appendMessage: message => messages.push(message),
+      validate: () => valid, accept: async () => { valid = false; env.replace(); } });
+    await assert.rejects(stopped.deliver({ id: 'second', content: 'stopped after acceptance boundary' }), /lease_lost/);
+    assert.equal(env.store.readSnapshot().deliveries.second.state, 'prepared');
+  } finally { env.cleanup(); }
+});

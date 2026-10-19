@@ -127,3 +127,26 @@ test('private commit publishes only after persistence, clones caller data and ke
     assert.throws(() => reader.commitEntry(entry, () => assert.fail('corruption cannot persist')), SyntaxError);
   } finally { w.close(); }
 });
+
+test('complete immutable snapshots share only an unchanged validated revision and cannot pollute replay', () => {
+  const w = world();
+  try {
+    const first = w.writer.readSnapshot();
+    assert.deepEqual(first, w.writer.read());
+    assert.equal(w.writer.readSnapshot(), first);
+    assert.ok(Object.isFrozen(first) && Object.isFrozen(first.works) && Object.isFrozen(first.works.x));
+    assert.throws(() => { first.works.x.text = 'mutated'; }, TypeError);
+    const copy = w.writer.read(); copy.works.x.text = 'isolated';
+    assert.notEqual(w.writer.readSnapshot().works.x.text, 'isolated');
+    w.reader.saveWork({ workId: 'new', text: 'external append' }, { returnState: false });
+    const second = w.writer.readSnapshot();
+    assert.notEqual(second, first); assert.equal(second.works.new.text, 'external append');
+    assert.equal(first.works.new, undefined, 'an old revision must not change under a reader');
+    const events = [{ eventId: 'fresh', kind: 'report_available' }];
+    w.writer.transfer(events); const pending = w.writer.pendingEvents(); pending[0].kind = 'caller mutation';
+    assert.equal(w.writer.pendingEvents()[0].kind, 'report_available');
+    appendFileSync(w.file, '{broken\n'); assert.throws(() => w.writer.readSnapshot(), SyntaxError);
+    writeFileSync(w.file + '.replacement', ''); renameSync(w.file + '.replacement', w.file);
+    assert.equal(w.writer.readSnapshot().revision, 0);
+  } finally { w.close(); }
+});
