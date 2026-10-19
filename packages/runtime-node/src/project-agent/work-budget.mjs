@@ -41,7 +41,8 @@ export function createWorkBudgetGuard(profile) {
     const stopsExecutor = profile.role === 'project_agent' || work?.stopScope !== 'reply' || ['budget_limited', 'coalesced'].includes(work?.state);
     if (!work || requireActive && stopped && stopsExecutor) throw new Error('work_execution_stopped');
     if (requireActive && profile.coordinationBinding) {
-      const state = store.read(), mandate = state.mandates?.[profile.coordinationBinding.workId];
+      const state = typeof store.readLifecycleFacts === 'function' ? store.readLifecycleFacts() : store.read();
+      const mandate = state.mandates?.[profile.coordinationBinding.workId];
       const transition = Object.values(state.transitions || {}).find(row => row.executionEpoch === profile.coordinationBinding.executionEpoch);
       if (!executionBindingCurrent(mandate, transition, profile.coordinationBinding)) throw new Error('execution_revision_stale');
     }
@@ -51,10 +52,10 @@ export function createWorkBudgetGuard(profile) {
     let patch;
     try { patch = update(budget); } catch (error) {
       if (error?.message === 'work_budget_limited') store.saveWork({ ...work, budget: { ...budget,
-        lastBoundary: error.boundary || budgetBoundary(budget, limits) || undefined } });
+        lastBoundary: error.boundary || budgetBoundary(budget, limits) || undefined } }, { returnState: false });
       throw error;
     }
-    store.saveWork({ ...work, ...patch, budget });
+    store.saveWork({ ...work, ...patch, budget }, { returnState: false });
     return budget;
   }
   const relevantOutcome = row => !row.planId || row.planId === profile.planId;
@@ -134,7 +135,7 @@ export function createWorkBudgetGuard(profile) {
       if (budget.attempts[attemptId]?.pendingTools?.length) budget.uncertainDispatches = [...(budget.uncertainDispatches || []),
         ...budget.attempts[attemptId].pendingTools.map(row => ({ ...row, attemptId, role: profile.role, planId: profile.planId, sessionId: profile.sessionId }))];
       delete budget.attempts[attemptId];
-      store.saveWork({ ...work, budget });
+      store.saveWork({ ...work, budget }, { returnState: false });
     },
   };
 }

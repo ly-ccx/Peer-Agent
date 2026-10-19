@@ -4,7 +4,8 @@ import { workBudgetBinding } from './work-budget.mjs';
 
 /** One automatic observer for each child-result scope. Never transfers execution authority. */
 export function reconcileContinuationCustody({ store, conversationId, sessions }) {
-  const state = store.read(), groups = new Map();
+  const state = typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  const groups = new Map();
   let snapshot;
   const roster = () => snapshot ??= typeof sessions === 'function' ? sessions() : sessions;
   const prepared = new Set(Object.values(state.deliveries || {}).filter(row => row.state === 'prepared').map(row => row.message.meta?.workId));
@@ -15,7 +16,7 @@ export function reconcileContinuationCustody({ store, conversationId, sessions }
       || Object.keys(work.budget?.attempts || {}).some(id => workBudgetBinding(work.workspaceId)?.activeAttempts?.has(id))
       || Object.values(work.budget?.attempts || {}).some(attempt => attempt.pendingTools?.length)) continue;
     let checkpoint;
-    try { checkpoint = store.readCheckpoint(work.checkpointRef); } catch { continue; }
+    try { checkpoint = store.readContinuationCheckpoint?.(work.checkpointRef) ?? store.readCheckpoint(work.checkpointRef); } catch { continue; }
     const events = checkpoint.job?.events || [];
     if (checkpoint.job?.kind !== 'wake' || checkpoint.job?.userInputs?.length || checkpoint.job?.interactive
       || !events.length || events.some(event => event.kind !== 'report_available' || !event.sessionId)) continue;
@@ -33,9 +34,18 @@ export function reconcileContinuationCustody({ store, conversationId, sessions }
     const fresh = Object.values(state.events || {}).filter(row => !row.handled && !owned.has(row.event.eventId)
       && row.event.kind === 'report_available' && owner.ids.includes(row.event.sessionId)).map(row => row.event);
     if (!duplicates.length && !fresh.length) continue;
-    const events = [...new Map([...group.flatMap(row => row.checkpoint.job.events), ...fresh].map(event => [event.eventId, event])).values()];
-    const checkpointRef = store.checkpoint(owner.work.workId, { ...owner.checkpoint,
-      job: { ...owner.checkpoint.job, events, continuation: true } });
+    const checkpoints = group.map(row => store.readCheckpoint(row.work.checkpointRef));
+    if (checkpoints.some((checkpoint, index) => {
+      const job = checkpoint?.job, events = job?.events || [];
+      const ids = [...new Set([...(group[index].work.sessionIds || []), ...events.map(event => event.sessionId)])].sort();
+      return job?.kind !== 'wake' || job.userInputs?.length || job.interactive || !events.length
+        || events.some(event => event.kind !== 'report_available' || !event.sessionId)
+        || JSON.stringify(ids) !== JSON.stringify(owner.ids);
+    })) continue;
+    const original = checkpoints[0];
+    const events = [...new Map([...checkpoints.flatMap(checkpoint => checkpoint.job.events), ...fresh].map(event => [event.eventId, event])).values()];
+    const checkpointRef = store.checkpoint(owner.work.workId, { ...original,
+      job: { ...original.job, events, continuation: true } });
     const waiting = reportedWaitCurrent(owner.work.reportedWait, roster());
     const next = { ...owner.work, checkpointRef,
       sessionIds: owner.ids, pendingEventIds: events.map(event => event.eventId),

@@ -60,3 +60,15 @@ test('corrupt continuation metadata is retained and refused rather than giving t
   assert.throws(() => port.load(), { code: 'verifier_checkpoint_unavailable' });
   assert.throws(() => validateVerificationContinuation({ ...f.state, checkpointRef: '../foreign' }));
 });
+
+test('continuation ownership reads only current work and still rejects a later stop', t => {
+  const f = fixture(t);
+  const fullRead = f.coord.read;
+  f.coord.read = () => assert.fail('single-work ownership must not copy unrelated work');
+  try {
+    const port = createVerificationContinuationPort(f.args);
+    port.save(f.state);
+    f.coord.saveWork({ ...f.coord.readWork('work'), state: 'cancelled', stopScope: 'work' });
+    assert.throws(() => port.save(f.state), /work_execution_stopped/);
+  } finally { f.coord.read = fullRead; }
+});

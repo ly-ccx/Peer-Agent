@@ -14,6 +14,7 @@ import {
   createObjectiveService,
   createBotDirectory,
   createBotSummaryHistory,
+  createBotConversationHistory,
   createBotLifecycle,
   createBotProfileStore,
   createInputQueue,
@@ -120,8 +121,14 @@ export function registerDesktopProjectAgent({
   configurePermissions = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
-  const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
-  const messageIds = conversationStore.createHistoryProjection?.(history => history.messages.map(message => message.id));
+  const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { immutableInput: true, maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
+  const messageIds = conversationStore.createHistoryProjection?.(history => history.messages.map(message => message.id), { immutableInput: true });
+  const conversationMessages = createBotConversationHistory(conversationStore);
+  const inputFacts = conversationStore.createHistoryProjection?.(history => history.messages.filter(message =>
+    message.kind === 'agent_reply' || message.kind === 'agent_turn' || message.card === 'agent_stopped'
+  ).map(message => ({ id: message.id, role: message.role, kind: message.kind, card: message.card,
+    turnId: message.turnId, replyTo: message.replyTo, meta: { replyTo: message.meta?.replyTo },
+    userInputs: message.userInputs?.map(input => ({ inputId: input.inputId })) })), { immutableInput: true });
   const readCanonicalMessages = id => botHistory ? botHistory(id) || [] : conversationStore.getPersistedConversationHistory(id)?.messages || [];
   let host = null;
   let objectiveWatches=null;
@@ -283,6 +290,7 @@ export function registerDesktopProjectAgent({
     rootDir: dataHome,
     registry,
     readMessages: readCanonicalMessages,
+    readConversationMessages: conversationMessages || readCanonicalMessages,
     readSummaryMessages: summaryHistory,
     readSummaryMessagesBatch: ids => new Map(ids.map(id => [id, summaryHistory(id) || []])),
     readMessagesBatch: botHistory ? ids => new Map(ids.map(id => [id, botHistory(id) || []]))
@@ -378,6 +386,7 @@ export function registerDesktopProjectAgent({
     holdsLease: ownsProject,
     acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
     readMessages: readCanonicalMessages,
+    readInputFacts: inputFacts || readCanonicalMessages,
     restoreQueue: workspaceId => { applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
     recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
@@ -597,9 +606,8 @@ export function registerDesktopProjectAgent({
         }
       },
       botName: (workspaceId) => {
-        const got = directory.get(workspaceId);
-        if (!got?.ok) return '';
-        return got.profile?.displayName || got.item?.profile?.displayName || '';
+        const profile = profileStore.read(workspaceId);
+        return profile && profile.status !== 'archived' ? profile.displayName : '';
       },
       workspaceIdForConversation,
       host,

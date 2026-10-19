@@ -37,6 +37,17 @@ export function createInputQueue({
   appendMessage = null,
   onCommitted = null,
 } = {}) {
+  const inputCache = new Map();
+  let cachedBytes = 0;
+  const dropCached = key => { const row = inputCache.get(key); if (row) cachedBytes -= row.bytes; inputCache.delete(key); };
+  const inputVersion = file => {
+    const info = statSync(file, { bigint: true });
+    return { token: `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`, bytes: Number(info.size) * 2 };
+  };
+  const copyInputs = inputs => inputs.map(input => ({ ...input,
+    anchorRefs: [...input.anchorRefs], quoteRefs: [...input.quoteRefs], attachmentRefs: [...input.attachmentRefs],
+    ...(input.attachments ? { attachments: input.attachments.map(item => ({ ...item })) } : {}),
+  }));
   function root() {
     return rootDir || pathOf('projectRuntime');
   }
@@ -102,9 +113,18 @@ export function createInputQueue({
     }
   }
 
-  function readInputs(workspaceId, strict = false) {
+  function readInputs(workspaceId, strict = false, attempt = 0) {
     const file = queueFile(workspaceId);
-    if (!existsSync(file)) return [];
+    const key = `${file}:${strict}`;
+    let version;
+    try { version = inputVersion(file); }
+    catch (error) { dropCached(key); if (strict && error.code !== 'ENOENT') throw error; return []; }
+    const cached = inputCache.get(key);
+    if (cached?.version === version.token) {
+      inputCache.delete(key); inputCache.set(key, cached);
+      return copyInputs(cached.inputs);
+    }
+    dropCached(key);
     let text = '';
     try {
       text = readFileSync(file, 'utf8');
@@ -127,7 +147,19 @@ export function createInputQueue({
         // 坏行跳过，不挡住后面的输入。
       }
     }
-    return inputs;
+    let current;
+    try { current = inputVersion(file); }
+    catch (error) { if (strict && error.code !== 'ENOENT') throw error; return []; }
+    if (current.token !== version.token) {
+      if (attempt < 2) return readInputs(workspaceId, strict, attempt + 1);
+      if (strict) throw new Error('INPUT_QUEUE_CHANGED');
+      return [];
+    }
+    if (version.bytes <= 32 * 1024 * 1024) {
+      inputCache.set(key, { inputs, version: version.token, bytes: version.bytes }); cachedBytes += version.bytes;
+      while (inputCache.size > 16 || cachedBytes > 32 * 1024 * 1024) dropCached(inputCache.keys().next().value);
+    }
+    return copyInputs(inputs);
   }
 
   function readCursorState(workspaceId) {

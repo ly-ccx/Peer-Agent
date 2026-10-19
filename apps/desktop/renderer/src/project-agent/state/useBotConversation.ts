@@ -94,7 +94,7 @@ export function useBotConversation(workspaceId: string) {
     setStatus('loading');
     setActivity(null); setStopping(false); setStopError(false);
     const pager = createConversationPager({
-      read: params => clientApi.projectAgentReadConversation({ workspaceId, ...params }),
+      read: params => clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true }),
       publish: snapshot => {
         if (generationRef.current !== ticket) return;
         setMessages(snapshot.messages);

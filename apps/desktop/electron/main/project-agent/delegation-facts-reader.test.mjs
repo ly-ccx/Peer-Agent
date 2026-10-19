@@ -61,3 +61,14 @@ test('missing plans are omitted and current failure/dependency facts retain the 
   assert.equal(read('ws').sessions[0].status, 'result_ready');
   assert.deepEqual(read(''), { sessions: [] });
 });
+
+test('watch discovery uses raw metadata before UI completion hydration', () => {
+  const rows = [...Array.from({length:400},(_,i)=>plan(`foreign-${i}`,'other','other')),plan('owned','owned')];
+  const hydrated=[];
+  const read=createDelegationFactsReader({
+    conversationStore:{listConversations:()=>[{id:'owned',workspaceId:'ws'}]},
+    goalPlanStore:{listPlans(){assert.fail('UI list hydrates unrelated completed plans');},
+      listPlanMetadata:()=>rows,getPlan(id){hydrated.push(id);return rows.find(row=>row.planId===id);}},
+  });
+  assert.equal(read('ws').sessions.length,1);assert.deepEqual(hydrated,['owned']);
+});

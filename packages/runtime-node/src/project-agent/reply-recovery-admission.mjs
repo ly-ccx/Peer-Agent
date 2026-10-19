@@ -25,7 +25,8 @@ export function replyRecoveryAdmission(work, checkpoint, { limits, readCheckpoin
 export function recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows, now }) {
   const binding = workBudgetBinding(workspaceId);
   if (!binding || binding.store !== store) return;
-  for (const work of Object.values(store.read().works)) {
+  const state = typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  for (const work of Object.values(state.works)) {
     if (work.state !== 'budget_limited' || work.stopScope === 'work' || work.parentConversationId !== conversationId) continue;
     const budget = legacyBudgetMigration(work, binding.limits, now());
     if (!budget || (typeof rows === 'function' ? rows() : rows).some(row => work.sessionIds?.includes(row.sessionId)
@@ -33,6 +34,6 @@ export function recoverLegacyBudgetWorks({ store, workspaceId, conversationId, r
     let checkpoint;
     try { checkpoint = store.readCheckpoint(work.checkpointRef); } catch { continue; }
     if (!replyRecoveryAdmission(work, checkpoint, { limits: binding.limits, readCheckpoint: store.readCheckpoint }).ok) continue;
-    store.saveWork({ ...work, budget, state: 'runnable', end: 'yielded', recovery: undefined });
+    store.saveWork({ ...work, budget, state: 'runnable', end: 'yielded', recovery: undefined }, { returnState: false });
   }
 }

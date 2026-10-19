@@ -6,6 +6,6 @@ export function createSessionParentFacts(conversationStore) {
     meta: { sources: Array.isArray(message.meta?.sources) ? [...message.meta.sources] : undefined },
   }));
   return typeof conversationStore.createHistoryProjection === 'function'
-    ? conversationStore.createHistoryProjection(project)
+    ? conversationStore.createHistoryProjection(project, { immutableInput: true })
     : id => project(conversationStore.getPersistedConversationHistory?.(id));
 }

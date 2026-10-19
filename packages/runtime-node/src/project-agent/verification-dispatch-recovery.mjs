@@ -28,9 +28,11 @@ function legacyTarget(work, row, messages, unsettled, origin) {
 
 /** Read-only reconciliation, never a tool executor or a success/verification authority. */
 export function createVerificationDispatchRecovery({ store, readMessages, activeAttempts, reconcileVerification, now }) {
+  const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : readSnapshot().works[id];
   function reconcile(workId) {
     if (typeof reconcileVerification !== 'function') return;
-    const work = store.read().works[workId];
+    const work = readWork(workId);
     if (!work || ['cancelled', 'delivered', 'budget_limited', 'coalesced'].includes(work.state)) return;
     const attempts = work.budget?.attempts || {};
     const unsettled = [...(work.budget?.uncertainDispatches || []), ...Object.entries(attempts).flatMap(([attemptId, attempt]) =>
@@ -52,7 +54,7 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
         || receipt.parentConversationId !== work.parentConversationId || receipt.sessionId !== sessionId
         || typeof receipt.planId !== 'string' || !receipt.planId || typeof receipt.sourceRevision !== 'string' || !receipt.sourceRevision) continue;
       store.assertOwner();
-      const current = store.read().works[workId];
+      const current = readWork(workId);
       if (!current || ['cancelled', 'delivered', 'budget_limited'].includes(current.state) || activeAttempts()?.has(row.attemptId)) continue;
       const budget = structuredClone(current.budget);
       const present = budget.uncertainDispatches?.find(item => keyOf(item) === keyOf(row))
@@ -69,13 +71,20 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
       const remaining = budget.uncertainDispatches.length || Object.entries(budget.attempts || {}).some(([id, item]) => item.pendingTools?.length && !activeAttempts()?.has(id));
       const cleared = !remaining && current.recovery?.failureKind === 'execution_outcome_unknown';
       store.saveWork({ ...current, budget, ...(cleared ? { recovery: { ...current.recovery, failureKind: 'cancelled', retryable: false,
-        dispatchesReconciled: true, retryAt: undefined, reservationId: undefined } } : {}) });
+        dispatchesReconciled: true, retryAt: undefined, reservationId: undefined } } : {}) }, { returnState: false });
     }
   }
   return {
     reconcile,
-    reconcileAll() { for (const workId of Object.keys(store.read().works)) reconcile(workId); },
-    facts(workId) { return (store.read().works[workId]?.budget?.reconciledDispatches || []).slice(-8).map(row => ({
+    reconcileAll() {
+      for (const work of Object.values(readSnapshot().works)) {
+        const pending = [...(work.budget?.uncertainDispatches || []),
+          ...Object.entries(work.budget?.attempts || {}).flatMap(([attemptId, attempt]) =>
+            activeAttempts()?.has(attemptId) ? [] : (attempt.pendingTools || []).map(row => ({ ...row, role: attempt.role })))];
+        if (pending.some(row => VERIFICATION.has(row.capabilityId) && row.role === 'project_agent')) reconcile(work.workId);
+      }
+    },
+    facts(workId) { return (readWork(workId)?.budget?.reconciledDispatches || []).slice(-8).map(row => ({
       toolCallId: row.toolCallId, sessionId: row.sessionId, outcome: row.outcome, verdict: 'unconfirmed', at: row.at,
     })); },
   };

@@ -89,6 +89,7 @@ export function createBotDirectory({
   rootDir = null,
   registry = null,
   readMessages = () => [],
+  readConversationMessages = null,
   readMessagesBatch = null,
   readSummaryMessages = null,
   readSummaryMessagesBatch = null,
@@ -260,15 +261,34 @@ export function createBotDirectory({
     };
   }
 
-  function readConversation(workspaceId, { limit = 50, before = null, kinds = null, latest = false } = {}) {
+  function readConversation(workspaceId, { limit = 50, before = null, kinds = null, latest = false, presentationOnly = false, processFor = null } = {}) {
     const profile = profiles.read(workspaceId);
     if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
     const allowed = Array.isArray(kinds) ? new Set(kinds.filter((kind) => typeof kind === 'string')) : null;
-    const filtered = messagesOf(profile).filter((message) => {
+    if (processFor !== null && (typeof processFor !== 'string' || !processFor.trim() || processFor.length > 500 || presentationOnly)) return fail('INVALID_INPUT');
+    const cards = readCards(workspaceId) || [];
+    let processMessageId = null;
+    let filtered = (presentationOnly && typeof readConversationMessages === 'function'
+      ? readConversationMessages(profile.agentConversationId) || [] : messagesOf(profile)).filter((message) => {
       if (allowed) return allowed.has(messageKind(message));
       // agent_turn stays available so the client can derive disposition marks, then hide the turn.
       return isVisibleBotMessage(message) || messageKind(message) === 'agent_turn';
     });
+    if (processFor) {
+      const card = cards.find(card => card.cardId === processFor);
+      const target = filtered.find(message => message.id === processFor && message.kind !== 'agent_turn')
+        || (card?.refs?.turnId ? filtered.find(message => message.turnId === card.refs.turnId && message.card === card.kind) : null)
+        || [...filtered].reverse().find(message => message.turnId === processFor && message.kind !== 'agent_turn')
+        || filtered.find(message => message.id === processFor);
+      let turn = target?.turnId ? filtered.find(message => message.id === target.turnId && message.kind === 'agent_turn') : null;
+      if (target?.kind === 'agent_reply' && !target.turnId) for (const message of filtered) {
+        if (message.id === target.id) break;
+        if (message.kind === 'user_input') turn = null;
+        else if (message.kind === 'agent_turn') turn = message;
+      }
+      filtered = filtered.filter(message => message === target || message === turn);
+      processMessageId = target?.id || null;
+    }
     const size = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 50;
     let start = 0;
     let end = filtered.length;
@@ -278,7 +298,6 @@ export function createBotDirectory({
       else start = index >= 0 ? index + 1 : 0;
     }
     if (latest) start = Math.max(0, end - size);
-    const cards = readCards(workspaceId) || [];
     const byCard = new Map(cards.map((card) => [card.cardId, card]));
     const byReply = new Map();
     for (const card of cards) {
@@ -307,19 +326,20 @@ export function createBotDirectory({
     }));
     const nextCursor = latest ? (start > 0 ? page[0]?.id ?? null : null)
       : (start + size < filtered.length ? page[page.length - 1]?.id ?? null : null);
-    if (!before) {
+    if (!before && !processFor) {
       const present = new Set(filtered.flatMap((message) => (message.cards || []).map((card) => card.cardId)));
       for (const card of cards) if (!card.refs?.replyMessageId && !present.has(card.cardId) && card.resolvedState !== 'resolved') {
         page.push({ id: card.cardId, role: 'assistant', kind: 'system_card', content: '', cards: [card] });
       }
     }
-    const familiarizeOffer = (before == null || before === '') && !profile.familiarize
+    const familiarizeOffer = !processFor && (before == null || before === '') && !profile.familiarize
       ? FAMILIARIZE_OFFER
       : null;
     return {
       ok: true,
       messages: page,
       nextCursor,
+      ...(processFor ? { processMessageId } : {}),
       ...(familiarizeOffer ? { familiarizeOffer } : {}),
     };
   }

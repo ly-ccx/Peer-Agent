@@ -28,7 +28,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
   const messageFacts = typeof conversationStore.createHistoryProjection === 'function'
     ? conversationStore.createHistoryProjection(history => history.messages.map(message => message.kind === 'agent_turn'
       ? { id: message.id, kind: message.kind, meta: message.meta, turnKind: message.turnKind }
-      : (({ attachments, ...fact }) => fact)(message)))
+      : (({ attachments, ...fact }) => fact)(message)), { immutableInput: true })
     : id => conversationStore.getPersistedConversationHistory(id)?.messages || [];
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {

@@ -2781,7 +2781,7 @@ export function createGoalPlanStore({
     return plan ? { ...meta, status: plan.status } : { ...meta, status: 'executing' };
   }
 
-  function listPlans() {
+  function readPlanMetadata() {
     let stat = null;
     try {
       stat = statSync(indexFile);
@@ -2794,7 +2794,7 @@ export function createGoalPlanStore({
       listPlansCache.mtimeMs === stat.mtimeMs &&
       listPlansCache.size === stat.size
     ) {
-      return listPlansCache.plans.map(projectUiMeta);
+      return listPlansCache.plans;
     }
     const plans = readIndex()
       .map(normalizePlan)
@@ -2807,8 +2807,24 @@ export function createGoalPlanStore({
       size: stat.size,
       plans,
     };
-    return plans.map(projectUiMeta);
+    return plans;
   }
+
+  // Discovery only; current plan state and completion still go through getPlan.
+  let planMetadataCache = null;
+  function listPlanMetadata() {
+    let info;
+    try { info = statSync(indexFile, { bigint: true }); }
+    catch { planMetadataCache = null; return []; }
+    const version = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+    if (planMetadataCache?.version === version) return structuredClone(planMetadataCache.plans);
+    const plans = readJsonl(indexFile).map(normalizePlan).filter(meta => meta && activeMeta(meta));
+    const next = statSync(indexFile, { bigint: true });
+    if (`${next.dev}:${next.ino}:${next.size}:${next.mtimeNs}:${next.ctimeNs}` !== version) throw new Error('plan_metadata_read_changed');
+    planMetadataCache = Buffer.byteLength(JSON.stringify(plans)) <= 8 * 1024 * 1024 ? { version, plans } : null;
+    return structuredClone(plans);
+  }
+  function listPlans() { return readPlanMetadata().map(projectUiMeta); }
 
   function listPlansByConversation(conversationId) {
     const normalizedConversationId = normalizeConversationId(conversationId);
@@ -4837,6 +4853,7 @@ export function createGoalPlanStore({
   return {
     getStoreDir: () => storeDir,
     listPlans,
+    listPlanMetadata,
     listPlansByConversation,
     countAwaitingApprovalsByConversation,
     listPlanDetails,

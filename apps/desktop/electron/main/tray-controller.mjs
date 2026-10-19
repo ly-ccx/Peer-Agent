@@ -17,6 +17,8 @@ export const TRAY_SUBSCRIPTION_REFRESH_DELAY_MS = 5_000;
  * 指纹未变时跳过 listConversations/listRuns 等同步加载。
  */
 export const TRAY_MENU_INPUT_CACHE_TTL_MS = 5_000;
+/** Bound presentation-only badge work without postponing it during event storms. */
+export const TRAY_BADGE_REFRESH_DELAY_MS = 100;
 
 /** 菜单栏角标。开关关闭或没有「需要你」时为空，调用方据此保持 beta.1 不写 title。 */
 export function trayBadgeTitle(count) {
@@ -314,6 +316,7 @@ export function createTrayController({
   let tray = null;
   let destroyed = false;
   let refreshTimer = null;
+  let badgeRefreshTimer = null;
 
   const boundHandlers = {
     onOpenConversation: (payload) => handlers.onOpenConversation?.(payload),
@@ -405,11 +408,20 @@ export function createTrayController({
   }
 
   function refreshBadge() {
-    updateBadge();
+    if (destroyed || !tray || badgeRefreshTimer !== null) return;
+    badgeRefreshTimer = setTimeout(() => {
+      badgeRefreshTimer = null;
+      updateBadge();
+    }, TRAY_BADGE_REFRESH_DELAY_MS);
+    badgeRefreshTimer.unref?.();
   }
 
   async function refresh({ force = false } = {}) {
     if (destroyed || !tray) return;
+    if (badgeRefreshTimer !== null) {
+      clearTimeout(badgeRefreshTimer);
+      badgeRefreshTimer = null;
+    }
     updateBadge();
     try {
       const inputs = await loadTrayMenuInputs({ force });
@@ -478,6 +490,10 @@ export function createTrayController({
     scheduleRefresh,
     destroy: () => {
       destroyed = true;
+      if (badgeRefreshTimer !== null) {
+        clearTimeout(badgeRefreshTimer);
+        badgeRefreshTimer = null;
+      }
       if (refreshTimer) {
         clearTimeout(refreshTimer);
         refreshTimer = null;

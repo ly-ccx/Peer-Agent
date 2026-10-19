@@ -152,3 +152,22 @@ test('a streaming details identity hands off to its canonical reply rather than 
     assert.equal(row.message.id, reply.id);
   }
 });
+
+test('targeted detail pages retain exact-turn interrupted Activity without borrowing another turn', async () => {
+  const { replyDetailsFromPage } = await import('./botActivityState.ts');
+  const messages = [
+    { id: 't', kind: 'agent_turn', turnId: 't', rounds: [{ toolCalls: [{ name: 'read_file', input: { path: 'README.md' } }] }] },
+    { id: 'stopped', kind: 'system_card', turnId: 't', cards: [{ cardId: 'stop', kind: 'agent_stopped' }] },
+  ];
+  for (const phase of ['stopped', 'error'] as const) {
+    const interrupted = { ...activity, phase };
+    const row = replyDetailsFromPage('projected-stop', { ok: true, processMessageId: 'stopped', messages, activity: interrupted });
+    assert.equal(row?.type, 'message');if (row?.type !== 'message') throw Error('detail missing');
+    assert.equal(row.activity, interrupted);
+    assert.equal(row.processRounds?.[0].toolCalls[0].name, 'read_file');
+  }
+  const other = replyDetailsFromPage('stopped', { ok: true, messages, activity: { ...activity, turnId: 'other', phase: 'stopped' } });
+  assert.equal(other?.type, 'message');if (other?.type !== 'message') throw Error('detail missing');
+  assert.equal(other.activity, undefined);
+  assert.equal(replyDetailsFromPage('stopped', { ok: false, messages, activity }), undefined);
+});

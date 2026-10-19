@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { openSync, closeSync, fsyncSync, writeSync, readSync, fstatSync, readFileSync, mkdirSync, renameSync, writeFileSync, existsSync } from 'node:fs';
+import { openSync, closeSync, fsyncSync, writeSync, readSync, fstatSync, readFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { admitCoordinationDecision } from './coordination-kernel.mjs';
 import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
-import { createRecoveryCheckpointView } from './recovery-checkpoint-view.mjs';
+import { createRecoveryCheckpointView, createContinuationCheckpointView } from './recovery-checkpoint-view.mjs';
 
 export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString(), onJournalRead }) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)) throw new Error('invalid_workspace');
@@ -14,6 +14,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   const epoch = leaseEpoch();
   const reader = createCoordinationJournalReader({ file, onRead: onJournalRead });
   const readRecoveryCheckpoint = createRecoveryCheckpointView(path.join(dir, 'checkpoints'));
+  const readContinuationCheckpoint = createContinuationCheckpointView(path.join(dir, 'checkpoints'));
   function assertOwner() {
     if (holdsLease() !== true || !epoch || leaseEpoch() !== epoch) throw new Error('coordination_lease_lost');
   }
@@ -49,26 +50,20 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     const appendFd = openSync(file, 'a', 0o600);
     try { writeSync(appendFd, '\n'); fsyncSync(appendFd); } finally { closeSync(appendFd); }
   }
-  function append(entry) {
+  function append(entry, options = {}) {
     assertOwner();
-    const state = read();
-    const record = { ...entry, schemaVersion: 1, epoch, revision: state.revision + 1, at: now() };
-    const next = reduceCoordination(state, record);
-    mkdirSync(dir, { recursive: true });
-    assertOwner();
-    const fd = openSync(file, 'a', 0o600);
-    try { writeSync(fd, JSON.stringify(record) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
-    const directory = openSync(dir, 'r');
-    try { fsyncSync(directory); } finally { closeSync(directory); }
-    reader.committed(next);
-    // A failed/replaced snapshot cannot lose truth: read() always replays the journal.
-    const snapshot = path.join(dir, 'coordination-snapshot.json');
-    try { writeFileSync(snapshot + '.tmp', JSON.stringify(next), { mode: 0o600 }); renameSync(snapshot + '.tmp', snapshot); } catch { /* rebuildable cache */ }
-    return next;
+    return reader.commitEntry(() => ({ ...entry, schemaVersion: 1, epoch, at: now() }), record => {
+      mkdirSync(dir, { recursive: true });
+      assertOwner();
+      const fd = openSync(file, 'a', 0o600);
+      try { writeSync(fd, JSON.stringify(record) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
+      const directory = openSync(dir, 'r');
+      try { fsyncSync(directory); } finally { closeSync(directory); }
+    }, options);
   }
   return {
-    read, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
-    append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint,
+    read, readSnapshot: reader.readSnapshot, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
+    append, assertOwner, recover, journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
     coalesceWorks(owner, retired) {
       const state = read();
       const stamp = work => ({ ...work, revision: (state.works[work.workId]?.revision || 0) + 1, updatedAt: now() });
@@ -116,9 +111,9 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     },
     transfer(events) { return append({ kind: 'transfer', events }); },
     handled(eventIds) { return append({ kind: 'handled', eventIds }); },
-    pendingEvents() { return Object.values(read().events).filter(row => !row.handled).map(row => row.event); },
-    saveWork(work) { const old = reader.readWork(work.workId); return append({ kind: 'work', work: { ...old, ...work,
-      revision: (old?.revision || 0) + 1, updatedAt: now() } }); },
+    pendingEvents() { return structuredClone(Object.values(reader.readSnapshot().events).filter(row => !row.handled).map(row => row.event)); },
+    saveWork(work, options = {}) { const old = reader.readWork(work.workId); return append({ kind: 'work', work: { ...old, ...work,
+      revision: (old?.revision || 0) + 1, updatedAt: now() } }, options); },
   };
 }
 function reduceEmpty() { return { revision: 0, events: {}, works: {}, deliveries: {} }; }

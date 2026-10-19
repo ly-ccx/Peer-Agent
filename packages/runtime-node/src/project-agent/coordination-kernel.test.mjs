@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { reduceCoordination } from './work-coordination.mjs';
 import { admitCoordinationDecision, executionBindingCurrent } from './coordination-kernel.mjs';
 const host = { workspaceId: 'w', parentConversationId: 'parent', holdsLease: true, currentInputIds: ['a', 'b', 'correction'], eventIds: ['event'], materialRefs: ['image:a'], now: '2026-10-10T00:00:00Z' };
 const command = (id, workId, inputId, action = 'parallel', expectedRevision = 0) => ({ operationId: id, workId, sourceInputIds: [inputId], sourceEventIds: [], action, expectedRevision, reason: 'user goal' });
@@ -58,4 +59,13 @@ test('transition replay has ordered phases and rejects stale execution; legacy r
     assert.equal(executionBindingCurrent(w.store.read().mandates.A, transition, binding), false);
     assert.equal(w.reopen().read().transitions.one.phase, 'ready');
   } finally { w.close(); }
+});
+
+test('transition patches do not retain caller-owned handoff objects', () => {
+  const before = { revision: 1, events: {}, works: {}, deliveries: {}, transitions: { one: { phase: 'recorded' } } };
+  const patch = { phase: 'ready', handoff: { result: 'original' } };
+  const next = reduceCoordination(before, { kind: 'coordination_transition', revision: 2, operationId: 'one', expectedPhase: 'recorded', patch });
+  patch.handoff.result = 'mutated';
+  assert.equal(next.transitions.one.handoff.result, 'original');
+  assert.equal(before.transitions.one.phase, 'recorded');
 });

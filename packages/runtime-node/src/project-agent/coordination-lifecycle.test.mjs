@@ -50,10 +50,21 @@ test('parallel work survives a sibling cancellation and cancellation events cann
   const guardA=createWorkBudgetGuard(profile(a.sessionId)), guardB=createWorkBudgetGuard(profile(b.sessionId));
   const result=await f.lifecycle.coordinate({ action:'cancel',reason:'stop A',sessionId:a.sessionId,expectedRevision:1 },f.context('u2','cancel'));
   assert.equal(result.phase,'completed'); assert.equal(f.sessions.get(a.sessionId).status,'cancelled');
-  assert.throws(()=>guardA.beforeTool(),/execution_revision_stale/); guardB.beforeTool();
+  const fullRead = f.store.read;
+  f.store.read = () => assert.fail('binding checks must not clone unrelated work');
+  try { assert.throws(()=>guardA.beforeTool(),/execution_revision_stale/); guardB.beforeTool(); }
+  finally { f.store.read = fullRead; }
   f.store.transfer([{eventId:'e',sessionId:a.sessionId,kind:'cancelled'}]);
   const wake = await f.lifecycle.coordinate({action:'parallel',reason:'revive',task:f.task('u1')},f.context('', 'wake',{currentInputAnchors:[],events:[{eventId:'e',sessionId:a.sessionId}]}));
   assert.equal(wake.error,'event_out_of_scope'); assert.equal(f.spawns.length,2);
+});
+
+test('one synchronous coordination decision reads its current parent messages once', async t => {
+  const f = fixture(t); let reads = 0;
+  const lifecycle = createCoordinationLifecycle({ ...f.ports, readMessages: id => { reads++; return f.ports.readMessages(id); } });
+  const result = await lifecycle.coordinate({ action: 'parallel', reason: 'inspect', task: f.task('u1') }, f.context('u1', 'once'));
+  assert.equal(result.ok, true); assert.equal(reads, 1);
+  assert.equal(f.spawns.length, 1);
 });
 
 test('query discovers an owned legacy session without a revision, mutation, mandate or execution', async t => {

@@ -55,6 +55,16 @@ function deliveryText(value) {
     .replace(/(?:在|通过)(?:应用)?(?:界面|任务卡片)(?:中|上)?(?:逐个|分别)?(?:确认(?:结果)?|签收(?:任务|结果)?|合回(?:改动)?|批准(?:权限|任务)?)/g, '');
 }
 
+// A data-file field row is not an application header. Only mask explicit
+// CSV/TSV syntax; any remaining header or other visual cue keeps the UI gate.
+function withoutDataHeaders(value) {
+  return value.split(/\n\s*\n/).map(line => {
+    if (!/\b(?:csv|tsv|rendercsv)\b/i.test(line)) return line;
+    return line.replace(/\b(?:csv|tsv)\s+(?:file\s+)?header\b/gi, 'data fields')
+      .replace(/\bheader\b\s*[:：=]?\s*(?=(?:[`\p{Quotation_Mark}\p{Ps}]\s*)*[a-z_][\w-]*(?:\s*,\s*[a-z_][\w-]*)+)/giu, 'fields ');
+  }).join('\n');
+}
+
 function collectMatches(haystack, tokens, mode) {
   const matched = [];
   for (const token of tokens) {
@@ -96,7 +106,7 @@ export function classifyUiDeliveryIntake(input = {}) {
   ].filter((value) => typeof value === 'string');
   const haystack = parts.map(deliveryText).join('\n').toLowerCase();
 
-  const surface = [...collectMatches(haystack, UI_SURFACE_ZH, 'zh'), ...collectMatches(haystack, UI_SURFACE_EN, 'en')];
+  let surface = [...collectMatches(haystack, UI_SURFACE_ZH, 'zh'), ...collectMatches(haystack, UI_SURFACE_EN, 'en')];
   const renderer = [
     ...collectMatches(haystack, RENDERER_HINTS_ZH, 'zh'),
     ...collectMatches(haystack, RENDERER_HINTS_EN, 'en'),
@@ -109,6 +119,10 @@ export function classifyUiDeliveryIntake(input = {}) {
   ];
   const meta = [...collectMatches(haystack, META_VERIFICATION_ZH, 'zh'), ...collectMatches(haystack, META_VERIFICATION_EN, 'en')];
   const negative = [...collectMatches(haystack, NEGATIVE_HINTS_ZH, 'zh'), ...collectMatches(haystack, NEGATIVE_HINTS_EN, 'en')];
+
+  if (surface.length === 1 && surface[0] === 'header' && renderer.length === 0
+    && preview.length === 0 && visual.length === 0
+    && collectMatches(withoutDataHeaders(haystack), ['header'], 'en').length === 0) surface = [];
 
   // 元目标护栏：若“截图/视觉验证”类词汇只与验证机制词汇共现，而无任何
   // UI 表层/渲染层/预览词汇，则视为在造验证机制本身，不武装。

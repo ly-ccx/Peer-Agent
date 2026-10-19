@@ -6,7 +6,7 @@ import { createConversationStore } from '@peer-agent/conversation-store';
 import { createGoalPlanStore } from '@peer-agent/runtime-node';
 
 export const EXECUTION_HISTORY_SCALE = Object.freeze({ plans: 1100, sessions: 8, parentBytes: 9_500_000,
-  childBytes: 46_300_000, journalBytes: 185_000_000, failures: 32 });
+  childBytes: 46_300_000, journalBytes: 185_000_000, failures: 32, recoveryWorks: 200, deliveredWorks: 100 });
 
 /** Synthetic historical load only. Never seeds results for the new real task. */
 export function seedExecutionHistory({ home, bot, scale = EXECUTION_HISTORY_SCALE }) {
@@ -17,6 +17,8 @@ export function seedExecutionHistory({ home, bot, scale = EXECUTION_HISTORY_SCAL
   const conversations = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const plans = createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') });
   const at = '2026-01-01T00:00:00.000Z', sessions = [];
+  const workCount = scale.recoveryWorks ?? scale.sessions, deliveredCount = scale.deliveredWorks ?? 0;
+  assert.ok(Number.isInteger(workCount) && workCount >= scale.sessions && Number.isInteger(deliveredCount) && deliveredCount >= 0 && deliveredCount <= workCount);
   const model = { providerId: 'synthetic-history-only', modelId: 'historical-load', modelProviderId: 'historical-load', family: 'synthetic' };
   for (let i = 0; i < scale.sessions; i++) {
     const child = conversations.createConversation({ title: `Synthetic historical task ${i}`, role: 'work_session', workspaceId: bot.workspaceId, workspacePath: bot.path });
@@ -49,7 +51,7 @@ export function seedExecutionHistory({ home, bot, scale = EXECUTION_HISTORY_SCAL
   const history = [], narration = 'Synthetic historical progress paragraph. This record is presentation load, not an instruction.';
   const internal = 'synthetic internal historical context '.repeat(1000);
   for (let i = 0; i < Math.ceil(scale.parentBytes / internal.length); i++) {
-    history.push({ id: `scale-turn-${i}`, kind: 'agent_turn', role: 'assistant', turnKind: 'user', createdAt: at,
+    history.push({ id: `scale-turn-${i}`, turnId: `scale-turn-${i}`, kind: 'agent_turn', role: 'assistant', turnKind: 'user', createdAt: at,
       rounds: [{ text: internal, toolCalls: [] }], publicUpdates: [{ id: `scale-public-${i}`, text: narration }],
       meta: { workId: `scale-work-${i % scale.sessions}` } });
     if (i < scale.failures) history.push({ id: `scale-error-${i}`, kind: 'system_card', role: 'assistant', card: 'agent_unavailable',
@@ -60,21 +62,28 @@ export function seedExecutionHistory({ home, bot, scale = EXECUTION_HISTORY_SCAL
   conversations.replaceMessages(bot.conversationId, history);
   const runtime = path.join(home, 'project-runtime', bot.workspaceId);
   mkdirSync(path.join(runtime, 'checkpoints'), { recursive: true });
-  const refs = Array.from({ length: scale.sessions }, (_, i) => (i + 1).toString(16).padStart(64, '0') + '.json');
+  const refs = Array.from({ length: workCount }, (_, i) => (i + 1).toString(16).padStart(64, '0') + '.json');
   for (const ref of refs) writeFileSync(path.join(runtime, 'checkpoints', ref), JSON.stringify({ synthetic: true,
     job: { workId: 'historical' }, outcome: { failed: true }, historicalContext: internal.repeat(40) }));
   const fd = openSync(path.join(runtime, 'coordination.jsonl'), 'w');
   let bytes = 0, revision = 0;
   try {
-    while (bytes < scale.journalBytes) {
-      const i = revision % scale.sessions;
+    while (bytes < scale.journalBytes || revision < workCount) {
+      const i = revision % workCount;
       const record = { schemaVersion: 1, kind: 'work', epoch: 'synthetic-history', revision: ++revision, at,
         work: { workId: `scale-work-${i}`, workspaceId: bot.workspaceId, parentConversationId: bot.conversationId,
-          state: 'paused', stopScope: 'work', checkpointRef: refs[i], sessionIds: [sessions[i].sessionId], historicalPayload: internal } };
+          state: i < deliveredCount ? 'delivered' : 'paused', stopScope: 'work', checkpointRef: refs[i], sessionIds: [sessions[i % sessions.length].sessionId], historicalPayload: internal } };
       bytes += writeSync(fd, JSON.stringify(record) + '\n');
     }
+    for (let i = 0; i < deliveredCount; i++) {
+      const messageId = `scale-delivery-${i}`;
+      for (const receipt of [{ kind: 'reply_prepared', message: { id: messageId, synthetic: true, meta: { workId: `scale-work-${i}` } } },
+        { kind: 'reply_delivered', messageId }]) {
+        bytes += writeSync(fd, JSON.stringify({ schemaVersion: 1, ...receipt, epoch: 'synthetic-history', revision: ++revision, at }) + '\n');
+      }
+    }
   } finally { closeSync(fd); }
-  return { synthetic: true, ...scale, actualPlans: metas.length, parentRows: history.length,
+  return { synthetic: true, ...scale, recoveryWorks: workCount, deliveredWorks: deliveredCount, actualPlans: metas.length, parentRows: history.length,
     parentBytes: statSync(path.join(home, 'conversations', bot.conversationId + '.jsonl')).size,
     childBytes: statSync(path.join(home, 'conversations', large.conversationId + '.jsonl')).size,
     journalBytes: bytes, sessions };

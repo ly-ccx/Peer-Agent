@@ -1,5 +1,6 @@
 /** Host events become lightweight conversation activity, never assistant claims. */
 export function createAgentEventPublisher({ inbox, conversationStore, findSession, onChanged = () => {} }) {
+  const messageIds = conversationStore.createHistoryProjection?.(history => history.messages.map(row => row.id), { immutableInput: true });
   return (workspaceId, events) => {
     const result = inbox.append(workspaceId, events);
     for (const event of events || []) {
@@ -10,12 +11,13 @@ export function createAgentEventPublisher({ inbox, conversationStore, findSessio
       if (!state) continue;
       const id = ['queued', 'started', 'ended', 'cancelled'].includes(state)
         ? `agent-activity:${origin.sessionId}:${state}` : `agent-activity:${event.eventId}`;
-      const history = conversationStore.getPersistedConversationHistory(origin.parentConversationId);
-      if (!history || history.messages.some(row => row.id === id)) continue;
+      const ids = messageIds ? messageIds(origin.parentConversationId)
+        : conversationStore.getPersistedConversationHistory(origin.parentConversationId)?.messages.map(row => row.id);
+      if (!ids || ids.includes(id)) continue;
       const stored = conversationStore.appendMessage(origin.parentConversationId, {
         id, role: 'system', kind: 'agent_activity', content: '', createdAt: event.at || new Date().toISOString(),
         agentActivity: { eventId: event.eventId, sessionId: origin.sessionId, name: plan.title || 'Agent', state },
-      });
+      }, { returnMessages: false });
       if (!stored) throw new Error('agent_activity_not_stored');
       onChanged(workspaceId);
     }

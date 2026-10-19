@@ -86,6 +86,22 @@ test('diagnostic read leaves a corrupt actual project registry untouched', async
   } finally { env.dispose(); }
 });
 
+test('notification naming reads only the current profile, independently of corrupt conversation facts', () => {
+  const env = harness({ holdsLease: () => false });
+  try {
+    const file = path.join(env.home, 'projects', env.bot.workspaceId, 'profile.json');
+    const profile = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(path.join(env.home, 'conversations', profile.agentConversationId + '.jsonl'), '{broken\n');
+    assert.equal(env.api.botName(env.bot.workspaceId), profile.displayName);
+    profile.displayName = '最新档案名字'; writeFileSync(file, JSON.stringify(profile));
+    assert.equal(env.api.botName(env.bot.workspaceId), '最新档案名字');
+    profile.status = 'archived'; writeFileSync(file, JSON.stringify(profile));
+    assert.equal(env.api.botName(env.bot.workspaceId), '');
+    rmSync(file); assert.equal(env.api.botName(env.bot.workspaceId), '');
+    assert.equal(env.api.botName('../outside'), '');
+  } finally { env.dispose(); }
+});
+
 test('200-bot maintenance uses a fresh runtime policy port and still revokes all runners on classic switch', async () => {
   const policy={projectAgent:{shell:'bots'},memory:{enabled:true}};
   const env=harness({projectCount:200,settings:{projectAgent:{shell:'bots'}},readRuntimePolicy:()=>policy});

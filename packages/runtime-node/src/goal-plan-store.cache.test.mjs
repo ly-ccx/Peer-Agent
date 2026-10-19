@@ -196,3 +196,16 @@ test('command evidence survives reload and cannot be supplied or overwritten by 
     assert.equal(long.text.length, 4000); assert.equal(long.truncated, true);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('raw plan metadata does not hydrate UI completion and observes same-size external rewrites', t => {
+  const {dir,store}=createTempStore();t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const file=path.join(dir,'index.jsonl');
+  const meta={planId:'metadata-only',conversationId:'first',status:'completed',updatedAt:'2026-10-19T00:00:00Z'};
+  writeFileSync(file,JSON.stringify(meta)+'\n');
+  writeFileSync(path.join(dir,'metadata-only.json'),'{broken');
+  const first=store.listPlanMetadata();assert.equal(first[0].status,'completed');
+  first[0].conversationId='forged';assert.equal(store.listPlanMetadata()[0].conversationId,'first');
+  const before=statSync(file);meta.conversationId='other';writeFileSync(file,JSON.stringify(meta)+'\n');utimesSync(file,before.atime,before.mtime);
+  assert.equal(store.listPlanMetadata()[0].conversationId,'other');
+  rmSync(file);assert.deepEqual(store.listPlanMetadata(),[]);
+});

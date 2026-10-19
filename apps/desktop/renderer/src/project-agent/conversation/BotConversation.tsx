@@ -7,6 +7,7 @@ import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
 import { quoteRefsFor } from '../state/botConversationState';
 import { replyDetailsRow } from '../state/botActivityState';
+import { useReplyDetailsRow } from '../state/useReplyDetailsRow';
 import { replyAnchorsForMessages } from '../state/replyReferenceState';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
@@ -106,9 +107,7 @@ export function BotConversation({
   const runningWork = background.rows.find(row => ['starting', 'running', 'verifying'].includes(row.status ?? ''));
   const detailsRow = useMemo(() => replyDetailsRow(replyDetailsId, conversation.rows, conversation.messages),
     [replyDetailsId, conversation.rows, conversation.messages]);
-  useEffect(() => {
-    if (replyDetailsId && !detailsRow) void conversation.locateMessage(replyDetailsId);
-  }, [replyDetailsId, detailsRow, conversation.locateMessage]);
+  const details = useReplyDetailsRow(workspaceId, replyDetailsId, detailsRow);
   const detailsKey = detailsRow?.type === 'activity' ? detailsRow.activity.turnId
     : detailsRow?.type === 'message' ? detailsRow.message.turnId ?? detailsRow.message.id : replyDetailsId ?? '';
   const [detailsOpen, setDetailsOpen] = useState<Record<string, Record<string, boolean>>>({});
@@ -133,7 +132,7 @@ export function BotConversation({
     <div className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
     } as CSSProperties}>
-      {replyDetailsId && replyDetailsTarget ? createPortal(<ReplyDetails key={replyDetailsId} row={detailsRow}
+      {replyDetailsId && replyDetailsTarget ? createPortal(<ReplyDetails key={replyDetailsId} row={details.row} loading={details.loading}
         workspaceId={workspaceId} botName={label} workIndex={workIndex} i18n={i18n}
         disclosure={detailsDisclosure}
         onOpenEvidence={openEvidence} onOpenWork={onLocateSession} />, replyDetailsTarget) : null}

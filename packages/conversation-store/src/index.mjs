@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
 import { createHistoryProjectionReader } from './history-projection-reader.mjs';
+import { createHistorySourceReader } from './history-source-reader.mjs';
 import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
@@ -500,6 +501,7 @@ export function createConversationStore(options = {}) {
   if (typeof storeDir !== 'string' || !storeDir.trim()) {
     throw new TypeError('createConversationStore(options): storeDir must be a non-empty string.');
   }
+  const historySources = createHistorySourceReader({ load: readPersistedHistoryFiles });
   const usageLogFile = options.usageLogFile === undefined
     ? path.join(path.dirname(storeDir), 'usage', 'requests.jsonl')
     : options.usageLogFile;
@@ -1133,21 +1135,22 @@ export function createConversationStore(options = {}) {
       try { return conversationFileVersion(file); }
       catch (error) { if (error.code === 'ENOENT') return 'missing'; throw error; }
     };
-    return createHistoryProjectionReader({ ...options, project,
-      describe(id) {
-        const token = fileVersion(indexFile);
-        if (token !== metadataVersion) {
-          const next = new Map(readIndex().map(row => [row.id, row]));
-          if (fileVersion(indexFile) !== token) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED'), { code: 'BACKGROUND_VERSION_CHANGED' });
-          metadata = next; metadataVersion = token;
-        }
-        const meta = metadata.get(id);
-        if (!meta) return null;
-        const historyFile = convFile(id), sidecarFile = streamPatchFile(id);
-        return { conversationId: id, contentRevision: meta.contentRevision, createdAt: meta.createdAt, historyFile, sidecarFile,
-          version: JSON.stringify([meta.contentRevision, meta.createdAt, fileVersion(historyFile), fileVersion(sidecarFile)]) };
-      },
-      load: readPersistedHistoryFiles,
+    const describe = id => {
+      const token = fileVersion(indexFile);
+      if (token !== metadataVersion) {
+        const next = new Map(readIndex().map(row => [row.id, row]));
+        if (fileVersion(indexFile) !== token) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED'), { code: 'BACKGROUND_VERSION_CHANGED' });
+        metadata = next; metadataVersion = token;
+      }
+      const meta = metadata.get(id);
+      if (!meta) return null;
+      const historyFile = convFile(id), sidecarFile = streamPatchFile(id);
+      return { conversationId: id, contentRevision: meta.contentRevision, createdAt: meta.createdAt, historyFile, sidecarFile,
+        version: JSON.stringify([meta.contentRevision, meta.createdAt, fileVersion(historyFile), fileVersion(sidecarFile)]) };
+    };
+    return createHistoryProjectionReader({ ...options, project, describe,
+      load: description => historySources(description, { immutableInput: options.immutableInput === true,
+        isCurrent: () => describe(description.conversationId)?.version === description.version }),
     });
   }
 

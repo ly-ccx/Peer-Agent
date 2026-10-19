@@ -11,7 +11,7 @@ export function projectSessionConversationFacts(history) {
 }
 
 export function createSessionConversationFacts(conversationStore) {
-  if (typeof conversationStore.createHistoryProjection === 'function') return conversationStore.createHistoryProjection(projectSessionConversationFacts);
+  if (typeof conversationStore.createHistoryProjection === 'function') return conversationStore.createHistoryProjection(projectSessionConversationFacts, { immutableInput: true });
   return id => projectSessionConversationFacts({ ...conversationStore.getPersistedConversationHistory?.(id),
     createdAt: conversationStore.getConversation?.(id)?.createdAt });
 }
