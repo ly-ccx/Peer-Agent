@@ -184,6 +184,13 @@ test('intake-ui/CSV field headers do not turn a command-only Node contract into 
     'renderCsv：接收 {category,count,total}；输出 header category,count,total，每行以换行结尾；字段内引号双写。',
     'Parse the CSV header and aggregate finite numeric rows.',
     'Write a TSV file header with name and amount fields.',
+    'renderCsv(groups)：接受 {category,count,total}；按 category 排序且不修改入参。输出以 header `category,count,total` 开头，其后每行以换行结尾；字段内含双引号时按 CSV 规则双写转义。',
+    'renderCsv outputs header "category,count,total" followed by rows.',
+    "renderCsv outputs header 'category,count,total' followed by rows.",
+    'renderCsv 输出 header：`category,count,total`，保留末尾换行。',
+    'renderCsv sets header=`category,count,total`.',
+    'renderCsv contract:\nOutput header:\n`category,count,total` then rows.',
+    'renderCsv contract:\nOutput header:\n```\ncategory,count,total\n```',
   ];
   for (const goal of contracts) {
     const input = { title: '修复 src 三模块使 node --test 全绿', goal,
@@ -205,5 +212,10 @@ test('intake-ui/CSV terminology cannot exempt a real header, component, appearan
     'renderCsv outputs header category,count,total; adjust the CSS for the header.',
     'Render a CSV header in the preview',
     '输出 header category,count,total',
+    'renderCsv outputs header `category,count,total`.\nFix the application header.',
+    'renderCsv outputs header "category,count,total"; adjust the CSS header.',
+    'Display a CSV header `category,count,total` component.',
+    '输出 header `category,count,total`',
+    'renderCsv outputs header `category,count,total`.\n\nFix the application header.',
   ]) assert.equal(classifyUiDeliveryIntake({ goal }).required, true, goal);
 });
