@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import { attachBotProcesses, isActivityRunning, replyDetailsRow } from './botActivityState';
-import { conversationRows, normalizeBotMessage, type BotChatMessage, type ConversationDisplayRow } from './botConversationState';
+import { isActivityRunning, replyDetailsFromPage } from './botActivityState';
+import { type ConversationDisplayRow } from './botConversationState';
 
 /** Full process data belongs to the selected detail, never the refreshing chat page. */
 export function useReplyDetailsRow(workspaceId: string, id: string | null, fallback: ConversationDisplayRow | undefined) {
@@ -14,10 +14,7 @@ export function useReplyDetailsRow(workspaceId: string, id: string | null, fallb
     setSnapshot({ key, loading: true });
     void clientApi.projectAgentReadConversation({ workspaceId, processFor: id }).then(result => {
       if (!current) return;
-      const messages = (result?.ok ? result.messages ?? [] : []).map(normalizeBotMessage)
-        .filter((message): message is BotChatMessage => message !== null);
-      const rows = attachBotProcesses(conversationRows(messages), messages, null);
-      setSnapshot({ key, loading: false, row: replyDetailsRow(result.processMessageId || id, rows, messages) });
+      setSnapshot({ key, loading: false, row: replyDetailsFromPage(id, result) });
     }).catch(() => { if (current) setSnapshot({ key, loading: false }); });
     return () => { current = false; };
   }, [workspaceId, id, live, key]);

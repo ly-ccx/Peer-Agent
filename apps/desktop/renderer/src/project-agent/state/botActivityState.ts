@@ -1,4 +1,5 @@
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { normalizeBotMessage, conversationRows } from './botConversationState.ts';
 import type { BotChatMessage, BotToolRound, ConversationRow, ConversationDisplayRow } from './botConversationState';
 import { botNarration } from './botNarrationState.ts';
 
@@ -34,6 +35,14 @@ export function replyDetailsRow(id: string | null, rows: readonly ConversationDi
   if (handoff) return handoff;
   const delivered = [...messages].reverse().find(message => message.turnId === id && message.kind !== 'agent_turn');
   return delivered ? attachBotProcesses([{ type: 'message', message: delivered }], messages, null)[0] : undefined;
+}
+
+/** A selected page keeps current interrupted Activity alongside complete durable rounds. */
+export function replyDetailsFromPage(id: string, page: { readonly ok: boolean; readonly messages?: readonly Record<string, unknown>[];
+  readonly activity?: ProjectAgentActivity | null; readonly processMessageId?: string | null }): ConversationDisplayRow | undefined {
+  const messages = (page.ok ? page.messages ?? [] : []).map(normalizeBotMessage).filter((message): message is BotChatMessage => message !== null);
+  const rows = attachBotProcesses(conversationRows(messages), messages, page.activity ?? null);
+  return replyDetailsRow(page.processMessageId || id, rows, messages);
 }
 
 /** Durable receipt, internal slices and unrelated wakes cannot answer a user input. */

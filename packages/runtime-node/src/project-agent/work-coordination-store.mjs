@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { openSync, closeSync, fsyncSync, writeSync, readSync, fstatSync, readFileSync, mkdirSync, renameSync, writeFileSync, existsSync } from 'node:fs';
+import { openSync, closeSync, fsyncSync, writeSync, readSync, fstatSync, readFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
@@ -62,9 +62,8 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     const directory = openSync(dir, 'r');
     try { fsyncSync(directory); } finally { closeSync(directory); }
     reader.committed(next);
-    // A failed/replaced snapshot cannot lose truth: read() always replays the journal.
-    const snapshot = path.join(dir, 'coordination-snapshot.json');
-    try { writeFileSync(snapshot + '.tmp', JSON.stringify(next), { mode: 0o600 }); renameSync(snapshot + '.tmp', snapshot); } catch { /* rebuildable cache */ }
+    // The journal is the recovery source. Do not synchronously rewrite an
+    // unused full-state snapshot on every usage/tool/checkpoint receipt.
     return next;
   }
   return {

@@ -45,7 +45,7 @@ const rows = file => {
 const distribution = values => { const sorted = [...values].sort((a,b) => a-b); return { n: sorted.length, p50: sorted[Math.floor(sorted.length*.5)] ?? null, p95: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.95))] ?? null, p99: sorted[Math.min(sorted.length-1, Math.floor(sorted.length*.99))] ?? null, max: sorted.at(-1) ?? null }; };
 const largeHistory = process.argv.includes('--large-history');
 const keyRoundTrips = [], wheelRoundTrips = [], scrollChanges = [];
-const wheelOutliers = [];
+const wheelOutliers = [], keyOutliers = [];
 const scrollCoverage = { topVisits: 0, bottomVisits: 0, liveReplyVisibleSamples: 0 };
 let scrollDirection = -1;
 const contractHashes = project => Object.fromEntries(readdirSync(project).filter(name => name.endsWith('.test.mjs')).sort()
@@ -118,7 +118,9 @@ try {
     const composer = page.locator('.bot-composer textarea');
     if (await composer.isVisible()) {
       await composer.click(); const keyAt = performance.now(); await composer.press('a');
-      await page.evaluate(() => new Promise(requestAnimationFrame)); keyRoundTrips.push(performance.now()-keyAt);
+      const dispatchMs = performance.now()-keyAt;
+      await page.evaluate(() => new Promise(requestAnimationFrame)); const keyMs = performance.now()-keyAt; keyRoundTrips.push(keyMs);
+      if (keyMs > 100) keyOutliers.push({at:new Date().toISOString(),dispatchMs,paintWaitMs:keyMs-dispatchMs,totalMs:keyMs});
       report.interactions++; if (report.interactions % 12 === 0) await composer.fill('');
     }
     const scroller = page.locator('.bot-thread'), box = await scroller.boundingBox();
@@ -248,7 +250,7 @@ try {
   report.elapsedMs = Date.now()-start;
   const perf = await page.evaluate(() => { const s=globalThis.executionPerf; s.stop=true;s.observer.disconnect();return { frames:s.frames,inputs:s.inputs,wheels:s.wheels,longTasks:s.longTasks, mountedRows:document.querySelectorAll('[data-conversation-row]').length, hidden:document.hidden,focused:document.hasFocus(),avatars:[...document.querySelectorAll('.bot-avatar')].map(n=>({animated:n.dataset.avatarAnimated, animation:getComputedStyle(n).animationName})) }; });
   report.mainLoop = await app.evaluate(() => { const h=globalThis.executionMainLoop; h.disable(); return { p95:h.percentile(95)/1e6,p99:h.percentile(99)/1e6,max:h.max/1e6 }; });
-  report.interaction = { keyRoundTripMs:distribution(keyRoundTrips), wheelRoundTripMs:distribution(wheelRoundTrips), wheelOutliers, scrollMovedSamples:scrollChanges.filter(n=>n>0).length, scrollCoverage,
+  report.interaction = { keyRoundTripMs:distribution(keyRoundTrips), wheelRoundTripMs:distribution(wheelRoundTrips), keyOutliers, wheelOutliers, scrollMovedSamples:scrollChanges.filter(n=>n>0).length, scrollCoverage,
     scope:'Automation dispatch through Browser and renderer to rAF, includes transport cost, not hardware latency. Wheel events target the actual bot-thread scroller.' };
   report.renderer = { frames: distribution(perf.frames), inputPaintMs: distribution(perf.inputs), wheelPaintMs:distribution(perf.wheels), longTasks: perf.longTasks, mountedRows:perf.mountedRows, hidden:perf.hidden, focused:perf.focused, avatars:perf.avatars };
   const cpuEnd = await metrics(); report.cpu = cpuEnd.map(m => ({ type:m.type,cpuPercent:100000*(m.cpu-(cpuStart.find(p=>p.pid===m.pid)?.cpu ?? m.cpu))/report.elapsedMs }));

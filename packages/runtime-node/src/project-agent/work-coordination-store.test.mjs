@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
@@ -56,4 +56,21 @@ test('an unsupported future executor or schema cannot recover or mutate the jour
       assert.equal(readFileSync(file,'utf8'),bytes);
     } finally {env.cleanup();}
   }
+});
+
+
+test('durable journal recovery ignores legacy snapshot bytes without rewriting that cache per receipt', () => {
+ const env=world();
+ try {
+  const file=path.join(env.options.rootDir,'w','coordination.jsonl'), snapshot=path.join(env.options.rootDir,'w','coordination-snapshot.json');
+  env.store.saveWork({workId:'root',state:'runnable'});
+  assert.equal(existsSync(snapshot),false);
+  const legacy='{"revision":999,"works":{"root":{"state":"delivered"}}}';writeFileSync(snapshot,legacy);
+  env.store.transfer([{eventId:'result',kind:'report_available'}]);env.store.handled(['result']);env.store.saveWork({workId:'root',state:'cancelled'});
+  const recovered=createWorkCoordinationStore(env.options);
+  assert.equal(recovered.readWork('root').state,'cancelled');assert.deepEqual(recovered.pendingEvents(),[]);
+  assert.equal(readFileSync(snapshot,'utf8'),legacy);
+  const journal=readFileSync(file,'utf8');env.replace();assert.throws(()=>env.store.saveWork({workId:'root',state:'runnable'}),/lease_lost/);
+  assert.equal(readFileSync(file,'utf8'),journal);assert.equal(readFileSync(snapshot,'utf8'),legacy);
+ }finally{env.cleanup();}
 });
