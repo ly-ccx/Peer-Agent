@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   TRAY_MENU_INPUT_CACHE_TTL_MS,
@@ -9,10 +10,74 @@ import {
   applyTrayBadge,
   buildTrayMenuFingerprint,
   buildTrayMenuTemplate,
+  createTrayController,
   trayBadgeTitle,
   truncateTrayTitle,
   workspaceShortName,
 } from './tray-controller.mjs';
+
+function liveTrayHarness(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const state = { count: 1, reads: 0, shell: 'bots', fail: false, titles: [] };
+  class Tray {
+    setToolTip() {}
+    setIgnoreDoubleClickEvents() {}
+    setContextMenu() {}
+    setTitle(value) { state.titles.push(value); }
+    on() {}
+    destroy() {}
+  }
+  const controller = createTrayController({ Tray, Menu: { buildFromTemplate: rows => rows },
+    nativeImage: { createFromBuffer: () => ({ isEmpty: () => false, setTemplateImage() {} }) },
+    workspaceRoot: fileURLToPath(new URL('../../../../', import.meta.url)), isPackaged: false,
+    isProjectAgentEnabled: () => true, shellMode: () => state.shell,
+    getNeedsYouCount: () => { state.reads++; if (state.fail) throw Error('unavailable'); return state.count; },
+    listRecentConversations: async () => [],
+  });
+  assert.equal(controller.isActive(), true);
+  t.after(() => controller.destroy());
+  return { controller, state };
+}
+
+describe('tray badge subscription', () => {
+  it('coalesces event storms without a synchronous roster read or starvation', async t => {
+    const { controller, state } = liveTrayHarness(t);
+    await controller.refresh({ force: true }); state.reads = 0; state.titles = [];
+    for (let i = 0; i < 200; i++) controller.refreshBadge();
+    assert.equal(state.reads, 0, 'broadcast must not synchronously scan Bot facts');
+    t.mock.timers.tick(60); state.count = 3;
+    for (let i = 0; i < 200; i++) controller.refreshBadge();
+    t.mock.timers.tick(39); assert.equal(state.reads, 0);
+    t.mock.timers.tick(1); assert.equal(state.reads, 1);
+    assert.deepEqual(state.titles, ['3'], 'bounded callback reads latest count');
+    state.count = 4; controller.refreshBadge(); t.mock.timers.tick(100);
+    assert.equal(state.reads, 2); assert.deepEqual(state.titles, ['3', '4']);
+  });
+
+  it('explicit refresh is immediate and cancels its duplicate; destroy removes queued work', async t => {
+    const { controller, state } = liveTrayHarness(t);
+    await controller.refresh({ force: true }); state.reads = 0;
+    controller.refreshBadge(); state.count = 7;
+    await controller.refresh({ force: true });
+    assert.equal(state.reads, 1); assert.equal(state.titles.at(-1), '7');
+    t.mock.timers.tick(100); assert.equal(state.reads, 1);
+    controller.refreshBadge(); controller.destroy();
+    t.mock.timers.tick(1000); controller.refreshBadge();
+    await controller.refresh({ force: true }); t.mock.timers.tick(1000);
+    assert.equal(state.reads, 1, 'disposed tray may not read project facts');
+  });
+
+  it('uses current shell and clears stale titles after failed counts', async t => {
+    const { controller, state } = liveTrayHarness(t);
+    await controller.refresh({ force: true }); state.reads = 0;
+    controller.refreshBadge(); state.shell = 'classic'; t.mock.timers.tick(100);
+    assert.equal(state.reads, 0); assert.equal(state.titles.at(-1), '');
+    state.shell = 'bots'; controller.refreshBadge(); t.mock.timers.tick(100);
+    assert.equal(state.titles.at(-1), '1');
+    controller.refreshBadge(); state.fail = true; t.mock.timers.tick(100);
+    assert.equal(state.reads, 2); assert.equal(state.titles.at(-1), '');
+  });
+});
 
 describe('trayBadgeTitle', () => {
   it('stays empty while the project agent switch is off', () => {
