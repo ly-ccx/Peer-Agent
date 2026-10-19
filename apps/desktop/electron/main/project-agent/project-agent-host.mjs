@@ -606,9 +606,8 @@ export function registerDesktopProjectAgent({
         }
       },
       botName: (workspaceId) => {
-        const got = directory.get(workspaceId);
-        if (!got?.ok) return '';
-        return got.profile?.displayName || got.item?.profile?.displayName || '';
+        const profile = profileStore.read(workspaceId);
+        return profile && profile.status !== 'archived' ? profile.displayName : '';
       },
       workspaceIdForConversation,
       host,
