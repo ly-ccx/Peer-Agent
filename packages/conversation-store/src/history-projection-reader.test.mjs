@@ -73,3 +73,33 @@ test('a racing external commit is retried from its new version without publishin
   },project:row=>row.value});
   assert.equal(read('a'),'current');assert.equal(loads,2);assert.equal(read('a'),'current');assert.equal(loads,2);
 });
+
+
+test('independent projections share one strict parsed source per version without callback or output pollution', t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-shared-history-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConversationStore({ storeDir: dir }), meta = store.createConversation({ title: 'shared' });
+  store.appendMessage(meta.id, { id: 'one', role: 'assistant', content: 'original', nested: { value: 'original' } });
+  const file=path.join(dir,meta.id+'.jsonl'), original=fs.readFileSync;let reads=0;
+  t.mock.method(fs,'readFileSync',(...args)=>{if(args[0]===file)reads++;return original(...args)});
+  syncBuiltinESMExports();t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports()});
+  const a=store.createHistoryProjection(h=>h.messages.at(-1),{immutableInput:true});
+  const b=store.createHistoryProjection(h=>h.messages.map(m=>m.content),{immutableInput:true});
+  const mutate=store.createHistoryProjection(h=>{h.messages[0].nested.value='mutated';return h.messages[0].nested.value});
+  const reject=store.createHistoryProjection(h=>{h.messages[0].nested.value='forged';return h.messages[0]},{immutableInput:true});
+  const first=a(meta.id);first.nested.value='caller';assert.deepEqual(b(meta.id),['original']);
+  assert.equal(mutate(meta.id),'mutated');assert.throws(()=>reject(meta.id),TypeError);
+  assert.equal(a(meta.id).nested.value,'original');assert.equal(reads,1,'all views parse one shared input');
+  store.appendMessage(meta.id,{id:'two',role:'assistant',content:'next'},{returnMessages:false});
+  const before=reads;assert.equal(a(meta.id).content,'next');assert.deepEqual(b(meta.id),['original','next']);
+  assert.equal(reads-before,1,'a new durable version is loaded once across views');
+  store.patchStreamingMessage(meta.id,'two',{content:'partial'});
+  assert.equal(a(meta.id).content,'original');assert.deepEqual(b(meta.id),['original']);
+  store.clearStreamPatch(meta.id);assert.equal(a(meta.id).content,'next');assert.deepEqual(b(meta.id),['original','next']);
+  const info=statSync(file);writeFileSync(file,readFileSync(file,'utf8').replaceAll('next','edit'));utimesSync(file,info.atime,info.mtime);
+  assert.equal(a(meta.id).content,'edit');assert.deepEqual(b(meta.id),['original','edit']);
+  writeFileSync(file+'.new',readFileSync(file,'utf8').replaceAll('edit','swap'));renameSync(file+'.new',file);
+  assert.equal(a(meta.id).content,'swap');assert.deepEqual(b(meta.id),['original','swap']);
+  writeFileSync(file,'{broken');assert.throws(()=>a(meta.id),{code:'BACKGROUND_HISTORY_CORRUPT'});assert.throws(()=>b(meta.id),{code:'BACKGROUND_HISTORY_CORRUPT'});
+  rmSync(file);assert.throws(()=>a(meta.id),{code:'BACKGROUND_HISTORY_MISSING'});assert.throws(()=>b(meta.id),{code:'BACKGROUND_HISTORY_MISSING'});
+});

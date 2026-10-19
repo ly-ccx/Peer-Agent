@@ -121,14 +121,14 @@ export function registerDesktopProjectAgent({
   configurePermissions = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
-  const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
-  const messageIds = conversationStore.createHistoryProjection?.(history => history.messages.map(message => message.id));
+  const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { immutableInput: true, maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
+  const messageIds = conversationStore.createHistoryProjection?.(history => history.messages.map(message => message.id), { immutableInput: true });
   const conversationMessages = createBotConversationHistory(conversationStore);
   const inputFacts = conversationStore.createHistoryProjection?.(history => history.messages.filter(message =>
     message.kind === 'agent_reply' || message.kind === 'agent_turn' || message.card === 'agent_stopped'
   ).map(message => ({ id: message.id, role: message.role, kind: message.kind, card: message.card,
     turnId: message.turnId, replyTo: message.replyTo, meta: { replyTo: message.meta?.replyTo },
-    userInputs: message.userInputs?.map(input => ({ inputId: input.inputId })) })));
+    userInputs: message.userInputs?.map(input => ({ inputId: input.inputId })) })), { immutableInput: true });
   const readCanonicalMessages = id => botHistory ? botHistory(id) || [] : conversationStore.getPersistedConversationHistory(id)?.messages || [];
   let host = null;
   let objectiveWatches=null;

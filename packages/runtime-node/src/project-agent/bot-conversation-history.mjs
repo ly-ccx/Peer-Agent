@@ -23,6 +23,6 @@ export function projectBotConversationHistory(history) {
 
 export function createBotConversationHistory(store) {
   return typeof store.createHistoryProjection === 'function'
-    ? store.createHistoryProjection(projectBotConversationHistory)
+    ? store.createHistoryProjection(projectBotConversationHistory, { immutableInput: true })
     : id => projectBotConversationHistory(store.getPersistedConversationHistory?.(id));
 }

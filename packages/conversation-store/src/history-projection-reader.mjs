@@ -1,5 +1,5 @@
 /** Bounded derived values only; strict history and file versions remain authoritative. */
-export function createHistoryProjectionReader({ describe, load, project, maxEntries = 32, maxBytes = 8 * 1024 * 1024 }) {
+export function createHistoryProjectionReader({ describe, load, project, immutableInput = false, maxEntries = 32, maxBytes = 8 * 1024 * 1024 }) {
   const entries = new Map(); let bytes = 0;
   const drop = id => { const row = entries.get(id); if (row) bytes -= row.bytes; entries.delete(id); };
   const attempt = id => {
@@ -14,7 +14,10 @@ export function createHistoryProjectionReader({ describe, load, project, maxEntr
     }
     drop(id);
     let value;
-    try { value = structuredClone(project({ ...load(description), createdAt: description.createdAt })); }
+    try {
+      const input = { ...load(description), createdAt: description.createdAt };
+      value = structuredClone(project(immutableInput ? Object.freeze(input) : input));
+    }
     catch (error) {
       if (describe(id)?.version !== description.version) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED', { cause: error }), { code: 'BACKGROUND_VERSION_CHANGED' });
       throw error;
