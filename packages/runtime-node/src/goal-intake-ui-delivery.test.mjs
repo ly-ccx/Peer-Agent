@@ -178,3 +178,32 @@ test('intake-ui/confirmation instructions do not erase the real UI output', () =
   }).required, true);
   assert.equal(classifyUiDeliveryIntake({ goal: '在界面上确认按钮的颜色显示正确' }).required, true);
 });
+
+test('intake-ui/CSV field headers do not turn a command-only Node contract into pixel delivery', () => {
+  const contracts = [
+    'renderCsv：接收 {category,count,total}；输出 header category,count,total，每行以换行结尾；字段内引号双写。',
+    'Parse the CSV header and aggregate finite numeric rows.',
+    'Write a TSV file header with name and amount fields.',
+  ];
+  for (const goal of contracts) {
+    const input = { title: '修复 src 三模块使 node --test 全绿', goal,
+      successCriteria: [{ kind: 'command', command: 'node --test', description: '18 tests pass, no failures or skipped tests' }] };
+    assert.equal(classifyUiDeliveryIntake(input).required, false, goal);
+    const armed = [];
+    const { store, cleanup } = withTempStore({ onUiDeliveryRequired: plan => armed.push(plan.planId) });
+    try { store.createGoalContract({ ...input, conversationId: 'csv-command' }); assert.equal(armed.length, 0); }
+    finally { cleanup(); }
+  }
+});
+
+test('intake-ui/CSV terminology cannot exempt a real header, component, appearance or mixed UI output', () => {
+  for (const goal of [
+    'Fix the header',
+    'Display a CSV header component',
+    '调整 CSV header 的颜色',
+    'renderCsv outputs header category,count,total.\nFix the application header.',
+    'renderCsv outputs header category,count,total; adjust the CSS for the header.',
+    'Render a CSV header in the preview',
+    '输出 header category,count,total',
+  ]) assert.equal(classifyUiDeliveryIntake({ goal }).required, true, goal);
+});
