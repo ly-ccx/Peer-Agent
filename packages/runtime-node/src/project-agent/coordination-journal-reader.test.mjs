@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, appendFileSync, writeFileSync, readFileSync, renam
 import path from 'node:path';
 import os from 'node:os';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
 
 function world() {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-journal-reader-'));
@@ -87,4 +88,42 @@ test('lifecycle facts exclude historical work bodies while retaining fresh contr
     assert.equal(w.reader.readLifecycleFacts().workStates.x.stopScope,'work');
     appendFileSync(w.file,'{broken\n');assert.throws(()=>w.reader.readLifecycleFacts(),SyntaxError);
   }finally{w.close();}
+});
+
+test('receipt-only writes never copy unrelated work and retain durable replay and default isolation', () => {
+  const w = world(), clone = globalThis.structuredClone;
+  try {
+    w.writer.saveWork({ workId: 'unrelated', text: 'historical payload' });
+    globalThis.structuredClone = value => {
+      assert.ok(!value?.works?.unrelated, 'a receipt must not clone the entire ledger');
+      return clone(value);
+    };
+    assert.equal(w.writer.saveWork({ workId: 'next', text: 'receipt' }, { returnState: false }), undefined);
+    globalThis.structuredClone = clone;
+    assert.equal(w.writer.readWork('next').text, 'receipt');
+    assert.deepEqual(w.writer.read(), createWorkCoordinationStore(w.options).read());
+    const saved = w.writer.saveWork({ workId: 'next', text: 'default return' });
+    saved.works.next.text = 'caller changed';
+    assert.equal(w.writer.readWork('next').text, 'default return');
+  } finally { globalThis.structuredClone = clone; w.close(); }
+});
+
+test('private commit publishes only after persistence, clones caller data and keeps strict errors', () => {
+  const w = world();
+  try {
+    const reader = createCoordinationJournalReader({ file: w.file });
+    const before = reader.read(), entry = { kind: 'work', work: { workId: 'receipt', text: 'original' } };
+    assert.throws(() => reader.commitEntry(entry, () => { throw Error('disk unavailable'); }), /disk unavailable/);
+    assert.deepEqual(reader.read(), before);
+    assert.throws(() => reader.commitEntry({ kind: 'unsupported' }, () => assert.fail('invalid entry cannot persist')), /unknown_coordination_event/);
+    const result = reader.commitEntry(entry, record => appendFileSync(w.file, JSON.stringify(record) + '\n'));
+    entry.work.text = 'mutated input'; result.works.receipt.text = 'mutated output';
+    assert.equal(reader.readWork('receipt').text, 'original');
+    assert.throws(() => reader.commitEntry({ kind: 'work', work: { workId: 'written', text: 'on disk' } }, record => {
+      appendFileSync(w.file, JSON.stringify(record) + '\n'); throw Error('directory sync failed');
+    }), /directory sync failed/);
+    assert.equal(reader.readWork('written').text, 'on disk', 'retry must replay durable bytes after a failed acknowledgement');
+    appendFileSync(w.file, '{broken\n');
+    assert.throws(() => reader.commitEntry(entry, () => assert.fail('corruption cannot persist')), SyntaxError);
+  } finally { w.close(); }
 });

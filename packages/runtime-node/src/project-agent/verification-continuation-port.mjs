@@ -21,7 +21,8 @@ export function createVerificationContinuationPort({ plan, goalPlanStore, workId
   if (!store) return null;
   const prior = plan.runner?.verificationContinuation;
   const candidate = prior?.workId || origin.workId || workId;
-  const work = candidate && store.read().works[candidate];
+  const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : store.read().works[id];
+  const work = candidate && readWork(candidate);
   if (candidate && (!work || work.parentConversationId !== origin.parentConversationId || work.workspaceId !== origin.workspaceId)) {
     throw failure('work_execution_stopped', 'Verifier work ownership is unavailable');
   }
@@ -34,7 +35,7 @@ export function createVerificationContinuationPort({ plan, goalPlanStore, workId
       || current.delegationOrigin?.supersededBy || ['cancelled', 'paused'].includes(current.status)
       || ['paused', 'waiting_user'].includes(current.runner?.status) || current.runner?.waitingOnUser) throw failure('work_execution_stopped');
     if (readSourceRevision(current) !== sourceRevision) throw failure('verification_source_changed');
-    const receipt = candidate ? store.read().works[candidate] : null;
+    const receipt = candidate ? readWork(candidate) : null;
     if (candidate && (!receipt || receipt.workspaceId !== origin.workspaceId || receipt.parentConversationId !== origin.parentConversationId
       || receipt.stopScope === 'work' && ['cancelled', 'paused', 'blocked_system'].includes(receipt.state)
       || receipt?.state === 'budget_limited')) throw failure('work_execution_stopped');

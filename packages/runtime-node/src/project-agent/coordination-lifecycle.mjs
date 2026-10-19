@@ -40,7 +40,8 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
       return { ok: true, session, legacy: !mandate, goalRevision: mandate?.goalRevision ?? null,
         ...(mandate ? { workId: mandate.workId } : {}), nextAction: mandate ? 'use_current_revision_for_changes' : 'legacy_session_requires_current_user_for_changes' };
     }
-    const current = readMessages(parentConversationId).filter(row => context.currentInputAnchors?.includes(row.id) && isCanonicalUserInput(row));
+    const messages = readMessages(parentConversationId);
+    const current = messages.filter(row => context.currentInputAnchors?.includes(row.id) && isCanonicalUserInput(row));
     const sourceInputIds = current.map(row => row.inputId || row.id);
     const events = context.events || [];
     const previous = state.decisions?.[operationId];
@@ -77,7 +78,7 @@ export function createCoordinationLifecycle({ readSession, readMessages, checkTa
     if (!work || work.parentConversationId !== parentConversationId || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)) return { ok: false, error: 'work_execution_stopped' };
     const eventIds = events.filter(row => mandate?.sessionIds.includes(row.sessionId) && state.events[row.eventId] && !state.events[row.eventId].handled).map(row => row.eventId);
     const materialRefs = current.flatMap(row => [...(row.attachmentRefs || []), ...(row.attachments || []).map(item => item.path || item.ref || item.id).filter(Boolean)]);
-    const anchors = [...new Set([...current.map(row => row.id), ...readMessages(parentConversationId)
+    const anchors = [...new Set([...current.map(row => row.id), ...messages
       .filter(row => [...(mandate?.rootInputIds || []), ...(mandate?.revisionInputIds || [])].includes(row.inputId || row.id) && isCanonicalUserInput(row)).map(row => row.id)])];
     if (!anchors.length) return { ok: false, error: 'current_user_required' };
     if (input.task && input.task.anchorMessageIds.some(id => !anchors.includes(id))) return { ok: false, error: 'material_out_of_scope' };

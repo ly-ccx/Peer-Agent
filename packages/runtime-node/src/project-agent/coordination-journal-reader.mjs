@@ -52,15 +52,25 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
       throw error;
     } finally { if (fd !== undefined) closeSync(fd); }
   }
-  function committed(state) {
+  function publish(state) {
     const fd = openSync(file, 'r');
     try {
       const info = fstatSync(fd, { bigint: true });
       const nextAnchors = boundaries(fd, Number(info.size));
-      cached = structuredClone(state); previous = info; anchors = nextAnchors;
+      cached = state; previous = info; anchors = nextAnchors;
     } finally { closeSync(fd); }
   }
   return { read: () => structuredClone(readState()),
+    commitEntry(entry, persist, { returnState = true } = {}) {
+      const state = readState();
+      const record = { ...(typeof entry === 'function' ? entry() : entry), revision: state.revision + 1 };
+      const next = reduceCoordination(state, record);
+      persist(record);
+      // The reducer owns new entry values; neither it nor this state escapes
+      // through the persistence callback. Publish only after durable success.
+      publish(next);
+      return returnState ? structuredClone(next) : undefined;
+    },
     readWork(id) { const works = readState().works; return Object.hasOwn(works, id) ? structuredClone(works[id]) : undefined; },
     readLifecycleFacts() {
       const state = readState();
@@ -68,5 +78,5 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
         transitions: state.transitions || {}, decisions: state.decisions || {},
         workStates: Object.fromEntries(Object.entries(state.works).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])) });
     },
-    committed, clear };
+    committed: state => publish(structuredClone(state)), clear };
 }

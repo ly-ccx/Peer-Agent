@@ -16,15 +16,15 @@ export async function controlProjectWork({ session, action, anchorMessageId, con
     && !['accepted', 'result_ready', 'cancelled', 'failed', 'superseded'].includes(row.status));
   const state = action === 'cancel' ? 'cancelled' : 'paused';
   // A partial failure keeps the gate closed; the same command can finish its remaining targets.
-  store.saveWork({ ...work, state, stopScope: 'work', pendingControl: { action, anchorMessageId, completedSessionIds: pendingSame ? work.pendingControl.completedSessionIds || [] : [] } });
+  store.saveWork({ ...work, state, stopScope: 'work', pendingControl: { action, anchorMessageId, completedSessionIds: pendingSame ? work.pendingControl.completedSessionIds || [] : [] } }, { returnState: false });
   for (const target of targets) {
     const result = await (action === 'pause' ? pause(target.sessionId) : action === 'cancel' ? cancel(target.sessionId) : resume(target.sessionId, anchorMessageId));
     if (result?.error || result?.ok === false) return { error: result.error || 'work_control_failed' };
     const current = store.read().works[work.workId];
-    store.saveWork({ ...current, pendingControl: { ...current.pendingControl, completedSessionIds: [...current.pendingControl.completedSessionIds, target.sessionId] } });
+    store.saveWork({ ...current, pendingControl: { ...current.pendingControl, completedSessionIds: [...current.pendingControl.completedSessionIds, target.sessionId] } }, { returnState: false });
   }
   const fresh = store.read().works[work.workId];
   store.saveWork({ ...fresh, state: action === 'resume' ? fresh.pendingControl.completedSessionIds.length ? 'waiting_children' : 'runnable' : state,
-    pendingControl: null, lastControl: { receiptKey, action, anchorMessageId } });
+    pendingControl: null, lastControl: { receiptKey, action, anchorMessageId } }, { returnState: false });
   return { ok: true, workId: work.workId, state: store.read().works[work.workId].state };
 }

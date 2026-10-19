@@ -33,6 +33,6 @@ export function recoverLegacyBudgetWorks({ store, workspaceId, conversationId, r
     let checkpoint;
     try { checkpoint = store.readCheckpoint(work.checkpointRef); } catch { continue; }
     if (!replyRecoveryAdmission(work, checkpoint, { limits: binding.limits, readCheckpoint: store.readCheckpoint }).ok) continue;
-    store.saveWork({ ...work, budget, state: 'runnable', end: 'yielded', recovery: undefined });
+    store.saveWork({ ...work, budget, state: 'runnable', end: 'yielded', recovery: undefined }, { returnState: false });
   }
 }

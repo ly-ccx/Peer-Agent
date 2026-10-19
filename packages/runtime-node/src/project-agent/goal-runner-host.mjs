@@ -1,6 +1,6 @@
 import { agentMessagesForContext } from './agent-communication.mjs';
 import path from 'node:path';
-import { readdirSync } from 'node:fs';
+import { createDelegatedPlanCatalog } from './delegated-plan-catalog.mjs';
 import { randomUUID } from 'node:crypto';
 import { projectConversationHistory } from '@peer-agent/runtime-core';
 import { buildGoalRunnerTickMessage, describeVisualRepair } from '../goal-visual-repair.mjs';
@@ -259,15 +259,12 @@ export function createProjectGoalRunnerHost({
 } = {}) {
   const executionScheduler = agentTurnExecutor.executionScheduler ?? createExecutionScheduler();
   const deliveryHandoff = createGoalDeliveryHandoff({ goalPlanStore });
+  const planCatalog = createDelegatedPlanCatalog({ directory: () => goalPlanStore.getStoreDir(), readPlan: id => goalPlanStore.getPlan(id) });
   function currentPlans() {
-    // listPlans is an active-only UI index; accepted dependencies must remain visible here.
+    // Keep accepted dependencies in the scheduler without hydrating ordinary history.
     const root = goalPlanStore.getStoreDir?.();
     if (!root) return [];
-    return readdirSync(root).filter(name => name.endsWith('.json'))
-      .flatMap(name => {
-        try { const plan = goalPlanStore.getPlan(name.slice(0, -5)); return plan ? [plan] : []; }
-        catch { return []; }
-      });
+    return planCatalog.read();
   }
   executionScheduler.configure({ rootDir: goalPlanStore.getStoreDir?.()
     ? path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime') : null });

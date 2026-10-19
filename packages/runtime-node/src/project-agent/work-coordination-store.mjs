@@ -50,21 +50,16 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     const appendFd = openSync(file, 'a', 0o600);
     try { writeSync(appendFd, '\n'); fsyncSync(appendFd); } finally { closeSync(appendFd); }
   }
-  function append(entry) {
+  function append(entry, options = {}) {
     assertOwner();
-    const state = read();
-    const record = { ...entry, schemaVersion: 1, epoch, revision: state.revision + 1, at: now() };
-    const next = reduceCoordination(state, record);
-    mkdirSync(dir, { recursive: true });
-    assertOwner();
-    const fd = openSync(file, 'a', 0o600);
-    try { writeSync(fd, JSON.stringify(record) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
-    const directory = openSync(dir, 'r');
-    try { fsyncSync(directory); } finally { closeSync(directory); }
-    reader.committed(next);
-    // The journal is the recovery source. Do not synchronously rewrite an
-    // unused full-state snapshot on every usage/tool/checkpoint receipt.
-    return next;
+    return reader.commitEntry(() => ({ ...entry, schemaVersion: 1, epoch, at: now() }), record => {
+      mkdirSync(dir, { recursive: true });
+      assertOwner();
+      const fd = openSync(file, 'a', 0o600);
+      try { writeSync(fd, JSON.stringify(record) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
+      const directory = openSync(dir, 'r');
+      try { fsyncSync(directory); } finally { closeSync(directory); }
+    }, options);
   }
   return {
     read, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
@@ -117,8 +112,8 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     transfer(events) { return append({ kind: 'transfer', events }); },
     handled(eventIds) { return append({ kind: 'handled', eventIds }); },
     pendingEvents() { return Object.values(read().events).filter(row => !row.handled).map(row => row.event); },
-    saveWork(work) { const old = reader.readWork(work.workId); return append({ kind: 'work', work: { ...old, ...work,
-      revision: (old?.revision || 0) + 1, updatedAt: now() } }); },
+    saveWork(work, options = {}) { const old = reader.readWork(work.workId); return append({ kind: 'work', work: { ...old, ...work,
+      revision: (old?.revision || 0) + 1, updatedAt: now() } }, options); },
   };
 }
 function reduceEmpty() { return { revision: 0, events: {}, works: {}, deliveries: {} }; }

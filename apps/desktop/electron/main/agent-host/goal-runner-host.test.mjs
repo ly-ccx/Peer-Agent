@@ -696,10 +696,13 @@ test('ordinary plans still run, and task plans run only while this desktop holds
     assert.equal(lookups > 0, true);
 
     lookups = 0;
+    const planReads = [], getPlan = goalPlanStore.getPlan.bind(goalPlanStore);
+    goalPlanStore.getPlan = id => { planReads.push(id); return getPlan(id); };
     const before = goalPlanStore.getPlan(task.planId)?.runner;
     await host.goalRunner.start(task.planId, { awaitIdle: true });
     await host.goalRunner.resume(task.planId);
     assert.equal(lookups, 0);
+    assert.ok(!planReads.includes(ordinary.planId), 'delegated scheduling must not hydrate ordinary historical plans');
     assert.deepEqual(goalPlanStore.getPlan(task.planId)?.runner, before);
 
     assert.equal(leases.acquire('ws-task').acquired, true);

@@ -70,7 +70,7 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
       const remaining = budget.uncertainDispatches.length || Object.entries(budget.attempts || {}).some(([id, item]) => item.pendingTools?.length && !activeAttempts()?.has(id));
       const cleared = !remaining && current.recovery?.failureKind === 'execution_outcome_unknown';
       store.saveWork({ ...current, budget, ...(cleared ? { recovery: { ...current.recovery, failureKind: 'cancelled', retryable: false,
-        dispatchesReconciled: true, retryAt: undefined, reservationId: undefined } } : {}) });
+        dispatchesReconciled: true, retryAt: undefined, reservationId: undefined } } : {}) }, { returnState: false });
     }
   }
   return {

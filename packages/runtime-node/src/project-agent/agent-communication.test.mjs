@@ -164,6 +164,33 @@ test('host activity deduplicates lifecycle rows and never equates a returned rep
   assert.equal(session.status, 'waiting_agent'); assert.equal(session.nextAction, 'none'); assert.equal(session.actionRight, 'peer_advancing');
 });
 
+test('activity identities use current persistent projection and append without discarded history', t => {
+  const f = fixture(t), writes = [], originalAppend = f.store.appendMessage.bind(f.store);
+  const store = { ...f.store,
+    getPersistedConversationHistory() { assert.fail('activity must not load full parent history'); },
+    appendMessage(...args) { writes.push(args[2]); return originalAppend(...args); },
+  };
+  const publish = createAgentEventPublisher({ inbox: f.inbox, conversationStore: store, findSession: () => f.plan });
+  const event = { eventId: 'start', kind: 'session_running', sessionId: 'worker' };
+  publish('ws', [event]); publish('ws', [event]);
+  assert.deepEqual(writes, [{ returnMessages: false }]);
+  const other = createConversationStore({ storeDir: f.storeDir });
+  other.appendMessage(f.parent.id, { id: 'agent-activity:worker:cancelled', kind: 'agent_activity', content: '' });
+  publish('ws', [{ eventId: 'cancel', kind: 'cancelled', sessionId: 'worker' }]);
+  assert.equal(writes.length, 1, 'external append must invalidate identity projection');
+  assert.equal(f.store.getConversation(f.parent.id).messages.filter(row => row.kind === 'agent_activity').length, 2);
+});
+
+test('activity persistence failure remains visible and a fresh publisher can retry', t => {
+  const f = fixture(t), event = { eventId: 'start', kind: 'session_running', sessionId: 'worker' };
+  let changed = 0;
+  const failing = createAgentEventPublisher({ inbox: f.inbox, conversationStore: { ...f.store,
+    appendMessage() { throw Error('activity disk error'); } }, findSession: () => f.plan, onChanged: () => changed++ });
+  assert.throws(() => failing('ws', [event]), /activity disk error/); assert.equal(changed, 0);
+  createAgentEventPublisher({ inbox: f.inbox, conversationStore: f.store, findSession: () => f.plan, onChanged: () => changed++ })('ws', [event]);
+  assert.equal(changed, 1);
+});
+
 test('real GoalRunner parks a worker question and resumes the same plan with the durable answer', async t => {
   for (const scenario of ['normal', 'human', 'deferred']) {
   const f = fixture(t);

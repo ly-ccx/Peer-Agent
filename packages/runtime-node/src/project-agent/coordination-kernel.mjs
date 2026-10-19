@@ -90,7 +90,7 @@ export function reduceCoordinationDecision(state, entry) {
     const transition = next.transitions[entry.operationId];
     if (!transition || transition.phase !== entry.expectedPhase) throw new Error('transition_phase_conflict');
     if (!phases[transition.phase]?.includes(entry.patch.phase)) throw new Error('invalid_transition_phase');
-    next.transitions[entry.operationId] = { ...transition, ...entry.patch };
+    next.transitions[entry.operationId] = { ...transition, ...structuredClone(entry.patch) };
   }
   return next;
 }

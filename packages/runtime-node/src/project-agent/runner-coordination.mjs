@@ -26,7 +26,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const work = readWork(message.meta?.workId);
       if (!work || !['runnable', 'retry_wait'].includes(work.state) || work.attemptId && work.attemptId !== message.turnId) return;
       const related = rows().filter(row => work.sessionIds?.includes(row.sessionId));
-      store.saveWork({ ...work, state: stateAfterReply(related), repairSessionIds: repairOwnership(related).repairSessionIds });
+      store.saveWork({ ...work, state: stateAfterReply(related), repairSessionIds: repairOwnership(related).repairSessionIds }, { returnState: false });
       store.handled(work.pendingEventIds || []);
     },
     onInvalidated: message => {
@@ -35,7 +35,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const current = rows().filter(row => message.meta?.sessionStates?.some(source => source.sessionId === row.sessionId));
       store.transfer(current.map(row => ({ eventId: `reply-refresh:${message.id}:${row.sourceRevision}:${row.observationRevision || ''}:${row.status}`,
         kind: 'report_available', sessionId: row.sessionId, at: new Date().toISOString(), payload: { sourceRevision: row.sourceRevision, observationRevision: row.observationRevision, status: row.status } })));
-      store.saveWork({ ...work, state: 'waiting_children' });
+      store.saveWork({ ...work, state: 'waiting_children' }, { returnState: false });
       if (readMessages().some(row => row.id === message.id)) remember({ id: `${message.id}:updated`, kind: 'agent_reply', role: 'assistant',
         content: '结果有更新，我再核对一下。', meta: { workId: work.workId } });
     },
@@ -64,7 +64,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const unknown = hasUnsettledDispatch(work);
       store.saveWork({ ...work, state: 'blocked_system', ...(unknown ? { end: 'fatal' } : {}),
         recovery: { ...work.recovery, ...(unknown ? { failureKind: 'execution_outcome_unknown', retryable: false } : {}), retryAt: undefined, reservationId: undefined },
-        waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') });
+        waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
     }
   }
   function readProtectedWork(work) {
@@ -76,7 +76,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       recovery: { ...work.recovery, failureKind: 'fatal', retryable: false, autoAttempts: work.recovery?.autoAttempts || 0,
         failedTurnId: work.recovery?.failedTurnId || work.attemptId, retryAt: undefined, reservationId: undefined,
         blockedCode: 'RECOVERY_CHECKPOINT_UNAVAILABLE' },
-      waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') });
+      waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
   }
   function pendingFrom(works) {
     // An owned batch continues through its durable job, never a duplicate wake.
@@ -92,7 +92,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     let snapshot, decisionSnapshot;
     const roster = () => snapshot ??= rows();
     const decision = () => decisionSnapshot ??= store.read();
-    const update = work => { store.saveWork(work); decisionSnapshot = undefined; };
+    const update = work => { store.saveWork(work, { returnState: false }); decisionSnapshot = undefined; };
     recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: roster, now });
     if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: roster });
     for (const work of Object.values(decision().works)) {
@@ -152,7 +152,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const checkpointRef = store.checkpoint(workId, { job, outcome: { turnId: turn.id, rounds: turn.rounds || [] } });
       store.saveWork({ schemaVersion: 1, workspaceId, parentConversationId: conversationId, workId, state: 'paused',
         attemptId: turn.id, anchorInputIds: inputIds, sessionIds: [], waitFor: [], consumedEventIds: [], pendingResultRefs: [],
-        pendingEventIds: events.map(event => event.eventId), checkpointRef, stopScope: 'reply' });
+        pendingEventIds: events.map(event => event.eventId), checkpointRef, stopScope: 'reply' }, { returnState: false });
     },
     admitRecoveredEvents(events) {
       const known = store.read().events;
@@ -211,7 +211,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const work = readWork(job.workId);
       if (!work || work.state !== 'retry_wait') return;
       store.saveWork({ ...work, state: 'blocked_system', recovery: work.recovery ? { ...work.recovery, retryAt: undefined, reservationId: undefined } : undefined,
-        waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') });
+        waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
     },
     prepare(job) {
       if (!job.workId || !job.continuation) return true;
@@ -241,7 +241,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       store.saveWork({ checkpointRef, schemaVersion: 1, workspaceId, parentConversationId: conversationId,
         anchorInputIds: inputs, sessionIds: [], waitFor: [], consumedEventIds: [], pendingResultRefs: [], stopScope: 'reply',
         ...existing, workId: job.workId, attemptId: job.attemptId, pendingEventIds: events.map(event => event.eventId), state: 'runnable', recovery,
-        waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') });
+        waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
     },
     stalls(job, outcome, roster) {
       if (reportedWaitFor({ job, outcome, state: store.read(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] })) return false;
@@ -280,7 +280,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       store.saveWork({ ...previous, ...decision, state, end, sessionIds, checkpointRef, recovery, reportedWait, repairSessionIds: ownership.repairSessionIds,
         waitFor: [...(reportedWait ? reportedWait.sessionStates : waiting).map(row => ({ kind: 'session', id: row.sessionId })),
           ...(state === 'retry_wait' && recovery?.reservationId ? [{ kind: 'retry_timer', id: recovery.reservationId }] : [])],
-        consumedEventIds: [...new Set([...previous.consumedEventIds, ...(job.events || []).map(row => row.eventId)])].slice(-64) });
+        consumedEventIds: [...new Set([...previous.consumedEventIds, ...(job.events || []).map(row => row.eventId)])].slice(-64) }, { returnState: false });
       if (!outcome.failed && !outcome.yielded && !outcome.deliveryPending) store.handled((job.events || []).map(row => row.eventId));
       return { ...decision, state };
     },
