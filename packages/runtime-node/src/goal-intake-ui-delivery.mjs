@@ -61,7 +61,7 @@ function withoutDataHeaders(value) {
   return value.split(/\n\s*\n/).map(line => {
     if (!/\b(?:csv|tsv|rendercsv)\b/i.test(line)) return line;
     return line.replace(/\b(?:csv|tsv)\s+(?:file\s+)?header\b/gi, 'data fields')
-      .replace(/\bheader\b\s*[:：=]?\s*(?=(?:(?:`{1,3}|['"])\s*)?[a-z_][\w-]*(?:\s*,\s*[a-z_][\w-]*)+)/gi, 'fields ');
+      .replace(/\bheader\b\s*[:：=]?\s*(?=(?:[`\p{Quotation_Mark}\p{Ps}]\s*)*[a-z_][\w-]*(?:\s*,\s*[a-z_][\w-]*)+)/giu, 'fields ');
   }).join('\n');
 }
 
