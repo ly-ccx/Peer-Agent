@@ -8,6 +8,13 @@ All notable changes to Peer Agent are tracked here.
 - Accept factual verifier summaries after real tool results and recover safe model changes.
 - Reduce large-history execution overhead, coalesce refreshes and preserve historical error details.
 
+## 0.1.0-rc.21 - 2026-10-20
+
+- Incrementally invalidate delegated-plan discovery using the existing journal; preserve current plan, permission and execution guards and full-scan fallback.
+- Keep tool artifact materialization inside the configured data root; retain existing persisted references.
+- Continue from the retained RC20 public-build performance failure with full-scale real-task and offline personal-history validation.
+- Synchronize bilingual release notes and generated documentation changelog.
+
 ## Unreleased
 
 ### Notes
