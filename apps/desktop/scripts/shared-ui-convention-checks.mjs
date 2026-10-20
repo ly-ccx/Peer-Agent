@@ -75,7 +75,8 @@ async function buildLegacyComponentFixture({ captureDirectory, classicFixture })
     import { DiffViewer } from './renderer/src/workbench/file-preview/DiffViewer.tsx';
     import './renderer/src/styles.css';
     const artifact = { kind: 'code', ref: 'file:///fixture/new-name.ts', openPath: '/fixture/new-name.ts',
-      label: 'new-name.ts', preview: { kind: 'code', additions: 1, deletions: 1 } };
+      label: 'new-name.ts', preview: { kind: 'code', additions: 1, deletions: 1,
+        diffLines: ${JSON.stringify(classicFixture.diff.split('\n'))} } };
     const item = { planSteps: [{ artifacts: [artifact] }] };
     createRoot(document.getElementById('root')).render(React.createElement('main',
       { className: 'task-overview-work-item', style: { margin: '32px', padding: '24px' } },
