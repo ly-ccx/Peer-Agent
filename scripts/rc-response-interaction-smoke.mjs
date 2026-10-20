@@ -327,8 +327,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     assert.ok(bubbles.every(item => item.background !== 'rgba(0, 0, 0, 0)' && item.radius >= 12 && item.padding >= 12 && item.fits));
     assert.equal(await detail.locator('.bot-turn-process > summary').isVisible(), false);
     assert.equal(await footer.locator(':scope > button').evaluate(node => node.getBoundingClientRect().top >= Math.max(...[...node.closest('.bot-reply').querySelectorAll('.bot-narration p')].map(p => p.getBoundingClientRect().bottom))), true);
-    assert.equal(await footer.textContent(), '正在整理回复查看详情');
-    assert.equal(await footer.locator(':scope > button').evaluate(node => parseFloat(getComputedStyle(node).fontSize)), 11);
+    assert.equal(await footer.textContent(), '正在整理回复');
+    assert.equal(await footer.locator(':scope > button').getAttribute('aria-label'), '回复详情');
+    assert.equal(await footer.locator(':scope > button').evaluate(node => parseFloat(getComputedStyle(node).fontSize)), 12);
     bubbleChecks.push({ theme, bubbles });
     await checkReplyPresence({ page, reply: live, report, until, state: `latest-paragraph-${theme}`, label: '正在整理回复' });
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `conversation-updates-${theme}.png`) });
@@ -456,7 +457,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.waitForTimeout(180);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'conversation-complete.png') });
   assert.equal(await completed.locator('.bot-turn-process').count(), 0);
-  assert.equal(await completed.locator('.bot-reply-context > button').innerText(), '查看详情');
+  assert.equal(await completed.locator('.bot-reply-context > button').innerText(), '回复详情');
   const finalBubble = await completed.locator(':scope > .bot-reply-body').evaluate(node => ({ background: getComputedStyle(node).backgroundColor, padding: getComputedStyle(node).padding, text: node.innerText }));
   assert.notEqual(finalBubble.background, 'rgba(0, 0, 0, 0)');
   assert.match(finalBubble.text, /界面展示结果，本地负责执行能力/);

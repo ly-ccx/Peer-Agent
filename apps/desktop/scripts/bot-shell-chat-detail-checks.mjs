@@ -103,7 +103,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   }, { url: page.url(), nativeSize: nativeView.previous });
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, entryTheme);
   await openReplyDetails(page, firstReply);
-  report.replyDetailsEntry = { themes: entryChecks, keyboard: true, rightAligned: true };
+  report.replyDetailsEntry = { themes: entryChecks, keyboard: true, leftAligned: true, unifiedActivity: true };
   const timed = page.locator('.bot-turn-process');
   if (!await timed.evaluate(node => node.open)) await timed.locator(':scope > summary').click();
   await timed.locator('.bot-tool-step > summary .bot-process-elapsed').first().waitFor({ state: 'visible' });

@@ -17,13 +17,18 @@ export async function checkReplyPresence({ page, reply, report, until, state, la
       + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
     if (!bubble) return null;
-    const body = bubble.getBoundingClientRect(), footer = node.querySelector('.bot-reply-context').getBoundingClientRect();
-    const button = node.querySelector('.bot-reply-context > button').getBoundingClientRect(), column = node.getBoundingClientRect();
-    return { bodyRight: body.right, bodyLeft: body.left, footerRight: footer.right, actionRight: button.right,
+    const body = bubble.getBoundingClientRect(), style = getComputedStyle(bubble), footerNode = node.querySelector('.bot-reply-context');
+    const footer = footerNode.getBoundingClientRect(), icon = footerNode.querySelector('button > svg').getBoundingClientRect();
+    const button = footerNode.querySelector('button').getBoundingClientRect(), column = node.getBoundingClientRect();
+    const textLeft = body.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth);
+    return { bodyRight: body.right, bodyLeft: body.left, textLeft, footerLeft: footer.left, actionLeft: button.left,
       columnRight: column.right, fits: button.left >= column.left && button.right <= column.right,
-      aligned: Math.abs(body.right - footer.right) <= 1 && Math.abs(body.right - button.right) <= 1 };
+      aligned: Math.abs(textLeft - footer.left) <= 1 && Math.abs(textLeft - icon.left) <= 1,
+      unifiedActivity: !footerNode.querySelector('.bot-context-running') || footerNode.querySelector('button .bot-context-running') !== null,
+      stableHeight: footer.height >= 32 && button.height >= 32, singleAction: footerNode.querySelectorAll('button').length === 1 };
   }), value => value?.aligned);
   assert.ok(bounds.fits, `${state}: footer remains inside the conversation`);
+  assert.ok(bounds.unifiedActivity && bounds.stableHeight && bounds.singleAction, 'one stable, accessible activity/details action');
   samples.cases.push({ state, ...bounds, width: page.viewportSize()?.width,
     theme: await page.evaluate(() => document.documentElement.dataset.theme) });
   if (shot) {

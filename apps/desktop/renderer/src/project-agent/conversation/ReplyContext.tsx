@@ -26,11 +26,12 @@ export function ReplyContext({ i18n, onOpenDetails, activity }: {
   const ref = useReplyFooterBounds();
   const label = replyActivityLabel(activity, i18n);
   return <div ref={ref} className="bot-reply-context" data-running={Boolean(label)}>
-    {label ? <span className="bot-context-running" role="status" title={label}>{label}</span> : null}
-    <button type="button" onClick={event => {
+    <button type="button" aria-label={i18n.t('projectAgent.chat.context.details')} title={i18n.t('projectAgent.chat.context.details')} onClick={event => {
       event.currentTarget.focus({ preventScroll: true });
       onOpenDetails?.();
-    }}>{i18n.t('projectAgent.chat.context.details')}<PeerIcon name="arrowUpRight" size={12} /></button>
+    }}><PeerIcon name="panelRight" size={14} />{label
+      ? <span className="bot-context-running" role="status">{label}</span>
+      : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
   </div>;
 }
 

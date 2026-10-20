@@ -12,7 +12,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await scrollToBotMessage(page, reply);
   await reply.locator('.bot-reply-body').click();
   const context = page.locator('.bot-reply-details');
-  assert.equal(await reply.locator('.bot-reply-context > button').innerText(), '查看详情');
+  assert.equal(await reply.locator('.bot-reply-context > button').innerText(), '回复详情');
   assert.equal(await reply.locator('.bot-work-row, .bot-evidence-list').count(), 0);
   assert.equal(await reply.locator('.bot-reply-marks > button').count(), 0);
   await openReplyDetails(page, reply);
