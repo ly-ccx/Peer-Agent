@@ -52,7 +52,9 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
     writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, sessions, unavailable }));
     renameSync(commandFile + '.next', commandFile);
   };
+  await closeReplyDetails(page);
   await checkParallelTaskRows({ page, until, report, captureDirectory, change, initial });
+  await openReplyDetails(page, reply);
   change([{ ...initial.sessions[0], status: 'verifying', report: { summary: '已完成' } }]);
   await until(() => work.getAttribute('data-status'), value => value === 'verifying');
   assert.match(await work.locator(':scope > summary').innerText(), /核验中/);
