@@ -2,7 +2,7 @@ import { scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
-/** A long reply with question controls reproduces the user's misplaced quote action. */
+/** A long historical reply remains quotable after its old question controls retire. */
 export async function checkBotSelectionQuote({ page, until, report, captureDirectory }) {
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
@@ -74,9 +74,11 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
     await page.locator('.bot-thread').evaluate(node => { node.scrollTop += 500; });
     await action.waitFor({ state: 'detached' });
     await select();
-    // A range that extends into question controls is not a quote of the body.
+    // The old question is closed; extending into adjacent reply controls still
+    // must not turn UI copy into a quote of the body.
+    assert.equal(await reply.locator('.bot-cards').count(), 0);
     await reply.evaluate(node => {
-      const range = window.getSelection().getRangeAt(0); range.setEndAfter(node.querySelector('.bot-cards'));
+      const range = window.getSelection().getRangeAt(0); range.setEndAfter(node.querySelector('.bot-reply-context'));
       document.dispatchEvent(new Event('selectionchange'));
     });
     await action.waitFor({ state: 'detached' });
@@ -103,5 +105,5 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
   await until(() => page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
   report.selectionQuote = { anchored: true, scrollTracking: true, offscreenDismissed: true,
     keyboard: true, mouseClick: true, draftPreserved: true, bodyBoundary: true, widthReflow: true, dockedFits: true, cases,
-    scope: 'Production long Markdown reply and question card; real browser Range and selectionchange; no model call or user acceptance' };
+    scope: 'Production long Markdown reply, retired question and adjacent reply controls; real browser Range and selectionchange; no model call or user acceptance' };
 }

@@ -132,11 +132,12 @@ seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agen
     + '2. 开发规则：按已有规则修改，界面只负责呈现。\n'
     + '3. 常用脚本：启动、构建、测试及产品回归都有对应入口。\n'
     + '4. 最近提交：已核对当前分支与提交记录。\n\n要把这些确认过的事实写入项目记忆吗？' };
+// Historical questions keep their body available for quoting after their controls retire.
 if (process.argv.includes('--selection-quote-only')) seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agent_reply',
   content: '仓库只读熟悉已经完成，工作区没有改动。叶子证据和独立校验都通过了；项目记忆里目前还没有对应条目。\n\n'
     + Array.from({ length: 8 }, (_, i) => `${i + 1}. 项目核对：检查应用、运行时、脚本与规则，整理已核实的事实和未覆盖的范围。`).join('\n')
     + '\n\n要把这些确认过的事实写入项目记忆吗？',
-  cards: [{ cardId: 'card:question:reply:rc-selection', kind: 'question', content: '要写入项目记忆吗？', actions: [] }] };
+  question: { options: ['写入项目记忆', '只收下，不写记忆'] } };
 if (workSurfaces) {
   seededMessages.at(-1).sources = ['rc-work-1'];
   seededMessages.at(-1).meta.evidenceRefs = Array.from({length:20}, (_,i)=>'rc-evidence-'+i);
