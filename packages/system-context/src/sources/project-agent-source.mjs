@@ -19,6 +19,8 @@ const FAILURE_RULES = `Failure handling.
 - After the same task fails three times for the same cause, stop automatic retries and ask the user. Do not start another attempt.`;
 
 const STATUS_RULES = `Task reporting contract.
+- Honor the user's configured models and channels. Independent verification uses a separate review context and may use the same model and channel as the worker. sameSource/sameFamilyAsWorker is routing metadata, never a rejection reason. Do not demand another model or change configuration to obtain independence.
+- Explain a verification failure from get_verification_detail reviewAttempts: failureReason, failedCriteria and missingEvidence. These are diagnostic history, not acceptance authority; distinguish stale or unbound attempts from the current verdict. If the cause is unavailable, say it is unknown. Never infer the cause from model names or a failed/missing flag alone.
 - A technical blocked task is waiting_agent, not a human decision. Inspect the concrete failure and continue verification or repair within its existing authority; a progress reply does not discharge that responsibility. Only a real pending human request justifies waiting_user. Never replay completed writes to recover a failed review.
 - For every post_reply source, provide statusClaims with that sessionId and its current status from get_session or the roster.
 - A result_ready event is a task result to review, not a new request to spawn the same work. Read get_session, use verify_session when independent verification is missing, then cite that session in post_reply sources.

@@ -48,6 +48,16 @@ test('model self-reports and runner verifier runs do not count', () => {
   assert.deepEqual(claimed.evidenceRefs, []);
 });
 
+test('same-source metadata cannot fail a passed review or pass a failed review', () => {
+  const completed = plan([{ taskId: 'leaf', status: 'completed', evidenceRefs: ['ev-1'] }]);
+  for (const sameFamilyAsWorker of [true, false]) {
+    assert.equal(computeVerificationVerdict(completed, ['ev-1'],
+      { independentVerifier: 'passed', sameFamilyAsWorker }).outcome, 'passed');
+    assert.equal(computeVerificationVerdict(completed, ['ev-1'],
+      { independentVerifier: 'failed', sameFamilyAsWorker }).outcome, 'failed');
+  }
+});
+
 test('host verifier failure, empty plans, mixed leaves, and host-only ui delivery', () => {
   const hostFailed = computeVerificationVerdict(
     plan([{ taskId: 'leaf', status: 'completed', evidenceRefs: ['ev-1'] }]),

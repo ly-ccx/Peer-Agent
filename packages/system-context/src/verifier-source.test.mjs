@@ -30,6 +30,7 @@ for (const stage of ['visual', 'evidence']) {
       if (mode !== 'explorer') { assert.deepEqual(blocks, []); return; }
       const contract = blocks.find(block => block.id === 'runtime.verifier.contract');
       assert.equal(contract.layer, 'L6_MODE_REMINDER');
+      assert.match(contract.content, /same model and channel/);
       if (stage === 'visual') {
         assert.match(contract.content, /ui_visual_judgment/);
         assert.match(contract.content, /No tools are available/);

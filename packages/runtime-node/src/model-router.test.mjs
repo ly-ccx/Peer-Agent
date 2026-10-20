@@ -41,6 +41,30 @@ test('provider family prefers provider type, then group id', () => {
   assert.equal(providerFamily({ groupId: 'local-group' }), 'local-group');
 });
 
+test('a fixed verifier preserves the configured model, channel and effort even with a different-family candidate', () => {
+  const selected = provider({ ...textModel, supportsReasoning: true,
+    reasoningEffortLevels: ['low', 'max'], defaultEffort: 'low' });
+  for (const layer of ['global', 'project', 'task', 'this_request']) {
+    const fixed = { mode: 'fixed', modelProviderId: selected.id, reasoningEffort: 'max' };
+    const route = resolveRoleRoute({ role: 'verifier', providers: [selected, visionModel], workerModelProviderId: selected.id,
+      routing: { verifierPreferDifferentFamily: true,
+        tiers: { strong: { primary: visionModel.id, fallbacks: [selected.id] } },
+        roles: { verifier: layer === 'global' ? fixed : { mode: 'tier', tier: 'strong' } } },
+      ...(layer === 'project' ? { projectPolicy: { overrides: { verifier: fixed } } } : {}),
+      ...(layer === 'task' ? { taskOverride: fixed } : {}),
+      ...(layer === 'this_request' ? { requestPreference: { modelProviderId: selected.id } } : {}),
+    });
+    assert.equal(route.ok, true, layer);
+    assert.equal(route.source, layer);
+    assert.equal(route.selection.modelProviderId, selected.id, layer);
+    assert.equal(route.selection.providerId, selected.groupId, layer);
+    assert.equal(route.selection.modelId, selected.model, layer);
+    assert.equal(route.selection.reasoningEffort, layer === 'this_request' ? 'low' : 'max', layer);
+    assert.deepEqual(route.candidateIds, [selected.id]);
+    assert.equal(route.sameFamilyAsWorker, true);
+  }
+});
+
 test('one usable model keeps explorer, verifier, and visual review on that model', () => {
   const only = provider({
     id: 'only-model',

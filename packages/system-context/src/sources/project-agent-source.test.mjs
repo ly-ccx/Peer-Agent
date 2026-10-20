@@ -31,6 +31,11 @@ test('项目代理规则只在 project_agent 角色进入 L1', () => {
   assert.match(section.content, /statusClaims/);
   assert.match(section.content, /Only persisted resultAcceptance/);
   assert.match(section.content, /Never repeat a rejected reply as final free text/);
+  assert.match(section.content, /Honor the user's configured models and channels/);
+  assert.match(section.content, /may use the same model and channel as the worker/);
+  assert.match(section.content, /routing metadata, never a rejection reason/);
+  assert.match(section.content, /get_verification_detail reviewAttempts/);
+  assert.match(section.content, /Never infer the cause from model names or a failed\/missing flag alone/);
   assert.match(section.content, /brief public assistant text before tools/);
   assert.match(section.content, /Simple answers can go straight to post_reply/);
   assert.match(section.content, /Progress text does not deliver a result/);
