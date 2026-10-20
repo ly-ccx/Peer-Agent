@@ -25,7 +25,7 @@ try {
   const profile = JSON.parse(readFileSync(path.join(root, 'projects', bot.workspaceId, 'profile.json'), 'utf8'));
   const facts = createDesktopProjectFacts({ runtimeRoot, conversationStore: conversations, supervisor, profileStore: { read: () => profile }, approvalStore: { list: () => [] }, readCoordination: () => coordination.read() });
   const history = conversations.createHistoryProjection(value => value.messages, { maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
-  const directory = createBotDirectory({ rootDir: root, readMessages: id => history(id) || [], readCards: id => facts.cards(id), getSession: id => supervisor.get({ sessionId: id }) });
+  const directory = createBotDirectory({ rootDir: root, readMessages: id => history(id) || [], readCards: id => facts.cards(id), readQuestionCards: id => facts.questionCards(id), getSession: id => supervisor.get({ sessionId: id }) });
   const cold = performance.now(); directory.readConversation(bot.workspaceId, { latest: true, limit: 50 }); report.firstConversationMs = performance.now()-cold;
   assert.equal(supervisor.sessionsForProject(bot.workspaceId).length, 8, 'all historical delegated plans must survive real normalization');
   for (const [name, read] of [['conversation', () => directory.readConversation(bot.workspaceId, { latest: true, limit: 50 })],

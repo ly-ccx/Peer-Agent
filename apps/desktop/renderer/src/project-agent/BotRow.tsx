@@ -11,10 +11,11 @@ interface BotRowProps {
   readonly timeLabel: string;
   readonly i18n: I18nRuntime;
   readonly onHighlight: (workspaceId: string) => void;
+  readonly onAttention?: (workspaceId: string) => void;
   readonly onOpen: (workspaceId: string) => void;
 }
 
-export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight, onOpen }: BotRowProps) {
+export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight, onOpen, onAttention }: BotRowProps) {
   const name = item.profile.displayName;
   const preview = item.preview.trim() || i18n.t('projectAgent.list.noPreview');
   const needsYou = item.state.needsYou;
@@ -37,10 +38,12 @@ export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight
       <span className="bot-row-side">
         {timeLabel ? <span className="bot-row-time">{timeLabel}</span> : <span className="bot-row-time" />}
         {needsYou > 0 ? (
-          <span className="bot-badge">
+          <button type="button" className="bot-badge" aria-label={i18n.t('projectAgent.list.needsYouBadge', { count: needsYou })}
+            onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}
+            onClick={event => { event.stopPropagation(); onAttention?.(item.workspaceId); }}>
             {needsYou}
             <span className="bot-sr">{i18n.t('projectAgent.list.needsYouBadge', { count: needsYou })}</span>
-          </span>
+          </button>
         ) : item.state.unread > 0 ? (
           <span className="bot-unread">
             <span className="bot-sr">{i18n.t('projectAgent.list.unread')}</span>

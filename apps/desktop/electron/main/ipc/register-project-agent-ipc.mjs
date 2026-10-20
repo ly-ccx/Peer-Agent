@@ -10,6 +10,7 @@ function owner(ownerName, register) {
 export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
   const ports = {
     list: assertFunction(projectAgent?.list, 'projectAgent.list'),
+    listAttention: assertFunction(projectAgent?.listAttention, 'projectAgent.listAttention'),
     get: assertFunction(projectAgent?.get, 'projectAgent.get'),
     readAvatar: assertFunction(projectAgent?.readAvatar, 'projectAgent.readAvatar'),
     create: assertFunction(projectAgent?.create, 'projectAgent.create'),
@@ -40,6 +41,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
 
   return Object.freeze([
     owner('project-agent-ipc', (ipc) => {
+      ipc.handle('project-agent:list-attention', (_event, payload) => ports.listAttention(payload));
       ipc.handle('project-agent:list', (_event, payload) => ports.list(payload));
       ipc.handle('project-agent:get', (_event, payload) => ports.get(payload));
       ipc.handle('project-agent:read-avatar', (_event, payload) => ports.readAvatar(payload));

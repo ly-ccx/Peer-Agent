@@ -38,7 +38,7 @@ export async function openReplyDetails(page, message) {
     if (!await history.evaluate(node => node.open)) {
       await history.locator(':scope > summary').focus(); await history.locator(':scope > summary').press('Enter');
     }
-    const action = history.getByRole('button', { name: '查看详情', exact: true });
+    const action = history.getByRole('button', { name: '回复详情', exact: true });
     await action.focus(); await action.press('Enter');
     await page.locator('.bot-reply-details').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
@@ -48,8 +48,9 @@ export async function openReplyDetails(page, message) {
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
   await page.locator('.bot-composer textarea').focus();
   await page.mouse.move(1, 1);
-  await page.waitForFunction(node => getComputedStyle(node).opacity === '0', await button.elementHandle());
-  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '0', 'reply details stay quiet until the reply is hovered or focused');
+  const running = await message.locator('.bot-reply-context').getAttribute('data-running') === 'true';
+  await page.waitForFunction(({ node, running }) => getComputedStyle(node).opacity === (running ? '1' : '0'), { node: await button.elementHandle(), running });
+  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live activity remains visible; completed details wait for hover or focus');
   // A pushed drawer's body can disappear before its width transition finishes.
   // Let the actual finite layout animations finish before choosing a pointer position.
   await message.evaluate(async node => {
@@ -59,18 +60,18 @@ export async function openReplyDetails(page, message) {
   });
   const placement = await button.evaluate(node => {
     const action = node.getBoundingClientRect(), footer = node.parentElement.getBoundingClientRect();
-    const status = node.parentElement.querySelector('.bot-context-running')?.getBoundingClientRect();
     const bubbles = [...node.closest('.bot-reply, .bot-system').querySelectorAll(
       ':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
       + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
       + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
-    const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0)?.getBoundingClientRect();
-    return { right: Math.abs(action.right - footer.right), bubbleRight: bubble ? Math.abs(action.right - bubble.right) : null,
-      gap: status && action.top < status.bottom ? action.left - status.right : null };
+    const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
+    const style = bubble ? getComputedStyle(bubble) : null;
+    const textLeft = bubble ? bubble.getBoundingClientRect().left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) : null;
+    const icon = node.querySelector('svg').getBoundingClientRect();
+    return { left: Math.abs(icon.left - footer.left), bubbleLeft: textLeft === null ? null : Math.abs(icon.left - textLeft), height: action.height };
   });
-  assert.ok(placement.right <= 2, 'details action aligns with its footer');
-  if (placement.bubbleRight !== null) assert.ok(placement.bubbleRight <= 2, 'details action aligns with the current bubble, not the conversation column');
-  if (placement.gap !== null) assert.ok(placement.gap >= 24, 'running status and details action have separate sides');
+  assert.ok(placement.left <= 2 && placement.height >= 32, 'details icon aligns left with its footer and keeps a usable hit target');
+  if (placement.bubbleLeft !== null) assert.ok(placement.bubbleLeft <= 2, 'details starts on the current bubble text column');
   // Move the pointer over the visible reply. Locator.hover() would first center
   // the whole element with scrollIntoView, scrolling the document at narrow widths.
   const visibleHoverPoint = () => message.evaluate(node => {

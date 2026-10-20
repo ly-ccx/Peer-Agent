@@ -82,6 +82,7 @@ export interface BotProfile {
 
 export interface BotRowState {
   readonly needsYou: number;
+  readonly attentionExpiresAt?: string;
   readonly unread: number;
   readonly running: number;
   /** Ephemeral status of the runner hosted by this desktop process. */
@@ -196,7 +197,6 @@ export const BOT_AVATAR_COLORS = [
   '#a8a59f',
 ] as const;
 
-const NEEDS_YOU_STATUSES = new Set<WorkSessionStatus>(['waiting_user', 'result_ready']);
 const RUNNING_STATUSES = new Set<WorkSessionStatus>(['starting', 'running', 'verifying']);
 
 function fnv1a(text: string): number {
@@ -230,12 +230,11 @@ export function projectBotListItem(input: {
   readonly lastMessage?: BotListMessage | null;
   readonly sessions?: readonly BotListSession[];
   readonly approvals?: readonly BotListApproval[];
+  readonly attention?: readonly { readonly id: string }[];
   readonly readCursor?: string | null;
 }): BotListItem {
   const sessions = input.sessions ?? [];
-  const approvals = input.approvals ?? [];
-  const openApprovals = approvals.filter((item) => item.state === 'open' || item.state === 'stale').length;
-  const waitingSessions = sessions.filter((item) => NEEDS_YOU_STATUSES.has(item.status)).length;
+  const attention = new Set((input.attention ?? []).map(item => item.id));
   const running = sessions.filter((item) => RUNNING_STATUSES.has(item.status)).length;
   const lastMessage = input.lastMessage ?? null;
   const unread = lastMessage
@@ -254,7 +253,7 @@ export function projectBotListItem(input: {
       ...sessions.map((item) => item.updatedAt),
     ]),
     state: {
-      needsYou: openApprovals + waitingSessions,
+      needsYou: attention.size,
       unread,
       running,
     },

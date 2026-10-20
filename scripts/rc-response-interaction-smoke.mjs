@@ -201,8 +201,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     await live.waitFor(); await live.locator('.bot-context-running').waitFor();
   };
   await start('RC_STREAM_TEXT');
-  // A pending reply has no bubble yet; the author and status still share the
-  // composer column, including while a detail drawer narrows the conversation.
+  // Before a bubble arrives, keep the author on the composer column and the
+  // unified activity entry on the future bubble's 14px text inset.
   const pendingViewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const pendingTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   report.pendingReplyLayout = [];
@@ -222,9 +222,13 @@ export async function checkResponseInteraction({ page, until, report, captureDir
           const box = element => { const { left, right } = element.getBoundingClientRect(); return { left, right }; };
           return { row: box(row), author: box(row.querySelector('.bot-message-author')),
             status: box(node.querySelector('.bot-reply-context')),
+            icon: box(node.querySelector('.bot-reply-context > button > svg')),
             composer: box(document.querySelector('.bot-composer')) };
         });
-        assert.ok([bounds.row, bounds.author, bounds.status].every(box => Math.abs(box.left - bounds.composer.left) <= 1)
+        assert.ok([bounds.row, bounds.author].every(box => Math.abs(box.left - bounds.composer.left) <= 1)
+          && Math.abs(bounds.status.left - bounds.composer.left - 14) <= 1
+          && Math.abs(bounds.icon.left - bounds.status.left) <= 1
+          && bounds.status.right <= bounds.composer.right
           && Math.abs(bounds.row.right - bounds.composer.right) <= 1,
           `pending reply and composer must share a column: ${JSON.stringify({ width, appearance, docked, ...bounds })}`);
         report.pendingReplyLayout.push({ width, appearance, docked, aligned: true, ...bounds });
@@ -327,8 +331,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     assert.ok(bubbles.every(item => item.background !== 'rgba(0, 0, 0, 0)' && item.radius >= 12 && item.padding >= 12 && item.fits));
     assert.equal(await detail.locator('.bot-turn-process > summary').isVisible(), false);
     assert.equal(await footer.locator(':scope > button').evaluate(node => node.getBoundingClientRect().top >= Math.max(...[...node.closest('.bot-reply').querySelectorAll('.bot-narration p')].map(p => p.getBoundingClientRect().bottom))), true);
-    assert.equal(await footer.textContent(), '正在整理回复查看详情');
-    assert.equal(await footer.locator(':scope > button').evaluate(node => parseFloat(getComputedStyle(node).fontSize)), 11);
+    assert.equal(await footer.textContent(), '正在整理回复');
+    assert.equal(await footer.locator(':scope > button').getAttribute('aria-label'), '回复详情');
+    assert.equal(await footer.locator(':scope > button').evaluate(node => parseFloat(getComputedStyle(node).fontSize)), 12);
     bubbleChecks.push({ theme, bubbles });
     await checkReplyPresence({ page, reply: live, report, until, state: `latest-paragraph-${theme}`, label: '正在整理回复' });
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `conversation-updates-${theme}.png`) });
@@ -456,7 +461,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.waitForTimeout(180);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'conversation-complete.png') });
   assert.equal(await completed.locator('.bot-turn-process').count(), 0);
-  assert.equal(await completed.locator('.bot-reply-context > button').innerText(), '查看详情');
+  assert.equal(await completed.locator('.bot-reply-context > button').innerText(), '回复详情');
   const finalBubble = await completed.locator(':scope > .bot-reply-body').evaluate(node => ({ background: getComputedStyle(node).backgroundColor, padding: getComputedStyle(node).padding, text: node.innerText }));
   assert.notEqual(finalBubble.background, 'rgba(0, 0, 0, 0)');
   assert.match(finalBubble.text, /界面展示结果，本地负责执行能力/);

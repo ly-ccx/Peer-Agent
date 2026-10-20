@@ -7,6 +7,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
+import { projectReplyQuestions } from './question-lifecycle.mjs';
 import { formatGoalDeliveryHandoff } from '@peer-agent/protocol';
 
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -17,17 +18,7 @@ const CLOSED_APPROVAL = new Set(['approved', 'denied', 'expired', 'cancelled']);
 
 /** Conversational choices only. Legacy freeform answers do not approve task or permission cards. */
 export function replyQuestionAnswered(messages, reply) {
-  if (reply?.question?.answered === true) return true;
-  const index = messages.indexOf(reply);
-  if (index < 0 || !reply?.id) return false;
-  const cardId = `card:question:reply:${reply.id}`;
-  const later = messages.slice(index + 1);
-  const isUser = message => message?.kind === 'user_input' || (!message?.kind && message?.role === 'user');
-  if (later.some(message => isUser(message) && message.answerTo === cardId)) return true;
-  const next = later.find(message => isUser(message) || message?.kind === 'agent_reply'
-    || (!message?.kind && message?.role === 'assistant'));
-  return Boolean(next && isUser(next) && !next.answerTo
-    && (!Array.isArray(next.quoteRefs) || next.quoteRefs.length === 0 || next.quoteRefs.includes(reply.id)));
+  return reply?.question?.answered === true || projectReplyQuestions(messages).get(reply?.id)?.state !== 'open';
 }
 
 /**
@@ -250,7 +241,7 @@ function replyQuestionCards(facts) {
       kind: 'question',
       content: clip(question.prompt, '需要你回答'),
       factResolved: answered,
-      factState: answered ? 'answered' : '',
+      factState: answered ? question.state || 'answered' : '',
       actions: answerActions(cardId, question.options),
       refs: refs({ replyMessageId }),
     }));
@@ -267,6 +258,7 @@ function questionsOnReplies(replies) {
       options: reply.question.options,
       prompt: reply.question.prompt,
       answered: reply.question.answered === true,
+      state: reply.question.state,
     });
   }
   return questions;

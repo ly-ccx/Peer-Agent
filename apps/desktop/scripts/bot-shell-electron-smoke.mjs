@@ -1,3 +1,5 @@
+import { checkBotUserReceipt } from './bot-user-receipt-checks.mjs';
+import { checkBotAttention } from './bot-attention-checks.mjs';
 import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
 import { checkBotFullAccessImages } from './bot-full-access-image-checks.mjs';
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
@@ -50,7 +52,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -131,11 +133,12 @@ seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agen
     + '2. 开发规则：按已有规则修改，界面只负责呈现。\n'
     + '3. 常用脚本：启动、构建、测试及产品回归都有对应入口。\n'
     + '4. 最近提交：已核对当前分支与提交记录。\n\n要把这些确认过的事实写入项目记忆吗？' };
+// Historical questions keep their body available for quoting after their controls retire.
 if (process.argv.includes('--selection-quote-only')) seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agent_reply',
   content: '仓库只读熟悉已经完成，工作区没有改动。叶子证据和独立校验都通过了；项目记忆里目前还没有对应条目。\n\n'
     + Array.from({ length: 8 }, (_, i) => `${i + 1}. 项目核对：检查应用、运行时、脚本与规则，整理已核实的事实和未覆盖的范围。`).join('\n')
     + '\n\n要把这些确认过的事实写入项目记忆吗？',
-  cards: [{ cardId: 'card:question:reply:rc-selection', kind: 'question', content: '要写入项目记忆吗？', actions: [] }] };
+  question: { options: ['写入项目记忆', '只收下，不写记忆'] } };
 if (workSurfaces) {
   seededMessages.at(-1).sources = ['rc-work-1'];
   seededMessages.at(-1).meta.evidenceRefs = Array.from({length:20}, (_,i)=>'rc-evidence-'+i);
@@ -225,6 +228,11 @@ assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read sea
 let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
   if (globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
     result.messages = [...result.messages, ...globalThis.rcBotWorkMessages];
+    // The injected task-note facts include their current decision, matching the production page contract.
+    const currentQuestion=globalThis.rcBotWorkMessages.flatMap(message=>(message.cards||[])
+      .filter(card=>card.kind==='question'&&card.resolvedState!=='resolved'&&card.actions?.length)
+      .map(()=>message.id)).at(-1);
+    if(currentQuestion)result.activeReplyQuestionId=currentQuestion;
   }
   globalThis.rcBotShellRecord('reads',{  before: payload.before ?? null, nextCursor: result.nextCursor,
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });`);
@@ -300,6 +308,10 @@ if (workSurfaces) {
       return {ok:true,session:{...fixtureSession,report:globalThis.rcBotWorkReports?.[payload.sessionId]??fixtureSession.report}};
     }`);
 }
+observedService = observedService.replace('function listAttention(payload = {}) {', `function listAttention(payload = {}) {
+  if(globalThis.rcAttentionFailOnce){globalThis.rcAttentionFailOnce=false;return {ok:false,code:'CONTROLLED_READ_FAILURE'};}`)
+  .replace('async function submitInput(payload = {}) {', `async function submitInput(payload = {}) {
+  if(globalThis.rcAttentionFailInput){globalThis.rcAttentionFailInput=false;return {ok:false,code:'CONTROLLED_WRITE_FAILURE'};}`);
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
 writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
@@ -500,6 +512,10 @@ try {
     await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--updater-only')) {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
+  } else if (process.argv.includes('--reply-receipt-only')) {
+    await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
+  } else if (process.argv.includes('--attention-only')) {
+    await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
   } else if (process.argv.includes('--task-cancel-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('#bot-msg-rc-message-9999').waitFor();
@@ -740,6 +756,8 @@ try {
   report.checks.push('bot shell returns with all persisted identities');
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
+  if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
+  if (!process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');

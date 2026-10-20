@@ -19,7 +19,7 @@ export function RecoveryHistory({ createdAt, highlighted, i18n, messageKey, onOp
       <p className="bot-reply-body">{i18n.t(messageKey)}</p>
       {onOpenDetails ? <button type="button" onClick={event => {
         event.currentTarget.focus({ preventScroll: true }); onOpenDetails();
-      }}>{i18n.t('projectAgent.chat.context.details')}<PeerIcon name="arrowUpRight" size={12} /></button> : null}
+      }}><PeerIcon name="panelRight" size={14} />{i18n.t('projectAgent.chat.context.details')}</button> : null}
     </div>
   </details>;
 }

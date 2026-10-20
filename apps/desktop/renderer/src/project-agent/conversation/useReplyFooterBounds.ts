@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-/** Follow the last displayed bubble, including streamed paragraphs and drawer reflow. */
+/** Follow the last displayed text column, including streamed paragraphs and drawer reflow. */
 export function useReplyFooterBounds() {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -19,9 +19,12 @@ export function useReplyFooterBounds() {
       )];
       const target = [...bubbles].reverse().find(node => node.getBoundingClientRect().width > 0);
       const bounds = target?.getBoundingClientRect(), parent = reply.getBoundingClientRect();
-      footer.style.width = bounds ? `${bounds.width}px` : '';
-      footer.style.marginInlineStart = bounds ? `${Math.max(0, bounds.left - parent.left)}px` : '';
-      footer.dataset.compact = String(Boolean(bounds && bounds.width < 210));
+      const style = target ? getComputedStyle(target) : null;
+      const start = style ? parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) : 0;
+      // Even a one-word bubble must leave room for a readable details label.
+      footer.style.width = bounds ? `${Math.max(0, parent.right - bounds.left - start - 14)}px` : 'calc(100% - 28px)';
+      // Match the message text inset before the first streamed bubble arrives.
+      footer.style.marginInlineStart = bounds ? `${Math.max(0, bounds.left - parent.left + start)}px` : '14px';
       if (observed.length !== bubbles.length || observed.some((node, index) => node !== bubbles[index])) {
         observed.forEach(node => resize.unobserve(node));
         observed = bubbles; observed.forEach(node => resize.observe(node));

@@ -1,4 +1,5 @@
-import { createCardProjection, replyQuestionAnswered } from './card-projection.mjs';
+import { projectReplyQuestions } from './question-lifecycle.mjs';
+import { createCardProjection } from './card-projection.mjs';
 import { verdictRefFor } from './acceptance.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { replyFailureStatus } from './reply-failure-facts.mjs';
@@ -30,6 +31,9 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       ? { id: message.id, kind: message.kind, meta: message.meta, turnKind: message.turnKind }
       : (({ attachments, ...fact }) => fact)(message)), { immutableInput: true })
     : id => conversationStore.getPersistedConversationHistory(id)?.messages || [];
+  const taskQuestionHistory = typeof conversationStore.createHistoryProjection === 'function'
+    ? conversationStore.createHistoryProjection(history => latestTaskQuestion(history.messages), { immutableInput: true })
+    : id => latestTaskQuestion(conversationStore.getPersistedConversationHistory(id)?.messages || []);
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
     const rows = sessions(workspaceId);
@@ -53,25 +57,8 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       }),
     };
   }
-  function cards(workspaceId) {
-    const profile = profileStore.read(workspaceId);
-    const messages = messageFacts(profile?.agentConversationId) || [];
-    const replies = messages.filter((message) => message.kind === 'agent_reply').map((message) => ({
-      ...message,
-      ...(message.question ? { question: { ...message.question,
-        answered: replyQuestionAnswered(messages, message) } } : {}),
-    }));
-    const rows = sessions(workspaceId);
-    const confirmations = rows.flatMap((row) => {
-      const decision = supervisor.acceptance(row.sessionId);
-      return decision && (row.status === 'result_ready' && decision.mode === 'confirm' || row.status === 'accepted')
-        ? [{ sessionId: row.sessionId, summary: row.title, accepted: row.status === 'accepted' }] : [];
-    });
-    const completionReviews = rows.flatMap(row => {
-      const review = supervisor.completionReview?.(row.sessionId);
-      return review ? [{ ...review, title: row.title }] : [];
-    });
-    const questions = rows.flatMap((row) => {
+  function taskQuestions(rows, messages) {
+    return rows.flatMap((row) => {
       if (row.status !== 'waiting_user') return [];
       if (['dependency_failed', 'dependency_missing'].includes(row.queueReason)) {
         const questionId = 'dependency';
@@ -82,16 +69,40 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
           answered: messages.some(answer => answer.answerTo === answerTo),
         }];
       }
-      const history = conversationStore.getPersistedConversationHistory(row.conversationId)?.messages || [];
-      return history.flatMap((message) => (message.segments || []).flatMap((segment) => {
-        if (segment.tool !== 'request_user_input' || !segment.args) return [];
-        const args = segment.args;
-        return [{ sessionId: row.sessionId, questionId: segment.toolCallId || message.id,
-          prompt: args.question || args.prompt,
-          options: (args.options || []).map((option) => typeof option === 'string' ? option : option.label),
-        }];
-      })).slice(-1);
+      if (!row.conversationId) return [];
+      const question = taskQuestionHistory(row.conversationId);
+      if (!question) return [];
+      return [{ ...question, sessionId: row.sessionId,
+        answered: messages.some(answer => answer.answerTo === `card:question:${row.sessionId}:${question.questionId}`) }];
     });
+  }
+  function questionCards(workspaceId) {
+    const rows = sessions(workspaceId).filter(row => row.status === 'waiting_user');
+    if (!rows.length) return [];
+    const profile = profileStore.read(workspaceId);
+    const messages = messageFacts(profile?.agentConversationId) || [];
+    return projection.project(workspaceId, { questions: taskQuestions(rows, messages) });
+  }
+  function cards(workspaceId) {
+    const profile = profileStore.read(workspaceId);
+    const messages = messageFacts(profile?.agentConversationId) || [];
+    const questionStates = projectReplyQuestions(messages, Date.parse(now()));
+    const replies = messages.filter((message) => message.kind === 'agent_reply').map((message) => ({
+      ...message,
+      ...(message.question ? { question: { ...message.question,
+        answered: questionStates.get(message.id)?.state !== 'open', state: questionStates.get(message.id)?.state } } : {}),
+    }));
+    const rows = sessions(workspaceId);
+    const confirmations = rows.flatMap((row) => {
+      const decision = supervisor.acceptance(row.sessionId);
+      return decision && (row.status === 'result_ready' && row.resultConfirmationRequired === true || row.status === 'accepted')
+        ? [{ sessionId: row.sessionId, summary: row.title, accepted: row.status === 'accepted' }] : [];
+    });
+    const completionReviews = rows.flatMap(row => {
+      const review = supervisor.completionReview?.(row.sessionId);
+      return review ? [{ ...review, title: row.title }] : [];
+    });
+    const questions = taskQuestions(rows, messages);
     const coordination = coordinationFor(workspaceId) || {};
     const works = Object.values(coordination.works || {});
     const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => {
@@ -128,5 +139,20 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
   }
   const query = read => typeof supervisor.readQuery === 'function' ? supervisor.readQuery(read) : read();
   return { delivery: id => query(() => delivery(id)), cards: id => query(() => cards(id)),
+    questionCards: id => query(() => questionCards(id)),
     resolve: (workspaceId, cardId) => projection.resolve(workspaceId, cardId, { resolution: 'retried' }) };
+}
+
+/** Keep the list projection independent of coordination, memories and full child transcripts. */
+function latestTaskQuestion(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    for (const segment of [...(message.segments || [])].reverse()) {
+      if (segment.tool !== 'request_user_input' || !segment.args) continue;
+      const args = segment.args;
+      return { questionId: segment.toolCallId || message.id, prompt: args.question || args.prompt,
+        options: (args.options || []).map(option => typeof option === 'string' ? option : option.label) };
+    }
+  }
+  return null;
 }

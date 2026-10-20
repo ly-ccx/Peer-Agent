@@ -31,6 +31,7 @@ export type PeerIconName =
   | 'ellipsis'
   | 'archive'
   | 'arrowRight'
+  | 'panelRight'
   | 'arrowRightOff';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
@@ -67,6 +68,7 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   ellipsis: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
   archive: <><rect x="3" y="3" width="18" height="4" rx="1" /><path d="M5 7v14h14V7m-10 5h6" /></>,
   arrowRight: <path d="M4 12h16m-6-6 6 6-6 6" />,
+  panelRight: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></>,
   arrowRightOff: <><path d="M4 12h10m2 0h4m-6-6 6 6-3 3M3 3l18 18" /></>,
   stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,

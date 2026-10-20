@@ -306,7 +306,10 @@ export function createInputQueue({
       executionDepth: inputs.slice(executed + 1, delivered + 1).filter(input => !completed.has(input.inputId)).length,
       cursor: state.inputId ?? null, executedCursor: state.executedInputId ?? null };
   }
-  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot };
+  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot,
+    findSubmission: (workspaceId, inputId) => readInputs(workspaceId).find(row => row.inputId === inputId) || null,
+    findAnswer: (workspaceId, answerTo) => readInputs(workspaceId).find(row => row.answerTo === answerTo) || null,
+  };
 }
 
 function normalizeSubmission(input, workspaceId, createdAt) {

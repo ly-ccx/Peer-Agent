@@ -9,10 +9,28 @@ import { createMemoryStore } from '../memory/memory-store.mjs';
 import { createProjectRegistry } from '../project-registry.mjs';
 import { createBotDirectory } from './bot-directory.mjs';
 import { createBotLifecycle } from './bot-lifecycle.mjs';
+import { projectCards } from './card-projection.mjs';
 
 function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
 }
+
+test('directory count and detail include the same open child decision without reading full cards', () => {
+  const root = tempRoot();
+  let answered = false;
+  try {
+    const { directory } = harness(root, {
+      readCards: () => { throw Error('List must not load the full card surface'); },
+      readQuestionCards: () => projectCards('w', { questions: [{ sessionId: 'sess-1', questionId: 'q', prompt: 'Choose format', options: ['CSV'], answered }] }),
+    });
+    assert.equal(directory.list()[0].state.needsYou, 4);
+    assert.equal(directory.attention().length, 4);
+    assert.equal(directory.attention().find(i => i.sessionId === 'sess-1').title, 'Choose format');
+    answered = true;
+    assert.equal(directory.list()[0].state.needsYou, 3);
+    assert.equal(directory.attention().length, 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('legacy freeform replies remove conversational needs-you while approval and confirmation remain', () => {
   const root = tempRoot();
@@ -76,7 +94,7 @@ function harness(root, directoryOptions = {}) {
     kind: 'agent_reply',
     content: '项'.repeat(100),
     createdAt: '2026-09-27T03:00:00.000Z',
-    question: { prompt: '用哪种方案', answered: false },
+    question: { prompt: '用哪种方案', options: ['方案一', '方案二'], answered: false },
   });
   conversationStore.appendMessage(conversationId, {
     id: 'hidden-1',
@@ -92,7 +110,7 @@ function harness(root, directoryOptions = {}) {
     updatedAt: '2026-09-27T05:00:00.000Z',
   }];
   const approvals = [{ approvalId: 'ap-1', state: 'open' }, { approvalId: 'ap-2', state: 'denied' }];
-  const confirmations = [{ accepted: false }];
+  const confirmations = [{ sessionId: 'confirm-1', accepted: false }];
   const directory = createBotDirectory({
     rootDir: root,
     registry,
@@ -220,11 +238,11 @@ test('task batch refreshes list facts while details and failed batches retain th
         return new Map(ids.map(id => [id, [{ title: 'fresh batch task', status }]])); },
     });
     assert.equal(directory.query('fresh batch task').items.length, 1);
-    assert.equal(directory.list()[0].state.needsYou, 1);
+    assert.equal(directory.list()[0].state.needsYou, 0);
     status = 'completed'; assert.equal(directory.list()[0].state.needsYou, 0);
     assert.equal(batches, 3); assert.equal(singles, 0);
-    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 1);
-    unavailable = true; assert.equal(directory.list()[0].state.needsYou, 1);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 0);
+    unavailable = true; assert.equal(directory.list()[0].state.needsYou, 0);
     assert.equal(singles, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -343,7 +361,7 @@ test('没熟悉过的机器人在第一页给出熟悉提议，翻页不带上�
   }
 });
 
-test('一个等待中的经典目标让需要你加一，不增加进行中', () => {
+test('没有当前用户动作的经典目标不占用待处理名额', () => {
   const root = tempRoot();
   try {
     const { directory } = harness(root, {
@@ -358,7 +376,7 @@ test('一个等待中的经典目标让需要你加一，不增加进行中', ()
       }],
     });
     const [item] = directory.list();
-    assert.equal(item.state.needsYou, 4);
+    assert.equal(item.state.needsYou, 3);
     assert.equal(item.state.running, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });

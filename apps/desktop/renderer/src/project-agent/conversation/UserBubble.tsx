@@ -4,6 +4,7 @@ import { BotAttachments } from './BotAttachments';
 import { ReplyAnchorPreview } from './ReplyAnchors';
 import type { ReplyAnchor } from '../state/replyReferenceState';
 import { useState } from 'react';
+import { userReceipt } from '../state/userReceiptState';
 
 export function UserBubble({
   message,
@@ -26,7 +27,7 @@ export function UserBubble({
 }) {
   const [arriving, setArriving] = useState(message.pending === 'sending');
   const excerpt = message.quoteRefs.length > 1 ? message.quoteRefs[1] : '';
-  const answered = message.dispositions.some((item) => item.kind === 'answered');
+  const receipt = userReceipt(message, replied);
   const markText = (item: BotChatMessage['dispositions'][number]) => (
     item.kind === 'out_of_scope'
       ? i18n.t(item.labelKey, { title: item.title || i18n.t('projectAgent.chat.taskFallback') })
@@ -50,19 +51,9 @@ export function UserBubble({
         {message.content ? <p className="bot-user-text">{message.content}</p> : null}
       </div>
       <div className="bot-user-marks">
-        {message.pending === 'received' || (!message.pending && message.inputId && !replied && message.dispositions.length === 0)
-          ? <span>{i18n.t('projectAgent.chat.received')}</span> : null}
-        {message.pending === 'sending' ? <span>{i18n.t('projectAgent.chat.sending')}</span> : null}
-        {message.pending === 'failed' && message.inputId ? (
-          <>
-            <span>{i18n.t('projectAgent.chat.failed')}</span>
-            <button type="button" onClick={() => onRetry(message.inputId!)}>
-              {i18n.t('projectAgent.chat.retry')}
-            </button>
-          </>
-        ) : null}
-        {replied && !message.pending && !answered ? <span>{i18n.t('projectAgent.chat.replied')}</span> : null}
-        {message.dispositions.map((item, index) => (
+        {receipt.labelKey ? <span>{i18n.t(receipt.labelKey)}</span> : null}
+        {receipt.retryInputId ? <button type="button" onClick={() => onRetry(receipt.retryInputId!)}>{i18n.t('projectAgent.chat.retry')}</button> : null}
+        {receipt.taskMarks.map((item, index) => (
           item.sessionIds.length > 0
             ? item.sessionIds.map((sessionId) => (
               <button

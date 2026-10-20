@@ -13,6 +13,20 @@ export const BOT_LIST_WIDTH_STORAGE_KEY = 'peer.projectAgent.botListWidth';
 const NAME_MAX = 40;
 const RESERVED_MANAGED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
+interface BotMessageFocus {
+  readonly workspaceId: string;
+  readonly messageId: string | null;
+  readonly requestId: number;
+}
+
+/** Local navigation owns focus only until a later notification arrives. Counter domains never compare. */
+export function resolveBotMessageFocus(
+  notification: BotMessageFocus | null,
+  attention: (BotMessageFocus & { readonly notificationRequestId: number | null }) | null,
+): BotMessageFocus | null {
+  return attention && attention.notificationRequestId === (notification?.requestId ?? null) ? attention : notification;
+}
+
 export function clampBotListWidth(value: number): number {
   if (!Number.isFinite(value)) return BOT_LIST_WIDTH_DEFAULT;
   return Math.min(BOT_LIST_WIDTH_MAX, Math.max(BOT_LIST_WIDTH_MIN, Math.round(value)));

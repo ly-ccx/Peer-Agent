@@ -75,7 +75,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await closeReplyDetails(page);
   await checkShortReplyQuote({ page, report, captureDirectory });
 
-  const process = reply.getByRole('button', { name: '查看详情', exact: true });
+  const process = reply.getByRole('button', { name: '回复详情', exact: true });
   await quote.focus();
   assert.equal(await quote.evaluate(node => node === document.activeElement), true);
   await quote.press('Enter');

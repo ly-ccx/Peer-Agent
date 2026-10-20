@@ -5,6 +5,7 @@ import { createProjectAgentApplicationService } from '../project-agent/project-a
 import { createProjectAgentIpcRegistrations } from './register-project-agent-ipc.mjs';
 
 const CHANNELS = [
+  'project-agent:list-attention',
   'project-agent:list',
   'project-agent:get',
   'project-agent:read-avatar',
@@ -43,6 +44,7 @@ function harness() {
   const [registration] = createProjectAgentIpcRegistrations({
     projectAgent: {
       list: port('list'),
+      listAttention: port('list-attention'),
       get: port('get'),
       readAvatar: port('read-avatar'),
       create: port('create'),
@@ -98,9 +100,9 @@ test('每个通道把载荷交给应用服务，创建和改档案带上发送�
     }
   }
   assert.equal(calls.length, CHANNELS.length);
-  assert.deepEqual(calls[3], ['create', { channel: 'project-agent:create' }, sender]);
-  assert.deepEqual(calls[4], ['update-profile', { channel: 'project-agent:update-profile' }, sender]);
-  assert.deepEqual(calls[0], ['list', { channel: 'project-agent:list' }]);
+  assert.deepEqual(calls[4], ['create', { channel: 'project-agent:create' }, sender]);
+  assert.deepEqual(calls[5], ['update-profile', { channel: 'project-agent:update-profile' }, sender]);
+  assert.ok(calls.some(row => row[0] === 'list' && row[1].channel === 'project-agent:list'));
   assert.equal(calls.some((call) => call[0] === 'submit-input'), true);
   assert.equal(calls.some((call) => call[0] === 'decide-approval'), true);
   assert.deepEqual(calls.at(-1), ['diagnostics', { channel: 'project-agent:diagnostics' }, sender]);

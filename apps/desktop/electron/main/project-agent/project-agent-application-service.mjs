@@ -1,3 +1,4 @@
+import { createAttentionExpiry } from './attention-expiry.mjs';
 import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
 /**
  * 项目代理应用服务。渲染层的数据和动作都从这里过。
@@ -99,6 +100,9 @@ export function createProjectAgentApplicationService({
   const imageAuthority = createImageReadAuthority({ approvalStore: approvals });
   let corpusToken = null;
   const retrying = new Map();
+  const expiry = createAttentionExpiry({ now, schedule, onExpired: workspaceId => {
+    queueChanged(workspaceId); queueConversation(workspaceId);
+  } });
   const pendingChanged = new Set();
   const pendingConversation = new Set();
   let changedTimer = null;
@@ -134,6 +138,7 @@ export function createProjectAgentApplicationService({
 
   function withAgentStatus(item) {
     if (!item) return item;
+    expiry.observe(item.workspaceId, item.state?.attentionExpiresAt);
     const status = readAgentStatus(item.workspaceId);
     if (!['idle', 'thinking', 'waiting_provider', 'error'].includes(status)) return item;
     return { ...item, state: { ...item.state, agentStatus: status } };
@@ -144,10 +149,22 @@ export function createProjectAgentApplicationService({
     const items = typeof payload?.query === 'string' && payload.query.trim()
       ? directory.search(payload.query)
       : directory.list();
+    if (typeof payload?.query !== 'string' || !payload.query.trim()) expiry.retain(items.map(item => item.workspaceId));
     const filtered = payload?.needsYouOnly === true
       ? items.filter((item) => item.state.needsYou > 0)
       : items;
     return { ok: true, items: filtered.map(withAgentStatus) };
+  }
+
+  function listAttention(payload = {}) {
+    if (!open()) return disabled();
+    if (payload.workspaceId !== undefined && (typeof payload.workspaceId !== 'string' || !directory.get(payload.workspaceId)?.ok)) return { ok: false, code: 'NOT_FOUND' };
+    const items = directory.attention(payload.workspaceId);
+    // Opening details can be the first read of a newly delivered decision.
+    const byWorkspace = new Map();
+    for (const item of items) if (item.expiresAt && (!byWorkspace.has(item.workspaceId) || Date.parse(item.expiresAt) < Date.parse(byWorkspace.get(item.workspaceId)))) byWorkspace.set(item.workspaceId, item.expiresAt);
+    for (const [id, at] of byWorkspace) expiry.observe(id, at);
+    return { ok: true, items };
   }
 
   function get(payload = {}) {
@@ -256,6 +273,15 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     try {
       const answerTo = typeof payload.answerTo === 'string' ? payload.answerTo.trim() : '';
+      if (answerTo.startsWith('card:question:reply:') && typeof directory.questionState === 'function') {
+        const existing = inputQueue.findSubmission?.(payload.workspaceId, payload.inputId);
+        if (existing) return { ok: true, input: existing, delivery: 'queued' };
+        const answered = inputQueue.findAnswer?.(payload.workspaceId, answerTo);
+        if (answered || directory.questionState(payload.workspaceId, answerTo.slice('card:question:reply:'.length)) !== 'open') {
+          queueChanged(payload.workspaceId); queueConversation(payload.workspaceId);
+          return { ok: false, code: 'QUESTION_CLOSED' };
+        }
+      }
       const input = inputQueue.submitInput({
         workspaceId: payload.workspaceId,
         inputId: payload.inputId,
@@ -693,7 +719,9 @@ export function createProjectAgentApplicationService({
   return {
     diagnostics: (...args) => typeof diagnostics === 'function' ? diagnostics(...args) : { ok: false, code: 'DIAGNOSTICS_UNAVAILABLE' },
     takeoverHost,
+    dispose: () => expiry.dispose(),
     list,
+    listAttention,
     get,
     readAvatar,
     create,

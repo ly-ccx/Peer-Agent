@@ -18,7 +18,8 @@ import { projectBotListItem, sortBotList } from '@peer-agent/protocol';
 
 import { pathOf } from '../data-store.mjs';
 import { createBotProfileStore, isBotWorkspaceId } from './bot-profile-store.mjs';
-import { replyQuestionAnswered } from './card-projection.mjs';
+import { projectBotAttention } from './attention.mjs';
+import { projectReplyQuestions } from './question-lifecycle.mjs';
 
 const VISIBLE_KINDS = new Set(['user_input', 'agent_reply', 'system_card', 'agent_activity']);
 const PREVIEW_MAX = 80;
@@ -69,16 +70,6 @@ export function projectBotListMessage(message, previewLength = PREVIEW_MAX) {
   };
 }
 
-function questionsIn(messages) {
-  const found = [];
-  for (const message of messages) {
-    const question = message?.question;
-    if (!question || typeof question !== 'object' || replyQuestionAnswered(messages, message)) continue;
-    found.push(question);
-  }
-  return found;
-}
-
 const FAMILIARIZE_OFFER = {
   kind: 'familiarize',
   text: '要我先熟悉一下这个项目吗？',
@@ -99,9 +90,8 @@ export function createBotDirectory({
   listApprovals = () => [],
   readApprovalsBatch = null,
   listConfirmations = () => [],
-  listClassicGoals = () => [],
-  readClassicGoalsBatch = null,
   readCards = () => [],
+  readQuestionCards = readCards,
   now = () => new Date(),
 } = {}) {
   const profiles = createBotProfileStore({ rootDir, now });
@@ -162,50 +152,29 @@ export function createBotDirectory({
     return Array.isArray(sessions) ? sessions : [];
   }
 
-  function classicGoalsOf(workspaceId, batch = null) {
-    if (batch instanceof Map && batch.has(workspaceId)) {
-      return Array.isArray(batch.get(workspaceId)) ? batch.get(workspaceId) : [];
-    }
-    if (typeof listClassicGoals !== 'function') return [];
-    try {
-      const goals = listClassicGoals(workspaceId);
-      return Array.isArray(goals) ? goals : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function projectRow(profile, classicBatch = null, messageBatch = null, approvalBatch = null, sessionBatch = null) {
+  function projectRow(profile, messageBatch = null, approvalBatch = null, sessionBatch = null) {
     const messages = summaryMessagesOf(profile, messageBatch);
     const visible = messages.filter(message => isVisibleBotMessage(message) && messageKind(message) !== 'agent_activity');
     const last = visible.length ? projectBotListMessage(visible[visible.length - 1]) : null;
     const sessions = sessionsOf(profile.workspaceId, sessionBatch);
-    const questions = questionsIn(messages);
     const confirmations = listConfirmations(profile.workspaceId);
-    const openConfirmations = (Array.isArray(confirmations) ? confirmations : [])
-      .filter((item) => item && item.accepted !== true && item.needsConfirm !== false);
-    const classicGoals = classicGoalsOf(profile.workspaceId, classicBatch);
-    const mappedSessions = [
-      ...sessions.map((session) => ({
-        status: session?.status,
-        updatedAt: session?.updatedAt,
-      })),
-      ...questions.map(() => ({ status: 'waiting_user' })),
-      ...openConfirmations.map(() => ({ status: 'waiting_user' })),
-      ...classicGoals
-        .filter((goal) => goal?.waitingUser === true)
-        .map((goal) => ({ status: 'waiting_user', updatedAt: goal.updatedAt })),
-    ];
+    const mappedSessions = sessions.map(session => ({ status: session?.status, updatedAt: session?.updatedAt }));
     const approvals = approvalBatch instanceof Map && approvalBatch.has(profile.workspaceId)
       ? approvalBatch.get(profile.workspaceId) : listApprovals(profile.workspaceId);
+    const cards = readQuestionCards(profile.workspaceId);
+    const attention = projectBotAttention({ profile, messages, sessions, cards: Array.isArray(cards) ? cards : [], approvals: Array.isArray(approvals) ? approvals : [],
+      confirmations: Array.isArray(confirmations) ? confirmations : [], now: Date.parse(stamp()) });
+    const item = projectBotListItem({
+      profile: { ...profile },
+      lastMessage: last,
+      sessions: mappedSessions,
+      attention,
+      readCursor: readCursor(profile.workspaceId)?.at ?? null,
+    });
+    const deadline = attention.map(entry => entry.expiresAt).filter(value => Number.isFinite(Date.parse(value))).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
     return {
-      item: projectBotListItem({
-        profile: { ...profile },
-        lastMessage: last,
-        sessions: mappedSessions,
-        approvals: Array.isArray(approvals) ? approvals : [],
-        readCursor: readCursor(profile.workspaceId)?.at ?? null,
-      }),
+      item: deadline ? { ...item, state: { ...item.state, attentionExpiresAt: deadline } } : item,
+      attention,
       titles: sessions
         .map((session) => (typeof session?.title === 'string' ? session.title : ''))
         .filter(Boolean),
@@ -224,9 +193,6 @@ export function createBotDirectory({
 
   function rows() {
     const current = activeProfiles();
-    let batch = null;
-    try { batch = readClassicGoalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
-    catch { /* Legacy per-project reads remain available. */ }
     let messages = null;
     try { messages = (readSummaryMessagesBatch || readMessagesBatch)?.(current.map(profile => profile.agentConversationId).filter(Boolean)) ?? null; }
     catch { /* Existing single reads retain their normal failure behavior. */ }
@@ -236,7 +202,7 @@ export function createBotDirectory({
     let sessions = null;
     try { sessions = readSessionsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
     catch { /* Existing single reads retain their normal failure behavior. */ }
-    return current.map(profile => projectRow(profile, batch, messages, approvals, sessions));
+    return current.map(profile => projectRow(profile, messages, approvals, sessions));
   }
 
   function list() {
@@ -339,6 +305,7 @@ export function createBotDirectory({
       ok: true,
       messages: page,
       nextCursor,
+      activeReplyQuestionId: cards.find(card => card.kind === 'question' && card.resolvedState !== 'resolved' && card.refs?.replyMessageId)?.refs.replyMessageId ?? null,
       ...(processFor ? { processMessageId } : {}),
       ...(familiarizeOffer ? { familiarizeOffer } : {}),
     };
@@ -382,6 +349,18 @@ export function createBotDirectory({
 
   return {
     list,
+    attention: workspaceId => {
+      if (workspaceId) {
+        const profile = profiles.read(workspaceId);
+        return profile && profile.status !== 'archived' ? projectRow(profile).attention : [];
+      }
+      return rows().flatMap(row => row.attention);
+    },
+    questionState: (workspaceId, messageId) => {
+      const profile = profiles.read(workspaceId);
+      return profile && profile.status !== 'archived'
+        ? projectReplyQuestions(summaryMessagesOf(profile), Date.parse(stamp())).get(messageId)?.state : undefined;
+    },
     get,
     readConversation,
     listSessions: (workspaceId) => sessionsOf(workspaceId),
