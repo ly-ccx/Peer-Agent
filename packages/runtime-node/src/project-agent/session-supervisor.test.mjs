@@ -785,6 +785,7 @@ test('main conversation can explicitly review a blocked manual report, never sig
     env.goalPlanStore.setRunnerState(session.planId, { enabled: true, status: 'blocked', blockedReason: 'manual_dod_confirmation_required' });
     assert.equal(env.supervisor.acceptance(opened.sessionId), null);
     assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).status, 'waiting_user');
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).completionReviewRequired, true);
     assert.equal((await env.supervisor.confirmResult(opened.sessionId)).error, 'session_not_completed');
     const review = env.supervisor.completionReview(opened.sessionId); assert.ok(review);
     assert.equal((await env.supervisor.confirmCompletion({ sessionId: opened.sessionId, reviewToken: 'old' })).ok, false);
@@ -795,6 +796,11 @@ test('main conversation can explicitly review a blocked manual report, never sig
     assert.equal(env.goalPlanStore.getPlan(session.planId).resultAcceptance, undefined);
     assert.equal((await env.supervisor.confirmCompletion({ sessionId: opened.sessionId, reviewToken: review.reviewToken })).alreadyConfirmed, true);
     assert.equal(resumes, 1);
+    // A restored manual gate can coexist with the saved confirmation before
+    // the background runner recovers. It must not ask the user to confirm twice.
+    env.goalPlanStore.setRunnerState(session.planId, { enabled: true, status: 'blocked', blockedReason: 'manual_dod_confirmation_required' });
+    assert.equal(env.supervisor.completionReview(opened.sessionId)?.confirmed, true);
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).completionReviewRequired, undefined);
   } finally { await env.cleanup(); }
 });
 

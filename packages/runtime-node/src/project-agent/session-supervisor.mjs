@@ -269,7 +269,8 @@ export function createSessionSupervisor({
         ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
     const report = buildReport(plan, session);
-    if (projectCompletionReview(plan, report)) session.completionReviewRequired = true;
+    const completionReview = projectCompletionReview(plan, report);
+    if (completionReview && !completionReview.confirmed) session.completionReviewRequired = true;
     if (session.status === 'result_ready') {
       const decision = decideSessionAcceptance(acceptanceFacts(plan));
       session.resultConfirmationRequired = decision.mode === 'confirm' && decision.closeGatePassed;
