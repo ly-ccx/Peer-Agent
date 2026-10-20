@@ -4,6 +4,7 @@ import { createConversationStore } from '@peer-agent/conversation-store';
 
 /** Production directory, IPC, input queue and real renderer on the standard 10k-message home. */
 export async function checkBotAttention({ page, app, until, report, captureDirectory, home, bots }) {
+  await page.locator('.bot-search').fill('');
   const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const first = bots[0], other = bots[1];
   const signal = async () => app.evaluate(({ BrowserWindow }, ids) => {

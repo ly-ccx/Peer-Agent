@@ -6,6 +6,7 @@ import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.
 
 /** One canonical reply referencing three tasks must remain one input acknowledgement. */
 export async function checkBotUserReceipt({ page, until, report, captureDirectory, home, bot, commandFile }) {
+  const previousSearch = await page.locator('.bot-search').inputValue();
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const titles = ['入口样式收尾', '中断原因核查收尾', '设置按钮记录核对'];
   const sessions = titles.map((title, index) => ({ ...initial.sessions[0], sessionId: `receipt-task-${index}`,
@@ -53,5 +54,6 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   const savedReply = store.getPersistedConversationHistory(bot.conversationId).messages.find(message => message.id === 'receipt-reply');
   assert.deepEqual(savedReply.sources, sessions.map(session => session.sessionId));
   change({ ...initial, seq: initial.seq + 2 });
+  await page.locator('.bot-search').fill(previousSearch);
   report.userReceipt = { singleReceipt: true, noTaskDuplicates: true, sourcesRetained: true, keyboard: true, cases };
 }
