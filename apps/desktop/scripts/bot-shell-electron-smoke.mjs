@@ -26,6 +26,7 @@ import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
 import { seedWorkBudgetMessages } from './work-budget-fixture.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { createQuickChatNativeController } from './quick-chat-native-fixture.mjs';
+import { createAttentionNativeController } from './bot-attention-native-fixture.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture, writeStreamingCommand } from '../../../scripts/rc-response-interaction-smoke.mjs';
 import { checkBotYieldFeedback } from './bot-yield-feedback-checks.mjs';
 import { checkRetryRetirement } from './bot-retry-retirement-checks.mjs';
@@ -340,6 +341,10 @@ const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
 const quickCommand = path.join(root, 'quick-command.json');
 const quickReceipt = path.join(root, 'quick-receipt.json');
+const attentionCommand = path.join(root, 'attention-command.json');
+const attentionReceipt = path.join(root, 'attention-receipt.json');
+writeFileSync(attentionCommand, JSON.stringify({ seq: 0 }));
+writeFileSync(attentionReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(quickCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(quickReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
@@ -348,6 +353,8 @@ writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu} from 'electron';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {installQuickChatNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/quick-chat-native-fixture.mjs')).href)};
 installQuickChatNativeFixture({BrowserWindow,Menu,commandFile:${JSON.stringify(quickCommand)},receiptFile:${JSON.stringify(quickReceipt)}});
+import {installAttentionNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/bot-attention-native-fixture.mjs')).href)};
+installAttentionNativeFixture({BrowserWindow,commandFile:${JSON.stringify(attentionCommand)},receiptFile:${JSON.stringify(attentionReceipt)}});
 import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/lab-main-thread-probe.mjs')).href)};
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
@@ -436,6 +443,7 @@ const until = async (read, predicate, timeout = 30000) => {
   throw Error('Shell acceptance timed out');
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
+const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
 let updaterSequence = 0;
 const emitUpdaterEvent = async event => {
   const seq = ++updaterSequence;
@@ -515,7 +523,7 @@ try {
   } else if (process.argv.includes('--reply-receipt-only')) {
     await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
   } else if (process.argv.includes('--attention-only')) {
-    await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
+    await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   } else if (process.argv.includes('--task-cancel-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('#bot-msg-rc-message-9999').waitFor();
@@ -757,7 +765,7 @@ try {
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
-  if (!process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
+  if (!process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
