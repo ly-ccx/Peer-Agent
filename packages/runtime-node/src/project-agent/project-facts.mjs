@@ -31,6 +31,9 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       ? { id: message.id, kind: message.kind, meta: message.meta, turnKind: message.turnKind }
       : (({ attachments, ...fact }) => fact)(message)), { immutableInput: true })
     : id => conversationStore.getPersistedConversationHistory(id)?.messages || [];
+  const taskQuestionHistory = typeof conversationStore.createHistoryProjection === 'function'
+    ? conversationStore.createHistoryProjection(history => latestTaskQuestion(history.messages), { immutableInput: true })
+    : id => latestTaskQuestion(conversationStore.getPersistedConversationHistory(id)?.messages || []);
   function sessions(workspaceId) { return supervisor.sessionsForProject(workspaceId); }
   function delivery(workspaceId) {
     const rows = sessions(workspaceId);
@@ -54,6 +57,32 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       }),
     };
   }
+  function taskQuestions(rows, messages) {
+    return rows.flatMap((row) => {
+      if (row.status !== 'waiting_user') return [];
+      if (['dependency_failed', 'dependency_missing'].includes(row.queueReason)) {
+        const questionId = 'dependency';
+        const answerTo = `card:question:${row.sessionId}:${questionId}`;
+        return [{ sessionId: row.sessionId, questionId,
+          prompt: `「${row.title}」的前置任务未成功签收。要取消还是重新安排？`,
+          options: ['取消这个任务', '重新安排任务'],
+          answered: messages.some(answer => answer.answerTo === answerTo),
+        }];
+      }
+      if (!row.conversationId) return [];
+      const question = taskQuestionHistory(row.conversationId);
+      if (!question) return [];
+      return [{ ...question, sessionId: row.sessionId,
+        answered: messages.some(answer => answer.answerTo === `card:question:${row.sessionId}:${question.questionId}`) }];
+    });
+  }
+  function questionCards(workspaceId) {
+    const rows = sessions(workspaceId).filter(row => row.status === 'waiting_user');
+    if (!rows.length) return [];
+    const profile = profileStore.read(workspaceId);
+    const messages = messageFacts(profile?.agentConversationId) || [];
+    return projection.project(workspaceId, { questions: taskQuestions(rows, messages) });
+  }
   function cards(workspaceId) {
     const profile = profileStore.read(workspaceId);
     const messages = messageFacts(profile?.agentConversationId) || [];
@@ -73,27 +102,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       const review = supervisor.completionReview?.(row.sessionId);
       return review ? [{ ...review, title: row.title }] : [];
     });
-    const questions = rows.flatMap((row) => {
-      if (row.status !== 'waiting_user') return [];
-      if (['dependency_failed', 'dependency_missing'].includes(row.queueReason)) {
-        const questionId = 'dependency';
-        const answerTo = `card:question:${row.sessionId}:${questionId}`;
-        return [{ sessionId: row.sessionId, questionId,
-          prompt: `「${row.title}」的前置任务未成功签收。要取消还是重新安排？`,
-          options: ['取消这个任务', '重新安排任务'],
-          answered: messages.some(answer => answer.answerTo === answerTo),
-        }];
-      }
-      const history = conversationStore.getPersistedConversationHistory(row.conversationId)?.messages || [];
-      return history.flatMap((message) => (message.segments || []).flatMap((segment) => {
-        if (segment.tool !== 'request_user_input' || !segment.args) return [];
-        const args = segment.args;
-        return [{ sessionId: row.sessionId, questionId: segment.toolCallId || message.id,
-          prompt: args.question || args.prompt,
-          options: (args.options || []).map((option) => typeof option === 'string' ? option : option.label),
-        }];
-      })).slice(-1);
-    });
+    const questions = taskQuestions(rows, messages);
     const coordination = coordinationFor(workspaceId) || {};
     const works = Object.values(coordination.works || {});
     const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => {
@@ -130,5 +139,20 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
   }
   const query = read => typeof supervisor.readQuery === 'function' ? supervisor.readQuery(read) : read();
   return { delivery: id => query(() => delivery(id)), cards: id => query(() => cards(id)),
+    questionCards: id => query(() => questionCards(id)),
     resolve: (workspaceId, cardId) => projection.resolve(workspaceId, cardId, { resolution: 'retried' }) };
+}
+
+/** Keep the list projection independent of coordination, memories and full child transcripts. */
+function latestTaskQuestion(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    for (const segment of [...(message.segments || [])].reverse()) {
+      if (segment.tool !== 'request_user_input' || !segment.args) continue;
+      const args = segment.args;
+      return { questionId: segment.toolCallId || message.id, prompt: args.question || args.prompt,
+        options: (args.options || []).map(option => typeof option === 'string' ? option : option.label) };
+    }
+  }
+  return null;
 }

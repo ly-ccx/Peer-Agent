@@ -300,6 +300,7 @@ export function registerDesktopProjectAgent({
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
     readApprovalsBatch: ids => approvalStore.listByWorkspaceIds(ids),
     readCards: (workspaceId) => projectFacts.cards(workspaceId),
+    readQuestionCards: (workspaceId) => projectFacts.questionCards(workspaceId),
   });
   const lifecycle = createBotLifecycle({
     rootDir: dataHome,

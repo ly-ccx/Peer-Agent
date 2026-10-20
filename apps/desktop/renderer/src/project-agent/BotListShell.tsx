@@ -27,6 +27,7 @@ import {
   enterBotSelection,
   moveBotSelection,
   sumNeedsYou,
+  resolveBotMessageFocus,
   validateManagedBotName,
 } from './state/botListState';
 import {
@@ -108,8 +109,9 @@ export function BotListShell({
   const [replyFlash, setReplyFlash] = useState<string | null>(null);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [attention, setAttention] = useState<{ workspaceId?: string } | null>(null);
-  const [attentionFocus, setAttentionFocus] = useState<{ workspaceId: string; messageId: string; requestId: number } | null>(null);
-  const focusTarget = attentionFocus && attentionFocus.requestId > (notificationFocus?.requestId ?? 0) ? attentionFocus : notificationFocus;
+  const attentionRequestRef = useRef(0);
+  const [attentionFocus, setAttentionFocus] = useState<{ workspaceId: string; messageId: string; requestId: number; notificationRequestId: number | null } | null>(null);
+  const focusTarget = resolveBotMessageFocus(notificationFocus, attentionFocus);
   const [meHistoryOpen, setMeHistoryOpen] = useState(false);
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
@@ -554,8 +556,10 @@ export function BotListShell({
         onClose={() => setAttention(null)} onChanged={() => { void list.reload(); }}
         onLocate={item => {
           list.openBot(item.workspaceId);
-          if (item.messageId) setAttentionFocus({ workspaceId: item.workspaceId, messageId: item.messageId, requestId: Date.now() });
+          if (item.messageId) setAttentionFocus({ workspaceId: item.workspaceId, messageId: item.messageId,
+            requestId: --attentionRequestRef.current, notificationRequestId: notificationFocus?.requestId ?? null });
           else if (item.sessionId) {
+            setAttentionFocus(null);
             setLocateSessionId(item.sessionId);
             setDrawerMemory(current => ({ ...openDrawer(current, 'tasks'), sessionId: item.sessionId ?? null }));
           }

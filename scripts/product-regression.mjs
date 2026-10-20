@@ -55,7 +55,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
-  if (!machine.attention?.passed || !machine.attention?.realDirectory || !machine.attention?.realQueue || !machine.attention?.expiresAutomatically || !machine.attention?.sourceLocated || !machine.attention?.failureRecovery || !machine.imagePermissionLifecycle?.attentionApproved) throw new Error('Actionable attention regression failed');
+  if (!machine.attention?.passed || !machine.attention?.realDirectory || !machine.attention?.realQueue || !machine.attention?.expiresAutomatically || !machine.attention?.sourceLocated || !machine.attention?.notificationFocus || !machine.attention?.failureRecovery || !machine.imagePermissionLifecycle?.attentionApproved) throw new Error('Actionable attention regression failed');
   if (!machine.imagePermissionLifecycle?.realCalls || machine.imagePermissionLifecycle?.cases?.length !== 6
     || !machine.imagePermissionLifecycle.cases.every(row => row.realProjection && row.evidence && row.ended && row.cardAutomatic && row.fits)) throw new Error('Real image permission lifecycle regression failed');
   if (!machine.imageFullAccess?.realCalls || machine.imageFullAccess.images !== 4

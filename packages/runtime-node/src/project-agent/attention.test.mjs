@@ -3,10 +3,24 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { projectReplyQuestions } from './question-lifecycle.mjs';
 import { projectBotAttention } from './attention.mjs';
+import { projectCards } from './card-projection.mjs';
 const profile = { workspaceId: 'w', displayName: 'Peer RSI' };
 const question = (id, extra = {}) => ({ id, kind: 'agent_reply', content: `Question ${id}`, question: { options: ['A', 'B'], ...extra } });
 const answer = id => ({ id: `answer-${id}`, kind: 'user_input', answerTo: `card:question:reply:${id}`, content: 'A' });
 const project = extra => projectBotAttention({ profile, ...extra });
+
+test('actual actionable child questions count once alongside a parent decision; resolved and terminal tasks stay out', () => {
+  const cards = projectCards('w', { questions: [
+    { sessionId: 'child', questionId: 'q', prompt: 'Choose the output', options: ['CSV', 'JSON'] },
+    { sessionId: 'done', questionId: 'q', answered: true },
+    { sessionId: 'cancelled', questionId: 'q' },
+  ] });
+  const sessions = [{ sessionId: 'child', status: 'waiting_user' }, { sessionId: 'cancelled', status: 'cancelled' }];
+  const items = project({ messages: [question('parent')], sessions, cards: [...cards, cards[0]] });
+  assert.deepEqual(items.map(i => i.id).sort(), ['card:question:child:q', 'card:question:reply:parent']);
+  assert.equal(items.find(i => i.sessionId === 'child').card.actions[0].payload.answerTo, 'card:question:child:q');
+  assert.equal(project({ sessions, cards: cards.map(c => ({ ...c, actions: [] })) }).length, 0);
+});
 
 test('screenshot history: three old questions and a waiting child produce zero after latest answer; new question produces one', () => {
   const messages = [question('old-1'), question('old-2'), question('old-3'), question('latest'), answer('latest')];

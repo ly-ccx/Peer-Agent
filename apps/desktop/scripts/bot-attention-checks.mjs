@@ -48,6 +48,17 @@ export async function checkBotAttention({ page, app, until, report, captureDirec
   const source = page.locator('#bot-msg-attention-current');
   await source.waitFor(); await source.locator('.bot-question button').first().waitFor({ state: 'visible' });
   assert.match(await source.innerText(), /这次交付的处理方式/);
+  const notify = async () => app.evaluate(({ BrowserWindow }, target) => {
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send('quick-chat:open-conversation', target);
+  }, { source: 'project-agent-notification', workspaceId: other.workspaceId,
+    conversationId: other.conversationId, messageId: 'attention-other' });
+  await notify();
+  await page.locator('#bot-msg-attention-other.is-anchored').waitFor({ state: 'visible' });
+  await firstRow.locator('.bot-badge').click(); await panel.waitFor();
+  await panel.locator('[data-attention-id="card:question:reply:attention-current"]').getByRole('button', { name: '查看原文并处理', exact: true }).click();
+  await page.locator('#bot-msg-attention-current.is-anchored').waitFor({ state: 'visible' });
+  await notify();
+  await page.locator('#bot-msg-attention-other.is-anchored').waitFor({ state: 'visible' });
   await page.locator('.bot-need-filter').click(); await panel.waitFor();
 
   const firstItem = panel.locator('[data-attention-id="card:question:reply:attention-current"]');
@@ -94,5 +105,5 @@ export async function checkBotAttention({ page, app, until, report, captureDirec
 
   await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' });
   report.attention = { passed: true, realDirectory: true, realQueue: true, duplicateRetired: true, staleClickRejected: true,
-    keyboard: true, failureRecovery: true, crossBotIsolation: true, liveReplacement: true, countEqualsDetail: true, sourceLocated: true, expiresAutomatically: true, largeHistoryMessages: 10000 };
+    keyboard: true, notificationFocus: true, failureRecovery: true, crossBotIsolation: true, liveReplacement: true, countEqualsDetail: true, sourceLocated: true, expiresAutomatically: true, largeHistoryMessages: 10000 };
 }

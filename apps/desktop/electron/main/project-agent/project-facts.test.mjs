@@ -5,6 +5,37 @@ import os from 'node:os';
 import path from 'node:path';
 import { createDesktopProjectFacts } from './project-facts.mjs';
 
+test('lightweight child questions reuse canonical request and resolutions without loading coordination or memories', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-child-attention-'));
+  const messages = [];
+  let status = 'waiting_user', reads = 0;
+  try {
+    const facts = createDesktopProjectFacts({ runtimeRoot: root,
+      supervisor: { sessionsForProject: () => [{ sessionId: 's', conversationId: 'child', status }],
+        acceptance: () => { throw Error('No acceptance scan'); } },
+      approvalStore: { list: () => { throw Error('No approval scan'); } },
+      memoryStore: { list: () => { throw Error('No memory scan'); } },
+      readCoordination: () => { throw Error('No coordination scan'); },
+      profileStore: { read: () => ({ agentConversationId: 'parent' }) },
+      conversationStore: { getPersistedConversationHistory: id => {
+        reads++;
+        return { messages: id === 'parent' ? messages : [{ id: 'm', segments: [{ tool: 'request_user_input',
+          toolCallId: 'q', args: { question: 'Choose format', options: [{ label: 'CSV' }, { label: 'JSON' }] } }] }] };
+      } } });
+    const [card] = facts.questionCards('w');
+    assert.equal(card.cardId, 'card:question:s:q');
+    assert.equal(card.resolvedState, 'open');
+    assert.equal(card.actions[0].payload.text, 'CSV');
+    messages.push({ kind: 'user_input', answerTo: card.cardId, content: 'CSV' });
+    assert.equal(facts.questionCards('w')[0].resolvedState, 'resolved');
+    messages.pop(); facts.resolve('w', card.cardId);
+    assert.equal(facts.questionCards('w')[0].resolvedState, 'resolved', 'persisted card resolution remains authoritative');
+    status = 'cancelled'; reads = 0;
+    assert.deepEqual(facts.questionCards('w'), []);
+    assert.equal(reads, 0, 'quiet bots do not read parent or child history');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('running and blocked tasks never get a result-signoff card; manual review has its own bound action', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-completion-cards-'));
   let status = 'running', manual = false;

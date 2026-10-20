@@ -13,7 +13,20 @@ import {
   sumNeedsYou,
   validateManagedBotName,
   visibleBotList,
+  resolveBotMessageFocus,
 } from './botListState.ts';
+
+test('attention and notification focus follow arrival order across unrelated request counters', () => {
+  const first = { workspaceId: 'a', messageId: 'first', requestId: 1 };
+  const local = { workspaceId: 'a', messageId: 'local', requestId: -1, notificationRequestId: 1 };
+  assert.equal(resolveBotMessageFocus(first, local), local);
+  const later = { workspaceId: 'b', messageId: 'notified', requestId: 2 };
+  assert.equal(resolveBotMessageFocus(later, local), later);
+  const nextLocal = { workspaceId: 'b', messageId: 'notified', requestId: -2, notificationRequestId: 2 };
+  assert.equal(resolveBotMessageFocus(later, nextLocal), nextLocal);
+  assert.notEqual(nextLocal.requestId, later.requestId, 'same-message navigation has a new effect identity');
+  assert.equal(resolveBotMessageFocus(null, { ...local, notificationRequestId: null })?.messageId, 'local');
+});
 
 function bot(id: string, at: string, extra: Partial<BotListItem['state']> & { name?: string; preview?: string } = {}): BotListItem {
   return {

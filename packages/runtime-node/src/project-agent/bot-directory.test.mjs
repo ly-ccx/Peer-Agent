@@ -9,10 +9,28 @@ import { createMemoryStore } from '../memory/memory-store.mjs';
 import { createProjectRegistry } from '../project-registry.mjs';
 import { createBotDirectory } from './bot-directory.mjs';
 import { createBotLifecycle } from './bot-lifecycle.mjs';
+import { projectCards } from './card-projection.mjs';
 
 function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
 }
+
+test('directory count and detail include the same open child decision without reading full cards', () => {
+  const root = tempRoot();
+  let answered = false;
+  try {
+    const { directory } = harness(root, {
+      readCards: () => { throw Error('List must not load the full card surface'); },
+      readQuestionCards: () => projectCards('w', { questions: [{ sessionId: 'sess-1', questionId: 'q', prompt: 'Choose format', options: ['CSV'], answered }] }),
+    });
+    assert.equal(directory.list()[0].state.needsYou, 4);
+    assert.equal(directory.attention().length, 4);
+    assert.equal(directory.attention().find(i => i.sessionId === 'sess-1').title, 'Choose format');
+    answered = true;
+    assert.equal(directory.list()[0].state.needsYou, 3);
+    assert.equal(directory.attention().length, 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('legacy freeform replies remove conversational needs-you while approval and confirmation remain', () => {
   const root = tempRoot();

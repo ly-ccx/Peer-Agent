@@ -2,7 +2,7 @@ import { projectReplyQuestions } from './question-lifecycle.mjs';
 import { projectCards } from './card-projection.mjs';
 
 /** Count and detail share these identities. No task execution, authorization, or history writes. */
-export function projectBotAttention({ profile, messages = [], sessions = [], approvals = [], confirmations = [], now = Date.now() }) {
+export function projectBotAttention({ profile, messages = [], sessions = [], approvals = [], confirmations = [], cards: projectedCards = [], now = Date.now() }) {
   const workspaceId = profile.workspaceId;
   const questionStates = projectReplyQuestions(messages, now);
   const replies = messages.filter(m => questionStates.get(m.id)?.state === 'open');
@@ -16,7 +16,9 @@ export function projectBotAttention({ profile, messages = [], sessions = [], app
     && !pendingSessions.has(session.sessionId) && !pendingConfirmations.some(c => c.sessionId === session.sessionId)) {
     pendingConfirmations.push({ sessionId: session.sessionId, summary: session.title });
   }
-  const cards = projectCards(workspaceId, { replies, approvals: pendingApprovals, confirmations: pendingConfirmations });
+  const taskQuestions = projectedCards.filter(card => card.kind === 'question' && card.refs?.sessionId && !card.refs.replyMessageId
+    && !['accepted', 'cancelled', 'failed', 'superseded'].includes(currentSessions.get(card.refs.sessionId)?.status));
+  const cards = [...projectCards(workspaceId, { replies, approvals: pendingApprovals, confirmations: pendingConfirmations }), ...taskQuestions];
   const items = cards.filter(card => card.resolvedState !== 'resolved' && card.actions?.length).map(card => {
     const message = replies.find(m => m.id === card.refs?.replyMessageId);
     const approval = pendingApprovals.find(a => a.approvalId === card.refs?.approvalId);

@@ -6,6 +6,7 @@ import os from 'node:os';
 import { createBotDirectory } from '../../../../../packages/runtime-node/src/project-agent/bot-directory.mjs';
 import { createInputQueue } from '../../../../../packages/runtime-node/src/project-agent/input-queue.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
+import { createDesktopProjectFacts } from './project-facts.mjs';
 const question = id => ({ id, role: 'assistant', kind: 'agent_reply', content: `Decision ${id}`, question: { options: ['A', 'B'] } });
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-attention-flow-'));
@@ -51,4 +52,26 @@ test('disabled host and failed queue cannot close a current question', async t =
     inputQueue: { submitInput() { throw Error('disk full'); } }, schedule: () => 1 });
   assert.equal((await fail.submitInput({ workspaceId: 'w', inputId: 'retry', text: 'A', answerTo: 'card:question:reply:current' })).ok, false);
   assert.equal(f.service.listAttention().items.length, 1);
+});
+
+test('canonical child request appears in count/detail and its queued answer clears attention without changing the task', async t => {
+  const f = fixture(t);
+  const session = { sessionId: 'child', conversationId: 'child-history', status: 'waiting_user', title: 'Choose format' };
+  const facts = createDesktopProjectFacts({ runtimeRoot: path.join(f.root, 'project-runtime'),
+    supervisor: { sessionsForProject: () => [session] }, profileStore: { read: () => ({ agentConversationId: 'bot' }) },
+    conversationStore: { getPersistedConversationHistory: id => ({ messages: id === 'bot' ? f.messages : [
+      { id: 'tool-message', segments: [{ tool: 'request_user_input', toolCallId: 'format', args: { question: 'Choose format', options: ['CSV', 'JSON'] } }] },
+    ] }) } });
+  const directory = createBotDirectory({ rootDir: f.root, readMessages: () => f.messages,
+    listSessions: () => [session], readQuestionCards: workspaceId => facts.questionCards(workspaceId) });
+  const service = createProjectAgentApplicationService({ enabled: () => true, directory, inputQueue: f.queue,
+    wake: () => {}, schedule: () => 1 });
+  assert.equal(directory.list()[0].state.needsYou, 2);
+  const child = service.listAttention().items.find(item => item.sessionId === 'child');
+  assert.equal(child.card.actions[0].payload.text, 'CSV');
+  assert.equal((await service.submitInput({ workspaceId: 'w', inputId: 'child-answer', ...child.card.actions[0].payload })).ok, true);
+  f.queue.consume('w');
+  assert.equal(service.listAttention().items.some(item => item.sessionId === 'child'), false);
+  assert.equal(directory.list()[0].state.needsYou, 1, 'parent question remains open');
+  assert.equal(session.status, 'waiting_user', 'a reply receipt is not a task terminal');
 });
