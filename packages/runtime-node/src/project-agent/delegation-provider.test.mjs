@@ -506,7 +506,7 @@ test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying
       async run(request) {
         assert.equal(status, 'verifying');
         assert.equal(request.role, 'verifier');
-        assert.equal(request.preferDifferentSource, true);
+        assert.equal(Object.hasOwn(request, 'preferDifferentSource'), false, 'the tool must not override configured model routing');
         pass += 1;
         const evidenceRef = pass === 1 ? 'missing' : 'ev-real';
         return {

@@ -20,7 +20,7 @@ function fixture(t, { policy = 'auto', changeDuringReview = false } = {}) {
     tasks: [{ taskId: 't', title: '核对', status: 'completed', result: '已有报告', evidenceRefs: ['tool-result://read'] }],
     delegationOrigin: { sessionId: 's', workspaceId: 'w', parentConversationId: 'parent', anchorMessageId: 'u',
       inputId: 'input', surface: 'desktop', depth: 1, phase: 'running', readOnly: true,
-      modelSelection: { worker: model, explorer: model, verifier: model, source: { worker: 'global', verifier: 'global' }, resolvedAt: '2026-10-07T00:00:00Z' } } });
+      modelSelection: { worker: model, explorer: model, verifier: { ...model, sameFamilyAsWorker: true }, source: { worker: 'global', verifier: 'global' }, resolvedAt: '2026-10-07T00:00:00Z' } } });
   store.recordEvidenceRefs({ planId: created.planId, conversationId: 'child', evidenceRef: 'tool-result://read', toolName: 'read_file' });
   store.revisePlan(created.planId, { status: 'executing', runner: { enabled: true, status: 'blocked', intent: 'verify', phase: 'repair',
     blockedReason: 'Verifier failed: missing report', blockerAudit: { reason: 'verifier_failed' } } }, { reason: 'old failure' });
@@ -58,6 +58,9 @@ test('a real recheck resolves the old readonly failure and policy accepts the re
   assert.equal(accepted.accepted, true);
   assert.equal(f.plan().resultAcceptance.acceptedBy, 'policy');
   assert.equal(f.supervisor.get({ sessionId: 's' }).status, 'accepted');
+  assert.equal(f.plan().hostVerification.sameFamilyAsWorker, true);
+  assert.equal(f.plan().delegationOrigin.modelSelection.verifier.modelProviderId,
+    f.plan().delegationOrigin.modelSelection.worker.modelProviderId);
   await f.verify();
   assert.equal(f.events.filter(e => e.type === 'goalRunner:completed').length, 1);
   assert.equal(f.runs(), 1, 'an idempotent repeat neither restarts the worker nor loops the verifier');

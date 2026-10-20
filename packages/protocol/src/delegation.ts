@@ -247,6 +247,22 @@ export interface VerificationVerdict {
   readonly evidenceRefs: readonly string[];
 }
 
+/** Bounded persisted diagnostics, never an input to acceptance or Evidence authority. */
+export interface VerificationAttemptDiagnostic {
+  readonly verifierRunId: string;
+  readonly status: 'passed' | 'failed';
+  readonly diagnosticOnly: true;
+  /** null means this historical run has no source-version binding. */
+  readonly matchesCurrentSource: boolean | null;
+  readonly completedAt: string;
+  readonly failureReason: string;
+  readonly failedCriteria: readonly { readonly criterionId: string; readonly reason: string; readonly evidenceRefs: readonly string[] }[];
+  readonly missingEvidence: readonly { readonly taskId: string; readonly reason: string; readonly evidenceRefs: readonly string[] }[];
+  readonly risks: readonly string[];
+  readonly recommendedNextAction: string;
+  readonly evidenceRefs: readonly string[];
+}
+
 export type AcceptancePolicy = 'auto' | 'confirm';
 
 export type AcceptanceReason =

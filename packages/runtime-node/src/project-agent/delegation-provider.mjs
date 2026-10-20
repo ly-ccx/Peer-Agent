@@ -352,7 +352,6 @@ export function createDelegationProvider({
         ...(input.focus ? { focus: input.focus } : {}),
         role: 'verifier',
         workId: view.workId,
-        preferDifferentSource: true,
       });
       if (!reviewed || reviewed.ok === false || !reviewed.facts) {
         return {
@@ -673,6 +672,7 @@ export function buildVerificationDetail(facts = {}) {
     workerModel: typeof facts.workerModel === 'string' ? facts.workerModel : null,
     verifierModel: typeof authority.verifierModel === 'string' ? authority.verifierModel : null,
     sameSource: facts.sameFamilyAsWorker === true,
+    reviewAttempts: facts.reviewAttempts || [],
     outputs,
   };
 }

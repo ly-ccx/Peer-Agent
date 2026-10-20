@@ -8,6 +8,7 @@ import { currentModelReview, criterionSourceRevision } from './criterion-review.
 import { readdirSync } from 'node:fs';
 import { verificationContentHash } from './verification-completion.mjs';
 import { verificationFailure } from './verification-failure.mjs';
+import { verificationHistory } from './verification-history.mjs';
 
 export function createSessionVerification({
   goalPlanStore,
@@ -102,6 +103,7 @@ export function createSessionVerification({
       ...(workerModel ? { workerModel } : {}),
       ...(verifierModel ? { verifierModel } : {}),
       sameFamilyAsWorker: sameFamily,
+      reviewAttempts: verificationHistory(plan, evidenceIndex),
       outputs,
     };
   }

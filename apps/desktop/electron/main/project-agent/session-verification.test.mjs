@@ -131,6 +131,41 @@ test('verify_session preserves the concrete failure and next action through the 
   assert.notEqual(store.getPlan(plan.planId).hostVerification?.independentVerifier, 'passed');
 });
 
+test('get_verification_detail exposes persisted actual failures for a same-model review after restart', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-model-diagnostic-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const storeDir = path.join(root, 'goal-plans');
+  const store = createGoalPlanStore({ storeDir });
+  const same = { ...selection, reasoningEffort: 'max' };
+  const plan = store.createPlan({ conversationId: 'child-1', title: 'Review', goal: 'Review',
+    successCriteria: [{ id: 'c', kind: 'model_review', description: 'Review the packet' }],
+    tasks: [{ taskId: 't', title: 'Read', status: 'completed', evidenceRefs: ['ev-read'] }],
+    delegationOrigin: origin({ modelSelection: { worker: same, explorer: same,
+      verifier: { ...same, sameFamilyAsWorker: true }, source: { worker: 'project', verifier: 'project' },
+      resolvedAt: '2026-10-20T00:00:00Z' } }) });
+  store.recordEvidenceRefs({ planId: plan.planId, conversationId: 'child-1', evidenceRef: 'ev-read', toolName: 'read_file' });
+  const verification = createSessionVerification({ goalPlanStore: store, verifySession: async () => ({ passed: false,
+    failedCriteria: [{ criterionId: 'c', reason: 'Missing review.json and product verify evidence', evidenceRefs: ['ev-read'] }],
+    missingEvidence: [{ taskId: 't', reason: 'Review screenshots before acceptance' }], evidenceRefs: ['ev-read'] }) });
+  await verification.run({ sessionId: 'session-1' });
+  store.recordVerifierRun(plan.planId, { verifierRunId: 'timeout', target: { kind: 'plan' }, status: 'failed',
+    failureReason: 'agent_loop_exhausted: configured turn budget (12)', report: { passed: false, risks: ['Review did not finish'] } });
+  const reopened = createGoalPlanStore({ storeDir });
+  const provider = createDelegationProvider({ verification: createSessionVerification({ goalPlanStore: reopened }) });
+  const result = await provider.executeCapability({ call: { toolCallId: 'detail', capabilityId: 'local.delegation.get_verification_detail',
+    arguments: { sessionId: 'session-1' } } }, { mode: 'project_agent', role: 'project_agent', messages: [] });
+  const detail = JSON.parse(result.result.outputPreview.legacyResult.output);
+  assert.equal(detail.sameSource, true);
+  assert.equal(detail.workerModel, detail.verifierModel);
+  assert.notEqual(detail.outcome, 'passed');
+  assert.equal(detail.reviewAttempts[0].failedCriteria[0].reason, 'Missing review.json and product verify evidence');
+  assert.equal(detail.reviewAttempts[0].matchesCurrentSource, true);
+  assert.match(detail.reviewAttempts[1].failureReason, /agent_loop_exhausted/);
+  assert.equal(detail.reviewAttempts[1].matchesCurrentSource, null);
+  assert.ok(detail.reviewAttempts.every(row => row.diagnosticOnly === true));
+  assert.deepEqual(reopened.getPlan(plan.planId).delegationOrigin.modelSelection, store.getPlan(plan.planId).delegationOrigin.modelSelection);
+});
+
 test('桌面复核端口从宿主计划和证据索引取事实，复核完成后退出 verifying', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b3-04-verify-'));
   const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
