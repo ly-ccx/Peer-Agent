@@ -106,7 +106,7 @@ function CardItem({
                 const request = submitInput && action.channel === 'project-agent:submit-input'
                   ? submitInput(text, answerTo) : runCardAction(workspaceId, action);
                 void request.then(result => {
-                  if (!result?.ok) { setError(i18n.t(cardActionErrorKey(result?.code))); return; }
+                  if (!result?.ok) { setError(i18n.t(cardActionErrorKey(result?.code))); if (result?.code === 'QUESTION_CLOSED') onDone?.(); return; }
                   if (submitInput && action.channel === 'project-agent:submit-input') {
                     dismissal.ref.current?.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea')?.focus({ preventScroll: true });
                   }

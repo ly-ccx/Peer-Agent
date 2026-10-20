@@ -1,3 +1,4 @@
+export type { AttentionCard, BotDecisionSnapshot, BotAttentionItem, BotAttentionRequest, BotAttentionResult } from './attention.ts';
 export type { ProjectWorkBudgetLimits, ProjectWorkBudgetBoundary, ProjectReplyRecoveryAction, ProjectWorkReceipt, ProjectWorkRecovery, ProjectWorkState, ProjectTurnEnd, ProjectReplyFailureStatus, ProjectAgentSilentWait } from './work-coordination.ts';
 export type { CoordinationAction, CoordinationLifecycle, CoordinationMandate, CoordinationDecision, TaskTransitionPhase, TaskTransition, CoordinationExecutionBinding, CoordinationSessionFacts } from './delegation-coordination.ts';
 export { deriveSessionFacts, type SessionFactSnapshot } from './session-facts.ts';

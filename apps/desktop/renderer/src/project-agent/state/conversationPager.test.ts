@@ -98,3 +98,20 @@ test('a burst larger than one page bridges every new message and retries a faile
   await pager.older();
   assert.deepEqual(snapshot!.messages.map(m => m.id), [...history.slice(400).map(m => m.id), 'projected-card']);
 });
+
+test('latest decision stamp closes old question controls already retained in an older page', async () => {
+  let active: string | null = 'old';
+  let snapshot: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0];
+  const old = { id: 'old', kind: 'agent_reply', role: 'assistant', content: 'Old decision', createdAt: '1', cards: [
+    { cardId: 'card:question:reply:old', kind: 'question', content: 'Old choice', actions: [{ id: 'answer' }] },
+    { cardId: 'card:approval:permission', kind: 'approval', content: 'Real permission', actions: [{ id: 'allow' }] },
+  ] };
+  const pager = createConversationPager({ read: async params => ({ ok: true, activeReplyQuestionId: active,
+    nextCursor: params.before ? null : 'tail', messages: params.before ? [old] : [{ id: 'tail', role: 'user', content: 'Tail', createdAt: '2' }] }), publish: value => { snapshot = value; } });
+  await pager.refresh(); await pager.older();
+  assert.equal(snapshot!.messages[0]!.cards[0]!.resolvedState, undefined);
+  active = null; await pager.refresh();
+  assert.equal(snapshot!.messages[0]!.cards[0]!.resolvedState, 'resolved');
+  assert.equal(snapshot!.messages[0]!.cards[0]!.actions?.length, 0);
+  assert.equal(snapshot!.messages[0]!.cards[1]!.actions?.length, 1, 'question retirement cannot resolve permissions');
+});

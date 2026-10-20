@@ -131,7 +131,7 @@ test('targeted wake checks global eligibility once while retaining 200 lease-own
   } finally { env.dispose(); }
 });
 
-test('200-bot search reads classic conversation and Goal catalogs once per projection', () => {
+test('200-bot attention search skips legacy catalogs; explicit history still reads them on demand', () => {
   const env = harness({ projectCount: 200 });
   let conversationReads = 0, planReads = 0, batchReads = 0, singleReads = 0;
   const readConversations = env.conversations.listConversations;
@@ -144,10 +144,12 @@ test('200-bot search reads classic conversation and Goal catalogs once per proje
   env.conversations.getPersistedConversationHistory = (...args) => { singleReads++; return readSingle(...args); };
   try {
     assert.equal(env.invoke('search', { query: 'test' }).ok, true);
-    assert.equal(conversationReads, 1, 'one canonical metadata read for the projection');
+    assert.equal(conversationReads, 0, 'attention is not inferred from old classic waiting goals');
     assert.ok(planReads <= 2, 'one projection read and at most one corpus rebuild read');
     assert.equal(batchReads, 1, 'only corpus uses the raw batch; directory uses versioned presentation views');
     assert.equal(singleReads, 0, 'no repeated index read for each bot');
+    assert.equal(env.invoke('list-history').ok, true);
+    assert.equal(conversationReads, 1, 'explicit history remains available');
   } finally { env.dispose(); }
 });
 

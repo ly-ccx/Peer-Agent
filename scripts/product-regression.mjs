@@ -50,11 +50,12 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress', 'child-running', 'historical', 'paused', 'cancelled', 'budget-unknown', 'budget-ready', 'budget-migrating', 'budget-reserved', 'budget-available'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
-  'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png'];
+  'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png', 'attention-1280-dark.png', 'attention-760-light.png', 'attention-empty-light.png', 'attention-expired-light.png', 'attention-image-permission-dark.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
+  if (!machine.attention?.passed || !machine.attention?.realDirectory || !machine.attention?.realQueue || !machine.attention?.expiresAutomatically || !machine.attention?.sourceLocated || !machine.attention?.failureRecovery || !machine.imagePermissionLifecycle?.attentionApproved) throw new Error('Actionable attention regression failed');
   if (!machine.imagePermissionLifecycle?.realCalls || machine.imagePermissionLifecycle?.cases?.length !== 6
     || !machine.imagePermissionLifecycle.cases.every(row => row.realProjection && row.evidence && row.ended && row.cardAutomatic && row.fits)) throw new Error('Real image permission lifecycle regression failed');
   if (!machine.imageFullAccess?.realCalls || machine.imageFullAccess.images !== 4
@@ -143,7 +144,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const packet = { schemaVersion: 1, runId: randomUUID(), capturedAt: new Date().toISOString(),
     sourceFingerprint: sourceFingerprint(root), sourceHead: machine.sourceHead, platform: machine.platform,
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
-    checks: { historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
+    checks: { attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
       chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,

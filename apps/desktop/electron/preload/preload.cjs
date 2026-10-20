@@ -186,6 +186,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   installQoderSkill: (identity) => ipcRenderer.invoke('skills:qoder:install', identity || {}),
   listQoderTaxonomies: () => ipcRenderer.invoke('skills:qoder:list-taxonomies'),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
+  projectAgentListAttention: (params) => ipcRenderer.invoke('project-agent:list-attention', params),
   projectAgentList: (params) => ipcRenderer.invoke('project-agent:list', params),
   projectAgentGet: (params) => ipcRenderer.invoke('project-agent:get', params),
   projectAgentUpdateModelSelection: (params) => ipcRenderer.invoke('project-agent:update-model-selection', params),

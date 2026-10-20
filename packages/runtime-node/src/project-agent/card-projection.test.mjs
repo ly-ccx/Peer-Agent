@@ -5,14 +5,14 @@ import path from 'node:path';
 import test from 'node:test';
 import { createCardProjection, projectCards, replyQuestionAnswered } from './card-projection.mjs';
 
-test('reply choices accept explicit answers or the next conversational freeform input only', () => {
+test('reply choices close on answers and replacement by a later formal reply', () => {
   const reply = { id: 'r', kind: 'agent_reply', question: { options: ['A', 'B'] } };
   const user = { id: 'u', kind: 'user_input', content: '我的回答' };
   assert.equal(replyQuestionAnswered([reply, { kind: 'agent_turn' }, user], reply), true);
   assert.equal(replyQuestionAnswered([reply, { ...user, quoteRefs: ['r'] }], reply), true);
   assert.equal(replyQuestionAnswered([reply, { ...user, quoteRefs: ['other'] }], reply), false);
   assert.equal(replyQuestionAnswered([reply, { ...user, answerTo: 'card:question:task:q' }], reply), false);
-  assert.equal(replyQuestionAnswered([reply, { id: 'later', kind: 'agent_reply' }, user], reply), false);
+  assert.equal(replyQuestionAnswered([reply, { id: 'later', kind: 'agent_reply' }, user], reply), true);
   assert.equal(replyQuestionAnswered([reply, { id: 'later', kind: 'agent_reply' }, { ...user, answerTo: 'card:question:reply:r' }], reply), true);
   assert.equal(replyQuestionAnswered([{ ...user, answerTo: 'card:question:reply:r' }, reply], reply), false);
 });

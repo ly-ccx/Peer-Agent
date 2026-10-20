@@ -1,6 +1,7 @@
 import type { TranslationKey } from '@peer-agent/i18n';
 
 export function cardActionErrorKey(code?: string): TranslationKey {
+  if (code === 'QUESTION_CLOSED') return 'projectAgent.attention.closed';
   if (code === 'TURN_FAILED' || code === 'RECOVERY_FAILED') return 'projectAgent.chat.recoveryAttemptFailed';
   if (['session_not_completed', 'stale_completion_review', 'not_confirmable', 'NOT_CONFIRMABLE'].includes(code || '')) return 'projectAgent.chat.resultChanged';
   if (code === 'EXECUTION_OUTCOME_UNKNOWN' || code === 'CHECKPOINT_PERSISTENCE_FAILED') return 'projectAgent.chat.recoveryUnknownOutcome';

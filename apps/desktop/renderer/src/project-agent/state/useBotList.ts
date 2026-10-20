@@ -222,6 +222,7 @@ export function useBotList() {
   }, [finishCreate]);
 
   return {
+    reload,
     status,
     catalog,
     visible,

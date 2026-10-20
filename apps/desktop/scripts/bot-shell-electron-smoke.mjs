@@ -1,3 +1,4 @@
+import { checkBotAttention } from './bot-attention-checks.mjs';
 import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
 import { checkBotFullAccessImages } from './bot-full-access-image-checks.mjs';
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
@@ -225,6 +226,11 @@ assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read sea
 let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
   if (globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
     result.messages = [...result.messages, ...globalThis.rcBotWorkMessages];
+    // The injected task-note facts include their current decision, matching the production page contract.
+    const currentQuestion=globalThis.rcBotWorkMessages.flatMap(message=>(message.cards||[])
+      .filter(card=>card.kind==='question'&&card.resolvedState!=='resolved'&&card.actions?.length)
+      .map(()=>message.id)).at(-1);
+    if(currentQuestion)result.activeReplyQuestionId=currentQuestion;
   }
   globalThis.rcBotShellRecord('reads',{  before: payload.before ?? null, nextCursor: result.nextCursor,
     count: result.messages?.length, firstId: result.messages?.[0]?.id, lastId: result.messages?.at(-1)?.id });`);
@@ -300,6 +306,10 @@ if (workSurfaces) {
       return {ok:true,session:{...fixtureSession,report:globalThis.rcBotWorkReports?.[payload.sessionId]??fixtureSession.report}};
     }`);
 }
+observedService = observedService.replace('function listAttention(payload = {}) {', `function listAttention(payload = {}) {
+  if(globalThis.rcAttentionFailOnce){globalThis.rcAttentionFailOnce=false;return {ok:false,code:'CONTROLLED_READ_FAILURE'};}`)
+  .replace('async function submitInput(payload = {}) {', `async function submitInput(payload = {}) {
+  if(globalThis.rcAttentionFailInput){globalThis.rcAttentionFailInput=false;return {ok:false,code:'CONTROLLED_WRITE_FAILURE'};}`);
 writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
 writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
@@ -500,6 +510,8 @@ try {
     await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--updater-only')) {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
+  } else if (process.argv.includes('--attention-only')) {
+    await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
   } else if (process.argv.includes('--task-cancel-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('#bot-msg-rc-message-9999').waitFor();
@@ -740,6 +752,7 @@ try {
   report.checks.push('bot shell returns with all persisted identities');
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
+  if (!process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');

@@ -1,4 +1,5 @@
-import { createCardProjection, replyQuestionAnswered } from './card-projection.mjs';
+import { projectReplyQuestions } from './question-lifecycle.mjs';
+import { createCardProjection } from './card-projection.mjs';
 import { verdictRefFor } from './acceptance.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { replyFailureStatus } from './reply-failure-facts.mjs';
@@ -56,15 +57,16 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
   function cards(workspaceId) {
     const profile = profileStore.read(workspaceId);
     const messages = messageFacts(profile?.agentConversationId) || [];
+    const questionStates = projectReplyQuestions(messages, Date.parse(now()));
     const replies = messages.filter((message) => message.kind === 'agent_reply').map((message) => ({
       ...message,
       ...(message.question ? { question: { ...message.question,
-        answered: replyQuestionAnswered(messages, message) } } : {}),
+        answered: questionStates.get(message.id)?.state !== 'open', state: questionStates.get(message.id)?.state } } : {}),
     }));
     const rows = sessions(workspaceId);
     const confirmations = rows.flatMap((row) => {
       const decision = supervisor.acceptance(row.sessionId);
-      return decision && (row.status === 'result_ready' && decision.mode === 'confirm' || row.status === 'accepted')
+      return decision && (row.status === 'result_ready' && row.resultConfirmationRequired === true || row.status === 'accepted')
         ? [{ sessionId: row.sessionId, summary: row.title, accepted: row.status === 'accepted' }] : [];
     });
     const completionReviews = rows.flatMap(row => {

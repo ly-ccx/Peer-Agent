@@ -10,7 +10,7 @@ test('running and blocked tasks never get a result-signoff card; manual review h
   let status = 'running', manual = false;
   try {
     const facts = createDesktopProjectFacts({ runtimeRoot: root,
-      supervisor: { sessionsForProject: () => [{ sessionId: 's', title: '核对目录', status }],
+      supervisor: { sessionsForProject: () => [{ sessionId: 's', title: '核对目录', status, resultConfirmationRequired: status === 'result_ready' }],
         acceptance: () => ({ mode: 'confirm' }),
         completionReview: () => manual ? { sessionId: 's', reviewToken: 'bound-token', criteria: [{ id: 'c', description: '报告含目录与脚本' }], report: '实际发现' } : null },
       approvalStore: { list: () => [] }, profileStore: { read: () => ({ agentConversationId: 'parent' }) },

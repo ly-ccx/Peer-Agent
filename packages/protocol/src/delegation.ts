@@ -77,6 +77,8 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly completionReviewRequired?: boolean;
+  readonly resultConfirmationRequired?: boolean;
   readonly coordination?: import('./delegation-coordination.ts').CoordinationSessionFacts;
   readonly sessionId: string;
   readonly workspaceId: string;

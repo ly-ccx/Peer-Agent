@@ -41,7 +41,6 @@ import {
 } from '@peer-agent/runtime-node';
 import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
-import { createClassicGoalProjection } from './classic-goal-projection.mjs';
 import { createDelegationFactsReader } from './delegation-facts-reader.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { createEvidenceReader } from './evidence-reader.mjs';
@@ -284,7 +283,6 @@ export function registerDesktopProjectAgent({
     resolveFileAnchors: fileAnchors.capture,
     onWrote: memoryChanged,
   });
-  const classicGoals = createClassicGoalProjection({ registry, conversationStore, goalPlanStore });
   const summaryHistory = createBotSummaryHistory(conversationStore);
   const directory = createBotDirectory({
     rootDir: dataHome,
@@ -302,8 +300,6 @@ export function registerDesktopProjectAgent({
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
     readApprovalsBatch: ids => approvalStore.listByWorkspaceIds(ids),
     readCards: (workspaceId) => projectFacts.cards(workspaceId),
-    listClassicGoals: classicGoals.one,
-    readClassicGoalsBatch: classicGoals.batch,
   });
   const lifecycle = createBotLifecycle({
     rootDir: dataHome,
@@ -614,7 +610,7 @@ export function registerDesktopProjectAgent({
       supervisor,
       objectives,
       objectiveWatches,
-      dispose: () => { uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
+      dispose: () => { projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({

@@ -1,7 +1,8 @@
 import { CONVERSATION_PAGE_SIZE, normalizeBotMessage, type BotChatMessage } from './botConversationState.ts';
 import { conversationValuesEqual } from './conversationValueEquality.ts';
 
-interface Page {
+type DecisionSnapshot = import('@peer-agent/protocol').BotDecisionSnapshot;
+interface Page extends Partial<DecisionSnapshot> {
   readonly ok: boolean;
   readonly messages?: readonly Record<string, unknown>[];
   readonly nextCursor?: string | null;
@@ -56,7 +57,16 @@ export function createConversationPager({ read, publish }: {
       && !message.createdAt && message.cards.some(card => card.cardId === message.id)));
     const byId = new Map([...retained, ...fetched].map(message => [message.id, message]));
     const order = before ? [...fetched, ...retained] : [...retained.filter(message => !freshIds.has(message.id)), ...fetched];
-    const nextMessages = [...new Set(order.map(message => message.id))].map(id => byId.get(id)!);
+    let nextMessages = [...new Set(order.map(message => message.id))].map(id => byId.get(id)!);
+    if (first && 'activeReplyQuestionId' in first) {
+      const active = first.activeReplyQuestionId;
+      nextMessages = nextMessages.map(message => {
+        if (!message.cards.some(card => card.cardId.startsWith('card:question:reply:') && card.resolvedState !== 'resolved'
+          && card.cardId !== `card:question:reply:${active}`)) return message;
+        return { ...message, cards: message.cards.map(card => card.cardId.startsWith('card:question:reply:')
+          && card.cardId !== `card:question:reply:${active}` ? { ...card, resolvedState: 'resolved' as const, actions: [], resolution: { state: 'superseded' } } : card) };
+      });
+    }
     if (nextMessages.length !== messages.length || nextMessages.some((message, index) => message !== messages[index])) messages = nextMessages;
     if (before || !initialized || !known.size) cursor = first!.nextCursor ?? null;
     initialized = true;

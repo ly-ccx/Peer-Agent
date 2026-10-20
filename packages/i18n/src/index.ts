@@ -115,6 +115,18 @@ export type TranslationKey =
   | 'projectAgent.list.brand'
   | 'projectAgent.list.newBot'
   | 'projectAgent.list.searchPlaceholder'
+  | 'projectAgent.attention.title'
+  | 'projectAgent.attention.subtitle'
+  | 'projectAgent.attention.close'
+  | 'projectAgent.attention.failed'
+  | 'projectAgent.attention.retry'
+  | 'projectAgent.attention.empty'
+  | 'projectAgent.attention.emptyHint'
+  | 'projectAgent.attention.question'
+  | 'projectAgent.attention.approval'
+  | 'projectAgent.attention.confirmation'
+  | 'projectAgent.attention.openSource'
+  | 'projectAgent.attention.closed'
   | 'projectAgent.list.needsYou'
   | 'projectAgent.list.empty'
   | 'projectAgent.list.emptyHint'
@@ -1653,6 +1665,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.brand': 'Peer',
     'projectAgent.list.newBot': '新建机器人',
     'projectAgent.list.searchPlaceholder': '搜索机器人、消息、任务',
+    'projectAgent.attention.title': '需要你处理',
+    'projectAgent.attention.subtitle': '只显示当前需要你回答、授权或确认的事项。',
+    'projectAgent.attention.close': '关闭待处理事项',
+    'projectAgent.attention.failed': '暂时无法读取待处理事项，请重试。',
+    'projectAgent.attention.retry': '重新读取',
+    'projectAgent.attention.empty': '暂时没有需要你处理的事项',
+    'projectAgent.attention.emptyHint': '机器人会继续跟进执行中的工作。',
+    'projectAgent.attention.question': '等待你的回答',
+    'projectAgent.attention.approval': '等待你的授权',
+    'projectAgent.attention.confirmation': '等待你的确认',
+    'projectAgent.attention.openSource': '查看原文并处理',
+    'projectAgent.attention.closed': '这个问题已被回答或后续流程取代，已刷新待处理事项。',
     'projectAgent.list.needsYou': '需要你 {count}',
     'projectAgent.list.empty': '还没有机器人',
     'projectAgent.list.emptyHint': '用左上角 + 绑定文件夹，或建一个空白机器人。',
@@ -2979,6 +3003,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.brand': 'Peer',
     'projectAgent.list.newBot': 'New bot',
     'projectAgent.list.searchPlaceholder': 'Search bots, messages, tasks',
+    'projectAgent.attention.title': 'Needs your attention',
+    'projectAgent.attention.subtitle': 'Current questions, permissions and confirmations.',
+    'projectAgent.attention.close': 'Close attention list',
+    'projectAgent.attention.failed': 'Could not load items. Please retry.',
+    'projectAgent.attention.retry': 'Reload',
+    'projectAgent.attention.empty': 'Nothing needs your attention',
+    'projectAgent.attention.emptyHint': 'Your bots will keep following up on ongoing work.',
+    'projectAgent.attention.question': 'Your answer is needed',
+    'projectAgent.attention.approval': 'Your permission is needed',
+    'projectAgent.attention.confirmation': 'Your confirmation is needed',
+    'projectAgent.attention.openSource': 'Open source and handle',
+    'projectAgent.attention.closed': 'This question was answered or superseded. The attention list has been refreshed.',
     'projectAgent.list.needsYou': 'Needs you {count}',
     'projectAgent.list.empty': 'No bots yet',
     'projectAgent.list.emptyHint': 'Use + to bind a folder, or create a blank bot.',

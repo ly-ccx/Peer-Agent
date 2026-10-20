@@ -116,6 +116,7 @@ const unavailableApi: ClientApi = {
   mcpReadResource: unavailableMethod('mcpReadResource'),
   mcpGetPrompt: unavailableMethod('mcpGetPrompt'),
   mcpConnectAndRegister: unavailableMethod('mcpConnectAndRegister'),
+  projectAgentListAttention: unavailableMethod('projectAgentListAttention'),
   projectAgentList: unavailableMethod('projectAgentList'),
   projectAgentGet: unavailableMethod('projectAgentGet'),
   projectAgentReadAvatar: unavailableMethod('projectAgentReadAvatar'),

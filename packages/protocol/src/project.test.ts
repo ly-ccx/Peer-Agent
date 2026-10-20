@@ -50,7 +50,7 @@ test('bot list filter matches needs-you and display name or preview', () => {
   assert.deepEqual(filterBotList(rows, { query: 'ALPHA' }).map((entry) => entry.workspaceId), ['alpha']);
 });
 
-test('bot row counts approvals, waiting sessions, running work, and unread replies', () => {
+test('bot row counts unique actionable attention separately from waiting work and unread replies', () => {
   const row = projectBotListItem({
     profile: profile('ws', '仓库'),
     lastMessage: { role: 'assistant', text: '做好了', at: '2026-09-26T04:00:00.000Z' },
@@ -63,13 +63,14 @@ test('bot row counts approvals, waiting sessions, running work, and unread repli
       { status: 'verifying' },
       { status: 'accepted' },
     ],
+    attention: [{ id: 'question' }, { id: 'permission' }, { id: 'question' }],
     approvals: [
       { state: 'open' },
       { state: 'stale' },
       { state: 'denied' },
     ],
   });
-  assert.equal(row.state.needsYou, 4);
+  assert.equal(row.state.needsYou, 2);
   assert.equal(row.state.running, 3);
   assert.equal(row.state.unread, 1);
   assert.equal(row.preview, '做好了');

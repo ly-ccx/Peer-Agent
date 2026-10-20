@@ -50,7 +50,7 @@ export interface BotChatCard {
   readonly completionReview?: import('@peer-agent/protocol').SessionCompletionReview;
   readonly resolvedState?: 'open' | 'resolved';
   readonly actions?: readonly BotChatCardAction[];
-  readonly refs?: { readonly sessionId: string; readonly capabilityId?: string; readonly decisionReason?: string; readonly deadlineAt?: string };
+  readonly refs?: { readonly sessionId?: string; readonly capabilityId?: string; readonly decisionReason?: string; readonly deadlineAt?: string };
   readonly resolution?: { readonly state: string };
   readonly recovery?: ProjectWorkRecovery;
   readonly recoveryWorkState?: ProjectWorkState;

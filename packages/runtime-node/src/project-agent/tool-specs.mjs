@@ -163,6 +163,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
         type: 'object',
         properties: {
           options: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          expiresAt: { type: 'string', description: 'Optional ISO deadline for this conversational decision; never a permission grant.' },
         },
         required: ['options'],
         additionalProperties: false,

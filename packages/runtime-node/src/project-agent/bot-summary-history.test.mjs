@@ -28,3 +28,14 @@ test('200 bot summaries stay warm within the bounded metadata cache and changed 
 });
 import { createBotSummaryHistory } from './bot-summary-history.mjs';
 import { createHistoryProjectionReader } from '../../../conversation-store/src/history-projection-reader.mjs';
+
+
+test('only the current question carries bounded public context; older large replies never grow the list snapshot', () => {
+  const messages = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), kind: 'agent_reply', role: 'assistant',
+    content: 'public preface '.repeat(1000) + 'Concrete decision at the end', question: { options: ['A', 'B'] } }));
+  const summary = projectBotSummaryHistory({ messages });
+  assert.equal(summary.filter(row => row.questionContext).length, 1);
+  assert.equal(summary.at(-1).questionContext.length, 2000);
+  assert.ok(summary.at(-1).questionContext.endsWith('Concrete decision at the end'));
+  assert.ok(JSON.stringify(summary).length < 250000);
+});

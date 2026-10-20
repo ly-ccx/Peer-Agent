@@ -24,8 +24,18 @@ export async function checkBotImageLifecycle({ page, until, report, captureDirec
     assert.equal(await card.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
     if (scenario === 'ALLOW' || scenario === 'TASK') {
       await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `image-live-wait-${scenario === 'TASK' ? '760-light' : '1280-dark'}.png`) });
-      await card.getByRole('button', { name: scenario === 'TASK' ? '本轮允许此图片' : '仅这一次', exact: true }).focus();
-      await page.keyboard.press('Enter');
+      if (scenario === 'ALLOW') {
+        await page.locator('.bot-need-filter').click();
+        const attention = page.getByRole('dialog', { name: '需要你处理', exact: true }); await attention.waitFor();
+        const permission = attention.locator(`[data-attention-id="card:approval:${approvalId}"]`);
+        await permission.waitFor();
+        await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'attention-image-permission-dark.png') });
+        await permission.getByRole('button', { name: '仅这一次', exact: true }).focus(); await page.keyboard.press('Enter');
+        await until(async () => (await page.evaluate(workspaceId => window.peerAgent.projectAgentListAttention({ workspaceId }), workspaceId)).items.some(item => item.id === `card:approval:${approvalId}`), exists => !exists);
+        await page.keyboard.press('Escape'); await attention.waitFor({ state: 'detached' });
+      } else {
+        await card.getByRole('button', { name: '本轮允许此图片', exact: true }).focus(); await page.keyboard.press('Enter');
+      }
     } else if (scenario === 'DENY') await card.getByRole('button', { name: '拒绝', exact: true }).click();
     else if (scenario === 'CANCEL') await card.getByRole('button', { name: '取消本次读取', exact: true }).click();
     else if (scenario === 'STOP') await page.getByRole('button', { name: '停止生成', exact: true }).click();
@@ -53,5 +63,5 @@ export async function checkBotImageLifecycle({ page, until, report, captureDirec
     await until(() => page.getByRole('button', { name: '停止生成', exact: true }).count(), value => value === 0);
   }
   await page.setViewportSize(viewport); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-  report.imagePermissionLifecycle = { cases, realCalls: true, keyboard: true, controlledCognition: true };
+  report.imagePermissionLifecycle = { cases, realCalls: true, attentionApproved: true, keyboard: true, controlledCognition: true };
 }

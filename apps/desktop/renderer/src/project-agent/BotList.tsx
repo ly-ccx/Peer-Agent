@@ -11,6 +11,7 @@ interface BotListProps {
   readonly emptyLabel: string;
   readonly i18n: I18nRuntime;
   readonly onHighlight: (workspaceId: string) => void;
+  readonly onAttention?: (workspaceId: string) => void;
   readonly onOpen: (workspaceId: string) => void;
   readonly now?: number;
 }
@@ -23,6 +24,7 @@ export function BotList({
   i18n,
   onHighlight,
   onOpen,
+  onAttention,
   now,
 }: BotListProps) {
   return (
@@ -55,6 +57,7 @@ export function BotList({
           i18n={i18n}
           onHighlight={onHighlight}
           onOpen={onOpen}
+          onAttention={onAttention}
         />
       ))}
     </div>

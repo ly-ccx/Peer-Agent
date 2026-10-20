@@ -268,7 +268,13 @@ export function createSessionSupervisor({
       ...(origin.phase === 'queued'
         ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
-    session.sourceRevision = verificationContentHash(plan, (({ status, ...report }) => report)(buildReport(plan, session)));
+    const report = buildReport(plan, session);
+    if (projectCompletionReview(plan, report)) session.completionReviewRequired = true;
+    if (session.status === 'result_ready') {
+      const decision = decideSessionAcceptance(acceptanceFacts(plan));
+      session.resultConfirmationRequired = decision.mode === 'confirm' && decision.closeGatePassed;
+    }
+    session.sourceRevision = verificationContentHash(plan, (({ status, ...body }) => body)(report));
     session.observationRevision = sessionObservationRevision(plan, session.sourceRevision);
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;

@@ -5,6 +5,7 @@ import { PeerIcon } from '../ui/icons';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
 import { VersionBadge } from '../app/components/VersionBadge';
+import { AttentionSheet } from './AttentionSheet';
 import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
 import { botAvatarMood } from './state/botAvatarState';
@@ -106,6 +107,9 @@ export function BotListShell({
   const [taskRequest, setTaskRequest] = useState<(TaskConversationRequest & { readonly workspaceId: string }) | null>(null);
   const [replyFlash, setReplyFlash] = useState<string | null>(null);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [attention, setAttention] = useState<{ workspaceId?: string } | null>(null);
+  const [attentionFocus, setAttentionFocus] = useState<{ workspaceId: string; messageId: string; requestId: number } | null>(null);
+  const focusTarget = attentionFocus && attentionFocus.requestId > (notificationFocus?.requestId ?? 0) ? attentionFocus : notificationFocus;
   const [meHistoryOpen, setMeHistoryOpen] = useState(false);
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
@@ -334,8 +338,9 @@ export function BotListShell({
             <button
               type="button"
               className={`bot-need-filter${list.needsYouOnly ? ' is-on' : ''}`}
-              aria-pressed={list.needsYouOnly}
-              onClick={() => list.setNeedsYouOnly(!list.needsYouOnly)}
+              aria-expanded={attention !== null}
+              aria-haspopup="dialog"
+              onClick={() => setAttention({})}
             >
               {i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}
             </button>
@@ -351,6 +356,7 @@ export function BotListShell({
           i18n={i18n}
           onHighlight={list.setHighlightedId}
           onOpen={list.openBot}
+          onAttention={workspaceId => setAttention({ workspaceId })}
         />
         {list.catalog.length === 0 && list.status === 'ready' && !list.searching ? (
           <p className="bot-list-hint">{i18n.t('projectAgent.list.emptyHint')}</p>
@@ -467,8 +473,8 @@ export function BotListShell({
                 setInspect(next);
                 setDrawerMemory((current) => openDrawer(current));
               }}
-              focusMessageId={notificationFocus?.workspaceId === opened.workspaceId ? notificationFocus.messageId : null}
-              focusRequestId={notificationFocus?.workspaceId === opened.workspaceId ? notificationFocus.requestId : 0}
+              focusMessageId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.messageId : null}
+              focusRequestId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.requestId : 0}
             />
           </div>
         ) : onboarding ? (
@@ -544,6 +550,16 @@ export function BotListShell({
           }}
         />
       ) : null}
+      {attention ? <AttentionSheet workspaceId={attention.workspaceId} i18n={i18n}
+        onClose={() => setAttention(null)} onChanged={() => { void list.reload(); }}
+        onLocate={item => {
+          list.openBot(item.workspaceId);
+          if (item.messageId) setAttentionFocus({ workspaceId: item.workspaceId, messageId: item.messageId, requestId: Date.now() });
+          else if (item.sessionId) {
+            setLocateSessionId(item.sessionId);
+            setDrawerMemory(current => ({ ...openDrawer(current, 'tasks'), sessionId: item.sessionId ?? null }));
+          }
+        }} /> : null}
       <HistorySheet
         open={meHistoryOpen}
         unscoped
