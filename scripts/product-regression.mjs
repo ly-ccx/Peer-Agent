@@ -52,6 +52,9 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
   'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png', 'attention-1280-dark.png', 'attention-760-light.png', 'attention-empty-light.png', 'attention-expired-light.png', 'attention-image-permission-dark.png', 'user-receipt-1280-dark.png', 'user-receipt-760-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
+  if (![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(row =>
+    row.width === width && row.appearance === appearance && row.distinctShapes && row.legacyReportDeduped)))
+    throw new Error('Agent activity identity or duplicate-report regression failed');
   if (!machine.parallelWork?.neutralGroup || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
     machine.parallelWork.cases?.some(row => row.width === width && row.appearance === appearance
       && row.sameLevel && row.uniqueRows && row.independentExpansion))) throw new Error('Parallel task grouping regression failed');

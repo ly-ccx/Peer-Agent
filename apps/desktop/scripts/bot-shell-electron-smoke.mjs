@@ -88,10 +88,12 @@ const longErrorText = '代理暂时不可用：HTTP 400: ' + JSON.stringify({ er
 seededMessages[9998] = { ...seededMessages[9998], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: longErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-long-error', kind: 'agent_unavailable', content: longErrorText, actions: [] }] };
 seedWorkBudgetMessages(seededMessages, fixture.bots[0].workspaceId);
-for (const [offset, state] of ['started', 'question', 'reported', 'started'].entries()) {
+for (const [offset, state] of ['started', 'question', 'reported', 'reported'].entries()) {
   seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
-    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 3 ? 'rc-work-2' : 'rc-work-1', name: offset === 3 ? '独立核验' : '实现检查', state} };
+    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: 'rc-work-1', name: '实现检查', state} };
 }
+seededMessages[9978] = { ...seededMessages[9978], kind: 'agent_activity', role: 'system', content: '',
+  agentActivity: {eventId: 'rc-agent-independent-start', sessionId: 'rc-work-2', name: '独立核验', state: 'started'} };
 // Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
 const recoveryCases = [
   { key: 'missing-checkpoint', failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system',
@@ -162,6 +164,9 @@ if (workSurfaces) {
   writeFileSync(path.join(home,'goal-plans','evidence-index.jsonl'),evidenceRows.filter((_,i)=>i!==3).map(row=>JSON.stringify(row)).join('\n')+'\n');
 }
 writeFileSync(workCommand, JSON.stringify({seq:0,workspaceId:fixture.bots[0].workspaceId,sessions:[{sessionId:'rc-work-1', title:'核查历史任务完成情况', status:'running',statusLabel:'正在核查历史记录', origin:{anchorMessageId:'rc-message-9500'},report:{summary:'逐条核对历史记录中的目标、结果和依据。'}}]}));
+// Keep the five activity facts together without changing the history size or existing message IDs.
+const [independentStart] = seededMessages.splice(9978, 1);
+seededMessages.splice(9983, 0, independentStart);
 writeFileSync(fixtureConversation, seededMessages.map(row => JSON.stringify(row)).join('\n') + '\n');
 if (process.argv.includes('--streaming')) {
   const bot = fixture.bots[1], file = path.join(home, 'conversations', bot.conversationId + '.jsonl');
