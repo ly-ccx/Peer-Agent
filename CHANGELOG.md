@@ -2,6 +2,13 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.22 - 2026-10-20
+
+- Preserve user-configured model and channel selections; independent review may use the same model in a separate context.
+- Expose bounded persisted review diagnostics with source-version association instead of attributing failed verification to model provenance.
+- Remove the delegation tool's unconditional different-source preference hint while retaining configured routing policies.
+- Synchronize bilingual model guidance, README, release notes and generated documentation changelog.
+
 ## 0.1.0-rc.19
 
 - Keep authoritative long-reply receipts separate from bounded UI previews.

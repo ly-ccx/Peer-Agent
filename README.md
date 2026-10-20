@@ -54,9 +54,11 @@ Desktop, TUI and CLI share the same core runtime:
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 >
-> beta channel **`0.1.0-rc.21`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
+> beta channel **`0.1.0-rc.22`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
 
 ### The 0.1.0 candidate
+
+Fixed bot model and channel choices are preserved. Execution and independent review can use the same model in separate contexts; failed reviews should explain the recorded error or missing evidence.
 
 Bind a folder or create a managed bot, choose its avatar color, then give it a request. The bot handles read-only understanding and delegates writes to tasks with success criteria. The main bot coordinates independent goals concurrently, sends additions to the responsible Agent, and can cancel incorrect work and arrange its replacement. Child Agents ask it questions and return results for verification and delivery within existing authorization; their named activity appears in the conversation. Receipt, verification, acceptance and worktree integration remain visible as separate steps.
 
