@@ -25,7 +25,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     const current = await identity(row);
     marker ??= current; assert.deepEqual(marker, current);
     assert.deepEqual(await identity(page.locator('#bot-msg-rc-message-9980')), current);
-    const other = await identity(page.locator('#bot-msg-rc-message-9978'));
+    const other = await identity(page.locator('#bot-msg-rc-message-9984'));
     assert.notEqual(current.icon, other.icon);
     assert.notEqual(current.svg, other.svg);
     assert.equal(await page.locator('#bot-msg-rc-message-9982').count(), 1);
