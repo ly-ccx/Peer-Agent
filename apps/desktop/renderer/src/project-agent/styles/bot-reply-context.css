@@ -8,7 +8,9 @@
 .bot-reply-context > button:hover, .bot-work-row > summary:hover { color: var(--graphite-base); }
 .bot-work-row > summary > svg:last-child { transition: transform 160ms ease; }
 .bot-work-row[open] > summary > svg:last-child { transform: rotate(180deg); }
-.bot-reply-context > button:focus-visible, .bot-work-row summary:focus-visible, .bot-work-detail button:focus-visible, .bot-background-work > summary:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: -1px; border-radius: 4px; }
+.bot-reply-context > button:focus-visible, .bot-work-row summary:focus-visible, .bot-work-detail button:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: -1px; border-radius: 4px; }
+/* 「当前有 N 项任务待跟进」折叠入口不显示焦点装饰（含 UA 与全局 summary:focus-visible），仍可点击、Tab 聚焦、Enter/Space 展开收起。 */
+.bot-background-work > summary:focus, .bot-background-work > summary:focus-visible { outline: none; box-shadow: none; }
 .bot-reply-details-slot { min-width: 0; }
 .bot-reply-details { padding: 20px; min-width: 0; font-size: 12px; line-height: 1.6; }
 .bot-reply-details-note { margin: 0 0 16px; color: var(--graphite-mute); font-size: 11px; }

@@ -866,7 +866,7 @@
   padding: 6px 10px;
   border-radius: var(--control-radius-compact);
   border-color: transparent;
-  background: var(--control-fill);
+  background: transparent;
   font-weight: 500;
   line-height: 18px;
   box-shadow: none;
@@ -874,7 +874,7 @@
 }
 
 .bot-profile:hover {
-  background: var(--control-fill-hover);
+  background: transparent;
 }
 
 .bot-profile[aria-expanded='true'] {
@@ -943,7 +943,7 @@
   text-align: left;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 16px;
+  border-radius: var(--control-radius);
   cursor: pointer;
   transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
@@ -952,6 +952,10 @@
 .bot-main-pick:focus-visible {
   background: var(--chrome-hover);
   border-color: color-mix(in srgb, var(--graphite-base) 24%, var(--chrome-hairline));
+}
+
+@supports (corner-shape: superellipse(1.4)) {
+  .bot-main-pick { corner-shape: var(--control-corner); }
 }
 
 .bot-main-pick-copy {

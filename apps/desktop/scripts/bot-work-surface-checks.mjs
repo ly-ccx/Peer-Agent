@@ -24,6 +24,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.equal(await backgroundSummary.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
   checks.push('collapsed background summary exposes named running work before any expansion');
   await closeReplyDetails(page);
+  await checkBackgroundSummaryFocusSuppression({ page, report, captureDirectory });
   await checkBackgroundWorkAlignment({ page, report, captureDirectory });
   await openReplyDetails(page, reply);
   assert.match(await work.locator(':scope > summary').textContent(), /核查历史任务完成情况.*正在运行中/);
@@ -233,6 +234,91 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(viewport);
   if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) await closeReplyDetails(page);
   checks.push('classified reply and delegated work fit a 760px viewport in both themes');
+}
+
+/**
+ * 「当前有 N 项任务待跟进」折叠入口按方案 B 取消焦点视觉提示：
+ * 键盘聚焦、点击、Enter/Space 展开收起都必须保留，仅抑制焦点框/背景/阴影。
+ * 邻近控件（同一回复内的任务条目）的焦点提示不受影响。
+ */
+async function checkBackgroundSummaryFocusSuppression({ page, report, captureDirectory }) {
+  const background = page.locator('.bot-background-work');
+  const summary = background.locator(':scope > summary');
+  const readFocus = locator => locator.evaluate(node => {
+    const style = getComputedStyle(node);
+    return {
+      focused: node === document.activeElement,
+      focusVisible: node.matches(':focus-visible'),
+      outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineColor: style.outlineColor,
+      boxShadow: style.boxShadow, backgroundColor: style.backgroundColor,
+      tabIndex: node.tabIndex, tagName: node.tagName,
+    };
+  });
+  const cases = report.backgroundSummaryFocus = [];
+  const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+  const viewport = page.viewportSize();
+  const assertSuppressed = (state, label) => {
+    assert.ok(['none', '0px'].includes(state.outlineStyle) || state.outlineWidth === '0px',
+      `${label} must not paint a focus outline (got ${state.outlineStyle}/${state.outlineWidth})`);
+    assert.equal(state.boxShadow, 'none', `${label} must not paint a focus shadow`);
+  };
+  try {
+    for (const appearance of ['dark', 'light']) {
+      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+      for (const width of [1280, 760]) {
+        await page.setViewportSize({ width, height: 860 });
+        if (await background.getAttribute('open') !== null) await summary.click();
+        assert.equal(await summary.evaluate(node => node.tagName), 'SUMMARY');
+        const idle = await readFocus(summary);
+        assert.ok(idle.tabIndex >= 0, 'target disclosure must stay keyboard reachable');
+        assertSuppressed(idle, 'idle target disclosure');
+
+        // Pointer path: clicking must still toggle, and must not leave a painted ring behind.
+        await summary.click();
+        assert.equal(await background.getAttribute('open'), '', 'pointer click must still expand the target disclosure');
+        const afterPointerExpand = await readFocus(summary);
+        assertSuppressed(afterPointerExpand, 'pointer-focused target disclosure');
+        await summary.click();
+        assert.equal(await background.getAttribute('open'), null, 'pointer click must still collapse the target disclosure');
+
+        // Keyboard path: prove real tab-order membership by traversing with Tab/Shift+Tab only.
+        await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+        const tabTo = async (locator, maxPresses, key) => {
+          for (let press = 0; press < maxPresses; press += 1) {
+            await page.keyboard.press(key);
+            if (await locator.evaluate(node => node === document.activeElement)) return true;
+          }
+          return false;
+        };
+        assert.equal(await tabTo(summary, 40, 'Tab'), true, 'Tab must be able to reach the target disclosure');
+        const focused = await readFocus(summary);
+        assert.equal(focused.focused, true, 'target disclosure must remain focusable');
+        assert.equal(focused.focusVisible, true, 'keyboard focus must still reach the target disclosure');
+        assertSuppressed(focused, 'keyboard-focused target disclosure');
+        assert.equal(focused.backgroundColor, idle.backgroundColor, 'target disclosure must not add a focus background');
+        await page.keyboard.press('Tab');
+        assert.equal(await summary.evaluate(node => node === document.activeElement), false,
+          'Tab must move focus off the target disclosure');
+        assert.equal(await tabTo(summary, 40, 'Shift+Tab'), true, 'Shift+Tab must return focus to the target disclosure');
+
+        // Neighbouring controls (same shared rule, other selectors) are asserted by the
+        // existing keyboard work-disclosure check right below, so they are not duplicated here.
+
+        await page.screenshot({ animations: 'disabled',
+          path: path.join(captureDirectory, `background-summary-focus-${width}-${appearance}.png`) });
+        await page.keyboard.press('Enter');
+        assert.equal(await background.getAttribute('open'), '', 'Enter must still expand the target disclosure');
+        await page.keyboard.press('Space');
+        assert.equal(await background.getAttribute('open'), null, 'Space must still collapse the target disclosure');
+        cases.push({ width, appearance, ...focused });
+      }
+    }
+  } finally {
+    await page.setViewportSize(viewport);
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+    if (await background.getAttribute('open') !== null) await summary.click();
+  }
+  report.workSurfaces.push('background task summary suppresses focus decoration while keeping Tab, click and Enter/Space disclosure at 1280/760px in both themes');
 }
 
 async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) {

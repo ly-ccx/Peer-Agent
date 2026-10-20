@@ -23,6 +23,7 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   assert.equal(await page.locator('.bot-row.is-open').getAttribute('id'), rowIds.at(-1));
   await list.focus(); await list.press('Home'); await list.press('Enter');
   checks.push('Space opens the selected bot without scrolling the page');
+  await checkProfileButtonStates({ page, app, until, report, captureDirectory });
   const trigger = page.locator('.bot-profile'); await trigger.focus(); await trigger.press('Enter');
   const tabs = page.locator('.bot-drawer-tabs');
   await until(() => focused(tabs.getByRole('tab', { selected: true })), Boolean);
@@ -376,6 +377,153 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
     independentRoles: true, otherBotUnchanged: true, globalConfigUnchanged: true,
     scope: 'Production model catalogue projection, settings DOM, IPC validation and durable profile; no real model request' };
   report.accessibility.push('bot models and declared reasoning strength save and survive reopen; cascading switch and inherit preserve other roles, bots and global routing');
+}
+
+/** Profile paint follows the existing expanded state, not the remembered settings tab. */
+async function checkProfileButtonStates({ page, app, until, report, captureDirectory }) {
+  const trigger = page.locator('.bot-profile');
+  const tabs = page.locator('.bot-drawer-tabs');
+  const focused = locator => locator.evaluate(node => node === document.activeElement);
+  const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme ?? null);
+  const originalSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
+  const originalViewport = page.viewportSize();
+  const samples = report.profileButtonStates = [];
+  const paint = () => trigger.evaluate(node => {
+    const style = getComputedStyle(node), rect = node.getBoundingClientRect();
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d');
+    const rgba = value => {
+      context.clearRect(0, 0, 1, 1); context.fillStyle = value;
+      context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data];
+    };
+    return {
+      expanded: node.getAttribute('aria-expanded'), hover: node.matches(':hover'), focusVisible: node.matches(':focus-visible'),
+      background: style.backgroundColor, rgba: rgba(style.backgroundColor), active: rgba(style.getPropertyValue('--control-fill-active').trim()),
+      backgroundImage: style.backgroundImage, shadow: style.boxShadow,
+      outline: { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset,
+        rgba: rgba(style.outlineColor), expected: rgba(style.getPropertyValue('--azure-seal').trim()) },
+      geometry: { width: rect.width, height: rect.height, minHeight: style.minHeight, padding: style.padding,
+        gap: style.gap, fontSize: style.fontSize, lineHeight: style.lineHeight, borderWidth: style.borderTopWidth },
+      svgCount: node.querySelectorAll('svg').length, label: node.textContent.trim(),
+      forcedColors: matchMedia('(forced-colors: active)').matches, border: style.borderTopColor, color: style.color,
+    };
+  });
+  try {
+    // Cross-product: light/dark × real wide dock/narrow modal × the named states below.
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      for (const [layout, width] of [['dock', 1360], ['modal', 900]]) {
+        await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 900), width);
+        // Earlier shell checks set an emulated viewport; resizing Electron alone cannot replace it.
+        await page.setViewportSize({ width, height: 900 });
+        await page.waitForFunction(width => window.innerWidth === width, width);
+        let geometry;
+        const state = async (name, expanded, { hover = false, focus = false, screenshot = false } = {}) => {
+          await until(paint, value => value.expanded === String(expanded)
+            && (expanded ? JSON.stringify(value.rgba) === JSON.stringify(value.active) : value.rgba[3] === 0));
+          const value = await paint();
+          assert.equal(value.backgroundImage, 'none'); assert.equal(value.shadow, 'none');
+          assert.equal(value.svgCount, 1); assert.equal(value.label, '机器人设置');
+          assert.equal(value.geometry.minHeight, '32px'); assert.equal(value.geometry.padding, '6px 10px');
+          assert.equal(value.geometry.gap, '6px'); assert.equal(value.geometry.fontSize, '12px');
+          assert.equal(value.geometry.lineHeight, '18px'); assert.equal(value.geometry.borderWidth, '1px');
+          if (geometry) assert.deepEqual(value.geometry, geometry, `${theme}/${layout}/${name} keeps button geometry`);
+          else geometry = value.geometry;
+          if (hover) assert.equal(value.hover, true, `${name} is an actual pointer hover`);
+          if (focus) {
+            assert.equal(value.focusVisible, true, `${name} has keyboard-visible focus`);
+            assert.equal(value.outline.style, 'solid'); assert.equal(value.outline.width, '2px');
+            assert.equal(value.outline.offset, '2px'); assert.deepEqual(value.outline.rgba, value.outline.expected);
+          }
+          const file = screenshot ? `profile-button-${theme}-${layout}-${name}.png` : null;
+          if (file) await page.screenshot({ path: path.join(captureDirectory, file) });
+          samples.push({ theme, layout, state: name, ...value, screenshot: file });
+        };
+        const open = async () => {
+          await trigger.click();
+          await tabs.getByRole('tab', { name: '设置', exact: true }).waitFor();
+          assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
+          if (layout === 'modal') await page.locator('.pa-overlay-panel:visible').waitFor();
+          else await page.locator('.bot-drawer-dock[aria-hidden="false"]').waitFor();
+        };
+        const closed = async name => {
+          await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+          await until(() => focused(trigger), Boolean);
+          await page.mouse.move(0, 0);
+          await state(name, false);
+        };
+        // Prime the remembered tab to settings, then close without changing that tab.
+        await open(); await page.getByRole('button', { name: '关闭', exact: true }).click();
+        await closed('closed-settings-tab');
+        await trigger.evaluate(node => node.blur());
+        await state('inactive', false, { screenshot: true });
+        await trigger.hover(); await state('hover', false, { hover: true, screenshot: true });
+        await page.mouse.move(0, 0); await page.keyboard.press('Tab'); await trigger.focus();
+        await state('focus', false, { focus: true, screenshot: true });
+        await trigger.press('Enter');
+        await until(() => focused(tabs.getByRole('tab', { selected: true })), Boolean);
+        await state('active', true, { screenshot: true });
+        if (layout === 'dock') {
+          await trigger.hover(); await state('active-hover', true, { hover: true });
+          await page.mouse.move(0, 0); await page.keyboard.press('Tab'); await trigger.focus();
+          await state('active-focus', true, { focus: true });
+          await trigger.press('Enter'); await closed('closed-by-profile');
+        } else {
+          // The modal makes the header inert; hover/focus and header-toggle are intentionally unreachable.
+          samples.push({ theme, layout, state: 'active-header-interaction', skip:
+            'The production modal focus scope makes the underlying header inert. Active hover/focus/header-toggle are exercised in dock, not simulated through the modal overlay.' });
+          await page.keyboard.press('Escape'); await closed('closed-by-escape');
+        }
+        await open(); await state('reopened', true);
+        await tabs.getByRole('tab', { name: '任务', exact: true }).click();
+        await state('tasks', false);
+        await page.locator('.bot-tasks-tab .bot-task-with-action .bot-task-row').first().click();
+        await page.locator('.bot-task-detail').waitFor(); await state('task-detail', false);
+        await page.locator('.bot-task-back').click();
+        await tabs.getByRole('tab', { name: '记忆', exact: true }).click(); await state('memory', false);
+        await tabs.getByRole('tab', { name: '设置', exact: true }).click(); await state('settings-again', true);
+        await page.getByRole('button', { name: '关闭', exact: true }).click(); await closed('closed-by-close');
+        await open(); await state('before-escape', true);
+        await page.keyboard.press('Escape'); await closed('restored');
+        await trigger.evaluate(node => node.blur()); await state('restored', false, { screenshot: true });
+        // Resizing can move a fixed reply out of the virtual window; use the real latest-message action.
+        const latest = page.getByRole('button', { name: '回到最新消息', exact: true });
+        if (await latest.count()) await latest.click();
+        const reply = page.locator('.bot-thread .bot-reply-context > button').first();
+        await reply.waitFor();
+        // Opening details after a settings close retains tab=settings; inspect must still clear expanded.
+        await reply.focus(); await reply.press('Enter');
+        await page.locator('.bot-reply-details').waitFor(); await state('reply-inspect', false);
+        await page.getByRole('button', { name: '关闭', exact: true }).click();
+        await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+        // The virtual window can reorder/remount footers on drawer close; match the current live footer,
+        // as the existing reply-details regression does, rather than the old nth=0 locator.
+        await until(() => page.evaluate(() => document.activeElement?.matches('.bot-reply-context > button')), Boolean);
+        await state('closed-inspect', false);
+        await open(); await state('after-inspect', true);
+        await page.getByRole('button', { name: '关闭', exact: true }).click(); await closed('final-close');
+        await page.emulateMedia({ forcedColors: 'active' });
+        await page.waitForFunction(() => matchMedia('(forced-colors: active)').matches);
+        await page.mouse.move(0, 0); await page.keyboard.press('Tab'); await trigger.focus();
+        const contrast = await paint();
+        assert.equal(contrast.expanded, 'false'); assert.equal(contrast.focusVisible, true);
+        assert.equal(contrast.outline.style, 'solid'); assert.equal(contrast.outline.width, '2px');
+        assert.equal(contrast.border, contrast.color, 'forced colors retain the ButtonText border');
+        assert.deepEqual(contrast.geometry, geometry);
+        samples.push({ theme, layout, state: 'forced-colors-focus', ...contrast });
+        await page.emulateMedia({ forcedColors: 'none' });
+      }
+    }
+    report.accessibility.push('profile button: light/dark × dock/modal computed paint, hover, visible focus, remembered settings tab, active state, task/memory/detail/inspect, close/Escape/reopen and forced colors; modal inert header exceptions are recorded');
+  } finally {
+    await page.emulateMedia({ forcedColors: 'none' });
+    await page.evaluate(theme => {
+      if (theme === null) delete document.documentElement.dataset.theme;
+      else document.documentElement.dataset.theme = theme;
+    }, originalTheme);
+    await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size), originalSize);
+    if (originalViewport) await page.setViewportSize(originalViewport);
+  }
 }
 
 async function settingsFirstScreen(page) {
