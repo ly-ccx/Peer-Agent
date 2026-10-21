@@ -46,6 +46,7 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     if (!await work.first().evaluate(node => node.open)) {
       const summary = work.first().locator(':scope > summary');
       await summary.focus(); await summary.press('Enter');
+
     }
     assert.equal(await work.first().evaluate(node => node.open), true);
     const action = work.first().getByRole('button', { name: '查看任务详情', exact: true });

@@ -1,4 +1,6 @@
 .bot-convo {
+  --bot-font-body: var(--ui-font-body-lg, 0.9375rem);
+  --bot-line-body: 1.7;
   --bot-column-max: 800px;
   --bot-column-gutter: 28px;
   --bot-column-width: min(var(--bot-column-max), calc(100cqw - 2 * var(--bot-column-gutter)));
@@ -62,6 +64,14 @@
   display: flex;
   flex-direction: column;
   padding-bottom: var(--space-6, 24px);
+}
+
+.bot-thread-row:has(
+  > .bot-system > .bot-cards > .bot-approval-receipt:only-child
+):has(
+  + .bot-thread-row > .bot-system > .bot-cards > .bot-approval-receipt:only-child
+) {
+  padding-bottom: 4px;
 }
 
 /* Use the conversation's width, so a scroll bar cannot shift the message
@@ -362,6 +372,12 @@
   white-space: pre-wrap;
 }
 
+.bot-user-text {
+  font-size: var(--bot-font-body);
+  font-weight: 500;
+  line-height: var(--bot-line-body);
+}
+
 .bot-user-quote {
   color: var(--graphite-soft);
   overflow-wrap: anywhere;
@@ -538,9 +554,16 @@
 
 .bot-reply-body {
   color: var(--graphite-base);
-  font-size: var(--ui-font-body, 14px);
-  line-height: 1.75;
+  font-size: var(--bot-font-body);
+  font-weight: 500;
+  line-height: var(--bot-line-body);
 }
+
+.bot-reply-body .markdown-content { row-gap: 12px; }
+.bot-reply-body .markdown-content :is(h3, h4, h5, h6) { font-size: var(--ui-font-heading-sm, 1rem); font-weight: 600; line-height: 1.5; }
+.bot-reply-body .markdown-content li { line-height: var(--bot-line-body); }
+.bot-reply-body .markdown-content strong { font-weight: 600; }
+.bot-reply-body .markdown-content code { font-family: var(--font-mono); font-size: var(--ui-font-control, 0.8125rem); font-weight: 400; }
 
 .bot-reply > .bot-reply-body,
 .bot-stopped-reply > .bot-reply-body,
@@ -564,14 +587,14 @@
 .bot-narration {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .bot-narration .markdown-content {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: 12px;
 }
 
 .bot-narration .markdown-content > * { margin: 0; }
@@ -606,6 +629,40 @@
 .bot-card.is-resolved {
   opacity: 0.72;
 }
+
+.bot-card.bot-approval-receipt {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  opacity: 1;
+}
+
+.bot-approval-receipt details { min-width: 0; }
+.bot-approval-receipt summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--ui-radius-control);
+  color: var(--graphite-soft);
+}
+.bot-approval-receipt summary::-webkit-details-marker { display: none; }
+.bot-approval-receipt summary:hover { background: var(--chrome-hover); }
+.bot-approval-receipt summary:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 2px; }
+.bot-approval-receipt summary > svg { flex-shrink: 0; }
+.bot-approval-receipt-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.bot-approval-receipt-copy strong { color: var(--graphite-base); font-size: var(--ui-font-control); font-weight: 500; line-height: 1.4; }
+.bot-approval-receipt-excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-font-meta); line-height: 1.5; }
+.bot-approval-receipt-state { flex-shrink: 0; font-size: var(--ui-font-meta); line-height: 1.5; }
+.bot-approval-receipt details[open] > summary > svg:last-child { transform: rotate(90deg); }
+.bot-approval-receipt-content { margin: 4px 10px 8px 34px; padding: 10px 12px; background: var(--paper-sheet); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); }
+.bot-approval-receipt-content > p { color: var(--graphite-soft); font-size: var(--ui-font-meta); line-height: 1.65; }
+.bot-approval-receipt-content > pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--graphite-soft); font: var(--ui-font-meta)/1.65 var(--font-mono); }
 
 .bot-unavailable-reply { padding: 0; border: 0; background: transparent; gap: 6px; align-items: flex-start; }
 
@@ -793,7 +850,7 @@
   background: transparent;
   color: var(--graphite-base);
   font: inherit;
-  font-size: .875rem;
+  font-size: var(--bot-font-body);
   line-height: 1.6;
 }
 

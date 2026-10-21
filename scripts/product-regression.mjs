@@ -48,11 +48,17 @@ const requiredShots = ['bot-access-1280-dark.png', 'bot-access-760-light.png', '
   ...['allow', 'deny', 'cancel', 'stop', 'timeout'].map(state => `image-live-${state}-1280-dark.png`),
   'image-approval-1280-dark.png', 'image-approval-760-light.png',
   ...[1280, 760].flatMap(width => ['dark', 'light'].map(theme => `process-empty-${width}-${theme}.png`)),
+  ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`conversation-typography-${width}-${theme}.png`, `approval-history-${width}-${theme}.png`]),
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress', 'child-running', 'historical', 'paused', 'cancelled', 'budget-unknown', 'budget-ready', 'budget-migrating', 'budget-reserved', 'budget-available'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
   'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png', 'attention-1280-dark.png', 'attention-760-light.png', 'attention-empty-light.png', 'attention-expired-light.png', 'attention-image-permission-dark.png', 'user-receipt-1280-dark.png', 'user-receipt-760-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
+  if (!machine.conversationTypography?.keyboardDisclosure || !machine.conversationTypography?.truthfulApprovalStates
+    || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.conversationTypography.cases?.some(item =>
+      item.width === width && item.appearance === appearance && item.weight === '500' && item.emphasis === '600'
+      && item.fits && item.compactReceipt && item.fullCommandPreserved && item.pendingVisible)))
+    throw new Error('Conversation typography or approval history regression failed');
   if (!machine.botAccessPolicy?.passed || !machine.botAccessPolicy?.realLocalIPC || !machine.botAccessPolicy?.isolatedBots || !machine.botAccessPolicy?.childReadOnly || !machine.botAccessPolicy?.returnsToBot) throw new Error('Bot access policy regression failed');
   if (![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(row =>
     row.width === width && row.appearance === appearance && row.distinctShapes && row.legacyReportDeduped)))
@@ -154,7 +160,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const packet = { schemaVersion: 1, runId: randomUUID(), capturedAt: new Date().toISOString(),
     sourceFingerprint: sourceFingerprint(root), sourceHead: machine.sourceHead, platform: machine.platform,
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
-    checks: { userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
+    checks: { conversationTypography: machine.conversationTypography, userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
       botAccessPolicy: machine.botAccessPolicy, chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,

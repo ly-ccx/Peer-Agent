@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createApprovalStore, digestApprovalArgs } from '../../../packages/runtime-node/src/project-agent/approval-store.mjs';
 import { projectCards } from '../../../packages/runtime-node/src/project-agent/card-projection.mjs';
+import { checkConversationTypography } from './bot-conversation-typography-checks.mjs';
 
 /** Production approval card/IPC/storage; synthetic pictures, no cloud model. */
 export async function checkBotImageApproval({ page, until, report, captureDirectory, commandFile, home, conversationId }) {
@@ -22,8 +23,9 @@ export async function checkBotImageApproval({ page, until, report, captureDirect
   const other = store.append({ approvalId: 'rc-other-approval', workspaceId: initial.workspaceId, conversationId,
     capabilityId: 'local.file.write', state: 'open', summary: '另一项操作仍需单独确认', policyRevision, argsDigest: digestApprovalArgs({ path: '/another/file' }) });
   const cards = projectCards(initial.workspaceId, { approvals: [approval, other] });
+  let seq = initial.seq;
   const send = messages => {
-    writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: initial.seq + 1, conversationMessages: messages }));
+    writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages: messages }));
     renameSync(commandFile + '.next', commandFile);
   };
   send(cards.map(card => ({ id: card.cardId, role: 'assistant', kind: 'system_card', cards: [card] })));
@@ -44,8 +46,8 @@ export async function checkBotImageApproval({ page, until, report, captureDirect
   assert.equal(store.list().find(row => row.approvalId === other.approvalId).state, 'open');
   assert.equal(store.list().find(row => row.imageReadGrant).imageReadGrant.scope.path, image);
   await page.setViewportSize(viewport); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-  writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: initial.seq + 2, conversationMessages: [] }));
-  renameSync(commandFile + '.next', commandFile);
+  await checkConversationTypography({ page, until, report, captureDirectory, send });
+  send([]);
   await card.waitFor({ state: 'detached' });
   report.imageApproval = { exactScope: true, keyboard: true, persisted: true, unrelatedUnapproved: true, narrowFits: true };
 }
