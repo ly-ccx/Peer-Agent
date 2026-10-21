@@ -7,6 +7,7 @@ import { createConversationStore } from '../../../conversation-store/src/index.m
 import { createProjectInbox } from './project-inbox.mjs';
 import { createAgentEventPublisher } from './agent-activity.mjs';
 import { mapDelegationEvents } from './event-mapper.mjs';
+import { createWatchPublisher } from './watch-publisher.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-activity-'));
@@ -44,4 +45,31 @@ test('a later report remains visible and verification never borrows the returned
   ]);
   assert.deepEqual(f.activities().map(row => row.state), ['reported', 'blocked', 'reported', 'verified', 'ended']);
   assert.equal(f.inbox.takeBatch('ws').events.length, 6);
+});
+
+test('verification starts visibly, retains throttled progress and still wakes on a stall', t => {
+  const f = fixture(t), publish = f.publisher();
+  let clock = Date.parse('2026-10-21T00:00:00Z');
+  const watch = createWatchPublisher({ now: () => new Date(clock).toISOString() });
+  const verificationProgress = { continuationId: 'review', startedAt: new Date(clock).toISOString(),
+    lastProgressAt: new Date(clock).toISOString(), observationCount: 0, phase: 'requesting' };
+  const session = { sessionId: 'child', workspaceId: 'ws', status: 'verifying', verificationProgress };
+  const emit = () => { const events = watch.publish('ws', { sessions: [session] }); publish('ws', events); return events; };
+  assert.equal(emit().filter(event => event.kind === 'session_progress').length, 1);
+  clock += 10_000;
+  session.verificationProgress = { ...verificationProgress, observationCount: 7, lastProgressAt: new Date(clock).toISOString() };
+  assert.equal(emit().length, 0);
+  clock += 20_000;
+  const progress = emit();
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0].payload.verificationProgress.observationCount, 7);
+  assert.deepEqual(f.activities().map(row => row.state), ['verifying', 'verifying']);
+  assert.equal(emit().length, 0);
+  clock += 10 * 60_000;
+  assert.equal(emit().filter(event => event.kind === 'stalled').length, 1);
+  assert.equal(emit().length, 0);
+  const events = f.inbox.diagnosticSnapshot('ws').events;
+  assert.equal(events.filter(event => event.kind === 'session_progress').length, 2);
+  assert.equal(events.filter(event => event.kind === 'session_progress').at(-1).payload.verificationProgress.observationCount, 7);
+  assert.equal(events.filter(event => event.kind === 'stalled').length, 1);
 });

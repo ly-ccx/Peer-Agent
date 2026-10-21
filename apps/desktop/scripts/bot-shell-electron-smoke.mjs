@@ -90,9 +90,11 @@ const longErrorText = '代理暂时不可用：HTTP 400: ' + JSON.stringify({ er
 seededMessages[9998] = { ...seededMessages[9998], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: longErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-long-error', kind: 'agent_unavailable', content: longErrorText, actions: [] }] };
 seedWorkBudgetMessages(seededMessages, fixture.bots[0].workspaceId);
-for (const [offset, state] of ['started', 'question', 'reported', 'reported', 'started'].entries()) {
+for (const [offset, state] of ['started', 'question', 'reported', 'reported', 'verifying'].entries()) {
   seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
-    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 4 ? 'rc-work-2' : 'rc-work-1', name: offset === 4 ? '独立核验' : '实现检查', state} };
+    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 4 ? 'rc-work-2' : 'rc-work-1', name: offset === 4 ? '独立核验' : '实现检查', state,
+      ...(offset === 4 ? { verificationProgress: { continuationId: 'rc-review', startedAt: '2026-10-21T00:00:00Z',
+        lastProgressAt: '2026-10-21T00:01:00Z', observationCount: 7, phase: 'ready' } } : {}) } };
 }
 // Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
 const recoveryCases = [

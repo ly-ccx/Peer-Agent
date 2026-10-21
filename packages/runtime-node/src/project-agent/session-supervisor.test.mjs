@@ -2241,6 +2241,33 @@ test('actual executor takeover retains GoalPlan, changes epoch, and does not con
   }finally{release();await env.cleanup();}
 });
 
+test('a correction handoff resumes the remaining work instead of replaying the old verification intent',async()=>{
+  const starts=[];
+  let env;
+  env=await harness({goalRunner:{async start(planId){starts.push({planId,intent:env.goalPlanStore.getPlan(planId)?.runner?.intent});},async resume(){}}});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try{
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const a=await env.supervisor.coordinateWork({action:'parallel',reason:'inspect',task:spawnInput({kind:'research',readOnly:true})},context);
+    const planId=planIdOf(env,a.sessionId), original=env.goalPlanStore.getPlan(planId);
+    // 原执行体停在核验阶段被挂起：这是复盘里"误回旧 verify 意图"的输入形态。
+    env.goalPlanStore.revisePlan(planId,{delegationOrigin:{...original.delegationOrigin,phase:'paused',pausedFromPhase:'running',pausedRunnerIntent:'verify'}},{reason:'suspended mid-verification',changedBy:'test'});
+    env.goalPlanStore.setRunnerState(planId,{status:'paused',intent:'verify'});
+    starts.length=0;
+    const handoff=await env.supervisor.coordinateWork({action:'handoff',sessionId:a.sessionId,expectedRevision:1,reason:'apply the correction to the remaining work'}, {...context,deliveryKey:'correction'});
+    assert.ok(['stopping','ready','completed'].includes(handoff.phase),JSON.stringify(handoff));
+    await until(()=>store.read().transitions.correction.phase==='completed');
+    // 换执行体是接着做剩下的活，不是重放上一个执行体的核验结论。
+    const firstTurn=starts.filter(row=>row.planId===planId).at(-1);
+    assert.equal(firstTurn?.intent,'execute',JSON.stringify({starts,planId}));
+    // 复盘症状：新执行体第一次写就被 work_execution_stopped 挡掉、没进入剩余修改。
+    const fresh=env.goalPlanStore.getPlan(planId);
+    assert.notEqual(evaluateWorkSessionWrite(fresh,{capabilityId:'local.file.write'}).error,'work_execution_stopped');
+  }finally{release();await env.cleanup();}
+});
+
 test('cancellation publishes an unknown outcome and keeps its replacement fenced after recovery',async()=>{
   const env=await harness();
   const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});

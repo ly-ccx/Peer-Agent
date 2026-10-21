@@ -11,6 +11,7 @@ import { createSessionConversationFacts } from './session-conversation-facts.mjs
 import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
+import { verificationProgressFromPlan } from './verification-progress.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { admitDelegationCriteria } from './criterion-authority.mjs';
 import { isHostHandoffPause } from './session-host-handoff.mjs';
@@ -269,6 +270,10 @@ export function createSessionSupervisor({
         ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
     const report = buildReport(plan, session);
+    if (sessionFactsFromPlan(plan).verificationActive) {
+      const verificationProgress = verificationProgressFromPlan(plan);
+      if (verificationProgress) session.verificationProgress = verificationProgress;
+    }
     const completionReview = projectCompletionReview(plan, report);
     if (completionReview && !completionReview.confirmed) session.completionReviewRequired = true;
     if (session.status === 'result_ready') {

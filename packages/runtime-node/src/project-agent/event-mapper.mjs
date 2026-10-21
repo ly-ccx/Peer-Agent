@@ -54,6 +54,17 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
   }
   const progress = progressEvent(prior, session, { at, progressThrottleMs });
   if (progress) events.push(progress);
+  const verification = session.verificationProgress;
+  if (session.status === 'verifying' && verification) {
+    const version = `${verification.continuationId}:${verification.observationCount}`;
+    const changed = version !== prior?.verificationProgressEmittedKey;
+    const started = prior?.verificationProgress?.continuationId !== verification.continuationId || prior?.status !== 'verifying';
+    const elapsed = Date.parse(at) - Date.parse(prior?.verificationProgressEmittedAt || '');
+    if (changed && (started || !Number.isFinite(elapsed) || elapsed >= progressThrottleMs)) {
+      events.push(event(session, { kind: 'session_progress', version: `verification:${version}`, at,
+        payload: { verificationProgress: verification } }));
+    }
+  }
   for (const item of newNeeds(prior, session)) {
     events.push(event(session, {
       kind: 'needs_user',

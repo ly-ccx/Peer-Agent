@@ -262,6 +262,8 @@ export type TranslationKey =
   | 'projectAgent.chat.agent.answer'
   | 'projectAgent.chat.agent.reported'
   | 'projectAgent.chat.agent.verified'
+  | 'projectAgent.chat.agent.verifying'
+  | 'projectAgent.chat.agent.verificationProgress'
   | 'projectAgent.chat.agent.ended'
   | 'projectAgent.chat.agent.cancelled'
   | 'projectAgent.chat.agent.blocked'
@@ -1818,6 +1820,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.agent.answer': '发来答复',
     'projectAgent.chat.agent.reported': '结果已返回',
     'projectAgent.chat.agent.verified': '核验通过',
+    'projectAgent.chat.agent.verifying': '正在核对结果',
+    'projectAgent.chat.agent.verificationProgress': '正在核对结果 · 已检查 {count} 项事实',
     'projectAgent.chat.agent.ended': '已结束',
     'projectAgent.chat.agent.cancelled': '已取消',
     'projectAgent.chat.agent.blocked': '执行受阻',
@@ -3162,6 +3166,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.agent.answer': 'sent an answer',
     'projectAgent.chat.agent.reported': 'returned a result',
     'projectAgent.chat.agent.verified': 'verification passed',
+    'projectAgent.chat.agent.verifying': 'checking the results',
+    'projectAgent.chat.agent.verificationProgress': 'checking the results · {count} observations checked',
     'projectAgent.chat.agent.ended': 'finished',
     'projectAgent.chat.agent.cancelled': 'cancelled',
     'projectAgent.chat.agent.blocked': 'blocked',

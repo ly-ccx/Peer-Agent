@@ -114,6 +114,20 @@ test('verification failures retain cancellation and permission classifications',
   }
 });
 
+test('a concurrent review reports waiting without recording a failed verdict for the active review', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-busy-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  const plan = store.createPlan({ conversationId: 'child-1', title: 'Review', goal: 'Review',
+    tasks: [], delegationOrigin: origin() });
+  const verification = createSessionVerification({ goalPlanStore: store,
+    verifySession: () => { throw Object.assign(new Error('verifier_in_progress'), { code: 'verifier_in_progress' }); } });
+  const result = await verification.run({ sessionId: 'session-1' });
+  assert.equal(result.error, 'verifier_in_progress');
+  assert.equal(result.nextAction, 'wait_for_verification');
+  assert.equal(store.getPlan(plan.planId).runner?.verifierRuns?.length || 0, 0);
+});
+
 test('verify_session preserves the concrete failure and next action through the Provider and persisted history', async t => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'verify-diagnostic-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
