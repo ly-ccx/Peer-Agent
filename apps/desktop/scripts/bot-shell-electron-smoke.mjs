@@ -26,6 +26,7 @@ import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
 import { seedWorkBudgetMessages } from './work-budget-fixture.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { createQuickChatNativeController } from './quick-chat-native-fixture.mjs';
+import { createAttentionNativeController } from './bot-attention-native-fixture.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture, writeStreamingCommand } from '../../../scripts/rc-response-interaction-smoke.mjs';
 import { checkBotYieldFeedback } from './bot-yield-feedback-checks.mjs';
 import { checkRetryRetirement } from './bot-retry-retirement-checks.mjs';
@@ -88,13 +89,13 @@ const longErrorText = '代理暂时不可用：HTTP 400: ' + JSON.stringify({ er
 seededMessages[9998] = { ...seededMessages[9998], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: longErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-long-error', kind: 'agent_unavailable', content: longErrorText, actions: [] }] };
 seedWorkBudgetMessages(seededMessages, fixture.bots[0].workspaceId);
-for (const [offset, state] of ['started', 'question', 'reported', 'started'].entries()) {
+for (const [offset, state] of ['started', 'question', 'reported', 'reported', 'started'].entries()) {
   seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
-    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 3 ? 'rc-work-2' : 'rc-work-1', name: offset === 3 ? '独立核验' : '实现检查', state} };
+    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 4 ? 'rc-work-2' : 'rc-work-1', name: offset === 4 ? '独立核验' : '实现检查', state} };
 }
 // Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
 const recoveryCases = [
-  { key: 'missing-checkpoint', failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system',
+  { key: 'missing-checkpoint', index: 9978, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system',
     blockedCode: 'RECOVERY_CHECKPOINT_UNAVAILABLE', reason: 'recovery checkpoint unavailable' },
   { key: 'scheduled', failureKind: 'response_headers_timeout', retryable: true, recoveryWorkState: 'retry_wait',
     retryAt: '2026-10-10T03:00:02.000Z', reservationId: 'rc-recovery-reservation', reason: 'connect timeout after 20000ms (ConnectTimeoutError)' },
@@ -340,6 +341,10 @@ const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
 const quickCommand = path.join(root, 'quick-command.json');
 const quickReceipt = path.join(root, 'quick-receipt.json');
+const attentionCommand = path.join(root, 'attention-command.json');
+const attentionReceipt = path.join(root, 'attention-receipt.json');
+writeFileSync(attentionCommand, JSON.stringify({ seq: 0 }));
+writeFileSync(attentionReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(quickCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(quickReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
@@ -348,6 +353,8 @@ writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu} from 'electron';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {installQuickChatNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/quick-chat-native-fixture.mjs')).href)};
 installQuickChatNativeFixture({BrowserWindow,Menu,commandFile:${JSON.stringify(quickCommand)},receiptFile:${JSON.stringify(quickReceipt)}});
+import {installAttentionNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/bot-attention-native-fixture.mjs')).href)};
+installAttentionNativeFixture({BrowserWindow,commandFile:${JSON.stringify(attentionCommand)},receiptFile:${JSON.stringify(attentionReceipt)}});
 import {startMainThreadProbe} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/lab-main-thread-probe.mjs')).href)};
 import {resolveRoleRoute} from ${JSON.stringify(pathToFileURL(path.join(source, 'packages/runtime-node/dist/index.js')).href)};
 startMainThreadProbe(process.env.PEER_RC_PROFILE_PREFIX);
@@ -436,6 +443,7 @@ const until = async (read, predicate, timeout = 30000) => {
   throw Error('Shell acceptance timed out');
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
+const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
 let updaterSequence = 0;
 const emitUpdaterEvent = async event => {
   const seq = ++updaterSequence;
@@ -515,7 +523,7 @@ try {
   } else if (process.argv.includes('--reply-receipt-only')) {
     await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
   } else if (process.argv.includes('--attention-only')) {
-    await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
+    await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   } else if (process.argv.includes('--task-cancel-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('#bot-msg-rc-message-9999').waitFor();
@@ -754,10 +762,10 @@ try {
   await page.locator('.bot-shell').waitFor();
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
-  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
+  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
-  if (!process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, app, until, report, captureDirectory: root, home, bots: fixture.bots });
+  if (!process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');

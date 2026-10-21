@@ -3,16 +3,11 @@ import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 
 /** Production directory, IPC, input queue and real renderer on the standard 10k-message home. */
-export async function checkBotAttention({ page, app, until, report, captureDirectory, home, bots }) {
+export async function checkBotAttention({ page, attentionNative, until, report, captureDirectory, home, bots }) {
   await page.locator('.bot-search').fill('');
   const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const first = bots[0], other = bots[1];
-  const signal = async () => app.evaluate(({ BrowserWindow }, ids) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send('project-agent:changed', { workspaceIds: ids });
-      window.webContents.send('project-agent:conversation-changed', { workspaceIds: ids });
-    }
-  }, [first.workspaceId, other.workspaceId]);
+  const signal = () => attentionNative('signal', [first.workspaceId, other.workspaceId]);
   const appendQuestion = (bot, id, content) => store.appendMessage(bot.conversationId, {
     id, kind: 'agent_reply', role: 'assistant', content,
     question: { options: ['保留当前方案', '调整后继续'] },
@@ -37,7 +32,7 @@ export async function checkBotAttention({ page, app, until, report, captureDirec
   await page.screenshot({ path: path.join(captureDirectory, 'attention-1280-dark.png'), animations: 'disabled' });
   await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' });
   assert.equal(await firstRow.locator('.bot-badge').evaluate(node => document.activeElement === node), true);
-  await app.evaluate(() => { globalThis.rcAttentionFailOnce = true; });
+  await attentionNative('failRead');
   const globalButton = page.locator('.bot-need-filter'); await globalButton.click(); await panel.waitFor();
   await panel.getByRole('alert').waitFor();
   await panel.getByRole('button', { name: '重新读取', exact: true }).click();
@@ -48,9 +43,7 @@ export async function checkBotAttention({ page, app, until, report, captureDirec
   const source = page.locator('#bot-msg-attention-current');
   await source.waitFor(); await source.locator('.bot-question button').first().waitFor({ state: 'visible' });
   assert.match(await source.innerText(), /这次交付的处理方式/);
-  const notify = async () => app.evaluate(({ BrowserWindow }, target) => {
-    for (const window of BrowserWindow.getAllWindows()) window.webContents.send('quick-chat:open-conversation', target);
-  }, { source: 'project-agent-notification', workspaceId: other.workspaceId,
+  const notify = () => attentionNative('notify', { source: 'project-agent-notification', workspaceId: other.workspaceId,
     conversationId: other.conversationId, messageId: 'attention-other' });
   await notify();
   await page.locator('#bot-msg-attention-other.is-anchored').waitFor({ state: 'visible' });
@@ -62,7 +55,7 @@ export async function checkBotAttention({ page, app, until, report, captureDirec
   await page.locator('.bot-need-filter').click(); await panel.waitFor();
 
   const firstItem = panel.locator('[data-attention-id="card:question:reply:attention-current"]');
-  await app.evaluate(() => { globalThis.rcAttentionFailInput = true; });
+  await attentionNative('failInput');
   await firstItem.getByRole('button', { name: '保留当前方案', exact: true }).click();
   await firstItem.getByRole('alert').waitFor(); assert.equal(await count(first.workspaceId), firstTotal);
   await firstItem.getByRole('button', { name: '保留当前方案', exact: true }).click();

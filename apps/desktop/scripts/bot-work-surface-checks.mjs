@@ -19,11 +19,11 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   const work = context.locator('.bot-work-row');
   await work.waitFor({ state: 'attached' });
   const backgroundSummary = page.locator('.bot-background-work > summary');
-  assert.match(await backgroundSummary.textContent(), /核查历史任务完成情况[\s\S]*正在运行中/);
+  assert.equal((await backgroundSummary.textContent()).trim(), '当前任务（1）');
   assert.equal(await backgroundSummary.isVisible(), true);
   assert.equal(await page.locator('.bot-background-work').getAttribute('open'), null);
-  assert.equal(await backgroundSummary.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'none');
-  checks.push('collapsed background summary exposes named running work before any expansion');
+  assert.equal(await backgroundSummary.locator('.bot-work-title, .bot-work-status').count(), 0);
+  checks.push('task group summary shows only its factual count, never a task impersonating its parent');
   await closeReplyDetails(page);
   await checkBackgroundWorkAlignment({ page, report, captureDirectory });
   await openReplyDetails(page, reply);
@@ -52,6 +52,9 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
     writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, sessions, unavailable }));
     renameSync(commandFile + '.next', commandFile);
   };
+  await closeReplyDetails(page);
+  await checkParallelTaskRows({ page, until, report, captureDirectory, change, initial });
+  await openReplyDetails(page, reply);
   change([{ ...initial.sessions[0], status: 'verifying', report: { summary: '已完成' } }]);
   await until(() => work.getAttribute('data-status'), value => value === 'verifying');
   assert.match(await work.locator(':scope > summary').innerText(), /核验中/);
@@ -283,6 +286,58 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(viewport);
   if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) await closeReplyDetails(page);
   checks.push('classified reply and delegated work fit a 760px viewport in both themes');
+}
+
+async function checkParallelTaskRows({ page, until, report, captureDirectory, change, initial }) {
+  const background = page.locator('.bot-background-work');
+  const group = background.locator(':scope > summary');
+  const rows = background.locator(':scope > .bot-delegated-work > .bot-work-row');
+  const parallel = { ...initial.sessions[0], sessionId: 'rc-independent-work', title: '三处界面改动一起提交到当前分支',
+    origin: { ...initial.sessions[0].origin, anchorMessageId: 'rc-message-9498' } };
+  const viewport = page.viewportSize();
+  const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+  const wasOpen = await background.getAttribute('open') !== null;
+  const wasRowOpen = await rows.first().getAttribute('open') !== null;
+  try {
+    change([initial.sessions[0], parallel]);
+    await until(() => rows.count(), count => count === 2);
+    assert.equal((await group.textContent()).trim(), '当前任务（2）');
+    assert.equal(await background.locator('.bot-work-title').count(), 2);
+    assert.equal(await background.locator('.bot-work-row .bot-work-row').count(), 0);
+    if (!wasOpen) { await group.focus(); await page.keyboard.press('Enter'); }
+    await background.evaluate(async node => {
+      await Promise.all(node.getAnimations({ subtree: true }).filter(animation =>
+        animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation => animation.finished));
+    });
+    if (!wasRowOpen) { await rows.nth(0).locator(':scope > summary').focus(); await page.keyboard.press('Enter'); }
+    assert.equal(await rows.nth(0).getAttribute('open'), '');
+    assert.equal(await rows.nth(1).getAttribute('open'), null);
+    const cases = [];
+    for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
+      await page.setViewportSize({ width, height: 860 });
+      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+      await rows.nth(1).scrollIntoViewIfNeeded();
+      const bounds = await rows.evaluateAll(nodes => nodes.map(node => ({ left: node.getBoundingClientRect().left,
+        right: node.getBoundingClientRect().right, parent: node.parentElement.className })));
+      assert.ok(Math.abs(bounds[0].left - bounds[1].left) <= 1);
+      assert.equal(bounds[0].parent, bounds[1].parent);
+      assert.ok(bounds.every(row => row.right <= width));
+      await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `parallel-work-${width}-${appearance}.png`) });
+      cases.push({ width, appearance, sameLevel: true, uniqueRows: true, independentExpansion: true });
+    }
+    report.parallelWork = { neutralGroup: true, cases };
+  } finally {
+    await page.setViewportSize(viewport);
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+    change(initial.sessions);
+    await until(() => rows.count(), count => count === 1);
+    if ((await rows.first().getAttribute('open') !== null) !== wasRowOpen) {
+      await rows.first().locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+    }
+    if ((await background.getAttribute('open') !== null) !== wasOpen) {
+      await group.focus(); await page.keyboard.press('Enter');
+    }
+  }
 }
 
 async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) {

@@ -32,8 +32,12 @@ function activityState(event, plan) {
     return plan.delegationOrigin.phase === 'running' ? 'started' : plan.delegationOrigin.phase === 'queued' ? 'queued' : null;
   }
   if (event.kind === 'session_running') return 'started';
-  if (event.kind === 'report_available') return 'reported';
-  if (event.kind === 'result_ready') return event.payload?.outcome === 'passed' ? 'verified' : 'reported';
+  if (event.kind === 'report_available') return event.payload?.owner === 'parent_agent' ? null : 'reported';
+  if (event.kind === 'result_ready') {
+    if (event.payload?.outcome === 'passed') return 'verified';
+    if (event.payload?.outcome === 'failed') return 'blocked';
+    return null;
+  }
   if (event.kind === 'session_verified') return plan.resultAcceptance?.acceptedAt ? 'ended' : null;
   if (event.kind === 'cancelled') return 'cancelled';
   if (event.kind === 'failed' || event.kind === 'interrupted') return 'blocked';
