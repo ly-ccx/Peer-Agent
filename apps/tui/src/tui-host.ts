@@ -229,16 +229,19 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       capabilityId: prompt.capabilityId, argsDigest: digestApprovalArgs(prompt.args), at: Date.now(),
       sessionId: context.project.sessionId, workspaceId: context.project.workspaceId, policyRevision: access.stamp.startsWith('bot:') ? access.stamp : undefined,
     })) return Promise.resolve({ granted: true, reason: 'approved_once_after_resume' });
-    const imagePrincipal = resolvePermissionPrincipal({ workspaceId: context?.project?.workspaceId,
-      conversationId: context?.conversationId, sessionId: context?.project?.sessionId,
-      planId: context?.project?.planId, goalPlanStore: goalBridge.store });
-    if (imagePrincipal && access.stamp.startsWith('bot:')) imagePrincipal.policyRevision = access.stamp;
+    const resolveImagePrincipal = () => {
+      const principal = resolvePermissionPrincipal({ workspaceId: context?.project?.workspaceId,
+        conversationId: context?.conversationId, sessionId: context?.project?.sessionId,
+        planId: context?.project?.planId, goalPlanStore: goalBridge.store });
+      if (principal && access.stamp.startsWith('bot:')) principal.policyRevision = access.stamp;
+      return principal;
+    };
+    const imagePrincipal = resolveImagePrincipal();
     if (prompt.capabilityId === 'local.image.read') {
       const inherited = imageAuthority.match({ principal: imagePrincipal, scope: prompt.scope, toolCallId: context?.toolCallId });
       if (inherited) return Promise.resolve({ ...inherited, validate: () => !context?.signal?.aborted
         && (!context?.project || context.project.holdsLease()) && Boolean(imageAuthority.match({
-        principal: resolvePermissionPrincipal({ workspaceId: context?.project?.workspaceId, conversationId: context?.conversationId,
-          sessionId: context?.project?.sessionId, planId: context?.project?.planId, goalPlanStore: goalBridge.store }),
+        principal: resolveImagePrincipal(),
         scope: prompt.scope, toolCallId: context?.toolCallId })) });
     }
     const approvalKey = context
@@ -265,19 +268,22 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     }
 
     const requestedEpoch = accessEpoch;
-    return new Promise<{ granted: boolean; reason: string; validate?: () => boolean }>((resolve) => {
-      let settled = false;
-      const policyWatch = setInterval(() => { if (accessFor(context).stamp !== access.stamp || !accessFor(context).valid) approval.resolve('deny'); }, 500);
-      policyWatch.unref?.();
-      const project = context?.project;
-      const store = approvalStore;
-      const record = context ? store?.append({
+    const project = context?.project;
+    const store = approvalStore;
+    let record: ReturnType<typeof store.append> = null;
+    try {
+      record = context ? store.append({
         approvalId: context.toolCallId, workspaceId: project?.workspaceId ?? null,
         conversationId: context.conversationId, streamId: context.streamId,
         sessionId: project?.sessionId, planId: project?.planId ?? null,
         capabilityId: prompt.capabilityId, summary: prompt.reason, policyRevision: access.stamp,
         riskLevel: typeof prompt.riskLevel === 'string' ? prompt.riskLevel : null, argsDigest: digestApprovalArgs(prompt.args), state: 'open',
       }) : null;
+      if (context && !record) return Promise.resolve({ granted: false, reason: 'permission_unavailable' });
+    } catch { return Promise.resolve({ granted: false, reason: 'permission_unavailable' }); }
+    return new Promise<{ granted: boolean; reason: string; validate?: () => boolean }>((resolve) => {
+      let settled = false;
+      let policyWatch: ReturnType<typeof setInterval> | null = null;
       const abort = () => approval.resolve('deny');
       const approval: PendingApproval = {
         prompt,
@@ -285,14 +291,20 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
         resolve(decision) {
           if (settled) return;
           settled = true;
-          clearInterval(policyWatch);
+          if (policyWatch) clearInterval(policyWatch);
           const policyChanged = accessFor(context).stamp !== access.stamp || !accessFor(context).valid;
           context?.signal?.removeEventListener('abort', abort);
           let permitted = decision !== 'deny' && !context?.signal?.aborted && (!project || project.holdsLease())
             && accessFor(context).valid && accessFor(context).stamp === access.stamp;
-          if (record) store?.append({ ...record, state: permitted ? 'approved' : policyChanged ? 'expired' : context?.signal?.aborted ? 'stale' : 'denied',
-            ...(policyChanged ? { decisionReason: 'permission_policy_changed' } : {}),
-            decidedAt: new Date().toISOString(), decidedBy: 'local_ui' });
+          let persistenceFailed = false;
+          if (record) {
+            try {
+              if (!store.append({ ...record, state: permitted ? 'approved' : policyChanged ? 'expired' : context?.signal?.aborted ? 'stale' : 'denied',
+                ...(policyChanged ? { decisionReason: 'permission_policy_changed' } : {}),
+                decidedAt: new Date().toISOString(), decidedBy: policyChanged ? 'policy' : 'local_ui' })) persistenceFailed = true;
+            } catch { persistenceFailed = true; }
+            if (persistenceFailed) permitted = false;
+          }
           if (permitted && decision === 'allow-session' && prompt.capabilityId === 'local.image.read') {
             try { permitted = Boolean(imageAuthority.remember({ principal: imagePrincipal, scope: prompt.scope,
               record: { ...record, state: 'approved', decidedAt: new Date().toISOString(), decidedBy: 'local_ui' } })); }
@@ -300,7 +312,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
           } else if (permitted && decision === 'allow-session' && approvalKey) sessionApprovals.add(approvalKey);
           if (activeApproval === approval) completeApproval();
           else { const index = approvalQueue.indexOf(approval); if (index >= 0) approvalQueue.splice(index, 1); }
-          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : policyChanged ? 'permission_policy_changed' : 'denied_in_tui',
+          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : persistenceFailed ? 'permission_unavailable' : policyChanged ? 'permission_policy_changed' : 'denied_in_tui',
             ...(prompt.capabilityId === 'local.image.read' ? { validate: () => (access.stamp.startsWith('bot:') || requestedEpoch === accessEpoch)
               && !context?.signal?.aborted && (!project || project.holdsLease())
               && Boolean(resolvePermissionPrincipal({ workspaceId: project?.workspaceId, conversationId: context?.conversationId,
@@ -309,6 +321,8 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
           });
         },
       };
+      policyWatch = setInterval(() => { if (accessFor(context).stamp !== access.stamp || !accessFor(context).valid) approval.resolve('deny'); }, 500);
+      policyWatch.unref?.();
       context?.signal?.addEventListener('abort', abort, { once: true });
       if (context?.signal?.aborted) { abort(); return; }
       approvalQueue.push(approval);

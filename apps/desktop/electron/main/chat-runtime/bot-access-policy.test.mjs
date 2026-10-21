@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createBotAccessPolicyAuthority, createLocalImageProvider, createApprovalStore } from '@peer-agent/runtime-node';
 import { createChatPermissionGate } from './permission-gate.mjs';
+import { createLocalShellProvider } from '../runtime-gateway/local-shell-provider.mjs';
 
 function fixture(t) {
   const dataHome = mkdtempSync(path.join(os.tmpdir(), 'peer-gate-bot-'));
@@ -105,4 +106,26 @@ test('invalid delegated identities are denied without emitting a permission card
   const f = fixture(t); f.plans.get('p').status = 'paused';
   assert.equal((await f.requester('child')({ capabilityId: 'local.test', args: {} })).granted, false);
   assert.equal(f.gate.listPendingPermissions().length, 0); assert.equal(f.events.length, 0);
+});
+
+test('Desktop shell rechecks Bot authority when a queued command reaches its execution turn', async t => {
+  const f = fixture(t);
+  const provider = createLocalShellProvider({ workspaceRoot: f.dataHome, userDataPath: f.dataHome,
+    permissionReview: { decideShellExecution: ({ call, classification }) => f.gate.createShellApprovalDecider({
+      streamId: call.toolCallId, toolCallId: call.toolCallId, conversationId: 'bot-a', workspacePath: f.dataHome, webContents: f.sink,
+    })({ call, classification, ruleDecision: {} }) },
+  });
+  t.after(() => provider.dispose());
+  const run = (id, command) => provider.executeCapability({ call: { toolCallId: id, capabilityId: 'local.shell.exec', arguments: { command } } }, { conversationId: 'bot-a' });
+  const active = run('active', 'touch desktop-started; sleep 0.4');
+  for (let n = 0; n < 100 && !existsSync(path.join(f.dataHome, 'desktop-started')); n++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(existsSync(path.join(f.dataHome, 'desktop-started')), true);
+  const queued = run('queued', 'printf forbidden > desktop-queued.txt');
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(existsSync(path.join(f.dataHome, 'desktop-queued.txt')), false);
+  f.change('a', 'ask_before_local');
+  assert.notEqual((await active).result.status, 'denied');
+  const denied = await queued;
+  assert.equal(denied.result.status, 'denied'); assert.equal(denied.grant.granted, false);
+  assert.equal(existsSync(path.join(f.dataHome, 'desktop-queued.txt')), false);
 });

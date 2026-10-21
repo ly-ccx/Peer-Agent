@@ -30,8 +30,8 @@ export function createBotAccessPolicyAuthority({ dataHome = getDataHome(), profi
     if (db) return db;
     const root = path.join(dataHome, 'project-runtime');
     mkdirSync(root, { recursive: true });
-    const { DatabaseSync } = require('node:sqlite');
-    const connection = new DatabaseSync(path.join(root, 'bot-access.sqlite'));
+    const Database = process.versions.bun ? require('bun:sqlite').Database : require('node:sqlite').DatabaseSync;
+    const connection = new Database(path.join(root, 'bot-access.sqlite'));
     try {
       connection.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (connection.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') throw new Error('POLICY_UNAVAILABLE');
