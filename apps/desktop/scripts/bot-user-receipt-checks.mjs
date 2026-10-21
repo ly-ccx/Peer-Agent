@@ -41,8 +41,14 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     const work = page.locator('.bot-reply-details .bot-work-row');
     assert.equal(await work.count(), 3);
     for (const title of titles) assert.ok((await work.allTextContents()).some(text => text.includes(title)));
-    await work.first().locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+    // Reply disclosures survive closing the drawer and changing viewport width.
+    // Open only a collapsed row; toggling an already-open row hides its action.
+    if (!await work.first().evaluate(node => node.open)) {
+      const summary = work.first().locator(':scope > summary');
+      await summary.focus(); await summary.press('Enter');
+    }
     const action = work.first().getByRole('button', { name: '查看任务详情', exact: true });
+    await action.waitFor({ state: 'visible' });
     await action.focus(); await action.press('Enter');
     const detail = page.locator('.bot-task-detail'); await detail.waitFor();
     assert.match(await detail.innerText(), /入口样式收尾/);

@@ -132,3 +132,61 @@ test('alternating old observations stop review and retired slice callbacks canno
   } }), { code: 'verifier_no_progress' });
   assert.equal(calls, 4);
 });
+
+test('format repair is one request with no tools and retains indexed evidence', async () => {
+  let calls = 0;
+  const port = storage();
+  const result = await runContinuedVerification({ identity, port, allowedEvidenceRefs: ['ev-existing'],
+    run: async ({ attempt, executionBudget }) => {
+      calls++;
+      executionBudget.guard.beforeRequest();
+      if (!attempt) return { events: text('not a structured report') };
+      assert.equal(executionBudget.maxTurns, 1);
+      assert.equal(executionBudget.maxToolCalls, 0);
+      assert.throws(() => executionBudget.guard.beforeTool(), { code: 'verifier_report_invalid' });
+      return { events: text({ passed: true, evidenceRefs: ['ev-existing'] }) };
+    } });
+  assert.equal(result.passed, true);
+  assert.equal(calls, 2);
+  assert.equal(port.state().toolCalls, 0);
+});
+
+test('recovery cannot renew ten minutes without factual progress, even with a fresh slice deadline', async () => {
+  const port = storage();
+  const start = Date.parse('2026-10-21T00:00:00Z');
+  port.save({ schemaVersion: 1, continuationId: 'review', ...identity, policyVersion: 2,
+    phase: 'ready', modelRequests: 40, toolCalls: 30, formatAttempt: 0, evidenceRefs: [],
+    startedAt: new Date(start).toISOString(), lastProgressAt: new Date(start).toISOString(),
+    deadlineAt: new Date(start + 60 * 60_000).toISOString() });
+  await assert.rejects(runContinuedVerification({ identity, port, now: () => start + 10 * 60_000,
+    run: () => assert.fail('idle review must stop before dispatch') }), { code: 'verifier_no_progress' });
+});
+
+test('paired new observations publish durable progress without treating requests as progress', async () => {
+  const port = storage(); let clock = Date.parse('2026-10-21T00:00:00Z'), calls = 0;
+  await runContinuedVerification({ identity, port, now: () => clock, run: async ({ executionBudget }) => {
+    if (!calls++) { clock += 60_000; return slice(executionBudget, 1, 'fresh'); }
+    const prior = port.state();
+    assert.equal(prior.observationCount, 1);
+    assert.equal(prior.lastProgressAt, new Date(clock).toISOString());
+    clock += 60_000;
+    executionBudget.guard.beforeRequest();
+    assert.equal(port.state().lastProgressAt, prior.lastProgressAt);
+    return { events: text({ passed: true, evidenceRefs: ['ev-fresh-0'] }) };
+  } });
+});
+
+test('a new explicit review after a terminal report retains usage and receives its own format-repair admission', async () => {
+  const port = storage(); let clock = Date.now();
+  for (let run = 0; run < 2; run++) {
+    let calls = 0;
+    const result = await runContinuedVerification({ identity, port, now: () => clock, allowedEvidenceRefs: ['e'],
+      run: async ({ attempt, executionBudget }) => {
+        calls++; executionBudget.guard.beforeRequest();
+        return { events: text(attempt ? { passed: true, evidenceRefs: ['e'] } : 'invalid report') };
+      } });
+    assert.equal(result.passed, true); assert.equal(calls, 2);
+    clock += 60 * 60_000;
+  }
+  assert.equal(port.state().modelRequests, 4);
+});

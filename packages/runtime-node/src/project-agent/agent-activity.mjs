@@ -16,7 +16,8 @@ export function createAgentEventPublisher({ inbox, conversationStore, findSessio
       if (!ids || ids.includes(id)) continue;
       const stored = conversationStore.appendMessage(origin.parentConversationId, {
         id, role: 'system', kind: 'agent_activity', content: '', createdAt: event.at || new Date().toISOString(),
-        agentActivity: { eventId: event.eventId, sessionId: origin.sessionId, name: plan.title || 'Agent', state },
+        agentActivity: { eventId: event.eventId, sessionId: origin.sessionId, name: plan.title || 'Agent', state,
+          ...(state === 'verifying' ? { verificationProgress: event.payload.verificationProgress } : {}) },
       }, { returnMessages: false });
       if (!stored) throw new Error('agent_activity_not_stored');
       onChanged(workspaceId);
@@ -26,6 +27,7 @@ export function createAgentEventPublisher({ inbox, conversationStore, findSessio
 }
 
 function activityState(event, plan) {
+  if (event.kind === 'session_progress' && event.payload?.verificationProgress) return 'verifying';
   if (event.kind === 'agent_message') return event.payload?.agentMessage?.purpose || null;
   if (event.kind === 'session_started') {
     if (event.payload?.status && !['running', 'starting', 'queued'].includes(event.payload.status)) return null;

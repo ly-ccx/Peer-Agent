@@ -26,3 +26,15 @@ test('agent identity is stable and varies both SVG shape and tone across indepen
   assert.ok(new Set(identities.map(row => row.icon)).size >= 6);
   assert.equal(new Set(identities.map(row => row.tone)).size, 4);
 });
+
+test('verification activity keeps validated factual progress and coalesces consecutive updates', () => {
+  const verificationProgress = { continuationId: 'review', startedAt: '2026-10-21T00:00:00Z',
+    lastProgressAt: '2026-10-21T00:01:00Z', observationCount: 7, phase: 'ready' };
+  const row = (id: string, count: number) => normalizeBotMessage({ id, kind: 'agent_activity',
+    agentActivity: { eventId: id, sessionId: 'child', name: '独立核验', state: 'verifying',
+      verificationProgress: { ...verificationProgress, observationCount: count } } })!;
+  assert.deepEqual(visibleBotMessages([row('first', 0), row('next', 7)]).map(row => row.id), ['next']);
+  assert.equal(row('next', 7).agentActivity?.verificationProgress?.observationCount, 7);
+  assert.equal(row('bad', -1).agentActivity?.verificationProgress, undefined);
+  assert.equal(visibleBotMessages([row('next', 7), activity('failed', 'child', undefined, 'blocked')]).length, 2);
+});

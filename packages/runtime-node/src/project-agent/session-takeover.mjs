@@ -45,7 +45,13 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
             delegationOrigin: { ...plan.delegationOrigin, phase: 'queued', workId: binding.workId, coordinationBinding: binding,
               takeover: { ...plan.delegationOrigin.takeover, phase: 'completed', completedAt: now() } } },
           { reason: 'executor takeover settled', changedBy: 'session-takeover' });
-          goalPlanStore.setRunnerState(plan.planId, { status: 'paused', intent: transition.action === 'revise' ? 'explore' : plan.delegationOrigin.pausedRunnerIntent || 'execute' });
+          // 换执行体的续接是"接着做剩下的活"：核验结论属于被替换的那个执行体，
+          // 重放 verify 会让新执行体第一轮就去核验旧成果，然后原地停滞/等用户（复盘症状）。
+          const pausedIntent = plan.delegationOrigin.pausedRunnerIntent || 'execute';
+          const resumeIntent = transition.action === 'revise'
+            ? 'explore'
+            : pausedIntent === 'verify' ? 'execute' : pausedIntent;
+          goalPlanStore.setRunnerState(plan.planId, { status: 'paused', intent: resumeIntent });
           emit({ kind: 'session_resumed', workspaceId: context.workspaceId, sessionId: input.sessionId, planId: plan.planId,
             reason: 'executor_takeover', payload: { operationId: input.operationId, goalRevision: binding.goalRevision } });
           await promote();

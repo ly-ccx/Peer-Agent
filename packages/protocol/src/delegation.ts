@@ -77,6 +77,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly verificationProgress?: VerificationProgress;
   readonly completionReviewRequired?: boolean;
   readonly resultConfirmationRequired?: boolean;
   readonly coordination?: import('./delegation-coordination.ts').CoordinationSessionFacts;
@@ -140,11 +141,20 @@ export interface AgentMessage {
   readonly at: string;
 }
 
+export interface VerificationProgress {
+  readonly continuationId: string;
+  readonly startedAt: string;
+  readonly lastProgressAt: string;
+  readonly observationCount: number;
+  readonly phase: 'ready' | 'requesting' | 'tools' | 'completed';
+}
+
 export interface AgentActivity {
+  readonly verificationProgress?: VerificationProgress;
   readonly eventId: string;
   readonly sessionId: string;
   readonly name: string;
-  readonly state: 'queued' | 'started' | 'update' | 'question' | 'answer' | 'reported' | 'verified' | 'ended' | 'cancelled' | 'blocked';
+  readonly state: 'queued' | 'started' | 'update' | 'question' | 'answer' | 'reported' | 'verified' | 'verifying' | 'ended' | 'cancelled' | 'blocked';
 }
 
 export type JsonValue =

@@ -1032,6 +1032,11 @@ export interface GoalRunnerState {
     readonly fingerprint?: string;
     readonly repeats?: number;
     readonly progressFacts?: readonly string[];
+    readonly startedAt?: string;
+    readonly lastProgressAt?: string;
+    readonly observationCount?: number;
+    readonly observationFacts?: readonly string[];
+    readonly formatRequests?: number;
   };
   readonly enabled: boolean;
   readonly status: GoalRunnerStatus;

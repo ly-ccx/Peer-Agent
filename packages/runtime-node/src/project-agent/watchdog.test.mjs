@@ -23,6 +23,17 @@ function running(extra = {}) {
   };
 }
 
+test('verification stalls use verifier factual progress and respect real human waits', () => {
+  const verificationProgress = { startedAt: STARTED, lastProgressAt: STARTED, observationCount: 0,
+    continuationId: 'review', phase: 'requesting' };
+  const session = running({ status: 'verifying', verificationProgress, lastProgressAt: TEN_MINUTES });
+  assert.equal(assessStall(session, { now: TEN_MINUTES }).stalled, true);
+  assert.equal(assessStall({ ...session, verificationProgress: { ...verificationProgress,
+    lastProgressAt: '2026-09-27T00:05:00.000Z' } }, { now: TEN_MINUTES }).stalled, false);
+  assert.equal(assessStall({ ...session, needsUser: [{ kind: 'approval', approvalId: 'permission' }] },
+    { now: TEN_MINUTES }).stalled, false);
+});
+
 test('运行满 10 分钟且没有进展才算停滞，差一秒或还在等用户都不算', () => {
   const almost = new Date(Date.parse(STARTED) + STALL_WINDOW_MS - 1).toISOString();
   assert.equal(assessStall(running(), { now: almost }).stalled, false);

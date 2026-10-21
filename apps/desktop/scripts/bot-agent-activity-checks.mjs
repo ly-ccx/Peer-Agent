@@ -26,6 +26,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     marker ??= current; assert.deepEqual(marker, current);
     assert.deepEqual(await identity(page.locator('#bot-msg-rc-message-9980')), current);
     const other = await identity(page.locator('#bot-msg-rc-message-9984'));
+    assert.match(await page.locator('#bot-msg-rc-message-9984').innerText(), /正在核对结果.*已检查 7 项事实/s);
     assert.notEqual(current.icon, other.icon);
     assert.notEqual(current.svg, other.svg);
     assert.equal(await page.locator('#bot-msg-rc-message-9982').count(), 1);
@@ -43,7 +44,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     await page.locator('.bot-drawer-body').waitFor({state: 'hidden'});
     await page.locator('.pa-overlay-backdrop--drawer').waitFor({state: 'hidden'});
     cases.push({width, appearance, named: true, svg: true, stableIdentity: true, distinctShapes: true, legacyReportDeduped: true,
-      taskDestination: true, humanWaitDistinct: true, fits: true});
+      taskDestination: true, humanWaitDistinct: true, verificationProgress: true, fits: true});
   }
   writeFileSync(commandFile + '.next', JSON.stringify({...initial, seq: command.seq + 1})); renameSync(commandFile + '.next', commandFile);
   report.agentActivity = {cases, scope: 'Production renderer and IPC with explicit isolated Agent facts; communication/Runner execution tested separately'};
