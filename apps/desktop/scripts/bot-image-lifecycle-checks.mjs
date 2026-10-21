@@ -1,9 +1,11 @@
+import { setFixtureBotAccess } from './bot-access-policy-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 /** No prebuilt cards: view_image must cause the host to present an actionable card. */
 export async function checkBotImageLifecycle({ page, until, report, captureDirectory, receiptFile, workspaceId }) {
+  await setFixtureBotAccess(page, workspaceId, 'ask_before_local');
   const read = () => JSON.parse(readFileSync(receiptFile, 'utf8'));
   const cases = [];
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));

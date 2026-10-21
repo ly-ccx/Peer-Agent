@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, cpSync } from 'node:fs';
+import { existsSync, mkdirSync, cpSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -65,6 +65,7 @@ export const DATA_STORE_ENTRIES = {
   userMemory:        { rel: 'memory',                  kind: 'dir',  scope: 'portable' },
   // 项目运行时事实（待批准、后续宿主租约）。设备本地，不随设置导出。
   // Includes coordination.jsonl, coordination-snapshot.json and protected checkpoints/<id>.json;
+  // bot-access.sqlite and bot-access-imported.json bind policies and safe import provenance to this device.
   // these retain local work/delivery receipts and must never enter portable exports.
   // Includes per-project circuit-breaker/recovery state, memory-maintenance checkpoints, objective watch-state/probe-evidence reservations and delivery/execution cursors (device only).
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
@@ -148,6 +149,12 @@ export function exportBundle(targetDir) {
 export function importBundle(sourceDir) {
   if (!sourceDir) return { imported: [] };
   const home = getDataHome();
+  if (existsSync(path.join(sourceDir, 'projects')) && !existsSync(path.join(home, 'project-runtime', 'bot-access.sqlite'))) {
+    // Record before copying portable profiles/settings: an import is not legacy local Full authority.
+    const runtime = path.join(home, 'project-runtime');
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(path.join(runtime, 'bot-access-imported.json'), JSON.stringify({ schemaVersion: 1, importedAt: new Date().toISOString() }));
+  }
   const imported = [];
   for (const entry of listEntries({ scope: 'portable' })) {
     const from = path.join(sourceDir, entry.rel);

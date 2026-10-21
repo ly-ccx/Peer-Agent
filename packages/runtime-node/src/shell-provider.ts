@@ -320,6 +320,8 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
           });
         }
 
+        let approvalPolicyRevision: unknown;
+        let approvalValidate: (() => boolean) | undefined;
         if (classification.decision === 'ask') {
           const approval = options.requestApproval
             ? await options.requestApproval({
@@ -344,7 +346,9 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
                 metadata: classificationData,
               })
             : { granted: false, reason: 'approval_unavailable' };
-          if (!approval.granted) {
+          approvalPolicyRevision = approval.policyRevision;
+          approvalValidate = typeof approval.validate === 'function' ? approval.validate as () => boolean : undefined;
+          if (!approval.granted || typeof approval.validate === 'function' && !approval.validate()) {
             const reason = approval.reason || 'user_denied';
             return createNodeToolResult({
               clock,
@@ -384,7 +388,7 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
           reason: classification.decision === 'allow'
             ? 'classified_readonly'
             : 'approved_shell_execution',
-          metadata: classificationData,
+          metadata: { ...classificationData, ...(typeof approvalPolicyRevision === 'string' ? { policyRevision: approvalPolicyRevision } : {}) },
         });
 
         if (!background && sessionManager) {
@@ -397,6 +401,10 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
             cwd: requestedCwd,
             timeoutMs,
             signal: context.signal,
+            beforeExecute: () => {
+              if (context.signal?.aborted) throw new Error('aborted');
+              if (approvalValidate && !approvalValidate()) throw new Error('permission_policy_changed');
+            },
           });
           const stopReason = sessionResult.timedOut
             ? 'timeout'
@@ -546,7 +554,7 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
         return createNodeToolResult({
           clock,
           call,
-          status: reason === 'aborted' ? 'cancelled' : 'failed',
+          status: reason === 'aborted' ? 'cancelled' : reason === 'permission_policy_changed' ? 'denied' : 'failed',
           summary: `Shell capability failed: ${reason}.`,
           grant: createNodePermissionGrant({ clock, call, decision: 'deny', reason }),
           error: { code: reason, message: reason, recoverable: true },

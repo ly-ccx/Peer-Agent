@@ -235,6 +235,7 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
   const file = page.locator('.diff-file-index-row').filter({ hasText: 'new-name.ts' });
   await file.waitFor();
   await layouts('classic-diff', async () => {
+    await page.locator('.diff-file-preview-portal').waitFor({ state: 'hidden' });
     await file.evaluate(node => node.blur());
     await file.focus();
     await page.locator('.diff-file-preview .diff-rename-arrow').waitFor();

@@ -32,6 +32,8 @@ export interface RunNodeShellSessionCommandOptions {
   readonly cwd?: string;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  /** Recheck host authority after queueing, immediately before each command write. Throw to refuse dispatch. */
+  readonly beforeExecute?: () => void;
 }
 
 export interface NodeShellSessionManager {
@@ -286,6 +288,7 @@ export function createNodeShellSessionManager(
         : undefined;
 
       return runLocked(key, async (initial, alreadyRebuilt) => {
+        runOptions.beforeExecute?.();
         let session = initial;
         let rebuilt = alreadyRebuilt;
         if (session.dead) {
@@ -312,6 +315,7 @@ pwd
         try {
           writeScript(session, script);
         } catch {
+          runOptions.beforeExecute?.();
           drop(session);
           session = spawnSession(key, workspaceRoot);
           session.bootstrapped = Boolean(bootstrap) || session.bootstrapped;

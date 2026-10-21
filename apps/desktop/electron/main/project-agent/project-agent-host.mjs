@@ -17,6 +17,7 @@ import {
   createBotConversationHistory,
   createBotLifecycle,
   createBotProfileStore,
+  createBotAccessPolicyAuthority,
   createInputQueue,
   createMemoryStore,
   createEpisodeLog,
@@ -152,6 +153,9 @@ export function registerDesktopProjectAgent({
     },
   });
   const profileStore = createBotProfileStore({ rootDir: dataHome });
+  const accessAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore, conversationStore, goalPlanStore,
+    legacyAccessLevel: getSettings()?.localAccessLevel });
+  accessAuthority.initialize();
   const memoryStore = createMemoryStore({ rootDir: dataHome });
   configurePermissions?.(approvalStore);
   const memoryChanged = workspaceId => {
@@ -463,6 +467,7 @@ export function registerDesktopProjectAgent({
     return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
   } });
   const projectAgent = createProjectAgentApplicationService({
+    accessAuthority,
     diagnostics: diagnostics.execute,
     enabled: runtimeEnabled,
     requestTakeover: workspaceId => {
@@ -611,7 +616,7 @@ export function registerDesktopProjectAgent({
       supervisor,
       objectives,
       objectiveWatches,
-      dispose: () => { projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
+      dispose: () => { accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({

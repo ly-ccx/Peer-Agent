@@ -194,7 +194,16 @@ export async function executeProjectedModelTool({
     return { success: false, error: projection.error };
   }
 
+  const dispatchPolicy = toolContext?.resolveAccessPolicy?.();
   const workSessionGate = () => {
+    const accessDenial = toolContext?.checkAccessPolicy?.();
+    if (accessDenial) return accessDenial;
+    if (dispatchPolicy?.ok && dispatchPolicy.policy) {
+      const current = toolContext.resolveAccessPolicy();
+      if (!current?.ok || current.policy?.workspaceId !== dispatchPolicy.policy.workspaceId
+        || current.policy?.conversationId !== dispatchPolicy.policy.conversationId
+        || current.policy?.revision !== dispatchPolicy.policy.revision) return 'permission_policy_changed';
+    }
     const planId = toolContext?.turnProfile?.planId ?? toolContext?.planId;
     const plan = planId ? goalPlanStore?.getPlan?.(planId) : null;
     const gate = evaluateWorkSessionWrite(plan, {
@@ -220,6 +229,7 @@ export async function executeProjectedModelTool({
   const effectiveToolContext = toolContext
     ? {
       ...toolContext,
+      checkAccessPolicy: workSessionGate,
       workspacePath: cwd,
       originWorkspacePath: goalBinding?.originWorkspacePath ?? toolContext.originWorkspacePath ?? requestedCwd,
       targetWorkspacePath: goalBinding?.targetWorkspacePath ?? toolContext.targetWorkspacePath ?? null,
@@ -378,12 +388,17 @@ export async function executeProjectedModelTool({
       hookRunner,
     }),
   });
-  const execution = await host.execute({ call: projection.call, conversationId }, {
+  const hostExecution = await host.execute({ call: projection.call, conversationId }, {
     toolContext: effectiveToolContext,
     requestPermission,
     signal,
     locale,
   });
+  // Provenance enriches the actual Provider grant; it never creates or replaces a decision.
+  const execution = dispatchPolicy?.ok && dispatchPolicy.policy && hostExecution.grant
+    ? { ...hostExecution, grant: { ...hostExecution.grant,
+        policyRevision: `bot:${dispatchPolicy.policy.workspaceId}:${dispatchPolicy.policy.conversationId}:${dispatchPolicy.policy.revision}` } }
+    : hostExecution;
   return {
     ...materializeProjectedToolExecution({
       name,

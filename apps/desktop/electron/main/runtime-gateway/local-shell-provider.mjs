@@ -50,6 +50,7 @@ function createGrant({ toolCallId, granted, classification, decision }) {
     duration: granted ? (decision.ruleId ? 'scope' : 'once') : 'denied',
     scope: `local.shell.exec:${classification?.category ?? 'unknown'}`,
     decidedAt: nowIso(),
+    ...(decision.policyRevision ? { policyRevision: decision.policyRevision } : {}),
   };
 }
 
@@ -418,6 +419,9 @@ export function createLocalShellProvider({
       localApproval: context.localApproval,
       hookDecision,
     });
+    if (decision.granted && typeof decision.validate === 'function' && !decision.validate()) {
+      decision.granted = false; decision.reason = 'permission_policy_changed';
+    }
     const grant = createGrant({
       toolCallId: call.toolCallId,
       granted: decision.granted,
@@ -456,7 +460,20 @@ export function createLocalShellProvider({
         cwd: requestedCwd,
         timeoutMs: clampTimeoutMs(args.timeoutMs),
         signal: context.signal,
+        beforeExecute: () => {
+          const reason = context.toolContext?.checkAccessPolicy?.()
+            || (typeof decision.validate === 'function' && !decision.validate() ? 'permission_policy_changed' : null);
+          if (reason) throw Object.assign(new Error(reason), { code: 'execution_authority_denied' });
+        },
+      }).catch(error => {
+        if (error?.code !== 'execution_authority_denied') throw error;
+        decision.granted = false; decision.reason = error.message;
+        return null;
       });
+      if (!sessionResult) return {
+        grant: createGrant({ toolCallId: call.toolCallId, granted: false, classification, decision }),
+        result: appendHookEvidence(deniedResult({ call, locale, classification, decision }), hookRecords, hookDecision?.behavior),
+      };
       const artifact = await artifactStore.writeTaskArtifacts({
         taskId: sessionResult.commandId,
         toolCallId: call.toolCallId,

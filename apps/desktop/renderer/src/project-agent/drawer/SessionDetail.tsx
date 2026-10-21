@@ -125,6 +125,7 @@ export function SessionDetail({
           i18n={i18n}
           isZh={isZh}
           onClose={() => setSceneOpen(false)}
+          onOpenBot={() => { setSceneOpen(false); onConversation({}); }}
         />
       ) : null}
     </div>
@@ -138,6 +139,7 @@ export function ConversationSceneDrawer({
   i18n,
   isZh,
   onClose,
+  onOpenBot,
 }: {
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -146,6 +148,7 @@ export function ConversationSceneDrawer({
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly onClose: () => void;
+  readonly onOpenBot?: () => void;
 }) {
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [systemInstructions, setSystemInstructions] = useState('');
@@ -179,6 +182,7 @@ export function ConversationSceneDrawer({
         <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
           <div className="conversation-chat-drawer__body">
             <ChatSurface
+              onOpenPermissionBot={onOpenBot}
               i18n={i18n}
               providers={providers}
               conversationId={conversationId}
