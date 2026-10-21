@@ -12,6 +12,7 @@ import { replyAnchorsForMessages } from '../state/replyReferenceState';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
 import { BotModelControls } from '../BotModelControls';
+import { BotAccessControl } from '../BotAccessControl';
 import type { BotModelsControlState } from '../state/useBotModels';
 import { DelegatedWork } from './DelegatedWork';
 import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
@@ -177,6 +178,7 @@ export function BotConversation({
         key={workspaceId}
         i18n={i18n}
         botName={label}
+        permissionControls={onSavingChange => <BotAccessControl key={workspaceId} workspaceId={workspaceId} i18n={i18n} onSavingChange={onSavingChange} />}
         modelUpdating={modelControls.busy}
         draftRequest={taskRequest?.draft ? { id: taskRequest.id, text: taskRequest.draft } : null}
         onDraftPrepared={id => {

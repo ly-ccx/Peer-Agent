@@ -12,6 +12,8 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     list: assertFunction(projectAgent?.list, 'projectAgent.list'),
     listAttention: assertFunction(projectAgent?.listAttention, 'projectAgent.listAttention'),
     get: assertFunction(projectAgent?.get, 'projectAgent.get'),
+    readAccessPolicy: assertFunction(projectAgent?.readAccessPolicy, 'projectAgent.readAccessPolicy'),
+    updateAccessPolicy: assertFunction(projectAgent?.updateAccessPolicy, 'projectAgent.updateAccessPolicy'),
     readAvatar: assertFunction(projectAgent?.readAvatar, 'projectAgent.readAvatar'),
     create: assertFunction(projectAgent?.create, 'projectAgent.create'),
     updateProfile: assertFunction(projectAgent?.updateProfile, 'projectAgent.updateProfile'),
@@ -44,6 +46,8 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:list-attention', (_event, payload) => ports.listAttention(payload));
       ipc.handle('project-agent:list', (_event, payload) => ports.list(payload));
       ipc.handle('project-agent:get', (_event, payload) => ports.get(payload));
+      ipc.handle('project-agent:read-access-policy', (_event, payload) => ports.readAccessPolicy(payload));
+      ipc.handle('project-agent:update-access-policy', (_event, payload) => ports.updateAccessPolicy(payload));
       ipc.handle('project-agent:read-avatar', (_event, payload) => ports.readAvatar(payload));
       ipc.handle('project-agent:create', (event, payload) => ports.create(payload, event.sender));
       ipc.handle('project-agent:update-profile', (event, payload) => ports.updateProfile(payload, event.sender));

@@ -1,3 +1,4 @@
+import { checkBotAccessPolicy } from './bot-access-policy-checks.mjs';
 import { checkBotUserReceipt } from './bot-user-receipt-checks.mjs';
 import { checkBotAttention } from './bot-attention-checks.mjs';
 import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
@@ -53,7 +54,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--access-policy-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -466,7 +467,10 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--image-permission-only')) {
+  if (process.argv.includes('--access-policy-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await checkBotAccessPolicy({ page, until, report, captureDirectory: root, home, bots: fixture.bots, commandFile: workCommand });
+  } else if (process.argv.includes('--image-permission-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
@@ -728,6 +732,7 @@ try {
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
     await checkBotCoordination({page,until,report,captureDirectory:root,commandFile:workCommand});
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
+    await checkBotAccessPolicy({ page, until, report, captureDirectory: root, home, bots: fixture.bots, commandFile: workCommand });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
     await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });

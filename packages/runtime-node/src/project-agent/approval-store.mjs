@@ -21,6 +21,7 @@
  * @property {string} summary 展示文本，已脱敏
  * @property {string | null} riskLevel
  * @property {string} argsDigest 参数的 sha256
+ * @property {string} [policyRevision] Host-bound access policy version
  * @property {string} createdAt
  * @property {ApprovalState} state
  * @property {string} [decidedAt]
@@ -114,9 +115,10 @@ export function createApprovalStore({
         : digestApprovalArgs(null),
       createdAt: nullableString(input.createdAt) || now().toISOString(),
       state: input.state,
+      ...(nullableString(input.policyRevision) ? { policyRevision: nullableString(input.policyRevision) } : {}),
     };
     if (typeof input.deadlineAt === 'string' && Number.isFinite(Date.parse(input.deadlineAt))) record.deadlineAt = input.deadlineAt;
-    if (['permission_cancelled', 'permission_timeout', 'permission_unavailable', 'local_user_denied'].includes(input.decisionReason)) record.decisionReason = input.decisionReason;
+    if (['permission_cancelled', 'permission_timeout', 'permission_unavailable', 'local_user_denied', 'permission_policy_changed'].includes(input.decisionReason)) record.decisionReason = input.decisionReason;
     const decidedAt = nullableString(input.decidedAt);
     if (decidedAt) record.decidedAt = decidedAt;
     if (DECIDERS.has(input.decidedBy)) record.decidedBy = input.decidedBy;

@@ -50,6 +50,7 @@ function createGrant({ toolCallId, granted, classification, decision }) {
     duration: granted ? (decision.ruleId ? 'scope' : 'once') : 'denied',
     scope: `local.shell.exec:${classification?.category ?? 'unknown'}`,
     decidedAt: nowIso(),
+    ...(decision.policyRevision ? { policyRevision: decision.policyRevision } : {}),
   };
 }
 
@@ -418,6 +419,9 @@ export function createLocalShellProvider({
       localApproval: context.localApproval,
       hookDecision,
     });
+    if (decision.granted && typeof decision.validate === 'function' && !decision.validate()) {
+      decision.granted = false; decision.reason = 'permission_policy_changed';
+    }
     const grant = createGrant({
       toolCallId: call.toolCallId,
       granted: decision.granted,

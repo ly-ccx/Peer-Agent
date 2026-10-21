@@ -320,6 +320,7 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
           });
         }
 
+        let approvalPolicyRevision: unknown;
         if (classification.decision === 'ask') {
           const approval = options.requestApproval
             ? await options.requestApproval({
@@ -344,7 +345,8 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
                 metadata: classificationData,
               })
             : { granted: false, reason: 'approval_unavailable' };
-          if (!approval.granted) {
+          approvalPolicyRevision = approval.policyRevision;
+          if (!approval.granted || typeof approval.validate === 'function' && !approval.validate()) {
             const reason = approval.reason || 'user_denied';
             return createNodeToolResult({
               clock,
@@ -384,7 +386,7 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
           reason: classification.decision === 'allow'
             ? 'classified_readonly'
             : 'approved_shell_execution',
-          metadata: classificationData,
+          metadata: { ...classificationData, ...(typeof approvalPolicyRevision === 'string' ? { policyRevision: approvalPolicyRevision } : {}) },
         });
 
         if (!background && sessionManager) {

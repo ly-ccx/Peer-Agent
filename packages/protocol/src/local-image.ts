@@ -28,6 +28,7 @@ export interface LocalImagePermissionScope {
 }
 /** Local host-issued exact-image read authority; no pixels are persisted. */
 export interface ImageReadGrant {
+  policyRevision?: string;
   schemaVersion: 1;
   grantId: string;
   workspaceId: string | null;

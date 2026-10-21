@@ -21,6 +21,7 @@ import type { DropdownOption } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
 import { SelectionQuoteAction } from './SelectionQuoteAction';
+import { ConversationAccessControl } from './ConversationAccessControl';
 import { appendSelectionQuote } from '../state/selectionQuoteAttachment';
 import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
@@ -480,7 +481,7 @@ export function ChatSurface({
   isPageActive,
   messageTarget,
   onOpenAutomationRun,
-  onClose,
+  onClose, onOpenPermissionBot,
   onOpenSelectionChild,
   onSelectionChildSend,
   pendingSendText,
@@ -528,6 +529,7 @@ export function ChatSurface({
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
   /** Drawer host close action; surfaces as a close control in ChatHeader. */
   readonly onClose?: () => void;
+  readonly onOpenPermissionBot?: (workspaceId: string) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
   readonly workspaces?: readonly { path: string; name: string }[];
@@ -3231,14 +3233,12 @@ export function ChatSurface({
               title={modeTitle(mode, isZh)}
               menuPlacement="up"
             />
-            <Dropdown
-              className="composer-dropdown composer-access-dropdown"
+            <ConversationAccessControl
+              conversationId={conversationId} isZh={isZh} onOpenBot={onOpenPermissionBot}
               value={localAccessLevel}
               options={accessLevelOptions}
               onChange={handleAccessLevelDropdownChange}
-              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
               title={accessLevelTitle(localAccessLevel, isZh)}
-              menuPlacement="up"
             />
           </div>
           {homeComposerContextControls}
