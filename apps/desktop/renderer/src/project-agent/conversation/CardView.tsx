@@ -11,6 +11,7 @@ import { CompletionReview } from './CompletionReview';
 import { BotInputContext } from './BotInputContext';
 import { useQuestionDismissal } from './useQuestionDismissal';
 import { useCardPresence } from './useCardPresence';
+import { ApprovalReceipt } from './ApprovalReceipt';
 
 /**
  * 所有动作通过应用服务，由宿主校验状态与项目归属。
@@ -79,6 +80,7 @@ function CardItem({
   const question = card.kind === 'question';
   const dismissal = useQuestionDismissal(question && resolved, onClosed);
   if (question && !dismissal.present) return null;
+  if (card.kind === 'approval' && resolved) return <ApprovalReceipt card={card} i18n={i18n} notice={imageApproval ? imageNotice : undefined} />;
   return (
     <section ref={dismissal.ref} aria-busy={busy} inert={question && resolved ? true : undefined} aria-hidden={question && resolved ? true : undefined}
       className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>

@@ -13,6 +13,8 @@
 .bot-turn-process-heading > svg { flex-shrink: 0; transition: transform 160ms ease; }
 .bot-turn-process[open] > .bot-turn-process-heading > svg { transform: rotate(180deg); }
 .bot-turn-process-content { margin: 0; padding: 0 4px 2px; border-top: 1px solid var(--chrome-hairline); }
+.bot-turn-process-content:has(> .bot-process-note) { padding: 8px 10px; }
+.bot-turn-process-content > .bot-process-note { margin: 0; }
 .bot-tool-step + .bot-tool-step { border-top: 1px solid var(--chrome-hairline); }
 .bot-tool-step > summary { display: flex; align-items: center; gap: 8px; min-height: 0; padding: 5px 8px; border-radius: var(--ui-radius-control); }
 .bot-tool-step > summary:hover { background: var(--chrome-hover); }
