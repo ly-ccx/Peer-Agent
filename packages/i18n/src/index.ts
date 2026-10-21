@@ -480,6 +480,12 @@ export type TranslationKey =
   | 'projectAgent.model.unavailable'
   | 'projectAgent.model.select'
   | 'projectAgent.model.noEffort'
+  | 'projectAgent.access.changed'
+  | 'projectAgent.access.label'
+  | 'projectAgent.access.scope'
+  | 'projectAgent.access.loading'
+  | 'projectAgent.access.failed'
+  | 'projectAgent.access.retry'
   | 'projectAgent.model.saveFailed'
   | 'projectAgent.policy.modelsHint'
   | 'projectAgent.policy.inherit'
@@ -1954,7 +1960,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.cancel': '取消任务',
     'projectAgent.task.cancelling': '正在取消…',
     'projectAgent.task.cancelFailed': '取消未完成，请重试。已有结果会保留。',
-    'projectAgent.chat.work.background': '当前有 {count} 项任务待跟进',
+    'projectAgent.chat.work.background': '当前任务（{count}）',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
     'projectAgent.chat.context.details': '回复详情',
@@ -2030,6 +2036,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.unavailable': '选择模型',
     'projectAgent.model.select': '选择机器人模型',
     'projectAgent.model.noEffort': '无可调推理强度',
+    'projectAgent.access.changed': '主 Bot 的权限已变更，本次旧请求已关闭。后续操作按新权限处理。',
+    'projectAgent.access.label': 'Bot 及子任务权限',
+    'projectAgent.access.scope': '作用于此 Bot 及其所有子任务的后续操作；角色职责与显式拒绝规则仍生效。',
+    'projectAgent.access.loading': '读取权限…',
+    'projectAgent.access.failed': '权限未保存或无法读取，保留原权限。请重试。',
+    'projectAgent.access.retry': '重试权限',
     'projectAgent.model.saveFailed': '模型设置未保存，请重试。',
     'projectAgent.policy.modelsHint': '直接选择这个机器人的模型和推理强度。对话配置用于后续回复，任务配置用于新任务。',
     'projectAgent.policy.inherit': '跟随全局',
@@ -3292,7 +3304,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.cancel': 'Cancel task',
     'projectAgent.task.cancelling': 'Cancelling…',
     'projectAgent.task.cancelFailed': 'Could not cancel. Please retry. Existing results are preserved.',
-    'projectAgent.chat.work.background': '{count} tasks to follow up',
+    'projectAgent.chat.work.background': 'Tasks ({count})',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',
     'projectAgent.chat.context.details': 'Reply details',
@@ -3368,6 +3380,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.unavailable': 'Choose model',
     'projectAgent.model.select': 'Choose bot model',
     'projectAgent.model.noEffort': 'No adjustable effort',
+    'projectAgent.access.changed': 'The Bot access policy changed. This previous request is closed; future actions use the current policy.',
+    'projectAgent.access.label': 'Bot and task access',
+    'projectAgent.access.scope': 'Applies to future actions by this Bot and all its tasks. Role limits and explicit denials still apply.',
+    'projectAgent.access.loading': 'Loading access…',
+    'projectAgent.access.failed': 'Access could not be saved or read. The previous policy is retained. Retry.',
+    'projectAgent.access.retry': 'Retry access',
     'projectAgent.model.saveFailed': 'Model settings were not saved. Please retry.',
     'projectAgent.policy.modelsHint': 'Choose this bot’s model and reasoning effort directly. Conversation changes apply to future replies; task changes apply to new tasks.',
     'projectAgent.policy.inherit': 'Use global routing',

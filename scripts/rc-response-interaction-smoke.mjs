@@ -449,6 +449,10 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'stream-tool-and-draft.png') });
   for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width: 760, height: 780 });
+    if (workCommandFile) {
+      await page.locator('.bot-drawer-dock').waitFor({ state: 'detached' });
+      await page.locator('.bot-drawer-panel').waitFor({ state: 'visible' });
+    }
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     assert.equal(await live.evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `stream-expanded-narrow-${theme}.png`) });

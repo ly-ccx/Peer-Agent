@@ -2586,7 +2586,7 @@ describe('llm chat service tool materialization', () => {
 
   it('carries host goal identity and Agent messages through the real desktop tool pipeline',async()=>{
     const {createLlmChatService}=await loadService();
-    const previousFetch=globalThis.fetch, calls=[];
+    const previousFetch=globalThis.fetch, calls=[], executions=[];
     const release=installDelegation({supervisor:{
       coordinationFacts:()=>[{workId:'root-goal',goalRevision:1,lifecycle:'active',sessionIds:['child']}],
       coordinateWork:async(input,context)=>{calls.push({input,context});return {ok:true,sessionId:'child',phase:'completed'};},
@@ -2596,8 +2596,16 @@ describe('llm chat service tool materialization', () => {
     const task={anchorMessageIds:['canonical-user'],title:'Inspect fixture',brief:'Inspect only fixture',kind:'research',readOnly:true,
       successCriteria:[{kind:'model_review',description:'Report the fixture facts'}]};
     const user={id:'canonical-user',kind:'user_input',role:'user',content:'Inspect fixture'};
-    const service=createLlmChatService({preferredAccessLevel:'restricted_local',
-      conversationStore:{getConversation:()=>({workspacePath:tmpDir}),getPersistedConversationHistory:()=>({messages:[user]})},
+    const { createBotAccessPolicyAuthority } = await import('@peer-agent/runtime-node');
+    const policyConversations = {getConversation:id=>({workspacePath:tmpDir,workspaceId:'workspace',
+      role:id==='worker-fixture-context'?'work_session':'project_agent',parentConversationId:id==='worker-fixture-context'?'same-cached-context':undefined}),
+      getPersistedConversationHistory:()=>({messages:[user]})};
+    const hostPlan={planId:'plan-one',conversationId:'worker-fixture-context',status:'executing',delegationOrigin:{workspaceId:'workspace',sessionId:'child',parentConversationId:'same-cached-context',phase:'running'}};
+    const policyPlans={getPlan:()=>hostPlan,getActivePlanByConversation:id=>id==='worker-fixture-context'?hostPlan:null};
+    const accessPolicyAuthority=createBotAccessPolicyAuthority({dataHome:tmpDir,conversationStore:policyConversations,goalPlanStore:policyPlans,
+      profileStore:{read:id=>id==='workspace'?{workspaceId:id,agentConversationId:'same-cached-context',status:'active'}:null}});
+    const service=createLlmChatService({preferredAccessLevel:'restricted_local',accessPolicyAuthority,goalPlanStore:policyPlans,
+      conversationStore:policyConversations,
       llmConfigStore:{listProviders:()=>[{id:'fixture',provider:'openai',baseUrl:'https://fixture.example/v1',model:'fixture',isDefault:true,apiKeyConfigured:true}],getDecryptedApiKey:()=> 'fixture-key'},
     });
     try {
@@ -2610,11 +2618,13 @@ describe('llm chat service tool materialization', () => {
         globalThis.fetch=async()=>new Response(sse(requests++===0?[
           {choices:[{delta:{tool_calls:[{index:0,id:'host-fixture',type:'function',function:{name:scenario.tool,arguments:JSON.stringify(scenario.input)}}]},finish_reason:'tool_calls'}]},'[DONE]',
         ]:[{choices:[{delta:{content:'Fixture complete'}}]},'[DONE]']),{status:200});
-        const outcome=await service.sendMessage({mode:scenario.profile.role==='project_agent'?'project_agent':'goal',conversationId:'same-cached-context',
-          streamId:`identity-${scenario.tool}`,workspacePath:tmpDir,messages:[{role:'user',content:'Inspect fixture'}],turnProfile:scenario.profile,webContents:{send() {}}});
+        const outcome=await service.sendMessage({mode:scenario.profile.role==='project_agent'?'project_agent':'goal',conversationId:scenario.profile.role==='work_session'?'worker-fixture-context':'same-cached-context',
+          streamId:`identity-${scenario.tool}`,workspacePath:tmpDir,agentProgress:{onToolExecution:value=>executions.push(value)},messages:[{role:'user',content:'Inspect fixture'}],turnProfile:scenario.profile,webContents:{send() {}}});
         assert.equal(outcome.terminalStatus,'done',JSON.stringify(outcome));
       }
       assert.equal(calls.length,3);
+      assert.equal(executions.length,3);
+      assert.ok(executions.every(execution=>execution.grant?.policyRevision==='bot:workspace:same-cached-context:1'));
       assert.equal(calls[0].input.action,'parallel');
       assert.equal(calls[0].context.workId,'root-goal');
       assert.deepEqual(calls[0].context.currentInputAnchors,['canonical-user']);
@@ -2623,7 +2633,7 @@ describe('llm chat service tool materialization', () => {
       assert.equal(calls[2].context.agentKind,'worker');
       assert.equal(calls[2].context.sessionId,'child');
       assert.equal(calls[2].context.planId,'plan-one');
-    } finally {release();globalThis.fetch=previousFetch;}
+    } finally {accessPolicyAuthority.close();release();globalThis.fetch=previousFetch;}
   });
 
   it('does not fail over outside turnProfile.recoveryCandidateIds', async () => {

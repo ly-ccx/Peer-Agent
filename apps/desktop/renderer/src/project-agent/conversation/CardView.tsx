@@ -88,6 +88,7 @@ function CardItem({
       </> : failure ? <><p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
         {budgetDetail ? <p className="bot-live-status">{i18n.t(budgetDetail.key, budgetDetail.params)} {i18n.t(budgetDetail.sourceKey)}</p> : null}
         {card.failureStatus?.activeSessionIds.length ? <p className="bot-live-status">{i18n.t('projectAgent.chat.childWorkContinues', { count: card.failureStatus.activeSessionIds.length })}</p> : null}</>
+        : card.kind === 'approval' && card.refs?.decisionReason === 'permission_policy_changed' ? <><p role="status">{i18n.t('projectAgent.access.changed')}</p><p>{card.content}</p></>
         : imageApproval ? <><p role="status">{i18n.t(imageNotice)}</p><p>{card.content}</p>{!resolved && card.refs?.deadlineAt ? <p className="bot-drawer-note">{i18n.t('projectAgent.chat.imageWaitLimit')}</p> : null}</>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved && !question || !actions?.length ? null : (

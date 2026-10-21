@@ -12,6 +12,7 @@ import { replyAnchorsForMessages } from '../state/replyReferenceState';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
 import { BotModelControls } from '../BotModelControls';
+import { BotAccessControl } from '../BotAccessControl';
 import type { BotModelsControlState } from '../state/useBotModels';
 import { DelegatedWork } from './DelegatedWork';
 import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
@@ -104,7 +105,6 @@ export function BotConversation({
   }, [taskRequest]);
 
   const background = useMemo(() => backgroundWork(workIndex), [workIndex]);
-  const runningWork = background.rows.find(row => ['starting', 'running', 'verifying'].includes(row.status ?? ''));
   const detailsRow = useMemo(() => replyDetailsRow(replyDetailsId, conversation.rows, conversation.messages),
     [replyDetailsId, conversation.rows, conversation.messages]);
   const details = useReplyDetailsRow(workspaceId, replyDetailsId, detailsRow);
@@ -172,14 +172,13 @@ export function BotConversation({
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
       {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
       {background.count ? <details className="bot-background-work"><summary>
-        {runningWork?.status ? <><PeerIcon name="terminal" size={14} /><span className="bot-work-title">{runningWork.session?.title || i18n.t('projectAgent.chat.work.related')}</span>
-          <span className="bot-work-status is-running">{i18n.t(`projectAgent.chat.sessionState.${runningWork.status}`)}</span></>
-          : <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span>}<PeerIcon name="chevronDown" size={12} /></summary>
+        <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span><PeerIcon name="chevronDown" size={12} /></summary>
         <DelegatedWork rows={background.rows} botName={label} i18n={i18n} onOpen={onLocateSession} /></details> : null}
       <BotComposer
         key={workspaceId}
         i18n={i18n}
         botName={label}
+        permissionControls={onSavingChange => <BotAccessControl key={workspaceId} workspaceId={workspaceId} i18n={i18n} onSavingChange={onSavingChange} />}
         modelUpdating={modelControls.busy}
         draftRequest={taskRequest?.draft ? { id: taskRequest.id, text: taskRequest.draft } : null}
         onDraftPrepared={id => {

@@ -19,8 +19,18 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     await scrollToBotMessage(page, row);
     assert.match(await row.innerText(), /实现检查.*发来问题/s);
     assert.equal(await row.locator('svg').count(), 2);
-    const tone = await row.locator('.bot-agent-marker').getAttribute('data-tone');
-    marker ??= tone; assert.equal(marker, tone);
+    const identity = target => target.locator('.bot-agent-marker').evaluate(node => ({
+      tone: node.dataset.tone, icon: node.dataset.agentIcon, svg: node.querySelector('svg').innerHTML,
+    }));
+    const current = await identity(row);
+    marker ??= current; assert.deepEqual(marker, current);
+    assert.deepEqual(await identity(page.locator('#bot-msg-rc-message-9980')), current);
+    const other = await identity(page.locator('#bot-msg-rc-message-9984'));
+    assert.notEqual(current.icon, other.icon);
+    assert.notEqual(current.svg, other.svg);
+    assert.equal(await page.locator('#bot-msg-rc-message-9982').count(), 1);
+    assert.equal(await page.locator('#bot-msg-rc-message-9983').count(), 0);
+    assert.equal(await page.locator('.bot-agent-activity[data-agent-session="rc-work-1"][data-agent-state="reported"]').count(), 1);
     assert.equal(await row.evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-${width}-${appearance}.png`), animations: 'disabled'});
     await row.focus(); await page.keyboard.press('Enter');
@@ -32,7 +42,8 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     await detail.waitFor({state: 'hidden'});
     await page.locator('.bot-drawer-body').waitFor({state: 'hidden'});
     await page.locator('.pa-overlay-backdrop--drawer').waitFor({state: 'hidden'});
-    cases.push({width, appearance, named: true, svg: true, stableIdentity: true, taskDestination: true, humanWaitDistinct: true, fits: true});
+    cases.push({width, appearance, named: true, svg: true, stableIdentity: true, distinctShapes: true, legacyReportDeduped: true,
+      taskDestination: true, humanWaitDistinct: true, fits: true});
   }
   writeFileSync(commandFile + '.next', JSON.stringify({...initial, seq: command.seq + 1})); renameSync(commandFile + '.next', commandFile);
   report.agentActivity = {cases, scope: 'Production renderer and IPC with explicit isolated Agent facts; communication/Runner execution tested separately'};

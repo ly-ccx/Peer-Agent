@@ -7,6 +7,9 @@ import { projectCards } from '../../../packages/runtime-node/src/project-agent/c
 /** Production approval card/IPC/storage; synthetic pictures, no cloud model. */
 export async function checkBotImageApproval({ page, until, report, captureDirectory, commandFile, home, conversationId }) {
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
+  const access = await page.evaluate(workspaceId => window.peerAgent.projectAgentReadAccessPolicy({ workspaceId }), initial.workspaceId);
+  assert.equal(access.ok, true);
+  const policyRevision = `bot:${access.policy.workspaceId}:${access.policy.conversationId}:${access.policy.revision}`;
   const store = createApprovalStore({ rootDir: path.join(home, 'project-runtime') });
   const image = path.join(captureDirectory, 'permission-fixture.png');
   writeFileSync(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'));
@@ -14,10 +17,10 @@ export async function checkBotImageApproval({ page, until, report, captureDirect
   const scope = { capabilityId: 'local.image.read', path: image, workspacePath: null, action: 'read_image_for_model',
     fileIdentity: { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs } };
   const approval = store.append({ approvalId: 'rc-image-approval', workspaceId: initial.workspaceId, conversationId,
-    capabilityId: 'local.image.read', imageReadScope: scope, state: 'stale', summary: image,
+    capabilityId: 'local.image.read', imageReadScope: scope, state: 'stale', summary: image, policyRevision,
     argsDigest: digestApprovalArgs({ path: image, fileIdentity: scope.fileIdentity }), createdAt: new Date().toISOString() });
   const other = store.append({ approvalId: 'rc-other-approval', workspaceId: initial.workspaceId, conversationId,
-    capabilityId: 'local.file.write', state: 'open', summary: '另一项操作仍需单独确认', argsDigest: digestApprovalArgs({ path: '/another/file' }) });
+    capabilityId: 'local.file.write', state: 'open', summary: '另一项操作仍需单独确认', policyRevision, argsDigest: digestApprovalArgs({ path: '/another/file' }) });
   const cards = projectCards(initial.workspaceId, { approvals: [approval, other] });
   const send = messages => {
     writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: initial.seq + 1, conversationMessages: messages }));

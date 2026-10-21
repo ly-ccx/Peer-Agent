@@ -30,7 +30,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
   report.budgetFailure = { reasonVisible: true, diagnosticInDrawer: true, retrySuppressed: true, limitVisible: true, narrowFits: true };
   const recoveryCases = [
     ...BUDGET_RECOVERY_CASES,
-    ['missing-checkpoint', 9984, '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。', false],
+    ['missing-checkpoint', 9978, '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。', false],
     ['scheduled', 9985, '连接暂时中断，我会接着刚才的进度继续。', false],
     ['exhausted', 9986, '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。', true],
     ['authentication', 9987, '连接的身份验证未通过。请重新登录或检查连接配置，再继续尝试。', true],

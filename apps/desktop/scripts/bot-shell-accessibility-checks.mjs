@@ -6,7 +6,7 @@ import { checkModelSwitch } from './bot-model-switch-checks.mjs';
 import { modelMenuChannelName } from '@peer-agent/protocol';
 
 /** Actual production DOM, keyboard and persistence; no replacement of product results. */
-export async function checkBotShellAccessibility({ page, app, until, report, captureDirectory, effortCommandFile }) {
+export async function checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory, effortCommandFile }) {
   const checks = report.accessibility = [];
   const focused = locator => locator.evaluate(node => node === document.activeElement);
   const list = page.getByRole('listbox', { name: 'Peer', exact: true });
@@ -160,10 +160,7 @@ export async function checkBotShellAccessibility({ page, app, until, report, cap
   await trigger.click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   const quick = app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat');
-  await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows().find(window => new URL(window.webContents.getURL()).searchParams.get('window') === 'quick-chat');
-    window.show(); window.webContents.send('quick-chat:shown');
-  });
+  await quickNative('open');
   await quick.getByRole('button', { name: 'Choose bot', exact: true }).waitFor();
   await quick.getByLabel('Quick Chat message', { exact: true }).waitFor();
   assert.equal(await quick.locator('select').count(), 0);

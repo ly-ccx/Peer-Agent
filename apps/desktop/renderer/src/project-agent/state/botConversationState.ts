@@ -23,7 +23,7 @@ import {
   type ProjectReplyRecoveryAction,
 } from '@peer-agent/protocol';
 
-import { readAgentActivity } from './agentActivityState.ts';
+import { coalesceAgentActivity, readAgentActivity } from './agentActivityState.ts';
 import { readReplyRecoveryAction } from './replyRecoveryState.ts';
 
 export const CONVERSATION_PAGE_SIZE = 50;
@@ -221,8 +221,8 @@ function readImages(value: unknown): { id: string; name: string; dataUrl: string
 export function visibleBotMessages(messages: readonly BotChatMessage[]): BotChatMessage[] {
   const deliveredTurns = new Set(messages.filter(message => ['agent_reply', 'system_card'].includes(message.kind))
     .map(message => message.turnId).filter(Boolean));
-  return messages.filter(message => VISIBLE_KINDS.has(message.kind) || message.kind === 'agent_turn'
-    && Boolean(message.publicUpdates?.some(update => update.text.trim())) && !deliveredTurns.has(message.id));
+  return coalesceAgentActivity(messages.filter(message => VISIBLE_KINDS.has(message.kind) || message.kind === 'agent_turn'
+    && Boolean(message.publicUpdates?.some(update => update.text.trim())) && !deliveredTurns.has(message.id)));
 }
 
 /**

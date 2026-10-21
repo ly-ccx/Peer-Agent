@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  resolveRoleRoute, readSnapshots, createExecutionScheduler, createWorkBudgetGuard,
+  createBotAccessPolicyAuthority, resolveRoleRoute, readSnapshots, createExecutionScheduler, createWorkBudgetGuard,
   runBoundedVerification, isVerificationTurn, verificationExecutionBudget,
   createFailedClientToolResult,
   createGoalPlanStore,
@@ -59,6 +59,10 @@ export function createTuiTurnExecutor(options: {
   scheduler?: ReturnType<typeof createExecutionScheduler>;
   createRuntime?: typeof createTuiRuntime;
 }) {
+  const botAccess = createBotAccessPolicyAuthority({ dataHome: options.dataHome, goalPlanStore: options.goalPlanStore,
+    legacyAccessLevel: options.getSettings().localAccessLevel });
+  botAccess.initialize();
+  botAccess.close();
   const executionScheduler = options.scheduler ?? createExecutionScheduler();
   const active = new Map<string, { workspaceId: string; controller: AbortController; done: Promise<any> }>();
   const sessionApprovals = new Set<string>();

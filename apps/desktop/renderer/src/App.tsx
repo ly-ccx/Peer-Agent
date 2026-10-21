@@ -1492,6 +1492,7 @@ function MainApp() {
                 <div className="conversation-chat-drawer-shell">
                   <div className="conversation-chat-drawer__body">
                     <ChatSurface
+                      onOpenPermissionBot={workspaceId => { setConversationDrawerOpen(false); setActivePage('chat'); setBotNotificationFocus({ workspaceId, messageId: null, requestId: ++botNotificationRequestRef.current }); }}
                       i18n={i18n}
                       providers={providers}
                       conversationId={activeConversationId}
