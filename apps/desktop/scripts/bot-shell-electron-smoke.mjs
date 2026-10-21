@@ -762,7 +762,7 @@ try {
   await page.locator('.bot-shell').waitFor();
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
-  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
+  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
   if (!process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
