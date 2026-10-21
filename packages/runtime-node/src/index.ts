@@ -634,5 +634,6 @@ export { LOCAL_IMAGE_TOOL_DEFINITIONS } from './local-image-tools.mjs';
 export { LOCAL_IMAGE_CONTEXT_PREFIX, checkpointWithoutLocalImagePixels, bindLocalImageContextBlock, createLocalImageContinuationStore, localImageContinuations } from './local-image-checkpoint.mjs';
 
 export { createImageReadAuthority, resolvePermissionPrincipal, permissionOperationKey, IMAGE_READ_GRANT_TTL_MS } from './project-agent/permission-inheritance.mjs';
+export { createBotAccessPolicyAuthority } from './project-agent/bot-access-policy.mjs';
 
 export { parseSseDataPayload, createSseAbortError, createSseIdleTimeoutError, throwIfSseReaderAborted, readSseChunk, cancelSseReader } from './provider-adapters/sse-line.mjs';

@@ -53,11 +53,12 @@ export async function openReplyDetails(page, message) {
   assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live activity remains visible; completed details wait for hover or focus');
   // A pushed drawer's body can disappear before its width transition finishes.
   // Let the actual finite layout animations finish before choosing a pointer position.
-  await message.evaluate(async node => {
-    const animations = node.closest('.bot-shell').getAnimations({ subtree: true }).filter(animation => animation.playState === 'running'
+  await page.waitForFunction(() => {
+    const shell = document.querySelector('.bot-shell');
+    return shell && !shell.getAnimations({ subtree: true }).some(animation => animation.playState === 'running'
       && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility());
-    await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
   });
+  await scrollToBotMessage(page, message);
   const placement = await button.evaluate(node => {
     const action = node.getBoundingClientRect(), footer = node.parentElement.getBoundingClientRect();
     const bubbles = [...node.closest('.bot-reply, .bot-system').querySelectorAll(

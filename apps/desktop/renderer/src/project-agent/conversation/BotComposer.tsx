@@ -18,6 +18,7 @@ export function BotComposer({
   stopping = false,
   onStop,
   modelControls,
+  permissionControls,
   modelUpdating = false,
   draftRequest = null,
   onDraftPrepared,
@@ -32,12 +33,14 @@ export function BotComposer({
   readonly stopping?: boolean;
   readonly onStop?: () => void;
   readonly modelControls?: ReactNode;
+  readonly permissionControls?: (onSavingChange: (saving: boolean) => void) => ReactNode;
   readonly modelUpdating?: boolean;
   readonly draftRequest?: { readonly id: number; readonly text: string } | null;
   readonly onDraftPrepared?: (id: number) => void;
 }) {
   const [text, setText] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [permissionSaving, setPermissionSaving] = useState(false);
   const uploads = useComposerAttachments(i18n.locale.startsWith('zh'));
   const fileInput = useRef<HTMLInputElement>(null);
   const trimmed = text.trim();
@@ -73,7 +76,7 @@ export function BotComposer({
   }, []);
 
   function send() {
-    if (!hasContent || tooLong || uploads.isReading() || modelUpdating) return;
+    if (!hasContent || tooLong || uploads.isReading() || modelUpdating || permissionSaving) return;
     onSend(trimmed, uploads.attachments);
     setText('');
     uploads.clear();
@@ -146,11 +149,12 @@ export function BotComposer({
           <button type="button" className="bot-attach-button" aria-label={i18n.t('projectAgent.chat.attach')}
             title={i18n.t('projectAgent.chat.attach')} onClick={() => fileInput.current?.click()}><PeerIcon name="plus" size={18} /></button>
           {!modelControls ? <p>{i18n.t('projectAgent.chat.hint')}</p> : null}
+          {permissionControls?.(setPermissionSaving)}
         </div>
         <div className="bot-composer-actions">
           {modelControls}
           {generating ? <button type="button" className="bot-stop-response" disabled={stopping} title={i18n.t('projectAgent.chat.stopHint')} aria-label={i18n.t(stopping ? 'projectAgent.chat.stopping' : 'projectAgent.chat.stop')} onClick={onStop}><PeerIcon name="stop" size={15} /></button> : null}
-          {!generating || hasContent ? <button type="submit" disabled={!hasContent || tooLong || uploads.reading || modelUpdating} aria-label={i18n.t('projectAgent.chat.send')} title={i18n.t('projectAgent.chat.send')}><PeerIcon name="send" size={17} /></button> : null}
+          {!generating || hasContent ? <button type="submit" disabled={!hasContent || tooLong || uploads.reading || modelUpdating || permissionSaving} aria-label={i18n.t('projectAgent.chat.send')} title={i18n.t('projectAgent.chat.send')}><PeerIcon name="send" size={17} /></button> : null}
         </div>
       </div>
     </form>

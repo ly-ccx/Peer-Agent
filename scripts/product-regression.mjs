@@ -21,7 +21,7 @@ export function sourceFingerprint(root) {
   return digest.digest('hex');
 }
 
-const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const requiredShots = ['bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
@@ -32,7 +32,7 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'task-detail-760-dark.png', 'task-detail-760-light.png', 'work-running.png', 'work-waiting.png', 'work-waiting-760-light.png', 'bot-overview.png', 'bot-memory.png', 'chat-process-summary.png',
   'task-cancel-failed-dark.png', 'task-cancelled-dark.png', 'task-cancel-detail-760-light.png',
   'long-error-760-dark.png', 'long-error-docked-light.png',
-  'background-work-1600-dark.png', 'background-work-760-light.png',
+  'background-work-1600-dark.png', 'background-work-760-light.png', 'parallel-work-1280-dark.png', 'parallel-work-760-light.png',
   'fallback-vision-1280-dark.png', 'fallback-vision-1280-light.png', 'fallback-vision-760-dark.png', 'fallback-vision-760-light.png',
   'providers-1280-dark.png', 'providers-expanded-1280-dark.png',
   'composer-empty-1280-dark.png', 'composer-empty-1280-light.png', 'composer-empty-760-dark.png',
@@ -58,6 +58,13 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       item.width === width && item.appearance === appearance && item.weight === '500' && item.emphasis === '600'
       && item.fits && item.compactReceipt && item.fullCommandPreserved && item.pendingVisible)))
     throw new Error('Conversation typography or approval history regression failed');
+  if (!machine.botAccessPolicy?.passed || !machine.botAccessPolicy?.realLocalIPC || !machine.botAccessPolicy?.isolatedBots || !machine.botAccessPolicy?.childReadOnly || !machine.botAccessPolicy?.returnsToBot) throw new Error('Bot access policy regression failed');
+  if (![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(row =>
+    row.width === width && row.appearance === appearance && row.distinctShapes && row.legacyReportDeduped)))
+    throw new Error('Agent activity identity or duplicate-report regression failed');
+  if (!machine.parallelWork?.neutralGroup || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
+    machine.parallelWork.cases?.some(row => row.width === width && row.appearance === appearance
+      && row.sameLevel && row.uniqueRows && row.independentExpansion))) throw new Error('Parallel task grouping regression failed');
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
@@ -154,8 +161,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
     checks: { conversationTypography: machine.conversationTypography, userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
-      chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
-      backgroundWorkLayout: machine.backgroundWorkLayout, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
+      botAccessPolicy: machine.botAccessPolicy, chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
+      backgroundWorkLayout: machine.backgroundWorkLayout, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,

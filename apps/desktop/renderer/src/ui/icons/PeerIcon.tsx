@@ -23,6 +23,14 @@ export type PeerIconName =
   | 'search'
   | 'repeat'
   | 'blocks'
+  | 'agentOrbit'
+  | 'agentBloom'
+  | 'agentPrism'
+  | 'agentWeave'
+  | 'agentSpark'
+  | 'agentFacet'
+  | 'agentLeaf'
+  | 'agentKnot'
   | 'check'
   | 'minus'
   | 'circle'
@@ -60,6 +68,14 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   search: <><circle cx="10.5" cy="10.5" r="7.5" /><path d="m16 16 5 5" /></>,
   repeat: <><path d="m17 2 4 4-4 4M3 11V8a2 2 0 0 1 2-2h16M7 22l-4-4 4-4m14-1v3a2 2 0 0 1-2 2H3" /></>,
   blocks: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 17.5h7m-3.5-3.5v7" /></>,
+  agentOrbit: <><circle cx="12" cy="12" r="3" /><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-35 12 12)" /></>,
+  agentBloom: <><path d="M12 12C2 12 2 2 7 3c4 0 5 5 5 9Zm0 0C12 2 22 2 21 7c0 4-5 5-9 5Zm0 0c10 0 10 10 5 9-4 0-5-5-5-9Zm0 0c0 10-10 10-9 5 0-4 5-5 9-5Z" /></>,
+  agentPrism: <><path d="m12 2 10 10-10 10L2 12Zm0 0v20M2 12h20" /></>,
+  agentWeave: <><rect x="3" y="7" width="18" height="10" rx="5" /><rect x="7" y="3" width="10" height="18" rx="5" /></>,
+  agentSpark: <path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" />,
+  agentFacet: <><path d="m12 2 9 5v10l-9 5-9-5V7Zm0 10 9-5m-9 5L3 7m9 5v10" /></>,
+  agentLeaf: <><path d="M12 13C3 13 2 6 3 3c7-1 10 3 9 10Zm0 0c9 0 10-7 9-10-7-1-10 3-9 10Zm0 0v8m-5-4 5 4 5-4" /></>,
+  agentKnot: <><rect x="3" y="3" width="12" height="12" rx="4" /><rect x="9" y="9" width="12" height="12" rx="4" /></>,
   check: <path d="m5 12 4 4L19 6" />,
   minus: <path d="M5 12h14" />,
   circle: <circle cx="12" cy="12" r="8" />,

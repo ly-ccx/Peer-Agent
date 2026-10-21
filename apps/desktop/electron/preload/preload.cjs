@@ -189,6 +189,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentListAttention: (params) => ipcRenderer.invoke('project-agent:list-attention', params),
   projectAgentList: (params) => ipcRenderer.invoke('project-agent:list', params),
   projectAgentGet: (params) => ipcRenderer.invoke('project-agent:get', params),
+  projectAgentReadAccessPolicy: (params) => ipcRenderer.invoke('project-agent:read-access-policy', params),
+  projectAgentUpdateAccessPolicy: (params) => ipcRenderer.invoke('project-agent:update-access-policy', params),
   projectAgentUpdateModelSelection: (params) => ipcRenderer.invoke('project-agent:update-model-selection', params),
   projectAgentReadAvatar: (params) => ipcRenderer.invoke('project-agent:read-avatar', params),
   projectAgentCreate: (params) => ipcRenderer.invoke('project-agent:create', params),

@@ -1,0 +1,6 @@
+.bot-access-control { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.bot-composer-bar .bot-access-picker > button { width: auto; min-width: 0; height: 32px; padding: 5px 6px; color: var(--graphite-soft); background: transparent; border: 0; border-radius: var(--ui-radius-control); font-size: 12px; }
+.bot-access-picker .dropdown-trigger-label { overflow: hidden; text-overflow: ellipsis; }
+.bot-composer-bar .bot-access-retry { width: auto; height: auto; padding: 4px; font-size: 11px; color: var(--graphite-base); background: transparent; }
+.conversation-access-inherited { display: flex; align-items: center; min-width: 0; color: var(--graphite-soft); font-size: 12px; }
+.conversation-access-inherited > span { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

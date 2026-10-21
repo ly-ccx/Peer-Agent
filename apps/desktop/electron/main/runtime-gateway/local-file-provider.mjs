@@ -84,6 +84,11 @@ function throwIfAborted(signal) {
   throw error;
 }
 
+function recheckFileAuthority(toolContext, pathPermission) {
+  return toolContext?.checkAccessPolicy?.()
+    || (typeof pathPermission.approval?.validate === 'function' && !pathPermission.approval.validate() ? 'permission_policy_changed' : null);
+}
+
 async function hasRipgrep() {
   if (process.env.PEER_AGENT_DISABLE_RIPGREP === '1') return false;
   if (ripgrepResolved !== null) return ripgrepResolved;
@@ -144,7 +149,7 @@ async function ensureWritablePathAllowed({ tool, args, filePath, workspacePath, 
     };
   }
   const approval = await requestPermission({ tool, args, filePath, workspacePath });
-  if (approval?.granted) {
+  if (approval?.granted && (typeof approval.validate !== 'function' || approval.validate())) {
     return { granted: true, approval };
   }
   return {
@@ -167,7 +172,7 @@ async function ensureReadablePathAllowed({ tool, args, filePath, workspacePath, 
     };
   }
   const approval = await requestPermission({ tool, args, filePath, workspacePath });
-  if (approval?.granted) {
+  if (approval?.granted && (typeof approval.validate !== 'function' || approval.validate())) {
     return { granted: true, approval };
   }
   return {
@@ -725,6 +730,8 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
           permission: pathPermission.approval?.reason || 'not_granted',
         });
       }
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      if (accessDenial) return formatToolFailure('edit_file', 'blocked', accessDenial, { path: filePath });
       writeFileSync(filePath, after, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: after, fullRead: true });
       return {
@@ -792,6 +799,8 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
         });
       }
 
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      if (accessDenial) return formatToolFailure('write_file', 'blocked', accessDenial, { path: filePath });
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, args.content, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: args.content, fullRead: true });
