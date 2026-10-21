@@ -461,6 +461,12 @@ export type TranslationKey =
   | 'projectAgent.chat.imageCancelled'
   | 'projectAgent.chat.imageDenied'
   | 'projectAgent.chat.imageApproved'
+  | 'projectAgent.chat.approvalReceipt.title'
+  | 'projectAgent.chat.approvalReceipt.approved'
+  | 'projectAgent.chat.approvalReceipt.denied'
+  | 'projectAgent.chat.approvalReceipt.cancelled'
+  | 'projectAgent.chat.approvalReceipt.expired'
+  | 'projectAgent.chat.approvalReceipt.closed'
   | 'projectAgent.chat.imageUnavailable'
   | 'projectAgent.chat.imageReadNotice'
   | 'projectAgent.chat.approveContinue'
@@ -2011,6 +2017,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.imageCancelled': '本次图片读取已取消。',
     'projectAgent.chat.imageDenied': '已拒绝本次图片读取。',
     'projectAgent.chat.imageApproved': '已授权，继续本次图片读取。',
+    'projectAgent.chat.approvalReceipt.title': '操作授权记录',
+    'projectAgent.chat.approvalReceipt.approved': '已授权',
+    'projectAgent.chat.approvalReceipt.denied': '已拒绝',
+    'projectAgent.chat.approvalReceipt.cancelled': '已取消',
+    'projectAgent.chat.approvalReceipt.expired': '已超时',
+    'projectAgent.chat.approvalReceipt.closed': '已结束',
     'projectAgent.chat.imageUnavailable': '本次授权请求已结束，没有读取图片。需要查看时可以重新发起。',
     'projectAgent.chat.imageReadNotice': '读取这张图片并交给当前模型。选择“本轮允许”后，仅此图片可供当前机器人及其任务使用，30 分钟内有效。',
     'projectAgent.chat.approveContinue': '批准并继续',
@@ -3349,6 +3361,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.imageCancelled': 'This image read was cancelled.',
     'projectAgent.chat.imageDenied': 'This image read was denied.',
     'projectAgent.chat.imageApproved': 'Permission granted. Continuing this image read.',
+    'projectAgent.chat.approvalReceipt.title': 'Operation permission record',
+    'projectAgent.chat.approvalReceipt.approved': 'Permission granted',
+    'projectAgent.chat.approvalReceipt.denied': 'Denied',
+    'projectAgent.chat.approvalReceipt.cancelled': 'Cancelled',
+    'projectAgent.chat.approvalReceipt.expired': 'Timed out',
+    'projectAgent.chat.approvalReceipt.closed': 'Closed',
     'projectAgent.chat.imageUnavailable': 'This permission request ended without reading the image. Start a new request if needed.',
     'projectAgent.chat.imageReadNotice': 'Read this image for the current model. Allowing it for this session covers only this image, for this bot and its tasks, valid for 30 minutes.',
     'projectAgent.chat.approveContinue': 'Approve and continue',
