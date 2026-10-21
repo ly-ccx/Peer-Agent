@@ -75,3 +75,31 @@ test('canonical child request appears in count/detail and its queued answer clea
   assert.equal(directory.list()[0].state.needsYou, 1, 'parent question remains open');
   assert.equal(session.status, 'waiting_user', 'a reply receipt is not a task terminal');
 });
+
+test('a summary read at the deadline cannot consume the refresh owed to an open attention sheet', t => {
+  const f = fixture(t);
+  let at = 0;
+  const timers = [], events = [];
+  f.messages.splice(0, f.messages.length, { ...question('deadline'),
+    question: { options: ['A'], expiresAt: new Date(100).toISOString() } });
+  const directory = createBotDirectory({ rootDir: f.root, readMessages: () => f.messages,
+    now: () => new Date(at).toISOString() });
+  const service = createProjectAgentApplicationService({ enabled: () => true, directory,
+    now: () => new Date(at).toISOString(),
+    schedule: (fn, ms) => { const timer = { fn, ms }; timers.push(timer); return timer; },
+    broadcast: (channel, payload) => events.push({ channel, payload }) });
+  t.after(() => service.dispose());
+  assert.equal(service.listAttention({ workspaceId: 'w' }).items.length, 1);
+  // A list refresh may run before an already-due timer gets its turn on the main loop.
+  at = 100;
+  assert.equal(service.get({ workspaceId: 'w' }).item.state.needsYou, 0);
+  const refreshTimers = timers.filter(timer => timer !== timers[0]);
+  for (const timer of refreshTimers) timer.fn();
+  assert.deepEqual(events, [
+    { channel: 'project-agent:changed', payload: { workspaceIds: ['w'] } },
+    { channel: 'project-agent:conversation-changed', payload: { workspaceIds: ['w'] } },
+  ]);
+  assert.equal(service.listAttention({ workspaceId: 'w' }).items.length, 0);
+  timers[0].fn();
+  assert.equal(timers.length, 3, 'the stale timer cannot publish a duplicate expiry');
+});

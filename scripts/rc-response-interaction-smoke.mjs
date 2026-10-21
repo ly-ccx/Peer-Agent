@@ -243,6 +243,38 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   }
   await page.setViewportSize(pendingViewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, pendingTheme);
+  await openDetails(live);
+  const emptyProcess = detail.locator('.bot-turn-process');
+  if (!await emptyProcess.evaluate(node => node.open)) await emptyProcess.locator(':scope > summary').click();
+  report.processEmptyLayout = [];
+  for (const width of [1280, 760]) {
+    await page.setViewportSize({ width, height: 860 });
+    for (const appearance of ['dark', 'light']) {
+      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+      await until(() => emptyProcess.evaluate(node => node.getAnimations({ subtree: true })
+        .filter(animation => animation.playState === 'running'
+          && Number.isFinite(animation.effect?.getComputedTiming().endTime)).length), count => count === 0);
+      const spacing = await emptyProcess.locator('.bot-turn-process-content > .bot-process-note').evaluate(note => {
+        const content = note.parentElement, box = content.getBoundingClientRect(), bounds = note.getBoundingClientRect();
+        const style = getComputedStyle(content);
+        const heading = content.parentElement.querySelector('.bot-process-overview').getBoundingClientRect();
+        const range = document.createRange(); range.selectNodeContents(note);
+        return { top: bounds.top - box.top - parseFloat(style.borderTopWidth), bottom: box.bottom - bounds.bottom,
+          left: bounds.left - box.left, right: box.right - bounds.right, headingOffset: bounds.left - heading.left,
+          fits: [...range.getClientRects()].every(rect => rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1
+            && rect.top >= bounds.top - 1 && rect.bottom <= bounds.bottom + 1) };
+      });
+      assert.ok(spacing.top >= 8 && Math.abs(spacing.top - spacing.bottom) <= 1
+        && spacing.left >= 10 && Math.abs(spacing.left - spacing.right) <= 1
+        && Math.abs(spacing.headingOffset) <= 1 && spacing.fits,
+        `empty process note needs balanced spacing and heading alignment: ${JSON.stringify({ width, appearance, ...spacing })}`);
+      report.processEmptyLayout.push({ width, appearance, ...spacing });
+      await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `process-empty-${width}-${appearance}.png`) });
+    }
+  }
+  await closeReplyDetails(page);
+  await page.setViewportSize(pendingViewport);
+  await page.evaluate(value => { document.documentElement.dataset.theme = value; }, pendingTheme);
   const setDelegatedWork = status => {
     if (!workCommandFile) return;
     const snapshot = JSON.parse(readFileSync(workCommandFile, 'utf8'));

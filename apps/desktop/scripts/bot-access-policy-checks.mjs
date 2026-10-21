@@ -55,6 +55,9 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   assert.equal(await scene.locator('.composer-access-dropdown').count(), 0);
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+    // Crossing the push/cover breakpoint remounts the task and its nested scene.
+    // Observe the new parent before deciding whether the scene needs reopening.
+    await page.locator(width === 1280 ? '.bot-drawer-dock .bot-task-detail' : '.bot-drawer-panel .bot-task-detail').waitFor({ state: 'visible' });
     if (!await scene.count()) {
       const information = page.locator('.bot-task-information');
       if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
