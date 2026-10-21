@@ -41,14 +41,21 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     const work = page.locator('.bot-reply-details .bot-work-row');
     assert.equal(await work.count(), 3);
     for (const title of titles) assert.ok((await work.allTextContents()).some(text => text.includes(title)));
-    await work.first().locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+    if (!await work.first().evaluate(node => node.open)) {
+      await work.first().locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+    }
+    assert.equal(await work.first().evaluate(node => node.open), true);
     const action = work.first().getByRole('button', { name: '查看任务详情', exact: true });
+    await action.waitFor({ state: 'visible' });
     await action.focus(); await action.press('Enter');
     const detail = page.locator('.bot-task-detail'); await detail.waitFor();
     assert.match(await detail.innerText(), /入口样式收尾/);
     await page.getByRole('button', { name: '关闭', exact: true }).click();
     await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
-    await openReplyDetails(page, reply); await closeReplyDetails(page);
+    await openReplyDetails(page, reply);
+    assert.equal(await page.locator('.bot-reply-details .bot-work-row').first().evaluate(node => node.open), true,
+      'reopening reply details preserves the task disclosure state');
+    await closeReplyDetails(page);
     cases.push({ width, appearance, singleReceipt: true, sourcesRetained: true, keyboard: true, fits: true });
   }
   const savedReply = store.getPersistedConversationHistory(bot.conversationId).messages.find(message => message.id === 'receipt-reply');
