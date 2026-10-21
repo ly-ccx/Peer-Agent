@@ -33,3 +33,18 @@ test('switching Bot ignores late reads and saves; inherited tasks cannot mutate 
   const child = createBotAccessPolicyState({ request: { conversationId: 'child' }, read: async () => ({ ...view(), inherited: true } as BotAccessPolicyResult), write: async () => { writes++; return view(); }, publish() {} });
   await child.refresh(); await child.save('full_local'); assert.equal(writes, 0);
 });
+
+test('a host change received during save is refreshed after an older write receipt arrives', async () => {
+  let snapshot: AccessControlSnapshot | undefined, finish!: (value: BotAccessPolicyResult) => void;
+  let latest = view();
+  const state = createBotAccessPolicyState({ request: { workspaceId: 'a' }, read: async () => latest,
+    write: () => new Promise(resolve => { finish = resolve; }), publish: next => { snapshot = next; } });
+  await state.refresh();
+  const saving = state.save('full_local');
+  latest = view(3);
+  await state.refresh();
+  finish(view(2, 'full_local')); await saving;
+  assert.equal(snapshot?.busy, false);
+  assert.equal(snapshot?.view?.policy?.revision, 3);
+  assert.equal(snapshot?.view?.policy?.accessLevel, 'ask_before_local');
+});
