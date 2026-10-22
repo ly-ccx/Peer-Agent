@@ -67,9 +67,10 @@ test('paired tool facts cross the actual continuation store, live session projec
       return { events: [{ channel: 'chat:stream:delta', payload: { content: JSON.stringify({ passed: false, risks: ['specific unresolved criterion'] }) } }] };
     } });
   const activity = conversations.getPersistedConversationHistory(parent.id).messages.map(row => row.agentActivity);
-  assert.deepEqual(activity.map(row => row.state), ['verifying', 'verifying']);
-  assert.equal(activity.at(-1).verificationProgress.observationCount, 1);
-  assert.equal(inbox.diagnosticSnapshot('w').events.filter(row => row.kind === 'session_progress').length, 2);
+  assert.deepEqual(activity, [], 'internal verification stays out of the main conversation');
+  const progress = inbox.diagnosticSnapshot('w').events.filter(row => row.kind === 'session_progress');
+  assert.equal(progress.length, 2);
+  assert.equal(progress.at(-1).payload.verificationProgress.observationCount, 1);
   assert.equal(plans.getPlan(plan.planId).runner.verificationContinuation.phase, 'completed');
   end();
   assert.notEqual(watchFactsFromPlan(plans.getPlan(plan.planId)).status, 'verifying');
