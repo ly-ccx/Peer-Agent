@@ -80,7 +80,16 @@
 .bot-thread-row {
   display: flex;
   flex-direction: column;
-  padding-bottom: var(--space-6, 24px);
+  padding-bottom: var(--space-4, 16px);
+}
+
+/* A one-line status follows the message it belongs to. It does not take a full paragraph gap. */
+.bot-thread-row:has(> .bot-agent-activity),
+.bot-thread-row:has(> .bot-separator),
+.bot-thread-row:has(> .bot-reply > .bot-reply-context:only-child),
+.bot-thread-row:has(+ .bot-thread-row > .bot-agent-activity),
+.bot-thread-row:has(+ .bot-thread-row > .bot-reply > .bot-reply-context:only-child) {
+  padding-bottom: 4px;
 }
 
 .bot-thread-row:has(
@@ -92,7 +101,7 @@
 }
 
 /* Use the conversation's width, so a scroll bar cannot shift the message
-   column relative to the non-scrolling task strip and composer. */
+   column relative to the task line and composer. */
 .bot-thread-row,
 .bot-thread > .bot-live-status,
 .bot-thread > .bot-thinking-status {
@@ -986,6 +995,16 @@
     -webkit-text-fill-color: currentColor;
     color: var(--graphite-soft);
   }
+}
+
+.bot-thread > .bot-live-status {
+  margin-bottom: 4px;
+}
+
+.bot-thread > .bot-background-work {
+  align-self: flex-start;
+  margin: 0 0 4px;
+  margin-inline-start: calc((100cqw - var(--bot-column-width)) / 2);
 }
 
 .bot-live-tool[data-status="error"] {
