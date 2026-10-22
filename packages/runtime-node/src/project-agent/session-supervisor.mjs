@@ -1158,6 +1158,13 @@ export function createSessionSupervisor({
       });
     },
     get: input => readQuery.run(() => get(input)),
+    /** Verification input is canonical content, independent of acceptance/session projection. */
+    readReportSummary(sessionId) {
+      return readQuery.run(() => {
+        const plan = findBySession(text(sessionId));
+        return plan ? buildReport(plan, {sessionId:plan.delegationOrigin.sessionId}).summary : '';
+      });
+    },
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
     cancel(input) {

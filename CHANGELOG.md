@@ -10,6 +10,7 @@ All notable changes to Peer Agent are tracked here.
 - Preserve task identities, conversations, evidence and legacy journals; unknown tool outcomes are not automatically repeated.
 - Fix completed-reply detail anchors, asynchronous question answers and narrow-window detail overflow.
 - Integrate all outstanding release PRs: unified lifecycle projection with visible budget/question gates and factual cancellation, continuous interface corners, and removal of the extra Bot-list footer divider. Preserve interruption facts across the compatibility seam.
+- Break the verification-report/session-projection dependency cycle on Desktop and TUI without changing verification or acceptance requirements.
 - Document coordinated upgrades, incompatible downgrade limits and the distinction between publishing and restarting an installed app; synchronize bilingual notes and website changelog.
 
 ## 0.1.0-rc.24 - 2026-10-22
