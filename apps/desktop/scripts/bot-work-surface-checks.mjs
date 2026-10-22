@@ -356,6 +356,8 @@ async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) 
             await summary.focus();
             await page.keyboard.press('Enter');
           }
+          await background.scrollIntoViewIfNeeded();
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const bounds = await background.evaluate(node => {
             const region = node.getBoundingClientRect();
             const composer = document.querySelector('.bot-composer').getBoundingClientRect();
