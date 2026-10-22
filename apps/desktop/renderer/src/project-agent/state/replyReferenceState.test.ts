@@ -26,7 +26,7 @@ test('public scheduling-slice paragraphs do not make continuation look like a us
 test('adjacent normal waiting, streaming, canonical, historical and terminal replies do not repeat the user message', () => {
   const user = message('u', 'user_input');
   for (const reply of [activity(['u']), message('r', 'agent_reply', ['u']), message('stopped', 'system_card', ['u']), message('failed', 'system_card', ['u'])]) {
-    const references = replyReferencesForRows([user, separator, reply]);
+    const references: ReturnType<typeof replyReferencesForRows> = replyReferencesForRows([user, separator, reply]);
     assert.deepEqual(references.get(reply), []);
     assert.deepEqual(reply.type === 'activity' ? reply.activity.replyTo : reply.type === 'message' ? reply.message.replyTo : [], ['u']);
   }
