@@ -1177,6 +1177,7 @@ html[data-vibrancy='true'] .bot-shell {
 html[data-vibrancy='true'] .bot-column {
   margin: calc(-1 * var(--bot-float-gap)) 0 calc(-1 * var(--bot-float-gap)) calc(-1 * var(--bot-float-gap));
   background: transparent;
+  border-right: 0;
 }
 
 /* 主面板：悬浮黑牌。实色纸面沿用 .bot-main 的 --paper-sheet。 */
