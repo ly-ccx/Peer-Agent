@@ -27,9 +27,9 @@ export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, hig
     id={message ? `bot-msg-${message.id}` : undefined} data-kind={message?.kind ?? 'reply_pending'}
     data-turn-id={reply.activity?.turnId ?? message?.turnId} data-phase={reply.activity?.phase}>
     {reply.aliases.filter(id => id !== message?.id).map(id => <span key={id} id={`bot-msg-${id}`} className="bot-reply-alias" tabIndex={-1} />)}
-    {reply.paragraphs.length ? <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} /> : null}
     <div className="bot-narration bot-continuous-paragraphs" data-live={running}>
     {reply.paragraphs.map((paragraph, index) => <div key={paragraph.id} className="bot-reply-body bot-narration-segment" aria-live="off" data-narration-id={paragraph.id}>
+      {index === 0 ? <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} /> : null}
       <div className="bot-reply-text" ref={message?.kind === 'agent_reply' && index === reply.paragraphs.length - 1 ? body : undefined}>
         <MarkdownMessage content={paragraph.text} />
       </div>
