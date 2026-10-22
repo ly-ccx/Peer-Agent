@@ -5,6 +5,7 @@ import path from 'node:path';
 export async function checkBotWindowMaterial({ page, until, report, captureDirectory }) {
   const previous = await page.evaluate(() => window.peerAgent.getSettings());
   const viewport = page.viewportSize();
+  const previousTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   const nativeGlass = await page.evaluate(() => document.documentElement.dataset.vibrancy === 'true');
   const cases = [];
   const openAppearance = async () => {
@@ -78,7 +79,17 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
     report.windowMaterial = { passed: true, cases, settingsKeyboard: nativeGlass, settingsPersisted: nativeGlass,
       reducedTransparency: true, nativeGlass, scope: 'Production appearance IPC and renderer over an isolated home; native desktop blur compositing needs visual review' };
   } finally {
-    await page.evaluate(previous => window.peerAgent.updateSettings({ appearance: previous.appearance ?? {} }), previous);
+    if (!await page.locator('.app-settings-page').count()) await openAppearance();
+    const originalMode = previous.appearance?.mode ?? 'system';
+    await page.getByRole('radio', { name: ({ dark: '深色', light: '浅色', system: '跟随系统' })[originalMode], exact: true }).click();
+    if (nativeGlass) await page.getByRole('group', { name: '窗口材质', exact: true }).getByRole('button', {
+      name: previous.appearance?.windowMaterial === 'solid' ? '实色' : '毛玻璃', exact: true,
+    }).click();
+    await closeAppearance();
+    await page.evaluate(({ previous, previousTheme }) => {
+      document.documentElement.dataset.theme = previousTheme;
+      return window.peerAgent.updateSettings({ appearance: previous.appearance ?? {} });
+    }, { previous, previousTheme });
     if (viewport) await page.setViewportSize(viewport);
   }
 }
