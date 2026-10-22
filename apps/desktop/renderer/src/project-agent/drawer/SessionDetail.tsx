@@ -77,7 +77,7 @@ export function SessionDetail({
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
         <p className="bot-task-hint">{i18n.t(`projectAgent.drawer.task.hint.${hint}`, { name: botName })}</p>
       </section>
-      {reportState === 'ready' && session.status !== 'verifying' && session.verification
+      {reportState === 'ready' && !['queued', 'starting', 'running', 'verifying', 'awaiting_approval'].includes(session.status) && session.verification
         && <TaskVerification detail={session.verification} i18n={i18n} />}
       <section className="bot-task-next">
         <h3>{i18n.t(question ? 'projectAgent.drawer.task.question' : ended ? 'projectAgent.drawer.task.followUpEnded' : 'projectAgent.drawer.task.followUp', { name: botName })}</h3>

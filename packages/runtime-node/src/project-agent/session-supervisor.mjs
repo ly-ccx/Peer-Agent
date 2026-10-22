@@ -689,10 +689,14 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input?.sessionId));
     if (!plan) return null;
     const session = project(plan);
-    if (input?.detail === 'report') return { ...session, report: { ...buildReport(plan, session),
-      verification: buildVerificationDetail({ ...hostFacts(plan).hostAuthority, plan, sessionId: session.sessionId,
-        evidenceIndex: indexedRefs(plan) }),
-    } };
+    if (input?.detail === 'report') {
+      const authority = hostFacts(plan).hostAuthority || {};
+      const reviewed = plan.hostVerification?.verdictRef || authority.reviewAttempts?.length
+        || ['passed', 'failed', 'not_required'].includes(authority.independentVerifier);
+      return { ...session, report: { ...buildReport(plan, session), ...(reviewed ? {
+        verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
+      } : {}) } };
+    }
     return session;
   }
 

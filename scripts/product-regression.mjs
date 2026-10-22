@@ -132,7 +132,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label
         && sample.shimmer === false && sample.readableWithoutRepaintAnimation === true))
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
-    || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry'].every(key => machine.taskVerification?.[key] === true)
+    || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
     || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp || !machine.verificationPresentation?.technicalOwnedByBot
     || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)

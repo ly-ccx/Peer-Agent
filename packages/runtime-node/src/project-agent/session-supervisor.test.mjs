@@ -29,6 +29,17 @@ function model(id, extra = {}) {
   };
 }
 
+test('a task without a real review has progress and a report but no invented verification verdict', async () => {
+  const env = await harness({ readSessionFacts: () => ({ hostAuthority: { independentVerifier: 'missing', reviewAttempts: [] } }) });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const detail = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' });
+    assert.ok(detail.report);
+    assert.equal(detail.report.verification, undefined);
+    assert.notEqual(detail.status, 'failed');
+  } finally { await env.cleanup(); }
+});
+
 test('verification reads canonical report content without reentering acceptance projection', async () => {
   let authorityReads = 0;
   const env = await harness({readPlanApproval:()=> 'always',readSessionFacts:()=>{

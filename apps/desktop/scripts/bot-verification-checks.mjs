@@ -68,10 +68,13 @@ export async function checkBotVerification({ page, until, report, captureDirecto
     const retry = info.getByRole('button', { name: '重试', exact: true });
     await retry.focus(); await retry.press('Enter');
     await until(() => page.locator('.bot-task-verification').getAttribute('data-outcome'), value => value === 'passed');
+    change('passed', { sessions: [{ ...session, status: 'running', statusLabel: '正在处理任务', observationRevision: `working-${seq}` }] });
+    await until(() => page.locator('.bot-task-progress-text').innerText(), value => value === '正在处理任务');
+    assert.equal(await page.locator('.bot-task-verification').count(), 0, 'a running task cannot display its earlier verdict as the current result');
     await page.getByRole('button', { name: '关闭', exact: true }).click();
     await page.locator('.bot-task-detail').waitFor({ state: 'hidden' });
   }
-  report.taskVerification = { outcomes: ['passed', 'failed', 'partial', 'unverifiable'], themes: ['dark', 'light'], legacyHidden: true, botExplanation: true, historyKeyboard: true, staleHidden: true, retry: true };
+  report.taskVerification = { outcomes: ['passed', 'failed', 'partial', 'unverifiable'], themes: ['dark', 'light'], legacyHidden: true, botExplanation: true, historyKeyboard: true, staleHidden: true, retry: true, activeProgressOnly: true };
   if (viewport) await page.setViewportSize(viewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
   report.checks.push('verification stays in task details for all four outcomes; legacy verdict cards are hidden, bot explanation survives, history is keyboard-accessible, failed refresh hides stale verdict and retry restores it in dark wide and light narrow windows');
