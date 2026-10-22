@@ -12,6 +12,7 @@ import type { TaskConversationContext, TaskConversationRequest } from '../state/
 import type { TaskReportState } from '../state/taskDetailState';
 import { TaskCancelButton } from '../state/TaskCancellation';
 import { CoordinationDetails } from './CoordinationDetails';
+import { TaskVerification } from './TaskVerification';
 import '../styles/bot-task-detail.css';
 
 export function SessionDetail({
@@ -48,7 +49,9 @@ export function SessionDetail({
   const label = session.coordination?.phase === 'stopping' ? formatDrawerSessionStatus(session,i18n) : status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
     : status === 'result_ready' ? i18n.t('projectAgent.chat.work.resultReady')
     : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable');
-  const progress = status === 'cancelled' ? label : formatDrawerSessionStatus(session, i18n);
+  const progress = status === 'verifying' && session.verificationProgress
+    ? i18n.t('projectAgent.chat.agent.verificationProgress', { count: session.verificationProgress.observationCount })
+    : status === 'cancelled' ? label : formatDrawerSessionStatus(session, i18n);
   const stamp = formatDrawerStamp(session.spawnedAt);
   const hint = session.status === 'waiting_user' || session.status === 'result_ready' ? 'confirm'
     : session.status === 'failed' || session.status === 'unavailable' ? 'failed'
@@ -74,6 +77,8 @@ export function SessionDetail({
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
         <p className="bot-task-hint">{i18n.t(`projectAgent.drawer.task.hint.${hint}`, { name: botName })}</p>
       </section>
+      {reportState === 'ready' && !['queued', 'starting', 'running', 'verifying', 'awaiting_approval'].includes(session.status) && session.verification
+        && <TaskVerification detail={session.verification} i18n={i18n} />}
       <section className="bot-task-next">
         <h3>{i18n.t(question ? 'projectAgent.drawer.task.question' : ended ? 'projectAgent.drawer.task.followUpEnded' : 'projectAgent.drawer.task.followUp', { name: botName })}</h3>
         {question ? <p className="bot-task-question">{question.content}</p>

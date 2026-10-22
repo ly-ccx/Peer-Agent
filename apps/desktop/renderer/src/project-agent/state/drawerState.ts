@@ -3,7 +3,7 @@
  * 设置写入由调用方只经已有 IPC 发出。
  */
 
-import type { CoordinationSessionFacts } from '@peer-agent/protocol';
+import type { CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
 export const DRAWER_WIDTH = 380;
@@ -26,6 +26,10 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly sourceRevision?: string;
+  readonly observationRevision?: string;
+  readonly verification?: SessionVerificationDetail;
+  readonly verificationProgress?: VerificationProgress;
   readonly coordination?: CoordinationSessionFacts;
   readonly sessionId: string;
   readonly title: string;
@@ -192,8 +196,18 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
   const report = record.report && typeof record.report === 'object'
     ? record.report as Record<string, unknown>
     : {};
+  const verification = readVerification(report.verification, sessionId);
+  const progress = record.verificationProgress as VerificationProgress | undefined;
+  const validProgress = progress && typeof progress.continuationId === 'string'
+    && Number.isSafeInteger(progress.observationCount) && progress.observationCount >= 0
+    && Number.isFinite(Date.parse(progress.startedAt)) && Number.isFinite(Date.parse(progress.lastProgressAt))
+    && ['ready', 'requesting', 'tools', 'completed'].includes(progress.phase);
   return {
     sessionId,
+    sourceRevision: readString(record.sourceRevision),
+    observationRevision: readString(record.observationRevision),
+    ...(verification ? { verification } : {}),
+    ...(validProgress ? { verificationProgress: progress } : {}),
     ...(readCoordination(record.coordination) ? {coordination:readCoordination(record.coordination)} : {}),
     title: readString(record.title) || sessionId,
     status: readString(record.status),
@@ -307,6 +321,18 @@ function readStringList(value: unknown): string[] {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readVerification(value: unknown, sessionId: string): SessionVerificationDetail | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const row = value as SessionVerificationDetail;
+  if (row.sessionId !== sessionId || !['passed', 'failed', 'partial', 'unverifiable'].includes(row.outcome)
+    || !Array.isArray(row.checks) || !Array.isArray(row.reviewAttempts) || !Array.isArray(row.outputs)) return undefined;
+  return { ...row, checks: row.checks.filter(check => check && typeof check.name === 'string'
+    && ['passed', 'failed'].includes(check.result) && Array.isArray(check.evidenceRefs)),
+    reviewAttempts: row.reviewAttempts.filter(attempt => attempt && typeof attempt.verifierRunId === 'string'
+      && typeof attempt.failureReason === 'string' && Array.isArray(attempt.failedCriteria) && Array.isArray(attempt.missingEvidence)),
+    outputs: row.outputs.filter(output => output && typeof output.evidenceRef === 'string' && typeof output.summary === 'string') };
 }
 
 function readCoordination(value: unknown): CoordinationSessionFacts | undefined {

@@ -494,8 +494,8 @@ test('验证细节只来自宿主事实，模型自述和范围外的输出进�
   assert.equal(denied.outcome, 'passed');
 });
 
-test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying', async () => {
-  const cards = [];
+test('复核返回结构化事件与详情，期间任务是 verifying，不生成对话卡片', async () => {
+  const verdicts = [];
   let status = 'running';
   let pass = 0;
   const provider = createDelegationProvider({
@@ -524,8 +524,9 @@ test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying
           },
         };
       },
-      async record({ event, card }) {
-        cards.push({ outcome: event.outcome, content: card.content, verdictRef: card.verdictRef });
+      async record({ event, card, detail }) {
+        assert.equal(card, undefined);
+        verdicts.push({ outcome: event.outcome, detailOutcome: detail.outcome, verdictRef: event.verdictRef });
       },
     },
   });
@@ -535,8 +536,8 @@ test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying
   ));
   assert.equal(first.status, first.event.outcome);
   assert.notEqual(first.event.outcome, 'passed');
-  assert.equal(first.card.content, first.event.outcome);
-  assert.equal(first.card.cardId, 'card:verdict:s-keep');
+  assert.equal(first.card, undefined);
+  assert.equal(first.detail.outcome, first.event.outcome);
 
   const second = outputOf(await provider.executeCapability(
     call('local.delegation.verify_session', { sessionId: 's-keep' }, 'verify-2'),
@@ -544,8 +545,8 @@ test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying
   ));
   assert.equal(second.event.outcome, 'passed');
   assert.equal(second.event.verdictRef, 'verdict:s-keep:passed');
-  assert.deepEqual(cards.map((item) => item.content), [first.event.outcome, 'passed']);
-  assert.notEqual(cards[0].verdictRef, cards[1].verdictRef);
+  assert.deepEqual(verdicts.map((item) => item.detailOutcome), [first.event.outcome, 'passed']);
+  assert.notEqual(verdicts[0].verdictRef, verdicts[1].verdictRef);
 });
 
 test('引用限定范围内，verify_session 越界被拒绝，读取细节不受限', async () => {

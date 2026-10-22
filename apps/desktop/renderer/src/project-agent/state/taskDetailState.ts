@@ -15,5 +15,8 @@ export function settleTaskReport(sessionId: string, result: { ok?: boolean; sess
 export function mergeTaskDetail(selected: DrawerSession | null, detail: DrawerSession | null): DrawerSession | null {
   if (!selected) return detail;
   if (!detail || detail.sessionId !== selected.sessionId) return selected;
-  return { ...detail, ...selected, summary: detail.summary, evidenceRefs: detail.evidenceRefs };
+  const current = (!selected.sourceRevision || selected.sourceRevision === detail.sourceRevision)
+    && (!selected.observationRevision || selected.observationRevision === detail.observationRevision);
+  return { ...detail, ...selected, summary: detail.summary, evidenceRefs: detail.evidenceRefs,
+    verification: current ? detail.verification : undefined };
 }

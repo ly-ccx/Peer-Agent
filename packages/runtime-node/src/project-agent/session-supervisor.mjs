@@ -12,6 +12,7 @@ import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
 import { verificationProgressFromPlan } from './verification-progress.mjs';
+import { buildVerificationDetail } from './verification-detail.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { admitDelegationCriteria } from './criterion-authority.mjs';
 import { isHostHandoffPause } from './session-host-handoff.mjs';
@@ -688,7 +689,14 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input?.sessionId));
     if (!plan) return null;
     const session = project(plan);
-    if (input?.detail === 'report') return { ...session, report: buildReport(plan, session) };
+    if (input?.detail === 'report') {
+      const authority = hostFacts(plan).hostAuthority || {};
+      const reviewed = plan.hostVerification?.verdictRef || authority.reviewAttempts?.length
+        || ['passed', 'failed', 'not_required'].includes(authority.independentVerifier);
+      return { ...session, report: { ...buildReport(plan, session), ...(reviewed ? {
+        verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
+      } : {}) } };
+    }
     return session;
   }
 

@@ -21,7 +21,11 @@ export function sourceFingerprint(root) {
   return digest.digest('hex');
 }
 
-const requiredShots = ['conversation-cards-failed-dark.png','conversation-refresh-failed-dark.png','conversation-initial-failed-light.png','conversation-recovered-light.png','bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const verificationShots = [[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [
+  `verification-main-${width}-${theme}.png`,
+  ...['passed', 'failed', 'partial', 'unverifiable'].map(outcome => `verification-task-${outcome}-${width}-${theme}.png`),
+]);
+const requiredShots = [...verificationShots, 'conversation-cards-failed-dark.png','conversation-refresh-failed-dark.png','conversation-initial-failed-light.png','conversation-recovered-light.png','bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
@@ -128,6 +132,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label
         && sample.shimmer === false && sample.readableWithoutRepaintAnimation === true))
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
+    || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
+    || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp || !machine.verificationPresentation?.technicalOwnedByBot
     || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
@@ -248,6 +254,7 @@ function main() {
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--selection-quote-only',
     '--output', path.join(output, 'selection-machine.json')], path.join(output, 'selection-capture.log'));
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--agent-activity-only', '--output', path.join(output, 'agent-activity.json')], path.join(output, 'agent-activity-capture.log'));
+  command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--verification-only', '--output', path.join(output, 'verification.json')], path.join(output, 'verification-capture.log'));
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--shared-ui-only',
     '--output', path.join(output, 'shared-ui-machine.json')], path.join(output, 'shared-ui-capture.log'));
   if (sourceFingerprint(repo) !== fingerprint) throw new Error('Source changed during capture; rerun on stable source');
@@ -263,6 +270,11 @@ function main() {
   const agentLine = readFileSync(path.join(output, 'agent-activity-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
   const agents = JSON.parse(agentLine);
   if (!agents.ok || agents.pageErrors?.length || agents.mainAuthorizationErrors?.length) throw new Error('Agent activity interaction failed');
+  const verificationLine = readFileSync(path.join(output, 'verification-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
+  const verification = JSON.parse(verificationLine);
+  if (!verification.ok || verification.pageErrors?.length || verification.mainAuthorizationErrors?.length) throw new Error('Task verification interaction failed');
+  machine.taskVerification = verification.taskVerification;
+  for (const file of verificationShots) copyFileSync(path.join(verification.root, file), path.join(artifactRoot, file));
   machine.agentActivity = agents.agentActivity;
   machine.agentActivityRun = { startedAt: agents.startedAt, finishedAt: agents.finishedAt, scope: agents.scope };
   for (const [width, theme] of [[1280, 'dark'], [760, 'light']])
