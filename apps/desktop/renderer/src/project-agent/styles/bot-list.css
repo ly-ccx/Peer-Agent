@@ -477,6 +477,17 @@
   transform-origin: center;
 }
 
+.bot-avatar-sleep-eye {
+  fill: none;
+  stroke: #17212b;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.bot-avatar[data-avatar-sleeping="true"] .bot-avatar-face {
+  transform: none;
+}
+
 .bot-avatar-mouth {
   fill: none;
   stroke: #17212b;

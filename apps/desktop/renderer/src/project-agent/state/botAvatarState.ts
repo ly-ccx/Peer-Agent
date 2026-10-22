@@ -8,7 +8,8 @@ export function botAvatarMotion(mood: BotAvatarMood, requested = false): boolean
 }
 
 /** The expression is a view of known facts; no renderer timer invents agent activity. */
-export function botAvatarMood(state: BotRowState): BotAvatarMood {
+export function botAvatarMood(state: BotRowState, replyArrived = false): BotAvatarMood {
+  if (replyArrived) return 'reply';
   if (state.needsYou > 0) return 'needs_you';
   if (state.agentStatus === 'error') return 'error';
   if (state.agentStatus === 'waiting_provider') return 'waiting_provider';

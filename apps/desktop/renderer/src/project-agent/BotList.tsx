@@ -3,9 +3,11 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { formatBotListTime } from './state/botListState';
 import { botListKey } from './state/botListKeyboard';
 import { BotRow } from './BotRow';
+import type { BotAvatarMood } from './state/botAvatarState';
 
 interface BotListProps {
   readonly items: readonly BotListItem[];
+  readonly avatarMoods?: ReadonlyMap<string, BotAvatarMood>;
   readonly highlightedId: string | null;
   readonly openedId: string | null;
   readonly emptyLabel: string;
@@ -18,6 +20,7 @@ interface BotListProps {
 
 export function BotList({
   items,
+  avatarMoods,
   highlightedId,
   openedId,
   emptyLabel,
@@ -51,6 +54,7 @@ export function BotList({
         <BotRow
           key={item.workspaceId}
           item={item}
+          avatarMood={avatarMoods?.get(item.workspaceId)}
           highlighted={item.workspaceId === highlightedId}
           opened={item.workspaceId === openedId}
           timeLabel={formatBotListTime(item.lastActiveAt, now)}

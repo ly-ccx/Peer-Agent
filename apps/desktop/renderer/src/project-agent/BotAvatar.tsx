@@ -73,6 +73,7 @@ function resetEyes(event: PointerEvent<HTMLSpanElement>) {
 
 export function BotAvatar({ avatar, label, workspaceId, mood = 'idle', animate = false }: BotAvatarProps) {
   const motion = useAvatarMotion(botAvatarMotion(mood, animate));
+  const sleeping = animate && mood === 'idle';
   const [imageData, setImageData] = useState<{ key: string; dataUrl: string } | null>(null);
   const imageKey = avatar.kind === 'image' ? `${workspaceId}:${avatar.ref}` : '';
   const dataUrl = imageData?.key === imageKey ? imageData.dataUrl : null;
@@ -99,9 +100,10 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle', animate =
         aria-label={label}
         data-avatar-kind="image"
         data-avatar-mood={mood}
+        data-avatar-sleeping={sleeping}
         ref={motion.ref}
         data-avatar-animated={motion.active}
-        onPointerMove={moveEyes}
+        onPointerMove={sleeping ? undefined : moveEyes}
         onPointerLeave={resetEyes}
       >
         <img src={dataUrl} alt="" />
@@ -125,9 +127,10 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle', animate =
       data-avatar-kind="generated"
       data-avatar-shape={visualShape}
       data-avatar-mood={mood}
-        ref={motion.ref}
-        data-avatar-animated={motion.active}
-      onPointerMove={moveEyes}
+      data-avatar-sleeping={sleeping}
+      ref={motion.ref}
+      data-avatar-animated={motion.active}
+      onPointerMove={sleeping ? undefined : moveEyes}
       onPointerLeave={resetEyes}
     >
       <svg viewBox="0 0 48 48" focusable="false" aria-hidden="true">
@@ -135,8 +138,11 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle', animate =
         <path className="bot-avatar-body" d={BODIES[visualShape] || BODIES.circle} />
         <path className="bot-avatar-highlight" d="M12 17c2-5 5-7 10-8" />
         <g className="bot-avatar-face">
-          <ellipse className="bot-avatar-eye" cx={24 - eyeSpread} cy={eyeY} rx="1.9" ry="2.6" />
-          <ellipse className="bot-avatar-eye" cx={24 + eyeSpread} cy={eyeY} rx="1.9" ry="2.6" />
+          {sleeping ? <path className="bot-avatar-sleep-eye"
+            d={`M${22 - eyeSpread} ${eyeY}q2 2.5 4 0M${22 + eyeSpread} ${eyeY}q2 2.5 4 0`} /> : <>
+            <ellipse className="bot-avatar-eye" cx={24 - eyeSpread} cy={eyeY} rx="1.9" ry="2.6" />
+            <ellipse className="bot-avatar-eye" cx={24 + eyeSpread} cy={eyeY} rx="1.9" ry="2.6" />
+          </>}
           {variant % 2 === 0
             ? <path className="bot-avatar-mouth" d={`M22 ${eyeY + 7}q2 2 4 0`} />
             : <circle className="bot-avatar-mouth-dot" cx="24" cy={eyeY + 6} r="0.9" />}

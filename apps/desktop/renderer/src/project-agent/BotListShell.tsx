@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
@@ -116,6 +116,9 @@ export function BotListShell({
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  const avatarMoods = useMemo(() => new Map(list.catalog.map(item => [item.workspaceId,
+    botAvatarMood(item.state, replyFlash === item.workspaceId)] as const)), [list.catalog, replyFlash]);
+  const openedAvatarMood = opened ? avatarMoods.get(opened.workspaceId) ?? botAvatarMood(opened.state) : 'idle';
   const work = useBotWorkSessions(opened?.workspaceId ?? null);
   const modelControls = useBotModels(opened?.workspaceId ?? null, opened?.profile ?? null, list.updateProfile);
   const openedIdRef = useRef(list.openedId);
@@ -350,6 +353,7 @@ export function BotListShell({
         </div>
         <BotList
           items={list.visible}
+          avatarMoods={avatarMoods}
           highlightedId={list.highlightedId}
           openedId={list.openedId}
           emptyLabel={list.catalog.length === 0 && list.status === 'ready' && !list.searching && !list.needsYouOnly
@@ -429,7 +433,7 @@ export function BotListShell({
           <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
               <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
-                animate mood={replyFlash === opened.workspaceId ? 'reply' : botAvatarMood(opened.state)} />
+                animate mood={openedAvatarMood} />
               <p className="bot-main-title">{opened.profile.displayName}</p>
               <button
                 ref={profileButtonRef}
@@ -460,7 +464,7 @@ export function BotListShell({
               modelControls={modelControls}
               avatar={opened.profile.avatar}
               label={opened.profile.displayName}
-              avatarMood={botAvatarMood(opened.state)}
+              avatarMood={openedAvatarMood}
               i18n={i18n}
               onReplyArrived={announceReply}
               onLocateSession={setLocateSessionId}
