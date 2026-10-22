@@ -210,7 +210,7 @@ export function BotMessageList({
       {scroll.view.after > 0 ? (
         <div className="bot-thread-spacer" style={{ height: scroll.view.after }} />
       ) : null}
-      {trailing}
+      <div className="bot-thread-tail" ref={scroll.tailRef}>{trailing}</div>
     </div>
     {!scroll.following ? <button type="button" className="bot-thread-latest" aria-label={i18n.t('projectAgent.chat.latest')} title={i18n.t('projectAgent.chat.latest')} onClick={scroll.followLatest}><PeerIcon name="chevronDown" size={18} /></button> : null}
     </div>
