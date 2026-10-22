@@ -54,6 +54,10 @@ const requiredShots = ['conversation-cards-failed-dark.png','conversation-refres
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
   'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png', 'attention-1280-dark.png', 'attention-760-light.png', 'attention-empty-light.png', 'attention-expired-light.png', 'attention-image-permission-dark.png', 'user-receipt-1280-dark.png', 'user-receipt-760-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
+  if (!['budget','question'].every(key => [[1280,'dark'],[760,'light']].every(([width,appearance]) =>
+    machine.lifecycleGates?.cases?.some(row => row.key===key && row.width===width && row.appearance===appearance
+      && row.listVisible && row.detailVisible && row.cancellationFromDecision && row.sameFacts))))
+    throw new Error('Completed lifecycle human gates were not verified');
   if (!['cardsFailureKeepsMessages', 'refreshFailureKeepsMessages', 'initialFailureIsExplicit', 'retryRestoresMessages'].every(key => machine.progressiveLoading?.[key] === true)) throw new Error('Progressive conversation failure recovery regression failed');
   if (!machine.conversationTypography?.keyboardDisclosure || !machine.conversationTypography?.truthfulApprovalStates
     || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.conversationTypography.cases?.some(item =>
@@ -153,7 +157,9 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     throw new Error('Machine regression failed or required product scenarios did not run');
   }
   mkdirSync(path.join(output, 'screenshots'), { recursive: true });
-  const screenshots = requiredShots.map(id => {
+  const lifecycleShots = ['budget','question'].flatMap(key=>[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>
+    ['list','detail'].map(surface=>`lifecycle-${key}-${surface}-${width}-${theme}.png`)));
+  const screenshots = [...requiredShots,...lifecycleShots].map(id => {
     const bytes = readFileSync(path.join(artifactRoot, id));
     writeFileSync(path.join(output, 'screenshots', id), bytes);
     return { id, path: `screenshots/${id}`, sha256: hash(bytes) };
@@ -169,7 +175,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       processEmptyLayout: machine.processEmptyLayout, processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote, retryRetirement: machine.retryRetirement },
-    supplementalCoverage: machine.sharedUiConventions,
+    supplementalCoverage: {sharedUiConventions:machine.sharedUiConventions,lifecycleGates:machine.lifecycleGates},
     reviewCriteria: [
       '默认内容能回答任务目标、当前进展和下一步；动作写明去向，主机器人负责对用户传达。',
       '内部 ID、模型机制和原始参数按需披露；状态来自结构化事实，目标与完成结论不得混淆。',

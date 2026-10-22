@@ -175,7 +175,7 @@ export function registerDesktopProjectAgent({
   const verification = createSessionVerification({
     goalPlanStore,
     verifySession: (plan, focus, context) => goalRunner?.verifyDelegatedSession?.({ plan, focus, workId: context?.workId }),
-    readReport: plan => supervisor.get({ sessionId: plan.delegationOrigin.sessionId, detail: 'report' })?.report?.summary || '',
+    readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
     completeRecheck: input => goalRunner?.completeRecheck?.(input),
     appendMessage,
   });

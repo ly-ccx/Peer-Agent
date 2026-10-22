@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { beginExecutionAttempt, beginVerificationAttempt, sessionFactsFromPlan } from './session-facts.mjs';
 
+test('runtime facts forward the current interruption through the protocol compatibility seam', () => {
+  const facts = sessionFactsFromPlan({planId:'unconsumed-interruption', status:'completed',
+    runner:{status:'completed', interruption:{recoverable:false,reason:'fixture interruption'}}});
+  assert.equal(facts.status, 'paused');
+  assert.equal(facts.needsUser, false);
+});
 test('manual DoD 门在共享决策里仍然是"等你确认"，不靠适配器私改状态', () => {
   const plan = { planId: 'dod', status: 'completed', conversationId: 'c-dod',
     delegationOrigin: { sessionId: 's', phase: 'running' }, runner: { status: 'blocked', blockedReason: 'manual_dod_confirmation_required' } };

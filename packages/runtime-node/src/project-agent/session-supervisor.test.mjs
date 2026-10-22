@@ -29,6 +29,26 @@ function model(id, extra = {}) {
   };
 }
 
+test('verification reads canonical report content without reentering acceptance projection', async () => {
+  let authorityReads = 0;
+  const env = await harness({readPlanApproval:()=> 'always',readSessionFacts:()=>{
+    authorityReads++;return {hostAuthority:{independentVerifier:'passed'}};
+  }});
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(),contextOf(env));
+    const plan = env.goalPlanStore.getPlan(env.supervisor.get({sessionId:opened.sessionId}).planId);
+    env.goalPlanStore.revisePlan(plan.planId,{status:'completed',runner:{status:'completed'},
+      delegationOrigin:{...plan.delegationOrigin,phase:'running'}});
+    env.conversationStore.appendMessage(plan.conversationId,{id:'canonical-report',role:'assistant',content:'Preserved worker report'});
+    authorityReads=0;
+    assert.equal(env.supervisor.readReportSummary(opened.sessionId),'Preserved worker report');
+    assert.equal(authorityReads,0,'report content never calls host verification or acceptance');
+    assert.equal(env.supervisor.readReportSummary('missing-session'),'');
+    assert.equal(env.supervisor.get({sessionId:opened.sessionId,detail:'report'}).report.summary,'Preserved worker report');
+    assert.ok(authorityReads>0,'full session projection still consults the real acceptance facts');
+  } finally {await env.cleanup();}
+});
+
 test('local plan approval is frozen before execution and survives store reload', async () => {
   let latest;
   const env = await harness({ readPlanApproval: () => 'always', approvalStore: {

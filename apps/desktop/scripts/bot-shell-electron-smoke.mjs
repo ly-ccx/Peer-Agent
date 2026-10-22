@@ -1,4 +1,5 @@
 import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
+import { checkBotLifecycleGates } from './bot-lifecycle-gate-checks.mjs';
 import { checkBotAccessPolicy } from './bot-access-policy-checks.mjs';
 import { checkBotUserReceipt } from './bot-user-receipt-checks.mjs';
 import { checkBotAttention } from './bot-attention-checks.mjs';
@@ -55,7 +56,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -561,6 +562,10 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     if(workSurfaces) await checkBotProgressiveLoading({page,until,report,captureDirectory:root,commandFile:workCommand});
   await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  } else if (process.argv.includes('--lifecycle-only')) {
+    await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotLifecycleGates({page,until,report,captureDirectory:root,commandFile:workCommand});
   } else if (process.argv.includes('--agent-activity-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -741,6 +746,7 @@ try {
     await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskCancellation({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
+    await checkBotLifecycleGates({page,until,report,captureDirectory:root,commandFile:workCommand});
     await checkBotCoordination({page,until,report,captureDirectory:root,commandFile:workCommand});
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotAccessPolicy({ page, until, report, captureDirectory: root, home, bots: fixture.bots, commandFile: workCommand });

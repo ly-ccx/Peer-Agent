@@ -101,7 +101,7 @@ export function createTuiProjectHost(options: {
   const goalRunner = goalHost.goalRunner as typeof goalHost.goalRunner & { verifyDelegatedSession(input: object): Promise<any> };
   const verification = createSessionVerification({goalPlanStore: plans,
     verifySession: (plan: any, focus: string) => goalRunner.verifyDelegatedSession({plan, focus}),
-    readReport: (plan: any) => (supervisor.get({sessionId: plan.delegationOrigin.sessionId, detail: 'report'}) as any)?.report?.summary || '',
+    readReport: (plan: any) => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
     completeRecheck: (input: any) => goalRunner.completeRecheck(input),
     appendMessage: (id: string, message: any) => conversations.appendMessage(id, message)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
