@@ -122,7 +122,18 @@ export async function openReplyDetails(page, message) {
 }
 
 export async function closeReplyDetails(page) {
+  const replyId = await page.locator('.bot-reply-details').getAttribute('data-reply-id');
+  const mountedTrigger = await page.evaluate(id => {
+    const reply = document.getElementById(`bot-msg-${id}`)?.closest('.bot-reply, .bot-system');
+    return Boolean(reply?.querySelector('.bot-reply-context > button, .bot-recovery-history-body > button'));
+  }, replyId);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
-  assert.equal(await page.evaluate(() => document.activeElement?.matches('.bot-reply-context > button, .bot-recovery-history-body > button')), true, 'close restores the current reply details trigger without scrolling it into view');
+  // Cancelling work in the scrolled tail can unmount the original reply. The
+  // existing drawer contract then returns focus to the thread with preventScroll.
+  assert.equal(await page.evaluate(mounted => {
+    const focused = document.activeElement;
+    return focused?.matches('.bot-reply-context > button, .bot-recovery-history-body > button')
+      || !mounted && focused?.matches('.bot-thread');
+  }, mountedTrigger), true, 'close restores the current details button, or the thread when its original reply was virtualized away');
 }
