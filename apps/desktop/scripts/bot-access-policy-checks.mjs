@@ -54,10 +54,15 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
   assert.equal(await scene.locator('.composer-access-dropdown').count(), 0);
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
+    const previousScene = await scene.elementHandle();
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
     // Crossing the push/cover breakpoint remounts the task and its nested scene.
     // Observe the new parent before deciding whether the scene needs reopening.
     await page.locator(width === 1280 ? '.bot-drawer-dock .bot-task-detail' : '.bot-drawer-panel .bot-task-detail').waitFor({ state: 'visible' });
+    // The old portal can remain connected during its exit animation even after
+    // the new parent is visible. Inspect only the newly mounted scene.
+    await page.waitForFunction(node => !node.isConnected, previousScene);
+    await previousScene.dispose();
     if (!await scene.count()) {
       const information = page.locator('.bot-task-information');
       if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
