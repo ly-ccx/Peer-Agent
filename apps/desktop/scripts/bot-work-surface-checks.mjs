@@ -28,7 +28,11 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await checkBackgroundWorkAlignment({ page, report, captureDirectory });
   await openReplyDetails(page, reply);
   assert.match(await work.locator(':scope > summary').textContent(), /核查历史任务完成情况.*正在运行中/);
+  assert.equal(await work.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   assert.equal(await work.locator('.is-running').evaluate(node => getComputedStyle(node).animationName), 'none');
+  assert.notEqual(await work.locator('.is-running').evaluate(node => getComputedStyle(node).webkitTextFillColor), 'rgba(0, 0, 0, 0)');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
   const keyboardFocus = await work.locator(':scope > summary').evaluate(node => {
     const style = getComputedStyle(node);

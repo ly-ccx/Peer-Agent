@@ -6,7 +6,8 @@ import type { BotChatMessage } from '../state/botConversationState';
 import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
 import { EvidenceList } from './EvidenceList';
 import '../styles/bot-reply-context.css';
-import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import type { BotAvatar as BotAvatarModel, ProjectAgentActivity } from '@peer-agent/protocol';
+import { BotAvatar } from '../BotAvatar';
 import { replyActivityLabel } from '../state/replyActivityLabel';
 import { useReplyFooterBounds } from './useReplyFooterBounds';
 
@@ -20,17 +21,21 @@ const SURFACING = {
 } as const;
 
 /** Reply metadata stays discoverable without competing with the answer or pending work. */
-export function ReplyContext({ i18n, onOpenDetails, activity }: {
+export function ReplyContext({ i18n, onOpenDetails, activity, avatar, workspaceId, botLabel }: {
   readonly i18n: I18nRuntime; readonly onOpenDetails?: () => void; readonly activity?: ProjectAgentActivity;
+  readonly avatar?: BotAvatarModel; readonly workspaceId?: string; readonly botLabel?: string;
 }) {
   const ref = useReplyFooterBounds();
   const label = replyActivityLabel(activity, i18n);
+  const thinking = Boolean(label) && activity?.phase !== 'awaiting_permission';
   return <div ref={ref} className="bot-reply-context" data-running={Boolean(label)}>
     <button type="button" aria-label={i18n.t('projectAgent.chat.context.details')} title={i18n.t('projectAgent.chat.context.details')} onClick={event => {
       event.currentTarget.focus({ preventScroll: true });
       onOpenDetails?.();
-    }}><PeerIcon name="panelRight" size={14} />{label
-      ? <span className="bot-context-running" role="status">{label}</span>
+    }}>{thinking && avatar && workspaceId && botLabel
+      ? <BotAvatar avatar={avatar} label={botLabel} workspaceId={workspaceId} mood="thinking" animate />
+      : <PeerIcon name="panelRight" size={14} />}{label
+      ? <span className={thinking ? 'bot-context-running bot-thinking-status-label' : 'bot-context-running'} role="status">{label}</span>
       : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
   </div>;
 }
