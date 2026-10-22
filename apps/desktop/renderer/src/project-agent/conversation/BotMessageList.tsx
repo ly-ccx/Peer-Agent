@@ -209,7 +209,7 @@ export function BotMessageList({
         <div className="bot-thread-spacer" style={{ height: scroll.view.after }} />
       ) : null}
       {waiting ? <p className="bot-live-status" role="status">{i18n.t('projectAgent.chat.waiting')}</p> : null}
-      {trailing}
+      <div className="bot-thread-tail" ref={scroll.tailRef}>{trailing}</div>
     </div>
     {!scroll.following ? <button type="button" className="bot-thread-latest" aria-label={i18n.t('projectAgent.chat.latest')} title={i18n.t('projectAgent.chat.latest')} onClick={scroll.followLatest}><PeerIcon name="chevronDown" size={18} /></button> : null}
     </div>

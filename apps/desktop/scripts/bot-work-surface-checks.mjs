@@ -352,10 +352,12 @@ async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) 
       for (const appearance of ['dark', 'light']) {
         await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
         for (const expanded of [false, true]) {
+          const following = await page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop < 2);
           if ((await background.getAttribute('open') !== null) !== expanded) {
             await summary.focus();
             await page.keyboard.press('Enter');
           }
+          if (following) await page.waitForFunction(() => { const node = document.querySelector('.bot-thread'); return node.scrollHeight - node.clientHeight - node.scrollTop < 2; });
           await background.scrollIntoViewIfNeeded();
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const bounds = await background.evaluate(node => {

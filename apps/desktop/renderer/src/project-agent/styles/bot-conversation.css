@@ -924,7 +924,9 @@
   margin-bottom: 4px;
 }
 
-.bot-thread > .bot-background-work {
+.bot-thread-tail { display: flex; flex-direction: column; width: 100%; flex: none; }
+
+.bot-thread-tail > .bot-background-work {
   align-self: flex-start;
   margin: 0 0 4px;
   margin-inline-start: calc((100cqw - var(--bot-column-width)) / 2);
