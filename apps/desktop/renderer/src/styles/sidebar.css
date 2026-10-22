@@ -218,7 +218,7 @@
   height: 18px;
   padding: 0 6px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-chip);
   font-family: var(--font-mono);
   font-size: 0.62rem;
   line-height: 1;
@@ -393,7 +393,7 @@
   cursor: pointer;
   padding: 0;
   line-height: 1;
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-control-compact);
   transform: translateY(-50%);
   transition: opacity var(--za-motion-fast) var(--za-ease-out);
   -webkit-app-region: no-drag;
@@ -535,7 +535,7 @@
   height: 22px;
   padding: 0;
   border: none;
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-mute);
   cursor: pointer;
@@ -788,7 +788,7 @@
   font-weight: 600;
   text-align: left;
   letter-spacing: 0.02em;
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-row);
   -webkit-app-region: no-drag;
 }
 .sidebar-section-heading:hover {
@@ -1146,7 +1146,7 @@
   font-size: 0.9rem;
   padding: 0;
   line-height: 1;
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-control-compact);
   flex-shrink: 0;
 }
 .sidebar-conv-pin:hover,

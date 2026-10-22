@@ -192,7 +192,7 @@
   }
 
   .capability-card-meta code {
-    @apply inline-flex min-h-6 items-center rounded-[var(--ui-radius-detail)] px-1.5 text-[12px];
+    @apply inline-flex min-h-6 items-center rounded-[var(--ui-radius-chip)] px-1.5 text-[12px];
     border: 1px solid var(--za-line);
     color: var(--za-text-soft);
     background: transparent;

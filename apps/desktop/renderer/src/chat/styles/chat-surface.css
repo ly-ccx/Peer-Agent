@@ -138,7 +138,7 @@
   padding: var(--space-2) var(--space-6);
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-panel);
   /* 独立于三栏基础 Chrome 的局部玻璃层：保留透明采样和下方投影，不叠顶部 inset 高光。 */
   background: var(--glass-frosted-chrome-background);
   box-shadow: var(--glass-frosted-chrome-shadow);

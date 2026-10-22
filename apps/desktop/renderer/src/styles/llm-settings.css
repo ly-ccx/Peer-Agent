@@ -323,7 +323,7 @@
   max-width: 100%;
   padding: 2px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-chip);
   background: var(--chrome-sunken);
   color: var(--graphite-soft);
   font-size: 0.68rem;
@@ -342,7 +342,7 @@
   font-size: 0.62rem;
   padding: 1px 6px;
   border: 1px solid rgba(78, 163, 217, 0.24);
-  border-radius: var(--ui-radius-detail);
+  border-radius: var(--ui-radius-chip);
   box-shadow:
     0 0 0 1px rgba(104, 201, 255, 0.08),
     0 0 12px rgba(104, 201, 255, 0.14);
