@@ -31,10 +31,11 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
   const tool = id => state?.segments.find(segment => segment.kind === 'tool' && segment.id === id);
   return {
     snapshot,
-    begin({ turnId, modelSelection, replyTo = [], startedAt = '', visible: show = false }) {
+    begin({ turnId, workId, modelSelection, replyTo = [], startedAt = '', visible: show = false }) {
       if (timer) clearTimeout(timer);
       timer = null; pendingPermissions.clear(); visible = show; textSequence = 0; textSegmentId = null; replyCallId = null; previewChars = 0;
       state = { workspaceId, conversationId, turnId, replyTo: replyTo.slice(0, 32), startedAt, revision: ++revision,
+        ...(workId ? { workId } : {}),
         phase: 'waiting', segments: [], replyText: '',
         ...(modelSelection?.modelProviderId ? { modelSelection: { modelProviderId: modelSelection.modelProviderId, reasoningEffort: modelSelection.reasoningEffort } } : {}) };
       flush();
@@ -42,6 +43,7 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
     round() { textSegmentId = null; replyCallId = null; if (state) { state.phase = 'waiting'; changed(true); } },
     accept(channel, payload) {
       if (!visible || !state || payload?.streamId !== state.turnId || ['done', 'error', 'stopped', 'disposed'].includes(state.phase)) return;
+      if (channel !== 'chat:stream:provider-recovery' && channel !== 'chat:stream:connection-recovery') delete state.recovery;
       if (channel === 'chat:stream:delta' && typeof payload.content === 'string') {
         let segment = state.segments.find(item => item.kind === 'text' && item.id === textSegmentId);
         if (!segment && state.segments.length < 100) {
@@ -120,12 +122,14 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
         }
       } else if (channel === 'chat:stream:provider-recovery' || channel === 'chat:stream:connection-recovery') {
         if (channel === 'chat:stream:provider-recovery' && payload.toProviderId) state.modelSelection = { modelProviderId: payload.toProviderId };
-        pendingPermissions.clear(); state.replyText = ''; state.segments = []; textSegmentId = null; previewChars = 0; state.phase = 'waiting'; changed(true);
+        pendingPermissions.clear(); state.replyText = ''; state.segments = []; textSegmentId = null; previewChars = 0; state.phase = 'waiting';
+        state.recovery = channel === 'chat:stream:provider-recovery' ? 'provider' : 'connection'; changed(true);
       }
     },
     finish(phase) {
       if (!state) return;
       pendingPermissions.clear();
+      delete state.recovery;
       state.phase = phase;
       state.finishedAt = now();
       for (const segment of state.segments) {

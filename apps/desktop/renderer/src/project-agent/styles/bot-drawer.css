@@ -1149,3 +1149,17 @@
 .bot-inspect-technical > summary::-webkit-details-marker { display: none; }
 .bot-inspect-technical > summary > svg { transition: transform 160ms ease; }
 .bot-inspect-technical[open] > summary > svg { transform: rotate(90deg); }
+
+/* ── macOS 毛玻璃壳层：抽屉也是一块悬浮黑牌 ──
+ * 与 .bot-main 同款纸面/描边/阴影（token 在 bot-list.css 的 vibrancy 段定义）。
+ * 关闭态保持透明边框，宽度过渡期间不露实色描边。 */
+html[data-vibrancy='true'] .bot-drawer-dock {
+  margin-left: var(--bot-float-gap);
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-panel);
+}
+
+html[data-vibrancy='true'] .bot-drawer-dock.is-open {
+  border-color: var(--chrome-hairline);
+  box-shadow: var(--glass-edge-highlight), var(--shadow-card);
+}

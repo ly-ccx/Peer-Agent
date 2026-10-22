@@ -14,7 +14,9 @@ const WAITING_KINDS = new Set(['approval', 'question', 'plan_approval']);
 export function assessStall(session, { now, windowMs = STALL_WINDOW_MS } = {}) {
   const quiet = { stalled: false, stallId: null, anchor: null, waiting: false };
   const sessionId = text(session?.sessionId);
-  if (!sessionId || !['running', 'verifying'].includes(session?.status)) return quiet;
+  if (!sessionId) return quiet;
+  if (session?.status === 'result_ready') return assessResultStall(session, { now, windowMs, quiet, sessionId });
+  if (!['running', 'verifying'].includes(session?.status)) return quiet;
   const waiting = waitingOnUser(session);
   if (waiting) return { ...quiet, waiting: true };
   const anchor = progressAnchor(session);
@@ -27,6 +29,27 @@ export function assessStall(session, { now, windowMs = STALL_WINDOW_MS } = {}) {
     stalled: true,
     stallId: `stall:${sessionId}:${anchor.token}`,
     anchor: anchor.token,
+    waiting: false,
+  };
+}
+
+/**
+ * 结果就绪却没人收下时，验收链停在等验证或等确认。停滞监视原本只看
+ * running/verifying，这类结果会永远停在 result_ready，而汇报不消除责任
+ * （ADR93）。超窗发一次 verify 停滞把责任交回主 Bot；stallId 绑定
+ * resultRevision，同一版结果只催一次，重新验证/重产出改变了版本才再催。
+ */
+function assessResultStall(session, { now, windowMs, quiet, sessionId }) {
+  if (waitingOnUser(session)) return quiet;
+  const anchor = parseTime(session.completedAt);
+  const at = resolveNow(now);
+  const window = Number.isFinite(windowMs) && windowMs >= 0 ? windowMs : STALL_WINDOW_MS;
+  if (anchor == null || at == null || at - anchor < window) return quiet;
+  const revision = text(session.resultRevision) || text(session.completedAt);
+  return {
+    stalled: true,
+    stallId: `stall:verify:${sessionId}:${revision}`,
+    anchor: 'verification_pending',
     waiting: false,
   };
 }

@@ -61,6 +61,7 @@ export interface BotChatCard {
 export { agentFailurePresentation } from './recoveryPresentation.ts';
 
 export interface BotChatMeta {
+  readonly workId?: string;
   readonly sessionStates?: readonly ReplySessionState[];
   readonly replyTo?: readonly string[];
   readonly sources?: readonly string[];
@@ -563,6 +564,7 @@ function readMeta(value: unknown): BotChatMeta {
   const separatorLabel = readString(record.separatorLabel);
   return {
     replyTo: readStringList(record.replyTo),
+    ...(readString(record.workId) ? { workId: readString(record.workId) } : {}),
     sources: readStringList(record.sources),
     sessionStates: Array.isArray(record.sessionStates) ? record.sessionStates.flatMap((item: unknown) => {
       if (!item || typeof item !== 'object') return [];

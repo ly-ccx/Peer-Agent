@@ -216,6 +216,15 @@ export type TranslationKey =
   | 'projectAgent.chat.thinking'
   | 'projectAgent.chat.waiting'
   | 'projectAgent.chat.generating'
+  | 'projectAgent.chat.reply.reconnecting'
+  | 'projectAgent.chat.reply.unconfirmed'
+  | 'projectAgent.chat.reply.interrupted'
+  | 'projectAgent.chat.reply.synchronizing'
+  | 'projectAgent.chat.reply.slow'
+  | 'projectAgent.chat.reply.refresh'
+  | 'projectAgent.chat.reply.related'
+  | 'projectAgent.chat.reply.relatedTurn'
+  | 'projectAgent.chat.reply.deliveryIssue'
   | 'projectAgent.chat.activity.preparing'
   | 'projectAgent.chat.activity.thinking'
   | 'projectAgent.chat.activity.responding'
@@ -760,6 +769,9 @@ export type TranslationKey =
   | 'appearance.foreground'
   | 'appearance.uiFont'
   | 'appearance.codeFont'
+  | 'appearance.windowMaterial'
+  | 'appearance.windowMaterial.glass'
+  | 'appearance.windowMaterial.solid'
   | 'appearance.diffMarker'
   | 'appearance.diffMarker.color'
   | 'appearance.diffMarker.sign'
@@ -1461,6 +1473,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': '文字',
     'appearance.uiFont': '界面字体',
     'appearance.codeFont': '代码字体',
+    'appearance.windowMaterial': '窗口材质',
+    'appearance.windowMaterial.glass': '毛玻璃',
+    'appearance.windowMaterial.solid': '实色',
     'appearance.diffMarker': '差异标记',
     'appearance.diffMarker.color': '颜色',
     'appearance.diffMarker.sign': '+/- 符号',
@@ -1790,9 +1805,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.loadFailed': '对话没有加载出来',
     'projectAgent.chat.cardsUnavailable': '任务状态暂不可用，已有对话仍可阅读。',
     'projectAgent.chat.refreshFailed': '新消息暂未刷新，已保留当前对话。',
-    'projectAgent.chat.thinking': '思考中…',
+    'projectAgent.chat.thinking': '正在思考中',
     'projectAgent.chat.waiting': '等待回复…',
     'projectAgent.chat.generating': '正在回复',
+    'projectAgent.chat.reply.reconnecting': '正在恢复这次回复',
+    'projectAgent.chat.reply.unconfirmed': '尚未确认这条消息的回复状态',
+    'projectAgent.chat.reply.interrupted': '这次回复已中断',
+    'projectAgent.chat.reply.synchronizing': '正在同步回复',
+    'projectAgent.chat.reply.slow': '这次回复耗时较久',
+    'projectAgent.chat.reply.refresh': '刷新状态',
+    'projectAgent.chat.reply.related': '这次回复的其他过程（{count}）',
+    'projectAgent.chat.reply.relatedTurn': '查看过程 {number}',
+    'projectAgent.chat.reply.deliveryIssue': '消息已保存，后续处理尚未完成',
     'projectAgent.chat.activity.preparing': '正在准备下一步',
     'projectAgent.chat.activity.thinking': '正在整理思路',
     'projectAgent.chat.activity.responding': '正在整理回复',
@@ -2826,6 +2850,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': 'Foreground',
     'appearance.uiFont': 'UI font',
     'appearance.codeFont': 'Code font',
+    'appearance.windowMaterial': 'Window material',
+    'appearance.windowMaterial.glass': 'Frosted glass',
+    'appearance.windowMaterial.solid': 'Solid',
     'appearance.diffMarker': 'Diff markers',
     'appearance.diffMarker.color': 'Color',
     'appearance.diffMarker.sign': '+/- signs',
@@ -3155,9 +3182,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.loadFailed': 'The conversation did not load',
     'projectAgent.chat.cardsUnavailable': 'Task status is unavailable. Your conversation is still readable.',
     'projectAgent.chat.refreshFailed': 'New messages could not refresh. Your current conversation is preserved.',
-    'projectAgent.chat.thinking': 'Thinking…',
+    'projectAgent.chat.thinking': 'Thinking',
     'projectAgent.chat.waiting': 'Waiting for a response…',
     'projectAgent.chat.generating': 'Replying',
+    'projectAgent.chat.reply.reconnecting': 'Resuming this reply',
+    'projectAgent.chat.reply.unconfirmed': 'The reply status has not been confirmed',
+    'projectAgent.chat.reply.interrupted': 'This reply was interrupted',
+    'projectAgent.chat.reply.synchronizing': 'Synchronizing the reply',
+    'projectAgent.chat.reply.slow': 'This reply is taking longer',
+    'projectAgent.chat.reply.refresh': 'Refresh status',
+    'projectAgent.chat.reply.related': 'Other parts of this reply ({count})',
+    'projectAgent.chat.reply.relatedTurn': 'View part {number}',
+    'projectAgent.chat.reply.deliveryIssue': 'The message was saved, but follow-up processing did not finish',
     'projectAgent.chat.activity.preparing': 'Getting ready for the next step',
     'projectAgent.chat.activity.thinking': 'Thinking it through',
     'projectAgent.chat.activity.responding': 'Putting the reply together',

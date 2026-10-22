@@ -37,17 +37,17 @@
   --font-serif-zh: var(--font-sans);
   --font-sans-zh: var(--font-sans);
   --font-mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-  --color-paper-sheet: #F7F9FC;
-  --color-paper-base: #EDF1F6;
+  --color-paper-sheet: #F8F8F8;
+  --color-paper-base: #F8F8F8;
   --color-graphite-base: #1A1D21;
   --color-azure-seal: #3B7FAB;
   --radius-frost: var(--ui-radius-panel);
   --radius-frost-sm: var(--ui-radius-control-compact);
-  --glass-chrome: hsla(215, 16%, 98%, 0.52);
-  --glass-chrome-hover: hsla(215, 16%, 96%, 0.62);
-  --glass-control: hsla(218, 18%, 96%, 0.56);
+  --glass-chrome: hsla(0, 0%, 96%, 0.86);
+  --glass-chrome-hover: hsla(0, 0%, 98%, 0.90);
+  --glass-control: hsla(0, 0%, 96%, 0.70);
   /* 磨砂毛玻璃：提高不透明度，避免「透明玻璃」可读背景字 */
-  --glass-popover: hsla(212, 12%, 99%, 0.88);
+  --glass-popover: hsla(0, 0%, 99%, 0.88);
   --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.55);
   --blur-chrome: 24px;
   --blur-control: 16px;
@@ -82,27 +82,28 @@
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "kern";
 
-  /* ─── Chrome 环境层（冷感纯白，hue 210-220 sat 14-19%）─── */
-  --chrome-canvas: #FAFBFC;
-  --chrome-raised: #F3F5F8;
-  --chrome-sunken: #EBEEF3;
-  --chrome-hover: #F0F2F6;
-  --chrome-active: #E5E8EE;
-  --chrome-hairline: #DCE0E8;
+  /* 中性底面与独立浮层共用语义色阶；印记和状态色继续保留 Frost 色彩。 */
+  /* ─── Chrome 环境层 ─── */
+  --chrome-canvas: #F4F4F4;
+  --chrome-raised: #F3F3F3;
+  --chrome-sunken: #EAEAEA;
+  --chrome-hover: #EDEDED;
+  --chrome-active: #E4E4E4;
+  --chrome-hairline: #DEDEDE;
 
-  /* ─── Paper 内容层（冷雪纸，hue 210-215 sat 10-13%）─── */
-  --paper-base: #EDF1F6;
-  --paper-sheet: #F7F9FC;
+  /* ─── Paper 内容层（中性近白面板）─── */
+  --paper-base: #F8F8F8;
+  --paper-sheet: #F8F8F8;
   /* ★ 消息卡 / 面板卡默认 */
-  --paper-sunken: #DDE3EB;
-  --paper-hover: #EAEEF4;
-  --paper-active: #D5DCE6;
+  --paper-sunken: #E8E8E8;
+  --paper-hover: #EFEFEF;
+  --paper-active: #DEDEDE;
 
-  /* ─── Control 控件层（冷感灰，hue 216-220 sat 16-19%）─── */
-  --control-composer: #EFF2F6;
-  --control-fill: #E9EDF2;
-  --control-fill-active: #DCE3EC;
-  --control-fill-hover: #E1E6EE;
+  /* ─── Control 控件层 ─── */
+  --control-composer: #FFFFFF;
+  --control-fill: #EBEBEB;
+  --control-fill-active: #DDDDDD;
+  --control-fill-hover: #E3E3E3;
 
   /* ─── Graphite 文字阶（冷石墨，hue 210-220 sat 5-14%）─── */
   --graphite-base: #1A1D21;
@@ -397,31 +398,31 @@
  * ───────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
   color-scheme: dark;
-  --glass-chrome: hsla(220, 22%, 12%, 0.48);
-  --glass-chrome-hover: hsla(220, 20%, 16%, 0.58);
-  --glass-control: hsla(220, 18%, 18%, 0.52);
+  --glass-chrome: hsla(0, 0%, 24%, 0.72);
+  --glass-chrome-hover: hsla(0, 0%, 28%, 0.78);
+  --glass-control: hsla(0, 0%, 18%, 0.62);
   /* 暗色磨砂：同样抬不透明度，背景字不可清晰辨认 */
-  --glass-popover: hsla(220, 20%, 12%, 0.86);
+  --glass-popover: hsla(0, 0%, 12%, 0.86);
   --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.14);
 
   /* ─── Frost 正名 token ─── */
-  --chrome-canvas: #11141A;
-  --chrome-raised: #181C24;
-  --chrome-sunken: #0C0F14;
-  --chrome-hover: #1E232C;
-  --chrome-active: #262C37;
-  --chrome-hairline: #2A303B;
+  --chrome-canvas: #383838;
+  --chrome-raised: #383838;
+  --chrome-sunken: #202020;
+  --chrome-hover: #424242;
+  --chrome-active: #4A4A4A;
+  --chrome-hairline: #303030;
 
-  --paper-base: #1A1E26;
-  --paper-sheet: #1E232C;
-  --paper-sunken: #11141A;
-  --paper-hover: #262C37;
-  --paper-active: #30374A;
+  --paper-base: #141414;
+  --paper-sheet: #141414;
+  --paper-sunken: #101010;
+  --paper-hover: #242424;
+  --paper-active: #303030;
 
-  --control-composer: #0C0F14;
-  --control-fill: #2C3440;
-  --control-fill-active: #3B4757;
-  --control-fill-hover: #343E4B;
+  --control-composer: #262626;
+  --control-fill: #2C2C2C;
+  --control-fill-active: #3C3C3C;
+  --control-fill-hover: #343434;
 
   --graphite-base: #EDF1F6;
   --graphite-base-hover: #D5DCE6;

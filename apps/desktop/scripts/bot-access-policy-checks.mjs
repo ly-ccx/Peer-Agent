@@ -44,7 +44,10 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const command = { ...initial, seq: initial.seq + 1, sessions: [{ ...initial.sessions[0], conversationId: child.id }] };
   writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
-  await page.locator('.bot-profile').click(); await page.getByRole('tab', { name: '任务', exact: true }).click();
+  await page.locator('.bot-profile').click();
+  // The preceding 760px case must reach its cover layout before opening a child.
+  await page.locator('.bot-drawer-panel .bot-drawer-body').waitFor({ state: 'visible' });
+  await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').first().click();
   await page.locator('.bot-task-information > summary').click();
@@ -54,10 +57,15 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
   assert.equal(await scene.locator('.composer-access-dropdown').count(), 0);
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
+    const previousScene = await scene.elementHandle();
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
     // Crossing the push/cover breakpoint remounts the task and its nested scene.
     // Observe the new parent before deciding whether the scene needs reopening.
     await page.locator(width === 1280 ? '.bot-drawer-dock .bot-task-detail' : '.bot-drawer-panel .bot-task-detail').waitFor({ state: 'visible' });
+    // The old portal can remain connected during its exit animation even after
+    // the new parent is visible. Inspect only the newly mounted scene.
+    await page.waitForFunction(node => !node.isConnected, previousScene);
+    await previousScene.dispose();
     if (!await scene.count()) {
       const information = page.locator('.bot-task-information');
       if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();

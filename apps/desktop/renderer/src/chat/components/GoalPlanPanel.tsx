@@ -16,6 +16,7 @@ import type {
   GoalVerifierRun,
 } from '@peer-agent/protocol';
 import {
+  decideLifecycle,
   formatGoalDeliveryHandoff,
   formatGoalDeliveryHandoffLamp,
   formatGoalDeliveryRoute,
@@ -243,6 +244,37 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
     failed: 'Failed',
   };
   return isZh ? zh[status] : en[status];
+}
+
+/**
+ * 头部状态以 protocol 的生命周期结论为准：executing 只是持久化计划状态，
+ * runner 已 blocked（如验证闸门未过）时实际应显示「由主 Bot 跟进」（ADR93：
+ * 技术阻塞是父代理的跟进项），不能永远标「执行中」。状态规则全部来自
+ * decideLifecycle，这里只补 executing 掩盖态的文案，不另立规则表。
+ */
+const PLAN_HEAD_LIFECYCLE_LABELS: Record<string, [string, string]> = {
+  waiting_agent: ['由主 Bot 跟进', 'Bot following up'],
+  waiting_user: ['需要你处理', 'Needs you'],
+};
+
+function planHeadStatus(plan: GoalPlan, isZh: boolean): { statusClass: string; label: string } {
+  if (plan.status === 'executing') {
+    const lifecycle = decideLifecycle({
+      planId: plan.planId,
+      title: '',
+      status: plan.status,
+      runnerStatus: plan.runner?.status,
+      blockedReason: plan.runner?.blockedReason,
+      interrupted: Boolean(plan.runner?.interruption),
+      // 与 session-facts 的 needsUser 判定同一条：blocked + manual_dod = 真实人工门。
+      ...(plan.runner?.status === 'blocked' && plan.runner?.blockedReason === 'manual_dod_confirmation_required'
+        ? { needsUser: true }
+        : {}),
+    });
+    const masked = PLAN_HEAD_LIFECYCLE_LABELS[lifecycle.status];
+    if (masked) return { statusClass: lifecycle.status, label: isZh ? masked[0] : masked[1] };
+  }
+  return { statusClass: plan.status, label: planStatusLabel(plan.status, isZh) };
 }
 
 function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
@@ -1731,6 +1763,7 @@ const PlanCard = memo(function PlanCard({
   );
   const nowMs = useLiveNowMs(timingLive);
   const elapsedLabel = formatGoalTimingLabel(plan, isZh, nowMs);
+  const headStatus = planHeadStatus(plan, isZh);
 
   return (
     <section
@@ -1750,8 +1783,8 @@ const PlanCard = memo(function PlanCard({
           aria-expanded={effectiveExpanded}
           title={awaitingLock ? (isZh ? '有待批准，需先处理' : 'Pending approval — resolve first') : undefined}
         >
-          <span className={`goal-plan-status goal-plan-status--${plan.status}`}>
-            {planStatusLabel(plan.status, isZh)}
+          <span className={`goal-plan-status goal-plan-status--${headStatus.statusClass}`}>
+            {headStatus.label}
           </span>
           <span className="goal-plan-title">{title}</span>
           {elapsedLabel ? (

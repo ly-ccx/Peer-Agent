@@ -9,6 +9,7 @@
 .bot-system:is(:hover, :focus-within) > .bot-reply-context > button { opacity: 1; pointer-events: auto; }
 @media (hover: none) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 @media (forced-colors: active) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
+.bot-reply-context > button .bot-avatar { width: 18px; height: 18px; flex-basis: 18px; }
 .bot-context-running { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--graphite-soft); }
 .bot-reply-context[data-running="true"] .bot-context-running { color: var(--graphite-base); }
 .bot-reply-context > button { flex-shrink: 1; max-width: calc(100% + 8px); }

@@ -27,6 +27,12 @@ export function createWatchPublisher({
     let delay = pollMs;
     if (!Number.isFinite(atMs)) return delay;
     for (const session of snapshots.get(workspaceId)?.sessions || []) {
+      if (session?.status === 'result_ready') {
+        // 结果等待收下的停滞锚点：到点即扫，让 verify 停滞及时交给唤醒。
+        const remaining = Date.parse(session.completedAt || '') + windowMs - atMs;
+        if (Number.isFinite(remaining) && remaining > 0) delay = Math.min(delay, remaining);
+        continue;
+      }
       if (!['running', 'verifying'].includes(session?.status)) continue;
       if (waiting(session)) continue;
       const anchor = Date.parse(session.status === 'verifying'

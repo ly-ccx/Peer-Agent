@@ -368,6 +368,15 @@ export interface ProjectInput {
   readonly createdAt: string;
 }
 
+/** Existing durable input receipt. A later handoff can fail after input was saved. */
+export interface ProjectAgentSubmitInputResult {
+  readonly ok: boolean;
+  readonly code?: string;
+  readonly message?: string;
+  readonly input?: ProjectInput;
+  readonly delivery?: 'queued' | 'user_intervened';
+}
+
 export type PendingApprovalState = 'open' | 'approved' | 'denied' | 'expired' | 'stale' | 'cancelled';
 
 export interface PendingApproval {

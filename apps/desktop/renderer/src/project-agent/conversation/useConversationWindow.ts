@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ConversationDisplayRow } from '../state/botConversationState';
+import { replyRowContains, type BotConversationViewRow } from '../state/botReplyContinuity';
 import { motionDurationMs, sendScrollProgress } from '../state/conversationMotion';
 import { conversationRowKey, conversationOffsets, conversationRowAt, conversationViewport, restoreConversationOffset } from '../state/conversationWindow';
 
 export { conversationRowKey } from '../state/conversationWindow';
 
 /** Owns scroll geometry and reading identity; no IPC or conversation data ownership. */
-export function useConversationWindow(rows: readonly ConversationDisplayRow[], highlightedId: string | null, highlightRequestId: number, followRequestId = 0) {
+export function useConversationWindow(rows: readonly BotConversationViewRow[], highlightedId: string | null, highlightRequestId: number, followRequestId = 0) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const originRef = useRef<HTMLDivElement>(null);
+  const tailRef = useRef<HTMLDivElement>(null);
+  const tailHeight = useRef(0);
   const heights = useRef(new Map<string, number>());
   const pinned = useRef(true);
   const observedTop = useRef<number | null>(null);
@@ -99,7 +101,9 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     if (!node) return;
     const measure = () => {
       setHeight(current => current === node.clientHeight ? current : node.clientHeight);
-      let changed = false;
+      const nextTailHeight = tailRef.current?.getBoundingClientRect().height ?? 0;
+      let changed = Math.abs(tailHeight.current - nextTailHeight) > 0.5;
+      tailHeight.current = nextTailHeight;
       for (const row of node.querySelectorAll<HTMLElement>('[data-conversation-row]')) {
         const key = row.dataset.conversationRow!, measured = row.getBoundingClientRect().height;
         if (measured > 0 && Math.abs((heights.current.get(key) ?? -1) - measured) > 0.5) {
@@ -111,6 +115,7 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(node);
+    if (tailRef.current) observer.observe(tailRef.current);
     for (const row of node.querySelectorAll<HTMLElement>('[data-conversation-row]')) observer.observe(row);
     return () => observer.disconnect();
   }, [keys, view.start, view.end]);
@@ -119,7 +124,7 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     if (!highlightedId) { located.current = null; return; }
     const request = `${highlightRequestId}:${highlightedId}`;
     if (located.current === request) return;
-    const index = rows.findIndex(row => row.type === 'message' && row.message.id === highlightedId), node = scrollerRef.current;
+    const index = rows.findIndex(row => replyRowContains(row, highlightedId)), node = scrollerRef.current;
     if (index < 0 || !node) return;
     located.current = request;
     stopSendScroll(); pinned.current = false;
@@ -129,7 +134,7 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     updateTop(node.scrollTop);
   }, [highlightedId, highlightRequestId, keys, offsets]);
 
-  return { scrollerRef, originRef, view, visibleRows: rows.slice(view.start, view.end), following, followLatest,
+  return { scrollerRef, originRef, tailRef, view, visibleRows: rows.slice(view.start, view.end), following, followLatest,
     interruptFollow: () => { if (sendScroll.current) { stopSendScroll(); remember(); pinned.current = false; setFollowing(false); } },
     holdPosition: () => { remember(); pinned.current = false; setFollowing(false); },
     onScroll: () => {

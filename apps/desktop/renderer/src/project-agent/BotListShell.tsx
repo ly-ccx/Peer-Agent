@@ -8,7 +8,7 @@ import { VersionBadge } from '../app/components/VersionBadge';
 import { AttentionSheet } from './AttentionSheet';
 import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
-import { botAvatarMood } from './state/botAvatarState';
+import { botAvatarMood, type BotAvatarMood } from './state/botAvatarState';
 import { BotList } from './BotList';
 import { AppMenu } from './AppMenu';
 import { NewBotSheet } from './NewBotSheet';
@@ -107,6 +107,10 @@ export function BotListShell({
   const [taskContext, setTaskContext] = useState<TaskConversationContext | null>(null);
   const [taskRequest, setTaskRequest] = useState<(TaskConversationRequest & { readonly workspaceId: string }) | null>(null);
   const [replyFlash, setReplyFlash] = useState<string | null>(null);
+  const [replyPresence, setReplyPresence] = useState<{ workspaceId: string; mood: BotAvatarMood | null } | null>(null);
+  const updateReplyPresence = useCallback((workspaceId: string, mood: BotAvatarMood | null) => {
+    setReplyPresence(current => current?.workspaceId === workspaceId && current.mood === mood ? current : { workspaceId, mood });
+  }, []);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [attention, setAttention] = useState<{ workspaceId?: string } | null>(null);
   const attentionRequestRef = useRef(0);
@@ -116,8 +120,11 @@ export function BotListShell({
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
-  const avatarMoods = useMemo(() => new Map(list.catalog.map(item => [item.workspaceId,
-    botAvatarMood(item.state, replyFlash === item.workspaceId)] as const)), [list.catalog, replyFlash]);
+  const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
+    const mood = botAvatarMood(item.state, replyFlash === item.workspaceId);
+    return [item.workspaceId, replyFlash !== item.workspaceId && mood !== 'needs_you' && (mood !== 'error' || replyPresence?.mood !== 'idle') && item.workspaceId === opened?.workspaceId
+      && replyPresence?.workspaceId === item.workspaceId && replyPresence.mood ? replyPresence.mood : mood] as const;
+  })), [list.catalog, replyFlash, opened?.workspaceId, replyPresence]);
   const openedAvatarMood = opened ? avatarMoods.get(opened.workspaceId) ?? botAvatarMood(opened.state) : 'idle';
   const work = useBotWorkSessions(opened?.workspaceId ?? null);
   const modelControls = useBotModels(opened?.workspaceId ?? null, opened?.profile ?? null, list.updateProfile);
@@ -467,6 +474,7 @@ export function BotListShell({
               avatarMood={openedAvatarMood}
               i18n={i18n}
               onReplyArrived={announceReply}
+              onReplyPresenceChange={updateReplyPresence}
               onLocateSession={setLocateSessionId}
               contextSessionId={drawerMemory.open && drawerMemory.tab === 'tasks' ? drawerMemory.sessionId : null}
               onTaskContext={setTaskContext}

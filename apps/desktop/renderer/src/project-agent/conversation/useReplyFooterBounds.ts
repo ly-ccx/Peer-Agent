@@ -13,7 +13,7 @@ export function useReplyFooterBounds() {
     function update() {
       if (!footer || !reply) return;
       const bubbles = [...reply.querySelectorAll<HTMLElement>(
-        ':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
+        ':scope > .bot-reply-body, :scope > .bot-continuous-paragraphs > .bot-reply-body, :scope > .bot-narration:not(.bot-continuous-paragraphs) .markdown-content > *, '
         + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
         + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body',
       )];

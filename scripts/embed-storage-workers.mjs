@@ -11,11 +11,11 @@ writeFileSync(path.join(root, 'packages/conversation-store/src/sqlite-runtime.ge
 const builtins = `const {createHash,randomUUID}=require('node:crypto');
 const {createRequire}=require('node:module');
 const {Worker,isMainThread,parentPort,workerData}=require('node:worker_threads');
-const {copyFile,truncate}=require('node:fs/promises');
-const {mkdirSync,readFileSync,renameSync,existsSync,statSync,openSync,closeSync,fsyncSync,writeSync,fstatSync,readSync,readdirSync}=require('node:fs');
+const {copyFile,truncate,open:legacyOpen}=require('node:fs/promises');
+const {realpathSync,linkSync,unlinkSync,writeFileSync,mkdirSync,readFileSync,renameSync,existsSync,statSync,openSync,closeSync,fsyncSync,writeSync,fstatSync,readSync,readdirSync}=require('node:fs');
 const path=require('node:path');\n`;
 const targets = [
-  { output: 'packages/runtime-node/src/project-agent/coordination-worker-source.generated.mjs', name: 'COORDINATION_WORKER_SOURCE', files: ['packages/runtime-node/src/project-agent/coordination-kernel.mjs', 'packages/runtime-node/src/project-agent/work-delta.mjs', 'packages/runtime-node/src/project-agent/work-coordination.mjs', 'packages/runtime-node/src/project-agent/journal-lines.mjs', 'packages/runtime-node/src/project-agent/coordination-storage-v2.mjs'] },
+  { output: 'packages/runtime-node/src/project-agent/coordination-worker-source.generated.mjs', name: 'COORDINATION_WORKER_SOURCE', files: ['packages/runtime-node/src/project-agent/coordination-kernel.mjs', 'packages/runtime-node/src/project-agent/work-delta.mjs', 'packages/runtime-node/src/project-agent/work-coordination.mjs', 'packages/runtime-node/src/project-agent/journal-lines.mjs', 'packages/runtime-node/src/project-agent/coordination-legacy-integrity.mjs', 'packages/runtime-node/src/project-agent/coordination-storage-v2.mjs'] },
   { output: 'packages/conversation-store/src/interaction-worker-source.generated.mjs', name: 'INTERACTION_WORKER_SOURCE', files: ['packages/conversation-store/src/interaction-reader.mjs'] },
 ];
 for (const target of targets) {

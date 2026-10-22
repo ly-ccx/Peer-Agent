@@ -4,6 +4,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { copyFile, truncate } from 'node:fs/promises';
 import { mkdirSync, readFileSync, renameSync, existsSync, statSync, openSync, closeSync, fsyncSync, writeSync, fstatSync, readSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { prepareLegacyIntegrity, acceptsLegacyIntegrity } from './coordination-legacy-integrity.mjs';
 import { journalLines } from './journal-lines.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { encodeWorkUpdate } from './work-delta.mjs';
@@ -148,7 +149,7 @@ function anchor(file, size) {
     return digest.digest('hex');
   } finally { closeSync(fd); }
 }
-function rebuild({ dir, legacy, target, generation, requireHead = false }) {
+function rebuild({ dir, legacy, target, generation, requireHead = false, legacyIntegrity }) {
   const db = database(target), versions = {}, options = { blobs: path.join(dir, 'blobs'), receiptCache: { workId: null, ids: new Set() } };
   try {
     db.exec('BEGIN IMMEDIATE');
@@ -161,9 +162,13 @@ function rebuild({ dir, legacy, target, generation, requireHead = false }) {
     if (requireHead && !existsSync(headFile)) throw fail('coordination_head_missing');
     if (existsSync(headFile)) {
       const expected = readHead(headFile, generation);
-      if (expected.legacyVersion !== token(legacy)) throw fail('coordination_legacy_changed');
+      if (!acceptsLegacyIntegrity(path.dirname(dir), legacy, expected, legacyIntegrity)) throw fail('coordination_legacy_changed');
       if ((getMeta(db, 'revision') || 0) < expected.revision
         || (getMeta(db, 'revision') || 0) === expected.revision && (getMeta(db, 'eventHash') || '') !== expected.hash) throw fail('coordination_journal_missing');
+    }
+    if (legacyIntegrity) {
+      if (token(legacy) !== legacyIntegrity.version) throw fail('coordination_read_changed');
+      putMeta(db, 'legacyIntegrity', legacyIntegrity);
     }
     putMeta(db, 'generation', generation); putMeta(db, 'sources', versions); db.exec('COMMIT');
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
@@ -185,7 +190,6 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (manifest && next.generation !== manifest.generation) { db?.close(); db = undefined; cached = undefined; }
     manifest = next;
     if (!existsSync(headFile)) throw fail('coordination_head_missing');
-    if (manifest.legacyVersion !== token(legacyFile)) throw fail('coordination_legacy_changed');
     if (!existsSync(pointerFile)) throw fail('coordination_recovery_pending');
     let pointer;
     try { pointer = JSON.parse(readFileSync(pointerFile, 'utf8')); } catch { throw fail('coordination_index_corrupt'); }
@@ -201,6 +205,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       db = database(indexFile, { derived: true }); dbIdentity = identity;
       if (db.prepare('PRAGMA quick_check(1)').get().quick_check !== 'ok') throw fail('coordination_index_corrupt');
     }
+    if (!acceptsLegacyIntegrity(directory, legacyFile, manifest, getMeta(db, 'legacyIntegrity'))) throw fail('coordination_legacy_changed');
     if (getMeta(db, 'generation') !== manifest.generation) throw fail('coordination_recovery_pending');
     const previous = getMeta(db, 'sources') || {}, files = sourceFiles(dir, legacyFile);
     if (Object.keys(previous).some(file => !files.includes(file))) throw fail('coordination_read_changed');
@@ -231,19 +236,27 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (preparing) return preparing;
     preparing = (async () => {
       assertOwner();
-      try { load(); finishRecovery(); return; } catch (error) {
-        if (!['coordination_recovery_pending', 'coordination_read_changed', 'coordination_partial_tail'].includes(error.code) && !corruptIndex(error)) throw error;
+      try {
+        load();
+        // A matching derived receipt was already checked by load. Only the
+        // original pre-seal baseline needs a one-time proof on this fast path.
+        if (manifest.legacyVersion === token(legacyFile)) await prepareLegacyIntegrity({ directory, legacyFile, baseline: manifest, assertOwner, onRead });
+        assertOwner(); load(); finishRecovery(); return;
+      } catch (error) {
+        if (!['coordination_recovery_pending', 'coordination_read_changed', 'coordination_partial_tail', 'coordination_legacy_changed'].includes(error.code) && !corruptIndex(error)) throw error;
       }
       const priorHead = existsSync(headFile) ? readHead(headFile) : null;
-      if (priorHead && priorHead.legacyVersion !== token(legacyFile)) throw fail('coordination_legacy_changed');
       const generation = existsSync(manifestFile) ? JSON.parse(readFileSync(manifestFile, 'utf8')).generation
         : priorHead?.generation ?? randomUUID();
+      const baseline = existsSync(manifestFile) ? JSON.parse(readFileSync(manifestFile, 'utf8')) : priorHead;
+      const legacyIntegrity = baseline ? await prepareLegacyIntegrity({ directory, legacyFile, baseline, assertOwner, onRead }) : null;
+      assertOwner();
       mkdirSync(indexDirectory, { recursive: true });
       const filename = `coordination-${randomUUID()}.sqlite`, published = path.join(indexDirectory, filename);
       const target = `${published}.tmp`;
       const requireHead = existsSync(manifestFile) || existsSync(headFile);
       const build = () => new Promise((resolve, reject) => {
-        const worker = new Worker(COORDINATION_WORKER_SOURCE, { eval: true, ...(!process.versions.bun ? { resourceLimits: { maxOldGenerationSizeMb: 192 } } : {}), workerData: { coordinationRebuild: { dir, legacy: legacyFile, target, generation, requireHead } } });
+        const worker = new Worker(COORDINATION_WORKER_SOURCE, { eval: true, ...(!process.versions.bun ? { resourceLimits: { maxOldGenerationSizeMb: 192 } } : {}), workerData: { coordinationRebuild: { dir, legacy: legacyFile, target, generation, requireHead, legacyIntegrity } } });
         let settled = false;
         const finish = error => { if (settled) return; settled = true; clearTimeout(timer); if (error) { void worker.terminate(); reject(error); } else resolve(); };
         const timer = setTimeout(() => finish(fail('coordination_recovery_timeout')), 300000);
@@ -277,7 +290,11 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         let legacyVersion;
         try {
           legacyVersion = getMeta(candidate, 'sources')?.[legacyFile] || 'missing';
-          if (legacyVersion !== token(legacyFile)) throw fail('coordination_legacy_changed');
+          if (!priorHead && legacyVersion !== token(legacyFile)) throw fail('coordination_legacy_changed');
+          // Preserve an earlier activation marker when only its manifest was lost.
+          legacyVersion = priorHead?.legacyVersion ?? legacyVersion;
+          await prepareLegacyIntegrity({ directory, legacyFile, baseline: { generation, legacyVersion }, assertOwner, onRead });
+          assertOwner();
           durable(headFile, JSON.stringify({ generation, legacyVersion, revision: getMeta(candidate, 'revision') || 0, hash: getMeta(candidate, 'eventHash') || '' }));
         }
         finally { candidate.close(); }
