@@ -14,6 +14,6 @@ export function botAvatarMood(state: BotRowState, replyArrived = false): BotAvat
   if (state.agentStatus === 'error') return 'error';
   if (state.agentStatus === 'waiting_provider') return 'waiting_provider';
   if (state.agentStatus === 'thinking') return 'thinking';
-  if (state.running > 0) return 'working';
+  // Child tasks have their own status strip; they do not keep the bot in a reply animation.
   return 'idle';
 }

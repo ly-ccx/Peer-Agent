@@ -7,7 +7,6 @@ import {
   repliedUserIds,
   type BotChatMessage,
   type ConversationRow,
-  type ConversationDisplayRow,
   type BotToolRound,
 } from '../state/botConversationState';
 import { BotAvatar } from '../BotAvatar';
@@ -16,7 +15,8 @@ import { CardView } from './CardView';
 import { ReplyBubble } from './ReplyBubble';
 import { UserBubble } from './UserBubble';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
-import { LiveReply } from './LiveReply';
+import { ContinuousReply } from './ContinuousReply';
+import { replyRowContains, replyRowRunning, replyRowMood, type BotConversationViewRow } from '../state/botReplyContinuity';
 import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
@@ -47,16 +47,16 @@ export function BotMessageList({
   onLocateSession,
   onOpenDetails,
   followRequestId = 0,
-  waiting = false,
+  onReload = () => {},
   focusTaskRequest = null,
 }: {
   readonly workspaceId: string;
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
-  readonly rows: readonly ConversationDisplayRow[];
+  readonly rows: readonly BotConversationViewRow[];
   readonly followRequestId?: number;
-  readonly waiting?: boolean;
+  readonly onReload?: () => void;
   readonly hasOlder?: boolean;
   readonly olderError?: boolean;
   readonly onLoadOlder?: () => Promise<void>;
@@ -73,7 +73,7 @@ export function BotMessageList({
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scroll = useConversationWindow(rows, highlightedId, highlightRequestId, followRequestId);
-  const taskMessageVisible = scroll.visibleRows.some(row => row.type === 'message' && row.message.id === focusTaskRequest?.messageId);
+  const taskMessageVisible = scroll.visibleRows.some(row => replyRowContains(row, focusTaskRequest?.messageId));
   useEffect(() => {
     if (!focusTaskRequest?.messageId || !taskMessageVisible) return;
     const root = scroll.scrollerRef.current;
@@ -84,9 +84,9 @@ export function BotMessageList({
     const target = card ?? message;
     if (target) { if (!card) target.tabIndex = -1; target.focus({ preventScroll: true }); }
   }, [focusTaskRequest, taskMessageVisible, scroll.scrollerRef]);
-  const highlighted = useMessageHighlight(highlightedId, highlightRequestId, scroll.visibleRows.some(row => row.type === 'message' && row.message.id === highlightedId));
+  const highlighted = useMessageHighlight(highlightedId, highlightRequestId, scroll.visibleRows.some(row => replyRowContains(row, highlightedId)));
   const references = replyReferencesForRows(rows);
-  const messages = rows.flatMap((row) => (row.type === 'message' ? [row.message] : []));
+  const messages = rows.flatMap(row => row.type === 'reply' ? [...row.messages] : row.type === 'message' ? [row.message] : []);
   const anchors = replyAnchorsForMessages(messages, { user: i18n.t('projectAgent.chat.you'), bot: label });
   const replied = repliedUserIds(messages);
   const loadOlder = async () => {
@@ -139,13 +139,15 @@ export function BotMessageList({
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
         <div key={conversationRowKey(row)} className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`} data-conversation-row={conversationRowKey(row)}>
-        {row.type === 'activity' || row.type === 'message' && (['agent_reply', 'agent_turn'].includes(row.message.kind)
+        {row.type === 'reply' || row.type === 'message' && (['agent_reply', 'agent_turn'].includes(row.message.kind)
           || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')
             && (!isRetiredRecovery(row.message.cards) || Boolean(row.narration?.length))) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId}
-            animate={row.type === 'activity'} mood={row.type === 'activity' ? avatarMood : 'idle'} /><span>{label}</span></div>
+            animate={row.type === 'reply' && replyRowRunning(row)} mood={row.type === 'reply' ? replyRowMood(row) : 'idle'} /><span>{label}</span></div>
         ) : null}
-        {row.type === 'activity' ? <LiveReply referenceIds={references.get(row) ?? []} activity={row.activity} i18n={i18n} anchors={anchors} onJump={onJump} onOpenDetails={onOpenDetails ? () => onOpenDetails(row.activity.turnId) : undefined} /> : row.type === 'separator' ? (
+        {row.type === 'reply' ? <ContinuousReply workspaceId={workspaceId} reply={row} referenceIds={references.get(row) ?? []}
+          i18n={i18n} anchors={anchors} highlighted={replyRowContains(row, highlighted)} onJump={onJump} onQuote={onQuote}
+          onReload={onReload} onOpenDetails={onOpenDetails} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
@@ -205,7 +207,6 @@ export function BotMessageList({
       {scroll.view.after > 0 ? (
         <div className="bot-thread-spacer" style={{ height: scroll.view.after }} />
       ) : null}
-      {waiting ? <p className="bot-live-status" role="status">{i18n.t('projectAgent.chat.waiting')}</p> : null}
     </div>
     {!scroll.following ? <button type="button" className="bot-thread-latest" aria-label={i18n.t('projectAgent.chat.latest')} title={i18n.t('projectAgent.chat.latest')} onClick={scroll.followLatest}><PeerIcon name="chevronDown" size={18} /></button> : null}
     </div>

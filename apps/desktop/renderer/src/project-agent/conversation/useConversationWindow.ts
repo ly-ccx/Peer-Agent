@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ConversationDisplayRow } from '../state/botConversationState';
+import { replyRowContains, type BotConversationViewRow } from '../state/botReplyContinuity';
 import { motionDurationMs, sendScrollProgress } from '../state/conversationMotion';
 import { conversationRowKey, conversationOffsets, conversationRowAt, conversationViewport, restoreConversationOffset } from '../state/conversationWindow';
 
 export { conversationRowKey } from '../state/conversationWindow';
 
 /** Owns scroll geometry and reading identity; no IPC or conversation data ownership. */
-export function useConversationWindow(rows: readonly ConversationDisplayRow[], highlightedId: string | null, highlightRequestId: number, followRequestId = 0) {
+export function useConversationWindow(rows: readonly BotConversationViewRow[], highlightedId: string | null, highlightRequestId: number, followRequestId = 0) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const originRef = useRef<HTMLDivElement>(null);
   const heights = useRef(new Map<string, number>());
@@ -119,7 +119,7 @@ export function useConversationWindow(rows: readonly ConversationDisplayRow[], h
     if (!highlightedId) { located.current = null; return; }
     const request = `${highlightRequestId}:${highlightedId}`;
     if (located.current === request) return;
-    const index = rows.findIndex(row => row.type === 'message' && row.message.id === highlightedId), node = scrollerRef.current;
+    const index = rows.findIndex(row => replyRowContains(row, highlightedId)), node = scrollerRef.current;
     if (index < 0 || !node) return;
     located.current = request;
     stopSendScroll(); pinned.current = false;

@@ -1078,7 +1078,7 @@ export interface BootstrapPreloadApi {
     attachmentRefs?: readonly string[];
     createdAt?: string;
     answerTo?: string;
-  }) => Promise<{ ok: boolean; code?: string }>;
+  }) => Promise<import('@peer-agent/protocol').ProjectAgentSubmitInputResult>;
   readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[]; presentationOnly?: boolean; processFor?: string; view?: import('@peer-agent/protocol').BotConversationReadView }) => Promise<{ ok: boolean; code?: string; cards?: readonly Record<string, unknown>[]; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activeReplyQuestionId?: import('@peer-agent/protocol').BotDecisionSnapshot['activeReplyQuestionId']; processMessageId?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
   readonly projectAgentReadEvidence: (params: ProjectAgentEvidenceReadRequest) => Promise<ProjectAgentEvidenceReadResult>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;

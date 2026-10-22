@@ -421,6 +421,7 @@
 
 .bot-user.is-anchored > .bot-user-content,
 .bot-reply.is-anchored > .bot-reply-body,
+.bot-reply.is-anchored > .bot-continuous-paragraphs > .bot-reply-body,
 .bot-system.is-anchored > .bot-card {
   background: var(--control-fill-hover);
 }
@@ -585,7 +586,8 @@
 .bot-reply > .bot-reply-body,
 .bot-stopped-reply > .bot-reply-body,
 .bot-unavailable-reply > .bot-reply-body,
-.bot-narration .markdown-content > * {
+.bot-continuous-paragraphs > .bot-reply-body,
+.bot-narration:not(.bot-continuous-paragraphs) .markdown-content > * {
   --graphite-soft: var(--bot-reply-secondary);
   --za-text-soft: var(--bot-reply-secondary);
   box-sizing: border-box;
@@ -615,17 +617,17 @@
 }
 
 .bot-narration .markdown-content > * { margin: 0; }
-.bot-narration .markdown-content > :is(ul, ol) { padding-left: 32px; }
+.bot-narration:not(.bot-continuous-paragraphs) .markdown-content > :is(ul, ol) { padding-left: 32px; }
 .bot-reply > .bot-reply-body { align-self: flex-start; }
 
 /* New public paragraphs enter once; incoming characters have no artificial delay. */
-.bot-narration[data-live="true"] .markdown-content > *,
+.bot-narration:not(.bot-continuous-paragraphs)[data-live="true"] .markdown-content > *,
 .bot-streaming-conclusion .markdown-content > * {
   animation: motion-enter-fade 160ms var(--za-ease-out) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bot-narration[data-live="true"] .markdown-content > *,
+  .bot-narration:not(.bot-continuous-paragraphs)[data-live="true"] .markdown-content > *,
   .bot-streaming-conclusion .markdown-content > * { animation: none; }
 }
 

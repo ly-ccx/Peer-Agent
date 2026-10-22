@@ -20,18 +20,20 @@ const SURFACING = {
 } as const;
 
 /** Reply metadata stays discoverable without competing with the answer or pending work. */
-export function ReplyContext({ i18n, onOpenDetails, activity }: {
+export function ReplyContext({ i18n, onOpenDetails, activity, statusLabel, busy = false, onRefresh }: {
   readonly i18n: I18nRuntime; readonly onOpenDetails?: () => void; readonly activity?: ProjectAgentActivity;
+  readonly statusLabel?: string | null; readonly busy?: boolean; readonly onRefresh?: () => void;
 }) {
   const ref = useReplyFooterBounds();
-  const label = replyActivityLabel(activity, i18n);
+  const label = statusLabel === undefined ? replyActivityLabel(activity, i18n) : statusLabel;
   return <div ref={ref} className="bot-reply-context" data-running={Boolean(label)}>
-    <button type="button" aria-label={i18n.t('projectAgent.chat.context.details')} title={i18n.t('projectAgent.chat.context.details')} onClick={event => {
+    <button type="button" disabled={!onOpenDetails} aria-label={label ? `${label} · ${i18n.t('projectAgent.chat.context.details')}` : i18n.t('projectAgent.chat.context.details')} title={i18n.t('projectAgent.chat.context.details')} onClick={event => {
       event.currentTarget.focus({ preventScroll: true });
       onOpenDetails?.();
-    }}><PeerIcon name="panelRight" size={14} />{label
+    }}><PeerIcon name={label ? busy ? 'loader' : 'info' : 'panelRight'} size={14} className={busy ? 'motion-spin' : undefined} />{label
       ? <span className="bot-context-running" role="status">{label}</span>
       : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
+    {onRefresh ? <button type="button" onClick={onRefresh}>{i18n.t('projectAgent.chat.reply.refresh')}</button> : null}
   </div>;
 }
 

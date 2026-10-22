@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { ProjectAgentActivity, ProjectInputAttachment } from '@peer-agent/protocol';
-import { attachBotProcesses, hasReplyForInput, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
+import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
+import { continuousReplyRows, type AwaitingBotInput } from './botReplyContinuity';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
 import { createConversationPager } from './conversationPager.ts';
@@ -11,7 +12,6 @@ import {
   applyOptimistic,
   conversationRows,
   optimisticInputMessageId,
-  showAgentThinking,
   type BotChatMessage,
   type ConversationDisplayRow,
   type PendingBotInput,
@@ -70,7 +70,7 @@ export function useBotConversation(workspaceId: string) {
   const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
   const [cardsError, setCardsError] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
-  const [awaitingReply, setAwaitingReply] = useState<{ inputId: string; createdAt: string } | null>(null);
+  const [awaitingInputs, setAwaitingInputs] = useState<readonly AwaitingBotInput[]>([]);
   const [hasOlder, setHasOlder] = useState(false);
   const [olderError, setOlderError] = useState(false);
   const [activity, setActivity] = useState<ProjectAgentActivity | null>(null);
@@ -79,6 +79,8 @@ export function useBotConversation(workspaceId: string) {
   const [followRequestId, setFollowRequestId] = useState(0);
   const pagerRef = useRef<ReturnType<typeof createConversationPager> | null>(null);
   const generationRef = useRef(0);
+  const activityEventRef = useRef(0);
+  const replyIdentitiesRef = useRef(new Map<string, string>());
   const refreshRef = useRef<(() => void) | null>(null);
 
   const dropEchoed = useCallback((next: readonly BotChatMessage[]) => {
@@ -93,14 +95,22 @@ export function useBotConversation(workspaceId: string) {
     setMessages([]);
     setFamiliarizeOffer(null);
     setPending([]);
-    setAwaitingReply(null);
+    setAwaitingInputs([]);
     setHasOlder(false);
     setOlderError(false);
     setStatus('loading');
     setCards([]); setCardsError(false); setRefreshError(false);
     setActivity(null); setStopping(false); setStopError(false);
+    replyIdentitiesRef.current = new Map();
     const pager = createConversationPager({
-      read: params => clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true, view: 'interactions' }),
+      read: async params => {
+        const revision = activityEventRef.current;
+        const result = await clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true, view: 'interactions' });
+        // A fresh host snapshot can prove an old stream is gone. A late read cannot erase a newer push.
+        if (!params.before && result?.ok && result.activity === null && generationRef.current === ticket
+          && activityEventRef.current === revision) setActivity(null);
+        return result;
+      },
       publish: snapshot => {
         if (generationRef.current !== ticket) return;
         setMessages(snapshot.messages);
@@ -139,6 +149,7 @@ export function useBotConversation(workspaceId: string) {
     const offFacts = clientApi.onProjectAgentChanged(onChange);
     const offActivity = clientApi.onProjectAgentActivity(event => {
       if (generationRef.current !== ticket || event.workspaceId !== workspaceId) return;
+      activityEventRef.current += 1;
       setActivity(current => mergeBotActivity(current, event, workspaceId));
       if (['awaiting_permission', 'done', 'error', 'stopped', 'disposed'].includes(event.phase)) void refresh.request();
     });
@@ -169,11 +180,14 @@ export function useBotConversation(workspaceId: string) {
   }, []);
 
   useEffect(() => {
-    if (awaitingReply && hasReplyForInput(messages, awaitingReply.inputId)) setAwaitingReply(null);
-  }, [awaitingReply, messages]);
+    const answered = answeredInputIds(messages);
+    setAwaitingInputs(current => current.some(input => answered.has(`input-${input.inputId}`))
+      ? current.filter(input => !answered.has(`input-${input.inputId}`)) : current);
+  }, [messages]);
 
   const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string, answerTo?: string, attachments: readonly ProjectInputAttachment[] = []) => {
     const ticket = generationRef.current;
+    setAwaitingInputs(current => [...current.filter(input => input.inputId !== inputId), { inputId, createdAt }]);
     setPending((current) => {
       const rest = current.filter((item) => item.inputId !== inputId);
       return [...rest, { inputId, text, quoteRefs, attachments, createdAt, state: 'sending', ...(answerTo ? { answerTo } : {}) }];
@@ -190,16 +204,22 @@ export function useBotConversation(workspaceId: string) {
       });
       if (generationRef.current !== ticket) return { ok: false, code: 'STALE_INPUT' };
       if (!result?.ok) {
+        if (result?.input?.inputId === inputId) {
+          setPending(current => acknowledgeInput(current, inputId));
+          setAwaitingInputs(current => current.map(input => input.inputId === inputId ? { ...input, deliveryIssue: true } : input));
+          return result;
+        }
+        setAwaitingInputs(current => current.filter(input => input.inputId !== inputId));
         setPending((current) => current.map((item) => (
           item.inputId === inputId ? { ...item, state: 'failed' } : item
         )));
         return result;
       }
       setPending(current => acknowledgeInput(current, inputId));
-      setAwaitingReply(current => current && current.createdAt > createdAt ? current : { inputId, createdAt });
       return result;
     } catch {
       if (generationRef.current !== ticket) return { ok: false, code: 'STALE_INPUT' };
+      setAwaitingInputs(current => current.filter(input => input.inputId !== inputId));
       setPending((current) => current.map((item) => (
         item.inputId === inputId ? { ...item, state: 'failed' } : item
       )));
@@ -237,13 +257,14 @@ export function useBotConversation(workspaceId: string) {
     : decorated, [familiarizeOffer, decorated]);
   const shown = useMemo(() => hideAcknowledgedQuestions(applyOptimistic(offered, pending)), [offered, pending]);
   const historyRows = useMemo(() => conversationRows(shown), [shown]);
-  const live = visibleBotActivity(activity, shown);
   const rows: ConversationDisplayRow[] = useMemo(() => {
     const next: ConversationDisplayRow[] = attachBotProcesses(historyRows, shown, activity);
     const current = visibleBotActivity(activity, shown);
     if (current) next.push({ type: 'activity', activity: current });
     return next;
   }, [historyRows, shown, activity]);
+  const viewRows = useMemo(() => continuousReplyRows(rows, shown, awaitingInputs, pending, replyIdentitiesRef.current,
+    stopping ? activity?.turnId : undefined), [rows, shown, awaitingInputs, pending, stopping, activity?.turnId]);
   const stop = async () => {
     if (!isActivityRunning(activity) || !activity || stopping) return;
     const ticket = generationRef.current;
@@ -263,7 +284,7 @@ export function useBotConversation(workspaceId: string) {
     cardsError, refreshError,
     messages: shown,
     rows,
-    thinking: !live && !isActivityRunning(activity) && showAgentThinking(pending, awaitingReply !== null),
+    viewRows,
     generating: isActivityRunning(activity),
     activeModelSelection: isActivityRunning(activity) ? activity?.modelSelection : undefined,
     stopping, stopError, stop, followRequestId,
