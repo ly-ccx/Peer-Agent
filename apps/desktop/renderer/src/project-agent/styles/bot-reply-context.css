@@ -1,5 +1,5 @@
 .bot-reply-context, .bot-delegated-work { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.6; }
-.bot-reply-context { display: flex; align-items: center; min-height: 32px; margin-top: 8px; max-width: 100%; box-sizing: border-box; font-size: 12px; }
+.bot-reply-context { display: flex; align-items: center; min-height: 32px; margin-top: 8px; max-width: calc(100% - var(--bot-reply-inset, 14px) - 14px); box-sizing: border-box; font-size: 12px; }
 .bot-delegated-work summary, .bot-background-work > summary { list-style: none; cursor: pointer; }
 .bot-delegated-work summary::-webkit-details-marker, .bot-background-work > summary::-webkit-details-marker { display: none; }
 .bot-reply-context > button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; margin-inline-start: -8px; padding: 6px 8px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 140ms ease, background 140ms ease, color 140ms ease; }

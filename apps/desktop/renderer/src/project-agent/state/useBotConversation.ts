@@ -5,6 +5,7 @@ import { attachBotProcesses, hasReplyForInput, isActivityRunning, mergeBotActivi
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
 import { createConversationPager } from './conversationPager.ts';
+import { mergeConversationCards, statusAfterRefreshFailure } from './conversationSections.ts';
 import {
   acknowledgeInput,
   applyOptimistic,
@@ -66,6 +67,9 @@ export function useBotConversation(workspaceId: string) {
   const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
   const [pending, setPending] = useState<readonly PendingBotInput[]>([]);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
+  const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
+  const [cardsError, setCardsError] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
   const [awaitingReply, setAwaitingReply] = useState<{ inputId: string; createdAt: string } | null>(null);
   const [hasOlder, setHasOlder] = useState(false);
   const [olderError, setOlderError] = useState(false);
@@ -75,6 +79,7 @@ export function useBotConversation(workspaceId: string) {
   const [followRequestId, setFollowRequestId] = useState(0);
   const pagerRef = useRef<ReturnType<typeof createConversationPager> | null>(null);
   const generationRef = useRef(0);
+  const refreshRef = useRef<(() => void) | null>(null);
 
   const dropEchoed = useCallback((next: readonly BotChatMessage[]) => {
     setPending((current) => current.filter((item) => !next.some((message) => (
@@ -92,9 +97,10 @@ export function useBotConversation(workspaceId: string) {
     setHasOlder(false);
     setOlderError(false);
     setStatus('loading');
+    setCards([]); setCardsError(false); setRefreshError(false);
     setActivity(null); setStopping(false); setStopError(false);
     const pager = createConversationPager({
-      read: params => clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true }),
+      read: params => clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true, view: 'interactions' }),
       publish: snapshot => {
         if (generationRef.current !== ticket) return;
         setMessages(snapshot.messages);
@@ -103,13 +109,23 @@ export function useBotConversation(workspaceId: string) {
         setHasOlder(snapshot.hasOlder);
         if ('familiarizeOffer' in snapshot) setFamiliarizeOffer(readFamiliarizeOffer(snapshot.familiarizeOffer));
         setStatus('ready');
+        setRefreshError(false);
       },
     });
     pagerRef.current = pager;
+    const cardRefresh = createConversationRefresh(async () => {
+      try {
+        const result = await clientApi.projectAgentReadConversation({ workspaceId, view: 'cards' });
+        if (generationRef.current !== ticket) return;
+        if (!result.ok) { setCardsError(true); return; }
+        setCards(result.cards ?? []); setCardsError(false);
+      } catch { if (generationRef.current === ticket) setCardsError(true); }
+    }, { delayMs: 80 });
     const refresh = createConversationRefresh(async () => {
       try { await pager.refresh(); }
-      catch { if (generationRef.current === ticket) setStatus('error'); }
+      catch { if (generationRef.current === ticket) { setStatus(statusAfterRefreshFailure); setRefreshError(true); } }
       if (generationRef.current === ticket) {
+        void cardRefresh.request();
         void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
       }
     }, { delayMs: 80 });
@@ -118,6 +134,7 @@ export function useBotConversation(workspaceId: string) {
       if (ids.length > 0 && !ids.includes(workspaceId)) return;
       void refresh.request();
     };
+    refreshRef.current = () => { void refresh.request(); };
     const offMessages = clientApi.onProjectAgentConversationChanged(onChange);
     const offFacts = clientApi.onProjectAgentChanged(onChange);
     const offActivity = clientApi.onProjectAgentActivity(event => {
@@ -128,8 +145,10 @@ export function useBotConversation(workspaceId: string) {
     void refresh.request();
     return () => {
       refresh.stop();
+      cardRefresh.stop();
       pager.stop();
       if (pagerRef.current === pager) pagerRef.current = null;
+      refreshRef.current = null;
       generationRef.current += 1;
       offMessages?.();
       offFacts?.();
@@ -188,14 +207,15 @@ export function useBotConversation(workspaceId: string) {
     }
   }, [workspaceId]);
 
+  const decorated = useMemo(() => mergeConversationCards(messages, cardsError ? [] : cards), [messages, cards, cardsError]);
   const send = useCallback(async (text: string, quoteRefs: readonly string[] = [], attachments: readonly ProjectInputAttachment[] = []) => {
     const trimmed = text.trim();
     if (!trimmed && !attachments.length) return;
     const inputId = crypto.randomUUID();
     setFollowRequestId(value => value + 1);
-    const answerTo = questionForInput(applyOptimistic(messages, pending), quoteRefs);
+    const answerTo = questionForInput(applyOptimistic(decorated, pending), quoteRefs);
     await submit(inputId, trimmed, quoteRefs, new Date().toISOString(), answerTo, attachments);
-  }, [submit, messages, pending]);
+  }, [submit, decorated, pending]);
 
   const answer = useCallback(async (text: string, answerTo?: string) => {
     const trimmed = text.trim();
@@ -212,9 +232,9 @@ export function useBotConversation(workspaceId: string) {
 
   useEffect(() => { if (!isActivityRunning(activity)) setStopping(false); }, [activity]);
 
-  const offered = useMemo(() => familiarizeOffer && !messages.some(message => ['user_input', 'agent_reply'].includes(message.kind))
-    ? [...messages, familiarizeMessage(familiarizeOffer, messages[messages.length - 1]?.createdAt || '')]
-    : messages, [familiarizeOffer, messages]);
+  const offered = useMemo(() => familiarizeOffer && !decorated.some(message => ['user_input', 'agent_reply'].includes(message.kind))
+    ? [...decorated, familiarizeMessage(familiarizeOffer, decorated[decorated.length - 1]?.createdAt || '')]
+    : decorated, [familiarizeOffer, decorated]);
   const shown = useMemo(() => hideAcknowledgedQuestions(applyOptimistic(offered, pending)), [offered, pending]);
   const historyRows = useMemo(() => conversationRows(shown), [shown]);
   const live = visibleBotActivity(activity, shown);
@@ -239,6 +259,8 @@ export function useBotConversation(workspaceId: string) {
 
   return {
     status,
+    reload: () => refreshRef.current?.(),
+    cardsError, refreshError,
     messages: shown,
     rows,
     thinking: !live && !isActivityRunning(activity) && showAgentThinking(pending, awaitingReply !== null),

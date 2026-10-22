@@ -81,6 +81,8 @@ export function createBotDirectory({
   registry = null,
   readMessages = () => [],
   readConversationMessages = null,
+  readInteractionPage = null,
+  readInteractionProcess = null,
   readMessagesBatch = null,
   readSummaryMessages = null,
   readSummaryMessagesBatch = null,
@@ -227,15 +229,19 @@ export function createBotDirectory({
     };
   }
 
-  function readConversation(workspaceId, { limit = 50, before = null, kinds = null, latest = false, presentationOnly = false, processFor = null } = {}) {
+  function readConversation(workspaceId, { limit = 50, before = null, kinds = null, latest = false, presentationOnly = false, processFor = null, view = null } = {}, selectedMessages = null) {
     const profile = profiles.read(workspaceId);
     if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
+    if (view === 'cards') {
+      try { return { ok: true, cards: readCards(workspaceId) || [] }; }
+      catch (error) { return { ok: false, cards: [], code: error?.code || 'CARDS_UNAVAILABLE' }; }
+    }
     const allowed = Array.isArray(kinds) ? new Set(kinds.filter((kind) => typeof kind === 'string')) : null;
     if (processFor !== null && (typeof processFor !== 'string' || !processFor.trim() || processFor.length > 500 || presentationOnly)) return fail('INVALID_INPUT');
     const cards = readCards(workspaceId) || [];
     let processMessageId = null;
-    let filtered = (presentationOnly && typeof readConversationMessages === 'function'
-      ? readConversationMessages(profile.agentConversationId) || [] : messagesOf(profile)).filter((message) => {
+    let filtered = (selectedMessages || (presentationOnly && typeof readConversationMessages === 'function'
+      ? readConversationMessages(profile.agentConversationId) || [] : messagesOf(profile))).filter((message) => {
       if (allowed) return allowed.has(messageKind(message));
       // agent_turn stays available so the client can derive disposition marks, then hide the turn.
       return isVisibleBotMessage(message) || messageKind(message) === 'agent_turn';
@@ -363,6 +369,23 @@ export function createBotDirectory({
     },
     get,
     readConversation,
+    async readProcess(workspaceId, params = {}) {
+      const profile = profiles.read(workspaceId);
+      if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
+      if (typeof params.processFor !== 'string' || !params.processFor.trim() || params.processFor.length > 500 || params.presentationOnly) return fail('INVALID_INPUT');
+      if (typeof readInteractionProcess !== 'function') return readConversation(workspaceId, params);
+      const card = (readCards(workspaceId) || []).find(card => card.cardId === params.processFor);
+      const page = await readInteractionProcess(profile.agentConversationId, { messageId: params.processFor, turnId: card?.refs?.turnId });
+      return page ? readConversation(workspaceId, params, page.messages) : fail('NOT_FOUND');
+    },
+    async readInteractions(workspaceId, { limit = 50, before = null } = {}) {
+      const profile = profiles.read(workspaceId);
+      if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
+      if (typeof readInteractionPage !== 'function') return readConversation(workspaceId, { limit, before, latest: true, presentationOnly: true });
+      const page = await readInteractionPage(profile.agentConversationId, { limit, ...(before ? { before } : {}) });
+      return page ? { ok: true, messages: page.messages, nextCursor: page.nextCursor, sourceVersion: page.sourceVersion,
+        ...(!before && !profile.familiarize ? { familiarizeOffer: FAMILIARIZE_OFFER } : {}) } : fail('NOT_FOUND');
+    },
     listSessions: (workspaceId) => sessionsOf(workspaceId),
     getSession: (sessionId) => getSession(sessionId),
     listApprovals: (workspaceId) => {

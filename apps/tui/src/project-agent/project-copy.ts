@@ -1,5 +1,6 @@
 import type {TuiLocale} from '../tui-language.ts';
 const english = {
+  messageUnavailable:'Messages unavailable; /latest retries. Existing messages are preserved.', cardsUnavailable:'Task status unavailable; conversation remains readable.',
   bots:'Bots', conversation:'Conversation', tasks:'Tasks', memory:'Memory', objectives:'Objectives', cards:'Needs you',
   bind:'Bind this directory to a bot?', yes:'Yes, create a bot', no:'No, open classic chat', empty:'Nothing here yet',
   host:'Running here', client:'Client · messages are queued to the host', desktop:'Handle this action on the desktop',
@@ -15,6 +16,7 @@ const english = {
   active:'Active',forgotten:'Forgotten',conflicted:'Conflicted',stated:'Stated',verified:'Verified',inferred:'Inferred',
 };
 const chinese: Record<keyof typeof english,string> = {
+  messageUnavailable:'消息暂不可用，已保留当前对话；输入 /latest 重试。',cardsUnavailable:'任务状态暂不可用，对话仍可阅读。',
   bots:'机器人',conversation:'对话',tasks:'任务',memory:'记忆',objectives:'目标',cards:'待处理',
   bind:'把这个目录绑定为机器人？',yes:'是，创建机器人',no:'否，进入经典对话',empty:'这里暂时没有内容',
   host:'由本终端运行',client:'客户端 · 消息将交由宿主处理',desktop:'请在桌面处理这个操作',

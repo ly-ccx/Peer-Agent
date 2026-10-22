@@ -103,11 +103,10 @@ export async function openReplyDetails(page, message) {
     await page.mouse.move(point.x, point.y, { steps: 2 });
     // Keep the actual pointer still while its opacity transition finishes.
     // Moving out every 50ms repeatedly restarted the 120ms transition on Linux.
-    revealed = await button.evaluate(async node => {
-      await Promise.all(node.getAnimations().filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
-        .map(animation => animation.finished.catch(() => {})));
-      return getComputedStyle(node).opacity === '1' && node.closest('.bot-reply, .bot-system').matches(':hover');
-    });
+    await page.waitForFunction(node => node.getAnimations().every(animation => animation.playState !== 'running'
+      || !Number.isFinite(animation.effect?.getComputedTiming().endTime)), await button.elementHandle(), { timeout: 15000 });
+    revealed = await button.evaluate(node => getComputedStyle(node).opacity === '1'
+      && node.closest('.bot-reply, .bot-system').matches(':hover'));
     if (!revealed) await page.waitForTimeout(50);
   }
   assert.equal(revealed, true, 'a real pointer over the current reply reveals its details');

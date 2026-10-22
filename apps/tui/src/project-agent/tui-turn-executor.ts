@@ -49,6 +49,7 @@ export function createTuiTurnExecutor(options: {
   holdsLease(workspaceId: string): boolean;
   resolveWorkspacePath(workspaceId: string): string;
   readMessages(conversationId: string): readonly any[];
+  readInteractionContext?(conversationId: string): Promise<readonly any[]>;
   readMemory(workspaceId: string): readonly any[];
   memoryEnabled(workspaceId: string): boolean;
   getProviders(): readonly TuiCapabilityProvider[];
@@ -99,13 +100,15 @@ export function createTuiTurnExecutor(options: {
     if (profile.providerCheckpoint && (profile.providerCheckpoint.provider !== 'tui' || profile.providerCheckpoint.modelProviderId !== input.modelProviderId)) throw new Error('continuity_model_changed');
     const saved = profile.role === 'project_agent' && profile.providerCheckpoint?.provider === 'tui'
       && profile.providerCheckpoint.modelProviderId === input.modelProviderId ? profile.providerCheckpoint : null;
-    const messages = saved?.messages ?? input.messages ?? projectConversationHistory(options.readMessages(input.conversationId ?? '')).messages;
+    const publicFacts = profile.role === 'project_agent' && options.readInteractionContext
+      ? await options.readInteractionContext(input.conversationId ?? '') : null;
+    const messages = saved?.messages ?? input.messages ?? projectConversationHistory(publicFacts ?? options.readMessages(input.conversationId ?? '')).messages;
     const last = messages.at(-1);
     const content = !saved && last?.role === 'user' && typeof last.content === 'string' ? last.content : '';
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
-      mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: options.readMessages(input.conversationId ?? ''),
+      mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: publicFacts ?? options.readMessages(input.conversationId ?? ''),
       currentInputAnchors: (profile.context?.inputAnchors ?? []).map((row: any) => row.messageId),
       objectiveWakeIds: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId).map((row: any) => row.objectiveId),
       objectiveWakeEvents: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId),

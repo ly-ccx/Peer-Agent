@@ -1,5 +1,6 @@
 import { openSync, closeSync, fstatSync, readSync, statSync } from 'node:fs';
 import { reduceCoordination } from './work-coordination.mjs';
+import { journalLines } from './journal-lines.mjs';
 
 const empty = () => ({ revision: 0, events: {}, works: {}, deliveries: {} });
 const version = info => `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
@@ -49,9 +50,10 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
         // A valid unterminated last record may be recovered by appending its separator.
         if (append && offset && bytes(fd, offset - 1, 1)[0] !== 10 && bytes(fd, offset, 1)[0] !== 10) append = false;
       }
-      const body = bytes(fd, append ? offset : 0, size - (append ? offset : 0)).toString('utf8');
       let state = append ? cached : empty();
-      for (const line of body.split('\n')) if (line) state = reduceCoordination(state, JSON.parse(line));
+      for (const line of journalLines(fd, { start: append ? offset : 0, end: size, onRead })) {
+        if (line.text) state = reduceCoordination(state, JSON.parse(line.text));
+      }
       const nextAnchors = boundaries(fd, size);
       if (version(fstatSync(fd, { bigint: true })) !== version(opened)
         || version(statSync(file, { bigint: true })) !== version(opened)) throw new Error('coordination_read_changed');

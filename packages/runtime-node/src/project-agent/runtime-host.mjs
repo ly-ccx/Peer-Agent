@@ -25,6 +25,7 @@ export function createProjectAgentHost({
   resolveModel = null,
   resolveContext = null,
   resolveRoster = null,
+  resolveTurnRoster = null,
   onReplied = null,
   onInputsConsumed = null,
   routing = null,
@@ -114,11 +115,11 @@ export function createProjectAgentHost({
     return Array.isArray(saved?.appended) ? saved.appended : [];
   }
 
-  function ensureRunner(workspaceId, conversationId) {
+  async function ensureRunner(workspaceId, conversationId) {
     const existing = runners.get(workspaceId);
     if (existing && existing.conversationId === conversationId) return existing;
     if (existing) drop(workspaceId);
-    const coordinationStore = createWorkCoordinationStore({ rootDir, workspaceId,
+    const coordinationStore = createWorkCoordinationStore({ rootDir, workspaceId, formatVersion: 2,
       holdsLease: () => holdsLease(workspaceId),
       leaseEpoch: () => {
         if (readLeaseEpoch) return readLeaseEpoch(workspaceId);
@@ -127,6 +128,8 @@ export function createProjectAgentHost({
         return `${lease.hostId}:${lease.acquiredAt}`;
       },
     });
+    await coordinationStore.prepare();
+    if (holdsLease(workspaceId) !== true) { coordinationStore.close(); throw new Error('coordination_lease_lost'); }
     coordinationStore.recover();
     if (continuityVersion !== 1 && Object.values(coordinationStore.read().works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
     const unregisterBudget = registerWorkBudget(workspaceId, coordinationStore, readSettings?.()?.projectAgent?.executionBudget);
@@ -150,6 +153,8 @@ export function createProjectAgentHost({
           : null
       ),
       resolveRoster: () => typeof resolveRoster === 'function' ? resolveRoster(workspaceId) : null,
+      resolveTurnRoster: info => typeof resolveTurnRoster === 'function' ? resolveTurnRoster({ ...info, workspaceId, conversationId })
+        : typeof resolveRoster === 'function' ? resolveRoster(workspaceId) : null,
       onReplied: typeof onReplied === 'function' ? (message) => onReplied(workspaceId, message) : null,
       sink: createSink(),
       now,
@@ -170,7 +175,7 @@ export function createProjectAgentHost({
       onActivity,
     });
     const disposeRunner = runner.dispose;
-    runner.dispose = () => { unregisterBudget(); disposeRunner(); };
+    runner.dispose = () => { unregisterBudget(); disposeRunner(); coordinationStore.close(); };
     runners.set(workspaceId, runner);
     return runner;
   }
@@ -184,7 +189,7 @@ export function createProjectAgentHost({
       async inputs(workspaceId) {
         const conversationId = resolveConversationId(workspaceId);
         if (!conversationId) throw new Error('conversation_unavailable');
-        ensureRunner(workspaceId, conversationId);
+        await ensureRunner(workspaceId, conversationId);
         stagedInputs.set(workspaceId, await consumeInputs(workspaceId));
       },
       inbox: workspaceId => inboxStore.takeBatch(workspaceId),
@@ -232,7 +237,7 @@ export function createProjectAgentHost({
       if (!recovered.ok) return { workspaceId, ...recovered };
       try {
         if (!recovered.reused && typeof activateSessions === 'function') await activateSessions(workspaceId);
-        const conversationId = resolveConversationId(workspaceId), runner = ensureRunner(workspaceId, conversationId);
+        const conversationId = resolveConversationId(workspaceId), runner = await ensureRunner(workspaceId, conversationId);
         const consumed = [...(stagedInputs.get(workspaceId) || []), ...await consumeInputs(workspaceId)];
         stagedInputs.delete(workspaceId);
         const pending = pendingInputs(workspaceId, conversationId, consumed);
@@ -277,7 +282,7 @@ export function createProjectAgentHost({
       if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
       const preview = digests.consider(workspaceId, at, settings.digestTime);
       if (!preview?.timer && !runners.has(workspaceId)) continue;
-      const runner = ensureRunner(workspaceId, conversationId.trim());
+      const runner = await ensureRunner(workspaceId, conversationId.trim());
       const due = armDigest(runner, workspaceId);
       const waiting = runner.mailbox().timers.some((timer) => timer?.kind === 'digest_due' && timer.wake === true);
       if (due || waiting) runs.push(runner.kick());

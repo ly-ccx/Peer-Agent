@@ -87,9 +87,14 @@ export function createWorkBudgetGuard(profile) {
           ...(verificationDispatchTarget(call) ? { verificationSessionId: verificationDispatchTarget(call) } : {}) }] };
     }); },
     observeUsage(usage, fingerprint) {
+      const observationKey = `${attemptId}:${usage?.requestIndex}:${usage?.requestPurpose}:${fingerprint}`;
+      if (typeof store.observeUsage === 'function') {
+        const added = store.observeUsage(profile.workId, observationKey, usage);
+        if (added && Number.isFinite(usage?.totalTokens) && usage.totalTokens >= 0) observed++;
+        return;
+      }
       change(budget => {
         budget.observations ||= {};
-        const observationKey = `${attemptId}:${usage?.requestIndex}:${usage?.requestPurpose}:${fingerprint}`;
         if (budget.observations[observationKey]) return;
         budget.observations[observationKey] = true;
         const tokens = usage?.totalTokens;

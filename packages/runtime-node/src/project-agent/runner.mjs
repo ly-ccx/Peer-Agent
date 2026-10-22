@@ -34,6 +34,7 @@ export function createProjectAgentRunner({
   resolveModel = () => ({ ok: false, missing: '没有可用的模型' }),
   resolveContext = () => null,
   resolveRoster = () => null,
+  resolveTurnRoster = resolveRoster,
   sink = null,
   now = () => new Date().toISOString(),
   retryDelays = SAME_PROVIDER_RETRY_DELAYS_MS,
@@ -463,8 +464,8 @@ export function createProjectAgentRunner({
       userInputs: job.userInputs,
       events: job.events,
       modelProviderId: model.modelProviderId,
-      context: readSlot(resolveContext, job.kind),
-      roster: readSlot(resolveRoster, job.kind),
+      context: readSlot(resolveContext, job.kind, job),
+      roster: readSlot(resolveTurnRoster, job.kind, job),
       workspaceId: workspace,
     });
     // A user-triggered retry is visible even when its original work was a wake.
@@ -635,9 +636,11 @@ export function createProjectAgentRunner({
     return { ok: true, modelProviderId, selection: resolved.selection || null, candidateIds: resolved.candidateIds || [], reason: '' };
   }
 
-  function readSlot(fn, kind) {
+  function readSlot(fn, kind, job) {
     try {
-      const value = fn({ workspaceId: workspace, conversationId: conversation, kind, role: 'project_agent' });
+      const value = fn({ workspaceId: workspace, conversationId: conversation, kind, role: 'project_agent',
+        ...(job ? { workId: job.workId, sessionIds: [...new Set((job.events || []).map(event => event.sessionId).filter(Boolean))],
+          anchorMessageIds: (job.userInputs || []).map(input => `input-${input.inputId}`) } : {}) });
       return value === undefined ? null : value;
     } catch {
       return null;

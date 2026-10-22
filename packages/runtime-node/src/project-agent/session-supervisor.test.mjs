@@ -2336,3 +2336,16 @@ test('acceptance shares compact parent facts and rechecks later replies and corr
     assert.throws(() => env.supervisor.acceptance(session.sessionId), /BACKGROUND_HISTORY_CORRUPT/, 'cached parent facts cannot hide current corruption');
   } finally { await env.cleanup(); }
 });
+
+test('related turn summaries never load child transcripts or reports', async () => {
+  const env=await harness();
+  try {
+    const opened=await env.supervisor.spawn(spawnInput(),contextOf(env));
+    env.conversationStore.getPersistedConversationHistory=()=>assert.fail('summary must not read a child transcript');
+    env.conversationStore.getConversation=()=>assert.fail('summary must not hydrate child messages');
+    const selected=env.supervisor.summaries({workspaceId:'ws-1',sessionIds:[opened.sessionId]});
+    assert.equal(selected.length,1); assert.equal(selected[0].sessionId,opened.sessionId);
+    assert.equal(selected[0].report,undefined);
+    assert.deepEqual(env.supervisor.summaries({workspaceId:'ws-1',sessionIds:['unrelated']}),[]);
+  } finally { await env.cleanup(); }
+});

@@ -211,6 +211,8 @@ export type TranslationKey =
   | 'projectAgent.list.close'
   | 'projectAgent.chat.empty'
   | 'projectAgent.chat.loadFailed'
+  | 'projectAgent.chat.cardsUnavailable'
+  | 'projectAgent.chat.refreshFailed'
   | 'projectAgent.chat.thinking'
   | 'projectAgent.chat.waiting'
   | 'projectAgent.chat.generating'
@@ -1775,6 +1777,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.close': '关闭',
     'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
     'projectAgent.chat.loadFailed': '对话没有加载出来',
+    'projectAgent.chat.cardsUnavailable': '任务状态暂不可用，已有对话仍可阅读。',
+    'projectAgent.chat.refreshFailed': '新消息暂未刷新，已保留当前对话。',
     'projectAgent.chat.thinking': '思考中…',
     'projectAgent.chat.waiting': '等待回复…',
     'projectAgent.chat.generating': '正在回复',
@@ -3127,6 +3131,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.close': 'Close',
     'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
     'projectAgent.chat.loadFailed': 'The conversation did not load',
+    'projectAgent.chat.cardsUnavailable': 'Task status is unavailable. Your conversation is still readable.',
+    'projectAgent.chat.refreshFailed': 'New messages could not refresh. Your current conversation is preserved.',
     'projectAgent.chat.thinking': 'Thinking…',
     'projectAgent.chat.waiting': 'Waiting for a response…',
     'projectAgent.chat.generating': 'Replying',

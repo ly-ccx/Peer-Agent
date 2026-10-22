@@ -2,6 +2,15 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.25 - 2026-10-22
+
+- Build on RC24 with public interaction reads by default and child execution details loaded on demand.
+- Isolate message, task-card and detail failures; retain readable messages and support explicit retry.
+- Replace repeated coordination snapshots with incremental segmented events and exact usage receipts; recover large journals in background workers and rebuild derived indexes with durable-source checks.
+- Preserve task identities, conversations, evidence and legacy journals; unknown tool outcomes are not automatically repeated.
+- Fix completed-reply detail anchors, asynchronous question answers and narrow-window detail overflow.
+- Document coordinated upgrades, incompatible downgrade limits and the distinction between publishing and restarting an installed app; synchronize bilingual notes and website changelog.
+
 ## 0.1.0-rc.24 - 2026-10-22
 
 - Inherit the Bot-owned access policy across task and verification runtimes; full access supports consecutive image reads without per-image prompts.

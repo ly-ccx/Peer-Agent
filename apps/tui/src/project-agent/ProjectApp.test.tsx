@@ -20,7 +20,7 @@ test('binding refusal enters classic without creating any bot',async()=>{
 });
 test('binding, message submission, list navigation and cards work through the actual terminal renderer',async()=>{
   const f=await harness();try{
-    await f.frame();await f.press('y');expect(await f.frame()).toContain('Running here');expect(f.host.directory.list()).toHaveLength(1);
+    await f.frame();await f.press('y');await act(async()=>{await f.host.tick();await f.client.poll();});expect(await f.frame()).toContain('Running here');expect(f.host.directory.list()).toHaveLength(1);
     await f.type('hello');await f.press('RETURN');await act(async()=>{await Bun.sleep(1100);});
     const reply=await f.frame();expect(reply).toContain('hello');expect(reply).toContain('scripted UI reply');expect(reply).toContain('Received');
     await f.type('/bots');await f.press('RETURN');expect(await f.frame()).toContain('Up/down to select');
