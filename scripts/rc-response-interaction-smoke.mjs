@@ -398,10 +398,10 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await readingStep.waitFor();
   await checkReplyPresence({ page, reply: live, report, until, state: 'reading-docked', label: '正在阅读 README.md' });
   const runningLabel = readingStep.locator('.bot-tool-step-label');
-  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).animationName), 'none');
+  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
   const position = await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition);
   await page.waitForTimeout(200);
-  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition), position);
+  assert.notEqual(await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition), position);
   await readingStep.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
   await readingStep.locator('.bot-tool-preview > summary').click();
   await readingStep.getByText('调用正在进行，返回内容到达后会显示在这里。', { exact: true }).waitFor();
