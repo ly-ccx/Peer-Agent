@@ -796,6 +796,9 @@
 
 .goal-plan-status--awaiting_approval { color: var(--za-warn); background: var(--za-warn-soft); }
 .goal-plan-status--executing { color: var(--state-confirm); background: color-mix(in srgb, var(--state-confirm) 14%, transparent); }
+/* executing 的掩盖态：生命周期结论接管头部 pill（waiting_agent=主 Bot 跟进）。 */
+.goal-plan-status--waiting_agent { color: var(--state-info); background: color-mix(in srgb, var(--state-info) 14%, transparent); }
+.goal-plan-status--waiting_user { color: var(--za-warn); background: var(--za-warn-soft); }
 .goal-plan-status--completed { color: var(--za-good); background: var(--za-good-soft); }
 .goal-plan-status--failed,
 .goal-plan-status--cancelled { color: var(--za-danger); background: var(--za-danger-soft); }
