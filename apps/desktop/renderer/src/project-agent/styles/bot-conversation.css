@@ -964,12 +964,6 @@
   animation: motion-shimmer 1.6s linear infinite;
 }
 
-@keyframes bot-thinking-hop {
-  0%, 100% { transform: translateY(0); }
-  45% { transform: translateY(-5px); }
-  70% { transform: translateY(-1px); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .bot-thinking-status,
   .bot-thinking-status .bot-avatar,
