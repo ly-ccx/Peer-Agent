@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto';
 import type { createTuiProjectHost } from './tui-project-host.ts';
 
 type ProjectHost = ReturnType<typeof createTuiProjectHost>;
+const emptySnapshot = (): ProjectSnapshot => ({ workspaceId: '', isHost: false, bots: [], messages: [], nextCursor: null,
+  familiarizeOffer: null, sessions: [], approvals: [], messageState: 'loading', cardsUnavailable: false });
 
-/** Read durable projections, submit to the shared queue; never execute a client turn. */
+/** Read public projections, submit to the shared queue; never execute a client turn. */
 export function createTuiProjectClient(options: {
   dataHome: string;
   host: ProjectHost;
@@ -13,65 +15,104 @@ export function createTuiProjectClient(options: {
   autoStart?: boolean;
 }) {
   const { host, dataHome } = options;
-  let stamp = '', snapshot: ProjectSnapshot | null = null;
+  let stamp = '', snapshot: ProjectSnapshot = emptySnapshot(), closed = false, generation = 0;
   let pageBefore: string | null = null;
+  let pageSourceVersion: string | undefined;
+  let flight: { key: string; source: string; promise: Promise<ProjectSnapshot> } | null = null;
+  function conversationVersion(workspaceId: string) {
+    try { const id = host.directory.conversationId(workspaceId), s = statSync(path.join(dataHome, 'conversations', id + '.jsonl'), { bigint: true });
+      return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
+    } catch { return 'missing'; }
+  }
   function fingerprint() {
     const parts = [host.workspaceId(), String(host.holdsLease(host.workspaceId())), pageBefore ?? ''];
     const inspect = (file: string, depth: number) => {
       try {
         const info = statSync(file);
         parts.push(`${file}:${info.mtimeMs}:${info.size}`);
-        if (info.isDirectory() && depth > 0) {
-          for (const name of readdirSync(file).sort()) inspect(path.join(file, name), depth - 1);
-        }
+        if (info.isDirectory() && depth > 0) for (const name of readdirSync(file).sort()) inspect(path.join(file, name), depth - 1);
       } catch { parts.push(`${file}:missing`); }
     };
-    // Stat only. Secret and artifact bodies never enter a surface projection.
-    for (const name of ['projects', 'conversations', 'project-runtime', 'memory', 'goal-plans']) {
+    for (const name of ['projects', 'conversations', 'project-runtime', 'memory', 'goal-plans'])
       inspect(path.join(dataHome, name), name === 'projects' || name === 'project-runtime' ? 2 : 1);
-    }
     return parts.join('|');
   }
-  function poll(force = false): ProjectSnapshot {
-    const next = fingerprint();
-    if (!force && next === stamp && snapshot) return snapshot;
-    stamp = next;
-    const workspaceId = host.workspaceId();
-    const conversation = workspaceId ? host.directory.readConversation(workspaceId, { limit: 50, latest: true, before: pageBefore } as never) : null;
-    snapshot = {
-      workspaceId, isHost: host.holdsLease(workspaceId), bots: host.directory.list(),
-      messages: conversation?.ok && 'messages' in conversation ? conversation.messages : [],
-      nextCursor: conversation?.ok && 'nextCursor' in conversation ? conversation.nextCursor : null,
-      familiarizeOffer: conversation?.ok && 'familiarizeOffer' in conversation ? conversation.familiarizeOffer ?? null : null,
-      sessions: workspaceId ? host.directory.listSessions(workspaceId) : [],
-      approvals: workspaceId ? host.approvals.list({ workspaceId }).filter(row => ['open', 'stale'].includes(row.state)) : [],
-    };
-    options.onChanged?.(snapshot);
-    return snapshot;
+  async function poll(force = false): Promise<ProjectSnapshot> {
+    const next = fingerprint(), workspaceId = host.workspaceId(), before = pageBefore;
+    if (!force && next === stamp && (!pageSourceVersion || pageSourceVersion === conversationVersion(workspaceId))) return snapshot;
+    const key = `${workspaceId}:${before ?? ''}`;
+    if (flight?.key === key) {
+      const active = flight, changed = next !== active.source;
+      return active.promise.then(result => {
+        if (!force || !changed) return result;
+        if (flight === active) flight = null;
+        return poll(true);
+      });
+    }
+    const ticket = ++generation;
+    const promise = (async () => {
+      let conversation: any, unavailable = false, cardsUnavailable = false;
+      try { conversation = workspaceId ? await host.directory.readInteractions(workspaceId, { limit: 50, before } as never) : null; }
+      catch { unavailable = true; }
+      if (conversation && !conversation.ok) unavailable = true;
+      let messages = conversation?.ok ? conversation.messages : snapshot.workspaceId === workspaceId ? snapshot.messages : [];
+      if (workspaceId) {
+        try {
+          const cards = host.directory.readConversation(workspaceId, { view: 'cards' } as never) as any;
+          if (cards.ok) {
+            const byReply = new Map<string, any[]>();
+            for (const card of cards.cards || []) if (card.refs?.replyMessageId) byReply.set(card.refs.replyMessageId, [...(byReply.get(card.refs.replyMessageId) || []), card]);
+            const attached = new Set<string>();
+            messages = messages.map((message: any) => {
+              const rows = byReply.get(message.id);
+              for (const card of rows || []) attached.add(card.cardId);
+              return rows ? { ...message, cards: rows } : message;
+            });
+            for (const card of cards.cards || []) if (!card.refs?.replyMessageId && !attached.has(card.cardId) && card.resolvedState !== 'resolved')
+              messages = [...messages, { id: card.cardId, role: 'assistant', kind: 'system_card', content: '', cards: [card] }];
+          } else cardsUnavailable = true;
+        } catch { cardsUnavailable = true; }
+      }
+      const optional = <T,>(read: () => T, fallback: T): T => { try { return read(); } catch { cardsUnavailable = true; return fallback; } };
+      const bots = optional(() => host.directory.list(), snapshot.bots);
+      const sessions = workspaceId ? optional(() => host.directory.listSessions(workspaceId), snapshot.workspaceId === workspaceId ? snapshot.sessions : []) : [];
+      const approvals = workspaceId ? optional(() => host.approvals.list({ workspaceId }).filter(row => ['open', 'stale'].includes(row.state)), []) : [];
+      const result: ProjectSnapshot = {
+        workspaceId, isHost: host.holdsLease(workspaceId), bots, messages,
+        nextCursor: conversation?.ok ? conversation.nextCursor : snapshot.workspaceId === workspaceId ? snapshot.nextCursor : null,
+        familiarizeOffer: conversation?.ok ? conversation.familiarizeOffer ?? null : null,
+        sessions, approvals,
+        messageState: unavailable ? 'unavailable' : 'ready', cardsUnavailable,
+      };
+      if (closed || ticket !== generation) return snapshot;
+      pageSourceVersion = conversation?.ok ? conversation.sourceVersion : undefined;
+      stamp = fingerprint();
+      if (JSON.stringify(snapshot) === JSON.stringify(result)) return snapshot;
+      snapshot = result;
+      options.onChanged?.(snapshot); return snapshot;
+    })();
+    flight = { key, source: next, promise };
+    try { return await promise; } finally { if (flight?.promise === promise) flight = null; }
   }
-  const timer = options.autoStart === false ? null : setInterval(() => poll(), 1000);
+  const timer = options.autoStart === false ? null : setInterval(() => { void poll().catch(() => {}); }, 1000);
   timer?.unref();
   return {
-    poll,
+    poll, current: () => snapshot,
     latest() { pageBefore = null; return poll(true); },
-    earlier() { if (snapshot?.nextCursor) pageBefore = snapshot.nextCursor; return poll(true); },
+    earlier() { if (snapshot.nextCursor) pageBefore = snapshot.nextCursor; return poll(true); },
     async select(workspaceId: string) { pageBefore = null; await host.selectWorkspace(workspaceId); return poll(true); },
     submit(text: string, input: { inputId?: string; answerTo?: string } = {}) {
       const workspaceId = host.workspaceId();
       if (!workspaceId || !text.trim()) throw new Error('project_input_required');
       const receipt = host.inputs.submitInput({ workspaceId, inputId: input.inputId ?? randomUUID(), text,
         surface: 'tui', ...(input.answerTo ? { answerTo: input.answerTo } : {}) });
-      void host.tick().catch(() => {});
-      poll(true);
-      return receipt;
+      void host.tick().catch(() => {}); void poll(true).catch(() => {}); return receipt;
     },
     async decide(approvalId: string, decision: 'approve' | 'deny', duration: 'once'|'task' = 'once') {
       if (!host.holdsLease(host.workspaceId())) return { ok: false, error: 'desktop_approval_required' };
-      const result = await host.decideApproval(approvalId, decision, duration);
-      poll(true);
-      return result;
+      const result = await host.decideApproval(approvalId, decision, duration); await poll(true); return result;
     },
-    close() { if (timer) clearInterval(timer); },
+    close() { closed = true; generation++; if (timer) clearInterval(timer); },
   };
 }
 
@@ -84,4 +125,6 @@ export interface ProjectSnapshot {
   familiarizeOffer: { text: string } | null;
   sessions: any[];
   approvals: any[];
+  messageState: 'loading' | 'ready' | 'unavailable';
+  cardsUnavailable: boolean;
 }

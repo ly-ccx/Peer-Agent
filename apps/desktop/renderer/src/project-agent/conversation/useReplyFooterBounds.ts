@@ -24,7 +24,9 @@ export function useReplyFooterBounds() {
       // Even a one-word bubble must leave room for a readable details label.
       footer.style.width = bounds ? `${Math.max(0, parent.right - bounds.left - start - 14)}px` : 'calc(100% - 28px)';
       // Match the message text inset before the first streamed bubble arrives.
-      footer.style.marginInlineStart = bounds ? `${Math.max(0, bounds.left - parent.left + start)}px` : '14px';
+      const inset = bounds ? `${Math.max(0, bounds.left - parent.left + start)}px` : '14px';
+      footer.style.setProperty('--bot-reply-inset', inset);
+      footer.style.marginInlineStart = inset;
       if (observed.length !== bubbles.length || observed.some((node, index) => node !== bubbles[index])) {
         observed.forEach(node => resize.unobserve(node));
         observed = bubbles; observed.forEach(node => resize.observe(node));

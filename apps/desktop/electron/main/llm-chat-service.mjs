@@ -1720,7 +1720,9 @@ export function createLlmChatService({
         toolContext.turnToolCalls = [];
         toolContext.turnMemoryIds = [];
         try {
-          const history = conversationStore?.getPersistedConversationHistory?.(conversationId);
+          const history = typeof conversationStore?.readInteractionContext === 'function'
+            ? await conversationStore.readInteractionContext(conversationId)
+            : conversationStore?.getPersistedConversationHistory?.(conversationId);
           toolContext.messages = Array.isArray(history?.messages) ? history.messages : [];
         } catch {
           toolContext.messages = [];

@@ -18,7 +18,7 @@ type Client=ReturnType<typeof createTuiProjectClient>;
 type View='bind'|'bots'|'conversation'|'tasks'|'task'|'memory'|'objectives'|'cards'|'help';
 export function ProjectApp({host,client,initialView,workspacePath,locale,themeStore,onClassic,onQuit}:{host:Host;client:Client;initialView:'bind'|'bots'|'conversation';workspacePath:string;locale:TuiLocale;themeStore:TuiThemeStore;onClassic():Promise<void>;onQuit():void}) {
   const terminal=useTerminalDimensions(), editor=useRef<TextareaRenderable|null>(null),numbers=useRef(createCardNumbers());
-  const [snapshot,setSnapshot]=useState(()=>client.poll()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
+  const [snapshot,setSnapshot]=useState(()=>client.current()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
   const [cardIndex,setCardIndex]=useState(0),[option,setOption]=useState(0),[bindYes,setBindYes]=useState(true),[detail,setDetail]=useState<any>(null);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[earlier,setEarlier]=useState(false),[,setTheme]=useState(themeStore.getState());
   const copy=(key:Parameters<typeof projectCopy>[1])=>projectCopy(locale,key);
@@ -29,8 +29,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   }]}]:snapshot.messages;
   const cards=numbers.current.project(snapshot.workspaceId,displayedMessages);
   const bot=snapshot.bots.find(row=>row.workspaceId===snapshot.workspaceId);
-  const refresh=()=>setSnapshot(client.poll(true));
-  useEffect(()=>{const timer=setInterval(()=>setSnapshot(client.poll()),1000);return()=>clearInterval(timer);},[client]);
+  const refresh=()=>{void client.poll(true).then(setSnapshot).catch(()=>setNotice(copy('error')));};
+  useEffect(()=>{let live=true;const read=()=>{void client.poll().then(next=>{if(live)setSnapshot(next);}).catch(()=>{if(live)setNotice(copy('error'));});};read();const timer=setInterval(read,1000);return()=>{live=false;clearInterval(timer);};},[client]);
   useEffect(()=>themeStore.subscribe(setTheme),[themeStore]);
   useEffect(()=>{if(!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view]);
   const lastId=snapshot.messages.filter(row=>['user_input','agent_reply','system_card'].includes(row.kind)).at(-1)?.id;
@@ -48,13 +48,13 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   }
   function submit(text:string) {
     const command=parseProjectCommand(text);
-    if(command.kind==='text'){if(command.text)perform(()=>{client.latest();client.submit(command.text);setEarlier(false);setView('conversation');return {ok:true};},copy('received'));return;}
+    if(command.kind==='text'){if(command.text)perform(()=>{void client.latest().catch(()=>{});client.submit(command.text);setEarlier(false);setView('conversation');return {ok:true};},copy('received'));return;}
     if(command.kind==='invalid'){setNotice(copy('invalid'));return;}
     if(command.kind==='view'){setView(command.view);setSelected(0);setCardIndex(0);setOption(0);return;}
     if(command.kind==='classic'){setNotice(copy('leaving'));void perform(onClassic);return;}
     if(command.kind==='takeover'){void perform(()=>host.takeover(),copy('takeover'));return;}
-    if(command.kind==='older'){setSnapshot(client.earlier());setEarlier(true);setView('conversation');return;}
-    if(command.kind==='latest'){setSnapshot(client.latest());setEarlier(false);setView('conversation');return;}
+    if(command.kind==='older'){void client.earlier().then(setSnapshot);setEarlier(true);setView('conversation');return;}
+    if(command.kind==='latest'){void client.latest().then(setSnapshot);setEarlier(false);setView('conversation');return;}
     if(command.kind==='help'){setView('help');return;}
     if(command.kind==='task'){
       const session=snapshot.sessions[command.number-1];if(!session){setNotice(copy('invalid'));return;}
@@ -108,6 +108,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       <ThemedText fg={COLOR.accent}>Peer · {terminalText(bot?.profile.displayName??copy('bots'))}</ThemedText>
       <ThemedText fg={COLOR.muted}>{snapshot.workspaceId?snapshot.isHost?copy('host'):copy('client'):''}</ThemedText>
     </box>
+    {snapshot.messageState==='unavailable'?<ThemedText fg={COLOR.info}>{copy('messageUnavailable')}</ThemedText>:null}
+    {snapshot.cardsUnavailable?<ThemedText fg={COLOR.muted}>{copy('cardsUnavailable')}</ThemedText>:null}
     {view==='bind'?<box flexGrow={1} flexDirection="column" justifyContent="center"><ThemedText fg={COLOR.text}>{copy('bind')}</ThemedText><ThemedText fg={COLOR.muted}>{terminalText(workspacePath)}</ThemedText><ThemedText fg={bindYes?COLOR.accent:COLOR.muted}>{copy('yes')} [Y]</ThemedText><ThemedText fg={!bindYes?COLOR.accent:COLOR.muted}>{copy('no')} [N]</ThemedText></box>
       :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height}/>
       :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={false}/>

@@ -165,6 +165,10 @@ export function createSessionSupervisor({
   const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
+    readSessionSummary: input => {
+      const plan = findBySession(input.sessionId);
+      return plan ? summaries({ workspaceId: plan.delegationOrigin.workspaceId, sessionIds: [input.sessionId] })[0] : null;
+    },
     checkTakeover: id => {
       const plan = findBySession(id);
       return plan?.runner?.status === 'waiting_user' ? 'human_decision_required'
@@ -653,12 +657,26 @@ export function createSessionSupervisor({
   }
 
 
+  function summaries(input = {}) {
+    const ids = new Set(input.sessionIds || []), anchors = new Set(input.anchorMessageIds || []);
+    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId
+      && (input.all === true || ids.has(plan.delegationOrigin.sessionId) || input.workId && plan.delegationOrigin.workId === input.workId
+        || anchors.has(plan.delegationOrigin.anchorMessageId))).slice(0, 24).map(plan => {
+      const origin = plan.delegationOrigin;
+      return { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
+        acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), spawnedAt: plan.createdAt || '',
+        conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}) }),
+        metadataRevision: plan.updatedAt || plan.createdAt || '' };
+    });
+  }
+
   function list(input = {}) {
     const limit = Number.isInteger(input?.limit) && input.limit > 0 ? Math.min(input.limit, 50) : 50;
     const workspaceId = text(input?.workspaceId);
     const status = text(input?.status);
     return delegatedPlans()
       .filter((plan) => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId)
+      .filter(plan => !input.workId && !input.sessionIds?.length || plan.delegationOrigin.workId === input.workId || input.sessionIds?.includes(plan.delegationOrigin.sessionId))
       .map(project)
       .filter((session) => !status || session.status === status)
       .slice(0, limit);
@@ -1023,8 +1041,9 @@ export function createSessionSupervisor({
 
   return {
     executionScheduler,
+    summaries: input => readQuery.run(() => summaries(input)),
     coordinateWork: (input, context) => coordination.coordinate(input, context),
-    coordinationFacts: (workspaceId, conversationId) => coordination.facts(workspaceId, conversationId),
+    coordinationFacts: (workspaceId, conversationId, scope) => coordination.facts(workspaceId, conversationId, scope),
     recoverCoordination: workspaceId => coordination.recover(workspaceId),
     sendAgentMessage: (input, context) => exclusive(() => communication.send(input, context)),
     recoverAgentMessages: () => exclusive(() => communication.recover()),

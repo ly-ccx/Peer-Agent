@@ -11,19 +11,23 @@ import path from 'node:path';
 /** Project facts shared by reply validation and cards; model payloads never supply verdicts. */
 export function createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore = null, objectiveProposals=()=>[],
   readCoordination, now = () => new Date().toISOString(),
-  readCoordinationCheckpoint = null }) {
+  readCoordinationCheckpoint = null, requirePreparedCoordination = false }) {
   const projection = createCardProjection({ rootDir: runtimeRoot });
   const readers = new Map();
   const storeFor = workspaceId => {
     const file = path.join(runtimeRoot || pathOf('projectRuntime'), workspaceId, 'coordination.jsonl');
     const owner = workBudgetBinding(workspaceId)?.store;
     if (owner?.journalFile === file) return owner;
-    const reader = readers.get(workspaceId) || createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId });
+    const reader = readers.get(workspaceId) || createWorkCoordinationStore({ rootDir: runtimeRoot, workspaceId, formatVersion: requirePreparedCoordination ? 2 : 1 });
     readers.delete(workspaceId); readers.set(workspaceId, reader);
-    if (readers.size > 16) readers.delete(readers.keys().next().value);
+    if (readers.size > 16) { const oldest = readers.keys().next().value; readers.get(oldest)?.close?.(); readers.delete(oldest); }
     return reader;
   };
-  const coordinationFor = workspaceId => readCoordination ? readCoordination(workspaceId) : storeFor(workspaceId).read();
+  const coordinationFor = workspaceId => {
+    if (readCoordination) return readCoordination(workspaceId);
+    const store = storeFor(workspaceId);
+    return typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  };
   const checkpointFor = (workspaceId, ref) => readCoordinationCheckpoint
     ? readCoordinationCheckpoint(workspaceId, ref) : storeFor(workspaceId).readRecoveryCheckpoint(ref);
   const messageFacts = typeof conversationStore.createHistoryProjection === 'function'
@@ -84,6 +88,8 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
     return projection.project(workspaceId, { questions: taskQuestions(rows, messages) });
   }
   function cards(workspaceId) {
+    // Readiness is checked before any deeper task or parent-history projection.
+    const coordination = coordinationFor(workspaceId) || {};
     const profile = profileStore.read(workspaceId);
     const messages = messageFacts(profile?.agentConversationId) || [];
     const questionStates = projectReplyQuestions(messages, Date.parse(now()));
@@ -103,7 +109,6 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       return review ? [{ ...review, title: row.title }] : [];
     });
     const questions = taskQuestions(rows, messages);
-    const coordination = coordinationFor(workspaceId) || {};
     const works = Object.values(coordination.works || {});
     const unavailable = messages.filter((message) => message.card === 'agent_unavailable').map((message) => {
       const turn = messages.find(turn => turn.id === message.turnId && turn.kind === 'agent_turn');

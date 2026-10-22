@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
 import { createHistoryProjectionReader } from './history-projection-reader.mjs';
+import { createInteractionReader } from './interaction-reader.mjs';
 import { createHistorySourceReader } from './history-source-reader.mjs';
 import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
@@ -506,6 +507,7 @@ export function createConversationStore(options = {}) {
     ? path.join(path.dirname(storeDir), 'usage', 'requests.jsonl')
     : options.usageLogFile;
   const indexFile = path.join(storeDir, 'index.jsonl');
+  const interactions = createInteractionReader({ storeDir, readMeta: id => readIndex().find(row => row.id === id) });
   const contextSnapshotDir = path.join(storeDir, '.context-snapshots');
 
   // 撤销 'goal'→'plan' 兼容映射前,先对存量数据做一次性迁移,避免历史 'goal' 被误判为自驱语义。
@@ -1873,6 +1875,9 @@ export function createConversationStore(options = {}) {
     createConversation: changed(createConversation, 'created'),
     getConversation,
     getPersistedConversationHistory,
+    readInteractionPage: interactions.readPage,
+    readInteractionContext: interactions.readContext,
+    readInteractionProcess: interactions.readProcess,
     createHistoryProjection,
     getPersistedConversationHistories,
     resolveSelectionReference,

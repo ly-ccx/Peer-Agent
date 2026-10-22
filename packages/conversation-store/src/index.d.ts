@@ -133,6 +133,9 @@ export interface SelectionChildRequest {
 }
 
 export interface ConversationStore {
+  readInteractionPage(conversationId: string, params?: { before?: string; limit?: number }): Promise<(PersistedConversationHistory & { sourceVersion: string; nextCursor: string | null }) | null>;
+  readInteractionProcess(conversationId: string, params: { messageId?: string; turnId?: string }): Promise<{ conversationId: string; sourceVersion: string; messages: Record<string, unknown>[]; nextCursor: null } | null>;
+  readInteractionContext(conversationId: string): Promise<PersistedConversationHistory | null>;
   resolveSelectionReference?(request: { conversationId: string; selection: import('@peer-agent/protocol').SelectionRange; runtimeState: { conversationId: string; contentRevision: number; status: string; activeMessageId?: string } }): import('@peer-agent/protocol').SelectionReference;
   /** Internal only: host must authorize and resolve runtimeState before calling. */
   createSelectionChild?(request: SelectionChildRequest): ConversationMeta;

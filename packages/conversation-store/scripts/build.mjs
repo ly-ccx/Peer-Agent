@@ -1,3 +1,4 @@
+import '../../../scripts/embed-storage-workers.mjs';
 import { copyFile, mkdir, rm } from 'node:fs/promises';
 
 const sourceDirectory = new URL('../src/', import.meta.url);
@@ -9,6 +10,8 @@ await mkdir(outputDirectory, { recursive: true });
 const runtimeFiles = [
   'index.mjs',
   'index.d.ts',
+  'interaction-reader.mjs',
+  'interaction-worker-source.generated.mjs',
   'selection-reference.mjs',
   'persisted-history.mjs',
   'history-projection-reader.mjs',

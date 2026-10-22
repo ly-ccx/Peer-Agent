@@ -335,8 +335,15 @@ export function createProjectAgentApplicationService({
 
   function readConversation(payload = {}) {
     if (!open()) return disabled();
-    const result = directory.readConversation(payload.workspaceId, payload);
-    return result?.ok ? { ...result, activity: readActivity(payload.workspaceId) } : result;
+    const result = payload.processFor && typeof directory.readProcess === 'function' ? directory.readProcess(payload.workspaceId, payload)
+      : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
+        ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
+    const decorate = page => {
+      if (!page?.ok) return page;
+      try { return { ...page, activity: readActivity(payload.workspaceId) }; }
+      catch { return { ...page, activity: null }; }
+    };
+    return result && typeof result.then === 'function' ? result.then(decorate) : decorate(result);
   }
 
   function stopResponse(payload = {}) {
