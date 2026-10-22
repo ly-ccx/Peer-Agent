@@ -63,6 +63,18 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
         }
         cases.push({ width, theme, material, nativeGlass, ...actual });
         await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `window-material-${material}-${width}-${theme}.png`) });
+        if (width === 1280 && theme === 'dark' && material === 'glass') {
+          await page.locator('.bot-profile').click();
+          const dock = page.locator('.bot-drawer-dock.is-open'); await dock.waitFor();
+          await until(() => dock.evaluate(node => node.getBoundingClientRect().width), value => value > 300);
+          if (nativeGlass) assert.equal(await dock.evaluate(node => {
+            const main = document.querySelector('.bot-main').getBoundingClientRect();
+            return node.getBoundingClientRect().left - main.right >= 9 && parseFloat(getComputedStyle(node).borderRadius) > 0;
+          }), true, 'details and main content remain separate floating panels');
+          await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'window-material-drawer-1280-dark.png') });
+          await page.getByRole('button', { name: '关闭', exact: true }).click();
+          await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+        }
       }
     }
     const cdp = await page.context().newCDPSession(page);
