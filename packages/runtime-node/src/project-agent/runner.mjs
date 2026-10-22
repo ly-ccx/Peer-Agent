@@ -6,6 +6,7 @@ import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn, 
 import { waitResult } from './wake-wait.mjs';
 import { createTurnActivity } from './turn-activity.mjs';
 import { readRetryContinuity } from './retry-continuity.mjs';
+import { beginExecutionAttempt } from './session-facts.mjs';
 
 /**
  * 与桌面 llm-chat-service 的同提供方重试退避一致（ADR 30）：
@@ -288,6 +289,8 @@ export function createProjectAgentRunner({
     activeContinuation = coordination !== null && job.continuation === true;
     const signal = controller.signal;
     setStatus('thinking');
+    // 本进程真实执行所有权：token 活到本轮 finally，暂停/取消/异常/重入都走同一释放路径。
+    const endExecution = beginExecutionAttempt(conversation, job.turnId);
     try {
       if (job.kind === 'digest') {
         if (job.message) remember(job.message);
@@ -428,6 +431,7 @@ export function createProjectAgentRunner({
       if (!outcome.silentWait && (job.kind === 'user' || job.kind === 'wake')) scheduleCurator(job);
       return 'ok';
     } finally {
+      endExecution();
       if (abortController === controller) { abortController = null; activeWorkId = null; activeContinuation = false; }
       turnKind = null; acceptingStop = false;
     }

@@ -220,16 +220,18 @@ export function createSessionSupervisor({
   }
 
   function snapshotOf(plan) {
+    // 生命周期结论只由 protocol 的 decideLifecycle 给出；适配器只交原始事实，不再私改状态。
+    const facts = sessionFactsFromPlan(plan);
     return {
       planId: plan.planId,
-      // Completed leaves can briefly precede the manual completion gate.
-      status: plan.status === 'completed' && plan.runner?.status === 'blocked'
-        && plan.runner.blockedReason === 'manual_dod_confirmation_required' ? 'executing' : plan.status,
+      status: plan.status,
       title: typeof plan.title === 'string' ? plan.title : '',
       runnerStatus: plan.runner?.status,
-      needsUser: sessionFactsFromPlan(plan).needsUser,
+      needsUser: facts.needsUser,
+      executionOwnership: facts.executionOwnership,
       blockedReason: plan.runner?.blockedReason,
       agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
+      delegated: Boolean(plan.delegationOrigin),
       updatedAt: plan.updatedAt,
       conversationId: plan.conversationId,
       progress: plan.progress,

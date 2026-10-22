@@ -1,12 +1,12 @@
-import { deriveSessionFacts } from './session-facts.ts';
 /**
  * Project-agent delegation contracts. Pure projections only; nothing here runs a tool.
- * The user-visible conclusion of a work session is projectGoalPlan's conclusion.
+ * The user-visible conclusion of a work session is `decideLifecycle`'s conclusion.
  */
 
 import type { ModelSelectionSnapshot } from './model-routing.ts';
 import {
-  projectGoalPlan,
+  decideLifecycle,
+  type ExecutionOwnership,
   type GoalPlanProjectionSnapshot,
   type TaskOverviewItem,
 } from './task-overview.ts';
@@ -74,6 +74,8 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly accepted?: boolean;
   readonly verifying?: boolean;
   readonly phase?: 'starting' | 'verifying' | 'paused';
+  /** 进程内执行所有权（runtime 采集）；缺省表示该入口尚未接入所有权事实。 */
+  readonly executionOwnership?: ExecutionOwnership;
 }
 
 export interface WorkSession extends SessionQueueFacts {
@@ -89,6 +91,8 @@ export interface WorkSession extends SessionQueueFacts {
   readonly actionRight: TaskOverviewItem['actionRight'];
   readonly nextAction: TaskOverviewItem['nextAction'];
   readonly statusLabel: string;
+  /** 是否可取消；由生命周期决策统一给出，renderer 不再自行推断。 */
+  readonly cancelable?: boolean;
   readonly needsYouReason?: TaskOverviewItem['needsYouReason'];
   readonly spawnedAt: string;
   readonly conversationId?: string;
@@ -430,22 +434,6 @@ export function createDelegationEvent(input: {
   };
 }
 
-function delegationStatus(
-  snapshot: GoalPlanProjectionSnapshot,
-  meta: WorkSessionConversationMeta,
-  projected: TaskOverviewItem,
-): WorkSessionStatus {
-  return deriveSessionFacts({ status: snapshot.status, runnerStatus: snapshot.runnerStatus,
-    cancellationPhase: meta.origin.cancellation?.phase,
-    takeoverPhase: meta.coordination?.phase === 'awaiting_outcome' ? 'awaiting_outcome' : meta.origin.takeover?.phase,
-    accepted: meta.accepted === true || (snapshot.status === 'completed' && meta.acceptance !== 'confirm'
-      && meta.accepted === undefined && !meta.verifying && !snapshot.runnerStatus),
-    superseded: Boolean(meta.supersededBy), phase: meta.phase,
-    needsUser: snapshot.status === 'awaiting_approval' || snapshot.needsUser === true, verificationActive: meta.verifying === true,
-    blockedReason: snapshot.agentWaiting ? 'waiting_parent_agent' : snapshot.blockedReason,
-  }).status;
-}
-
 /**
  * Project a GoalPlan snapshot into a work session.
  * actionRight / nextAction / statusLabel come from projectGoalPlan, so the two projections cannot disagree.
@@ -455,22 +443,46 @@ export function projectWorkSession(
   plan: GoalPlanProjectionSnapshot,
   conversationMeta: WorkSessionConversationMeta,
 ): WorkSession {
-  const projected = projectGoalPlan(plan);
-  const status = delegationStatus(plan, conversationMeta, projected);
-  const parentFollowing = status === 'waiting_agent' || status === 'verifying';
-  const transitioning = ['stopping','awaiting_outcome'].includes(status) || conversationMeta.origin.takeover?.phase === 'stopping';
+  const projected = decideLifecycle(plan, {
+    ...(conversationMeta.executionOwnership ? { executionOwnership: conversationMeta.executionOwnership } : {}),
+    // `delegated` 必须是真实事实；不能用"这是工作会话"反推，否则会改写非委派历史语义。
+    ...(plan.delegated === true ? { delegated: true } : {}),
+    ...(conversationMeta.acceptance ? { acceptance: conversationMeta.acceptance } : {}),
+    accepted:
+      conversationMeta.accepted === true ||
+      (plan.delegated !== true &&
+        plan.status === 'completed' &&
+        conversationMeta.acceptance !== 'confirm' &&
+        conversationMeta.accepted === undefined &&
+        !conversationMeta.verifying &&
+        !plan.runnerStatus),
+    superseded: Boolean(conversationMeta.supersededBy),
+    needsUser: plan.status === 'awaiting_approval' || plan.needsUser === true,
+    verificationActive: conversationMeta.verifying === true,
+    ...(conversationMeta.phase ? { phase: conversationMeta.phase } : {}),
+    blockedReason: plan.agentWaiting ? 'waiting_parent_agent' : plan.blockedReason,
+    ...(conversationMeta.origin.cancellation?.phase
+      ? { cancellationPhase: conversationMeta.origin.cancellation.phase }
+      : {}),
+    ...(conversationMeta.coordination?.phase === 'awaiting_outcome'
+      ? { takeoverPhase: 'awaiting_outcome' }
+      : conversationMeta.origin.takeover?.phase
+        ? { takeoverPhase: conversationMeta.origin.takeover.phase }
+        : {}),
+  });
+  const status = projected.status;
   return {
     sessionId: conversationMeta.sessionId ?? plan.conversationId ?? plan.planId,
     workspaceId: conversationMeta.workspaceId,
     title: plan.title,
     planId: plan.planId,
     status,
-    actionRight: transitioning || parentFollowing ? 'peer_advancing' : projected.actionRight,
-    nextAction: transitioning || parentFollowing ? 'none' : projected.nextAction,
-    statusLabel: status === 'stopping' ? '正在停止' : status === 'awaiting_outcome' ? '执行结果待核实'
-      : conversationMeta.origin.takeover?.phase === 'stopping' ? '正在接手'
-      : status === 'waiting_agent' ? '由主 Bot 跟进' : status === 'verifying' ? '核验中' : projected.statusLabel,
-    ...(!transitioning && !parentFollowing && projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
+    // 直接消费同一份决策；这里再改写就等于第二套状态机。
+    actionRight: projected.actionRight,
+    nextAction: projected.nextAction,
+    statusLabel: projected.statusLabel,
+    cancelable: projected.cancelable,
+    ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
     ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
     ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),

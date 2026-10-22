@@ -31,7 +31,7 @@ function WorkRow({ row, botName, i18n, onOpen, disclosure }: { readonly row: Bot
       {handoff ? <p className="bot-work-hint">{i18n.t('projectAgent.chat.work.handoff', { name: botName })}</p> : null}
       <div className="bot-work-actions">
         <button type="button" onClick={() => onOpen(row.id)}>{i18n.t('projectAgent.chat.work.open')}<PeerIcon name="arrowUpRight" size={13} /></button>
-        <TaskCancelButton sessionId={row.id} status={row.status} title={row.session?.title ?? i18n.t('projectAgent.chat.work.related')} i18n={i18n} />
+        <TaskCancelButton sessionId={row.id} status={row.status} cancelable={row.session?.cancelable} title={row.session?.title ?? i18n.t('projectAgent.chat.work.related')} i18n={i18n} />
       </div>
     </div>
   </details>;

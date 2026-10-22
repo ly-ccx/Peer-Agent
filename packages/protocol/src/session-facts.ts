@@ -1,37 +1,59 @@
-import type { WorkSessionStatus } from './delegation.ts';
+import {
+  decideLifecycle,
+  type ExecutionOwnership,
+  type GoalPlanProjectionSnapshot,
+  type LifecycleDecision,
+  type LifecycleFacts,
+} from './task-overview.ts';
+
+export type { ExecutionOwnership, LifecycleDecision, LifecycleFacts } from './task-overview.ts';
 
 export interface SessionFactSnapshot {
-  readonly status: WorkSessionStatus;
+  readonly status: LifecycleDecision['status'];
   readonly verificationActive: boolean;
   readonly needsUser: boolean;
   readonly blockedReason?: string;
 }
 
+/**
+ * 兼容入口：把扁平事实交给唯一的生命周期决策器。
+ * 旧的直接判定逻辑已删除，`status / needsUser / blockedReason` 全部来自 `decideLifecycle`。
+ */
 export function deriveSessionFacts(input: {
-  status?: string; phase?: string; runnerStatus?: string; accepted?: boolean;
-  superseded?: boolean; needsUser?: boolean; blockedReason?: string; verificationActive?: boolean;
-  cancellationPhase?: string; takeoverPhase?: string;
+  status?: string;
+  phase?: string;
+  runnerStatus?: string;
+  accepted?: boolean;
+  superseded?: boolean;
+  needsUser?: boolean;
+  blockedReason?: string;
+  verificationActive?: boolean;
+  cancellationPhase?: string;
+  takeoverPhase?: string;
+  executionOwnership?: ExecutionOwnership;
 }): SessionFactSnapshot {
-  const verificationActive = input.verificationActive === true;
-  let status: WorkSessionStatus;
-  if (input.status === 'cancelled') status = 'cancelled';
-  else if (input.status === 'failed') status = 'failed';
-  else if (input.accepted) status = 'accepted';
-  else if (input.cancellationPhase === 'awaiting_outcome' || input.takeoverPhase === 'awaiting_outcome') status = 'awaiting_outcome';
-  else if (input.cancellationPhase === 'stopping') status = 'stopping';
-  else if (input.takeoverPhase === 'stopping') status = 'starting';
-  else if (input.superseded && input.status !== 'completed') status = 'superseded';
-  else if ((input.phase === 'paused' || input.runnerStatus === 'paused') && input.status !== 'completed') status = 'paused';
-  else if (input.needsUser || input.runnerStatus === 'waiting_user') status = 'waiting_user';
-  else if (input.blockedReason === 'waiting_parent_agent' && input.phase !== 'paused' && !input.superseded && input.runnerStatus !== 'paused') status = 'waiting_agent';
-  else if (verificationActive) status = 'verifying';
-  // A technical blocker is work for the parent Agent. It is not a human question.
-  else if (input.runnerStatus === 'blocked') status = 'waiting_agent';
-  else if (input.status === 'completed' && ['running', 'starting', 'waiting_provider', 'resuming_after_compaction'].includes(input.runnerStatus || '')) status = 'running';
-  else if (input.status === 'completed') status = 'result_ready';
-  else if (input.phase === 'starting') status = 'starting';
-  else if (['approved', 'accepted', 'paused', 'interrupted'].includes(input.status || '') || input.phase === 'queued') status = 'queued';
-  else status = 'running';
-  return { status, verificationActive: status === 'verifying', needsUser: status === 'waiting_user',
-    ...(input.blockedReason ? { blockedReason: input.blockedReason } : {}) };
+  const snapshot = {
+    conversationId: '',
+    title: '',
+    planId: '',
+    status: (input.status ?? 'executing') as GoalPlanProjectionSnapshot['status'],
+    ...(input.runnerStatus ? { runnerStatus: input.runnerStatus } : {}),
+  } as GoalPlanProjectionSnapshot;
+  const decision = decideLifecycle(snapshot, {
+    ...(input.executionOwnership ? { executionOwnership: input.executionOwnership } : {}),
+    ...(input.phase ? { phase: input.phase } : {}),
+    ...(input.accepted !== undefined ? { accepted: input.accepted } : {}),
+    ...(input.superseded !== undefined ? { superseded: input.superseded } : {}),
+    ...(input.needsUser !== undefined ? { needsUser: input.needsUser } : {}),
+    ...(input.blockedReason ? { blockedReason: input.blockedReason } : {}),
+    ...(input.verificationActive !== undefined ? { verificationActive: input.verificationActive } : {}),
+    ...(input.cancellationPhase ? { cancellationPhase: input.cancellationPhase } : {}),
+    ...(input.takeoverPhase ? { takeoverPhase: input.takeoverPhase } : {}),
+  });
+  return {
+    status: decision.status,
+    verificationActive: decision.verificationActive,
+    needsUser: decision.needsUser,
+    ...(decision.blockedReason ? { blockedReason: decision.blockedReason } : {}),
+  };
 }

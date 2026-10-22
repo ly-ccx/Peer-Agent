@@ -68,7 +68,7 @@ export function SessionDetail({
           {stamp && <time dateTime={session.spawnedAt}>{i18n.t('projectAgent.drawer.task.created', { time: stamp })}</time>}
         </div>
       </header>
-      <TaskCancelButton sessionId={session.sessionId} status={session.status} title={title} i18n={i18n} />
+      <TaskCancelButton sessionId={session.sessionId} status={session.status} cancelable={session.cancelable} title={title} i18n={i18n} />
       <section className="bot-task-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
         <h3>{i18n.t('projectAgent.drawer.progress')}</h3>
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
