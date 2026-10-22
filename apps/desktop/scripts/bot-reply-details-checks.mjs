@@ -44,7 +44,7 @@ export async function openReplyDetails(page, message) {
     assert.equal(await page.locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
     return;
   }
-  const button = message.locator('.bot-reply-context > button');
+  const button = message.locator('.bot-reply-context > button').first();
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
   await page.locator('.bot-composer textarea').focus();
   await page.mouse.move(1, 1);
@@ -62,7 +62,7 @@ export async function openReplyDetails(page, message) {
   const placement = await button.evaluate(node => {
     const action = node.getBoundingClientRect(), footer = node.parentElement.getBoundingClientRect();
     const bubbles = [...node.closest('.bot-reply, .bot-system').querySelectorAll(
-      ':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
+      ':scope > .bot-reply-body, :scope > .bot-continuous-paragraphs > .bot-reply-body, :scope > .bot-narration:not(.bot-continuous-paragraphs) .markdown-content > *, '
       + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
       + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);

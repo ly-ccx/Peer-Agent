@@ -330,7 +330,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   checks.push('real delta visible while controlled provider remains pending, before canonical reply');
   const firstParagraph = live.locator('.bot-narration p').first();
   await firstParagraph.evaluate(node => { node.dataset.rcParagraphIdentity = 'first'; });
-  await checkReplyPresence({ page, reply: live, report, until, state: 'first-paragraph', label: '正在整理回复' });
+  await checkReplyPresence({ page, reply: live, report, until, state: 'first-paragraph', quiet: true });
   await live.hover();
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'reply-presence-progress-dark.png') });
   await page.waitForTimeout(180);
@@ -338,8 +338,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const secondParagraph = live.locator('.bot-narration p').filter({ hasText: '项目把界面和本地执行分开了，我再确认它们如何连接。' });
   await secondParagraph.waitFor();
   assert.equal(await firstParagraph.getAttribute('data-rc-paragraph-identity'), 'first');
-  assert.equal(await secondParagraph.evaluate(node => getComputedStyle(node).animationName), 'motion-enter-fade');
-  assert.equal(await firstParagraph.evaluate(node => node.getAnimations()[0]?.playState), 'finished');
+  assert.equal(await secondParagraph.evaluate(node => getComputedStyle(node).animationName), 'none', 'continuous paragraphs do not replay enter animations');
+  assert.equal(await firstParagraph.evaluate(node => node.getAnimations().filter(animation => animation.playState === 'running').length), 0);
   assert.equal(await live.locator('.bot-narration').evaluate(node => Boolean(node.closest('details'))), false);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   assert.equal(await secondParagraph.evaluate(node => getComputedStyle(node).animationName), 'none');
@@ -352,7 +352,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     assert.equal(await live.evaluate(node => node.scrollWidth <= node.clientWidth), true);
     const bubbles = await live.locator('.bot-narration p').evaluateAll(nodes => nodes.map(node => {
-      const rect = node.getBoundingClientRect(), container = node.closest('.bot-reply').getBoundingClientRect(), style = getComputedStyle(node);
+      const bubble = node.closest('.bot-reply-body');
+      const rect = bubble.getBoundingClientRect(), container = node.closest('.bot-reply').getBoundingClientRect(), style = getComputedStyle(bubble);
       const range = document.createRange(); range.selectNodeContents(node);
       const text = [...range.getClientRects()];
       return { background: style.backgroundColor, radius: parseFloat(style.borderRadius),
@@ -363,11 +364,11 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     assert.ok(bubbles.every(item => item.background !== 'rgba(0, 0, 0, 0)' && item.radius >= 12 && item.padding >= 12 && item.fits));
     assert.equal(await detail.locator('.bot-turn-process > summary').isVisible(), false);
     assert.equal(await footer.locator(':scope > button').evaluate(node => node.getBoundingClientRect().top >= Math.max(...[...node.closest('.bot-reply').querySelectorAll('.bot-narration p')].map(p => p.getBoundingClientRect().bottom))), true);
-    assert.equal(await footer.textContent(), '正在整理回复');
-    assert.equal(await footer.locator(':scope > button').getAttribute('aria-label'), '回复详情');
+    assert.doesNotMatch(await footer.textContent(), /正在整理回复|正在准备下一步/);
+    assert.match(await footer.locator(':scope > button').first().getAttribute('aria-label'), /回复详情/);
     assert.equal(await footer.locator(':scope > button').evaluate(node => parseFloat(getComputedStyle(node).fontSize)), 12);
     bubbleChecks.push({ theme, bubbles });
-    await checkReplyPresence({ page, reply: live, report, until, state: `latest-paragraph-${theme}`, label: '正在整理回复' });
+    await checkReplyPresence({ page, reply: live, report, until, state: `latest-paragraph-${theme}`, quiet: true });
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `conversation-updates-${theme}.png`) });
   }
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
@@ -390,18 +391,18 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.locator('.bot-thread-latest').waitFor();
   let readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 1.75);
-  await checkReplyPresence({ page, reply: live, report, until, state: 'preparing-read', label: '准备阅读 README.md' });
+  await checkReplyPresence({ page, reply: live, report, until, state: 'preparing-read', quiet: true });
   command('RC_STREAM_TEXT', 2);
   assert.equal(await detail.isVisible(), true, 'the drawer stays open while the user reads earlier messages');
   if (!(await detail.locator('.bot-turn-process').evaluate(node => node.open))) await detail.locator('.bot-turn-process > summary').click();
   const readingStep = detail.locator('.bot-tool-step[data-status="running"]');
   await readingStep.waitFor();
-  await checkReplyPresence({ page, reply: live, report, until, state: 'reading-docked', label: '正在阅读 README.md' });
+  await checkReplyPresence({ page, reply: live, report, until, state: 'reading-docked', quiet: true });
   const runningLabel = readingStep.locator('.bot-tool-step-label');
-  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).animationName), 'none');
+  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
   const position = await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition);
   await page.waitForTimeout(200);
-  assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition), position);
+  assert.notEqual(await runningLabel.evaluate(node => getComputedStyle(node).backgroundPosition), position);
   await readingStep.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
   await readingStep.locator('.bot-tool-preview > summary').click();
   await readingStep.getByText('调用正在进行，返回内容到达后会显示在这里。', { exact: true }).waitFor();
@@ -415,7 +416,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await runningLabel.evaluate(node => getComputedStyle(node).animationName), 'none');
   assert.notEqual(await runningLabel.evaluate(node => getComputedStyle(node).opacity), '0');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  checks.push('running tool shows its actual target without continuous paint animation; keyboard opens step and parameters before result; reduced motion remains readable');
+  checks.push('running tool keeps its actual target in details with a reduced-motion fallback; keyboard opens step and parameters before result; reduced motion remains readable');
   if (await page.locator('.bot-thread-latest').count()) await page.locator('.bot-thread-latest').click();
   // Keyboard focus may leave us near the end (within the follow threshold),
   // without a latest button. Scroll to the actual end before testing history.
@@ -465,11 +466,13 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     setDelegatedWork('accepted');
     await until(() => detail.locator('.bot-work-row').getAttribute('data-status'), status => status === 'accepted');
   }
+  await live.evaluate(node => { globalThis.rcContinuousNodes = { reply: node, author: node.closest('.bot-thread-row').querySelector('.bot-message-author'), paragraph: node.querySelector('[data-narration-id]'), footer: node.querySelector('.bot-reply-context > button') }; });
   command('RC_STREAM_TEXT', 3); await live.waitFor({ state: 'detached' });
   const normalTurns = readFixtureTurns().filter(turn => turn.role === 'project_agent' && turn.scenario === 'RC_STREAM_TEXT');
   assert.equal(normalTurns.length, 1, 'the controlled successful stream must not silently retry');
   report.streamingFixtureTurns = normalTurns;
   const completed = page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' });
+  assert.equal(await completed.evaluate(node => { const saved = globalThis.rcContinuousNodes; return node === saved.reply && node.closest('.bot-thread-row').querySelector('.bot-message-author') === saved.author && node.querySelector('[data-narration-id]') === saved.paragraph && node.querySelector('.bot-reply-context > button') === saved.footer; }), true, 'canonical delivery preserves reply, avatar, public paragraph and details nodes');
   await checkReplyPresence({ page, reply: completed, report, until, state: 'completed' });
   assert.equal(await completed.locator('.bot-context-running').count(), 0);
   assert.equal(await detail.locator('.bot-turn-process').evaluate(node => node.open), true);
@@ -482,8 +485,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     '我先看看项目的整体情况，整理好后告诉你重点。',
     '项目把界面和本地执行分开了，我再确认它们如何连接。',
     '本地执行的结果会交回界面。修改前还需要遵循项目里的开发规则。',
+    '项目概况看清楚了。',
   ]);
-  assert.equal(await completed.locator('.bot-narration-segment').count(), 2);
+  assert.equal(await completed.locator('.bot-narration-segment').count(), 3);
   assert.doesNotMatch(await completed.textContent(), /PRIVATE_/);
   if (workCommandFile) {
     assert.equal(await detail.locator('.bot-work-row').evaluate(node => node.open), true);
@@ -498,7 +502,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'conversation-complete.png') });
   assert.equal(await completed.locator('.bot-turn-process').count(), 0);
   assert.equal(await completed.locator('.bot-reply-context > button').innerText(), '回复详情');
-  const finalBubble = await completed.locator(':scope > .bot-reply-body').evaluate(node => ({ background: getComputedStyle(node).backgroundColor, padding: getComputedStyle(node).padding, text: node.innerText }));
+  const finalBubble = await completed.locator('.bot-continuous-paragraphs > .bot-reply-body').last().evaluate(node => ({ background: getComputedStyle(node).backgroundColor, padding: getComputedStyle(node).padding, text: node.innerText }));
   assert.notEqual(finalBubble.background, 'rgba(0, 0, 0, 0)');
   assert.match(finalBubble.text, /界面展示结果，本地负责执行能力/);
   assert.equal(await completed.locator('.bot-reply-body ul li').count(), 2);
@@ -527,9 +531,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   report.replyDrawerReading = { before: beforeDrawer, after: afterDrawer };
 
   await start('RC_STREAM_STOP');
-  assert.equal(await completed.locator('.bot-narration p').count(), 3);
+  assert.equal(await completed.locator('.bot-narration p').count(), 4);
   assert.equal(await completed.locator('.bot-narration').getAttribute('data-live'), 'false');
-  report.conversationFlow = { incrementalParagraphs: true, stableParagraphs: true, narrationOutsideProcess: true,
+  report.conversationFlow = { incrementalParagraphs: true, stableParagraphs: true, stableReplyCarrier: true, stableAvatar: true, stableDetailsTrigger: true, narrationOutsideProcess: true,
     retainedAfterCompletion: true, retainedFromHistory: true, separateToolUpdates: true, noPrivateThinking: true, reducedMotion: true,
     messageBubbles: true, detailsAtEnd: true, detailsCollapsed: true, detailsKeyboard: true, detailsInDrawer: true, detailsFocusRestored: true, detailsReadingPosition: true, bubbleChecks };
   await openDetails(completed);
@@ -549,10 +553,10 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await stop.evaluate(node => getComputedStyle(node).outlineStyle), 'solid');
   await stop.press('Enter');
   await page.getByText('生成已停止，以上内容未完成', { exact: true }).waitFor();
-  assert.equal(await page.locator('.bot-system').filter({ has: page.locator('.bot-stopped-reply') }).locator('.bot-reply-bar').count(), 0);
+  assert.equal(await page.locator('.bot-continuous-reply, .bot-system').filter({ has: page.locator('.bot-stopped-reply') }).locator('.bot-reply-bar').count(), 0);
   assert.equal(await composer.inputValue(), '停止之后继续保留我的草稿');
   assert.equal(await page.locator('.bot-stop-response').count(), 0);
-  const stoppedMessage = page.locator('.bot-system').filter({ has: page.locator('.bot-stopped-reply') });
+  const stoppedMessage = page.locator('.bot-continuous-reply, .bot-system').filter({ has: page.locator('.bot-stopped-reply') });
   await checkReplyPresence({ page, reply: stoppedMessage, report, until, state: 'stopped' });
   await openDetails(stoppedMessage);
   await detail.locator('.bot-tool-step[data-status="stopped"]').waitFor({ state: 'attached' });
@@ -565,7 +569,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await start('RC_STREAM_FAIL'); command('RC_STREAM_FAIL', 2.5);
   await live.getByText('项目概况看', { exact: true }).waitFor();
   command('RC_STREAM_FAIL', 3); await live.waitFor({ state: 'detached' });
-  const failedMessage = page.locator('.bot-system').filter({ has: page.locator('.bot-unavailable-reply') }).last();
+  const failedMessage = page.locator('.bot-continuous-reply, .bot-system').filter({ has: page.locator('.bot-unavailable-reply') }).last();
   const failed = failedMessage.locator('.bot-unavailable-reply');
   await failed.waitFor();
   assert.equal(await failedMessage.locator('.bot-context-error').isVisible(), false);

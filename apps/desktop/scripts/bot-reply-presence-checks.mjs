@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 /** Assert the actual rendered bubble edge, rather than the full-width article. */
-export async function checkReplyPresence({ page, reply, report, until, state, label, captureDirectory, shot }) {
+export async function checkReplyPresence({ page, reply, report, until, state, label, quiet = false, captureDirectory, shot }) {
   const samples = report.replyPresence ??= { cases: [], labels: [] };
   const footer = reply.locator('.bot-reply-context');
   if (label) {
@@ -11,8 +11,11 @@ export async function checkReplyPresence({ page, reply, report, until, state, la
     assert.notEqual(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).webkitTextFillColor), 'rgba(0, 0, 0, 0)');
     samples.labels.push({ state, label, shimmer: false, readableWithoutRepaintAnimation: true });
   }
+  if (quiet) {
+    assert.doesNotMatch(await footer.textContent(), /正在整理回复|准备阅读|正在阅读|正在准备下一步/);
+  }
   const bounds = await until(() => reply.evaluate(node => {
-    const bubbles = [...node.querySelectorAll(':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
+    const bubbles = [...node.querySelectorAll(':scope > .bot-reply-body, :scope > .bot-continuous-paragraphs > .bot-reply-body, :scope > .bot-narration:not(.bot-continuous-paragraphs) .markdown-content > *, '
       + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
       + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
@@ -25,7 +28,7 @@ export async function checkReplyPresence({ page, reply, report, until, state, la
       columnRight: column.right, fits: button.left >= column.left && button.right <= column.right,
       aligned: Math.abs(textLeft - footer.left) <= 1 && Math.abs(textLeft - icon.left) <= 1,
       unifiedActivity: !footerNode.querySelector('.bot-context-running') || footerNode.querySelector('button .bot-context-running') !== null,
-      stableHeight: footer.height >= 32 && button.height >= 32, singleAction: footerNode.querySelectorAll('button').length === 1 };
+      stableHeight: footer.height >= 32 && button.height >= 32, singleAction: footerNode.querySelectorAll(':scope > button:not(:disabled)').length >= 1 };
   }), value => value?.aligned);
   assert.ok(bounds.fits, `${state}: footer remains inside the conversation`);
   assert.ok(bounds.unifiedActivity && bounds.stableHeight && bounds.singleAction, 'one stable, accessible activity/details action');
