@@ -102,8 +102,7 @@ export function createTuiProjectHost(options: {
   const verification = createSessionVerification({goalPlanStore: plans,
     verifySession: (plan: any, focus: string) => goalRunner.verifyDelegatedSession({plan, focus}),
     readReport: (plan: any) => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
-    completeRecheck: (input: any) => goalRunner.completeRecheck(input),
-    appendMessage: (id: string, message: any) => conversations.appendMessage(id, message)} as never);
+    completeRecheck: (input: any) => goalRunner.completeRecheck(input)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
     executionScheduler: scheduler, deferRecovery: true, approvalStore: approvals, memoryStore: memory, canManageWorkspace: holds,
     objectives: {prepareSpawn: (...args: any[]) => (objectives.prepareSpawn as any)(...args), linkSession: (...args: any[]) => (objectives.linkSession as any)(...args)},

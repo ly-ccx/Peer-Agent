@@ -129,7 +129,8 @@ export function BotProfileDrawer({
     triggerRef.current?.focus({ preventScroll: true });
   };
   const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
-  const reportRead = useTaskReport(workspaceId, memory.sessionId, memory.open, selected?.status, sessionsAvailable);
+  const reportRead = useTaskReport(workspaceId, memory.sessionId, memory.open, selected?.status, sessionsAvailable,
+    `${selected?.sourceRevision || ''}:${selected?.observationRevision || ''}`);
   const taskDetail = mergeTaskDetail(selected, reportRead.detail);
 
   useEffect(() => {

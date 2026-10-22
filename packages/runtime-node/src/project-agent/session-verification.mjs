@@ -13,7 +13,6 @@ import { verificationHistory } from './verification-history.mjs';
 export function createSessionVerification({
   goalPlanStore,
   verifySession,
-  appendMessage = null,
   readReport = () => '',
   completeRecheck = null,
 } = {}) {
@@ -210,21 +209,6 @@ export function createSessionVerification({
           await completeRecheck({ planId: plan.planId, contentHash,
             currentHash: verificationContentHash(current, readReport(current)) });
         }
-      }
-      const conversationId = plan?.delegationOrigin?.parentConversationId || plan?.conversationId;
-      if (typeof appendMessage === 'function' && conversationId && card) {
-        const evidenceRefs = Array.isArray(detail?.outputs)
-          ? detail.outputs.map((item) => item?.evidenceRef).filter((ref) => typeof ref === 'string' && ref)
-          : [];
-        appendMessage(conversationId, {
-          id: card.cardId,
-          role: 'assistant',
-          kind: 'system_card',
-          content: typeof card.content === 'string' ? card.content : '',
-          cards: [card],
-          sessionId: card.sessionId,
-          meta: { evidenceRefs },
-        });
       }
       return { ok: true };
     },

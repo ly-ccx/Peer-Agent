@@ -464,3 +464,23 @@ test('projected failure cards resolve the canonical error message and exact orig
   assert.equal(result.messages[1].content,'ORIGINAL_ERROR');
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('legacy verdict cards cannot become the bot preview or public messages; exact process reads preserve them', () => {
+  const root = tempRoot();
+  try {
+    const env = harness(root);
+    env.conversationStore.replaceMessages(env.conversationId, [
+      { id: 'user', kind: 'user_input', role: 'user', content: '核对结果' },
+      { id: 'reply', kind: 'agent_reply', role: 'assistant', content: '结果仍有一项尚未核验。' },
+      { id: 'verdict', kind: 'system_card', role: 'assistant', content: 'passed',
+        cards: [{ cardId: 'card:verdict:session', kind: 'verdict', content: 'passed', resolvedState: 'resolved' }] },
+    ]);
+    const file = path.join(root, 'conversations', `${env.conversationId}.jsonl`);
+    const before = readFileSync(file);
+    assert.deepEqual(env.directory.readConversation(env.entry.workspaceId).messages.map(row => row.id), ['user', 'reply']);
+    assert.equal(env.directory.get(env.entry.workspaceId).item.preview, '结果仍有一项尚未核验。');
+    const detail = env.directory.readConversation(env.entry.workspaceId, { processFor: 'verdict' });
+    assert.equal(detail.messages[0].cards[0].content, 'passed');
+    assert.deepEqual(readFileSync(file), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

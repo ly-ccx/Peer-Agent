@@ -153,6 +153,10 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
   const explicitKind = readString(raw.kind) || readString(raw.type) || readString(raw.messageKind);
   const role = readString(raw.role);
   const kind = explicitKind || (role === 'user' ? 'user_input' : '');
+  const agentActivity = readAgentActivity(raw.agentActivity);
+  if (kind === 'agent_activity' && agentActivity && ['verifying', 'verified'].includes(agentActivity.state)) return null;
+  const cards = readCards(raw.cards);
+  if (kind === 'system_card' && cards.length && cards.every(card => card.kind === 'verdict')) return null;
   const meta = readMeta(raw.meta);
   const replyTo = readStringList(raw.replyTo).length > 0 ? readStringList(raw.replyTo) : (meta.replyTo ?? []);
   const sources = readStringList(raw.sources).length > 0 ? readStringList(raw.sources) : (meta.sources ?? []);
@@ -161,7 +165,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     kind,
     role,
     content: readString(raw.content) || readString(raw.text),
-    ...(readAgentActivity(raw.agentActivity) ? { agentActivity: readAgentActivity(raw.agentActivity) } : {}),
+    ...(agentActivity ? { agentActivity } : {}),
     createdAt: readString(raw.createdAt) || readString(raw.at),
     ...(readString(raw.turnId) ? { turnId: readString(raw.turnId) } : {}),
     ...(raw.turnKind === 'user' || raw.turnKind === 'wake' ? { turnKind: raw.turnKind } : {}),
@@ -176,7 +180,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     ...(Array.isArray(raw.dispositionCalls) ? { dispositionCalls: readRounds([{ toolCalls: raw.dispositionCalls }])[0]?.toolCalls ?? [] } : {}),
     meta,
     proactive: raw.proactive === true || meta.surfacing === 'digest',
-    cards: readCards(raw.cards),
+    cards: cards.filter(card => card.kind !== 'verdict'),
     quoteRefs: readStringList(raw.quoteRefs),
     separatorLabel: readString(raw.separatorLabel) || meta.separatorLabel || '',
     ...imageField(raw.attachments),

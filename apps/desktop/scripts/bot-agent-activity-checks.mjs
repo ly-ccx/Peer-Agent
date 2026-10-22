@@ -8,7 +8,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const command = {...initial, seq: initial.seq + 1, sessions: [
     {...initial.sessions[0], sessionId: 'rc-work-1', title: '实现检查', status: 'waiting_agent', statusLabel: '由主 Bot 跟进'},
-    {...initial.sessions[0], sessionId: 'rc-work-2', title: '独立核验', status: 'running', statusLabel: '正在运行中'},
+    {...initial.sessions[0], sessionId: 'rc-work-2', title: '独立核验', status: 'verifying', statusLabel: '正在核对结果', verificationProgress: { continuationId: 'rc-review', startedAt: '2026-10-21T00:00:00Z', lastProgressAt: '2026-10-21T00:01:00Z', observationCount: 7, phase: 'ready' }},
   ]};
   writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
   const cases = []; let marker;
@@ -25,8 +25,9 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     const current = await identity(row);
     marker ??= current; assert.deepEqual(marker, current);
     assert.deepEqual(await identity(page.locator('#bot-msg-rc-message-9980')), current);
-    const other = await identity(page.locator('#bot-msg-rc-message-9984'));
-    assert.match(await page.locator('#bot-msg-rc-message-9984').innerText(), /正在核对结果.*已检查 7 项事实/s);
+    const otherRow = page.locator('#bot-msg-rc-message-9977');
+    const other = await identity(otherRow);
+    assert.equal(await page.locator('#bot-msg-rc-message-9984').count(), 0, 'internal verification progress stays out of the main conversation');
     assert.notEqual(current.icon, other.icon);
     assert.notEqual(current.svg, other.svg);
     assert.equal(await page.locator('#bot-msg-rc-message-9982').count(), 1);
@@ -38,6 +39,11 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     const detail = page.locator('.bot-task-detail'); await detail.waitFor();
     await until(() => detail.innerText(), text => text.includes('实现检查') && text.includes('由主 Bot 跟进'));
     assert.doesNotMatch(await detail.innerText(), /需要你的选择/);
+    await page.getByRole('button', {name: '关闭', exact: true}).click();
+    await detail.waitFor({state: 'hidden'});
+    await scrollToBotMessage(page, otherRow);
+    await otherRow.focus(); await page.keyboard.press('Enter');
+    await until(() => detail.innerText(), text => text.includes('独立核验') && text.includes('已检查 7 项事实'));
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-detail-${width}-${appearance}.png`), animations: 'disabled'});
     await page.getByRole('button', {name: '关闭', exact: true}).click();
     await detail.waitFor({state: 'hidden'});
