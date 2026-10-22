@@ -214,7 +214,7 @@ export function BotMessageList({
           <span className="bot-thinking-status-label">{i18n.t('projectAgent.chat.thinking')}</span>
         </p>
       ) : null}
-      {trailing}
+      <div className="bot-thread-tail" ref={scroll.tailRef}>{trailing}</div>
     </div>
     {!scroll.following ? <button type="button" className="bot-thread-latest" aria-label={i18n.t('projectAgent.chat.latest')} title={i18n.t('projectAgent.chat.latest')} onClick={scroll.followLatest}><PeerIcon name="chevronDown" size={18} /></button> : null}
     </div>
