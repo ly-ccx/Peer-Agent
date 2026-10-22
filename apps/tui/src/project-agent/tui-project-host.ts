@@ -155,8 +155,9 @@ export function createTuiProjectHost(options: {
   host = createProjectAgentHost({rootDir:runtimeRoot, holdsLease:holds, acquireLease:(id: string)=>leases.acquire(id),
     listWorkspaceIds:()=> selectedId ? [selectedId] : [], resolveConversationId,
     appendMessage:(id: string,message: any)=>{conversations.appendMessage(id,message);changed();}, readMessages,
+    // The interaction query owns admission, including kind-less legacy user/assistant records.
     executeTurn:async (request: any)=>turns.runTurn({...request,ephemeral:true,messages:(await conversations.readInteractionContext(request.conversationId))?.messages
-      .filter(message=>['user_input','agent_reply'].includes(String(message.kind))).map(message=>({role:message.role,content:message.content})) as any}),
+      .map(message=>({role:message.role,content:message.content})) as any}),
     resolveModel:(input: any)=>turns.resolveGoalRole({...input,projectPolicy:profiles.read(input.workspaceId)?.modelPolicy}),
     resolveContext:({workspaceId,...scope}: any)=>{const result=objectives.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)});return {coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId),scope),objectives:result.ok && 'items' in result ? result.items : []};},
     resolveTurnRoster:(scope: any)=>supervisor.summaries(scope),
