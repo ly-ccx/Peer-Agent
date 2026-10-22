@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { deriveSessionFacts } from './session-facts.ts';
+
+test('compatibility facts preserve an unconsumed interruption before completed', () => {
+  const interrupted = deriveSessionFacts({status:'completed', runnerStatus:'completed', interrupted:true});
+  assert.equal(interrupted.status, 'paused');
+  assert.equal(interrupted.needsUser, false);
+});
 
 import {
   projectWorkSession,

@@ -123,6 +123,16 @@ Before implementing a non-trivial change, classify it:
 
 Once a change is committed locally, push it to the tracked remote branch in the same turn. Multi-device work treats `origin` as the source of truth. Do not leave commits only on this machine.
 
+## Release Pull Request Gate
+
+User preference (2026-10-22): a new version or RC must include all open pull requests in this repository, not only the releasing agent's own changes.
+
+- Inventory every open PR, including drafts and PRs targeting other branches, before freezing a release. Review each PR, resolve conflicts, complete its required checks, and merge it; never silently omit another task's PR.
+- An unmerged or blocked PR blocks the release. Do not force through conflicts, bypass failing checks, or treat an excluded PR as merged. Report the concrete blocker if it cannot be resolved.
+- Freeze the candidate only after all PRs are merged, then run the release-wide build, tests, contract/type/architecture/IPC checks and complete product regression on that combined source. Earlier checks on a smaller candidate do not validate newly merged changes.
+- Check the open PR inventory again immediately before pushing the release tag; it must be empty. Include the merged PR list and final candidate identity in the release receipt.
+- Preserve uncommitted work and current runtime instances. The merge-all rule applies to submitted PRs; it does not authorize sweeping unrelated dirty files into a release or installing/restarting the app.
+
 ## Validation Scope
 
 User preference (2026-10-22): full regression is a release gate, not a prerequisite for every feature or fix.

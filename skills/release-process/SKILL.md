@@ -2,7 +2,7 @@
 name: release-process
 description: Peer Agent 发版流程（版本戳、release notes、CHANGELOG、根 README 漂移检查、CLI 平台矩阵核对、GitHub Pages 文档站、打 tag 触发 CI）。
 whenToUse: 用户要求发版、打 beta/正式 tag、写 release notes、更新 CHANGELOG、检查/更新根 README、同步 docs 站点/Pages，或询问如何发布 Desktop/CLI。
-version: 0.1.5
+version: 0.1.6
 ---
 
 # Peer Agent 发布流程 Skill
@@ -37,6 +37,10 @@ version: 0.1.5
 ## 流程（必须按序）
 
 ### 0) 冻结变更范围
+
+发布新版本或 RC 必须合入本仓库全部未合并 PR（用户规则，2026-10-22），不能只处理发版代理自己的 PR。先列出所有 open PR（包括 draft、其它目标分支），逐一审查、解冲突、完成必要检查并合并；有未合并或无法解决的 PR 就阻断发布，不能静默排除、绕过检查或强行合并。未提交的在制文件继续保留，不因该规则一并提交。
+
+全部 PR 合入后才冻结候选，并对组合后的源码完成发布前全量回归与产品截图验收。新增合入使之前较小候选的验收失效，不能沿用旧指纹。推送 tag 前再次运行 `gh pr list --state open --limit 1000`，必须为空；交付回执列出实际合并 PR 和最终候选。若 tag 已推送但尚未发布，先停掉旧流水线、保留证据并核对 Release/npm 是否存在；已有正式产物或 npm 版本不得覆盖重发。
 
 - 用 `git log` / `git diff` 汇总自上一 tag 以来的用户可见变更。
 - 上一 tag 可参考：`git tag --list 'v*' --sort=-v:refname | head`。

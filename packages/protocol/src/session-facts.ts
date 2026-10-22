@@ -28,6 +28,7 @@ export function deriveSessionFacts(input: {
   needsUser?: boolean;
   blockedReason?: string;
   verificationActive?: boolean;
+  interrupted?: boolean;
   cancellationPhase?: string;
   takeoverPhase?: string;
   executionOwnership?: ExecutionOwnership;
@@ -47,6 +48,7 @@ export function deriveSessionFacts(input: {
     ...(input.needsUser !== undefined ? { needsUser: input.needsUser } : {}),
     ...(input.blockedReason ? { blockedReason: input.blockedReason } : {}),
     ...(input.verificationActive !== undefined ? { verificationActive: input.verificationActive } : {}),
+    ...(input.interrupted !== undefined ? { interrupted: input.interrupted } : {}),
     ...(input.cancellationPhase ? { cancellationPhase: input.cancellationPhase } : {}),
     ...(input.takeoverPhase ? { takeoverPhase: input.takeoverPhase } : {}),
   });
