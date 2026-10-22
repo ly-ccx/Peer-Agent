@@ -44,7 +44,10 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const command = { ...initial, seq: initial.seq + 1, sessions: [{ ...initial.sessions[0], conversationId: child.id }] };
   writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
-  await page.locator('.bot-profile').click(); await page.getByRole('tab', { name: '任务', exact: true }).click();
+  await page.locator('.bot-profile').click();
+  // The preceding 760px case must reach its cover layout before opening a child.
+  await page.locator('.bot-drawer-panel .bot-drawer-body').waitFor({ state: 'visible' });
+  await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').first().click();
   await page.locator('.bot-task-information > summary').click();
