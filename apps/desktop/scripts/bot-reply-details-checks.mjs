@@ -73,6 +73,36 @@ export async function openReplyDetails(page, message) {
   });
   assert.ok(placement.left <= 2 && placement.height >= 32, 'details icon aligns left with its footer and keeps a usable hit target');
   if (placement.bubbleLeft !== null) assert.ok(placement.bubbleLeft <= 2, 'details starts on the current bubble text column');
+  await hoverBotReply(page, message, button);
+  await page.mouse.move(1, 1);
+  await button.focus(); await button.press('Enter');
+  const details = page.locator('.bot-reply-details');
+  await details.waitFor({ state: 'visible' });
+  assert.equal(await details.evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
+  assert.equal(await message.locator('.bot-turn-process, .bot-evidence-list, .bot-context-error').count(), 0);
+  assert.equal(await page.locator('.bot-drawer-head > p').innerText(), '回复详情');
+  return details;
+}
+
+export async function closeReplyDetails(page) {
+  const replyId = await page.locator('.bot-reply-details').getAttribute('data-reply-id');
+  const mountedTrigger = await page.evaluate(id => {
+    const reply = document.getElementById(`bot-msg-${id}`)?.closest('.bot-reply, .bot-system');
+    return Boolean(reply?.querySelector('.bot-reply-context > button, .bot-recovery-history-body > button'));
+  }, replyId);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+  // Cancelling work in the scrolled tail can unmount the original reply. The
+  // existing drawer contract then returns focus to the thread with preventScroll.
+  assert.equal(await page.evaluate(mounted => {
+    const focused = document.activeElement;
+    return focused?.matches('.bot-reply-context > button, .bot-recovery-history-body > button')
+      || !mounted && focused?.matches('.bot-thread');
+  }, mountedTrigger), true, 'close restores the current details button, or the thread when its original reply was virtualized away');
+}
+
+/** Reveal through real pointer movement after virtual-row and footer measurement. */
+export async function hoverBotReply(page, message, button = message.locator('.bot-reply-context > button').first()) {
   // Move the pointer over the visible reply. Locator.hover() would first center
   // the whole element with scrollIntoView, scrolling the document at narrow widths.
   const visibleHoverPoint = () => message.evaluate(node => {
@@ -111,29 +141,4 @@ export async function openReplyDetails(page, message) {
   }
   assert.equal(revealed, true, 'a real pointer over the current reply reveals its details');
   assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'hovering the reply reveals its details');
-  await page.mouse.move(1, 1);
-  await button.focus(); await button.press('Enter');
-  const details = page.locator('.bot-reply-details');
-  await details.waitFor({ state: 'visible' });
-  assert.equal(await details.evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
-  assert.equal(await message.locator('.bot-turn-process, .bot-evidence-list, .bot-context-error').count(), 0);
-  assert.equal(await page.locator('.bot-drawer-head > p').innerText(), '回复详情');
-  return details;
-}
-
-export async function closeReplyDetails(page) {
-  const replyId = await page.locator('.bot-reply-details').getAttribute('data-reply-id');
-  const mountedTrigger = await page.evaluate(id => {
-    const reply = document.getElementById(`bot-msg-${id}`)?.closest('.bot-reply, .bot-system');
-    return Boolean(reply?.querySelector('.bot-reply-context > button, .bot-recovery-history-body > button'));
-  }, replyId);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
-  // Cancelling work in the scrolled tail can unmount the original reply. The
-  // existing drawer contract then returns focus to the thread with preventScroll.
-  assert.equal(await page.evaluate(mounted => {
-    const focused = document.activeElement;
-    return focused?.matches('.bot-reply-context > button, .bot-recovery-history-body > button')
-      || !mounted && focused?.matches('.bot-thread');
-  }, mountedTrigger), true, 'close restores the current details button, or the thread when its original reply was virtualized away');
 }
