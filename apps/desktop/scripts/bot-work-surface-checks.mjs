@@ -351,6 +351,13 @@ async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) 
       await page.setViewportSize({ width, height: 860 });
       for (const appearance of ['dark', 'light']) {
         await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+        const lastReply = page.locator('#bot-msg-rc-message-9999');
+        await scrollToBotMessage(page, lastReply);
+        const replyGeometry = await lastReply.evaluate(node => {
+          const row = node.closest('.bot-thread-row').getBoundingClientRect();
+          const author = node.closest('.bot-thread-row').querySelector('.bot-message-author').getBoundingClientRect();
+          return { replyLeft: row.left, replyRight: row.right, authorLeft: author.left };
+        });
         for (const expanded of [false, true]) {
           const following = await page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop < 2);
           if ((await background.getAttribute('open') !== null) !== expanded) {
@@ -360,19 +367,17 @@ async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) 
           if (following) await page.waitForFunction(() => { const node = document.querySelector('.bot-thread'); return node.scrollHeight - node.clientHeight - node.scrollTop < 2; });
           await background.scrollIntoViewIfNeeded();
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-          const bounds = await background.evaluate(node => {
+          const bounds = await background.evaluate((node, replyGeometry) => {
             const region = node.getBoundingClientRect();
             const composer = document.querySelector('.bot-composer').getBoundingClientRect();
             const content = node.querySelector(':scope > summary').getBoundingClientRect();
             const child = node.querySelector('.bot-delegated-work').getBoundingClientRect();
-            const reply = document.querySelector('#bot-msg-rc-message-9999').closest('.bot-thread-row');
-            const replyBounds = reply.getBoundingClientRect();
-            const author = reply.querySelector('.bot-message-author').getBoundingClientRect();
+
             return { left: region.left, right: region.right, composerLeft: composer.left, composerRight: composer.right,
-              replyLeft: replyBounds.left, replyRight: replyBounds.right, authorLeft: author.left,
+              ...replyGeometry,
               contentFits: content.left >= region.left - 1 && content.right <= region.right + 1,
               expandedFits: !node.open || (child.left >= region.left - 1 && child.right <= region.right + 1) };
-          });
+          }, replyGeometry);
           assert.ok(Math.abs(bounds.left - bounds.composerLeft) <= 1 && Math.abs(bounds.right - bounds.composerRight) <= 1,
             `background task and composer edges must align: ${width}/${appearance}/${expanded}: ${JSON.stringify(bounds)}`);
           assert.ok(bounds.contentFits && bounds.expandedFits, 'background task contents must fit the shared column');
