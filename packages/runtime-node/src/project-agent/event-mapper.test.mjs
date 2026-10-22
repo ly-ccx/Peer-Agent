@@ -209,3 +209,19 @@ test('completed before verifier finishes wakes again for the terminal revision, 
   const pending = watchFactsFromPlan({...plan,runner:{verifierRuns:[{verifierRunId:'run-1',status:'running'}]}});
   assert.equal(mapDelegationEvents({sessions:[before]},{sessions:[pending]}).length,0);
 });
+
+test('结果就绪超窗未收下时映射出一次 verify 停滞，同版结果不重复催', () => {
+  const ready = { ...SESSION, status: 'result_ready', completedAt: '2026-10-01T00:00:00Z',
+    resultRevision: 'rev-1', version: 6 };
+  const now = new Date(Date.parse('2026-10-01T00:00:00Z') + 10 * 60 * 1000).toISOString();
+  const first = mapDelegationEvents({ sessions: [ready] }, { sessions: [{ ...ready, version: 7 }] }, { now: () => now });
+  const stalled = first.find(item => item.kind === 'stalled');
+  assert.ok(stalled, 'result_ready 超窗应映射出 stalled');
+  assert.equal(stalled.version, 'stall:verify:session-1:rev-1');
+  assert.equal(stalled.payload.stallId, stalled.version);
+  const again = mapDelegationEvents(
+    { sessions: [{ ...ready, version: 7, stallId: stalled.payload.stallId }] },
+    { sessions: [{ ...ready, version: 8 }] },
+    { now: () => now });
+  assert.equal(again.some(item => item.kind === 'stalled'), false);
+});

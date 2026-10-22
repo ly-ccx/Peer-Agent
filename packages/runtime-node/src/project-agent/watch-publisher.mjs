@@ -27,9 +27,17 @@ export function createWatchPublisher({
     let delay = pollMs;
     if (!Number.isFinite(atMs)) return delay;
     for (const session of snapshots.get(workspaceId)?.sessions || []) {
-      if (session?.status !== 'running') continue;
+      if (session?.status === 'result_ready') {
+        // 结果等待收下的停滞锚点：到点即扫，让 verify 停滞及时交给唤醒。
+        const remaining = Date.parse(session.completedAt || '') + windowMs - atMs;
+        if (Number.isFinite(remaining) && remaining > 0) delay = Math.min(delay, remaining);
+        continue;
+      }
+      if (!['running', 'verifying'].includes(session?.status)) continue;
       if (waiting(session)) continue;
-      const anchor = Date.parse(session.lastProgressAt || session.progressEmittedAt || session.startedAt || '');
+      const anchor = Date.parse(session.status === 'verifying'
+        ? session.verificationProgress?.lastProgressAt || session.verificationProgress?.startedAt || session.startedAt || ''
+        : session.lastProgressAt || session.progressEmittedAt || session.startedAt || '');
       if (!Number.isFinite(anchor)) continue;
       const remaining = anchor + windowMs - atMs;
       if (remaining <= 0) continue;
@@ -52,12 +60,18 @@ function retain(previous, current, events, at) {
       const old = prior.get(session.sessionId);
       const stalled = events.find((event) => event.sessionId === session.sessionId && event.kind === 'stalled');
       const progressed = events.some((event) => event.sessionId === session.sessionId && event.kind === 'progress');
+      const verification = events.find(event => event.sessionId === session.sessionId
+        && event.kind === 'session_progress' && event.payload?.verificationProgress)?.payload.verificationProgress;
       const stallId = text(stalled?.payload?.stallId) || text(old?.stallId);
       const progressEmittedAt = progressed
         ? at
         : (text(old?.progressEmittedAt) || text(session.progressEmittedAt));
       return {
         ...session,
+        ...(verification ? { verificationProgressEmittedKey: `${verification.continuationId}:${verification.observationCount}`,
+          verificationProgressEmittedAt: at } : old?.verificationProgressEmittedKey
+          ? { verificationProgressEmittedKey: old.verificationProgressEmittedKey,
+            verificationProgressEmittedAt: old.verificationProgressEmittedAt } : {}),
         ...(stallId ? { stallId } : {}),
         ...(progressEmittedAt ? { progressEmittedAt } : {}),
       };
