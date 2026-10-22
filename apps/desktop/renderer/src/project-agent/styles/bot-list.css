@@ -829,7 +829,7 @@
   flex: none;
   min-height: 52px;
   padding: 0 27px;
-  background: var(--chrome-canvas);
+  background: var(--paper-sheet);
   border-bottom: 1px solid var(--chrome-hairline);
   -webkit-app-region: drag;
 }
@@ -1173,7 +1173,7 @@ html[data-vibrancy='true'] .bot-shell {
 }
 
 /* 负 margin 抵消壳层 padding：左栏贴住窗口左缘与上下，玻璃直达边缘，
- * 交通灯落在玻璃上；右缘由 hairline 收边。 */
+ * 交通灯落在玻璃上；面板圆角区分侧栏，不再绘制分隔线。 */
 html[data-vibrancy='true'] .bot-column {
   margin: calc(-1 * var(--bot-float-gap)) 0 calc(-1 * var(--bot-float-gap)) calc(-1 * var(--bot-float-gap));
   background: transparent;
