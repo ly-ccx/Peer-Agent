@@ -222,7 +222,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
           const box = element => { const { left, right } = element.getBoundingClientRect(); return { left, right }; };
           return { row: box(row), author: box(row.querySelector('.bot-message-author')),
             status: box(node.querySelector('.bot-reply-context')),
-            icon: box(node.querySelector('.bot-reply-context > button > svg')),
+            icon: box(node.querySelector('.bot-reply-context > button > :is(svg, .bot-avatar)')),
             composer: box(document.querySelector('.bot-composer')) };
         });
         assert.ok([bounds.row, bounds.author].every(box => Math.abs(box.left - bounds.composer.left) <= 1)
