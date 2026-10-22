@@ -12,6 +12,7 @@ const runtimeFiles = [
   'index.d.ts',
   'interaction-reader.mjs',
   'interaction-worker-source.generated.mjs',
+  'sqlite-runtime.generated.mjs',
   'selection-reference.mjs',
   'persisted-history.mjs',
   'history-projection-reader.mjs',

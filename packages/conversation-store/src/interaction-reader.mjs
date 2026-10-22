@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite-runtime.generated.mjs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { mkdirSync, statSync, existsSync, openSync, closeSync, readSync, readFileSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -130,7 +130,7 @@ export function createInteractionReader({ storeDir, readMeta }) {
         let flight = flights.get(id);
         if (!flight) {
           flight = new Promise((resolve, reject) => {
-            const worker = new Worker(INTERACTION_WORKER_SOURCE, { eval: true, resourceLimits: { maxOldGenerationSizeMb: 192 }, workerData: { interactionRebuild: { file, target, expected } } });
+            const worker = new Worker(INTERACTION_WORKER_SOURCE, { eval: true, ...(!process.versions.bun ? { resourceLimits: { maxOldGenerationSizeMb: 192 } } : {}), workerData: { interactionRebuild: { file, target, expected } } });
             let settled = false;
             const finish = error => { if (settled) return; settled = true; clearTimeout(timer); if (error) { void worker.terminate(); reject(error); } else resolve(); };
             const timer = setTimeout(() => finish(fail('BACKGROUND_READ_TIMEOUT')), 120000);

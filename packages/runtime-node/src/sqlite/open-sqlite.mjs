@@ -1,8 +1,6 @@
-import { createRequire } from 'node:module';
+import { DatabaseSync } from './connection.mjs';
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
-
-const require = createRequire(import.meta.url);
 
 function quarantine(file) {
   const dest = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
@@ -13,7 +11,6 @@ function quarantine(file) {
 }
 
 function connect(file, readonly) {
-  const { DatabaseSync } = require('node:sqlite');
   const db = new DatabaseSync(file, { readOnly: readonly });
   db.exec('PRAGMA busy_timeout=3000');
   if (!readonly) db.exec('PRAGMA journal_mode=WAL');

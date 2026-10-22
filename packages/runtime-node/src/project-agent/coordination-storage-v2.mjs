@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from '../sqlite/connection.mjs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { copyFile, truncate } from 'node:fs/promises';
 import { mkdirSync, readFileSync, renameSync, existsSync, statSync, openSync, closeSync, fsyncSync, writeSync, fstatSync, readSync, readdirSync } from 'node:fs';
@@ -243,7 +243,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       const target = `${published}.tmp`;
       const requireHead = existsSync(manifestFile) || existsSync(headFile);
       const build = () => new Promise((resolve, reject) => {
-        const worker = new Worker(COORDINATION_WORKER_SOURCE, { eval: true, resourceLimits: { maxOldGenerationSizeMb: 192 }, workerData: { coordinationRebuild: { dir, legacy: legacyFile, target, generation, requireHead } } });
+        const worker = new Worker(COORDINATION_WORKER_SOURCE, { eval: true, ...(!process.versions.bun ? { resourceLimits: { maxOldGenerationSizeMb: 192 } } : {}), workerData: { coordinationRebuild: { dir, legacy: legacyFile, target, generation, requireHead } } });
         let settled = false;
         const finish = error => { if (settled) return; settled = true; clearTimeout(timer); if (error) { void worker.terminate(); reject(error); } else resolve(); };
         const timer = setTimeout(() => finish(fail('coordination_recovery_timeout')), 300000);
