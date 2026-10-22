@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { TaskConversationRequest } from '../state/taskConversationState';
 import {
   formatConversationStamp,
@@ -49,6 +49,7 @@ export function BotMessageList({
   followRequestId = 0,
   onReload = () => {},
   focusTaskRequest = null,
+  trailing = null,
 }: {
   readonly workspaceId: string;
   readonly avatar: BotAvatarModel;
@@ -69,6 +70,8 @@ export function BotMessageList({
   readonly onLocateSession: (sessionId: string) => void;
   readonly onOpenDetails?: (replyId: string) => void;
   readonly focusTaskRequest?: TaskConversationRequest | null;
+  /** Sits with the latest line. Kept inside the thread so the unused scroll area cannot open a gap above it. */
+  readonly trailing?: ReactNode;
 }) {
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -207,6 +210,7 @@ export function BotMessageList({
       {scroll.view.after > 0 ? (
         <div className="bot-thread-spacer" style={{ height: scroll.view.after }} />
       ) : null}
+      {trailing}
     </div>
     {!scroll.following ? <button type="button" className="bot-thread-latest" aria-label={i18n.t('projectAgent.chat.latest')} title={i18n.t('projectAgent.chat.latest')} onClick={scroll.followLatest}><PeerIcon name="chevronDown" size={18} /></button> : null}
     </div>

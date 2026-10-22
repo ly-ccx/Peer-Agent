@@ -334,6 +334,12 @@
   55% { transform: translateY(0) rotate(5deg); }
 }
 
+@keyframes bot-thinking-hop {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(-5px); }
+  70% { transform: translateY(-1px); }
+}
+
 @keyframes bot-avatar-reply {
   0% { transform: translateY(0) scale(1); }
   45% { transform: translateY(-4px) scale(1.11, 0.92); }

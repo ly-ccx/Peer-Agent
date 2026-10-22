@@ -6,7 +6,8 @@ import type { BotChatMessage } from '../state/botConversationState';
 import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
 import { EvidenceList } from './EvidenceList';
 import '../styles/bot-reply-context.css';
-import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import type { BotAvatar as BotAvatarModel, ProjectAgentActivity } from '@peer-agent/protocol';
+import { BotAvatar } from '../BotAvatar';
 import { replyActivityLabel } from '../state/replyActivityLabel';
 import { useReplyFooterBounds } from './useReplyFooterBounds';
 
@@ -20,18 +21,22 @@ const SURFACING = {
 } as const;
 
 /** Reply metadata stays discoverable without competing with the answer or pending work. */
-export function ReplyContext({ i18n, onOpenDetails, activity, statusLabel, busy = false, onRefresh }: {
+export function ReplyContext({ i18n, onOpenDetails, activity, statusLabel, busy = false, onRefresh, avatar, workspaceId, botLabel }: {
   readonly i18n: I18nRuntime; readonly onOpenDetails?: () => void; readonly activity?: ProjectAgentActivity;
+  readonly avatar?: BotAvatarModel; readonly workspaceId?: string; readonly botLabel?: string;
   readonly statusLabel?: string | null; readonly busy?: boolean; readonly onRefresh?: () => void;
 }) {
   const ref = useReplyFooterBounds();
   const label = statusLabel === undefined ? replyActivityLabel(activity, i18n) : statusLabel;
+  const thinking = busy || statusLabel === undefined && Boolean(label) && activity?.phase !== 'awaiting_permission';
   return <div ref={ref} className="bot-reply-context" data-running={Boolean(label)}>
     <button type="button" disabled={!onOpenDetails} aria-label={label ? `${label} · ${i18n.t('projectAgent.chat.context.details')}` : i18n.t('projectAgent.chat.context.details')} title={i18n.t('projectAgent.chat.context.details')} onClick={event => {
       event.currentTarget.focus({ preventScroll: true });
       onOpenDetails?.();
-    }}><PeerIcon name={label ? busy ? 'loader' : 'info' : 'panelRight'} size={14} className={busy ? 'motion-spin' : undefined} />{label
-      ? <span className="bot-context-running" role="status">{label}</span>
+    }}>{thinking && avatar && workspaceId && botLabel
+      ? <BotAvatar avatar={avatar} label={botLabel} workspaceId={workspaceId} mood="thinking" animate />
+      : <PeerIcon name={label ? busy ? 'loader' : 'info' : 'panelRight'} size={14} className={busy ? 'motion-spin' : undefined} />}{label
+      ? <span className={thinking ? 'bot-context-running bot-thinking-status-label' : 'bot-context-running'} role="status">{label}</span>
       : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
     {onRefresh ? <button type="button" onClick={onRefresh}>{i18n.t('projectAgent.chat.reply.refresh')}</button> : null}
   </div>;
