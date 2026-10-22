@@ -21,6 +21,27 @@ const selection = {
   family: 'alpha',
 };
 
+test('verification records task authority without posting internal verdicts into the parent conversation', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-task-only-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const storeDir = path.join(root, 'goal-plans');
+  const store = createGoalPlanStore({ storeDir });
+  const plan = store.createPlan({ conversationId: 'child-1', title: 'Review', goal: 'Review', tasks: [], delegationOrigin: origin() });
+  const messages = [];
+  const verification = createSessionVerification({ goalPlanStore: store, appendMessage: (...args) => messages.push(args) });
+  for (const outcome of ['passed', 'failed', 'partial', 'unverifiable']) {
+    const authority = outcome === 'passed' ? 'passed' : 'failed';
+    await verification.record({ event: { sessionId: 'session-1', outcome, verdictRef: `verdict:session-1:${outcome}` },
+      card: { cardId: 'card:verdict:session-1', kind: 'verdict', sessionId: 'session-1', content: outcome },
+      detail: { outcome, checks: [{ name: 'independent_verifier', result: authority, reason: authority }] } });
+    const saved = createGoalPlanStore({ storeDir }).getPlan(plan.planId);
+    assert.equal(saved.hostVerification.verdictRef, `verdict:session-1:${outcome}`);
+    assert.equal(saved.hostVerification.independentVerifier, authority);
+    assert.notEqual(saved.delegationOrigin.verifying, true);
+  }
+  assert.deepEqual(messages, [], 'no assistant/system_card is created by verification');
+});
+
 test('unavailable, invalid and throwing verifiers leave no permanent verifying flag or invented verdict', async () => {
   for (const verifySession of [undefined, async () => { throw Error('offline'); }, async () => ({ ok: false }), async () => null]) {
     const root = mkdtempSync(path.join(os.tmpdir(), 'verify-failed-'));
@@ -228,9 +249,9 @@ test('桌面复核端口从宿主计划和证据索引取事实，复核完成�
     assert.equal(reviewed.status, reviewed.event.outcome);
     assert.notEqual(store.getPlan(created.planId).delegationOrigin.verifying, true);
     assert.equal(supervisor.get({ sessionId: 'session-1' }).status, 'running');
-    assert.equal(appended[0].conversationId, 'parent-1');
-    assert.equal(appended[0].message.kind, 'system_card');
-    assert.equal(appended[0].message.cards[0].content, reviewed.event.outcome);
+    assert.deepEqual(appended, []);
+    assert.equal(reviewed.card, undefined);
+    assert.equal(supervisor.get({ sessionId: 'session-1', detail: 'report' }).report.verification.outcome, reviewed.detail.outcome);
 
     const host = createLocalToolHost({
       workspaceRoot: root,

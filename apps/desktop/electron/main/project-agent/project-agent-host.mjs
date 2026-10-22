@@ -177,7 +177,6 @@ export function registerDesktopProjectAgent({
     verifySession: (plan, focus, context) => goalRunner?.verifyDelegatedSession?.({ plan, focus, workId: context?.workId }),
     readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
     completeRecheck: input => goalRunner?.completeRecheck?.(input),
-    appendMessage,
   });
   const objectiveStore = createObjectiveStore({rootDir:dataHome});
   const objectiveActions=createObjectiveActions({rootDir:runtimeRoot});

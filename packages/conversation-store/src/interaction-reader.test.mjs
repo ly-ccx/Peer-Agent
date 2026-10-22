@@ -1,9 +1,55 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createConversationStore } from './index.mjs';
+import { DatabaseSync } from './sqlite-runtime.generated.mjs';
+
+test('legacy verdicts stay in canonical process records but never fill public pages or model context', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-verdict-history-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createConversationStore({ storeDir: path.join(root, 'conversations') });
+  const c = store.createConversation({ role: 'project_agent' });
+  const append = row => store.appendMessage(c.id, row, { returnMessages: false });
+  append({ id: 'user', role: 'user', kind: 'user_input', content: 'passed 是什么意思？' });
+  await store.readInteractionPage(c.id); // Exercise an already warm cache as well as a cold rebuild.
+  for (let i = 0; i < 105; i++) {
+    const content = ['passed', 'failed', 'partial', 'unverifiable'][i % 4];
+    append({ id: `verdict-${i}`, role: 'assistant', kind: 'system_card', content,
+      cards: [{ cardId: `card:verdict:${i}`, kind: 'verdict', content, resolvedState: 'resolved' }] });
+  }
+  for (const state of ['verifying', 'verified']) append({ id: `activity-${state}`, kind: 'agent_activity', role: 'system',
+    agentActivity: { eventId: state, sessionId: 'session', name: '核对任务', state } });
+  append({ id: 'mixed', role: 'assistant', kind: 'system_card', cards: [
+    { cardId: 'old-verdict', kind: 'verdict', content: 'failed' },
+    { cardId: 'permission', kind: 'approval', content: '需要批准', actions: [{ id: 'allow' }] },
+  ] });
+  append({ id: 'reply', role: 'assistant', kind: 'agent_reply', content: 'passed 表示通过；这次仍有一项未核验。' });
+  const file = path.join(root, 'conversations', `${c.id}.jsonl`), bytes = readFileSync(file);
+  await store.readInteractionPage(c.id);
+  const indices = path.join(root, 'cache', 'read-models', 'interactions');
+  const db = new DatabaseSync(path.join(indices, readdirSync(indices)[0], `${c.id}.sqlite`));
+  // Simulate an RC25 cache: canonical records are unchanged, but verdicts were indexed as public.
+  const rawVerdict = bytes.toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)).find(row => row.id === 'verdict-0');
+  const seq = db.prepare('SELECT seq FROM identities WHERE id=?').get(rawVerdict.id).seq;
+  db.prepare('INSERT INTO messages VALUES (?,?,?,?)').run(seq, rawVerdict.id, rawVerdict.kind, JSON.stringify(rawVerdict));
+  db.prepare("UPDATE meta SET value='2' WHERE id='schema'").run();
+  db.close();
+  for (const cold of [false, true]) {
+    if (cold) rmSync(path.join(root, 'cache'), { recursive: true, force: true });
+    const page = await store.readInteractionPage(c.id, { limit: 2 });
+    assert.deepEqual(page.messages.map(row => row.id), ['mixed', 'reply']);
+    assert.deepEqual(page.messages[0].cards.map(card => card.kind), ['approval']);
+    const older = await store.readInteractionPage(c.id, { limit: 2, before: page.nextCursor });
+    assert.deepEqual(older.messages.map(row => row.id), ['user']);
+    assert.equal(older.nextCursor, null);
+    assert.deepEqual((await store.readInteractionContext(c.id)).messages.map(row => row.id), ['user', 'reply']);
+    const process = await store.readInteractionProcess(c.id, { messageId: 'verdict-0' });
+    assert.equal(process.messages[0].cards[0].kind, 'verdict');
+    assert.deepEqual(readFileSync(file), bytes);
+  }
+});
 
 test('public interaction queries exclude private rounds and paginate visible messages before loading process facts', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-interactions-'));

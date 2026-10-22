@@ -26,6 +26,13 @@
 .bot-task-update-head time { font-size: 10px; color: var(--graphite-soft); }
 .bot-task-update-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.7; color: var(--graphite-soft); }
 .bot-task-instructions { margin-top: 14px; }
+.bot-task-verification { margin-top: 14px; font-size: 12px; line-height: 1.7; }
+.bot-task-verification details { margin-top: 6px; }
+.bot-task-verification summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; color: var(--graphite-secondary); }
+.bot-task-verification summary::-webkit-details-marker { display: none; }
+.bot-task-verification details[open] > summary .peer-icon { transform: rotate(90deg); }
+.bot-task-verification summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 3px; }
+.bot-task-verification details section { margin-top: 10px; }
 .bot-task-instructions p { font-size: 11px; line-height: 1.7; white-space: pre-wrap; color: var(--graphite-soft); }
 .bot-task-report-read { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--graphite-secondary); }
 .bot-task-report-read:has(p) { margin-top: 12px; }

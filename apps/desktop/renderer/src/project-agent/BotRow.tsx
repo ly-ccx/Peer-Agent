@@ -2,10 +2,11 @@ import type { BotListItem } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { BotAvatar } from './BotAvatar';
 import { PeerIcon } from '../ui/icons';
-import { botAvatarMood } from './state/botAvatarState';
+import { botAvatarMood, type BotAvatarMood } from './state/botAvatarState';
 
 interface BotRowProps {
   readonly item: BotListItem;
+  readonly avatarMood?: BotAvatarMood;
   readonly highlighted: boolean;
   readonly opened: boolean;
   readonly timeLabel: string;
@@ -15,7 +16,7 @@ interface BotRowProps {
   readonly onOpen: (workspaceId: string) => void;
 }
 
-export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight, onOpen, onAttention }: BotRowProps) {
+export function BotRow({ item, avatarMood, highlighted, opened, timeLabel, i18n, onHighlight, onOpen, onAttention }: BotRowProps) {
   const name = item.profile.displayName;
   const preview = item.preview.trim() || i18n.t('projectAgent.list.noPreview');
   const needsYou = item.state.needsYou;
@@ -30,7 +31,7 @@ export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight
       onClick={() => onOpen(item.workspaceId)}
 
     >
-      <BotAvatar avatar={item.profile.avatar} label={name} workspaceId={item.workspaceId} mood={botAvatarMood(item.state)} />
+      <BotAvatar avatar={item.profile.avatar} label={name} workspaceId={item.workspaceId} animate mood={avatarMood ?? botAvatarMood(item.state)} />
       <span className="bot-row-copy">
         <span className="bot-row-name">{name}</span>
         <span className="bot-row-preview">{preview}</span>

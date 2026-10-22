@@ -1,5 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+test('internal verdict cards never become public replies; real text and actionable cards survive', () => {
+  for (const content of ['passed', 'failed', 'partial', 'unverifiable']) {
+    assert.equal(normalizeBotMessage({ id: 'verdict', kind: 'system_card', role: 'assistant', content,
+      cards: [{ cardId: 'card:verdict:s', kind: 'verdict', content, resolvedState: 'resolved' }] }), null);
+  }
+  for (const state of ['verifying', 'verified']) assert.equal(normalizeBotMessage({ id: state, kind: 'agent_activity',
+    agentActivity: { eventId: state, sessionId: 's', name: '核对任务', state } }), null);
+  const mixed = normalizeBotMessage({ id: 'mixed', kind: 'system_card', cards: [
+    { cardId: 'v', kind: 'verdict', content: 'passed' }, { cardId: 'q', kind: 'question', content: '请选择下一步' },
+  ] })!;
+  assert.deepEqual(mixed.cards.map(card => card.kind), ['question']);
+  const user = normalizeBotMessage({ id: 'u', kind: 'user_input', content: 'passed' })!;
+  const reply = normalizeBotMessage({ id: 'r', kind: 'agent_reply', content: 'failed' })!;
+  assert.deepEqual(visibleBotMessages([user, reply]).map(row => row.content), ['passed', 'failed']);
+});
 import { createI18n } from '@peer-agent/i18n';
 import {
   acknowledgeInput,

@@ -1,3 +1,4 @@
+import { checkBotVerification } from './bot-verification-checks.mjs';
 import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
 import { checkBotLifecycleGates } from './bot-lifecycle-gate-checks.mjs';
 import { checkBotAccessPolicy } from './bot-access-policy-checks.mjs';
@@ -56,7 +57,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -98,6 +99,8 @@ for (const [offset, state] of ['started', 'question', 'reported', 'reported', 'v
       ...(offset === 4 ? { verificationProgress: { continuationId: 'rc-review', startedAt: '2026-10-21T00:00:00Z',
         lastProgressAt: '2026-10-21T00:01:00Z', observationCount: 7, phase: 'ready' } } : {}) } };
 }
+seededMessages[9977] = { ...seededMessages[9977], kind: 'agent_activity', role: 'system', content: '',
+  agentActivity: { eventId: 'rc-other-agent-started', sessionId: 'rc-work-2', name: '独立核验', state: 'started' } };
 // Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
 const recoveryCases = [
   { key: 'missing-checkpoint', index: 9978, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system',
@@ -562,6 +565,10 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     if(workSurfaces) await checkBotProgressiveLoading({page,until,report,captureDirectory:root,commandFile:workCommand});
   await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  } else if (process.argv.includes('--verification-only')) {
+    await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotVerification({page,until,report,captureDirectory:root,commandFile:workCommand});
   } else if (process.argv.includes('--lifecycle-only')) {
     await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -787,7 +794,7 @@ try {
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
-  if (!process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
+  if (!process.argv.includes('--verification-only') && !process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
