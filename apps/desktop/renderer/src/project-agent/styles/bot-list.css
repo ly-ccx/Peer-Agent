@@ -569,7 +569,6 @@
   margin-top: 12px;
   margin-inline: -10px;
   padding: 12px 14px 0;
-  border-top: 1px solid var(--chrome-hairline);
 }
 
 .bot-column-footer .sidebar-version-badge {
