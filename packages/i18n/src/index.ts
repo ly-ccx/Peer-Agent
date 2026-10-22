@@ -592,6 +592,17 @@ export type TranslationKey =
   | 'projectAgent.drawer.task.noReport'
   | 'projectAgent.drawer.task.id'
   | 'projectAgent.drawer.task.records'
+  | 'projectAgent.drawer.task.verification'
+  | 'projectAgent.drawer.task.verificationScope'
+  | 'projectAgent.drawer.task.verificationChecks'
+  | 'projectAgent.drawer.task.verificationEvidence'
+  | 'projectAgent.drawer.task.verificationIndependent'
+  | 'projectAgent.drawer.task.verificationHistory'
+  | 'projectAgent.drawer.task.verificationHistorical'
+  | 'projectAgent.drawer.task.verificationPassed'
+  | 'projectAgent.drawer.task.verificationFailed'
+  | 'projectAgent.drawer.task.verificationMissing'
+  | 'projectAgent.drawer.task.verificationOther'
   | 'projectAgent.drawer.task.hint.confirm'
   | 'projectAgent.drawer.task.hint.failed'
   | 'projectAgent.drawer.task.hint.ended'
@@ -2164,6 +2175,17 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.noReport': '暂无补充任务资料。',
     'projectAgent.drawer.task.id': '任务标识',
     'projectAgent.drawer.task.records': '执行记录 · {count} 条',
+    'projectAgent.drawer.task.verification': '核验结果',
+    'projectAgent.drawer.task.verificationScope': '仅表示本任务当前证据的核验结果，不等于结果已签收。',
+    'projectAgent.drawer.task.verificationChecks': '检查项',
+    'projectAgent.drawer.task.verificationEvidence': '任务结果与证据',
+    'projectAgent.drawer.task.verificationIndependent': '独立复核',
+    'projectAgent.drawer.task.verificationHistory': '历史核验记录',
+    'projectAgent.drawer.task.verificationHistorical': '历史记录仅供调查，不代表当前结论。',
+    'projectAgent.drawer.task.verificationPassed': '通过',
+    'projectAgent.drawer.task.verificationFailed': '未通过',
+    'projectAgent.drawer.task.verificationMissing': '尚未核验',
+    'projectAgent.drawer.task.verificationOther': '其他检查',
     'projectAgent.drawer.task.hint.confirm': '{name} 在主对话中跟进这项工作。',
     'projectAgent.drawer.task.hint.failed': '任务未能完成。后续安排由 {name} 在主对话中说明。',
     'projectAgent.drawer.task.hint.ended': '可查看 {name} 的交付说明，或在主对话中继续追问。',
@@ -3521,6 +3543,17 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.noReport': 'No additional task information yet.',
     'projectAgent.drawer.task.id': 'Task ID',
     'projectAgent.drawer.task.records': 'Execution records · {count}',
+    'projectAgent.drawer.task.verification': 'Verification',
+    'projectAgent.drawer.task.verificationScope': 'Applies to the current task evidence; verification does not imply acceptance.',
+    'projectAgent.drawer.task.verificationChecks': 'Checks',
+    'projectAgent.drawer.task.verificationEvidence': 'Task results and evidence',
+    'projectAgent.drawer.task.verificationIndependent': 'Independent review',
+    'projectAgent.drawer.task.verificationHistory': 'Review history',
+    'projectAgent.drawer.task.verificationHistorical': 'Historical diagnostics do not establish the current verdict.',
+    'projectAgent.drawer.task.verificationPassed': 'Passed',
+    'projectAgent.drawer.task.verificationFailed': 'Failed',
+    'projectAgent.drawer.task.verificationMissing': 'Not reviewed',
+    'projectAgent.drawer.task.verificationOther': 'Other check',
     'projectAgent.drawer.task.hint.confirm': '{name} follows up on this task in the main conversation.',
     'projectAgent.drawer.task.hint.failed': 'The task could not finish. {name} explains the next steps in the main conversation.',
     'projectAgent.drawer.task.hint.ended': 'Review {name}’s delivery or ask a follow-up in the main conversation.',

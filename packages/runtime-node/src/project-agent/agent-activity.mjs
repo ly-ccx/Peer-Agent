@@ -7,6 +7,10 @@ export function createAgentEventPublisher({ inbox, conversationStore, findSessio
       const plan = findSession(event.sessionId, event);
       const origin = plan?.delegationOrigin;
       if (!origin?.parentConversationId || origin.workspaceId !== workspaceId) continue;
+      if (event.kind === 'result_ready' || event.kind === 'session_progress' && event.payload?.verificationProgress) {
+        onChanged(workspaceId);
+        continue;
+      }
       const state = activityState(event, plan);
       if (!state) continue;
       const id = ['queued', 'started', 'ended', 'cancelled'].includes(state)
@@ -27,7 +31,6 @@ export function createAgentEventPublisher({ inbox, conversationStore, findSessio
 }
 
 function activityState(event, plan) {
-  if (event.kind === 'session_progress' && event.payload?.verificationProgress) return 'verifying';
   if (event.kind === 'agent_message') return event.payload?.agentMessage?.purpose || null;
   if (event.kind === 'session_started') {
     if (event.payload?.status && !['running', 'starting', 'queued'].includes(event.payload.status)) return null;
@@ -35,11 +38,6 @@ function activityState(event, plan) {
   }
   if (event.kind === 'session_running') return 'started';
   if (event.kind === 'report_available') return event.payload?.owner === 'parent_agent' ? null : 'reported';
-  if (event.kind === 'result_ready') {
-    if (event.payload?.outcome === 'passed') return 'verified';
-    if (event.payload?.outcome === 'failed') return 'blocked';
-    return null;
-  }
   if (event.kind === 'session_verified') return plan.resultAcceptance?.acceptedAt ? 'ended' : null;
   if (event.kind === 'cancelled') return 'cancelled';
   if (event.kind === 'failed' || event.kind === 'interrupted') return 'blocked';

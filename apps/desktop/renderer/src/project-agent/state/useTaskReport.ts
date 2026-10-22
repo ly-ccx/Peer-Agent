@@ -5,7 +5,7 @@ import type { DrawerSession } from './drawerState';
 
 /** Scoped report reads never replace live status or another task's information. */
 export function useTaskReport(workspaceId: string, sessionId: string | null, open: boolean,
-  status: string | undefined, available: boolean) {
+  status: string | undefined, available: boolean, revision?: string) {
   const [retry, setRetry] = useState(0);
   const [read, setRead] = useState<{ workspaceId: string; sessionId: string | null; detail: DrawerSession | null; state: TaskReportState } | null>(null);
   const matches = read?.workspaceId === workspaceId && read.sessionId === sessionId;
@@ -20,7 +20,7 @@ export function useTaskReport(workspaceId: string, sessionId: string | null, ope
     };
     void clientApi.projectAgentGetSession({ sessionId, detail: 'report' }).then(settle).catch(() => settle(null));
     return () => { cancelled = true; };
-  }, [workspaceId, sessionId, open, status, available, retry]);
+  }, [workspaceId, sessionId, open, status, available, revision, retry]);
   return { detail: matches ? read.detail : null, state: matches ? read.state : 'loading' as TaskReportState,
     refresh: () => setRetry(value => value + 1) };
 }

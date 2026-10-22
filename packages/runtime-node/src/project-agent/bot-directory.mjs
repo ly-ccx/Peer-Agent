@@ -53,6 +53,8 @@ function messageAt(message) {
 
 export function isVisibleBotMessage(message) {
   const kind = messageKind(message);
+  if (kind === 'agent_activity' && ['verifying', 'verified'].includes(message.agentActivity?.state)) return false;
+  if (kind === 'system_card' && Array.isArray(message.cards) && message.cards.length && message.cards.every(card => card?.kind === 'verdict')) return false;
   if (VISIBLE_KINDS.has(kind)) return true;
   if (!kind && (message?.role === 'user' || message?.role === 'assistant')) return true;
   return false;
@@ -242,6 +244,7 @@ export function createBotDirectory({
     let processMessageId = null;
     let filtered = (selectedMessages || (presentationOnly && typeof readConversationMessages === 'function'
       ? readConversationMessages(profile.agentConversationId) || [] : messagesOf(profile))).filter((message) => {
+      if (processFor) return true;
       if (allowed) return allowed.has(messageKind(message));
       // agent_turn stays available so the client can derive disposition marks, then hide the turn.
       return isVisibleBotMessage(message) || messageKind(message) === 'agent_turn';
