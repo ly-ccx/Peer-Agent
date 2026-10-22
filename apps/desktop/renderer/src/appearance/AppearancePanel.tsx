@@ -29,6 +29,7 @@ export function AppearancePanel({
     activeScheme,
     settings,
     setMode,
+    setWindowMaterial,
     setFontScale,
     setCodeFontSize,
     setDiffMarkerMode,
@@ -86,6 +87,13 @@ export function AppearancePanel({
       {/* 3. 统一 settings list：字号 / 代码字号 / 差异标记 */}
       <SettingsGroup className="appearance-group" title={i18n.t('appearance.settingsList')}>
         <div className="appearance-settings-list appearance-settings-card">
+          {document.documentElement.dataset.os === 'darwin' ? <div className="appearance-settings-row">
+            <div className="appearance-settings-row-meta"><span className="appearance-settings-row-title">{i18n.t('appearance.windowMaterial')}</span></div>
+            <div className="appearance-segmented appearance-segmented--two appearance-segmented--inline" role="group" aria-label={i18n.t('appearance.windowMaterial')}>
+              {(['glass', 'solid'] as const).map(material => <button key={material} type="button" aria-pressed={settings.windowMaterial === material}
+                className={settings.windowMaterial === material ? 'active' : undefined} onClick={() => setWindowMaterial(material)}>{i18n.t(`appearance.windowMaterial.${material}`)}</button>)}
+            </div>
+          </div> : null}
           <div className="appearance-settings-row">
             <div className="appearance-settings-row-meta">
               <span className="appearance-settings-row-title">{i18n.t('appearance.fontScale')}</span>

@@ -1163,18 +1163,3 @@ html[data-vibrancy='true'] .bot-drawer-dock.is-open {
   border-color: var(--chrome-hairline);
   box-shadow: var(--glass-edge-highlight), var(--shadow-card);
 }
-
-@media (prefers-reduced-transparency: reduce) {
-  html[data-vibrancy='true'] .bot-drawer-dock {
-    margin-left: 0;
-    border: 0;
-    border-left: 1px solid transparent;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  html[data-vibrancy='true'] .bot-drawer-dock.is-open {
-    border-color: transparent;
-    border-left-color: var(--chrome-hairline);
-  }
-}

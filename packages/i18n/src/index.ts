@@ -760,6 +760,9 @@ export type TranslationKey =
   | 'appearance.foreground'
   | 'appearance.uiFont'
   | 'appearance.codeFont'
+  | 'appearance.windowMaterial'
+  | 'appearance.windowMaterial.glass'
+  | 'appearance.windowMaterial.solid'
   | 'appearance.diffMarker'
   | 'appearance.diffMarker.color'
   | 'appearance.diffMarker.sign'
@@ -1461,6 +1464,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': '文字',
     'appearance.uiFont': '界面字体',
     'appearance.codeFont': '代码字体',
+    'appearance.windowMaterial': '窗口材质',
+    'appearance.windowMaterial.glass': '毛玻璃',
+    'appearance.windowMaterial.solid': '实色',
     'appearance.diffMarker': '差异标记',
     'appearance.diffMarker.color': '颜色',
     'appearance.diffMarker.sign': '+/- 符号',
@@ -2826,6 +2832,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': 'Foreground',
     'appearance.uiFont': 'UI font',
     'appearance.codeFont': 'Code font',
+    'appearance.windowMaterial': 'Window material',
+    'appearance.windowMaterial.glass': 'Frosted glass',
+    'appearance.windowMaterial.solid': 'Solid',
     'appearance.diffMarker': 'Diff markers',
     'appearance.diffMarker.color': 'Color',
     'appearance.diffMarker.sign': '+/- signs',

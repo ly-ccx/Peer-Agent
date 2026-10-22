@@ -829,7 +829,7 @@
   flex: none;
   min-height: 52px;
   padding: 0 27px;
-  background: var(--chrome-canvas);
+  background: var(--paper-sheet);
   border-bottom: 1px solid var(--chrome-hairline);
   -webkit-app-region: drag;
 }
@@ -1162,21 +1162,22 @@
 
 /* ── macOS 毛玻璃壳层 ──
  * html[data-vibrancy] 由 main.tsx 仅在 darwin 且 bootstrap 正常时打标；
- * 窗口底为原生 vibrancy：左栏贴边铺成整片玻璃，主面板与右侧抽屉
+ * 窗口底为原生 vibrancy：整窗只叠一层主题玻璃底色，左栏透明，主面板与右侧抽屉
  * 各自成悬浮纸面（黑牌），四周留出玻璃缝。纸面/描边/阴影全部取自
  * 主题 token（--paper-sheet / --chrome-hairline / --shadow-card），
  * 深浅主题与自定义色板自动跟随。非 macOS 无标记，保持原平铺实色布局。 */
 html[data-vibrancy='true'] .bot-shell {
   --bot-float-gap: 10px;
   padding: var(--bot-float-gap);
-  background: transparent;
+  background: var(--glass-chrome);
 }
 
 /* 负 margin 抵消壳层 padding：左栏贴住窗口左缘与上下，玻璃直达边缘，
- * 交通灯落在玻璃上；右缘由 hairline 收边。 */
+ * 交通灯落在玻璃上；面板圆角区分侧栏，不再绘制分隔线。 */
 html[data-vibrancy='true'] .bot-column {
   margin: calc(-1 * var(--bot-float-gap)) 0 calc(-1 * var(--bot-float-gap)) calc(-1 * var(--bot-float-gap));
-  background: var(--glass-chrome);
+  background: transparent;
+  border-right: 0;
 }
 
 /* 主面板：悬浮黑牌。实色纸面沿用 .bot-main 的 --paper-sheet。 */
@@ -1188,23 +1189,11 @@ html[data-vibrancy='true'] .bot-main {
   box-shadow: var(--glass-edge-highlight), var(--shadow-card);
 }
 
-/* 用户开启“降低透明度”时整体回到平铺实色布局，与 base.css 降级策略一致。 */
+/* Material is one appearance choice for the entire window. Native blur stays behind this tint. */
+html[data-vibrancy='true'][data-window-material='solid'] .bot-shell {
+  background: var(--chrome-raised);
+}
+
 @media (prefers-reduced-transparency: reduce) {
-  html[data-vibrancy='true'] .bot-shell {
-    padding: 0;
-    background: var(--paper-sheet, var(--za-app-bg));
-  }
-
-  html[data-vibrancy='true'] .bot-column {
-    margin: 0;
-    background: var(--chrome-raised);
-  }
-
-  html[data-vibrancy='true'] .bot-main {
-    margin-left: 0;
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
+  html[data-vibrancy='true'] .bot-shell { background: var(--chrome-raised); }
 }
