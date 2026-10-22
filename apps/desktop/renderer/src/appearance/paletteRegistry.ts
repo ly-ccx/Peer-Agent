@@ -44,8 +44,8 @@ export const PALETTE_REGISTRY = [
     swatches: {
       light: [
         { label: 'Accent', value: '#3B7FAB' },
-        { label: 'Background', value: '#EDF1F6' },
-        { label: 'Surface', value: '#F7F9FC' },
+        { label: 'Background', value: '#F8F8F8' },
+        { label: 'Surface', value: '#F8F8F8' },
         { label: 'Text', value: '#1A1D21' },
         { label: 'Success', value: '#3E7A6B' },
         { label: 'Warn', value: '#3B6FAB' },
@@ -53,8 +53,8 @@ export const PALETTE_REGISTRY = [
       ],
       dark: [
         { label: 'Accent', value: '#5D9CBF' },
-        { label: 'Background', value: '#11141A' },
-        { label: 'Surface', value: '#1E232C' },
+        { label: 'Background', value: '#141414' },
+        { label: 'Surface', value: '#141414' },
         { label: 'Text', value: '#EDF1F6' },
         { label: 'Success', value: '#6EAA9B' },
         { label: 'Warn', value: '#6B9FCB' },
