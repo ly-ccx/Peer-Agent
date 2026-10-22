@@ -123,9 +123,31 @@ Before implementing a non-trivial change, classify it:
 
 Once a change is committed locally, push it to the tracked remote branch in the same turn. Multi-device work treats `origin` as the source of truth. Do not leave commits only on this machine.
 
+## Release Pull Request Gate
+
+User preference (2026-10-22): a new version or RC must include all open pull requests in this repository, not only the releasing agent's own changes.
+
+- Inventory every open PR, including drafts and PRs targeting other branches, before freezing a release. Review each PR, resolve conflicts, complete its required checks, and merge it; never silently omit another task's PR.
+- An unmerged or blocked PR blocks the release. Do not force through conflicts, bypass failing checks, or treat an excluded PR as merged. Report the concrete blocker if it cannot be resolved.
+- Freeze the candidate only after all PRs are merged, then run the release-wide build, tests, contract/type/architecture/IPC checks and complete product regression on that combined source. Earlier checks on a smaller candidate do not validate newly merged changes.
+- Check the open PR inventory again immediately before pushing the release tag; it must be empty. Include the merged PR list and final candidate identity in the release receipt.
+- Preserve uncommitted work and current runtime instances. The merge-all rule applies to submitted PRs; it does not authorize sweeping unrelated dirty files into a release or installing/restarting the app.
+
+## Validation Scope
+
+User preference (2026-10-22): full regression is a release gate, not a prerequisite for every feature or fix.
+
+- During daily development, run focused tests for the changed behavior and affected modules. Build the required dependencies and run relevant type, contract, permission, IPC, or architecture checks only where the change requires them; include directly affected consumers when a shared contract changes.
+- Do not automatically run the whole-repository build/test/check suite or the complete desktop screenshot packet for each task, fix, or handoff. Expand focused validation when failures or a concrete impact justify it, without turning every change into a release rehearsal.
+- Before a version release or RC release, run the full build, test suite, typecheck, architecture/IPC checks, and complete product regression applicable to that release candidate. An explicit user request for full regression on a particular task also authorizes it.
+- State what was actually checked and what was not. Older task cards or playbooks that require full regression on every handoff follow this scope policy; focused validation must never be reported as a full pass.
+- Documentation-only or instruction-only edits need a content/diff check, not application regression.
+
 ## Product Regression
 
-For user-facing UI changes, follow `peer-knowledge/playbook/product-regression.md` before handoff or an RC release:
+For daily user-facing UI changes, follow `peer-knowledge/playbook/product-regression.md` for the affected interaction, failure states, layouts, and screenshots. Review the actual changed UI and state the coverage; the full packet is not required for each handoff.
+
+Before a version release or RC release, perform the complete product regression:
 
 - Run `pnpm qa:product:capture --output <temporary-directory-outside-repo>` for the standard isolated desktop interaction and screenshot packet.
 - The AI doing the work must inspect every required screenshot against the user goal and product north star, then write the packet's `review.json` with concrete observations. Machine success alone is not product acceptance.

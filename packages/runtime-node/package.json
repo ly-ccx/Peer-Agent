@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/runtime-node",
-  "version": "0.1.0-rc.23",
+  "version": "0.1.0-rc.25",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -17,7 +17,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node scripts/embed-project-tool-prompts.mjs && tsc -p tsconfig.build.json",
+    "build": "node ../../scripts/embed-storage-workers.mjs && node scripts/embed-project-tool-prompts.mjs && tsc -p tsconfig.build.json",
     "test": "node --test src/*.test.ts src/*.test.mjs src/sqlite/*.test.mjs src/memory/*.test.mjs src/project-agent/*.test.mjs src/project-agent/probes/*.test.mjs src/testing/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },

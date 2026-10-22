@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { beginVerificationAttempt, sessionFactsFromPlan } from './session-facts.mjs';
+import { beginExecutionAttempt, beginVerificationAttempt, sessionFactsFromPlan } from './session-facts.mjs';
+
+test('runtime facts forward the current interruption through the protocol compatibility seam', () => {
+  const facts = sessionFactsFromPlan({planId:'unconsumed-interruption', status:'completed',
+    runner:{status:'completed', interruption:{recoverable:false,reason:'fixture interruption'}}});
+  assert.equal(facts.status, 'paused');
+  assert.equal(facts.needsUser, false);
+});
+test('manual DoD 门在共享决策里仍然是"等你确认"，不靠适配器私改状态', () => {
+  const plan = { planId: 'dod', status: 'completed', conversationId: 'c-dod',
+    delegationOrigin: { sessionId: 's', phase: 'running' }, runner: { status: 'blocked', blockedReason: 'manual_dod_confirmation_required' } };
+  const facts = sessionFactsFromPlan(plan);
+  assert.equal(facts.status, 'waiting_user');
+  assert.equal(facts.needsUser, true);
+});
 
 test('stale verifying flags cannot hide a blocker or survive verifier termination', () => {
   const plan = { planId: 'p', status: 'executing', delegationOrigin: { phase: 'running', verifying: true }, runner: { status: 'blocked', blockedReason: 'verifier_failed' } };
@@ -23,14 +37,17 @@ test('current terminal and human facts win over active verification', () => {
 
 test('completed worker evidence does not announce a result while its runner is still verifying it', async () => {
   const { watchFactsFromPlan } = await import('./watchdog.mjs');
-  const plan = { planId: 'race', status: 'completed', delegationOrigin: { sessionId: 's', phase: 'running' },
+  const plan = { planId: 'race', status: 'completed', conversationId: 'c-race',
+    delegationOrigin: { sessionId: 's', phase: 'running' },
     tasks: [{ taskId: 'read', status: 'completed', result: 'Read complete', evidenceRefs: ['e'] }], runner: { status: 'running' } };
+  // "还在跑"必须由本进程执行 token 证明；持久化 runner.status 本身只是观测记录（ADR 102）。
+  const endExecution = beginExecutionAttempt('c-race', 'turn');
   assert.equal(sessionFactsFromPlan(plan).status, 'running');
   assert.equal(watchFactsFromPlan(plan).reportRevision, undefined);
   const end = beginVerificationAttempt('race', 'verifier');
   assert.equal(sessionFactsFromPlan(plan).status, 'verifying');
   assert.equal(watchFactsFromPlan(plan).reportRevision, undefined);
-  end(); plan.runner.status = 'completed';
+  end(); endExecution(); plan.runner.status = 'completed';
   assert.equal(sessionFactsFromPlan(plan).status, 'result_ready');
   assert.ok(watchFactsFromPlan(plan).reportRevision);
 });

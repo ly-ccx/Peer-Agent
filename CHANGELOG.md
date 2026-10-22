@@ -2,6 +2,27 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.25 - 2026-10-22
+
+- Build on RC24 with public interaction reads by default and child execution details loaded on demand.
+- Retain kind-less legacy public user/assistant interactions in TUI model context; private process records remain excluded.
+- Isolate message, task-card and detail failures; retain readable messages and support explicit retry.
+- Replace repeated coordination snapshots with incremental segmented events and exact usage receipts; recover large journals in background workers and rebuild derived indexes with durable-source checks.
+- Preserve task identities, conversations, evidence and legacy journals; unknown tool outcomes are not automatically repeated.
+- Fix completed-reply detail anchors, asynchronous question answers and narrow-window detail overflow.
+- Integrate all outstanding release PRs: unified lifecycle projection with visible budget/question gates and factual cancellation, continuous interface corners, and removal of the extra Bot-list footer divider. Preserve interruption facts across the compatibility seam.
+- Break the verification-report/session-projection dependency cycle on Desktop and TUI without changing verification or acceptance requirements.
+- Document coordinated upgrades, incompatible downgrade limits and the distinction between publishing and restarting an installed app; synchronize bilingual notes and website changelog.
+
+## 0.1.0-rc.24 - 2026-10-22
+
+- Inherit the Bot-owned access policy across task and verification runtimes; full access supports consecutive image reads without per-image prompts.
+- Show independent tasks as peers, distinguish child Agent identities, and consolidate duplicate result events.
+- Refine conversation typography and compact ended authorization receipts; preserve pending actions and expandable full commands.
+- Remove process empty-state whitespace and refresh open attention lists when questions expire during concurrent reads.
+- Track verification by new facts, settle ten minutes without factual progress, and limit report-format repair to one tool-free request.
+- Synchronize bilingual release notes, user documentation, README candidate links and generated website changelog.
+
 ## 0.1.0-rc.22 - 2026-10-20
 
 - Preserve user-configured model and channel selections; independent review may use the same model in a separate context.

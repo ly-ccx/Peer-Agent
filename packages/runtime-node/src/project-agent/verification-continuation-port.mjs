@@ -10,6 +10,11 @@ export function validateVerificationContinuation(value) {
     || !phases.has(value.phase) || !Number.isFinite(Date.parse(value.deadlineAt))
     || ![value.modelRequests, value.toolCalls, value.formatAttempt].every(n => Number.isSafeInteger(n) && n >= 0)
     || value.formatAttempt > 1 || value.checkpointRef && !/^[a-f0-9]{64}\.json$/.test(value.checkpointRef)
+    || [value.startedAt, value.lastProgressAt].some(at => at !== undefined && !Number.isFinite(Date.parse(at)))
+    || value.observationCount !== undefined && (!Number.isSafeInteger(value.observationCount) || value.observationCount < 0)
+    || value.formatRequests !== undefined && (!Number.isSafeInteger(value.formatRequests) || value.formatRequests < 0 || value.formatRequests > 1)
+    || value.observationFacts !== undefined && (!Array.isArray(value.observationFacts)
+      || value.observationFacts.some(fact => typeof fact !== 'string' || !/^[a-f0-9]{64}$/.test(fact)))
     || !Array.isArray(value.evidenceRefs) || value.evidenceRefs.some(ref => typeof ref !== 'string')) throw failure('verifier_checkpoint_unavailable', 'Invalid verifier continuation metadata; allowance was not reset');
   return structuredClone(value);
 }

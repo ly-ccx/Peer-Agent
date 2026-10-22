@@ -154,6 +154,7 @@ export function createSessionVerification({
         report = await verifySession(plan, input.focus, { workId: input.workId });
       } catch (error) {
         const failure = verificationFailure(error);
+        if (failure.error === 'verifier_in_progress') return failure;
         goalPlanStore.recordVerifierRun?.(plan.planId, { verifierRunId: `delegated-failure:${randomUUID()}`,
           target: { kind: 'plan' }, status: 'failed', summary: failure.message, failureReason: failure.message,
           report: { passed: false, risks: [failure.error, failure.message], evidenceRefs: [], recommendedNextAction: failure.nextAction } });

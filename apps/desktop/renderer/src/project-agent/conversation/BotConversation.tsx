@@ -12,6 +12,7 @@ import { replyAnchorsForMessages } from '../state/replyReferenceState';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
 import { BotModelControls } from '../BotModelControls';
+import { BotAccessControl } from '../BotAccessControl';
 import type { BotModelsControlState } from '../state/useBotModels';
 import { DelegatedWork } from './DelegatedWork';
 import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
@@ -135,8 +136,18 @@ export function BotConversation({
         workspaceId={workspaceId} botName={label} workIndex={workIndex} i18n={i18n}
         disclosure={detailsDisclosure}
         onOpenEvidence={openEvidence} onOpenWork={onLocateSession} />, replyDetailsTarget) : null}
+      {conversation.status === 'ready' && (conversation.cardsError || conversation.refreshError) ? <div className="bot-thread-feedback" role="status">
+        <div>
+          {conversation.cardsError ? <p>{i18n.t('projectAgent.chat.cardsUnavailable')}</p> : null}
+          {conversation.refreshError && conversation.status === 'ready' ? <p>{i18n.t('projectAgent.chat.refreshFailed')}</p> : null}
+        </div>
+        <button type="button" onClick={conversation.reload}>{i18n.t('projectAgent.history.retry')}</button>
+      </div> : null}
       {conversation.status === 'error' ? (
-        <p className="bot-thread-error">{i18n.t('projectAgent.chat.loadFailed')}</p>
+        <div className="bot-thread-failed" role="status">
+          <p className="bot-thread-error">{i18n.t('projectAgent.chat.loadFailed')}</p>
+          <button type="button" onClick={conversation.reload}>{i18n.t('projectAgent.history.retry')}</button>
+        </div>
       ) : (
         <BotMessageList
           workspaceId={workspaceId}
@@ -177,6 +188,7 @@ export function BotConversation({
         key={workspaceId}
         i18n={i18n}
         botName={label}
+        permissionControls={onSavingChange => <BotAccessControl key={workspaceId} workspaceId={workspaceId} i18n={i18n} onSavingChange={onSavingChange} />}
         modelUpdating={modelControls.busy}
         draftRequest={taskRequest?.draft ? { id: taskRequest.id, text: taskRequest.draft } : null}
         onDraftPrepared={id => {

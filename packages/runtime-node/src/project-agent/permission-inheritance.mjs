@@ -10,6 +10,7 @@ const stopped = plan => ['cancelled', 'paused', 'interrupted'].includes(plan?.st
 
 /** Host facts only. A profile's claimed parent is never an authority source.
  * @param {{workspaceId?: string | null, conversationId?: string | null, planId?: string | null, sessionId?: string | null, goalPlanStore?: any}} [input]
+ * @returns {{workspaceId: string | null, conversationId: string, policyRevision?: string} | null}
  */
 export function resolvePermissionPrincipal({ workspaceId, conversationId, planId, sessionId, goalPlanStore } = {}) {
   workspaceId = text(workspaceId); conversationId = text(conversationId);
@@ -50,6 +51,7 @@ export function normalizeImageReadGrant(value) {
   const identity = value.scope.fileIdentity;
   if (!identity || !['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].every(key => Number.isFinite(identity[key]))) return null;
   return { schemaVersion: 1, grantId: value.grantId, workspaceId: text(value.workspaceId),
+    ...(text(value.policyRevision) ? { policyRevision: value.policyRevision } : {}),
     conversationId: value.conversationId, expiresAt: value.expiresAt,
     scope: { capabilityId: 'local.image.read', action: 'read_image_for_model', path: value.scope.path,
       workspacePath: text(value.scope.workspacePath), fileIdentity: {
@@ -75,7 +77,9 @@ export function createImageReadAuthority({ approvalStore, now = () => Date.now()
       const grant = normalizeImageReadGrant(record.imageReadGrant);
       if (record.state !== 'approved' || record.decidedBy !== 'local_ui' || record.capabilityId !== 'local.image.read'
         || !grant || grant.expiresAt <= Number(now()) || grant.workspaceId !== principal.workspaceId
-        || grant.conversationId !== principal.conversationId || !sameImage(grant.scope, scope)) continue;
+        || grant.conversationId !== principal.conversationId || !sameImage(grant.scope, scope)
+        || (grant.policyRevision ?? null) !== (principal.policyRevision ?? null)
+          && !(grant.policyRevision == null && principal.policyRevision?.startsWith('bot:') && principal.policyRevision.endsWith(':1'))) continue;
       return { granted: true, reason: 'local_user_approved_image_scope', grant: {
         grantId: grant.grantId, toolCallId, granted: true, duration: 'scope', scope,
         decidedAt: record.decidedAt, expiresAt: grant.expiresAt,
@@ -96,9 +100,10 @@ export function createImageReadAuthority({ approvalStore, now = () => Date.now()
       kind: 'image_read_grant', imageReadGrant });
     return saved?.imageReadGrant ? imageReadGrant : null;
   }
-  function revokeAll() {
+  /** @param {{shouldRevoke?: (grant: any) => boolean}} [options] */
+  function revokeAll({ shouldRevoke = () => true } = {}) {
     for (const record of approvalStore?.list?.({ state: 'approved' }) ?? []) {
-      if (record.imageReadGrant) approvalStore.append({ ...record, state: 'expired',
+      if (record.imageReadGrant && shouldRevoke(record.imageReadGrant)) approvalStore.append({ ...record, state: 'expired',
         decidedAt: new Date(Number(now())).toISOString(), decidedBy: 'policy' });
     }
   }

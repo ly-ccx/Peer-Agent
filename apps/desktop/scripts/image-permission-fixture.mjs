@@ -1,3 +1,4 @@
+import { createBotAccessPolicyAuthority } from '@peer-agent/runtime-node';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
@@ -27,8 +28,10 @@ export async function withImagePermissionFixture(service, { mainRoot, imageRoot,
       assert.ok(approvalStore, 'production host must configure its own ApprovalStore');
       const controller = new AbortController(); running.set(input.streamId, controller);
       const streams = new Map([[input.streamId, { turnProfile: input.turnProfile, runtimeTurn: { signal: controller.signal } }]]);
+      const authority = createBotAccessPolicyAuthority();
       const gate = createChatPermissionGate({ activeStreams: streams, approvalStore,
-        accessLevel: scenario === 'FULL' ? 'full_local' : 'ask_before_local',
+        resolveAccessPolicy: () => authority.read(input.turnProfile.workspaceId),
+        accessLevel: 'ask_before_local',
         // Keep the pending card inspectable under traced CI renderer load;
         // the production gate still performs the eventual expiry itself.
         permissionWaitMs: scenario === 'TIMEOUT' ? 10_000 : 60_000,
@@ -98,6 +101,7 @@ export async function withImagePermissionFixture(service, { mainRoot, imageRoot,
             : scenario === 'DENY' ? '已拒绝本次图片读取。' : '本次图片读取已取消。' };
       } finally {
         gate.settleStreamPermissionRequests(input.streamId, { granted: false });
+        authority.close();
         running.delete(input.streamId);
       }
     },

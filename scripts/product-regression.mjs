@@ -21,7 +21,7 @@ export function sourceFingerprint(root) {
   return digest.digest('hex');
 }
 
-const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const requiredShots = ['conversation-cards-failed-dark.png','conversation-refresh-failed-dark.png','conversation-initial-failed-light.png','conversation-recovered-light.png','bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
@@ -47,11 +47,24 @@ const requiredShots = [...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMa
   'image-full-1280-dark.png', 'image-full-760-light.png',
   ...['allow', 'deny', 'cancel', 'stop', 'timeout'].map(state => `image-live-${state}-1280-dark.png`),
   'image-approval-1280-dark.png', 'image-approval-760-light.png',
+  ...[1280, 760].flatMap(width => ['dark', 'light'].map(theme => `process-empty-${width}-${theme}.png`)),
+  ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`conversation-typography-${width}-${theme}.png`, `approval-history-${width}-${theme}.png`]),
   'process-timing-dark.png', 'process-timing-light.png', 'budget-exhausted-dark.png', 'budget-exhausted-light.png', 'manual-wake-retry-dark.png', 'manual-wake-retry-light.png',
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress', 'child-running', 'historical', 'paused', 'cancelled', 'budget-unknown', 'budget-ready', 'budget-migrating', 'budget-reserved', 'budget-available'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
   'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png', 'attention-1280-dark.png', 'attention-760-light.png', 'attention-empty-light.png', 'attention-expired-light.png', 'attention-image-permission-dark.png', 'user-receipt-1280-dark.png', 'user-receipt-760-light.png'];
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
+  if (!['budget','question'].every(key => [[1280,'dark'],[760,'light']].every(([width,appearance]) =>
+    machine.lifecycleGates?.cases?.some(row => row.key===key && row.width===width && row.appearance===appearance
+      && row.listVisible && row.detailVisible && row.cancellationFromDecision && row.sameFacts))))
+    throw new Error('Completed lifecycle human gates were not verified');
+  if (!['cardsFailureKeepsMessages', 'refreshFailureKeepsMessages', 'initialFailureIsExplicit', 'retryRestoresMessages'].every(key => machine.progressiveLoading?.[key] === true)) throw new Error('Progressive conversation failure recovery regression failed');
+  if (!machine.conversationTypography?.keyboardDisclosure || !machine.conversationTypography?.truthfulApprovalStates
+    || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.conversationTypography.cases?.some(item =>
+      item.width === width && item.appearance === appearance && item.weight === '500' && item.emphasis === '600'
+      && item.fits && item.compactReceipt && item.fullCommandPreserved && item.pendingVisible)))
+    throw new Error('Conversation typography or approval history regression failed');
+  if (!machine.botAccessPolicy?.passed || !machine.botAccessPolicy?.realLocalIPC || !machine.botAccessPolicy?.isolatedBots || !machine.botAccessPolicy?.childReadOnly || !machine.botAccessPolicy?.returnsToBot) throw new Error('Bot access policy regression failed');
   if (![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(row =>
     row.width === width && row.appearance === appearance && row.distinctShapes && row.legacyReportDeduped)))
     throw new Error('Agent activity identity or duplicate-report regression failed');
@@ -97,7 +110,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       machine.replyRecovery?.cases?.some(item => item.state === state && item.width === width && item.appearance === appearance
         && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication', 'no-progress', 'child-running', 'budget-ready', 'budget-available'].includes(state))))
     || !['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationRetained', 'noPrivateThinking', 'narrowFits', 'nativeLoaded', 'persistedEventBatch'].every(check => machine.manualWakeRetry?.[check] === true)
-    || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(item => item.width === width && item.appearance === appearance && item.named && item.svg && item.stableIdentity && item.taskDestination && item.humanWaitDistinct && item.fits))
+    || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(item => item.width === width && item.appearance === appearance && item.named && item.svg && item.stableIdentity && item.taskDestination && item.humanWaitDistinct && item.verificationProgress && item.fits))
     || machine.manualWakeRetry?.guardedCognitionDispatches !== 1
     || !['controlledCognition', 'realCheckpointPort', 'nativePairLoaded', 'noAutomaticReplay'].every(check => machine.streamingFailureRecovery?.[check] === true)
     || machine.streamingFailureRecovery?.readFileDispatches !== 1 || machine.streamingFailureRecovery?.explicitRetryTurns !== 1
@@ -144,7 +157,9 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     throw new Error('Machine regression failed or required product scenarios did not run');
   }
   mkdirSync(path.join(output, 'screenshots'), { recursive: true });
-  const screenshots = requiredShots.map(id => {
+  const lifecycleShots = ['budget','question'].flatMap(key=>[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>
+    ['list','detail'].map(surface=>`lifecycle-${key}-${surface}-${width}-${theme}.png`)));
+  const screenshots = [...requiredShots,...lifecycleShots].map(id => {
     const bytes = readFileSync(path.join(artifactRoot, id));
     writeFileSync(path.join(output, 'screenshots', id), bytes);
     return { id, path: `screenshots/${id}`, sha256: hash(bytes) };
@@ -152,15 +167,15 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const packet = { schemaVersion: 1, runId: randomUUID(), capturedAt: new Date().toISOString(),
     sourceFingerprint: sourceFingerprint(root), sourceHead: machine.sourceHead, platform: machine.platform,
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
-    checks: { userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
+    checks: { conversationTypography: machine.conversationTypography, userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces,
-      chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
+      botAccessPolicy: machine.botAccessPolicy, chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
-      processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
+      processEmptyLayout: machine.processEmptyLayout, processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
       selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote, retryRetirement: machine.retryRetirement },
-    supplementalCoverage: machine.sharedUiConventions,
+    supplementalCoverage: {sharedUiConventions:machine.sharedUiConventions,lifecycleGates:machine.lifecycleGates},
     reviewCriteria: [
       '默认内容能回答任务目标、当前进展和下一步；动作写明去向，主机器人负责对用户传达。',
       '内部 ID、模型机制和原始参数按需披露；状态来自结构化事实，目标与完成结论不得混淆。',

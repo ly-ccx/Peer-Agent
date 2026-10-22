@@ -68,7 +68,7 @@ export function SessionDetail({
           {stamp && <time dateTime={session.spawnedAt}>{i18n.t('projectAgent.drawer.task.created', { time: stamp })}</time>}
         </div>
       </header>
-      <TaskCancelButton sessionId={session.sessionId} status={session.status} title={title} i18n={i18n} />
+      <TaskCancelButton sessionId={session.sessionId} status={session.status} cancelable={session.cancelable} title={title} i18n={i18n} />
       <section className="bot-task-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
         <h3>{i18n.t('projectAgent.drawer.progress')}</h3>
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
@@ -125,6 +125,7 @@ export function SessionDetail({
           i18n={i18n}
           isZh={isZh}
           onClose={() => setSceneOpen(false)}
+          onOpenBot={() => { setSceneOpen(false); onConversation({}); }}
         />
       ) : null}
     </div>
@@ -138,6 +139,7 @@ export function ConversationSceneDrawer({
   i18n,
   isZh,
   onClose,
+  onOpenBot,
 }: {
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -146,6 +148,7 @@ export function ConversationSceneDrawer({
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly onClose: () => void;
+  readonly onOpenBot?: () => void;
 }) {
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [systemInstructions, setSystemInstructions] = useState('');
@@ -179,6 +182,7 @@ export function ConversationSceneDrawer({
         <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
           <div className="conversation-chat-drawer__body">
             <ChatSurface
+              onOpenPermissionBot={onOpenBot}
               i18n={i18n}
               providers={providers}
               conversationId={conversationId}

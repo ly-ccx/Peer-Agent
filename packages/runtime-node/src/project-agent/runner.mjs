@@ -6,6 +6,7 @@ import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn, 
 import { waitResult } from './wake-wait.mjs';
 import { createTurnActivity } from './turn-activity.mjs';
 import { readRetryContinuity } from './retry-continuity.mjs';
+import { beginExecutionAttempt } from './session-facts.mjs';
 
 /**
  * 与桌面 llm-chat-service 的同提供方重试退避一致（ADR 30）：
@@ -34,6 +35,7 @@ export function createProjectAgentRunner({
   resolveModel = () => ({ ok: false, missing: '没有可用的模型' }),
   resolveContext = () => null,
   resolveRoster = () => null,
+  resolveTurnRoster = resolveRoster,
   sink = null,
   now = () => new Date().toISOString(),
   retryDelays = SAME_PROVIDER_RETRY_DELAYS_MS,
@@ -288,6 +290,8 @@ export function createProjectAgentRunner({
     activeContinuation = coordination !== null && job.continuation === true;
     const signal = controller.signal;
     setStatus('thinking');
+    // 本进程真实执行所有权：token 活到本轮 finally，暂停/取消/异常/重入都走同一释放路径。
+    const endExecution = beginExecutionAttempt(conversation, job.turnId);
     try {
       if (job.kind === 'digest') {
         if (job.message) remember(job.message);
@@ -428,6 +432,7 @@ export function createProjectAgentRunner({
       if (!outcome.silentWait && (job.kind === 'user' || job.kind === 'wake')) scheduleCurator(job);
       return 'ok';
     } finally {
+      endExecution();
       if (abortController === controller) { abortController = null; activeWorkId = null; activeContinuation = false; }
       turnKind = null; acceptingStop = false;
     }
@@ -463,8 +468,8 @@ export function createProjectAgentRunner({
       userInputs: job.userInputs,
       events: job.events,
       modelProviderId: model.modelProviderId,
-      context: readSlot(resolveContext, job.kind),
-      roster: readSlot(resolveRoster, job.kind),
+      context: readSlot(resolveContext, job.kind, job),
+      roster: readSlot(resolveTurnRoster, job.kind, job),
       workspaceId: workspace,
     });
     // A user-triggered retry is visible even when its original work was a wake.
@@ -635,9 +640,11 @@ export function createProjectAgentRunner({
     return { ok: true, modelProviderId, selection: resolved.selection || null, candidateIds: resolved.candidateIds || [], reason: '' };
   }
 
-  function readSlot(fn, kind) {
+  function readSlot(fn, kind, job) {
     try {
-      const value = fn({ workspaceId: workspace, conversationId: conversation, kind, role: 'project_agent' });
+      const value = fn({ workspaceId: workspace, conversationId: conversation, kind, role: 'project_agent',
+        ...(job ? { workId: job.workId, sessionIds: [...new Set((job.events || []).map(event => event.sessionId).filter(Boolean))],
+          anchorMessageIds: (job.userInputs || []).map(input => `input-${input.inputId}`) } : {}) });
       return value === undefined ? null : value;
     } catch {
       return null;

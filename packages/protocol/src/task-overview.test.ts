@@ -156,14 +156,16 @@ test('request_user_input outranks stale completed until the answer is consumed',
   assert.equal(item.statusLabel, '等待你的选择');
 });
 
-test('rule 5: runner blocked → needs_you / decision', () => {
+test('rule 5: runner blocked → 技术阻塞由 Bot 跟进，不是人类决定（ADR 102 §4 不变量 4）', () => {
   const item = projectGoalPlan(
     goalSnapshot({ status: 'executing', runnerStatus: 'blocked' }),
   );
-  assert.equal(item.actionRight, 'needs_you');
-  assert.equal(item.needsYouReason, 'decision');
-  assert.equal(item.nextAction, 'decide_blocked');
-  assert.equal(item.statusLabel, '执行受阻');
+  // 同一事实以前在任务卡说"需要你决定"、在会话说"由主 Bot 跟进"；现在统一为 Bot 跟进。
+  // 真实审批/提问/权限门仍走 awaiting_approval / waiting_user / needsUser 路径。
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.nextAction, 'none');
+  assert.equal(item.statusLabel, '由主 Bot 跟进');
 });
 
 test('live conversation stream outranks stale blocked as peer_advancing', () => {

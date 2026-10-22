@@ -1,4 +1,5 @@
 import { createAttentionExpiry } from './attention-expiry.mjs';
+import { createBotAccessPolicyService } from './bot-access-policy-service.mjs';
 import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
 /**
  * 项目代理应用服务。渲染层的数据和动作都从这里过。
@@ -96,6 +97,7 @@ export function createProjectAgentApplicationService({
   stopResponseTurn = null,
   requestTakeover = null,
   diagnostics = null,
+  accessAuthority = null,
 } = {}) {
   const imageAuthority = createImageReadAuthority({ approvalStore: approvals });
   let corpusToken = null;
@@ -105,6 +107,7 @@ export function createProjectAgentApplicationService({
   } });
   const pendingChanged = new Set();
   const pendingConversation = new Set();
+  const accessPolicy = createBotAccessPolicyService({ authority: accessAuthority, enabled, changed: queueChanged, approvals });
   let changedTimer = null;
   let conversationTimer = null;
 
@@ -332,8 +335,15 @@ export function createProjectAgentApplicationService({
 
   function readConversation(payload = {}) {
     if (!open()) return disabled();
-    const result = directory.readConversation(payload.workspaceId, payload);
-    return result?.ok ? { ...result, activity: readActivity(payload.workspaceId) } : result;
+    const result = payload.processFor && typeof directory.readProcess === 'function' ? directory.readProcess(payload.workspaceId, payload)
+      : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
+        ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
+    const decorate = page => {
+      if (!page?.ok) return page;
+      try { return { ...page, activity: readActivity(payload.workspaceId) }; }
+      catch { return { ...page, activity: null }; }
+    };
+    return result && typeof result.then === 'function' ? result.then(decorate) : decorate(result);
   }
 
   function stopResponse(payload = {}) {
@@ -413,6 +423,18 @@ export function createProjectAgentApplicationService({
     };
     current = expireDeadline(current);
     if (!current) return { ok: false, code: 'NOT_FOUND' };
+    if (!isPlanApproval(current) && ['open', 'stale'].includes(current.state) && accessAuthority) {
+      const resolved = accessAuthority.resolve({ conversationId: current.conversationId, workspaceId: current.workspaceId,
+        sessionId: current.sessionId, planId: current.planId });
+      const stamp = resolved?.ok ? `bot:${resolved.policy.workspaceId}:${resolved.policy.conversationId}:${resolved.policy.revision}` : null;
+      if (resolved && (!resolved.ok || (current.policyRevision ?? (resolved.policy.revision === 1 ? stamp : 'legacy')) !== stamp)) {
+        try { settleLive?.(current, { decision: 'expired', reason: 'permission_policy_changed' }); } catch {}
+        current = approvals.append({ ...current, state: 'expired', decidedBy: 'policy', decisionReason: 'permission_policy_changed', decidedAt: now() });
+        queueChanged(payload.workspaceId);
+        return { ok: true, approval: current };
+      }
+      if (stamp && !current.policyRevision) current = { ...current, policyRevision: stamp };
+    }
     if (current.state === 'approved' || current.state === 'denied' || current.state === 'expired' || current.state === 'cancelled') {
       const waiting = decision === 'approved' && current.state === 'approved' && isPlanApproval(current) && current.sessionId
         && typeof sessions?.get === 'function' ? await sessions.get({ sessionId: current.sessionId }) : null;
@@ -442,6 +464,7 @@ export function createProjectAgentApplicationService({
     if (decision === 'approved' && duration === 'task' && current.state === 'stale' && current.capabilityId === 'local.image.read') {
       try {
         const principal = resolvePermissionPrincipal({ ...current, goalPlanStore });
+        if (principal && current.policyRevision) principal.policyRevision = current.policyRevision;
         if (!imageAuthority.remember({ principal, scope: current.imageReadScope, record: decisionRecord })) {
           return { ok: false, code: 'IMAGE_AUTHORIZATION_UNAVAILABLE' };
         }
@@ -461,6 +484,7 @@ export function createProjectAgentApplicationService({
             argsDigest: current.argsDigest,
             sessionId: current.sessionId,
             workspaceId: current.workspaceId,
+            policyRevision: current.policyRevision,
             at: Date.now(),
           });
         } catch {
@@ -723,6 +747,8 @@ export function createProjectAgentApplicationService({
     list,
     listAttention,
     get,
+    readAccessPolicy: accessPolicy.read,
+    updateAccessPolicy: accessPolicy.update,
     readAvatar,
     create,
     updateProfile,

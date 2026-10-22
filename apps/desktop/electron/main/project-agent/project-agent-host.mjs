@@ -17,6 +17,7 @@ import {
   createBotConversationHistory,
   createBotLifecycle,
   createBotProfileStore,
+  createBotAccessPolicyAuthority,
   createInputQueue,
   createMemoryStore,
   createEpisodeLog,
@@ -152,6 +153,9 @@ export function registerDesktopProjectAgent({
     },
   });
   const profileStore = createBotProfileStore({ rootDir: dataHome });
+  const accessAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore, conversationStore, goalPlanStore,
+    legacyAccessLevel: getSettings()?.localAccessLevel });
+  accessAuthority.initialize();
   const memoryStore = createMemoryStore({ rootDir: dataHome });
   configurePermissions?.(approvalStore);
   const memoryChanged = workspaceId => {
@@ -171,7 +175,7 @@ export function registerDesktopProjectAgent({
   const verification = createSessionVerification({
     goalPlanStore,
     verifySession: (plan, focus, context) => goalRunner?.verifyDelegatedSession?.({ plan, focus, workId: context?.workId }),
-    readReport: plan => supervisor.get({ sessionId: plan.delegationOrigin.sessionId, detail: 'report' })?.report?.summary || '',
+    readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
     completeRecheck: input => goalRunner?.completeRecheck?.(input),
     appendMessage,
   });
@@ -220,7 +224,7 @@ export function registerDesktopProjectAgent({
   });
   const uninstallDelegation = installDelegation({ supervisor, objectives:objectiveService, storeDir: runtimeRoot });
   const uninstallVerification = installSessionVerification(verification);
-  const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
+  const projectFacts = createDesktopProjectFacts({ requirePreparedCoordination: true, supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
   const uninstallDelivery = installDeliveryFacts({
     read(view) {
       const settings = normalizeProjectAgentSettings(readRuntimePolicy()?.projectAgent);
@@ -289,6 +293,8 @@ export function registerDesktopProjectAgent({
     registry,
     readMessages: readCanonicalMessages,
     readConversationMessages: conversationMessages || readCanonicalMessages,
+    readInteractionPage: conversationStore.readInteractionPage?.bind(conversationStore),
+    readInteractionProcess: conversationStore.readInteractionProcess?.bind(conversationStore),
     readSummaryMessages: summaryHistory,
     readSummaryMessagesBatch: ids => new Map(ids.map(id => [id, summaryHistory(id) || []])),
     readMessagesBatch: botHistory ? ids => new Map(ids.map(id => [id, botHistory(id) || []]))
@@ -395,15 +401,18 @@ export function registerDesktopProjectAgent({
     appendMessage,
     inbox,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }),
-    resolveContext:({workspaceId})=>({coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId)),objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
+    resolveContext:({workspaceId,...scope})=>({coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId),scope),objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
+    resolveTurnRoster: scope => supervisor.summaries(scope),
     reconcileSessions: () => supervisor.reconcile(),
     reconcileVerification: input => verification.reconcileInterrupted(input),
     ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
       memoryEnabled: workspaceId => memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(workspaceId) }),
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),
-    executeTurn: (input) => {
-      const history = conversationStore.getPersistedConversationHistory(input.conversationId)?.messages || [];
+    executeTurn: async (input) => {
+      const history = typeof conversationStore.readInteractionContext === 'function'
+        ? (await conversationStore.readInteractionContext(input.conversationId))?.messages || []
+        : conversationStore.getPersistedConversationHistory(input.conversationId)?.messages || [];
       const messages = projectConversationHistory(history.filter((message) => message.kind === 'user_input' || message.kind === 'agent_reply' || !message.kind && ['user', 'assistant'].includes(message.role))).messages;
       return agentTurnExecutor.runTurn({
         ...input,
@@ -463,6 +472,7 @@ export function registerDesktopProjectAgent({
     return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
   } });
   const projectAgent = createProjectAgentApplicationService({
+    accessAuthority,
     diagnostics: diagnostics.execute,
     enabled: runtimeEnabled,
     requestTakeover: workspaceId => {
@@ -611,7 +621,7 @@ export function registerDesktopProjectAgent({
       supervisor,
       objectives,
       objectiveWatches,
-      dispose: () => { projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
+      dispose: () => { accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({

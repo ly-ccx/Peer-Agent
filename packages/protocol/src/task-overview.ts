@@ -1,3 +1,5 @@
+import type { WorkSessionStatus } from './delegation.ts';
+
 /**
  * TaskOverview 行动权投影契约 —— Peer 2.0 阶段 0 协议层。
  *
@@ -158,6 +160,11 @@ export interface TaskOverviewItem {
   readonly source: TaskOverviewSourceKind;
   /** 行动权归属。 */
   readonly actionRight: TaskActionRight;
+  /**
+   * 本投影是否真的可取消（生命周期决策给出）。
+   * 缺省表示来自尚未接入决策的旧入口；renderer 不得自行再写一套生命周期规则。
+   */
+  readonly cancelable?: boolean;
   /** needs_you 细分桶；仅 actionRight === 'needs_you' 时有值。 */
   readonly needsYouReason?: TaskNeedsYouReason;
   /** 下一步动作标识。 */
@@ -355,6 +362,15 @@ export interface GoalPlanProjectionSnapshot {
    * 完成即终态，合回/自检未结束仍走 peer_advancing 或 needs_you。
    */
   readonly accepted?: boolean;
+  /**
+   * 进程内执行所有权（runtime → protocol 事实）。
+   * 只有 `live` 能证明"还在跑"；重启后缺 token 只能 `unknown`，既不是活体也不是已结束。
+   */
+  readonly executionOwnership?: ExecutionOwnership;
+  /** 是否委派会话；委派任务的 accepted 只能来自真实落盘的验收结论。 */
+  readonly delegated?: boolean;
+  /** 归一化后的活体执行事实，仅由 decideLifecycle 计算，调用方不得直接写。 */
+  readonly liveExecution?: boolean;
   /** 有代码副作用时，完成门之后还要质量自检过线才能进终态。 */
   readonly requiresQualityReview?: boolean;
   readonly qualityReviewStatus?: 'reviewing' | 'passed' | 'failed';
@@ -425,6 +441,270 @@ interface ProjectionDecision {
   readonly nextAction: TaskNextAction;
   readonly statusLabel: string;
   readonly actionLabel: string;
+}
+
+/**
+ * 进程内执行所有权。`live` 只能由本进程持有的执行/核验 token 产生；
+ * 重启后持久化标记只能算 `unknown`（不许当活体，也不许当已结束）。
+ */
+export type ExecutionOwnership = 'live' | 'ended' | 'unknown';
+
+/**
+ * 生命周期事实：runtime 只提供事实，不提供结论。
+ * `decideLifecycle` 是 `status / statusLabel / actionRight / nextAction / cancelable`
+ * 的唯一出口；任何适配器都不得自行改写生命周期结论。
+ */
+export interface LifecycleFacts {
+  readonly executionOwnership?: ExecutionOwnership;
+  readonly phase?: string;
+  readonly delegated?: boolean;
+  readonly acceptance?: string;
+  readonly accepted?: boolean;
+  readonly superseded?: boolean;
+  readonly needsUser?: boolean;
+  /** 未消费的执行中断是当前行动权事实，优先于 completed/结果就绪。 */
+  readonly interrupted?: boolean;
+  readonly verificationActive?: boolean;
+  readonly blockedReason?: string;
+  readonly cancellationPhase?: string;
+  readonly takeoverPhase?: string;
+  readonly coordinationPhase?: string;
+}
+
+export interface LifecycleDecision extends ProjectionDecision {
+  readonly status: WorkSessionStatus;
+  readonly cancelable: boolean;
+  readonly needsUser: boolean;
+  readonly verificationActive: boolean;
+  readonly blockedReason?: string;
+}
+
+/** 仍在占用执行体的 runner 状态（持久化字符串本身不构成活体证据）。 */
+const ACTIVE_EXECUTION_RUNNER_STATUSES = new Set([
+  'running',
+  'starting',
+  'waiting_provider',
+  'resuming_after_compaction',
+  'exploring',
+]);
+
+/** 终态与"结果待核实"不可取消：停止中/结果未知也不能靠重复取消恢复。 */
+const NON_CANCELABLE_STATUSES = new Set([
+  'accepted',
+  'failed',
+  'cancelled',
+  'superseded',
+  'result_ready',
+  'stopping',
+  'awaiting_outcome',
+]);
+
+/**
+ * 生命周期唯一决策。
+ *
+ * 关键不变量：
+ * - 活 token 不能压过等待用户/父代理、核验、停止中/结果未知、中断等更具体事实；
+ * - 持久化 `runnerStatus` 在 ownership=unknown 时不得当作"还在跑"；
+ * - `accepted` 只来自真实验收事实（本函数不制造 accepted）；
+ * - 返回的字段必须被所有投影直接消费，不得二次推导。
+ *
+ * 过渡兼容：不传 `executionOwnership` 的旧入口按 `unknown` 处理——
+ * `runner.status` 字符串本身不能证明"还在跑"；真实入口（S2/S3）应显式传入 live/ended/unknown。
+ */
+export function decideLifecycle(
+  snapshot: GoalPlanProjectionSnapshot,
+  facts: LifecycleFacts = {},
+): LifecycleDecision {
+  const declaredOwnership = facts.executionOwnership ?? snapshot.executionOwnership;
+  const ownership: ExecutionOwnership = declaredOwnership ?? 'unknown';
+  const persistedRunner = snapshot.runnerStatus;
+  const persistedActive = persistedRunner ? ACTIVE_EXECUTION_RUNNER_STATUSES.has(persistedRunner) : false;
+  const liveExecution = ownership === 'live' && (persistedActive || persistedRunner === undefined);
+  // 持久化 runner 状态不是活体证据：unknown（重启遗留）和 ended（活流已结束、数据滞后）
+  // 都不能凭字符串冒充 live。waiting_user 的待消费问题按 ADR 100 保留。
+  const stalePersistedRunner = persistedActive && ownership !== 'live';
+  const runnerStatus = stalePersistedRunner ? undefined : persistedRunner;
+
+  const { runnerStatus: _rawRunnerStatus, ...snapshotRest } = snapshot;
+  const canonical: GoalPlanProjectionSnapshot = {
+    ...snapshotRest,
+    ...(runnerStatus ? { runnerStatus } : {}),
+    liveExecution,
+  };
+
+  const decision = decideGoalPlan(canonical);
+  const accepted = facts.accepted ?? snapshot.accepted;
+  const needsUserFacts =
+    facts.needsUser === true ||
+    snapshot.needsUser === true ||
+    snapshot.status === 'awaiting_approval';
+  const verificationActive = facts.verificationActive === true;
+  const blockedReason = facts.blockedReason ?? snapshot.blockedReason;
+  const interrupted = facts.interrupted ?? snapshot.interrupted === true;
+  const delegated = facts.delegated ?? snapshot.delegated === true;
+
+  let status: WorkSessionStatus;
+  if (snapshot.status === 'cancelled') status = 'cancelled';
+  else if (snapshot.status === 'failed') status = 'failed';
+  else if (accepted === true) status = 'accepted';
+  else if (
+    facts.cancellationPhase === 'awaiting_outcome' ||
+    facts.takeoverPhase === 'awaiting_outcome'
+  ) status = 'awaiting_outcome';
+  else if (facts.cancellationPhase === 'stopping') status = 'stopping';
+  else if (facts.takeoverPhase === 'stopping') status = 'starting';
+  else if (facts.superseded === true && snapshot.status !== 'completed') status = 'superseded';
+  else if ((facts.phase === 'paused' || runnerStatus === 'paused') && snapshot.status !== 'completed') status = 'paused';
+  // 未消费中断优先于 completed/结果就绪（decideGoalPlan rule 1 已按此给文案），
+  // 但持久化终态（cancelled/failed）和真实验收结论先于它。
+  else if (interrupted) status = 'paused';
+  else if (needsUserFacts || runnerStatus === 'waiting_user') status = 'waiting_user';
+  // 预算/范围耗尽是真的需要人决策（rule 5b 已给 needs_you/decide_blocked）：
+  // 不能被父代理等待标记等技术阻塞吞掉，也不能让 status 落在 running，
+  // 否则同一行会出现「由主 Bot 跟进 / 运行中 + 需要你决定」，真实预算决策丢失。
+  // 活流（liveExecution / conversationLive）说明预算门尚未真正落下，交给既有规则。
+  else if (
+    runnerStatus === 'budget_exhausted' &&
+    !liveExecution &&
+    snapshot.conversationLive !== true
+  ) status = 'waiting_user';
+  // 技术阻塞是父代理的工作，不是人类问题；活流说明阻塞已过期。
+  // 这里刻意保留 completed 的既有优先级：技术残留不越过完成，也不制造人类门，
+  // 只有真实人类门（审批/权限/提问/预算）能越过 completed（见 lifecyclePresentation）。
+  else if (
+    (blockedReason === 'waiting_parent_agent' || snapshot.agentWaiting === true) &&
+    facts.phase !== 'paused' &&
+    facts.superseded !== true &&
+    runnerStatus !== 'paused' &&
+    !liveExecution
+  ) status = 'waiting_agent';
+  else if (verificationActive) status = 'verifying';
+  else if (runnerStatus === 'blocked' && !liveExecution) status = 'waiting_agent';
+  else if (snapshot.status === 'completed' && runnerStatus && ACTIVE_EXECUTION_RUNNER_STATUSES.has(runnerStatus)) status = 'running';
+  // 计划已完成、但本进程仍持有执行 token（可能还没有 runner 状态字符串）。
+  else if (snapshot.status === 'completed' && liveExecution) status = 'running';
+  else if (snapshot.status === 'completed') status = 'result_ready';
+  else if (facts.phase === 'starting') status = 'starting';
+  else if (
+    ['approved', 'accepted', 'paused', 'interrupted'].includes(snapshot.status) ||
+    facts.phase === 'queued'
+  ) status = 'queued';
+  else status = 'running';
+
+  // 五字段必须同源：状态定稿后由同一个出口给出文案/行动权/下一步/可取消。
+  const presentation = lifecyclePresentation(status, decision, {
+    delegated,
+    accepted: accepted === true,
+    takeoverStopping: facts.takeoverPhase === 'stopping',
+    budgetGate:
+      runnerStatus === 'budget_exhausted' &&
+      !liveExecution &&
+      snapshot.conversationLive !== true,
+  });
+
+  return {
+    ...presentation,
+    status,
+    cancelable: presentation.actionRight !== 'terminal' && !NON_CANCELABLE_STATUSES.has(status),
+    needsUser: status === 'waiting_user',
+    verificationActive: status === 'verifying',
+    ...(blockedReason ? { blockedReason } : {}),
+  };
+}
+
+/**
+ * 状态语义 → 同一行文案/行动权（ADR 102 §4）。
+ *
+ * 只覆盖"旧规则看不到这些事实"的 status；其余沿用既有文案，避免修一个坑挖一个坑。
+ * 调用方（任务卡/工作会话/抽屉）必须直接消费 decideLifecycle 的返回值。
+ */
+function lifecyclePresentation(
+  status: WorkSessionStatus,
+  legacy: ProjectionDecision,
+  facts: {
+    readonly delegated: boolean;
+    readonly accepted: boolean;
+    readonly takeoverStopping: boolean;
+    readonly budgetGate: boolean;
+  },
+): ProjectionDecision {
+  switch (status) {
+    case 'waiting_user':
+      // completed 只说明计划已落库完成，不等于没有待你消费的决策：旧规则表把
+      // completed 放在最前（rule 16），会把预算门/待确认门吞成「已完成 / terminal」。
+      // 规则表已经给出 needs_you 的（审批、提问、权限、活跃计划预算）原样沿用，
+      // 只补它看不到的事实，文案/下一步复用既有配对，不新发明口径。
+      if (legacy.actionRight === 'needs_you') return legacy;
+      return facts.budgetGate
+        ? {
+            actionRight: 'needs_you',
+            needsYouReason: 'decision',
+            nextAction: 'decide_blocked',
+            statusLabel: '预算已耗尽',
+            actionLabel: '决策',
+          }
+        : {
+            actionRight: 'needs_you',
+            needsYouReason: 'user_input',
+            nextAction: 'answer_question',
+            statusLabel: '等待你的选择',
+            actionLabel: '回答 →',
+          };
+    case 'verifying':
+      // 核验 ≠ 完成：即使 plan 已落 completed，核验在跑就是核验中。
+      return {
+        actionRight: 'peer_advancing',
+        nextAction: 'none',
+        statusLabel: '核验中',
+        actionLabel: '查看 →',
+      };
+    case 'stopping':
+      return {
+        actionRight: 'peer_advancing',
+        nextAction: 'none',
+        statusLabel: '正在停止',
+        actionLabel: '查看 →',
+      };
+    case 'awaiting_outcome':
+      return {
+        actionRight: 'peer_advancing',
+        nextAction: 'none',
+        statusLabel: '执行结果待核实',
+        actionLabel: '查看 →',
+      };
+    case 'waiting_agent':
+      // 技术阻塞是父代理的跟进项，不是人类待办；具体文案（等待答复/系统中断）沿用旧规则。
+      return legacy.actionRight === 'needs_you'
+        ? {
+            actionRight: 'peer_advancing',
+            nextAction: 'none',
+            statusLabel: '由主 Bot 跟进',
+            actionLabel: '查看 →',
+          }
+        : legacy;
+    case 'starting':
+      return facts.takeoverStopping
+        ? {
+            actionRight: 'peer_advancing',
+            nextAction: 'none',
+            statusLabel: '正在接手',
+            actionLabel: '查看 →',
+          }
+        : legacy;
+    case 'result_ready':
+      // 委派结果必须等真实验收：完成 ≠ 已验收（ADR 102 O4.2）。
+      // 非委派历史数据沿用既有完成契约（rule 6），不强制进入验收卡点。
+      return facts.delegated && !facts.accepted
+        ? {
+            actionRight: 'result_ready',
+            nextAction: 'review_result',
+            statusLabel: '等待验收',
+            actionLabel: '验收 →',
+          }
+        : legacy;
+    default:
+      return legacy;
+  }
 }
 
 /** Conversation → 无计划讨论态（工作台动线 §15）。 */
@@ -510,7 +790,7 @@ export function projectGoalPlan(
   snapshot: GoalPlanProjectionSnapshot,
   options?: { readonly nowMs?: number },
 ): TaskOverviewItem {
-  const decision = decideGoalPlan(snapshot);
+  const decision = decideLifecycle(snapshot);
   const projectedTiming = projectGoalTiming(snapshot.timing, options?.nowMs);
   const durationMs =
     typeof projectedTiming?.activeMs === 'number' && Number.isFinite(projectedTiming.activeMs)
@@ -593,6 +873,7 @@ export function projectGoalPlan(
       : {}),
     ...(modelLabel ? { modelLabel } : {}),
     ...(providerLabel ? { providerLabel } : {}),
+    cancelable: decision.cancelable,
     actionLabel: decision.actionLabel,
     ...(snapshot.conversationId ? { conversationId: snapshot.conversationId } : {}),
   };
@@ -661,6 +942,15 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
           actionLabel: '查看 →',
         };
       }
+    }
+    // 计划已完成但本进程仍持有真实执行 token：不得投影为终态/已完成。
+    if (snapshot.liveExecution === true) {
+      return {
+        actionRight: 'peer_advancing',
+        nextAction: 'none',
+        statusLabel: 'Peer 正在推进',
+        actionLabel: '查看 →',
+      };
     }
     return {
       actionRight: 'terminal',

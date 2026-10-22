@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { realpathSync } from 'node:fs';
+import { realpathSync, existsSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +14,18 @@ function createManager(t: test.TestContext, workspaceRoot: string) {
   t.after(() => manager.disposeAll());
   return manager;
 }
+
+test('queued dispatch rechecks authority and a denied command does not consume session bootstrap', posixOnly, async t => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-shell-authority-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const manager = createNodeShellSessionManager({ workspaceRoot, bootstrapScript: 'export PEER_BOOTSTRAP_MARK=ready' });
+  t.after(() => manager.disposeAll());
+  await assert.rejects(manager.runCommand({ command: 'touch forbidden', timeoutMs: 5000,
+    beforeExecute: () => { throw new Error('permission_policy_changed'); } }), /permission_policy_changed/);
+  assert.equal(existsSync(path.join(workspaceRoot, 'forbidden')), false);
+  const allowed = await manager.runCommand({ command: 'printf "$PEER_BOOTSTRAP_MARK"', timeoutMs: 5000 });
+  assert.equal(allowed.status, 'completed'); assert.equal(allowed.stdout, 'ready');
+});
 
 test('session manager keeps cwd and env across foreground commands', posixOnly, async (t) => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-shell-session-'));

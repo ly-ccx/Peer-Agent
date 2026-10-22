@@ -26,8 +26,11 @@ test('cancellation retires waiting work and stale report text without changing a
   const index = indexBotWork([{ ...session('work-1', 'cancelled'), summary: '等待你的选择' }, session('work-2')], true);
   assert.equal(workProgress(replyWork(reply, index)[0], createI18n('zh-CN')), '已取消');
   assert.deepEqual(backgroundWork(index).rows.map(row => row.id), ['work-2']);
-  for (const status of ['accepted', 'result_ready', 'cancelled', 'failed', 'unavailable', null]) assert.equal(canCancelTask(status), false);
-  for (const status of ['waiting_user', 'paused', 'superseded', 'running', 'queued', 'starting', 'verifying']) assert.equal(canCancelTask(status), true);
+  for (const status of ['accepted', 'result_ready', 'cancelled', 'failed', 'superseded', 'stopping', 'awaiting_outcome', 'unavailable', null]) assert.equal(canCancelTask(status), false);
+  for (const status of ['waiting_user', 'paused', 'running', 'queued', 'starting', 'verifying']) assert.equal(canCancelTask(status), true);
+  // 生命周期决策给出 cancelable 时以决策为准（ADR 102）；缺字段才退回状态表。
+  assert.equal(canCancelTask('running', false), false);
+  assert.equal(canCancelTask('accepted', true), true);
 });
 test('latest host status overrides a reply snapshot, including terminal and waiting states', () => {
   for (const status of ['waiting_user', 'accepted', 'cancelled']) {
@@ -60,4 +63,22 @@ test('background summary prioritizes attention, bounds rendered rows and counts 
   const work = backgroundWork(indexBotWork([...Array.from({ length: 1000 }, (_, i) => session(`q-${i}`, 'queued')), session('waiting', 'waiting_user'), session('done', 'accepted')], true));
   assert.equal(work.count, 1001); assert.equal(work.rows.length, 100); assert.equal(work.rows[0].id, 'waiting');
   assert.deepEqual(backgroundWork(indexBotWork([session('old')], false)), { count: 0, rows: [] });
+});
+test('completed + 预算耗尽的决策在 UI 侧只认 cancelable，不自建第二套状态表', () => {
+  // 与协议 R15 / aggregator 同一组合的决策五字段：
+  // status=waiting_user、statusLabel=预算已耗尽、actionRight=needs_you、
+  // nextAction=decide_blocked、cancelable=true。
+  // 修复前同一行是 waiting_user + cancelable=false：任务卡写「已完成」，取消入口消失。
+  const decision = {
+    status: 'waiting_user',
+    statusLabel: '预算已耗尽',
+    actionRight: 'needs_you',
+    nextAction: 'decide_blocked',
+    cancelable: true,
+  } as const;
+  assert.equal(canCancelTask(decision.status, decision.cancelable), true);
+  // 决策说不能取消时必须服从，即使状态本身在可取消集合里。
+  assert.equal(canCancelTask(decision.status, false), false);
+  // 结果待核实/终态在任何路径下都没有取消入口。
+  assert.equal(canCancelTask('result_ready', false), false);
 });

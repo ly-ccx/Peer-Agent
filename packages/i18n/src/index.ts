@@ -211,6 +211,8 @@ export type TranslationKey =
   | 'projectAgent.list.close'
   | 'projectAgent.chat.empty'
   | 'projectAgent.chat.loadFailed'
+  | 'projectAgent.chat.cardsUnavailable'
+  | 'projectAgent.chat.refreshFailed'
   | 'projectAgent.chat.thinking'
   | 'projectAgent.chat.waiting'
   | 'projectAgent.chat.generating'
@@ -262,6 +264,8 @@ export type TranslationKey =
   | 'projectAgent.chat.agent.answer'
   | 'projectAgent.chat.agent.reported'
   | 'projectAgent.chat.agent.verified'
+  | 'projectAgent.chat.agent.verifying'
+  | 'projectAgent.chat.agent.verificationProgress'
   | 'projectAgent.chat.agent.ended'
   | 'projectAgent.chat.agent.cancelled'
   | 'projectAgent.chat.agent.blocked'
@@ -461,6 +465,12 @@ export type TranslationKey =
   | 'projectAgent.chat.imageCancelled'
   | 'projectAgent.chat.imageDenied'
   | 'projectAgent.chat.imageApproved'
+  | 'projectAgent.chat.approvalReceipt.title'
+  | 'projectAgent.chat.approvalReceipt.approved'
+  | 'projectAgent.chat.approvalReceipt.denied'
+  | 'projectAgent.chat.approvalReceipt.cancelled'
+  | 'projectAgent.chat.approvalReceipt.expired'
+  | 'projectAgent.chat.approvalReceipt.closed'
   | 'projectAgent.chat.imageUnavailable'
   | 'projectAgent.chat.imageReadNotice'
   | 'projectAgent.chat.approveContinue'
@@ -480,6 +490,12 @@ export type TranslationKey =
   | 'projectAgent.model.unavailable'
   | 'projectAgent.model.select'
   | 'projectAgent.model.noEffort'
+  | 'projectAgent.access.changed'
+  | 'projectAgent.access.label'
+  | 'projectAgent.access.scope'
+  | 'projectAgent.access.loading'
+  | 'projectAgent.access.failed'
+  | 'projectAgent.access.retry'
   | 'projectAgent.model.saveFailed'
   | 'projectAgent.policy.modelsHint'
   | 'projectAgent.policy.inherit'
@@ -1761,6 +1777,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.close': '关闭',
     'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
     'projectAgent.chat.loadFailed': '对话没有加载出来',
+    'projectAgent.chat.cardsUnavailable': '任务状态暂不可用，已有对话仍可阅读。',
+    'projectAgent.chat.refreshFailed': '新消息暂未刷新，已保留当前对话。',
     'projectAgent.chat.thinking': '思考中…',
     'projectAgent.chat.waiting': '等待回复…',
     'projectAgent.chat.generating': '正在回复',
@@ -1812,6 +1830,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.agent.answer': '发来答复',
     'projectAgent.chat.agent.reported': '结果已返回',
     'projectAgent.chat.agent.verified': '核验通过',
+    'projectAgent.chat.agent.verifying': '正在核对结果',
+    'projectAgent.chat.agent.verificationProgress': '正在核对结果 · 已检查 {count} 项事实',
     'projectAgent.chat.agent.ended': '已结束',
     'projectAgent.chat.agent.cancelled': '已取消',
     'projectAgent.chat.agent.blocked': '执行受阻',
@@ -2011,6 +2031,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.imageCancelled': '本次图片读取已取消。',
     'projectAgent.chat.imageDenied': '已拒绝本次图片读取。',
     'projectAgent.chat.imageApproved': '已授权，继续本次图片读取。',
+    'projectAgent.chat.approvalReceipt.title': '操作授权记录',
+    'projectAgent.chat.approvalReceipt.approved': '已授权',
+    'projectAgent.chat.approvalReceipt.denied': '已拒绝',
+    'projectAgent.chat.approvalReceipt.cancelled': '已取消',
+    'projectAgent.chat.approvalReceipt.expired': '已超时',
+    'projectAgent.chat.approvalReceipt.closed': '已结束',
     'projectAgent.chat.imageUnavailable': '本次授权请求已结束，没有读取图片。需要查看时可以重新发起。',
     'projectAgent.chat.imageReadNotice': '读取这张图片并交给当前模型。选择“本轮允许”后，仅此图片可供当前机器人及其任务使用，30 分钟内有效。',
     'projectAgent.chat.approveContinue': '批准并继续',
@@ -2030,6 +2056,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.unavailable': '选择模型',
     'projectAgent.model.select': '选择机器人模型',
     'projectAgent.model.noEffort': '无可调推理强度',
+    'projectAgent.access.changed': '主 Bot 的权限已变更，本次旧请求已关闭。后续操作按新权限处理。',
+    'projectAgent.access.label': 'Bot 及子任务权限',
+    'projectAgent.access.scope': '作用于此 Bot 及其所有子任务的后续操作；角色职责与显式拒绝规则仍生效。',
+    'projectAgent.access.loading': '读取权限…',
+    'projectAgent.access.failed': '权限未保存或无法读取，保留原权限。请重试。',
+    'projectAgent.access.retry': '重试权限',
     'projectAgent.model.saveFailed': '模型设置未保存，请重试。',
     'projectAgent.policy.modelsHint': '直接选择这个机器人的模型和推理强度。对话配置用于后续回复，任务配置用于新任务。',
     'projectAgent.policy.inherit': '跟随全局',
@@ -3099,6 +3131,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.close': 'Close',
     'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
     'projectAgent.chat.loadFailed': 'The conversation did not load',
+    'projectAgent.chat.cardsUnavailable': 'Task status is unavailable. Your conversation is still readable.',
+    'projectAgent.chat.refreshFailed': 'New messages could not refresh. Your current conversation is preserved.',
     'projectAgent.chat.thinking': 'Thinking…',
     'projectAgent.chat.waiting': 'Waiting for a response…',
     'projectAgent.chat.generating': 'Replying',
@@ -3150,6 +3184,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.agent.answer': 'sent an answer',
     'projectAgent.chat.agent.reported': 'returned a result',
     'projectAgent.chat.agent.verified': 'verification passed',
+    'projectAgent.chat.agent.verifying': 'checking the results',
+    'projectAgent.chat.agent.verificationProgress': 'checking the results · {count} observations checked',
     'projectAgent.chat.agent.ended': 'finished',
     'projectAgent.chat.agent.cancelled': 'cancelled',
     'projectAgent.chat.agent.blocked': 'blocked',
@@ -3349,6 +3385,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.imageCancelled': 'This image read was cancelled.',
     'projectAgent.chat.imageDenied': 'This image read was denied.',
     'projectAgent.chat.imageApproved': 'Permission granted. Continuing this image read.',
+    'projectAgent.chat.approvalReceipt.title': 'Operation permission record',
+    'projectAgent.chat.approvalReceipt.approved': 'Permission granted',
+    'projectAgent.chat.approvalReceipt.denied': 'Denied',
+    'projectAgent.chat.approvalReceipt.cancelled': 'Cancelled',
+    'projectAgent.chat.approvalReceipt.expired': 'Timed out',
+    'projectAgent.chat.approvalReceipt.closed': 'Closed',
     'projectAgent.chat.imageUnavailable': 'This permission request ended without reading the image. Start a new request if needed.',
     'projectAgent.chat.imageReadNotice': 'Read this image for the current model. Allowing it for this session covers only this image, for this bot and its tasks, valid for 30 minutes.',
     'projectAgent.chat.approveContinue': 'Approve and continue',
@@ -3368,6 +3410,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.unavailable': 'Choose model',
     'projectAgent.model.select': 'Choose bot model',
     'projectAgent.model.noEffort': 'No adjustable effort',
+    'projectAgent.access.changed': 'The Bot access policy changed. This previous request is closed; future actions use the current policy.',
+    'projectAgent.access.label': 'Bot and task access',
+    'projectAgent.access.scope': 'Applies to future actions by this Bot and all its tasks. Role limits and explicit denials still apply.',
+    'projectAgent.access.loading': 'Loading access…',
+    'projectAgent.access.failed': 'Access could not be saved or read. The previous policy is retained. Retry.',
+    'projectAgent.access.retry': 'Retry access',
     'projectAgent.model.saveFailed': 'Model settings were not saved. Please retry.',
     'projectAgent.policy.modelsHint': 'Choose this bot’s model and reasoning effort directly. Conversation changes apply to future replies; task changes apply to new tasks.',
     'projectAgent.policy.inherit': 'Use global routing',

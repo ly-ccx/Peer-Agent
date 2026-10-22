@@ -9,6 +9,8 @@ import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
 export const sharedOneTimeApprovals = createOneTimeApprovalBook();
 let activeGate = null;
 
+export function refreshActiveAccessPolicies() { activeGate?.refreshAccessPolicies(); }
+
 export function settleActivePermissionRequest(toolCallId, grant, options) {
   if (!activeGate || typeof activeGate.settlePermissionRequest !== 'function') return false;
   return activeGate.settlePermissionRequest(toolCallId, grant, options);
@@ -224,6 +226,7 @@ export function createChatPermissionGate({
   approvalStore = null,
   resolveApprovalScope = null,
   resolvePermissionPrincipal = null,
+  resolveAccessPolicy = null,
   settleNotifier = null,
   oneTimeApprovals = sharedOneTimeApprovals,
   now = () => Date.now(),
@@ -239,8 +242,10 @@ export function createChatPermissionGate({
   let durableApprovals = approvalStore;
   let resolveScope = resolveApprovalScope;
   let resolvePrincipal = resolvePermissionPrincipal;
+  let resolveAccess = resolveAccessPolicy;
   let imageAuthority = createImageReadAuthority({ approvalStore, now });
   let notifySettled = settleNotifier;
+  let policyWatch = null;
 
   function configure(next = {}) {
     if (Object.prototype.hasOwnProperty.call(next, 'approvalStore')) {
@@ -248,6 +253,7 @@ export function createChatPermissionGate({
       imageAuthority = createImageReadAuthority({ approvalStore: durableApprovals, now });
     }
     if (Object.prototype.hasOwnProperty.call(next, 'resolvePermissionPrincipal')) resolvePrincipal = next.resolvePermissionPrincipal;
+    if (Object.prototype.hasOwnProperty.call(next, 'resolveAccessPolicy')) resolveAccess = next.resolveAccessPolicy;
     if (Object.prototype.hasOwnProperty.call(next, 'resolveApprovalScope')) resolveScope = next.resolveApprovalScope;
     if (Object.prototype.hasOwnProperty.call(next, 'settleNotifier')) notifySettled = next.settleNotifier;
   }
@@ -265,6 +271,7 @@ export function createChatPermissionGate({
     createdAt = undefined,
     deadlineAt = undefined,
     decisionReason = undefined,
+    policyRevision = undefined,
   }) {
     if (!durableApprovals || typeof durableApprovals.append !== 'function' || !call) return null;
     let scope = {};
@@ -295,6 +302,7 @@ export function createChatPermissionGate({
       argsDigest: argsDigest || digestApprovalArgs(call.arguments),
       createdAt: createdAt || call.requestedAt || new Date().toISOString(),
       state,
+      policyRevision: policyRevision ?? accessFor({ streamId, conversationId, workspacePath }).stamp,
       ...(deadlineAt ? { deadlineAt } : {}),
       ...(decisionReason ? { decisionReason } : {}),
     };
@@ -312,14 +320,41 @@ export function createChatPermissionGate({
 
   function scopeKeyFor(context) {
     const profile = activeStreams.get(context.streamId)?.turnProfile;
-    return buildPermissionScopeKey({ ...context, sessionId: profile?.sessionId, planId: profile?.planId });
+    return `${accessFor(context).stamp}:${buildPermissionScopeKey({ ...context, sessionId: profile?.sessionId, planId: profile?.planId })}`;
+  }
+
+  function accessFor(context) {
+    let result = null;
+    try { result = resolveAccess?.(context); } catch { result = { ok: false }; }
+    if (result && !result.ok) return { level: 'restricted_local', stamp: 'invalid', valid: false,
+      reason: result.code === 'POLICY_UNAVAILABLE' ? 'access_policy_unavailable' : 'access_identity_invalid' };
+    const policy = result?.policy;
+    return policy ? { level: policy.accessLevel, stamp: `bot:${policy.workspaceId}:${policy.conversationId}:${policy.revision}`, valid: true }
+      : { level: accessLevel, stamp: `global:${policyEpoch}`, valid: true };
+  }
+
+  function guardResolve(resolve, context, snapshot) {
+    return decision => {
+      const valid = () => { const current = accessFor(context); return current.valid && current.stamp === snapshot.stamp; };
+      if (!snapshot.valid || !valid()) return resolve(createPolicyDenial({ toolCallId: context.toolCallId, reason: 'permission_policy_changed' }));
+      const previous = decision.validate;
+      resolve({ ...decision, ...(snapshot.stamp.startsWith('bot:') ? { policyRevision: snapshot.stamp,
+        ...(decision.grant ? { grant: { ...decision.grant, policyRevision: snapshot.stamp } } : {}) } : {}),
+        validate: () => valid() && (!previous || previous()) });
+    };
   }
 
   function principalFor(context) {
-    if (typeof resolvePrincipal === 'function') return resolvePrincipal(context);
+    if (typeof resolvePrincipal === 'function') {
+      const principal = resolvePrincipal(context);
+      const stamp = accessFor(context).stamp;
+      return principal ? { ...principal, ...(stamp.startsWith('bot:') ? { policyRevision: stamp } : {}) } : null;
+    }
     const profile = activeStreams.get(context.streamId)?.turnProfile;
     if (profile?.planId) return null; // Delegated identity needs host GoalPlan validation.
-    return context.conversationId ? { workspaceId: profile?.workspaceId ?? null, conversationId: context.conversationId } : null;
+    const stamp = accessFor(context).stamp;
+    return context.conversationId ? { workspaceId: profile?.workspaceId ?? null, conversationId: context.conversationId,
+      ...(stamp.startsWith('bot:') ? { policyRevision: stamp } : {}) } : null;
   }
 
   function reuseApprovedSourceToolCall(call, context) {
@@ -337,8 +372,9 @@ export function createChatPermissionGate({
     const next = normalizeLocalAccessLevel(nextAccessLevel);
     if (next !== accessLevel) {
       policyEpoch++;
-      approvedPermissionScopes.clear(); approvedSourceToolCalls.clear();
-      imageAuthority.revokeAll();
+      // Cache keys contain their authority version. Global changes cannot revoke another Bot.
+      imageAuthority.revokeAll({ shouldRevoke: grant => !grant.policyRevision?.startsWith('bot:')
+        && !accessFor({ conversationId: grant.conversationId }).stamp.startsWith('bot:') });
     }
     accessLevel = next;
     return accessLevel;
@@ -375,7 +411,12 @@ export function createChatPermissionGate({
       approval,
       deadlineAt,
       signal: signal ?? active?.runtimeTurn?.signal,
+      policyRevision: accessFor({ streamId, conversationId, workspacePath }).stamp,
     });
+    if (!policyWatch && resolveAccess) {
+      policyWatch = setInterval(refreshAccessPolicies, 500);
+      policyWatch.unref?.();
+    }
   }
 
   function askUser({
@@ -400,6 +441,8 @@ export function createChatPermissionGate({
       at,
       sessionId,
       workspaceId: grantWorkspaceId,
+      policyRevision: accessFor({ streamId, conversationId, workspacePath }).stamp.startsWith('bot:')
+        ? accessFor({ streamId, conversationId, workspacePath }).stamp : undefined,
     })) {
       resolve({
         granted: true,
@@ -463,8 +506,12 @@ export function createChatPermissionGate({
   }
 
   function createFilePermissionRequester({ webContents, streamId, toolCallId, conversationId = null, permissionPolicy = null, sourceArguments = undefined, signal = null }) {
-    return ({ tool, args, filePath, workspacePath }) => new Promise((resolvePermission) => {
+    return ({ tool, args, filePath, workspacePath }) => new Promise((resolve) => {
+      const context = { streamId, conversationId, workspacePath, toolCallId };
+      const access = accessFor(context);
+      const resolvePermission = guardResolve(resolve, context, access);
       const call = buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCallId });
+      if (!access.valid) return resolve(createPolicyDenial({ toolCallId: call.toolCallId, reason: access.reason }));
       const policyDecision = automationCapabilityDecision(permissionPolicy, call);
       if (policyDecision) {
         resolvePermission(policyDecision);
@@ -480,7 +527,7 @@ export function createChatPermissionGate({
         });
         return;
       }
-      const accessGrant = maybeCreateAutoGrantForFile({ accessLevel, call });
+      const accessGrant = maybeCreateAutoGrantForFile({ accessLevel: access.level, call });
       if (accessGrant) {
         resolvePermission(accessGrant);
         return;
@@ -505,8 +552,12 @@ export function createChatPermissionGate({
   }
 
   function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null, sourceArguments = undefined, signal = null }) {
-    return (request = {}) => new Promise((resolvePermission) => {
+    return (request = {}) => new Promise((resolve) => {
+      const context = { streamId, conversationId, workspacePath, toolCallId };
+      const access = accessFor(context);
+      const resolvePermission = guardResolve(resolve, context, access);
       const call = buildLocalCapabilityPermissionCall({ request, toolCallId });
+      if (!access.valid) return resolve(createPolicyDenial({ toolCallId: call.toolCallId, reason: access.reason }));
       const policyDecision = automationCapabilityDecision(permissionPolicy, call);
       if (policyDecision) {
         resolvePermission(policyDecision);
@@ -515,12 +566,10 @@ export function createChatPermissionGate({
       // Full is the user's current host policy. Roles still pass their own
       // capability gates; they do not turn an already authorized read into
       // another per-file question or depend on an older scoped grant's TTL.
-      if (accessLevel === 'full_local') {
-        const epoch = policyEpoch;
+      if (access.level === 'full_local') {
         resolvePermission({
           ...createAutoAccessGrant({ toolCallId: call.toolCallId,
             scope: request.scope ?? call.capabilityId, reason: 'local_access_level_full' }),
-          validate: () => accessLevel === 'full_local' && policyEpoch === epoch,
         });
         return;
       }
@@ -569,8 +618,12 @@ export function createChatPermissionGate({
     sourceArguments = undefined,
     signal = null,
   }) {
-    return ({ call, classification, ruleDecision }) => new Promise((resolvePermission) => {
+    return ({ call, classification, ruleDecision }) => new Promise((resolve) => {
+      const context = { streamId, conversationId, workspacePath, toolCallId };
+      const access = accessFor(context);
+      const resolvePermission = guardResolve(resolve, context, access);
       const permissionCall = buildShellPermissionCall({ call, classification, ruleDecision, toolCallId });
+      if (!access.valid) return resolve(createPolicyDenial({ toolCallId: permissionCall.toolCallId, reason: access.reason }));
       if(permissionPolicy?.kind==='objective_probe'){resolvePermission(createPolicyDenial({toolCallId:permissionCall.toolCallId,reason:'objective_probe_read_only'}));return;}
       if (permissionPolicy?.kind === 'automation') {
         if (compareShellRisk(classification?.riskLevel, 'L4_privileged') >= 0) {
@@ -603,7 +656,7 @@ export function createChatPermissionGate({
         });
         return;
       }
-      const accessGrant = maybeCreateAutoGrantForShell({ accessLevel, permissionCall, classification });
+      const accessGrant = maybeCreateAutoGrantForShell({ accessLevel: access.level, permissionCall, classification });
       if (accessGrant) {
         resolvePermission(accessGrant);
         return;
@@ -630,8 +683,10 @@ export function createChatPermissionGate({
   function settlePermissionRequest(toolCallId, grant, options = {}) {
     const pending = pendingPermissionRequests.take(toolCallId, options.terminal === true);
     if (!pending) return false;
+    if (pendingPermissionRequests.entries().next().done && policyWatch) { clearInterval(policyWatch); policyWatch = null; }
     activeStreams.get(pending.streamId)?.permissionIds?.delete(toolCallId);
     let endingReason = options.reason ?? (grant?.reason && grant.granted !== true ? 'permission_cancelled' : null);
+    if (pending.policyRevision !== accessFor(pending).stamp) endingReason = 'permission_policy_changed';
     if (endingReason) grant = { ...grant, granted: false, duration: 'denied' };
     const rememberType = options.remember === false
       ? false
@@ -664,7 +719,6 @@ export function createChatPermissionGate({
       if (!grant.granted) approvedSourceToolCalls.delete(sourceToolCallIdFromPermissionId(toolCallId));
     }
     const decisionPrincipal = principalFor(pending);
-    const decisionEpoch = policyEpoch;
     const saved = recordApproval({
       call: pending.call,
       streamId: pending.streamId,
@@ -677,6 +731,7 @@ export function createChatPermissionGate({
       planId: pending.approval?.planId ?? null,
       argsDigest: pending.approval?.argsDigest,
       createdAt: pending.approval?.createdAt,
+      policyRevision: pending.policyRevision,
     });
     if (durableApprovals && !saved && grant?.granted) {
       grant = { ...grant, granted: false, duration: 'denied' }; endingReason = 'permission_unavailable';
@@ -684,7 +739,7 @@ export function createChatPermissionGate({
     }
     pending.resolve({
       ...(pending.call.capabilityId === 'local.image.read' ? { validate: () => {
-        if (policyEpoch !== decisionEpoch || !decisionPrincipal || digestApprovalArgs(principalFor(pending)) !== digestApprovalArgs(decisionPrincipal)) return false;
+        if (!decisionPrincipal || digestApprovalArgs(principalFor(pending)) !== digestApprovalArgs(decisionPrincipal)) return false;
         return !rememberType || Boolean(imageAuthority.match({ principal: principalFor(pending), scope: pending.call.argumentsPreview, toolCallId }));
       } } : {}),
       granted: Boolean(grant?.granted),
@@ -721,6 +776,13 @@ export function createChatPermissionGate({
     return items;
   }
 
+  function refreshAccessPolicies() {
+    for (const [id, pending] of [...pendingPermissionRequests.entries()]) {
+      if (pending.policyRevision !== accessFor(pending).stamp) settlePermissionRequest(id,
+        { granted: false, duration: 'denied' }, { reason: 'permission_policy_changed', terminal: true });
+    }
+  }
+
   function settleStreamPermissionRequests(streamId, grant) {
     const ids = [...pendingPermissionRequests.entries()].filter(([, pending]) => pending.streamId === streamId).map(([id]) => id);
     for (const id of ids) {
@@ -730,6 +792,7 @@ export function createChatPermissionGate({
 
   const gate = {
     configure,
+    refreshAccessPolicies,
     createFilePermissionRequester,
     createLocalCapabilityPermissionRequester,
     createShellApprovalDecider,

@@ -53,11 +53,12 @@ export async function openReplyDetails(page, message) {
   assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live activity remains visible; completed details wait for hover or focus');
   // A pushed drawer's body can disappear before its width transition finishes.
   // Let the actual finite layout animations finish before choosing a pointer position.
-  await message.evaluate(async node => {
-    const animations = node.closest('.bot-shell').getAnimations({ subtree: true }).filter(animation => animation.playState === 'running'
+  await page.waitForFunction(() => {
+    const shell = document.querySelector('.bot-shell');
+    return shell && !shell.getAnimations({ subtree: true }).some(animation => animation.playState === 'running'
       && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility());
-    await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
   });
+  await scrollToBotMessage(page, message);
   const placement = await button.evaluate(node => {
     const action = node.getBoundingClientRect(), footer = node.parentElement.getBoundingClientRect();
     const bubbles = [...node.closest('.bot-reply, .bot-system').querySelectorAll(
@@ -102,11 +103,10 @@ export async function openReplyDetails(page, message) {
     await page.mouse.move(point.x, point.y, { steps: 2 });
     // Keep the actual pointer still while its opacity transition finishes.
     // Moving out every 50ms repeatedly restarted the 120ms transition on Linux.
-    revealed = await button.evaluate(async node => {
-      await Promise.all(node.getAnimations().filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
-        .map(animation => animation.finished.catch(() => {})));
-      return getComputedStyle(node).opacity === '1' && node.closest('.bot-reply, .bot-system').matches(':hover');
-    });
+    await page.waitForFunction(node => node.getAnimations().every(animation => animation.playState !== 'running'
+      || !Number.isFinite(animation.effect?.getComputedTiming().endTime)), await button.elementHandle(), { timeout: 15000 });
+    revealed = await button.evaluate(node => getComputedStyle(node).opacity === '1'
+      && node.closest('.bot-reply, .bot-system').matches(':hover'));
     if (!revealed) await page.waitForTimeout(50);
   }
   assert.equal(revealed, true, 'a real pointer over the current reply reveals its details');

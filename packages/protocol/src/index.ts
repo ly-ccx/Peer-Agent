@@ -25,6 +25,8 @@ export type LocalAccessLevel =
   | 'restricted_local'
   | 'full_local';
 
+export type { BotAccessPolicy, BotAccessPolicyReadRequest, BotAccessPolicyUpdateRequest, BotAccessPolicyResult } from './bot-access-policy.ts';
+
 export type {
   ConversationLifetimeUsage,
   ProviderRequestUsage,
@@ -952,6 +954,8 @@ export interface ClientToolCallPollResult {
 export type PermissionDuration = 'once' | 'task' | 'session' | 'scope' | 'persistent' | 'denied';
 
 export interface PermissionGrant {
+  /** Host-issued policy version; audit provenance, never a client authority token. */
+  readonly policyRevision?: string;
   readonly grantId: string;
   readonly toolCallId: string;
   readonly granted: boolean;
@@ -1104,3 +1108,4 @@ export * from './remote-access-settings.ts';
 
 export type { BotModelSelectionUpdateRequest, BotModelSelectionUpdateResult } from './bot-model-selection.ts';
 export * from './local-image.ts';
+export * from './bot-conversation-read.ts';

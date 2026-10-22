@@ -13,7 +13,9 @@ export function AgentActivityRow({ messageId, activity, i18n, onOpen }: {
   return <button type="button" id={`bot-msg-${messageId}`} className="bot-agent-activity" data-agent-state={activity.state} data-agent-session={activity.sessionId}
     onClick={() => onOpen(activity.sessionId)} title={i18n.t('projectAgent.chat.agent.open')}>
     <span className="bot-agent-marker" data-tone={identity.tone} data-agent-icon={identity.icon}><PeerIcon name={identity.icon} size={18} /></span>
-    <strong>{activity.name}</strong><span>{i18n.t(`projectAgent.chat.agent.${activity.state}`)}</span>
+    <strong>{activity.name}</strong><span>{activity.state === 'verifying' && activity.verificationProgress?.observationCount
+      ? i18n.t('projectAgent.chat.agent.verificationProgress', { count: activity.verificationProgress.observationCount })
+      : i18n.t(`projectAgent.chat.agent.${activity.state}`)}</span>
     <PeerIcon name="chevronRight" size={14} className="bot-agent-open" />
   </button>;
 }

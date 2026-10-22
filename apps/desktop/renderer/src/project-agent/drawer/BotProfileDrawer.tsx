@@ -327,6 +327,7 @@ export function BotProfileDrawer({
           i18n={i18n}
           isZh={isZh}
           onClose={() => setClassicScene(null)}
+          onOpenBot={() => { setClassicScene(null); onTaskConversation({}); }}
         />
       ) : null}
     </div>

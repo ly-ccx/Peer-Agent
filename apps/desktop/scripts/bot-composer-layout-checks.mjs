@@ -79,6 +79,8 @@ export async function checkBotComposerLayout({ page, until, report, captureDirec
   await input.fill('');
   await composer.locator('.bot-attach-button').focus();
   await page.keyboard.press('Tab');
+  assert.equal(await composer.locator('.bot-access-picker > button').evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('Tab');
   assert.equal(await composer.locator('.bot-model-picker > button').evaluate(node => node === document.activeElement), true);
   await page.keyboard.press('Enter');
   await page.locator('.pa-cascading-menu-panel').waitFor();

@@ -11,6 +11,7 @@ import { createSessionConversationFacts } from './session-conversation-facts.mjs
 import { createAgentCommunication } from './agent-communication.mjs';
 import { createLegacyCriterionRecovery } from './criterion-recovery.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
+import { verificationProgressFromPlan } from './verification-progress.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { admitDelegationCriteria } from './criterion-authority.mjs';
 import { isHostHandoffPause } from './session-host-handoff.mjs';
@@ -164,6 +165,10 @@ export function createSessionSupervisor({
   const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
+    readSessionSummary: input => {
+      const plan = findBySession(input.sessionId);
+      return plan ? summaries({ workspaceId: plan.delegationOrigin.workspaceId, sessionIds: [input.sessionId] })[0] : null;
+    },
     checkTakeover: id => {
       const plan = findBySession(id);
       return plan?.runner?.status === 'waiting_user' ? 'human_decision_required'
@@ -219,16 +224,18 @@ export function createSessionSupervisor({
   }
 
   function snapshotOf(plan) {
+    // 生命周期结论只由 protocol 的 decideLifecycle 给出；适配器只交原始事实，不再私改状态。
+    const facts = sessionFactsFromPlan(plan);
     return {
       planId: plan.planId,
-      // Completed leaves can briefly precede the manual completion gate.
-      status: plan.status === 'completed' && plan.runner?.status === 'blocked'
-        && plan.runner.blockedReason === 'manual_dod_confirmation_required' ? 'executing' : plan.status,
+      status: plan.status,
       title: typeof plan.title === 'string' ? plan.title : '',
       runnerStatus: plan.runner?.status,
-      needsUser: sessionFactsFromPlan(plan).needsUser,
+      needsUser: facts.needsUser,
+      executionOwnership: facts.executionOwnership,
       blockedReason: plan.runner?.blockedReason,
       agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
+      delegated: Boolean(plan.delegationOrigin),
       updatedAt: plan.updatedAt,
       conversationId: plan.conversationId,
       progress: plan.progress,
@@ -269,6 +276,10 @@ export function createSessionSupervisor({
         ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
     const report = buildReport(plan, session);
+    if (sessionFactsFromPlan(plan).verificationActive) {
+      const verificationProgress = verificationProgressFromPlan(plan);
+      if (verificationProgress) session.verificationProgress = verificationProgress;
+    }
     const completionReview = projectCompletionReview(plan, report);
     if (completionReview && !completionReview.confirmed) session.completionReviewRequired = true;
     if (session.status === 'result_ready') {
@@ -648,12 +659,26 @@ export function createSessionSupervisor({
   }
 
 
+  function summaries(input = {}) {
+    const ids = new Set(input.sessionIds || []), anchors = new Set(input.anchorMessageIds || []);
+    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId
+      && (input.all === true || ids.has(plan.delegationOrigin.sessionId) || input.workId && plan.delegationOrigin.workId === input.workId
+        || anchors.has(plan.delegationOrigin.anchorMessageId))).slice(0, 24).map(plan => {
+      const origin = plan.delegationOrigin;
+      return { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
+        acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), spawnedAt: plan.createdAt || '',
+        conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}) }),
+        metadataRevision: plan.updatedAt || plan.createdAt || '' };
+    });
+  }
+
   function list(input = {}) {
     const limit = Number.isInteger(input?.limit) && input.limit > 0 ? Math.min(input.limit, 50) : 50;
     const workspaceId = text(input?.workspaceId);
     const status = text(input?.status);
     return delegatedPlans()
       .filter((plan) => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId)
+      .filter(plan => !input.workId && !input.sessionIds?.length || plan.delegationOrigin.workId === input.workId || input.sessionIds?.includes(plan.delegationOrigin.sessionId))
       .map(project)
       .filter((session) => !status || session.status === status)
       .slice(0, limit);
@@ -1018,8 +1043,9 @@ export function createSessionSupervisor({
 
   return {
     executionScheduler,
+    summaries: input => readQuery.run(() => summaries(input)),
     coordinateWork: (input, context) => coordination.coordinate(input, context),
-    coordinationFacts: (workspaceId, conversationId) => coordination.facts(workspaceId, conversationId),
+    coordinationFacts: (workspaceId, conversationId, scope) => coordination.facts(workspaceId, conversationId, scope),
     recoverCoordination: workspaceId => coordination.recover(workspaceId),
     sendAgentMessage: (input, context) => exclusive(() => communication.send(input, context)),
     recoverAgentMessages: () => exclusive(() => communication.recover()),
@@ -1132,6 +1158,13 @@ export function createSessionSupervisor({
       });
     },
     get: input => readQuery.run(() => get(input)),
+    /** Verification input is canonical content, independent of acceptance/session projection. */
+    readReportSummary(sessionId) {
+      return readQuery.run(() => {
+        const plan = findBySession(text(sessionId));
+        return plan ? buildReport(plan, {sessionId:plan.delegationOrigin.sessionId}).summary : '';
+      });
+    },
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
     cancel(input) {

@@ -5,22 +5,23 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readMessages, checkTakeover, spawn, requestCancel, send, takeover, holdsLease, isEnabled = () => true }) {
+export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, checkTakeover, spawn, requestCancel, send, takeover, holdsLease, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
   const lifecycleFacts = store => typeof store?.readLifecycleFacts === 'function' ? store.readLifecycleFacts() : store?.read();
-  function lifecycleOf(state, mandate) {
+  function lifecycleOf(state, mandate, summary = false) {
     const work=(state.workStates || state.works)[mandate.workId];
     if (work?.stopScope === 'work' && ['paused','cancelled'].includes(work.state)) return 'cancelled';
-    const sessions=mandate.sessionIds.map(sessionId=>readSession({sessionId}));
+    const sessions=mandate.sessionIds.map(sessionId=>(summary ? readSessionSummary : readSession)({sessionId}));
     const pending=Object.values(state.transitions || {}).some(row=>row.workId===mandate.workId && !['completed','blocked'].includes(row.phase));
     return sessions.length && sessions.every(row=>row && ['accepted','cancelled'].includes(row.status)) && !pending ? 'fulfilled' : mandate.lifecycle;
   }
-  function facts(workspaceId, parentConversationId) {
+  function facts(workspaceId, parentConversationId, scope = null) {
     const state = lifecycleFacts(storeFor(workspaceId));
     return Object.values(state?.mandates || {}).filter(row => row.parentConversationId === parentConversationId)
-      .slice(-24).map(row => ({ workId: row.workId, goalRevision: row.goalRevision, lifecycle: lifecycleOf(state,row),
+      .filter(row => !scope || row.workId === scope.workId || row.sessionIds.some(id => scope.sessionIds?.includes(id)))
+      .slice(-24).map(row => ({ workId: row.workId, goalRevision: row.goalRevision, lifecycle: lifecycleOf(state,row,true),
         sessionIds: row.sessionIds.filter(id => !row.revokedSessionIds?.includes(id)), rootInputIds: row.rootInputIds,
         transitions: Object.values(state.transitions || {}).filter(item => item.workId === row.workId && item.phase !== 'completed')
           .slice(-8).map(item => ({ operationId: item.operationId, action: item.action, phase: item.phase, oldSessionId: item.oldSessionId, replacementSessionId: item.replacementSessionId })) }));

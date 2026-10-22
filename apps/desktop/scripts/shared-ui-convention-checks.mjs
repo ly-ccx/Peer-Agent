@@ -145,8 +145,18 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
   });
   await nav.getByRole('button', { name: '外观', exact: true }).click();
   await layouts('appearance', async () => {
-    const radii = await page.locator('.appearance-mode-thumb').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).borderRadius));
-    assert.deepEqual(radii, ['8px', '8px', '8px'], 'rectangular theme previews must retain their corners');
+    const previews = await page.locator('.appearance-mode-thumb').evaluateAll(nodes => nodes.map(node => ({
+      radius: getComputedStyle(node).borderRadius,
+      expected: getComputedStyle(node).getPropertyValue('--ui-radius-inset').trim(),
+      shorterSide: Math.min(node.getBoundingClientRect().width, node.getBoundingClientRect().height),
+    })));
+    assert.equal(previews.length, 3);
+    for (const preview of previews) {
+      assert.match(preview.expected, /^\d+(?:\.\d+)?px$/);
+      assert.equal(preview.radius, preview.expected, 'theme previews use the current shared inset radius');
+      assert.ok(parseFloat(preview.radius) > 0 && parseFloat(preview.radius) < preview.shorterSide / 2,
+        'rectangular theme previews retain corners rather than becoming pills');
+    }
   });
   await nav.getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('.bot-app-menu-button').click();
@@ -192,7 +202,9 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
   await image.waitFor();
   await page.waitForFunction(() => document.querySelector('.markdown-local-image-thumb img')?.naturalWidth === 320);
   await layouts('classic-chat', async () => {
-    assert.equal(await image.evaluate(node => getComputedStyle(node).borderRadius), '8px');
+    assert.equal(await image.evaluate(node => getComputedStyle(node).borderRadius),
+      await image.evaluate(node => getComputedStyle(node).getPropertyValue('--ui-radius-inset').trim()),
+      'image previews use the current shared inset radius');
     assert.equal(await image.locator('img').evaluate(node => node.naturalHeight), 180);
   });
   await layouts('classic-image-lightbox', async () => {
@@ -235,6 +247,7 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
   const file = page.locator('.diff-file-index-row').filter({ hasText: 'new-name.ts' });
   await file.waitFor();
   await layouts('classic-diff', async () => {
+    await page.locator('.diff-file-preview-portal').waitFor({ state: 'hidden' });
     await file.evaluate(node => node.blur());
     await file.focus();
     await page.locator('.diff-file-preview .diff-rename-arrow').waitFor();

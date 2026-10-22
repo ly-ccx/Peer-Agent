@@ -1,3 +1,6 @@
+import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
+import { checkBotLifecycleGates } from './bot-lifecycle-gate-checks.mjs';
+import { checkBotAccessPolicy } from './bot-access-policy-checks.mjs';
 import { checkBotUserReceipt } from './bot-user-receipt-checks.mjs';
 import { checkBotAttention } from './bot-attention-checks.mjs';
 import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
@@ -53,7 +56,7 @@ const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -89,9 +92,11 @@ const longErrorText = '代理暂时不可用：HTTP 400: ' + JSON.stringify({ er
 seededMessages[9998] = { ...seededMessages[9998], role: 'assistant', kind: 'system_card', card: 'agent_unavailable',
   content: longErrorText, cards: [{ cardId: 'card:agent_unavailable:rc-long-error', kind: 'agent_unavailable', content: longErrorText, actions: [] }] };
 seedWorkBudgetMessages(seededMessages, fixture.bots[0].workspaceId);
-for (const [offset, state] of ['started', 'question', 'reported', 'reported', 'started'].entries()) {
+for (const [offset, state] of ['started', 'question', 'reported', 'reported', 'verifying'].entries()) {
   seededMessages[9980 + offset] = { ...seededMessages[9980 + offset], kind: 'agent_activity', role: 'system', content: '',
-    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 4 ? 'rc-work-2' : 'rc-work-1', name: offset === 4 ? '独立核验' : '实现检查', state} };
+    agentActivity: {eventId: `rc-agent-event-${offset}`, sessionId: offset === 4 ? 'rc-work-2' : 'rc-work-1', name: offset === 4 ? '独立核验' : '实现检查', state,
+      ...(offset === 4 ? { verificationProgress: { continuationId: 'rc-review', startedAt: '2026-10-21T00:00:00Z',
+        lastProgressAt: '2026-10-21T00:01:00Z', observationCount: 7, phase: 'ready' } } : {}) } };
 }
 // Renderer presentation fixtures use explicit host facts. They do not invoke recovery or a provider.
 const recoveryCases = [
@@ -224,10 +229,11 @@ writeFileSync(main, isolatedMain);
 // Observe production pagination without changing its results or admitting a new IPC.
 const applicationService = path.join(isolation.launch.desktopDir, 'electron/main/project-agent/project-agent-application-service.mjs');
 const serviceText = readFileSync(applicationService, 'utf8');
-const readSeam = 'const result = directory.readConversation(payload.workspaceId, payload);';
+const readSeam = 'const decorate = page => {\n      if (!page?.ok) return page;';
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
-let observedService = serviceText.replace(readSeam, `const result = directory.readConversation(payload.workspaceId, payload);
-  if (globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
+let observedService = serviceText.replace('function readConversation(payload = {}) {', `function readConversation(payload = {}) {
+    if(payload.workspaceId===globalThis.rcBotWorkWorkspace && (globalThis.rcInteractionReadMode==='all'||globalThis.rcInteractionReadMode==='cards'&&payload.view==='cards'))return {ok:false,code:'CONTROLLED_READ_FAILURE'};`).replace(readSeam, `${readSeam}\n  const result = page;
+  if (payload.view !== 'cards' && !payload.processFor && globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
     result.messages = [...result.messages, ...globalThis.rcBotWorkMessages];
     // The injected task-note facts include their current decision, matching the production page contract.
     const currentQuestion=globalThis.rcBotWorkMessages.flatMap(message=>(message.cards||[])
@@ -391,11 +397,11 @@ globalThis.rcBotShellService.sendMessage=input=>{
 };
 ${workSurfaces ? `const workFile=${JSON.stringify(workCommand)};
 let workCommand=JSON.parse(readFileSync(workFile,'utf8'));
-globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);globalThis.rcBotWorkReports=workCommand.detailReports;globalThis.rcBotWorkMessages=workCommand.conversationMessages;globalThis.rcHistoryReadMode=workCommand.historyReadMode;
+globalThis.rcBotWorkWorkspace=workCommand.workspaceId;globalThis.rcBotWorkSessions=workCommand.sessions;globalThis.rcBotWorkUnavailable=Boolean(workCommand.unavailable);globalThis.rcBotWorkReports=workCommand.detailReports;globalThis.rcBotWorkMessages=workCommand.conversationMessages;globalThis.rcHistoryReadMode=workCommand.historyReadMode;globalThis.rcInteractionReadMode=workCommand.interactionReadMode;
 const workTimer=setInterval(()=>{
   const next=JSON.parse(readFileSync(workFile,'utf8'));if(next.seq<=workCommand.seq)return;
-  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);globalThis.rcBotWorkReports=next.detailReports;globalThis.rcBotWorkMessages=next.conversationMessages;globalThis.rcHistoryReadMode=next.historyReadMode;
-  for(const window of BrowserWindow.getAllWindows())window.webContents.send('project-agent:changed',{workspaceIds:[next.workspaceId]});
+  workCommand=next;globalThis.rcBotWorkSessions=next.sessions;globalThis.rcBotWorkUnavailable=Boolean(next.unavailable);globalThis.rcBotWorkReports=next.detailReports;globalThis.rcBotWorkMessages=next.conversationMessages;globalThis.rcHistoryReadMode=next.historyReadMode;globalThis.rcInteractionReadMode=next.interactionReadMode;
+  if(!next.silent)for(const window of BrowserWindow.getAllWindows())window.webContents.send('project-agent:changed',{workspaceIds:[next.workspaceId]});
 },25);workTimer.unref();` : ''}
 // Keep synthetic updater delivery outside inspector Promise lifetime. Only this
 // isolated entry consumes the disposable command file; product IPC is unchanged.
@@ -466,7 +472,15 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--image-permission-only')) {
+  if (process.argv.includes('--conversation-typography-only')) {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
+  } else if (process.argv.includes('--access-policy-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await checkBotAccessPolicy({ page, until, report, captureDirectory: root, home, bots: fixture.bots, commandFile: workCommand });
+  } else if (process.argv.includes('--image-permission-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
     await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
@@ -546,7 +560,12 @@ try {
   } else if (process.argv.includes('--message-layout-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
-    await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+    if(workSurfaces) await checkBotProgressiveLoading({page,until,report,captureDirectory:root,commandFile:workCommand});
+  await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  } else if (process.argv.includes('--lifecycle-only')) {
+    await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotLifecycleGates({page,until,report,captureDirectory:root,commandFile:workCommand});
   } else if (process.argv.includes('--agent-activity-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -611,6 +630,7 @@ try {
   await until(() => page.locator('.bot-composer textarea').getAttribute('placeholder'), text => text === '给 project-000 发消息');
   assert.equal(await page.locator('.bot-composer textarea').getAttribute('aria-label'), '给 project-000 发消息');
   report.checks.push('composer prompt and accessible name follow the selected bot name');
+  if(workSurfaces) await checkBotProgressiveLoading({page,until,report,captureDirectory:root,commandFile:workCommand});
   await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
   await checkBotMessageColors({ page, until, report, captureDirectory: root });
   for (let i = 0; i < 5; i++) {
@@ -726,8 +746,10 @@ try {
     await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskCancellation({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
+    await checkBotLifecycleGates({page,until,report,captureDirectory:root,commandFile:workCommand});
     await checkBotCoordination({page,until,report,captureDirectory:root,commandFile:workCommand});
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
+    await checkBotAccessPolicy({ page, until, report, captureDirectory: root, home, bots: fixture.bots, commandFile: workCommand });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
     await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
@@ -765,7 +787,7 @@ try {
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
-  if (!process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
+  if (!process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { reduceCoordinationDecision } from './coordination-kernel.mjs';
+import { applyWorkUpdate } from './work-delta.mjs';
 /** Durable event transfer and handling are different receipts. Replay is deterministic. */
 export function reduceCoordination(state, entry) {
   if (entry.schemaVersion !== undefined && entry.schemaVersion !== 1) throw new Error('coordination_schema_unsupported');
@@ -18,6 +19,19 @@ export function reduceCoordination(state, entry) {
     for (const id of entry.eventIds) {
       if (!next.events[id]) throw new Error('event_not_transferred');
       next.events[id] = { ...next.events[id], handled: true };
+    }
+  } else if (entry.kind === 'work_updated') {
+    next.works[entry.workId] = applyWorkUpdate(next.works[entry.workId], entry);
+  } else if (entry.kind === 'usage_observed') {
+    const work = next.works[entry.workId];
+    if (!work?.budget || !entry.observationId) throw new Error('coordination_usage_invalid');
+    if (!work.budget.observations?.[entry.observationId]) {
+      const budget = { ...work.budget, observations: { ...work.budget.observations, [entry.observationId]: true } };
+      if (Number.isFinite(entry.tokens) && entry.tokens >= 0) budget.tokens = (budget.tokens || 0) + entry.tokens;
+      else budget.unknownUsage = true;
+      if (Number.isFinite(entry.costUsd) && entry.costUsd >= 0) budget.costUsd = (budget.costUsd || 0) + entry.costUsd;
+      else budget.unknownCost = true;
+      next.works[entry.workId] = { ...work, budget };
     }
   } else if (entry.kind === 'work') {
     next.works[entry.work.workId] = structuredClone(entry.work);

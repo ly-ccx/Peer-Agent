@@ -69,7 +69,8 @@ export function createTuiProjectHost(options: {
     projectAgentEnabled: () => !closed, botWorkspaceIds: () => selectedId && profiles.read(selectedId)?.status === 'active' ? [selectedId] : [] } as never);
   const executor = createTuiTurnExecutor({ dataHome, getSettings, holdsLease: holds,
     resolveWorkspacePath: id => registry.get(id)?.path ?? options.workspacePath,
-    readMessages, readMemory: id => memory.list({workspaceId: id, status: 'active'}).filter(item => isEffectiveMemory(item)),
+    readMessages, readInteractionContext: async id => (await conversations.readInteractionContext(id))?.messages || [],
+    readMemory: id => memory.list({workspaceId: id, status: 'active'}).filter(item => isEffectiveMemory(item)),
     memoryEnabled, getProviders: () => toolProvider ? [toolProvider] : [], scheduler, oneTimeApprovals, goalPlanStore: plans, createRuntime: options.createRuntime,
     onApproval(approval, streamId) { if (approval) liveApprovals.set(streamId, approval); else liveApprovals.delete(streamId); changed(); },
     persistTurn(input, output) {
@@ -100,7 +101,7 @@ export function createTuiProjectHost(options: {
   const goalRunner = goalHost.goalRunner as typeof goalHost.goalRunner & { verifyDelegatedSession(input: object): Promise<any> };
   const verification = createSessionVerification({goalPlanStore: plans,
     verifySession: (plan: any, focus: string) => goalRunner.verifyDelegatedSession({plan, focus}),
-    readReport: (plan: any) => (supervisor.get({sessionId: plan.delegationOrigin.sessionId, detail: 'report'}) as any)?.report?.summary || '',
+    readReport: (plan: any) => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
     completeRecheck: (input: any) => goalRunner.completeRecheck(input),
     appendMessage: (id: string, message: any) => conversations.appendMessage(id, message)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
@@ -124,10 +125,10 @@ export function createTuiProjectHost(options: {
     isReady: (id: string) => host?.isReady(id) === true, resolveWorkspacePath: (id: string) => registry.get(id)?.path,
     readSessions: (id: string) => supervisor.sessionsForProject(id).map((row:any)=>({...row,verdict:supervisor.acceptance(row.sessionId)?.verdict})), agentTurnExecutor: turns,
     projectPolicy: (id: string) => profiles.read(id)?.modelPolicy, inbox, wake: () => void tick(), onChanged: changed} as never);
-  const facts = createDesktopProjectFacts({supervisor, approvalStore: approvals, profileStore: profiles, conversationStore: conversations,
+  const facts = createDesktopProjectFacts({requirePreparedCoordination: true, supervisor, approvalStore: approvals, profileStore: profiles, conversationStore: conversations,
     runtimeRoot, memoryStore: memory, objectiveProposals: (id: string) => objectiveActions.pending(id)} as never);
-  const directory = createBotDirectory({rootDir: dataHome, registry, readMessages, listSessions: (id: string) => supervisor.list({workspaceId: id}),
-    getSession: (id: string) => supervisor.get({sessionId: id}), listApprovals: (id: string) => approvals.list({workspaceId: id}), readCards: facts.cards} as never);
+  const directory = createBotDirectory({rootDir: dataHome, registry, readMessages, readInteractionPage: conversations.readInteractionPage, listSessions: (id: string) => supervisor.list({workspaceId: id}),
+    getSession: (id: string) => supervisor.get({sessionId: id}), listApprovals: (id: string) => approvals.list({workspaceId: id}), readCards: facts.cards, readQuestionCards: facts.questionCards} as never);
   const lifecycle = createBotLifecycle({rootDir: dataHome, enabled: () => !closed, registry, conversationStore: conversations, memoryStore: memory,
     spawn: async (input: any) => {
       await tick(); const anchor = `lifecycle-${input.kind}-${input.workspaceId}`;
@@ -154,10 +155,12 @@ export function createTuiProjectHost(options: {
   host = createProjectAgentHost({rootDir:runtimeRoot, holdsLease:holds, acquireLease:(id: string)=>leases.acquire(id),
     listWorkspaceIds:()=> selectedId ? [selectedId] : [], resolveConversationId,
     appendMessage:(id: string,message: any)=>{conversations.appendMessage(id,message);changed();}, readMessages,
-    executeTurn:(request: any)=>turns.runTurn({...request,ephemeral:true,messages:readMessages(request.conversationId)
-      .filter(message=>['user_input','agent_reply'].includes(message.kind)).map(message=>({role:message.role,content:message.content}))}),
+    // The interaction query owns admission, including kind-less legacy user/assistant records.
+    executeTurn:async (request: any)=>turns.runTurn({...request,ephemeral:true,messages:(await conversations.readInteractionContext(request.conversationId))?.messages
+      .map(message=>({role:message.role,content:message.content})) as any}),
     resolveModel:(input: any)=>turns.resolveGoalRole({...input,projectPolicy:profiles.read(input.workspaceId)?.modelPolicy}),
-    resolveContext:({workspaceId}: any)=>{const result=objectives.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)});return {coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId)),objectives:result.ok && 'items' in result ? result.items : []};},
+    resolveContext:({workspaceId,...scope}: any)=>{const result=objectives.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)});return {coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId),scope),objectives:result.ok && 'items' in result ? result.items : []};},
+    resolveTurnRoster:(scope: any)=>supervisor.summaries(scope),
     resolveRoster:(id: string)=>supervisor.list({workspaceId:id}), restoreQueue:(id: string)=>{applyStartupApprovalRecovery({approvalStore:approvals,goalPlanStore:plans,canRecover:row=>row.workspaceId===id});return supervisor.recoverQueue(id);},
     recoverTasks:(id: string)=>goalRunner.recoverContextCheckpoints({workspaceId:id,deferPump:true} as never), activateSessions:supervisor.resumeRecovered,
     restoreWatches:watches.restore,stopWatches:watches.stopWorkspace, reconcileSessions:supervisor.reconcile,

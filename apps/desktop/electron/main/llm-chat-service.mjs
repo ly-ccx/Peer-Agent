@@ -62,6 +62,7 @@ import { persistContextAccounting } from './chat-runtime/persist-context-account
 import { createStreamTerminalDelivery, afterTerminalCommit } from './chat-runtime/stream-terminal-delivery.mjs';
 import {
   createApprovalStore,
+  createBotAccessPolicyAuthority,
   createMemoryStore,
   createProjectRegistry,
   readSnapshots,
@@ -1108,6 +1109,7 @@ export function createLlmChatService({
   persistCompaction = null,
   promptSnapshotStore = null,
   preferredAccessLevel = 'ask_before_local',
+  accessPolicyAuthority = null,
   mcpRegistry = null,
   skillStore = null,
   automationProposalService = null,
@@ -1126,7 +1128,13 @@ export function createLlmChatService({
   getSettings = null,
 }) {
   permissionGate.setAccessLevel(preferredAccessLevel);
+  const botAccess = accessPolicyAuthority ?? createBotAccessPolicyAuthority({ conversationStore, goalPlanStore, legacyAccessLevel: preferredAccessLevel });
   permissionGate.configure({
+    resolveAccessPolicy({ streamId, conversationId }) {
+      const profile = activeStreams.get(streamId)?.turnProfile;
+      return botAccess.resolve({ conversationId, workspaceId: profile?.workspaceId,
+        planId: profile?.planId, sessionId: profile?.sessionId, role: profile?.role });
+    },
     approvalStore: durableApprovals,
     resolveApprovalScope({ conversationId, workspacePath }) {
       let workspaceId = null;
@@ -1669,6 +1677,12 @@ export function createLlmChatService({
       toolContext.mode = runtimeMode;
       toolContext.turnRole = profile?.role ?? null;
       toolContext.turnProfile = profile;
+      toolContext.resolveAccessPolicy = () => botAccess.resolve({ conversationId, workspaceId: profile?.workspaceId,
+        planId: profile?.planId, sessionId: profile?.sessionId, role: profile?.role });
+      toolContext.checkAccessPolicy = () => {
+        const access = toolContext.resolveAccessPolicy();
+        return access && !access.ok ? 'access_identity_invalid' : null;
+      };
       toolContext.planId = profile?.planId ?? null;
       toolContext.currentInputAnchors = projectAgentTurn && Array.isArray(profile?.context?.inputAnchors)
         ? profile.context.inputAnchors.map(anchor => anchor.messageId).filter(id => typeof id === 'string') : [];
@@ -1706,7 +1720,9 @@ export function createLlmChatService({
         toolContext.turnToolCalls = [];
         toolContext.turnMemoryIds = [];
         try {
-          const history = conversationStore?.getPersistedConversationHistory?.(conversationId);
+          const history = typeof conversationStore?.readInteractionContext === 'function'
+            ? await conversationStore.readInteractionContext(conversationId)
+            : conversationStore?.getPersistedConversationHistory?.(conversationId);
           toolContext.messages = Array.isArray(history?.messages) ? history.messages : [];
         } catch {
           toolContext.messages = [];

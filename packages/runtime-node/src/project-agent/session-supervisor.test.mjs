@@ -29,6 +29,26 @@ function model(id, extra = {}) {
   };
 }
 
+test('verification reads canonical report content without reentering acceptance projection', async () => {
+  let authorityReads = 0;
+  const env = await harness({readPlanApproval:()=> 'always',readSessionFacts:()=>{
+    authorityReads++;return {hostAuthority:{independentVerifier:'passed'}};
+  }});
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(),contextOf(env));
+    const plan = env.goalPlanStore.getPlan(env.supervisor.get({sessionId:opened.sessionId}).planId);
+    env.goalPlanStore.revisePlan(plan.planId,{status:'completed',runner:{status:'completed'},
+      delegationOrigin:{...plan.delegationOrigin,phase:'running'}});
+    env.conversationStore.appendMessage(plan.conversationId,{id:'canonical-report',role:'assistant',content:'Preserved worker report'});
+    authorityReads=0;
+    assert.equal(env.supervisor.readReportSummary(opened.sessionId),'Preserved worker report');
+    assert.equal(authorityReads,0,'report content never calls host verification or acceptance');
+    assert.equal(env.supervisor.readReportSummary('missing-session'),'');
+    assert.equal(env.supervisor.get({sessionId:opened.sessionId,detail:'report'}).report.summary,'Preserved worker report');
+    assert.ok(authorityReads>0,'full session projection still consults the real acceptance facts');
+  } finally {await env.cleanup();}
+});
+
 test('local plan approval is frozen before execution and survives store reload', async () => {
   let latest;
   const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
@@ -2241,6 +2261,33 @@ test('actual executor takeover retains GoalPlan, changes epoch, and does not con
   }finally{release();await env.cleanup();}
 });
 
+test('a correction handoff resumes the remaining work instead of replaying the old verification intent',async()=>{
+  const starts=[];
+  let env;
+  env=await harness({goalRunner:{async start(planId){starts.push({planId,intent:env.goalPlanStore.getPlan(planId)?.runner?.intent});},async resume(){}}});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try{
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const a=await env.supervisor.coordinateWork({action:'parallel',reason:'inspect',task:spawnInput({kind:'research',readOnly:true})},context);
+    const planId=planIdOf(env,a.sessionId), original=env.goalPlanStore.getPlan(planId);
+    // 原执行体停在核验阶段被挂起：这是复盘里"误回旧 verify 意图"的输入形态。
+    env.goalPlanStore.revisePlan(planId,{delegationOrigin:{...original.delegationOrigin,phase:'paused',pausedFromPhase:'running',pausedRunnerIntent:'verify'}},{reason:'suspended mid-verification',changedBy:'test'});
+    env.goalPlanStore.setRunnerState(planId,{status:'paused',intent:'verify'});
+    starts.length=0;
+    const handoff=await env.supervisor.coordinateWork({action:'handoff',sessionId:a.sessionId,expectedRevision:1,reason:'apply the correction to the remaining work'}, {...context,deliveryKey:'correction'});
+    assert.ok(['stopping','ready','completed'].includes(handoff.phase),JSON.stringify(handoff));
+    await until(()=>store.read().transitions.correction.phase==='completed');
+    // 换执行体是接着做剩下的活，不是重放上一个执行体的核验结论。
+    const firstTurn=starts.filter(row=>row.planId===planId).at(-1);
+    assert.equal(firstTurn?.intent,'execute',JSON.stringify({starts,planId}));
+    // 复盘症状：新执行体第一次写就被 work_execution_stopped 挡掉、没进入剩余修改。
+    const fresh=env.goalPlanStore.getPlan(planId);
+    assert.notEqual(evaluateWorkSessionWrite(fresh,{capabilityId:'local.file.write'}).error,'work_execution_stopped');
+  }finally{release();await env.cleanup();}
+});
+
 test('cancellation publishes an unknown outcome and keeps its replacement fenced after recovery',async()=>{
   const env=await harness();
   const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
@@ -2307,5 +2354,18 @@ test('acceptance shares compact parent facts and rechecks later replies and corr
     const file = path.join(env.root, 'conversations', env.parent.id + '.jsonl');
     const { appendFileSync } = await import('node:fs'); appendFileSync(file, '{broken\n');
     assert.throws(() => env.supervisor.acceptance(session.sessionId), /BACKGROUND_HISTORY_CORRUPT/, 'cached parent facts cannot hide current corruption');
+  } finally { await env.cleanup(); }
+});
+
+test('related turn summaries never load child transcripts or reports', async () => {
+  const env=await harness();
+  try {
+    const opened=await env.supervisor.spawn(spawnInput(),contextOf(env));
+    env.conversationStore.getPersistedConversationHistory=()=>assert.fail('summary must not read a child transcript');
+    env.conversationStore.getConversation=()=>assert.fail('summary must not hydrate child messages');
+    const selected=env.supervisor.summaries({workspaceId:'ws-1',sessionIds:[opened.sessionId]});
+    assert.equal(selected.length,1); assert.equal(selected[0].sessionId,opened.sessionId);
+    assert.equal(selected[0].report,undefined);
+    assert.deepEqual(env.supervisor.summaries({workspaceId:'ws-1',sessionIds:['unrelated']}),[]);
   } finally { await env.cleanup(); }
 });

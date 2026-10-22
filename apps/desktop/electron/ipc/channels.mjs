@@ -56,6 +56,8 @@ function allowedWindowRolesFor(channel, rendererToMain) {
 }
 
 const INVOKE_CHANNELS = Object.freeze([
+  'project-agent:read-access-policy',
+  'project-agent:update-access-policy',
   'about:open-link',
   'appshot:capture',
   'appshot:open-screen-settings',

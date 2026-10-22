@@ -116,13 +116,40 @@ test('terminal composition consumes a durable input once and projects its shared
   expect(receipt.inputId).toBe('same-input');
   await host.tick();
   client.submit('different retry text', { inputId: 'same-input' }); await host.tick();
-  const messages = client.poll(true).messages;
+  const messages = (await client.poll(true)).messages;
   expect(calls).toHaveLength(1);
   expect(messages.filter(row => row.id === 'input-same-input')).toHaveLength(1);
   expect(messages.find(row => row.id === 'input-same-input').content).toBe('hello');
   expect(messages.find(row => row.kind === 'agent_reply').content).toBe('received');
   expect(calls[0].turnProfile.role).toBe('project_agent');
   expect(calls[0].turnProfile.modelSelection.modelProviderId).toBe('configured');
+});
+
+test('terminal model context keeps legacy public interactions and excludes private process records', async () => {
+  const f=fixture(), requests:(readonly any[])[]=[];
+  const host=createTuiProjectHost({...f,autoStart:false,
+    getSettings:()=>({providers:[provider],projectAgent:{concurrency:1},memory:{enabled:false}}),
+    createRuntime(options){
+      const toolHost=createTuiHost(options);
+      return {host:toolHost,
+        modelSelection:createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'}),
+        model:createProviderChatModel({model:'test-model',toolDefinitionsForMode:mode=>toolHost.toolDefinitionsForMode!(mode),
+          getSystemPrompt:context=>buildTuiSystemPrompt({}, {...context.systemContextInput,mode:context.mode}),
+          provider:{async stream(request){requests.push(request.messages);return {content:'Public reply',toolCalls:[]};}}}),
+        dispose:()=>toolHost.dispose()} as unknown as TuiRuntime;
+    }});
+  cleanups.push(()=>host.close());
+  host.conversations.appendMessage(f.conversationId,{id:'legacy-public-user',role:'user',content:'KEEP_LEGACY_USER_BOUNDARY'});
+  host.conversations.appendMessage(f.conversationId,{id:'legacy-public-assistant',role:'assistant',content:'KEEP_LEGACY_PUBLIC_REPLY'});
+  host.conversations.appendMessage(f.conversationId,{id:'private-process-record',role:'assistant',kind:'agent_turn',turnKind:'wake',
+    content:'PRIVATE_PROCESS_SENTINEL',rounds:[{content:'PRIVATE_ROUND_SENTINEL'}]} as never);
+  host.inputs.submitInput({workspaceId:f.workspaceId,inputId:'current-public-input',surface:'tui',text:'Current public question'});
+  await host.tick();
+  const messages=requests.flat();
+  expect(messages.some(row=>row.role==='user'&&JSON.stringify(row.content).includes('KEEP_LEGACY_USER_BOUNDARY'))).toBe(true);
+  expect(messages.some(row=>row.role==='assistant'&&JSON.stringify(row.content).includes('KEEP_LEGACY_PUBLIC_REPLY'))).toBe(true);
+  expect(JSON.stringify(requests)).not.toContain('PRIVATE_PROCESS_SENTINEL');
+  expect(JSON.stringify(requests)).not.toContain('PRIVATE_ROUND_SENTINEL');
 });
 
 test('a terminal client writes only the queue; active desktop owns consumption and approval', async () => {
@@ -135,8 +162,8 @@ test('a terminal client writes only the queue; active desktop owns consumption a
   cleanups.push(() => client.close());
   client.submit('queue me', { inputId: 'other-process' }); await host.tick();
   expect(turns).toBe(0);
-  expect(client.poll(true).isHost).toBe(false);
-  expect(client.poll().messages.some(row => row.id === 'input-other-process')).toBe(false);
+  expect((await client.poll(true)).isHost).toBe(false);
+  expect((await client.poll()).messages.some(row => row.id === 'input-other-process')).toBe(false);
   expect(await client.decide('approval', 'approve')).toEqual({ ok: false, error: 'desktop_approval_required' });
   desktop.close(); await host.tick();
   expect(turns).toBe(1);
@@ -146,10 +173,10 @@ test('unchanged client polls reuse the projection without rereading conversation
   const f = fixture(), host = start(f, async () => ({ ok: true, text: 'hello' }));
   const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
   cleanups.push(() => client.close());
-  const first = client.poll();
+  const first = await client.poll();
   const original = host.directory.readConversation;
   host.directory.readConversation = (() => { throw new Error('unchanged poll read a body'); }) as typeof original;
-  expect(client.poll()).toBe(first);
+  expect(await client.poll()).toBe(first);
   host.directory.readConversation = original;
 });
 
@@ -178,12 +205,12 @@ for await(const line of createInterface({input:process.stdin})){
   await next('child-ready');
   const host=start(f,async()=>{throw new Error('client executed a turn');});
   const client=createTuiProjectClient({dataHome:f.dataHome,host,autoStart:false});cleanups.push(()=>client.close());
-  client.submit('cross process',{inputId:'cross-process'});expect(client.poll(true).isHost).toBe(false);
+  client.submit('cross process',{inputId:'cross-process'});expect((await client.poll(true)).isHost).toBe(false);
   child.stdin.write('tick\n');await next('child-consumed');
-  expect(client.poll(true).messages.filter(row=>row.kind==='agent_reply'&&row.content==='child process received')).toHaveLength(1);
+  expect((await client.poll(true)).messages.filter(row=>row.kind==='agent_reply'&&row.content==='child process received')).toHaveLength(1);
   client.submit('duplicate retry',{inputId:'cross-process'});child.stdin.write('tick\n');await next('child-consumed');
-  expect(client.poll(true).messages.filter(row=>row.id==='input-cross-process')).toHaveLength(1);
-  expect(client.poll(true).messages.filter(row=>row.kind==='agent_reply'&&row.content==='child process received')).toHaveLength(1);
+  expect((await client.poll(true)).messages.filter(row=>row.id==='input-cross-process')).toHaveLength(1);
+  expect((await client.poll(true)).messages.filter(row=>row.kind==='agent_reply'&&row.content==='child process received')).toHaveLength(1);
   const exited=new Promise<void>(resolve=>child.once('close',()=>resolve()));child.stdin.write('close\n');child.stdin.end();await exited;lines.close();
 },12000);
 
@@ -256,8 +283,8 @@ test('shared terminal composition completes delegation, real file evidence, inde
   client.submit('Read README and verify it',{inputId:'chain'});await host.tick();
   const deadline=Date.now()+6000;
   while(Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,20));await host.tick();
-    if(client.poll(true).messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收')))break;}
-  const snapshot=client.poll(true),session=snapshot.sessions[0];
+    if((await client.poll(true)).messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收')))break;}
+  const snapshot=await client.poll(true),session=snapshot.sessions[0];
   expect(session).toBeDefined();
   expect(snapshot.messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收'))).toBe(true);
   const plan=host.plans.getPlan(session.planId)!;
@@ -268,3 +295,21 @@ test('shared terminal composition completes delegation, real file evidence, inde
   const after=host.plans.getPlan(plan.planId)!;
   expect({status:after.status,runner:after.runner,origin:after.delegationOrigin}).toEqual(before);
 },15000);
+
+test('terminal public messages survive optional card failure and a failed refresh without a full conversation read',async()=>{
+  const f=fixture(),host=start(f,async()=>({ok:true,text:'public reply',toolCalls:[]}));
+  const client=createTuiProjectClient({dataHome:f.dataHome,host,autoStart:false});cleanups.push(()=>client.close());
+  client.submit('public question',{inputId:'isolated-public'});await host.tick();
+  const before=await client.poll(true);expect(before.messages.some(row=>row.content==='public reply')).toBe(true);
+  const read=host.directory.readConversation,interactions=host.directory.readInteractions;
+  try {
+    host.directory.readConversation=((_workspaceId: string,params: any)=>{
+      expect(params.view).toBe('cards');return {ok:false,code:'CONTROLLED_CARD_FAILURE'};
+    }) as typeof read;
+    const cardsFailed=await client.poll(true);expect(cardsFailed.cardsUnavailable).toBe(true);
+    expect(cardsFailed.messages.some(row=>row.content==='public reply')).toBe(true);
+    host.directory.readInteractions=(async()=>{throw new Error('CONTROLLED_PUBLIC_FAILURE');}) as typeof interactions;
+    const refreshFailed=await client.poll(true);expect(refreshFailed.messageState).toBe('unavailable');
+    expect(refreshFailed.messages).toEqual(cardsFailed.messages);
+  }finally{host.directory.readConversation=read;host.directory.readInteractions=interactions;}
+});

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createExecutionScheduler, registerWorkBudget, type ModelProvider } from '@peer-agent/runtime-node';
@@ -17,6 +17,8 @@ afterEach(async () => { while (cleanup.length) await cleanup.pop()!(); });
 function harness(provider: ModelProvider, extra: Partial<Parameters<typeof createTuiTurnExecutor>[0]> = {}) {
   const home = mkdtempSync(path.join(os.tmpdir(), 'peer-tui-turn-'));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(path.join(home, 'projects', 'workspace'), { recursive: true });
+  writeFileSync(path.join(home, 'projects', 'workspace', 'profile.json'), JSON.stringify({ workspaceId: 'workspace', agentConversationId: 'conversation', status: 'active', displayName: 'Test Bot', avatar: { kind: 'generated' } }));
   const requests: any[] = [], hosts: TuiHost[] = [], persisted: any[] = [];
   const scheduler = createExecutionScheduler();
   const executor = createTuiTurnExecutor({ dataHome: home, getSettings: () => ({}),
