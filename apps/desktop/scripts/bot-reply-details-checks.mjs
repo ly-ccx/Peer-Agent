@@ -126,8 +126,10 @@ export async function hoverBotReply(page, message, button = message.locator('.bo
   // do not retry the scenario or force the details button visible.
   const deadline = Date.now() + 15000;
   let revealed = false;
+  let pointer;
   while (!revealed && Date.now() < deadline) {
     const point = await visibleHoverPoint();
+    pointer = point;
     assert.equal(point.visible, true, 'the reply is visible before a real pointer hovers it');
     await page.mouse.move(1, 1);
     await page.mouse.move(point.x, point.y, { steps: 2 });
@@ -141,4 +143,5 @@ export async function hoverBotReply(page, message, button = message.locator('.bo
   }
   assert.equal(revealed, true, 'a real pointer over the current reply reveals its details');
   assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'hovering the reply reveals its details');
+  return pointer;
 }

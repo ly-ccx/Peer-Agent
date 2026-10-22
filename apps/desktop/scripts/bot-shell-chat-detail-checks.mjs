@@ -59,7 +59,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
       await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
     });
     await checkReplyPresence({ page, reply: firstReply, report, until, state: `short-question-${theme}` });
-    await hoverBotReply(page, firstReply, button);
+    const pointer = await hoverBotReply(page, firstReply, button);
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1');
     const beforeCapture = await firstReply.evaluate(node => ({ hovered: node.matches(':hover'),
       opacity: getComputedStyle(node.querySelector('.bot-reply-context > button')).opacity,
