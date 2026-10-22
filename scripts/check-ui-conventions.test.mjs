@@ -38,8 +38,8 @@ test('renderer satisfies the shared radius and SVG rules', () => assert.deepEqua
 
 test('message/composer and their insets have explicit role relationships', () => {
   const css = readFileSync(new URL('../apps/desktop/renderer/src/styles/tokens.css', import.meta.url), 'utf8');
-  const expected = { detail: '2px', chip: '4px', 'control-compact': '6px', control: '8px', row: '8px', panel: '12px',
-    modal: '16px', inset: '8px', message: '16px', composer: '18px', pill: '999px', circle: '50%', avatar: '25%' };
+  const expected = { detail: '2px', chip: '8px', 'control-compact': '8px', control: '12px', row: '12px', panel: '16px',
+    modal: '16px', inset: '12px', message: '16px', composer: '16px', pill: '999px', circle: '50%', avatar: '25%' };
   for (const [role, value] of Object.entries(expected)) assert.ok(css.includes(`--ui-radius-${role}: ${value};`));
   for (const alias of ['radius-', 'za-radius', 'control-radius', 'surface-radius', 'composer-radius']) {
     for (const match of css.matchAll(new RegExp(`--${alias}[\\w-]*:\\s*([^;]+);`, 'g')))

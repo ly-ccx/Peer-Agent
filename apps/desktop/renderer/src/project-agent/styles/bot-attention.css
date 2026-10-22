@@ -7,7 +7,7 @@
 .bot-attention-group + .bot-attention-group { margin-top: 24px; }
 .bot-attention-group > h3 { display: flex; gap: 8px; align-items: center; color: var(--graphite-soft); font-size: .8125rem; margin: 0 0 12px; }
 .bot-attention-group > h3 span { font-variant-numeric: tabular-nums; }
-.bot-attention-item { padding: 16px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-detail); background: var(--control-fill); overflow-wrap: anywhere; }
+.bot-attention-item { padding: 16px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--control-fill); overflow-wrap: anywhere; }
 .bot-attention-item + .bot-attention-item { margin-top: 12px; }
 .bot-attention-kind { margin: 0 0 6px; font-size: .6875rem; color: var(--graphite-soft); }
 .bot-attention-title { margin: 0; font-size: .875rem; line-height: 1.65; white-space: pre-wrap; }

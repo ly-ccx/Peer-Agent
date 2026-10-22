@@ -307,25 +307,28 @@
   --control-radius: var(--ui-radius-control);
   --control-radius-compact: var(--ui-radius-control-compact);
   --surface-radius: var(--ui-radius-modal);
+  /* 绘制出来的连续曲线。控件、分组和浮层共用这一条，不再混用圆弧。 */
   --control-corner: superellipse(1.4);
+  --surface-corner: var(--control-corner);
   --composer-radius: var(--ui-radius-composer);
-  --composer-corner: superellipse(1.4);
+  --composer-corner: var(--control-corner);
   --composer-surface: color-mix(in srgb, var(--paper-sheet) 72%, var(--control-fill) 28%);
   --composer-edge: color-mix(in srgb, var(--graphite-base) 7%, transparent);
   --composer-focus-edge: color-mix(in srgb, var(--graphite-base) 18%, transparent);
 
-  /* One radius scale, chosen by role. Insets stay smaller than their parent;
-   * joined edges use 0/inherit. Pill/circle/avatar describe geometry, not size. */
+  /* 三档尺寸，曲线都是同一条连续圆角。
+   * 8 紧凑控件与小标记，12 普通控件和列表行，16 分组、消息、输入框和浮层。
+   * detail 只留给印章、刻度和图表。胶囊、正圆按几何保留。内嵌角小于外层；相接边用 0/inherit。 */
   --ui-radius-detail: 2px;
-  --ui-radius-chip: 4px;
-  --ui-radius-control-compact: 6px;
-  --ui-radius-control: 8px;
-  --ui-radius-row: 8px;
-  --ui-radius-panel: 12px;
+  --ui-radius-chip: 8px;
+  --ui-radius-control-compact: 8px;
+  --ui-radius-control: 12px;
+  --ui-radius-row: 12px;
+  --ui-radius-panel: 16px;
   --ui-radius-modal: 16px;
-  --ui-radius-inset: 8px;
+  --ui-radius-inset: 12px;
   --ui-radius-message: 16px;
-  --ui-radius-composer: 18px;
+  --ui-radius-composer: 16px;
   --ui-radius-pill: 999px;
   --ui-radius-circle: 50%;
   --ui-radius-avatar: 25%;
@@ -875,5 +878,16 @@ textarea:focus-visible,
   /* 扫光停动后直接撤掉遮罩,文字回归纯 ink-base 静态可读 */
   .za-streaming-text::after {
     display: none;
+  }
+}
+
+/* 连续曲线盖住全部绘制圆角。开关及其旋钮保持圆弧。 */
+@supports (corner-shape: superellipse(1.4)) {
+  :where(body *, body *::before, body *::after) {
+    corner-shape: var(--peer-corner, var(--control-corner));
+  }
+
+  :where(.peer-switch) {
+    --peer-corner: round;
   }
 }
