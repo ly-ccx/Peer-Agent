@@ -125,6 +125,33 @@ test('terminal composition consumes a durable input once and projects its shared
   expect(calls[0].turnProfile.modelSelection.modelProviderId).toBe('configured');
 });
 
+test('terminal model context keeps legacy public interactions and excludes private process records', async () => {
+  const f=fixture(), requests:(readonly any[])[]=[];
+  const host=createTuiProjectHost({...f,autoStart:false,
+    getSettings:()=>({providers:[provider],projectAgent:{concurrency:1},memory:{enabled:false}}),
+    createRuntime(options){
+      const toolHost=createTuiHost(options);
+      return {host:toolHost,
+        modelSelection:createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'}),
+        model:createProviderChatModel({model:'test-model',toolDefinitionsForMode:mode=>toolHost.toolDefinitionsForMode!(mode),
+          getSystemPrompt:context=>buildTuiSystemPrompt({}, {...context.systemContextInput,mode:context.mode}),
+          provider:{async stream(request){requests.push(request.messages);return {content:'Public reply',toolCalls:[]};}}}),
+        dispose:()=>toolHost.dispose()} as unknown as TuiRuntime;
+    }});
+  cleanups.push(()=>host.close());
+  host.conversations.appendMessage(f.conversationId,{id:'legacy-public-user',role:'user',content:'KEEP_LEGACY_USER_BOUNDARY'});
+  host.conversations.appendMessage(f.conversationId,{id:'legacy-public-assistant',role:'assistant',content:'KEEP_LEGACY_PUBLIC_REPLY'});
+  host.conversations.appendMessage(f.conversationId,{id:'private-process-record',role:'assistant',kind:'agent_turn',turnKind:'wake',
+    content:'PRIVATE_PROCESS_SENTINEL',rounds:[{content:'PRIVATE_ROUND_SENTINEL'}]} as never);
+  host.inputs.submitInput({workspaceId:f.workspaceId,inputId:'current-public-input',surface:'tui',text:'Current public question'});
+  await host.tick();
+  const messages=requests.flat();
+  expect(messages.some(row=>row.role==='user'&&JSON.stringify(row.content).includes('KEEP_LEGACY_USER_BOUNDARY'))).toBe(true);
+  expect(messages.some(row=>row.role==='assistant'&&JSON.stringify(row.content).includes('KEEP_LEGACY_PUBLIC_REPLY'))).toBe(true);
+  expect(JSON.stringify(requests)).not.toContain('PRIVATE_PROCESS_SENTINEL');
+  expect(JSON.stringify(requests)).not.toContain('PRIVATE_ROUND_SENTINEL');
+});
+
 test('a terminal client writes only the queue; active desktop owns consumption and approval', async () => {
   const f = fixture();
   const desktop = createHostLease({ rootDir: path.join(f.dataHome, 'project-runtime'), hostId: 'desktop', surface: 'desktop' } as never);

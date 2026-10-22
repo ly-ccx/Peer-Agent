@@ -5,6 +5,7 @@ All notable changes to Peer Agent are tracked here.
 ## 0.1.0-rc.25 - 2026-10-22
 
 - Build on RC24 with public interaction reads by default and child execution details loaded on demand.
+- Retain kind-less legacy public user/assistant interactions in TUI model context; private process records remain excluded.
 - Isolate message, task-card and detail failures; retain readable messages and support explicit retry.
 - Replace repeated coordination snapshots with incremental segmented events and exact usage receipts; recover large journals in background workers and rebuild derived indexes with durable-source checks.
 - Preserve task identities, conversations, evidence and legacy journals; unknown tool outcomes are not automatically repeated.
