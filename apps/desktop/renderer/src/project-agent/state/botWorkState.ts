@@ -19,8 +19,10 @@ export function indexBotWork(sessions: readonly DrawerSession[], available: bool
   return { byId, byAnchor, available };
 }
 export interface BotWorkRow { readonly id: string; readonly session?: DrawerSession; readonly status: WorkSessionStatus | null }
-export function canCancelTask(status: string | null): boolean {
-  return ['starting', 'queued', 'running', 'waiting_user', 'waiting_agent', 'verifying', 'paused', 'superseded'].includes(status ?? '');
+export function canCancelTask(status: string | null, cancelable?: boolean): boolean {
+  // 生命周期决策给出的 cancelable 优先；缺字段时才退回状态表，避免出现第二套规则。
+  if (typeof cancelable === 'boolean') return cancelable;
+  return ['starting', 'queued', 'running', 'waiting_user', 'waiting_agent', 'verifying', 'paused'].includes(status ?? '');
 }
 /** A worker's report summary is not the current verification phase. */
 export function workProgress(row: BotWorkRow, i18n: Pick<I18nRuntime, 't'>): string {

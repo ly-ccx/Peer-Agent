@@ -28,6 +28,8 @@ import {
   DEFAULT_HOME_LIMIT,
   DEFAULT_RESULT_READY_WITHIN_MS,
   DEFAULT_RESULT_READY_LIMIT,
+  DEFAULT_ACTIVE_WITHIN_MS,
+  isCompletedPlanGateCandidate,
 } from './task-overview-aggregator.mjs';
 
 // ---------------------------------------------------------------------------
@@ -622,6 +624,49 @@ test('aggregator keeps waiting_user as a question even when the conversation is 
   assert.equal(item.actionRight, 'needs_you');
   assert.equal(item.needsYouReason, 'user_input');
   assert.equal(item.nextAction, 'answer_question');
+});
+
+test('aggregator 把 completed + 预算耗尽的委派计划投影成人类决策，而不是已完成', () => {
+  // 桌面表面同一真实反例：plan.status=completed、delegated=true、
+  // runner.status=budget_exhausted、无活体流（executionOwnership=unknown）。
+  // 修复前 item 是 status=waiting_user + statusLabel=已完成 + actionRight=terminal，
+  // 任务卡会出现「已完成」+ 需要你决定的矛盾组合。
+  const plan = {
+    planId: 'plan-completed-budget',
+    conversationId: 'conversation-completed-budget',
+    title: '预算耗尽但计划已落完成',
+    status: 'completed',
+    updatedAt: '2026-08-09T02:00:00.000Z',
+    targetWorkspacePath: '/work/peer_agent',
+    runner: { status: 'budget_exhausted' },
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: { listPlanDetails: () => [plan] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-completed-budget',
+        title: '预算耗尽但计划已落完成',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-09T02:00:00.000Z',
+        // 已读水位晚于更新：确保断言的是生命周期文案，而不是「有未读」。
+        lastReadAt: '2026-08-09T03:00:00.000Z',
+      },
+    ],
+    listActiveStreams: () => [],
+  });
+  const item = agg
+    .listTaskOverview({ activeWithinMs: 0 })
+    .find((entry) => entry.source === 'goal_plan');
+  assert.ok(item, '列表里必须有这条 GoalPlan 卡片');
+  // 行动权/下一步/按钮同源：预算门必须给出可决策入口，而不是终态。
+  // （statusLabel 会被「已读/未读」水位覆盖，属于另一条展示轴，这里不做断言。）
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'decision');
+  assert.equal(item.nextAction, 'decide_blocked');
+  assert.equal(item.cancelable, true);
+  assert.notEqual(item.statusLabel, '已完成');
+  assert.notEqual(item.actionRight, 'terminal');
 });
 
 test('toGoalPlanSnapshot classifies renderer unavailability as a system-owned blocker', () => {
@@ -1796,7 +1841,7 @@ test('listTaskOverview moves waiting_user GoalPlans out of Peer advancing', () =
   assert.equal(item.statusLabel, '等待你的选择');
 });
 
-test('listTaskOverview ignores stale waiting_user after plan completion', () => {
+test('completed + 未消费的 waiting_user：问题优先于 completed（ADR 102 统一契约）', () => {
   const agg = createTaskOverviewAggregator({
     goalPlanStore: {
       listPlanDetails: () => [{
@@ -1812,17 +1857,52 @@ test('listTaskOverview ignores stale waiting_user after plan completion', () => 
     },
     automationStore: { listDefinitions: () => [], listRuns: () => [] },
   });
+  // completed 仍有未消费的人类门：默认列表必须露出这张卡，且五字段与协议同源
+  // （问题优先于 completed）。旧断言把「列表里 0 张」钉成契约——那正是本轮修的缺口，
+  // 按已批准目标改为正向断言，不是弱化。
   const items = agg.listTaskOverview({ workspacePath: '/x/peer_agent', activeWithinMs: 0 });
-  assert.equal(items.length, 0);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].source, 'goal_plan');
+  assert.equal(items[0].actionRight, 'needs_you');
+  assert.equal(items[0].needsYouReason, 'user_input');
+  assert.equal(items[0].nextAction, 'answer_question');
+  assert.equal(items[0].statusLabel, '等待你的选择');
+  assert.equal(items[0].cancelable, true);
+  const [item] = agg.listTaskOverview({
+    workspacePath: '/x/peer_agent',
+    includeTerminal: true,
+    activeWithinMs: 0,
+  });
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+  assert.notEqual(item.statusLabel, '已完成');
+});
+
+test('completed + 遗留 runner=running：不再显示运行中，也没有取消入口', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [{
+        planId: 'stale-completed-running',
+        status: 'completed',
+        title: '遗留执行',
+        updatedAt: POST_CUTOFF,
+        targetWorkspacePath: '/x/peer_agent',
+        conversationId: 'c-stale-running',
+        runner: { status: 'running' },
+        progress: { completed: 1, total: 1 },
+      }],
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
   const [item] = agg.listTaskOverview({
     workspacePath: '/x/peer_agent',
     includeTerminal: true,
     activeWithinMs: 0,
   });
   assert.equal(item.actionRight, 'terminal');
-  assert.equal(item.needsYouReason, undefined);
-  assert.equal(item.nextAction, 'none');
   assert.equal(item.statusLabel, '已完成');
+  assert.equal(item.cancelable, false);
 });
 
 test('listTaskOverview 默认排除 failed 与 completed；活跃任务仍在', () => {
@@ -2316,4 +2396,166 @@ test('cancelled declined plans leave needs_you and are not source-block', () => 
   assert.equal(items.length, 0);
   assert.equal(items.some((item) => item.actionRight === 'needs_you'), false);
   assert.equal(items.some((item) => String(item.taskId || '').startsWith('source-block:')), false);
+});
+
+// ---------------------------------------------------------------------------
+// ADR102 §12.8.5：门卡不新开会话维度 —— 同一会话只留最新一张计划卡。
+// ---------------------------------------------------------------------------
+
+const dedupeConversation = (updatedAt) => ({
+  id: 'conversation-dedupe-gates',
+  title: '两个门',
+  workspacePath: '/work/peer_agent',
+  updatedAt,
+  // 已读水位晚于更新：断言的是生命周期语义，不是「有未读」。
+  lastReadAt: '2026-08-09T09:00:00.000Z',
+});
+
+const budgetGatePlan = (planId, title, updatedAt) => ({
+  planId,
+  conversationId: 'conversation-dedupe-gates',
+  title,
+  status: 'completed',
+  delegated: true,
+  runner: { status: 'budget_exhausted' },
+  workspacePath: '/work/peer_agent',
+  updatedAt,
+});
+
+test('aggregator 同一会话多个门只留最新一张（不再一个会话两张门卡）', () => {
+  // 修复前实测：count=2，plan-gate-old 与 plan-gate-new 各一张，违反 §12.8.5
+  // 「本轮不引入『一个会话多张门卡』的新交互」。
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        budgetGatePlan('plan-gate-old', '旧门：预算耗尽', '2026-08-09T02:00:00.000Z'),
+        budgetGatePlan('plan-gate-new', '新门：预算耗尽', '2026-08-09T05:00:00.000Z'),
+      ],
+    },
+    conversationStore: { listConversations: () => [dedupeConversation('2026-08-09T05:00:00.000Z')] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listActiveStreams: () => [],
+  });
+  const items = agg
+    .listTaskOverview({ includeTerminal: false, activeWithinMs: 0 })
+    .filter((item) => item.source === 'goal_plan');
+  assert.equal(items.length, 1);
+  // 留下的是最新那张门卡，且仍然是人类决策（不能因为去重把门变成「已完成」）。
+  assert.equal(items[0].taskId, 'plan-gate-new');
+  assert.equal(items[0].actionRight, 'needs_you');
+  assert.equal(items[0].statusLabel, '预算已耗尽');
+});
+
+test('aggregator 同会话已有更新计划时，旧门卡不单独成卡（最新计划去重）', () => {
+  // 修复前实测：count=2，旧门卡与更新的推进中计划同时出现。
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        budgetGatePlan('plan-gate-old', '旧门：预算耗尽', '2026-08-09T02:00:00.000Z'),
+        {
+          planId: 'plan-exec-new',
+          conversationId: 'conversation-dedupe-gates',
+          title: '更新的推进中计划',
+          status: 'executing',
+          workspacePath: '/work/peer_agent',
+          updatedAt: '2026-08-09T06:00:00.000Z',
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [dedupeConversation('2026-08-09T06:00:00.000Z')] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listActiveStreams: () => [],
+  });
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  const goalPlanItems = items.filter((item) => item.source === 'goal_plan');
+  assert.equal(goalPlanItems.length, 1);
+  assert.equal(goalPlanItems[0].taskId, 'plan-exec-new');
+  assert.equal(
+    items.some((item) => item.taskId === 'plan-gate-old'),
+    false,
+  );
+});
+
+test('aggregator 仍保留 completed live handoff 的独立投影（去重不能吞掉交回中）', () => {
+  // 与上一条成对：门卡受会话级最新计划去重约束，但「仍在合进源头」的 live
+  // handoff 必须保持原有独立投影语义，不能被同会话更新计划盖掉。
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-live-delivering',
+          conversationId: 'conversation-dedupe-gates',
+          title: '交回中',
+          status: 'completed',
+          workspacePath: '/work/peer_agent',
+          updatedAt: '2026-08-09T03:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: { status: 'delivering' },
+        },
+        {
+          planId: 'plan-exec-new',
+          conversationId: 'conversation-dedupe-gates',
+          title: '更新的推进中计划',
+          status: 'executing',
+          workspacePath: '/work/peer_agent',
+          updatedAt: '2026-08-09T06:00:00.000Z',
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [dedupeConversation('2026-08-09T06:00:00.000Z')] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listActiveStreams: () => [],
+  });
+  const items = agg
+    .listTaskOverview({ includeTerminal: false, activeWithinMs: 0 })
+    .filter((item) => item.source === 'goal_plan');
+  assert.equal(items.length, 2);
+  assert.ok(items.some((item) => item.taskId === 'plan-live-delivering'));
+  assert.ok(items.some((item) => item.taskId === 'plan-exec-new'));
+});
+
+// ---------------------------------------------------------------------------
+// isCompletedPlanGateCandidate：默认活跃窗必须有正例，且时间窗不得代替验收判断。
+// ---------------------------------------------------------------------------
+
+test('isCompletedPlanGateCandidate 默认 7 天活跃窗内保留门卡，窗外不成门卡', () => {
+  assert.equal(DEFAULT_ACTIVE_WITHIN_MS, 7 * 24 * 60 * 60 * 1000);
+  const nowMs = Date.parse('2026-08-20T00:00:00.000Z');
+  // 正例：不传 activeWithinMs，走生产默认值。此前唯一的绿例是 activeWithinMs: 0
+  // （等于关闭时间窗），默认窗内从来没有正例，等于没人验证过真实默认行为。
+  const inWindowGate = {
+    planId: 'plan-gate-in-window',
+    status: 'completed',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+  };
+  assert.equal(isCompletedPlanGateCandidate(inWindowGate, { nowMs }), true);
+  // 反例：同样形状、只是超出默认 7 天窗，必须不成门卡。
+  const outOfWindowGate = {
+    planId: 'plan-gate-out-of-window',
+    status: 'completed',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  };
+  assert.equal(isCompletedPlanGateCandidate(outOfWindowGate, { nowMs }), false);
+});
+
+test('isCompletedPlanGateCandidate 已验收与祖父化即使落在默认窗内也不成门卡', () => {
+  const nowMs = Date.parse('2026-08-20T00:00:00.000Z');
+  // 已验收：有真实验收事实，不是待决策。
+  const acceptedGate = {
+    planId: 'plan-gate-accepted',
+    status: 'completed',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+    resultAcceptance: { acceptedAt: '2026-08-18T01:00:00.000Z' },
+  };
+  assert.equal(isPlanResultAccepted(acceptedGate), true);
+  assert.equal(isCompletedPlanGateCandidate(acceptedGate, { nowMs }), false);
+  // 祖父化：completed 早于验收要求生效，不能因为 updatedAt 新鲜就当成门。
+  const grandfatheredGate = {
+    planId: 'plan-gate-grandfathered',
+    status: 'completed',
+    completedAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+  };
+  assert.equal(isPlanResultAccepted(grandfatheredGate), true);
+  assert.equal(isCompletedPlanGateCandidate(grandfatheredGate, { nowMs }), false);
 });

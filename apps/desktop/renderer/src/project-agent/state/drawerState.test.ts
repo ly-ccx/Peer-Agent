@@ -49,6 +49,15 @@ function session(partial: Partial<DrawerSession> & Pick<DrawerSession, 'sessionI
   };
 }
 
+test('会话事实里的 cancelable 必须原样带到抽屉，缺字段时不伪造', () => {
+  const blocked = readDrawerSession({ sessionId: 's-cancel', status: 'running', statusLabel: 'Peer 正在推进', cancelable: false });
+  assert.ok(blocked);
+  assert.equal(blocked.cancelable, false);
+  const legacy = readDrawerSession({ sessionId: 's-legacy', status: 'running', statusLabel: 'Peer 正在推进' });
+  assert.ok(legacy);
+  assert.equal(legacy.cancelable, undefined);
+});
+
 test('缺失前置任务没有 blocker 行时仍显示需要重新安排的原因', () => {
   const missing = readDrawerSession({ sessionId: 'blocked', status: 'waiting_user', statusLabel: '等待你',
     queueReason: 'dependency_missing', queuedBehind: [] });

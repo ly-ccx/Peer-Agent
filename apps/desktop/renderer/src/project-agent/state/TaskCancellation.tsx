@@ -44,11 +44,13 @@ export function TaskCancellationProvider({ workspaceId, onRefresh, children }: {
   return <TaskCancellation.Provider value={{ workspaceId, states, cancel }}>{children}</TaskCancellation.Provider>;
 }
 
-export function TaskCancelButton({ sessionId, status, title, i18n }: {
-  readonly sessionId: string; readonly status: string | null; readonly title: string; readonly i18n: I18nRuntime;
+export function TaskCancelButton({ sessionId, status, cancelable, title, i18n }: {
+  readonly sessionId: string; readonly status: string | null; readonly cancelable?: boolean;
+  readonly title: string; readonly i18n: I18nRuntime;
 }) {
   const control = useContext(TaskCancellation);
-  if (!control || !canCancelTask(status) && status !== 'stopping') return null;
+  // 停止中的按钮只表达"正在停止"，其余一律听生命周期决策的 cancelable。
+  if (!control || (!canCancelTask(status, cancelable) && status !== 'stopping')) return null;
   const state = control.states[`${control.workspaceId}:${sessionId}`];
   const stopping=state?.pending || status==='stopping';
   return <div className="bot-task-cancel">

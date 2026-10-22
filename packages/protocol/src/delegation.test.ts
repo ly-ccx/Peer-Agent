@@ -108,7 +108,8 @@ test('work session conclusion matches the goal-plan projection', () => {
   assert.equal(paused.statusLabel, '已暂停');
 
   const interrupted = agrees(plan({ status: 'interrupted', interrupted: true }));
-  assert.equal(interrupted.status, 'queued');
+  // 中断是暂停语义：不再用 queued 冒充"排队待执行"。
+  assert.equal(interrupted.status, 'paused');
   assert.equal(interrupted.actionRight, 'paused');
 
   const failed = agrees(plan({ status: 'failed' }));

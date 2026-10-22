@@ -662,10 +662,13 @@ export function toGoalPlanSnapshot(plan, options = {}) {
   return {
     planId,
     status,
-    // Plan completion is authoritative over stale runner state. A completed plan cannot
-    // still own a live "waiting for you" interaction until a real user message reopens it.
-    runnerStatus: status === GOAL_COMPLETED_STATUS ? undefined : plan.runner?.status,
+    // 适配器只交原始事实：completed 不再抹掉 runner 事实；"是不是真的还在跑"由
+    // executionOwnership（进程内活流）表达，生命周期结论统一交给 protocol 的 decideLifecycle。
+    runnerStatus: plan.runner?.status,
+    ...(options.executionOwnership ? { executionOwnership: options.executionOwnership } : {}),
     agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
+    // 委派是真实事实：决定"完成但未验收"是否要停在等待验收，而不是靠工作会话表面反推。
+    delegated: Boolean(plan.delegationOrigin),
     systemBlocked: status !== GOAL_COMPLETED_STATUS
       && plan.runner?.status === 'blocked'
       && isRecoverableSystemGoalBlocker(plan.runner?.blockedReason),
@@ -938,6 +941,20 @@ function conversationIdOf(plan) {
 }
 
 /**
+ * 每会话只留最新计划 —— 唯一去重出口。
+ * 门卡与普通计划都走这里：两处各写一遍比较，就是门卡绕过 §12.8.5 去重的入口。
+ * updatedAt 不可解析时按「后来者覆盖」处理；时刻相同时保留新候选（宁可露出决策）。
+ */
+function recordLatestPlanCandidate(map, conversationId, plan) {
+  const current = map.get(conversationId);
+  const currentUpdatedAt = Date.parse(current?.updatedAt ?? current?.createdAt ?? '');
+  const nextUpdatedAt = Date.parse(plan?.updatedAt ?? plan?.createdAt ?? '');
+  if (!current || !Number.isFinite(currentUpdatedAt) || nextUpdatedAt >= currentUpdatedAt) {
+    map.set(conversationId, plan);
+  }
+}
+
+/**
  * 把同线但未进工作台队列的节点补进本轮 plans。
  * 先沿 parentPlanId 补祖先，再按会话补兄弟；只 hydrate 已在队列里的线，不做全量历史扫描。
  */
@@ -1032,10 +1049,34 @@ export function isGoalPlanMetaCandidate(plan, options = {}) {
   const status = typeof plan.status === 'string' ? plan.status : null;
   if (!status) return false;
   if (status === GOAL_COMPLETED_STATUS) {
-    return includeTerminal || isCompletedPlanStillLive(plan);
+    return (
+      includeTerminal ||
+      isCompletedPlanStillLive(plan) ||
+      isCompletedPlanGateCandidate(plan, options)
+    );
   }
   if (GOAL_HISTORY_TERMINAL_STATUSES.has(status)) return includeTerminal;
   return true;
+}
+
+/**
+ * completed 的索引 meta 不带 `runner`（store 的 `toMeta` 只持久化轻量字段），
+ * 所以「预算耗尽 / 待确认」这类真实人类门在 hydrate 前根本不可见。
+ * 这里只负责把「可能还有未消费决策」的 completed 放行给 hydrate：
+ * - 已验收 / 按存量规则祖父化为已验收 → 真结束，不再 hydrate；
+ * - 与列表可见窗同源（`activeWithinMs`），更早的历史 completed 不进来。
+ * 是否真的还有门由唯一决策出口 `projectGoalPlan` 判定，不在这里另立规则。
+ */
+export function isCompletedPlanGateCandidate(plan, options = {}) {
+  if (!plan || typeof plan !== 'object') return false;
+  if (plan.status !== GOAL_COMPLETED_STATUS) return false;
+  if (isPlanResultAccepted(plan)) return false;
+  const {
+    activeWithinMs = DEFAULT_ACTIVE_WITHIN_MS,
+    nowMs = Date.now(),
+  } = options;
+  const updatedAt = typeof plan.updatedAt === 'string' ? plan.updatedAt : null;
+  return isWithinActiveWindow(updatedAt, activeWithinMs, nowMs);
 }
 
 /**
@@ -1231,18 +1272,49 @@ export function createTaskOverviewAggregator({
       ? goalPlanStore.findEvidenceIndexRecords(evidenceRefs)
       : [];
     const latestPlanByConversationId = new Map();
+    // 门计划候选：与普通计划竞争同一张会话卡，不单独成卡（ADR102 §12.8.5）。
+    const gatePlansByConversationId = new Map();
     const independentlyProjectedLiveCompleted = [];
     const unlinkedPlans = [];
     // 目标线（Goal Thread）关系索引：从这批 plans 建一次，供两处 snapshot 组装共用。
     const relationIndex = buildGoalThreadRelationIndex(plans);
     const inScopeRootIds = collectInScopeThreadRoots(plans, scope, relationIndex);
     for (const rawPlan of plans) {
-      if (!isGoalPlanInScope(rawPlan, scope) && !isGoalThreadContextPlan(rawPlan, relationIndex, inScopeRootIds)) {
+      const inScope =
+        isGoalPlanInScope(rawPlan, scope) ||
+        isGoalThreadContextPlan(rawPlan, relationIndex, inScopeRootIds);
+      // completed 是否还有真实人类门（预算/审批/提问/权限）不能靠 status 猜：
+      // 唯一决策出口给出 needs_you 时，列表必须露出这张卡，不能让会话行
+      // （已读 / paused / continue_task）把待办吞掉。
+      const gateCandidate =
+        !inScope && !includeTerminal && rawPlan?.status === GOAL_COMPLETED_STATUS;
+      if (!inScope && !gateCandidate) continue;
+      const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
+      const planConversationId = typeof plan?.conversationId === 'string' ? plan.conversationId : '';
+      const snapshot = toGoalPlanSnapshot(plan, {
+        relationIndex,
+        evidenceIndex,
+        artifactRoots,
+        executionOwnership:
+          planConversationId && liveConversationIds.has(planConversationId) ? 'live' : 'unknown',
+      });
+      const projected = snapshot ? projectGoalPlan(snapshot) : null;
+      if (!inScope) {
+        // 未进作用域的 completed 只有一个例外：真实人类门。除此之外一律丢弃，
+        // 保持「历史 completed 不进列表」的既有语义。
+        if (projected?.actionRight !== 'needs_you') continue;
+        // ADR102 §12.8.5：门卡不新开会话维度。门计划先登记为该会话的最新计划
+        // 候选，循环结束后再与同会话其它计划竞争同一张卡——「一个会话多张门卡」
+        // 这个新交互不在批准范围内。没有会话归属就没有去重维度，保持逐项投影。
+        const gateConversationId =
+          typeof plan?.conversationId === 'string' ? plan.conversationId : '';
+        if (!gateConversationId) {
+          independentlyProjectedLiveCompleted.push(plan);
+          continue;
+        }
+        recordLatestPlanCandidate(gatePlansByConversationId, gateConversationId, plan);
         continue;
       }
-      const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
-      const snapshot = toGoalPlanSnapshot(plan, { relationIndex, evidenceIndex, artifactRoots });
-      const projected = snapshot ? projectGoalPlan(snapshot) : null;
       // completed 仍 live（自检/交回）时按 GoalPlan 逐项投影，避免被会话级去重吃掉。
       if (
         projected
@@ -1257,12 +1329,12 @@ export function createTaskOverviewAggregator({
         unlinkedPlans.push(plan);
         continue;
       }
-      const current = latestPlanByConversationId.get(conversationId);
-      const currentUpdatedAt = Date.parse(current?.updatedAt ?? current?.createdAt ?? '');
-      const nextUpdatedAt = Date.parse(plan?.updatedAt ?? plan?.createdAt ?? '');
-      if (!current || !Number.isFinite(currentUpdatedAt) || nextUpdatedAt >= currentUpdatedAt) {
-        latestPlanByConversationId.set(conversationId, plan);
-      }
+      recordLatestPlanCandidate(latestPlanByConversationId, conversationId, plan);
+    }
+    // 门计划与同会话其它计划竞争同一张卡：只有它确实是该会话最新计划时才占位，
+    // 否则按 §12.8.5 由更新的计划代表会话，不额外插一张旧门卡。
+    for (const [gateConversationId, gatePlan] of gatePlansByConversationId) {
+      recordLatestPlanCandidate(latestPlanByConversationId, gateConversationId, gatePlan);
     }
     for (const plan of [
       ...independentlyProjectedLiveCompleted,
@@ -1279,6 +1351,8 @@ export function createTaskOverviewAggregator({
         evidenceIndex,
         artifactRoots,
         conversationLive: conversationId ? liveConversationIds.has(conversationId) : false,
+        executionOwnership:
+          conversationId && liveConversationIds.has(conversationId) ? 'live' : 'unknown',
       });
       if (!snapshot) continue;
       // nowMs 与列表过滤时钟一致，保证 durationMs 与 active 窗同源。
