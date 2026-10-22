@@ -15,6 +15,11 @@ const pick = (value, keys) => value ? Object.fromEntries(keys.filter(key => valu
 
 function project(message) {
   const { rounds, segments, ...row } = message;
+  if (row.kind === 'agent_activity' && ['verifying', 'verified'].includes(row.agentActivity?.state)) return null;
+  if (row.kind === 'system_card' && Array.isArray(row.cards) && row.cards.some(card => card?.kind === 'verdict')) {
+    row.cards = row.cards.filter(card => card?.kind !== 'verdict');
+    if (!row.cards.length) return null;
+  }
   if (row.kind === 'agent_turn') return { id: row.id, role: row.role, kind: row.kind, turnId: row.turnId, turnKind: row.turnKind,
     content: '', createdAt: row.createdAt, replyTo: row.replyTo, userInputs: row.userInputs?.map(input => ({ inputId: input.inputId })),
     publicUpdates: row.publicUpdates, meta: pick(row.meta, ['workId', 'replyTo']), dispositionCalls: (rounds || []).flatMap(round => (round.toolCalls || []).flatMap(call => {
@@ -56,7 +61,7 @@ function rebuild({ file, target, expected, appendOnly = false }) {
   try {
     if (actual !== expected) throw fail('BACKGROUND_VERSION_CHANGED');
     const size = existsSync(file) ? statSync(file).size : 0, oldSize = Number(meta(db, 'size') || 0), previous = meta(db, 'source');
-    const append = meta(db, 'schema') === '2' && meta(db, 'terminated') === 'true' && previous && size > oldSize && previous.split(':').slice(0, 2).join(':') === actual.split(':').slice(0, 2).join(':') && prefix(file, oldSize) === meta(db, 'anchor');
+    const append = meta(db, 'schema') === '3' && meta(db, 'terminated') === 'true' && previous && size > oldSize && previous.split(':').slice(0, 2).join(':') === actual.split(':').slice(0, 2).join(':') && prefix(file, oldSize) === meta(db, 'anchor');
     if (appendOnly && (!append || size - oldSize > 128 * 1024)) throw fail('BACKGROUND_VERSION_CHANGED');
     db.exec('BEGIN IMMEDIATE');
     if (!append) db.exec('DELETE FROM messages; DELETE FROM identities; DELETE FROM links; DELETE FROM records;');
@@ -87,7 +92,7 @@ function rebuild({ file, target, expected, appendOnly = false }) {
       } finally { closeSync(fd); }
     }
     if (version(file) !== actual) throw fail('BACKGROUND_VERSION_CHANGED');
-    put(db, 'terminated', terminated); put(db, 'schema', 2); put(db, 'source', actual); put(db, 'size', size); put(db, 'seq', seq); put(db, 'anchor', prefix(file, size)); db.exec('COMMIT');
+    put(db, 'terminated', terminated); put(db, 'schema', 3); put(db, 'source', actual); put(db, 'size', size); put(db, 'seq', seq); put(db, 'anchor', prefix(file, size)); db.exec('COMMIT');
   } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
   finally { db.close(); }
 }
@@ -113,10 +118,10 @@ export function createInteractionReader({ storeDir, readMeta }) {
         for (const suffix of ['-wal', '-shm']) if (existsSync(target + suffix)) renameSync(target + suffix, backup + suffix);
         db = connect(target);
       }
-      if (meta(db, 'schema') !== '2' || meta(db, 'source') !== expected) {
+      if (meta(db, 'schema') !== '3' || meta(db, 'source') !== expected) {
         const oldSize = Number(meta(db, 'size') || 0), previous = meta(db, 'source');
         const size = expected === 'missing' ? 0 : statSync(file).size;
-        const smallTail = !flights.has(id) && meta(db, 'schema') === '2' && meta(db, 'terminated') === 'true' && previous
+        const smallTail = !flights.has(id) && meta(db, 'schema') === '3' && meta(db, 'terminated') === 'true' && previous
           && size > oldSize && size - oldSize <= 128 * 1024 && previous.split(':').slice(0, 2).join(':') === expected.split(':').slice(0, 2).join(':')
           && prefix(file, oldSize) === meta(db, 'anchor');
         db.close();

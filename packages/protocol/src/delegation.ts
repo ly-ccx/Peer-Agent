@@ -101,6 +101,8 @@ export interface WorkSession extends SessionQueueFacts {
 }
 
 export interface SessionReport {
+  /** Current host verification, loaded with task details; never assistant prose. */
+  readonly verification?: SessionVerificationDetail;
   readonly sessionId: string;
   readonly planId: string | null;
   readonly status: WorkSessionStatus;
@@ -261,6 +263,22 @@ export interface VerificationVerdict {
   readonly sameFamilyAsWorker?: boolean;
   readonly checks: readonly VerificationCheck[];
   readonly evidenceRefs: readonly string[];
+}
+
+export interface SessionVerificationDetail {
+  readonly sessionId: string;
+  readonly outcome: VerificationOutcome;
+  readonly checks: readonly {
+    readonly name: string;
+    readonly result: 'passed' | 'failed';
+    readonly evidenceRefs: readonly string[];
+    readonly reason?: string;
+  }[];
+  readonly workerModel: string | null;
+  readonly verifierModel: string | null;
+  readonly sameSource: boolean;
+  readonly reviewAttempts: readonly VerificationAttemptDiagnostic[];
+  readonly outputs: readonly { readonly name: string; readonly evidenceRef: string; readonly summary: string; readonly truncated: boolean }[];
 }
 
 /** Bounded persisted diagnostics, never an input to acceptance or Evidence authority. */

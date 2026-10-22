@@ -33,7 +33,7 @@ test('report and result-ready without a verdict retain both inbox facts but publ
   assert.equal(f.inbox.takeBatch('ws').events.length, 2);
 });
 
-test('a later report remains visible and verification never borrows the returned-result label', t => {
+test('reports remain visible while verification results stay in the inbox for task facts and bot reporting', t => {
   const f = fixture(t), publish = f.publisher();
   publish('ws', [
     { eventId: 'report-1', kind: 'report_available', sessionId: 'child' },
@@ -43,11 +43,11 @@ test('a later report remains visible and verification never borrows the returned
     { eventId: 'verify-passed', kind: 'result_ready', sessionId: 'child', payload: { outcome: 'passed' } },
     { eventId: 'accepted', kind: 'session_ended', sessionId: 'child' },
   ]);
-  assert.deepEqual(f.activities().map(row => row.state), ['reported', 'blocked', 'reported', 'verified', 'ended']);
+  assert.deepEqual(f.activities().map(row => row.state), ['reported', 'reported', 'ended']);
   assert.equal(f.inbox.takeBatch('ws').events.length, 6);
 });
 
-test('verification starts visibly, retains throttled progress and still wakes on a stall', t => {
+test('verification retains throttled task progress and stall wakes without adding public messages', t => {
   const f = fixture(t), publish = f.publisher();
   let clock = Date.parse('2026-10-21T00:00:00Z');
   const watch = createWatchPublisher({ now: () => new Date(clock).toISOString() });
@@ -63,7 +63,7 @@ test('verification starts visibly, retains throttled progress and still wakes on
   const progress = emit();
   assert.equal(progress.length, 1);
   assert.equal(progress[0].payload.verificationProgress.observationCount, 7);
-  assert.deepEqual(f.activities().map(row => row.state), ['verifying', 'verifying']);
+  assert.deepEqual(f.activities(), []);
   assert.equal(emit().length, 0);
   clock += 10 * 60_000;
   assert.equal(emit().filter(event => event.kind === 'stalled').length, 1);
