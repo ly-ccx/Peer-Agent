@@ -46,11 +46,12 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
         await choose(theme, material);
         const actual = await page.locator('.bot-shell').evaluate((shell, material) => {
           const probe = document.createElement('span');
-          probe.style.background = `var(${material === 'glass' ? '--glass-chrome' : '--chrome-raised'})`;
+          const transparencyReduced = matchMedia('(prefers-reduced-transparency: reduce)').matches;
+          probe.style.background = `var(${material === 'glass' && !transparencyReduced ? '--glass-chrome' : '--chrome-raised'})`;
           shell.append(probe); const expected = getComputedStyle(probe).backgroundColor; probe.remove();
           const column = shell.querySelector('.bot-column'), main = shell.querySelector('.bot-main');
           const c = column.getBoundingClientRect(), m = main.getBoundingClientRect(), s = shell.getBoundingClientRect();
-          return { background: getComputedStyle(shell).backgroundColor, expected,
+          return { background: getComputedStyle(shell).backgroundColor, expected, transparencyReduced,
             sidebar: getComputedStyle(column).backgroundColor, divider: getComputedStyle(column).borderRightWidth, radius: parseFloat(getComputedStyle(main).borderRadius),
             gap: m.left - c.right, top: m.top - s.top, fits: shell.scrollWidth <= shell.clientWidth };
         }, material);
