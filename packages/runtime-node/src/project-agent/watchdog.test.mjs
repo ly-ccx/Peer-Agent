@@ -237,3 +237,21 @@ test('计划上的重试记录和等待用户会进入同一套判断', () => {
   ], 'ws-1');
   assert.deepEqual(facts.sessions.map((session) => session.sessionId), ['session-1']);
 });
+
+test('结果就绪超过停滞窗口仍未收下时发一次 verify 停滞，责任交回主 Bot', () => {
+  const session = { sessionId: 'session-r', status: 'result_ready', startedAt: STARTED,
+    completedAt: STARTED, resultRevision: 'rev-1' };
+  const beforeWindow = new Date(Date.parse(STARTED) + STALL_WINDOW_MS - 1).toISOString();
+  assert.equal(assessStall(session, { now: beforeWindow }).stalled, false);
+  const stalled = assessStall(session, { now: TEN_MINUTES });
+  assert.equal(stalled.stalled, true);
+  assert.equal(stalled.stallId, 'stall:verify:session-r:rev-1');
+  assert.equal(stalled.anchor, 'verification_pending');
+  // 同一版结果只催一次；时间推进 stallId 稳定，新验证版本才换。
+  assert.equal(assessStall(session, { now: new Date(Date.parse(TEN_MINUTES) + 60_000).toISOString() }).stallId, stalled.stallId);
+  assert.notEqual(assessStall({ ...session, resultRevision: 'rev-2' }, { now: TEN_MINUTES }).stallId, stalled.stallId);
+  assert.equal(assessStall({ ...session, resultRevision: '' }, { now: TEN_MINUTES }).stallId, `stall:verify:session-r:${STARTED}`);
+  // 真实待批/待答走 attention，不催；已验收不算停滞。
+  assert.equal(assessStall({ ...session, needsUser: [{ kind: 'question', approvalId: 'q1' }] }, { now: TEN_MINUTES }).stalled, false);
+  assert.equal(assessStall({ ...session, status: 'accepted' }, { now: TEN_MINUTES }).stalled, false);
+});
