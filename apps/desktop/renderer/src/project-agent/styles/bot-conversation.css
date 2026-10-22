@@ -94,7 +94,8 @@
 /* Use the conversation's width, so a scroll bar cannot shift the message
    column relative to the non-scrolling task strip and composer. */
 .bot-thread-row,
-.bot-thread > .bot-live-status {
+.bot-thread > .bot-live-status,
+.bot-thread > .bot-thinking-status {
   align-self: flex-start;
   margin-inline-start: calc((100cqw - var(--bot-column-width)) / 2);
 }
@@ -762,6 +763,7 @@
 /* Replies, background work and the composer share one conversation column. */
 .bot-thread-row,
 .bot-thread > .bot-live-status,
+.bot-thread > .bot-thinking-status,
 .bot-composer,
 .bot-background-work {
   width: var(--bot-column-width);
@@ -909,6 +911,87 @@
   color: var(--graphite-soft);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.bot-thinking-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0 0 4px;
+  color: var(--graphite-soft);
+  font-size: 13px;
+  line-height: 1.4;
+  --motion-enter-from: 6px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+}
+
+.bot-thinking-status .bot-avatar {
+  width: 22px;
+  height: 22px;
+  flex-basis: 22px;
+}
+
+.bot-thinking-status .bot-avatar-generated[data-avatar-animated='true'][data-avatar-mood='thinking'] svg,
+.bot-thinking-status .bot-avatar-image[data-avatar-animated='true'][data-avatar-mood='thinking'],
+.bot-reply-context .bot-avatar-generated[data-avatar-animated='true'][data-avatar-mood='thinking'] svg,
+.bot-reply-context .bot-avatar-image[data-avatar-animated='true'][data-avatar-mood='thinking'] {
+  animation: bot-thinking-hop 1.05s ease-in-out infinite;
+}
+
+.bot-agent-activity[data-agent-state='queued'] .bot-agent-marker,
+.bot-agent-activity[data-agent-state='started'] .bot-agent-marker,
+.bot-agent-activity[data-agent-state='verifying'] .bot-agent-marker {
+  animation: bot-thinking-hop 1.05s ease-in-out infinite;
+}
+
+.bot-thinking-status-label {
+  background: linear-gradient(
+    100deg,
+    var(--graphite-soft) 0%,
+    var(--graphite-soft) 36%,
+    var(--graphite-base) 50%,
+    var(--graphite-soft) 64%,
+    var(--graphite-soft) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  --motion-shimmer-from: 100%;
+  --motion-shimmer-x: -120%;
+  animation: motion-shimmer 1.6s linear infinite;
+}
+
+@keyframes bot-thinking-hop {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(-5px); }
+  70% { transform: translateY(-1px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-thinking-status,
+  .bot-thinking-status .bot-avatar,
+  .bot-thinking-status .bot-avatar svg,
+  .bot-reply-context .bot-avatar,
+  .bot-reply-context .bot-avatar svg,
+  .bot-agent-marker,
+  .bot-thinking-status-label,
+  .bot-process-current.is-running,
+  .bot-tool-step-label.is-running,
+  .bot-work-status.is-running {
+    animation: none;
+  }
+
+  .bot-thinking-status-label,
+  .bot-process-current.is-running,
+  .bot-tool-step-label.is-running,
+  .bot-work-status.is-running {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--graphite-soft);
+  }
 }
 
 .bot-live-tool[data-status="error"] {
