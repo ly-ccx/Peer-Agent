@@ -75,6 +75,7 @@ export function sanitizeSettings(raw: unknown): AppearanceSettings {
   if (!raw || typeof raw !== 'object') return DEFAULT_APPEARANCE_SETTINGS;
   const candidate = raw as Partial<AppearanceSettings>;
   return {
+    windowMaterial: candidate.windowMaterial === 'solid' ? 'solid' : 'glass',
     mode: isMode(candidate.mode) ? candidate.mode : DEFAULT_APPEARANCE_SETTINGS.mode,
     // palette 合法性由配色注册表统一判定；历史 custom 等非法值回退默认 Frost
     palette: sanitizePalette(candidate.palette),
@@ -93,6 +94,7 @@ export function sanitizeSettings(raw: unknown): AppearanceSettings {
 export function applyAppearance(settings: AppearanceSettings, scheme: AppearanceScheme) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
+  root.dataset.windowMaterial = settings.windowMaterial;
   root.dataset.theme = scheme;
   root.dataset.themeMode = settings.mode;
   root.dataset.palette = settings.palette;

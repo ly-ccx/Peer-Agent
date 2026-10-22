@@ -15,6 +15,7 @@ import type {
   AppearanceScheme,
   AppearanceSettings,
   DiffMarkerMode,
+  WindowMaterial,
 } from './appearanceTypes';
 import { DEFAULT_APPEARANCE_SETTINGS } from './themePresets';
 import { applyAppearance, sanitizeSettings } from './themeTokens';
@@ -25,6 +26,7 @@ const LEGACY_STORAGE_KEY = 'peer-agent.appearance.v1';
 interface AppearanceContextValue {
   readonly activeScheme: AppearanceScheme;
   readonly settings: AppearanceSettings;
+  readonly setWindowMaterial: (material: WindowMaterial) => void;
   readonly setMode: (mode: AppearanceMode) => void;
   readonly setPalette: (palette: AppearancePalette) => void;
   readonly setDensity: (density: AppearanceDensity) => void;
@@ -84,6 +86,7 @@ function saveSettings(settings: AppearanceSettings) {
 function appearanceEqual(a: AppearanceSettings, b: AppearanceSettings): boolean {
   return (
     a.mode === b.mode
+    && a.windowMaterial === b.windowMaterial
     && a.palette === b.palette
     && a.density === b.density
     && a.fontScale === b.fontScale
@@ -141,6 +144,7 @@ export function AppearanceProvider({
     });
   }, []);
 
+  const setWindowMaterial = useCallback((windowMaterial: WindowMaterial) => update({ windowMaterial }), [update]);
   const setMode = useCallback((mode: AppearanceMode) => update({ mode }), [update]);
   const setPalette = useCallback((palette: AppearancePalette) => update({ palette }), [update]);
   const setDensity = useCallback((density: AppearanceDensity) => update({ density }), [update]);
@@ -159,6 +163,7 @@ export function AppearanceProvider({
     () => ({
       activeScheme,
       settings,
+      setWindowMaterial,
       setMode,
       setPalette,
       setDensity,
@@ -170,6 +175,7 @@ export function AppearanceProvider({
     [
       activeScheme,
       settings,
+      setWindowMaterial,
       setMode,
       setPalette,
       setDensity,

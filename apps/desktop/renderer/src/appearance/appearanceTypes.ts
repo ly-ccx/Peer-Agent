@@ -23,6 +23,8 @@ export type AppearanceScheme = 'light' | 'dark';
 import type { AppearancePalette } from './paletteRegistry';
 export type { AppearancePalette };
 
+export type WindowMaterial = 'glass' | 'solid';
+
 export type AppearanceDensity = 'comfortable' | 'compact';
 
 // 界面字体大小：一条正交于 mode/palette/density 的外观轴。
@@ -60,6 +62,7 @@ export interface CustomColors {
 
 export interface AppearanceSettings {
   readonly mode: AppearanceMode;
+  readonly windowMaterial: WindowMaterial;
   readonly palette: AppearancePalette;
   readonly density: AppearanceDensity;
   readonly fontScale: AppearanceFontScale;

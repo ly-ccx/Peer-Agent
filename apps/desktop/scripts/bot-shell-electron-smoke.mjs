@@ -1,3 +1,4 @@
+import { checkBotWindowMaterial } from './bot-window-material-checks.mjs';
 import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
 import { checkBotLifecycleGates } from './bot-lifecycle-gate-checks.mjs';
 import { checkBotAccessPolicy } from './bot-access-policy-checks.mjs';
@@ -472,7 +473,11 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--conversation-typography-only')) {
+  if (process.argv.includes('--window-material-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotWindowMaterial({ page, until, report, captureDirectory: root });
+  } else if (process.argv.includes('--conversation-typography-only')) {
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -744,6 +749,7 @@ try {
     await workReply.waitFor();
     report.checks.push('real scrolling reaches the earlier work reply after quote, streaming and question exchanges');
     await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
+    await checkBotWindowMaterial({ page, until, report, captureDirectory: root });
     await checkBotTaskCancellation({ page, until, report, captureDirectory: root, commandFile: workCommand });
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
     await checkBotLifecycleGates({page,until,report,captureDirectory:root,commandFile:workCommand});
