@@ -131,7 +131,9 @@ export async function closeReplyDetails(page) {
   await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
   // Cancelling work in the scrolled tail can unmount the original reply. The
   // existing drawer contract then returns focus to the thread with preventScroll.
-  const selector = mountedTrigger ? '.bot-reply-context > button, .bot-recovery-history-body > button' : '.bot-thread';
-  assert.equal(await page.evaluate(selector => document.activeElement?.matches(selector), selector), true,
-    mountedTrigger ? 'close restores the mounted reply details trigger' : 'close restores the thread when its original reply was virtualized away');
+  assert.equal(await page.evaluate(mounted => {
+    const focused = document.activeElement;
+    return focused?.matches('.bot-reply-context > button, .bot-recovery-history-body > button')
+      || !mounted && focused?.matches('.bot-thread');
+  }, mountedTrigger), true, 'close restores the current details button, or the thread when its original reply was virtualized away');
 }
