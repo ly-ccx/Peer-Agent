@@ -35,7 +35,7 @@ export function ReplyContext({ i18n, onOpenDetails, activity, statusLabel, busy 
       onOpenDetails?.();
     }}>{thinking && avatar && workspaceId && botLabel
       ? <BotAvatar avatar={avatar} label={botLabel} workspaceId={workspaceId} mood="thinking" animate />
-      : <PeerIcon name={label ? busy ? 'loader' : 'info' : 'panelRight'} size={14} className={busy ? 'motion-spin' : undefined} />}{label
+      : <PeerIcon name={label ? busy ? 'loader' : 'info' : 'panelRight'} size={14} className={busy ? 'bot-reply-loading-icon' : undefined} />}{label
       ? <span className={thinking ? 'bot-context-running bot-thinking-status-label' : 'bot-context-running'} role="status">{label}</span>
       : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
     {onRefresh ? <button type="button" onClick={onRefresh}>{i18n.t('projectAgent.chat.reply.refresh')}</button> : null}

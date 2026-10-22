@@ -9,4 +9,6 @@
 .bot-reply-related-turns > button:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: 2px; }
 .bot-continuous-reply > .bot-reply-context { gap: 8px; flex-wrap: wrap; }
 .bot-reply-context > button:disabled { cursor: default; pointer-events: none; }
-@media (prefers-reduced-motion: reduce) { .bot-reply-context .motion-spin { animation: none; } }
+/* Rotate the glyph inside its stable SVG viewport; its layout edge stays on the text column. */
+.bot-reply-loading-icon > * { animation: motion-spin 1s linear infinite; transform-box: view-box; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) { .bot-reply-loading-icon > * { animation: none; } }
