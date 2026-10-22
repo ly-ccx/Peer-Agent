@@ -69,8 +69,8 @@ test('healthy source succeeds once, with bounded commands and unchanged dependen
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.apt.map(c => c.phase), ['update', 'install']);
   assert.deepEqual(r.rows.filter(c => c.command === 'timeout').map(c => c.args.slice(0, 4)), [
-    ['--signal=TERM', '--kill-after=5s', '90s', 'sudo'],
-    ['--signal=TERM', '--kill-after=5s', '120s', 'sudo'],
+    ['--signal=TERM', '--kill-after=5s', '90s', 'env'],
+    ['--signal=TERM', '--kill-after=5s', '120s', 'env'],
   ]);
   for (const c of r.apt) {
     for (const option of ['Acquire::http::Timeout=15', 'Acquire::https::Timeout=15', 'Acquire::Retries=0', 'DPkg::Lock::Timeout=20']) assert.ok(c.args.includes(option));

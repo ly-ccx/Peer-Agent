@@ -54,9 +54,10 @@ status=1
 for attempt in 1 2 3; do
   echo "Linux dependencies: attempt $attempt/3"
   # Error-on-any rejects partial index refreshes; a stale cache is not success.
-  if timeout --signal=TERM --kill-after=5s 90s sudo -n env DEBIAN_FRONTEND=noninteractive \
+  # The timeout must own the privileged APT process group, including its methods.
+  if sudo -n timeout --signal=TERM --kill-after=5s 90s env DEBIAN_FRONTEND=noninteractive \
     apt-get "${apt_options[@]}" update --error-on=any; then
-    if timeout --signal=TERM --kill-after=5s 120s sudo -n env DEBIAN_FRONTEND=noninteractive \
+    if sudo -n timeout --signal=TERM --kill-after=5s 120s env DEBIAN_FRONTEND=noninteractive \
       apt-get "${apt_options[@]}" install -y libdbus-1-dev pkg-config xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2t64; then
       exit 0
     else
