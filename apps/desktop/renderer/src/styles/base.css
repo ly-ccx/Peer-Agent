@@ -32,9 +32,9 @@
    * bootstrap 失败时标记不存在 → 上方实色兜底仍然生效；
    * 非 macOS 不打标 → 保持实色回退。内容主区 (.main-panel) 自带实色纸面，不受影响。
    */
-  html[data-vibrancy='true'],
-  html[data-vibrancy='true'] body,
-  html[data-vibrancy='true'] #root {
+  html[data-vibrancy='true']:not([data-window-material='solid']),
+  html[data-vibrancy='true']:not([data-window-material='solid']) body,
+  html[data-vibrancy='true']:not([data-window-material='solid']) #root {
     background: transparent;
   }
 

@@ -72,6 +72,7 @@ export const DEFAULT_CUSTOM_COLORS: CustomColors = {
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   mode: 'system',
+  windowMaterial: 'glass',
   palette: 'frost',
   density: 'comfortable',
   fontScale: 'medium',
