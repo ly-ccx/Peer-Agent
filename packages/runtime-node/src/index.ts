@@ -357,6 +357,11 @@ export {
   runnerWaitsOnUser,
 } from './goal-plan-store.mjs';
 export {
+  looksLikeExplicitNewRequest,
+  pickRecentCompletedPlan,
+  resolveDerivedPlanRelation,
+} from './goal-plan-relation.mjs';
+export {
   attachWorkspaceHeadBinding,
   readWorkspaceHead,
   resolveWorkspaceHead,
