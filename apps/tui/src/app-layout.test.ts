@@ -205,7 +205,7 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('onMouseDown={() => onResume(row)}');
     expect(appSource).toContain('onResume={handleResumeConversationSummary}');
     expect(keyboardSource).toContain("key.name === 'escape'");
-    expect(keyboardSource).toContain("key.name === 'return' || key.name === 'enter'");
+    expect(keyboardSource).toContain('if (isEnterKeyName(key.name)) {');
   });
 
 
