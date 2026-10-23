@@ -95,7 +95,8 @@ function CardItem({
     } catch { setError(i18n.t('projectAgent.chat.cardsUnavailable')); }
   }
   const question = card.kind === 'question';
-  const dismissal = useQuestionDismissal(question && resolved, onClosed);
+  const dismissal = useQuestionDismissal(question && resolved, onClosed, node =>
+    node.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea:not(:disabled)') ?? null);
   if (retired?.key === key && retired.source === sourceCard || question && !dismissal.present) return null;
   if (['approval', 'plan_approval'].includes(card.kind) && resolved) return <ApprovalReceipt card={card} i18n={i18n} notice={imageApproval ? imageNotice : undefined} />;
   return (

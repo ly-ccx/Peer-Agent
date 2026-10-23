@@ -132,7 +132,7 @@ export function ChatFindBar({ containerRef, isZh, onClose, onNavigate, recompute
     api.registry.set(HIGHLIGHT_ACTIVE, activeHl);
     if (lastNavigation.current !== navigationRevision) {
       lastNavigation.current = navigationRevision; navigate.current?.();
-      range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'auto' });
     }
   }, [activeIndex, navigationRevision, query, recomputeKey]);
 

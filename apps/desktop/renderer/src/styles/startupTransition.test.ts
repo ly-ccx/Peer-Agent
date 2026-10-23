@@ -7,13 +7,12 @@ const readRendererSource = (path: string) => readFile(new URL(path, import.meta.
 test('desktop bootstrap publishes session early and preloads workspace snapshot in background', async () => {
   const bootstrap = await readRendererSource('../app/state/useDesktopBootstrap.ts');
 
-  assert.match(bootstrap, /setSession\(bootstrap\.session\)/);
+  assert.match(bootstrap, /useResourceRead/);
   assert.match(bootstrap, /await clientApi\.workspaceList\(\)/);
   assert.match(bootstrap, /clientApi\.workspaceInfo/);
   assert.match(bootstrap, /clientApi\.conversationsList/);
-  // 冷启动：session 先发布；snapshot 后台填充（LOGO 最短展示由 useBrandStartupMinHold 保证）
-  assert.ok(bootstrap.indexOf('setSession(bootstrap.session)') < bootstrap.indexOf('clientApi.workspaceList'));
-  assert.match(bootstrap, /catch \{[\s\S]*normal background refresh paths/);
+  assert.match(bootstrap, /Optional warmup cannot turn a usable bootstrap into a failure/);
+
 });
 
 test('App and Sidebar consume the startup snapshot on their first render', async () => {
@@ -38,8 +37,7 @@ test('desktop startup has no delayed hidden layout reveal', async () => {
   // 禁止：隐藏壳层后 setTimeout 再 reveal 的假启动（450ms 那套）
   assert.doesNotMatch(app, /450|isInitialWorkspaceReady|app-layout-initializing|app-layout-ready/);
   assert.doesNotMatch(sidebarCss, /app-layout-initializing|app-layout-ready/);
-  // 允许：会话列表防抖 setTimeout、品牌最短展示（在独立 hook 中）
-  // 品牌最短展示不得写回 App.tsx 的 hidden layout 路径
+  // 允许会话列表防抖；内容就绪不因品牌动画增加强制等待。
   assert.doesNotMatch(app, /BRAND_STARTUP_INTRO_MS|app-layout-initializing/);
 });
 
@@ -49,7 +47,7 @@ test('bootstrap uses the branded wordmark loader without exposing initialization
     readRendererSource('../app/components/BrandStartupLoader.tsx'),
   ]);
 
-  assert.match(app, /useBrandStartupMinHold/);
+  assert.doesNotMatch(app, /useBrandStartupMinHold/);
   assert.match(app, /showMainShell/);
   assert.match(app, /!initError \? <BrandStartupLoader \/>/);
   assert.match(app, /BrandStartupLoader/);
@@ -146,19 +144,9 @@ test('brand startup is pure wordmark with theme-aware ink and no fluid wash', as
   );
 });
 
-test('brand startup min hold keeps LOGO intro for the full 2.2s animation', async () => {
-  const [app, hold] = await Promise.all([
-    readRendererSource('../App.tsx'),
-    readRendererSource('../app/state/useBrandStartupMinHold.ts'),
-  ]);
-
-  assert.match(hold, /export const BRAND_STARTUP_INTRO_MS = 2200/);
-  assert.match(hold, /useBrandStartupMinHold/);
-  assert.match(hold, /prefers-reduced-motion/);
-  assert.match(hold, /setTimeout/);
-  // App 门闩：session 就绪也要等品牌最短展示
-  assert.match(app, /showMainShell = Boolean\(session\) && brandStartupHoldDone/);
-  assert.match(app, /!initError \? <BrandStartupLoader \/>/);
-  // 最短展示逻辑不写在 App.tsx 里，避免和「无 delayed reveal」门禁冲突
-  assert.doesNotMatch(app, /BRAND_STARTUP_INTRO_MS/);
+test('startup readiness has no brand hold and bootstrap failures offer a retry', async () => {
+  const app = await readRendererSource('../App.tsx');
+  assert.match(app, /showMainShell = Boolean\(session\)/);
+  assert.doesNotMatch(app, /brandStartupHoldDone|useBrandStartupMinHold|BRAND_STARTUP_INTRO_MS/);
+  assert.match(app, /ResourceFeedback[\s\S]*onReload=\{refreshBootstrap\}/);
 });

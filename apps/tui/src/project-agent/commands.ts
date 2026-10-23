@@ -2,7 +2,7 @@ export type ProjectCommand =
   | { kind: 'text'; text: string }
   | { kind: 'retry_input'; inputId: string }
   | { kind: 'save_draft' }
-  | { kind: 'view'; view: 'bots'|'tasks'|'memory'|'objectives'|'cards' }
+  | { kind: 'view'; view: 'bots'|'tasks'|'memory'|'objectives'|'cards'|'diagnostics' }
   | { kind: 'task'; number: number }
   | { kind: 'card'; operation: 'approve'|'deny'|'answer'|'action'; number: number; text: string; option?: number }
   | { kind: 'takeover'|'classic'|'older'|'latest'|'help' }
@@ -12,7 +12,7 @@ export function parseProjectCommand(input: string): ProjectCommand {
   const text = input.trim();
   if (!text.startsWith('/')) return {kind:'text',text};
   const [name, ...args] = text.slice(1).split(/\s+/);
-  if (['bots','tasks','memory','objectives','cards'].includes(name!) && !args.length) return {kind:'view',view:name as any};
+  if (['bots','tasks','memory','objectives','cards','diagnostics'].includes(name!) && !args.length) return {kind:'view',view:name as any};
   if (['takeover','classic','older','latest','help'].includes(name!) && !args.length) return {kind:name as any};
   if (name === 'save-draft' && !args.length) return {kind:'save_draft'};
   if (name === 'retry-input' && args.length === 1 && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(args[0]!)) return {kind:'retry_input',inputId:args[0]!};

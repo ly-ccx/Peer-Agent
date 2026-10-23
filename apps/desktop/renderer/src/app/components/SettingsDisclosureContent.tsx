@@ -1,3 +1,4 @@
+import { watchVisualMotion, motionDurationMs } from '../state/visualMotion';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 /** Keep content mounted through closing motion, then release its controls and effects. */
@@ -19,12 +20,11 @@ export function SettingsDisclosureContent({ expanded, id, children }: {
   useEffect(() => {
     setSettled(false);
     if (expanded) setMounted(true);
-    const timer = window.setTimeout(() => {
-      if (expanded) setSettled(true);
-      else setMounted(false);
-    },
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 200);
-    return () => window.clearTimeout(timer);
+    const duration = root.current ? motionDurationMs(getComputedStyle(root.current).getPropertyValue('--za-motion-medium')) : 0;
+    const motion = watchVisualMotion([], () => {
+      if (expanded) setSettled(true); else setMounted(false);
+    }, { durationMs: duration });
+    return motion.cancel;
   }, [expanded]);
   return (
     <div ref={root} id={id} className="llm-settings-disclosure" data-expanded={expanded} data-settled={expanded && settled} inert={!expanded} aria-hidden={!expanded}>

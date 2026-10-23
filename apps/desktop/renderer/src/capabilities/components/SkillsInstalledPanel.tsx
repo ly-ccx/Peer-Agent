@@ -1,3 +1,7 @@
+import { createI18n } from '@peer-agent/i18n';
+import { useResourceRead, useResourceActions } from '../../ui/resources/useResourceState';
+import { ResourceFeedback } from '../../ui/resources/ResourceFeedback';
+import { isImeKey } from '../../chat/state/compositionGuard';
 import type { AvailableSkillSummary, SkillSummary } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
@@ -38,12 +42,14 @@ function SkillSection({
   skills,
   onSelect,
   onToggle,
+  pending,
 }: {
   readonly title: string;
   readonly description: string;
   readonly skills: readonly SkillSummary[];
   readonly onSelect: (skill: SkillSummary) => void;
   readonly onToggle: (skill: SkillSummary) => void;
+  readonly pending: (skill: SkillSummary) => boolean;
 }) {
   return (
     <section className="skill-scope-section">
@@ -66,6 +72,7 @@ function SkillSection({
             role="button"
             onClick={() => onSelect(skill)}
             onKeyDown={(event) => {
+              if (event.target !== event.currentTarget || isImeKey(event.nativeEvent)) return;
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 onSelect(skill);
@@ -82,7 +89,7 @@ function SkillSection({
                   ) : null}
                 </div>
                 <span className="skill-card-actions" onClick={(event) => event.stopPropagation()}>
-                  <Switch checked={skill.enabled} onCheckedChange={() => onToggle(skill)} aria-label={`${skill.name} ${skill.enabled ? '已启用' : '已停用'}`} />
+                  <Switch disabled={pending(skill)} checked={skill.enabled} onCheckedChange={() => onToggle(skill)} aria-label={`${skill.name} ${skill.enabled ? '已启用' : '已停用'}`} />
                 </span>
               </div>
               <span className="skill-card-desc">{skill.description || '暂无描述'}</span>
@@ -98,36 +105,26 @@ function SkillSection({
 export function SkillsInstalledPanel({ onSkillsCountChange }: {
   readonly onSkillsCountChange?: (count: number) => void;
 }) {
-  const [skills, setSkills] = useState<readonly SkillSummary[]>([]);
-  const [available, setAvailable] = useState<readonly AvailableSkillSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const actions = useResourceActions('installed-skills');
+  const i18n = useMemo(() => createI18n('zh-CN'), []);
+  const reader = useResourceRead('installed-skills', async () => {
+    const workspace = await clientApi.workspaceList();
+    const list = await clientApi.listSkills(workspace.workspaces.map(row => row.path));
+    return { list, workspaces: workspace.workspaces };
+  });
+  const availableReader = useResourceRead('available-skills', () => clientApi.listAvailableSkills());
   const [searchQuery, setSearchQuery] = useState('');
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
-  const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string }[]>([]);
+  const skills = reader.value?.list ?? [];
+  const workspaces = reader.value?.workspaces ?? [];
+  const available = availableReader.value ?? [];
 
-  const loadSkills = useCallback(async () => {
-    try {
-      const workspaceState = await clientApi.workspaceList().catch(() => ({ workspaces: [], activeWorkspace: null }));
-      setWorkspaces(workspaceState.workspaces);
-      const list = await clientApi.listSkills(workspaceState.workspaces.map((workspace) => workspace.path));
-      setSkills(list);
-      onSkillsCountChange?.(list.length);
-    } finally {
-      setLoading(false);
-    }
-  }, [onSkillsCountChange]);
-
-  const loadAvailable = useCallback(async () => {
-    try { setAvailable(await clientApi.listAvailableSkills()); }
-    catch { setAvailable([]); }
-  }, []);
-
+  const loadSkills = reader.reload, loadAvailable = availableReader.reload;
   useEffect(() => {
-    void loadSkills();
-    void loadAvailable();
-  }, [loadSkills, loadAvailable]);
+    if (!reader.value) return;
+    onSkillsCountChange?.(reader.value.list.length);
+  }, [reader.value, onSkillsCountChange]);
 
   useEffect(() => clientApi.onWorkspacesChanged(() => {
     setSelectedSkill(null);
@@ -153,15 +150,17 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
   const borrowable = useMemo(() => available.filter((skill) => !skill.linked), [available]);
 
   const setSkillEnabled = useCallback(async (skillId: string, enabled: boolean, workspacePath?: string | null) => {
-    if (enabled) await clientApi.enableSkill(skillId, workspacePath);
-    else await clientApi.disableSkill(skillId, workspacePath);
-    setSkills((current) => current.map((skill) => skill.skillId === skillId && skill.workspacePath === workspacePath
-      ? { ...skill, enabled }
-      : skill));
-    setSelectedSkill((current) => current?.skillId === skillId && current.workspacePath === workspacePath
-      ? { ...current, enabled }
-      : current);
-  }, []);
+    const confirmed = await actions.run(JSON.stringify([skillId, workspacePath ?? null]), async () => {
+      if (enabled) await clientApi.enableSkill(skillId, workspacePath);
+      else await clientApi.disableSkill(skillId, workspacePath);
+      const snapshot = reader.snapshot().value;
+      if (snapshot) reader.accept({ ...snapshot, list: snapshot.list.map(skill =>
+        skill.skillId === skillId && (skill.workspacePath ?? null) === (workspacePath ?? null) ? { ...skill, enabled } : skill) });
+      setSelectedSkill(current => current?.skillId === skillId && (current.workspacePath ?? null) === (workspacePath ?? null)
+        ? { ...current, enabled } : current);
+    });
+    if (!confirmed) throw Error('技能开关尚未确认，原状态已保留。');
+  }, [actions.run, reader.accept, reader.snapshot]);
 
   const uninstallSkill = useCallback(async (skillId: string) => {
     const workspacePath = selectedSkill?.workspacePath ?? null;
@@ -181,27 +180,27 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
   }, [loadAvailable, loadSkills, selectedSkill?.workspacePath]);
 
   const handleLink = useCallback(async (skill: AvailableSkillSummary) => {
-    setBusyId(skill.skillId);
-    setLinkError(null);
-    try {
-      const result = await clientApi.linkSkill(skill.skillId);
-      if (!result.ok) {
-        setLinkError(`借用「${skill.name}」失败：${result.error ?? '未知错误'}`);
-        return;
+    await actions.run(`link:${skill.sourceRoot}:${skill.skillId}`, async () => {
+      setLinkError(null);
+      try {
+        const result = await clientApi.linkSkill(skill.skillId);
+        if (!result.ok) throw Error(result.error ?? '未知错误');
+        await Promise.all([loadSkills(), loadAvailable()]);
+      } catch (error) {
+        setLinkError(`借用「${skill.name}」尚未确认：${error instanceof Error ? error.message : '调用异常'}`);
+        throw error;
       }
-      await Promise.all([loadSkills(), loadAvailable()]);
-    } catch {
-      setLinkError(`借用「${skill.name}」失败：调用异常`);
-    } finally { setBusyId(null); }
-  }, [loadSkills, loadAvailable]);
-
-  if (loading) return <div className="skill-loading">加载中…</div>;
+    });
+  }, [actions.run, loadSkills, loadAvailable]);
 
   return (
     <div className="skill-panel">
+      <ResourceFeedback i18n={i18n} loading={reader.loading} error={reader.error} onReload={loadSkills} />
+      <ResourceFeedback i18n={i18n} loading={availableReader.loading} error={availableReader.error} onReload={loadAvailable} />
+      {skills.some(skill => actions.get(JSON.stringify([skill.skillId, skill.workspacePath ?? null])).error) ? <p className="ui-form-feedback is-error" role="alert">技能开关尚未确认，原状态已保留。请核对后重试。</p> : null}
       {linkError ? <div className="skill-link-error" role="alert">{linkError}</div> : null}
       <input
-        className="skill-search-input"
+        className="ui-input skill-search-input"
         type="search"
         value={searchQuery}
         onChange={(event) => setSearchQuery(event.target.value)}
@@ -209,7 +208,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
         aria-label="搜索 Skills"
       />
 
-      {filteredSkills.length === 0 ? (
+      {!reader.loaded ? null : filteredSkills.length === 0 ? (
         <section className="skill-empty"><p>没有找到 Skill</p></section>
       ) : (
         <>
@@ -220,7 +219,8 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
               description={workspace.path}
               skills={workspace.skills}
               onSelect={setSelectedSkill}
-              onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled, skill.workspacePath); }}
+              pending={skill => actions.get(JSON.stringify([skill.skillId, skill.workspacePath ?? null])).pending}
+            onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled, skill.workspacePath).catch(() => {}); }}
             />
           ))}
           <SkillSection
@@ -228,7 +228,8 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
             description="安装在用户目录中，可挂载到任意工作空间"
             skills={globalSkills}
             onSelect={setSelectedSkill}
-            onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled, null); }}
+            pending={skill => actions.get(JSON.stringify([skill.skillId, skill.workspacePath ?? null])).pending}
+            onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled, null).catch(() => {}); }}
           />
         </>
       )}
@@ -247,8 +248,8 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
                   <div className="skill-card-title-row">
                     <strong className="skill-card-name">{skill.name}</strong>
                     <span className="skill-card-actions">
-                      <button type="button" className="skill-borrow-btn" disabled={busyId === skill.skillId} onClick={() => { void handleLink(skill); }}>
-                        {busyId === skill.skillId ? '借用中…' : '借用'}
+                      <button type="button" className="skill-borrow-btn" disabled={actions.get(`link:${skill.sourceRoot}:${skill.skillId}`).pending} onClick={() => { void handleLink(skill); }}>
+                        {actions.get(`link:${skill.sourceRoot}:${skill.skillId}`).pending ? '借用中…' : '借用'}
                       </button>
                     </span>
                   </div>
