@@ -61,7 +61,7 @@ export function useBotModels(workspaceId: string | null, profile: BotProfile | n
       if (!got.ok || !got.profile) { setReadError(got.code || 'FAILED'); return false; }
       setReadError(''); latest.current.onProfile(got.profile);
       return await target.save(rebaseBotModelPolicy(draft.base, draft.policy, got.profile.modelPolicy), got.profile.modelPolicy ?? null);
-    } catch { if (stateRef.current === target) setReadError('FAILED'); return false; }
+    } catch { if (stateRef.current === target && ticket === intent.current) setReadError('FAILED'); return false; }
     finally { if (stateRef.current === target) { retrying.current = false; setReading(false); } }
   };
   const discard = () => { if (busy) return; intent.current++; if (workspaceId) pendingPolicies.delete(workspaceId); setPending(null); setSaveError(''); };
