@@ -5,7 +5,7 @@ import type {
   AutomationScheduleKind,
   AutomationSummary,
 } from '@peer-agent/protocol';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createI18n } from '@peer-agent/i18n';
 import { ResourceFeedback } from '../ui/resources/ResourceFeedback';
 import { EvidencePreview } from '../project-agent/drawer/EvidencePreview';
@@ -71,10 +71,11 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
   const globallyPaused = bootstrap.value?.runtime.globallyPaused ?? false;
   const loading = bootstrap.loading;
   const action = actions.get('command');
-  const busy = action.pending;
+  const editorKey = JSON.stringify([editing?.workspacePath ?? draft.workspacePath, editing?.automationId ?? 'new']);
+  const retainedEditor = useSyncExternalStore(automationEditorDrafts.subscribe, () => automationEditorDrafts.get(editorKey));
+  const busy = action.pending || retainedEditor?.state === 'pending';
   const [error, setError] = useState<string | null>(null);
   const [definitionReceipt, setDefinitionReceipt] = useState<AutomationDefinition | null>(null);
-  const editorKey = JSON.stringify([editing?.workspacePath ?? draft.workspacePath, editing?.automationId ?? 'new']);
   const setDraft = (value: Draft) => {
     automationEditorDrafts.retain(editorKey, value, editing); setDraftState(value);
   };
@@ -83,11 +84,13 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
   const reread = async () => {
     const read = await Promise.all([refresh(), selectedId ? runList.reload() : Promise.resolve(true),
       selectedRun?.runId || initialRunTarget?.runId ? runRead.reload() : Promise.resolve(true)]);
-    if (read.every(Boolean)) setReviewedAfterError(true);
+    if (read.every(Boolean)) { setReviewedAfterError(true); automationEditorDrafts.reviewed(editorKey); }
   };
   const feedback = <>
     <ResourceFeedback i18n={i18n} loading={bootstrap.loading && !bootstrap.loaded} error={bootstrap.error} onReload={reread} />
-    <ResourceFeedback i18n={i18n} action={action} onReload={reread} />
+    <ResourceFeedback i18n={i18n} action={retainedEditor?.state === 'pending' ? { pending: true, confirmed: false, error: false }
+      : retainedEditor?.state === 'unconfirmed' ? { pending: false, confirmed: false, error: true }
+        : retainedEditor?.state === 'confirmed' ? { pending: false, confirmed: true, error: false } : action} onReload={reread} />
     {error ? <p className="automation-alert" role="alert">{error}</p> : null}
   </>;
   useEffect(() => {
@@ -127,7 +130,8 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
     }
     setError(null);
     const key = JSON.stringify([definition?.workspacePath ?? defaultWorkspace, definition?.automationId ?? 'new']);
-    const retained = automationEditorDrafts.get(key);
+    let retained = automationEditorDrafts.get(key);
+    if (retained?.state === 'confirmed') { automationEditorDrafts.discard(key); retained = undefined; }
     setEditing(retained?.definition ?? definition ?? null);
     setDraftState(retained?.draft ?? (definition ? draftFromDefinition(definition) : blankDraft(defaultWorkspace, copy.promptTemplate)));
     setView('editor');
@@ -139,18 +143,29 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
       setError(copy.workspaceRequired);
       return;
     }
-    automationEditorDrafts.retain(editorKey, nextDraft, editing);
     await runAction(async () => {
-      const input = inputFromDraft(nextDraft);
-      const definition = editing
-        ? await clientApi.automationsUpdate({ automationId: editing.automationId, expectedVersion: editing.version, patch: input })
-        : await clientApi.automationsCreate(input);
-      automationEditorDrafts.discard(editorKey);
-      setDefinitionReceipt(definition); setSelectedId(definition.automationId); setView('detail'); setTab('overview');
+      const ticket = automationEditorDrafts.begin(editorKey, nextDraft, editing);
+      try {
+        const input = inputFromDraft(nextDraft);
+        const definition = editing
+          ? await clientApi.automationsUpdate({ automationId: editing.automationId, expectedVersion: editing.version, patch: input })
+          : await clientApi.automationsCreate(input);
+        automationEditorDrafts.finish(editorKey, ticket, true, definition);
+        setDefinitionReceipt(definition); setSelectedId(definition.automationId); setView('detail'); setTab('overview');
+      } catch (cause) { automationEditorDrafts.finish(editorKey, ticket, false); throw cause; }
     });
   };
 
   const openRun = (run: AutomationRun) => { setSelectedRun(run); setView('run'); };
+
+  if (view === 'editor' && retainedEditor?.state === 'confirmed' && retainedEditor.definition) return <>{feedback}
+    <section className="automation-center"><p>{retainedEditor.definition.name}</p>
+      <button type="button" className="ui-button" onClick={() => {
+        setDefinitionReceipt(retainedEditor.definition); void openDefinition(retainedEditor.definition!.automationId);
+      }}>{copy.details}</button>
+      <button type="button" className="ui-button" onClick={() => openEditor()}>{copy.newAutomation}</button>
+      <button type="button" className="ui-button" onClick={() => setView('list')}>{copy.back}</button>
+    </section></>;
 
   if (view === 'editor') return <>{feedback}
     {staleEditor && currentDefinition ? <div className="automation-alert" role="status"><p>{i18n.t('resources.staleDraft')}</p>
@@ -160,7 +175,7 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
       }}>{i18n.t('resources.reviewedVersion')}</button></div> : null}
     {missingEditor ? <p role="alert">{i18n.t('resources.objectUnavailable')}</p> : null}
     <Editor key={editorKey} copy={copy} locale={locale} draft={draft} setDraft={setDraft} editing={editing}
-    busy={busy} saveBlocked={(action.error && !reviewedAfterError) || staleEditor || missingEditor || bootstrap.error || bootstrap.loading} onDiscard={() => { automationEditorDrafts.discard(editorKey); setView(editing ? 'detail' : 'list'); }}
+    busy={busy} saveBlocked={retainedEditor?.state === 'unconfirmed' || (action.error && !reviewedAfterError) || staleEditor || missingEditor || bootstrap.error || bootstrap.loading} onDiscard={() => { automationEditorDrafts.discard(editorKey); setView(editing ? 'detail' : 'list'); }}
     onCancel={() => setView(editing ? 'detail' : 'list')} onSave={(next) => void save(next)} /></>;
 
   if (view === 'run') return <>{feedback}<ResourceFeedback i18n={i18n} loading={runRead.loading && !runRead.loaded} error={runRead.error} onReload={runRead.reload} />

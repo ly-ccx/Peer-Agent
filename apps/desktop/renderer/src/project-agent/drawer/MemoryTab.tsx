@@ -78,6 +78,7 @@ function MemoryScope({
   const [status, setStatus] = useState('');
   const [pageState, setPageState] = useState({ scope: '', index: 0 });
   const [editingId, setEditingId] = useState('');
+  const editingRef = useRef(editingId); editingRef.current = editingId;
   const reload = resource.reload;
   const restoreEditorFocus = useRef(false);
   const closeEditor = () => { restoreEditorFocus.current = true; setEditingId(''); };
@@ -175,7 +176,7 @@ function MemoryScope({
                         const result = await clientApi.projectMemoryEdit({ workspaceId, id: item.id, text: draft.text });
                         if (!result.ok || !result.item) throw Error(result.code);
                         void reload(); return { text: result.item.text };
-                      }} onClose={closeEditor} onSaved={closeEditor} />
+                      }} onClose={closeEditor} onSaved={() => { if (editingRef.current === item.id) closeEditor(); }} />
                   ) : (
                     <p>{item.text}</p>
                   )}

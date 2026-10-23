@@ -1,6 +1,6 @@
 import type { AutomationAccessPreset, AutomationCreateInput, AutomationDefinition, AutomationScheduleKind } from '@peer-agent/protocol';
-import { systemAutomationTimezone, timezoneForExistingAutomation } from './automationTimezoneBinding';
-import { workspaceForExistingAutomation, workspaceForNewAutomation } from './automationWorkspaceBinding';
+import { systemAutomationTimezone, timezoneForExistingAutomation } from './automationTimezoneBinding.ts';
+import { workspaceForExistingAutomation, workspaceForNewAutomation } from './automationWorkspaceBinding.ts';
 export interface Draft {
   name: string;
   prompt: string;
@@ -76,10 +76,34 @@ export function inputFromDraft(draft: Draft): AutomationCreateInput {
   };
 }
 
-// Non-secret editor content only, retained in this renderer session until saved or discarded.
-const retainedDrafts = new Map<string, { draft: Draft; definition: AutomationDefinition | null }>();
+// Presentation recovery only. Pending/unknown is never a permission or execution claim.
+type RetainedDraft = { readonly draft: Draft; readonly definition: AutomationDefinition | null; readonly state: 'editing' | 'pending' | 'unconfirmed' | 'confirmed' };
+const retainedDrafts = new Map<string, RetainedDraft>();
+const listeners = new Set<() => void>();
+const publish = (key: string, entry?: RetainedDraft) => {
+  if (entry) retainedDrafts.set(key, entry); else retainedDrafts.delete(key);
+  listeners.forEach(listener => listener());
+};
 export const automationEditorDrafts = {
   get: (key: string) => retainedDrafts.get(key),
-  retain(key: string, draft: Draft, definition: AutomationDefinition | null) { retainedDrafts.set(key, { draft, definition }); },
-  discard(key: string) { retainedDrafts.delete(key); },
+  subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+  retain(key: string, draft: Draft, definition: AutomationDefinition | null) {
+    const previous = retainedDrafts.get(key);
+    if (previous?.state === 'pending') return;
+    publish(key, { draft, definition, state: previous?.state ?? 'editing' });
+  },
+  begin(key: string, draft: Draft, definition: AutomationDefinition | null) {
+    if (['pending', 'confirmed'].includes(retainedDrafts.get(key)?.state ?? '')) throw Error('SAVE_PENDING');
+    const entry: RetainedDraft = { draft, definition, state: 'pending' };
+    publish(key, entry); return entry;
+  },
+  finish(key: string, entry: RetainedDraft, confirmed: boolean, definition?: AutomationDefinition) {
+    if (retainedDrafts.get(key) !== entry) return;
+    publish(key, confirmed && definition ? { ...entry, definition, state: 'confirmed' } : { ...entry, state: 'unconfirmed' });
+  },
+  reviewed(key: string) {
+    const entry = retainedDrafts.get(key);
+    if (entry?.state === 'unconfirmed') publish(key, { ...entry, state: 'editing' });
+  },
+  discard(key: string) { if (retainedDrafts.get(key)?.state !== 'pending') publish(key); },
 };
