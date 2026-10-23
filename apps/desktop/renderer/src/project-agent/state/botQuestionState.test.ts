@@ -27,5 +27,9 @@ test('收到回答后收起对应选择；发送失败保留选择，重发绑�
   assert.equal(hideAcknowledgedQuestions(failed)[0]?.cards[0]?.resolvedState, 'open');
   const sending = applyOptimistic([question()], [{ ...input, state: 'sending' }]);
   assert.equal(hideAcknowledgedQuestions(sending)[0]?.cards[0]?.resolvedState, 'open');
+  const unknown = applyOptimistic([question()], [{ ...input, state: 'unknown' }]);
+  assert.equal(hideAcknowledgedQuestions(unknown)[0]?.cards[0]?.resolvedState, 'open');
+  assert.equal(unknown[1]?.inputId, input.inputId);
+  assert.equal(unknown[1]?.answerTo, input.answerTo);
   assert.equal(failed[1]?.answerTo, input.answerTo);
 });
