@@ -13,6 +13,7 @@ import {cardAction,createCardNumbers,parseProjectCommand,terminalText} from './c
 import {runProjectCardAction} from './card-actions.ts';
 import {projectCopy,projectStatus} from './project-copy.ts';
 import {isRecoveryCard} from './card-presentation.ts';
+import {isEnterKeyName} from '../runtime-controls.ts';
 
 type Host=ReturnType<typeof createTuiProjectHost>;
 type Client=ReturnType<typeof createTuiProjectClient>;
@@ -80,8 +81,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(key.name==='escape'){key.preventDefault();if(view==='bind')void perform(onClassic);else setView('conversation');return;}
     if(view==='bind'){
       if(['left','right','up','down','tab'].includes(key.name)){key.preventDefault();setBindYes(!bindYes);}
-      if(['y','n','enter','return'].includes(key.name)){
-        key.preventDefault();const accept=key.name==='y'||(['enter','return'].includes(key.name)&&bindYes);
+      if(key.name==='y'||key.name==='n'||isEnterKeyName(key.name)){
+        key.preventDefault();const accept=key.name==='y'||(isEnterKeyName(key.name)&&bindYes);
         if(!accept){void perform(onClassic);return;}
         void perform(async()=>{const entry=host.registry.ensureForPath(workspacePath);const created=host.lifecycle.ensureBot(entry.workspaceId) as any;
           if(!created.ok)return created;if(created.profile.status==='archived')host.lifecycle.restoreBot(entry.workspaceId);
@@ -90,14 +91,14 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     }
     if(view==='bots'){
       if(key.name==='down'||key.name==='up'){key.preventDefault();setSelected(Math.max(0,Math.min(snapshot.bots.length-1,selected+(key.name==='down'?1:-1))));}
-      if(key.name==='enter'||key.name==='return'){key.preventDefault();void openBot(selected);}return;
+      if(isEnterKeyName(key.name)){key.preventDefault();void openBot(selected);}return;
     }
     if(key.name==='tab'&&cards.length){key.preventDefault();setView(view==='cards'?'conversation':'cards');return;}
     if(view==='cards'){
       key.preventDefault();
       if(key.name==='down'||key.name==='up'){setCardIndex(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));setOption(0);}
       if(key.name==='left'||key.name==='right')setOption(Math.max(0,Math.min((cards[cardIndex]?.card.actions?.length??1)-1,option+(key.name==='right'?1:-1))));
-      if(key.name==='enter'||key.name==='return')selectedCardAction();
+      if(isEnterKeyName(key.name))selectedCardAction();
     }
   });
   const objectiveResult=view==='objectives'?host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any:null;
@@ -123,7 +124,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
     {!['bind','bots','cards'].includes(view)?<box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
       <ThemedTextarea ref={editor} focused={!busy} height={3} placeholder={copy('composer')} wrapMode="char" onKeyDown={event=>{
-        if(!['enter','return'].includes(event.name)||event.eventType!=='press')return;
+        if(!isEnterKeyName(event.name)||event.eventType!=='press')return;
         event.preventDefault();event.stopPropagation();if(event.shift){editor.current?.newLine();return;}
         const text=editor.current?.plainText??'';if(text.trim()){editor.current?.clear();submit(text);}
       }}/>

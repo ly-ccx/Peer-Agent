@@ -43,6 +43,11 @@ export interface ComposerEnterInput {
 
 export type ComposerEnterAction = 'submit' | 'newline' | 'suppress' | 'none';
 
+/** Raw LF and Kitty keypad Enter are distinct key names in OpenTUI. */
+export function isEnterKeyName(name: string): boolean {
+  return ['return', 'enter', 'linefeed', 'kpenter'].includes(name);
+}
+
 /**
  * Keeps the text area's multiline editing and message submission bindings separate.
  * Only the first unmodified Enter submits; Shift+Enter is handled as newline
@@ -50,7 +55,7 @@ export type ComposerEnterAction = 'submit' | 'newline' | 'suppress' | 'none';
  * while repeat/release events are suppressed so one physical key press acts once.
  */
 export function composerEnterAction(input: ComposerEnterInput): ComposerEnterAction {
-  const isEnter = input.keyName === 'return' || input.keyName === 'enter';
+  const isEnter = isEnterKeyName(input.keyName);
   if (!isEnter) return 'none';
   if (input.eventType !== 'press') return 'suppress';
   return input.shift ? 'newline' : 'submit';
