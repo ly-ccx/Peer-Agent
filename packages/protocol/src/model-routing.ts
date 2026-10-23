@@ -18,7 +18,7 @@ export type ModelRole =
 
 export type RoleSetting =
   | { readonly mode: 'tier'; readonly tier: ModelTier }
-  | { readonly mode: 'fixed'; readonly modelProviderId: string; readonly reasoningEffort?: ModelReasoningEffort }
+  | { readonly mode: 'fixed'; readonly modelProviderId: string; readonly reasoningEffort?: ModelReasoningEffort; readonly fastMode?: boolean }
   | { readonly mode: 'auto'; readonly pool: readonly string[] };
 
 export interface ModelTierBinding {
@@ -58,6 +58,8 @@ export interface RuntimeModelSelection {
   readonly modelId: string;
   readonly modelProviderId: string;
   readonly reasoningEffort?: string;
+  /** Subscription priority channel. Encoding still admits only ChatGPT and Grok OAuth. */
+  readonly fastMode?: boolean;
   readonly family: string;
 }
 
@@ -371,10 +373,15 @@ export function resolveRoleModel(input: RoleModelRequest): ModelResolution {
     if (!chosen) return fail(input, 'empty');
     const requestedEffort = layer.setting.mode === 'fixed' ? layer.setting.reasoningEffort : undefined;
     if (requestedEffort !== undefined && !chosen.reasoningEffortLevels?.includes(requestedEffort)) return fail(input, 'reasoning');
+    const requestedFast = layer.setting.mode === 'fixed' && layer.setting.fastMode === true;
     const source: ModelSelectionSource = layer.setting.mode === 'auto' ? 'auto' : layer.source;
     return {
       ok: true,
-      selection: { ...toSelection(chosen), ...(requestedEffort !== undefined ? { reasoningEffort: requestedEffort } : {}) },
+      selection: {
+        ...toSelection(chosen),
+        ...(requestedEffort !== undefined ? { reasoningEffort: requestedEffort } : {}),
+        ...(requestedFast ? { fastMode: true } : {}),
+      },
       source,
       ...(input.role === 'verifier'
         ? { sameFamilyAsWorker: sameFamily(chosen, input.workerModel) }

@@ -116,6 +116,10 @@ export function BotMessageList({
 
   return (
     <div className="bot-thread-shell">
+    {scroll.referenceStatus !== 'none' ? <div className="bot-thread-feedback" role="status">
+      <p>{i18n.t(scroll.referenceStatus === 'loading' ? 'resources.locating' : 'resources.sourceUnavailable')}</p>
+      {scroll.referenceStatus !== 'loading' ? <button type="button" onClick={() => void scroll.locateReference()}>{i18n.t('resources.retryRead')}</button> : null}
+    </div> : null}
     {scroll.restoreStatus !== 'none' ? <div className="bot-thread-feedback" role="status">
       <p>{i18n.t(scroll.restoreStatus === 'loading' ? 'projectAgent.chat.restoringReading' : 'projectAgent.chat.readingUnavailable')}</p>
       {scroll.restoreStatus !== 'loading' ? <button type="button" onClick={() => void scroll.restoreReading()}>{i18n.t('projectAgent.chat.restoreReading')}</button> : null}

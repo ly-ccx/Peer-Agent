@@ -1083,6 +1083,7 @@
 .bot-sheet-head h2 {
   margin: 0;
   font-size: 18px;
+  font-weight: 600;
 }
 
 .bot-sheet-close,
@@ -1114,12 +1115,12 @@
   border-radius: var(--ui-radius-panel);
 }
 
-.bot-sheet-choice span,
-.bot-sheet-blank span,
+.bot-sheet-copy,
 .bot-sheet-hint {
-  color: var(--graphite-fade);
-  font-size: 12px;
-  line-height: 1.5;
+  color: var(--graphite-soft);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
 }
 
 .bot-sheet-name {
@@ -1136,8 +1137,9 @@
 .bot-sheet-error {
   margin: 0;
   color: var(--graphite-base);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 1.5;
 }
 
 .bot-sheet-submit {
@@ -1153,6 +1155,109 @@
 .bot-sheet-choice:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+/* 标题用 600。浏览器默认粗体（700）会让中文离开界面字栈，看起来像另一套字体。 */
+.bot-new-sheet {
+  font-family: var(--font-sans);
+  font-size: var(--ui-font-body);
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.bot-new-sheet .bot-sheet-head {
+  margin-bottom: 14px;
+}
+
+.bot-new-sheet .bot-sheet-head h2 {
+  font-size: var(--ui-font-heading-sm);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.011em;
+}
+
+.bot-new-sheet .bot-sheet-close {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--ui-control-height-compact);
+  height: auto; min-height: var(--ui-control-height-compact);
+  padding: 0;
+  border-radius: var(--ui-radius-control);
+}
+
+.bot-new-sheet .bot-sheet-close:hover:not(:disabled) {
+  color: var(--graphite-base);
+  background: var(--control-fill-hover);
+}
+
+.bot-new-sheet .bot-sheet-choice,
+.bot-new-sheet .bot-sheet-blank {
+  gap: 6px;
+  padding: 14px 14px 13px;
+}
+
+.bot-new-sheet .bot-sheet-blank {
+  margin-bottom: 10px;
+}
+
+.bot-new-sheet .bot-sheet-choice {
+  margin-bottom: 0;
+}
+
+.bot-new-sheet .bot-sheet-label {
+  color: var(--graphite-base);
+  font-size: var(--ui-font-body);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.011em;
+}
+
+.bot-new-sheet .bot-sheet-name {
+  margin-top: 6px;
+  padding: 9px 12px;
+  font-size: var(--ui-font-body);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.bot-new-sheet .bot-sheet-name::placeholder {
+  color: var(--graphite-soft);
+  font-weight: 400;
+}
+
+.bot-new-sheet .bot-sheet-hint,
+.bot-new-sheet .bot-sheet-error {
+  margin: 2px 0 0;
+}
+
+.bot-new-sheet .bot-sheet-submit {
+  min-height: var(--ui-control-height);
+  margin-top: 10px;
+  padding: 6px 14px;
+  font-size: var(--ui-font-control);
+  font-weight: 500;
+  line-height: 1.3;
+  border-radius: var(--ui-radius-control);
+}
+
+.bot-new-sheet .bot-sheet-submit:hover:not(:disabled) {
+  background: var(--graphite-base-hover);
+}
+
+.bot-new-sheet .bot-sheet-submit:disabled {
+  color: var(--graphite-mute);
+  background: var(--control-fill);
+  opacity: 1;
+}
+
+.bot-new-sheet .bot-sheet-choice:focus-visible,
+.bot-new-sheet .bot-sheet-close:focus-visible,
+.bot-new-sheet .bot-sheet-name:focus-visible,
+.bot-new-sheet .bot-sheet-submit:focus-visible {
+  outline: var(--ui-focus-width) solid var(--ui-focus-color);
+  outline-offset: var(--ui-focus-offset);
 }
 
 .bot-avatar[data-avatar-animated="false"],

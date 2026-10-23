@@ -1,3 +1,5 @@
+import { FileEntryInput } from './FileEntryInput';
+import { isImeKey } from '../../chat/state/compositionGuard';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
@@ -220,6 +222,7 @@ function TreeNode({
           else onOpenFile(entry);
         }}
         onKeyDown={(event) => {
+          if (isImeKey(event.nativeEvent)) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onSelect(entry);
@@ -244,28 +247,8 @@ function TreeNode({
             <div className="workbench-tree-draft" style={{ ['--tree-depth' as string]: depth + 1 }}>
               <span className="workbench-tree-twisty" aria-hidden />
               <FileTreeIcon kind={draft.kind === 'dir' ? 'folder' : 'file'} />
-              <input
-                className="workbench-tree-draft-input"
-                autoFocus
-                disabled={draft.busy}
-                value={draft.value}
-                placeholder={draft.kind === 'dir' ? (isZh ? '文件夹名' : 'Folder name') : (isZh ? '文件名' : 'File name')}
-                aria-label={draft.kind === 'dir' ? (isZh ? '新建文件夹' : 'New folder') : (isZh ? '新建文件' : 'New file')}
-                onChange={(event) => onDraftChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    onDraftCommit();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    onDraftCancel();
-                  }
-                }}
-                onBlur={() => {
-                  if (!draft.busy) onDraftCommit();
-                }}
-              />
-              {draft.error ? <span className="workbench-tree-draft-error">{draft.error}</span> : null}
+              <FileEntryInput value={draft.value} busy={draft.busy} error={draft.error} kind={draft.kind} isZh={isZh}
+                onChange={onDraftChange} onCommit={onDraftCommit} onCancel={onDraftCancel} />
             </div>
           ) : null}
           {isLoading && !kids ? (
@@ -307,6 +290,8 @@ function TreeNode({
 }
 
 export function FilesView({ isZh, workspacePath }: FilesViewProps) {
+  const surfaceRef = useRef<HTMLDivElement>(null), mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { openFile: openWorkbenchFile, filesTarget } = useWorkbench();
   const rootPath = workspacePath ? stripTrailingSep(workspacePath) : null;
 
@@ -326,6 +311,8 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   const selectedRef = useRef(selected);
   const selectedIsDirRef = useRef(selectedIsDir);
   const draftRef = useRef(draft);
+  const creating = useRef(new Set<string>()), scope = useRef({ workspacePath });
+  if (scope.current.workspacePath !== workspacePath) scope.current = { workspacePath };
   useEffect(() => { expandedRef.current = expanded; }, [expanded]);
   useEffect(() => { childrenRef.current = children; }, [children]);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
@@ -508,7 +495,8 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   }, [rootPath]);
 
   const beginCreate = useCallback((kind: DraftKind) => {
-    if (!rootPath) return;
+    if (!rootPath || draftRef.current?.busy) return;
+    if (draftRef.current) { surfaceRef.current?.querySelector<HTMLInputElement>('.workbench-tree-draft-input')?.focus({ preventScroll: true }); return; }
     const parentPath = resolveCreateParent() ?? rootPath;
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -528,8 +516,11 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   }, [rootPath, resolveCreateParent, loadDir, isZh]);
 
   const cancelDraft = useCallback(() => {
+    const current = draftRef.current;
+    if (current?.busy || current && creating.current.has(JSON.stringify([workspacePath, current.parentPath, current.kind, current.value]))) return;
     setDraft(null);
-  }, []);
+    surfaceRef.current?.querySelector<HTMLButtonElement>('.workbench-files-toolbar button')?.focus({ preventScroll: true });
+  }, [workspacePath]);
 
   const changeDraft = useCallback((value: string) => {
     setDraft((prev) => (prev ? { ...prev, value, error: null } : prev));
@@ -538,6 +529,8 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   const commitDraft = useCallback(async () => {
     const current = draftRef.current;
     if (!current || current.busy) return;
+    const creationKey = JSON.stringify([workspacePath, current.parentPath, current.kind, current.value]);
+    if (creating.current.has(creationKey)) return;
     const name = sanitizeNewEntryName(current.value);
     if (!name) {
       setDraft((prev) => (prev ? {
@@ -550,11 +543,14 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     const relPath = workspacePath
       ? toForward(absPath).replace(`${toForward(stripTrailingSep(workspacePath))}/`, '')
       : name;
+    creating.current.add(creationKey);
+    const origin = scope.current;
     setDraft((prev) => (prev ? { ...prev, busy: true, error: null } : prev));
     try {
       const result = current.kind === 'dir'
         ? await clientApi.mkdir(absPath, workspacePath ?? undefined, relPath)
         : await clientApi.writeFile(absPath, workspacePath ?? undefined, relPath, '');
+      if (!mounted.current || scope.current !== origin) return;
       if (!result.ok) {
         const message = result.status === 'already_exists'
           ? (isZh ? '已存在同名项' : 'Already exists')
@@ -562,8 +558,13 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         setDraft((prev) => (prev ? { ...prev, busy: false, error: message } : prev));
         return;
       }
+      const active = document.activeElement;
+      if (surfaceRef.current?.contains(active) && (active as HTMLElement | null)?.closest('.workbench-tree-draft')) {
+        surfaceRef.current.querySelector<HTMLInputElement>('.workbench-files-filter-input')?.focus({ preventScroll: true });
+      }
       setDraft(null);
       await loadDir(current.parentPath, { force: true });
+      if (!mounted.current || scope.current !== origin) return;
       setExpanded((prev) => {
         const next = new Set(prev);
         next.add(current.parentPath);
@@ -576,12 +577,13 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         openWorkbenchFile(result.path ?? absPath, workspacePath ?? undefined, relPath);
       }
     } catch (error) {
+      if (!mounted.current || scope.current !== origin) return;
       setDraft((prev) => (prev ? {
         ...prev,
         busy: false,
         error: error instanceof Error ? error.message : (isZh ? '创建失败' : 'Create failed'),
       } : prev));
-    }
+    } finally { creating.current.delete(creationKey); }
   }, [isZh, workspacePath, loadDir, openWorkbenchFile]);
 
   // workspace 切换：重置树，默认展开根并加载第一层。
@@ -699,7 +701,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     : undefined;
 
   return (
-    <div className="workbench-files">
+    <div ref={surfaceRef} className="workbench-files">
       <div className="workbench-files-toolbar" role="toolbar" aria-label={isZh ? '文件操作' : 'File actions'}>
         <button
           type="button"
@@ -748,28 +750,8 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
             <div className="workbench-tree-draft" style={{ ['--tree-depth' as string]: 0 }}>
               <span className="workbench-tree-twisty" aria-hidden />
               <FileTreeIcon kind={draft.kind === 'dir' ? 'folder' : 'file'} />
-              <input
-                className="workbench-tree-draft-input"
-                autoFocus
-                disabled={draft.busy}
-                value={draft.value}
-                placeholder={draft.kind === 'dir' ? (isZh ? '文件夹名' : 'Folder name') : (isZh ? '文件名' : 'File name')}
-                aria-label={draft.kind === 'dir' ? (isZh ? '新建文件夹' : 'New folder') : (isZh ? '新建文件' : 'New file')}
-                onChange={(event) => changeDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    void commitDraft();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    cancelDraft();
-                  }
-                }}
-                onBlur={() => {
-                  if (!draft.busy) void commitDraft();
-                }}
-              />
-              {draft.error ? <span className="workbench-tree-draft-error">{draft.error}</span> : null}
+              <FileEntryInput value={draft.value} busy={draft.busy} error={draft.error} kind={draft.kind} isZh={isZh}
+                onChange={changeDraft} onCommit={() => { void commitDraft(); }} onCancel={cancelDraft} />
             </div>
           ) : null}
           {loading.has(rootPath) && !rootKids ? (

@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ClientToolCall } from '@peer-agent/protocol';
-import { useExitAnimation } from '../../hooks/useExitAnimation';
+import { useRef } from 'react';
 import { buildPermissionGateView } from '../../state/permissionGateView';
 
 interface PermissionGateStripProps {
@@ -27,28 +27,24 @@ export function PermissionGateStrip({
   showApproveAlways = true,
   i18n,
 }: PermissionGateStripProps) {
-  const { exiting, exit } = useExitAnimation(180);
-
-  if (pendingCalls.length === 0 && !exiting) return null;
-  if (pendingCalls.length === 0) return null;
-
+  const sent = useRef<ClientToolCall | null>(null);
   const head = pendingCalls[0];
+  if (sent.current !== head) sent.current = null;
+
+  if (!head) return null;
+
   const extra = pendingCalls.length - 1;
   const view = buildPermissionGateView(head, i18n.locale);
 
   const handleAction = (action: (call: ClientToolCall) => void) => {
-    exit(() => action(head));
-  };
-
-  const handleApproveAlways = () => {
-    exit(() => {
-      onApproveAlways(head);
-    });
+    if (sent.current === head) return;
+    sent.current = head;
+    try { action(head); } catch (error) { sent.current = null; throw error; }
   };
 
   return (
     <aside
-      className={`permission-gate-strip permission-gate-strip--${view.variant}${exiting ? ' exiting' : ''}`}
+      className={`permission-gate-strip permission-gate-strip--${view.variant}`}
       role="region"
       aria-live="polite"
     >
@@ -67,7 +63,7 @@ export function PermissionGateStrip({
           {view.allowLabel ?? i18n.t('review.allow')}
         </button>
         {showApproveAlways && !view.isGoalConfirmation ? (
-          <button type="button" className="allow-always" title={view.allowAlwaysHint} onClick={handleApproveAlways}>
+          <button type="button" className="allow-always" title={view.allowAlwaysHint} onClick={() => handleAction(onApproveAlways)}>
             {view.allowAlwaysLabel ?? i18n.t('review.allowAlways')}
           </button>
         ) : null}

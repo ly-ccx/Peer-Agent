@@ -75,6 +75,7 @@ export function useBotList() {
   const [status, setStatus] = useState<BotListStatus>('loading');
   const [width, setWidthState] = useState(readStoredWidth);
   const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
   const catalogRef = useRef<readonly BotListItem[]>([]);
 
   const replaceCatalog = useCallback((next: readonly BotListItem[]) => {
@@ -203,21 +204,27 @@ export function useBotList() {
     return { ok: true, workspaceId: result.workspaceId };
   }, [reload]);
 
-  const createBind = useCallback(async () => {
-    setCreating(true);
+  const createBind = useCallback(async (): Promise<BotCreateResult> => {
+    if (creatingRef.current) return { ok: false, code: 'BUSY' };
+    creatingRef.current = true; setCreating(true);
     try {
       return await finishCreate(await clientApi.projectAgentCreate({ kind: 'bind' }));
+    } catch {
+      return { ok: false, code: 'UNCONFIRMED' };
     } finally {
-      setCreating(false);
+      creatingRef.current = false; setCreating(false);
     }
   }, [finishCreate]);
 
-  const createManaged = useCallback(async (name: string) => {
-    setCreating(true);
+  const createManaged = useCallback(async (name: string): Promise<BotCreateResult> => {
+    if (creatingRef.current) return { ok: false, code: 'BUSY' };
+    creatingRef.current = true; setCreating(true);
     try {
       return await finishCreate(await clientApi.projectAgentCreate({ kind: 'managed', name }));
+    } catch {
+      return { ok: false, code: 'UNCONFIRMED' };
     } finally {
-      setCreating(false);
+      creatingRef.current = false; setCreating(false);
     }
   }, [finishCreate]);
 

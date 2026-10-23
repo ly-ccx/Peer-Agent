@@ -3,10 +3,10 @@
 .settings-nav { background: var(--glass-chrome); backdrop-filter: blur(var(--blur-chrome)); padding-inline: 16px; }
 .settings-nav-list { gap: 14px; }
 .settings-nav-group h2 { color: var(--graphite-soft); font-weight: 400; letter-spacing: 0; text-transform: none; padding-bottom: 8px; }
-.settings-nav-item { min-height: 34px; padding-block: 6px; border-radius: var(--ui-radius-row); font-size: .8125rem; }
+.settings-nav-item { min-height: 34px; padding-block: 6px; border-radius: var(--ui-radius-row); font-size: var(--ui-font-control); }
 .settings-nav-item.active { background: var(--chrome-active); }
 .settings-nav-search { height: 32px; margin-inline: 4px; border-radius: var(--ui-radius-control); border-color: transparent; background: var(--chrome-sunken); box-shadow: none; }
-.settings-nav-search:focus-within { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
+.settings-nav-search:focus-within { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
 .settings-content { --settings-help-size: .75rem; --settings-help-color: color-mix(in srgb, var(--graphite-soft) 84%, var(--paper-sheet)); container: settings / inline-size; background: var(--chrome-canvas); }
 .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) {
   width: 100%; max-width: var(--settings-panel-max-width); margin: 0 auto;
@@ -52,22 +52,22 @@
 .settings-content .pa-cascading-trigger,
 .bot-drawer-body .pa-cascading-trigger {
   position: relative; display: flex; align-items: center; justify-content: space-between;
-  width: 100%; max-width: none; min-width: 0; min-height: 40px; height: auto; gap: 12px;
+  width: 100%; max-width: none; min-width: 0; min-height: var(--ui-control-height); height: auto; gap: 12px;
   padding: 8px 14px; border: 1px solid transparent; border-radius: var(--ui-radius-control);
   background: var(--control-fill); color: var(--graphite-base);
-  font-family: var(--font-sans); font-size: .8125rem; font-weight: 400; text-align: left; box-shadow: none;
+  font-family: var(--font-sans); font-size: var(--ui-font-control); font-weight: 400; text-align: left; box-shadow: none;
 }
 :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-value, .pa-cascading-value) { flex: 1; min-width: 0; text-align: left; }
 :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-caret, .pa-cascading-trigger > svg) { flex: none; width: 14px; height: 14px; margin: 0; color: var(--graphite-soft); }
 :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger):hover:not(:disabled) { background: var(--control-fill-hover); border-color: transparent; }
 :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger):is(.open, :active):not(:disabled) { background: var(--control-fill-active); border-color: transparent; }
-:is(.settings-content, .bot-drawer-body) :is(button, input, textarea):focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
-.settings-content .general-language-select input { width: 100%; min-height: 40px; height: auto; padding: 8px 14px; border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); font-size: .8125rem; }
+:is(.settings-content, .bot-drawer-body) :is(button, input, textarea):focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
+.settings-content .general-language-select input { width: 100%; min-height: var(--ui-control-height); height: auto; padding: 8px 14px; border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); font-size: var(--ui-font-control); }
 .settings-content .general-quiet-setting { grid-template-columns: minmax(0, 1fr) 272px; }
 .general-quiet-controls, .settings-content .general-bots-hours { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .settings-content .general-bots-hours { margin: 0; padding: 0; gap: 8px; }
 .settings-content .general-bots-hours > span { font-size: .75rem; color: var(--graphite-soft); }
-.settings-content .general-bot-time { display: flex; align-items: center; justify-content: center; justify-self: end; gap: 2px; min-width: 88px; padding: 3px 8px; min-height: 40px; border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); }
+.settings-content .general-bot-time { display: flex; align-items: center; justify-content: center; justify-self: end; gap: 2px; min-width: 88px; padding: 3px 8px; min-height: var(--ui-control-height); border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); }
 .settings-content .general-bot-time .pa-dropdown { width: 31px; }
 .settings-content .general-bot-time .pa-dropdown-trigger { justify-content: center; height: 32px; min-height: 32px; padding: 0; gap: 0; background: transparent; border: 0; font-variant-numeric: tabular-nums; }
 .settings-content .general-bot-time .pa-dropdown-caret { display: none; }
@@ -87,11 +87,11 @@
 .settings-content :is(.shortcut-group-heading p, .shortcut-description, .llm-instructions-hint) { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
 .settings-content .shortcut-row { padding: var(--settings-row-padding); }
 .settings-content .shortcut-title { font-size: .875rem; font-weight: 600; }
-.settings-content :is(.shortcut-status, .shortcut-reset, .shortcut-error) { font-size: .8125rem; }
-.settings-content .shortcut-recorder { min-height: 40px; border-radius: var(--ui-radius-control); border-color: transparent; background: var(--control-fill); box-shadow: none; }
+.settings-content :is(.shortcut-status, .shortcut-reset, .shortcut-error) { font-size: var(--ui-font-control); }
+.settings-content .shortcut-recorder { min-height: var(--ui-control-height); border-radius: var(--ui-radius-control); border-color: transparent; background: var(--control-fill); box-shadow: none; }
 .settings-content .shortcut-recorder:hover { background: var(--control-fill-hover); }
 .settings-content .shortcut-recorder:active { background: var(--control-fill-active); }
-.settings-content .shortcut-recorder.is-recording { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
+.settings-content .shortcut-recorder.is-recording { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
 .settings-content .shortcut-recorder kbd { font-size: .875rem; }
 .settings-content .llm-instructions-card > :is(.llm-instructions-hint, textarea, .llm-instructions-actions) { margin: 12px var(--settings-group-inset); width: auto; }
 .settings-content .settings-help-links { padding: var(--settings-row-padding); }
@@ -110,8 +110,8 @@
 .settings-content .remote-access-card { padding: 0 var(--settings-group-inset) 10px; }
 .settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: var(--settings-heading-padding); margin: 0 calc(-1 * var(--settings-group-inset)) 12px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; }
 .settings-content .remote-access-card h3 { font-size: .9375rem; font-weight: 400; }
-.settings-content .remote-access-card p { font-size: .8125rem; line-height: 1.6; }
-.settings-content .remote-access-gateway input { min-height: 38px; border-radius: var(--ui-radius-control); font-size: .8125rem; }
+.settings-content .remote-access-card p { font-size: var(--ui-font-control); line-height: 1.6; }
+.settings-content .remote-access-gateway input { min-height: 38px; border-radius: var(--ui-radius-control); font-size: var(--ui-font-control); }
 .settings-content .llm-fallback-vision { padding: var(--settings-row-padding); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); }
 .settings-content .llm-fallback-vision-copy strong { font-size: .875rem; font-weight: 500; }
 .settings-content .llm-fallback-vision-copy p { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }

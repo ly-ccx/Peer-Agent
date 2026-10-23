@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { interactionLayers } from './interactionLayers';
 import { InteractionLayerContext, useInteractionLayer } from '../hooks/useInteractionLayer';
 import { overlayCloseTarget } from './overlayCloseTarget';
+import { watchVisualMotion } from '../state/visualMotion';
 
 /**
  * Overlay —— 统一浮层基座（默认模态；anchor 为非模态，均仅负责表达）。
@@ -32,6 +33,7 @@ export function Overlay({
   anchor,
   id,
   onEscape,
+  onRequestClose,
   closeTarget,
   restoreFocusRef,
   children,
@@ -42,6 +44,8 @@ export function Overlay({
   readonly id?: string;
   /** Return true when an inner confirmation consumed Escape. */
   readonly onEscape?: () => boolean;
+  /** Return false to retain the live layer while its editor resolves unsaved work. */
+  readonly onRequestClose?: () => boolean;
   /** Optional destination for an action that continues in another visible control. */
   readonly closeTarget?: () => HTMLElement | null;
   readonly onClose?: () => void;
@@ -63,6 +67,7 @@ export function Overlay({
   const [closingStyle, setClosingStyle] = useState<CSSProperties>();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const requestGuard = useRef(onRequestClose); requestGuard.current = onRequestClose;
   const closeRef = useRef(onClose); closeRef.current = onClose;
   const closingRef = useRef(false), finished = useRef(false);
   const acceptedClose = useRef<(() => void) | null>(null);
@@ -101,66 +106,25 @@ export function Overlay({
 
     };
   }, [anchor]);
-  // 退场动画兜底定时器：防止 animationend 事件因故丢失导致浮层卡死不卸载。
-  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 请求关闭：先进入退场态播动画，真正的 onClose 卸载交由 finishClose 收尾。
   const requestClose = useCallback(() => {
-    if (!closeRef.current || closingRef.current) return;
+    if (!closeRef.current || closingRef.current || requestGuard.current?.() === false) return;
     acceptedClose.current = closeRef.current; closingRef.current = true; setClosing(true);
   }, []);
-
-  // 退场动画结束（或兜底超时）后，执行调用方传入的真正卸载。
   const finishClose = useCallback(() => {
-    if (finished.current) return;
+    if (!closingRef.current || finished.current) return;
     finished.current = true;
-    if (fallbackTimer.current) {
-      clearTimeout(fallbackTimer.current);
-      fallbackTimer.current = null;
-    }
     (acceptedClose.current ?? closeRef.current)?.();
   }, []);
-
-  // Start the duration fallback after the native animation is ready. Under
-  // renderer load its pending start may outlast the old duration-only timer.
-  useEffect(() => {
-    if (!closing) return undefined;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { finishClose(); return undefined; }
-    let current = true;
-    const animations = panelRef.current?.getAnimations?.() ?? [];
-    if (!animations.length) { finishClose(); return; }
-    // A broken/never-started animation must still release the overlay.
-    fallbackTimer.current = setTimeout(finishClose, 2000);
-    void Promise.allSettled(animations.map(animation => animation.ready)).then(() => {
-      if (!current) return;
-      const remaining = animations.map(animation => {
-        const end = animation.effect?.getComputedTiming().endTime;
-        const time = typeof animation.currentTime === 'number' ? animation.currentTime : 0;
-        return typeof end === 'number' && Number.isFinite(end)
-          ? Math.max(0, end - time) / (Math.abs(animation.playbackRate) || 1) : 0;
-      });
-      if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
-      fallbackTimer.current = setTimeout(finishClose, Math.max(240, ...remaining.map(duration => duration + 60)));
-    });
-    return () => {
-      current = false;
-      if (fallbackTimer.current) {
-        clearTimeout(fallbackTimer.current);
-        fallbackTimer.current = null;
-      }
-    };
-  }, [closing, closingStyle, finishClose]);
-
   useEffect(() => {
     if (!closing) return;
+    let animations: Animation[] = [];
+    try { animations = panelRef.current?.getAnimations?.() ?? []; } catch { /* Static close. */ }
+    const motion = watchVisualMotion(animations, finishClose, { durationMs: animations.length ? 240 : 0 });
     const panel = panelRef.current;
-    const cancel = (event: AnimationEvent) => { if (event.target === panel) finishClose(); };
-    const preference = matchMedia('(prefers-reduced-motion: reduce)');
-    const reduced = () => { if (preference.matches) finishClose(); };
-    preference.addEventListener?.('change', reduced);
+    const cancel = (event: AnimationEvent) => { if (event.target === panel) motion.finish(); };
     panel?.addEventListener('animationcancel', cancel);
-    return () => { panel?.removeEventListener('animationcancel', cancel); preference.removeEventListener?.('change', reduced); };
-  }, [closing, finishClose]);
+    return () => { panel?.removeEventListener('animationcancel', cancel); motion.cancel(); };
+  }, [closing, closingStyle, finishClose]);
 
   const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : 'pa-overlay-backdrop';
   const panelBase = closing ? `pa-overlay-panel is-closing${closingStyle ? ' is-minimizing' : ''}` : 'pa-overlay-panel';

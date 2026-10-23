@@ -55,3 +55,6 @@ export function __resetLocalImagePreviewCacheForTests(): void {
   pathPreviewCache.clear();
   pathPreviewInflight.clear();
 }
+
+/** Explicit user retry may discard a cached image that failed browser decoding. */
+export function invalidateLocalImagePreview(absolutePath: string): void { pathPreviewCache.delete(absolutePath); }

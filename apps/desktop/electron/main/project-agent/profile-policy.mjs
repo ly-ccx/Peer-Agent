@@ -44,6 +44,13 @@ export function profilePolicyPatch(payload, models = []) {
             || !modelReasoningLevels(models.find(model => model.id === setting.modelProviderId) || {}).includes(setting.reasoningEffort))) {
             return { ok: false, code: 'INVALID_REASONING_EFFORT' };
           }
+          if (setting.fastMode !== undefined) {
+            const chosen = models.find(model => model.id === setting.modelProviderId);
+            const subscription = chosen?.authMethod === 'oauth_chatgpt' || chosen?.authMethod === 'oauth_grok';
+            if (typeof setting.fastMode !== 'boolean' || setting.mode !== 'fixed' || (setting.fastMode === true && !subscription)) {
+              return { ok: false, code: 'INVALID_FAST_MODE' };
+            }
+          }
           if (!valid) return { ok: false, code: 'INVALID_MODEL_POLICY' };
         }
       }

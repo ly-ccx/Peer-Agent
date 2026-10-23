@@ -48,7 +48,7 @@ const page = `<!doctype html>
  *   5. no pure black; near-white only on the environment layer
  *   6. state never by colour alone — the dot reinforces a full sentence
  *   7. shadows limited — no shadow is used here, boundaries are hairlines
- *   8. radius <= 16px — 12px cards, 6px controls
+ *   8. radius <= 16px — 16px panels, 12px controls, 8px compact controls
  *
  * The Desktop app themes via `[data-theme]`; a standalone page has no such
  * attribute, so the dark palette hangs off prefers-color-scheme instead.
@@ -82,9 +82,28 @@ const styles = `/* Critical: any author rule that sets \`display\` outranks the 
   --state-warn: #3B6FAB;
   --state-danger: #7A3E50;
 
-  --radius: 12px;
-  --radius-sm: 6px;
-  --focus: rgba(59, 127, 171, 0.32);
+  /* Standalone host adapter for the existing Frost roles; palette remains above. */
+  --ui-radius-panel: 16px;
+  --ui-radius-control: 12px;
+  --ui-radius-control-compact: 8px;
+  --ui-radius-row: 12px;
+  --ui-radius-message: 16px;
+  --ui-radius-composer: 16px;
+  --ui-control-height: 2.375rem;
+  --ui-control-height-compact: 2rem;
+  --ui-focus-width: 2px;
+  --ui-focus-offset: 3px;
+  --ui-focus-color: var(--seal);
+  --ui-font-meta: .75rem;
+  --ui-font-control: .8125rem;
+  --ui-font-body: .875rem;
+  --ui-font-body-lg: .9375rem;
+  --ui-font-heading-sm: 1rem;
+  --za-motion-fast: 120ms;
+  --za-ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --radius: var(--ui-radius-panel);
+  --radius-sm: var(--ui-radius-control-compact);
+  --focus: var(--ui-focus-color);
 
   --font-sans: "Inter", -apple-system, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
 }
@@ -110,7 +129,7 @@ const styles = `/* Critical: any author rule that sets \`display\` outranks the 
     --state-warn: #6B9FCB;
     --state-danger: #AA6E80;
 
-    --focus: rgba(93, 156, 191, 0.38);
+    --focus: var(--ui-focus-color);
   }
 }
 
@@ -122,7 +141,7 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--ui-font-body-lg);
   line-height: 1.6;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
@@ -165,21 +184,27 @@ h1 {
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 
 button {
+  min-block-size: var(--ui-control-height);
+  min-inline-size: var(--ui-control-height-compact);
+  overflow-wrap: anywhere;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   font-weight: 550;
   padding: 9px 16px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--hairline);
   background: var(--sheet);
   color: var(--ink);
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
-button:hover { background: var(--raised); border-color: var(--ink-mute); }
+button:hover:not(:disabled) { background: var(--raised); border-color: var(--ink-mute); }
 
-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button:active:not(:disabled) { background: var(--base); }
+:is(button, a, input, select, textarea, [tabindex]):focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
+@media (pointer: coarse) { button, input, select, textarea { min-block-size: 2.75rem; } }
+@media (forced-colors: active) { button, input, select, textarea { border-color: ButtonText; } :focus-visible { outline-color: Highlight; } }
 
 button:disabled { opacity: 0.5; cursor: default; }
 
@@ -191,7 +216,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   color: var(--canvas);
 }
 
-.btn-primary:hover { background: var(--ink-soft); border-color: var(--ink-soft); }
+.btn-primary:hover:not(:disabled) { background: var(--ink-soft); border-color: var(--ink-soft); }
 
 .btn-quiet { background: transparent; }
 
@@ -206,7 +231,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   border-radius: var(--radius-sm);
   background: var(--sheet);
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: var(--ui-font-control);
 }
 
 /* Tone is decoration on top of the sentence, never the message itself. */
@@ -244,7 +269,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   align-items: center;
   gap: 8px;
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: var(--ui-font-control);
 }
 
 /* Red line 6: the dot only reinforces the sentence next to it, so the state
@@ -279,34 +304,34 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .field { display: grid; gap: 5px; }
 
-.field label { font-size: 12.5px; font-weight: 550; color: var(--ink-soft); }
+.field label { font-size: var(--ui-font-meta); font-weight: 550; color: var(--ink-soft); }
 
 input {
   font: inherit;
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--canvas);
   color: var(--ink);
 }
 
-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+input { min-block-size: var(--ui-control-height); }
 
 /* Native select styled to match the text fields; the OS keeps the menu. */
 select {
   font: inherit;
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--canvas);
   color: var(--ink);
 }
 
-select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+select { min-block-size: var(--ui-control-height); }
 
 .pairing-status { margin: 0; color: var(--ink-soft); font-size: 13px; }
 
@@ -348,6 +373,13 @@ const taskSubmit = document.getElementById('task-submit');
 const taskResult = document.getElementById('task-result');
 let authenticated = false;
 let generation = 0;
+let taskGeneration = 0;
+let delegationEntries = [];
+function invalidateTaskRead() {
+  taskGeneration++;
+  if (taskSubmit.disabled) taskResult.textContent = '读取已中断，可重新读取。';
+  taskSubmit.disabled = false;
+}
 function setStatus(text, tone) {
   status.textContent = text;
   status.className = tone ? 'status status-' + tone : 'status';
@@ -355,14 +387,14 @@ function setStatus(text, tone) {
 async function load() {
   if (logout.disabled) return;
   const current = ++generation;
-  devices.replaceChildren();
+  invalidateTaskRead();
   setStatus('正在刷新…');
   try {
     const response = await fetch('/api/devices', { credentials: 'same-origin', cache: 'no-store' });
     if (current !== generation) return;
     if (response.status === 401) {
       authenticated = false; pairing.hidden = true; pairingKey.value = '';
-      taskForm.hidden = true; taskResult.textContent = '';
+      taskForm.hidden = true; taskResult.textContent = ''; devices.replaceChildren();
       login.hidden = false; logout.hidden = true;
       setStatus('请登录后查看设备。登录过期不会解除设备绑定。'); return;
     }
@@ -375,6 +407,7 @@ async function load() {
     void refreshTaskTargets();
     const empty = payload.devices.length === 0;
     setStatus(empty ? '尚未绑定电脑。请在目标电脑发起配对。' : '设备状态已更新', empty ? '' : 'ok');
+    devices.replaceChildren();
     for (const device of payload.devices) {
       const card = document.createElement('article');
       card.className = device.revoked ? 'device device-revoked' : 'device';
@@ -392,7 +425,7 @@ async function load() {
 }
 logout.addEventListener('click', async () => {
   if (logout.disabled) return;
-  ++generation; authenticated = false; pairing.hidden = true; pairingKey.value = '';
+  ++generation; invalidateTaskRead(); delegationEntries = []; authenticated = false; pairing.hidden = true; pairingKey.value = '';
   challenge.value = ''; pairingStatus.textContent = '';
   taskForm.hidden = true; taskResult.textContent = ''; taskId.value = '';
   devices.replaceChildren(); logout.disabled = true; refresh.disabled = true;
@@ -417,6 +450,7 @@ pairing.addEventListener('submit', async event => {
     if (current !== generation || !authenticated) return;
     if (response.status === 401) {
       authenticated = false; pairing.hidden = true; login.hidden = false; logout.hidden = true;
+      invalidateTaskRead(); delegationEntries = []; taskForm.hidden = true; taskResult.textContent = '';
       devices.replaceChildren(); setStatus('登录已过期，请重新登录。', 'alert'); return;
     }
     if (response.status !== 202) {
@@ -440,25 +474,43 @@ function toOptions(entries) {
   });
 }
 async function loadDelegations() {
-  try {
-    const response = await fetch('/api/delegations', { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) return [];
-    const payload = await response.json();
-    return Array.isArray(payload && payload.delegations) ? payload.delegations : [];
-  } catch { return []; }
+  const response = await fetch('/api/delegations', { credentials: 'same-origin', cache: 'no-store' });
+  if (response.status === 401) throw new Error('AUTH_REQUIRED');
+  if (!response.ok) throw new Error('delegations_unavailable');
+  const payload = await response.json();
+  if (!Array.isArray(payload && payload.delegations)) throw new Error('delegations_unavailable');
+  return payload.delegations;
+}
+function renderWorkspaces() {
+  const previous = taskWorkspace.value;
+  const entry = delegationEntries.find(entry => entry.deviceId === taskDevice.value);
+  const workspaces = Array.isArray(entry?.delegation?.workspaceIds) ? entry.delegation.workspaceIds : [];
+  taskWorkspace.replaceChildren(...toOptions(workspaces.map(value => ({ value, label: value }))));
+  taskWorkspace.value = workspaces.includes(previous) ? previous : workspaces[0] || '';
 }
 async function refreshTaskTargets() {
   // Same generation guard the rest of the page uses: a delegation reply that
   // lands after logout must not put the signed-in panels back on screen.
   const current = generation;
-  const entries = await loadDelegations();
-  if (current !== generation || !authenticated) return;
-  taskDevice.replaceChildren(...toOptions(entries.map(entry => ({ value: entry.deviceId, label: entry.name || entry.deviceId }))));
-  const first = entries[0];
-  const workspaces = first && first.delegation && Array.isArray(first.delegation.workspaceIds) ? first.delegation.workspaceIds : [];
-  taskWorkspace.replaceChildren(...toOptions(workspaces.map(value => ({ value, label: value }))));
-  taskForm.hidden = entries.length === 0;
+  try {
+    const entries = await loadDelegations();
+    if (current !== generation || !authenticated) return;
+    const previous = taskDevice.value;
+    delegationEntries = entries;
+    taskDevice.replaceChildren(...toOptions(entries.map(entry => ({ value: entry.deviceId, label: entry.name || entry.deviceId }))));
+    taskDevice.value = entries.some(entry => entry.deviceId === previous) ? previous : entries[0]?.deviceId || '';
+    renderWorkspaces(); taskForm.hidden = entries.length === 0;
+  } catch (error) {
+    if (current !== generation || !authenticated) return;
+    if (error.message === 'AUTH_REQUIRED') {
+      generation++; invalidateTaskRead(); authenticated = false; delegationEntries = [];
+      taskForm.hidden = true; pairing.hidden = true; pairingKey.value = ''; taskResult.textContent = ''; devices.replaceChildren();
+      login.hidden = false; logout.hidden = true; setStatus('登录已过期，请重新登录。', 'alert');
+    } else setStatus('授权列表读取未完成，保留上次选项；请刷新重试，读取权限仍由电脑核对。', 'alert');
+  }
 }
+taskDevice.addEventListener('change', () => { invalidateTaskRead(); taskResult.textContent = ''; renderWorkspaces(); });
+for (const field of [taskWorkspace, taskId]) field.addEventListener('input', () => { invalidateTaskRead(); taskResult.textContent = ''; });
 const TASK_ERROR_TEXT = {
   DEVICE_OFFLINE: '设备当前不在线。', DEVICE_UNAVAILABLE: '设备连接不可用。',
   DELEGATION_UNAVAILABLE: '本机尚未开放远程读取。', DELEGATION_EXPIRED: '本机委派已过期。',
@@ -470,6 +522,7 @@ taskForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!authenticated || taskSubmit.disabled) return;
   const current = generation;
+  const ticket = ++taskGeneration;
   const body = JSON.stringify({ deviceId: taskDevice.value, workspaceId: taskWorkspace.value, taskId: taskId.value.trim() });
   taskSubmit.disabled = true;
   taskResult.className = 'task-result';
@@ -477,10 +530,12 @@ taskForm.addEventListener('submit', async event => {
   try {
     const response = await fetch('/api/tasks/read', { method: 'POST', credentials: 'same-origin',
       headers: { 'content-type': 'application/json' }, body });
-    if (current !== generation || !authenticated) return;
+    if (current !== generation || ticket !== taskGeneration || !authenticated) return;
     const payload = await response.json().catch(() => null);
+    if (current !== generation || ticket !== taskGeneration || !authenticated) return;
     if (response.status === 401) {
       authenticated = false; taskForm.hidden = true; pairing.hidden = true;
+      taskResult.textContent = ''; delegationEntries = [];
       login.hidden = false; logout.hidden = true; devices.replaceChildren();
       setStatus('登录已过期，请重新登录。', 'alert'); return;
     }
@@ -492,11 +547,11 @@ taskForm.addEventListener('submit', async event => {
     taskResult.textContent = '任务状态：' + JSON.stringify(payload.result === undefined ? payload.status : payload.result);
     taskResult.className = 'task-result task-result-ok';
   } catch {
-    if (current === generation && authenticated) {
+    if (current === generation && ticket === taskGeneration && authenticated) {
       taskResult.textContent = '结果暂时不明确，请重试；重试会产生一次新的读取请求。';
       taskResult.className = 'task-result task-result-alert';
     }
-  } finally { taskSubmit.disabled = false; }
+  } finally { if (ticket === taskGeneration) taskSubmit.disabled = false; }
 });
 load();`;
 

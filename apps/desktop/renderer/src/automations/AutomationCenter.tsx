@@ -1,13 +1,16 @@
 import type {
-  AutomationAccessPreset,
-  AutomationCreateInput,
   AutomationDefinition,
   AutomationRun,
   AutomationSchedule,
   AutomationScheduleKind,
   AutomationSummary,
 } from '@peer-agent/protocol';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createI18n } from '@peer-agent/i18n';
+import { ResourceFeedback } from '../ui/resources/ResourceFeedback';
+import { EvidencePreview } from '../project-agent/drawer/EvidencePreview';
+import { useAutomationResources } from './useAutomationResources';
+import { automationEditorDrafts, blankDraft, draftFromDefinition, inputFromDraft, type Draft } from './automationEditorState';
 import { Overlay } from '../app/components/Overlay';
 import { clientApi } from '../clientApi';
 import { Switch } from '../ui/boolean-controls';
@@ -25,92 +28,11 @@ import {
   parseLlmAutomationDetectionText,
 } from './automationDraftInference';
 import {
-  systemAutomationTimezone,
-  timezoneForExistingAutomation,
-} from './automationTimezoneBinding';
-import {
   hasBoundAutomationWorkspace,
-  workspaceForExistingAutomation,
-  workspaceForNewAutomation,
 } from './automationWorkspaceBinding';
 
 type CenterView = 'list' | 'editor' | 'detail' | 'run';
 type DetailTab = 'overview' | 'runs';
-
-interface Draft {
-  name: string;
-  prompt: string;
-  workspacePath: string;
-  scheduleKind: AutomationScheduleKind;
-  timezone: string;
-  onceAt: string;
-  hour: number;
-  minute: number;
-  everyHours: number;
-  dayOfMonth: number;
-  cron: string;
-  access: AutomationAccessPreset;
-  notifySuccess: boolean;
-  notifySuccessOnlyOnChange: boolean;
-  timeoutMinutes: number;
-}
-
-function blankDraft(defaultWorkspace: string, promptTemplate = ''): Draft {
-  const next = new Date(Date.now() + 60 * 60 * 1000);
-  return {
-    name: '', prompt: promptTemplate, workspacePath: workspaceForNewAutomation(defaultWorkspace), scheduleKind: 'daily',
-    timezone: systemAutomationTimezone(),
-    onceAt: next.toISOString().slice(0, 16), hour: 9, minute: 0, everyHours: 1,
-    dayOfMonth: 1, cron: '0 9 * * *', access: 'observe', notifySuccess: false,
-    notifySuccessOnlyOnChange: true, timeoutMinutes: 30,
-  };
-}
-
-function draftFromDefinition(value: AutomationDefinition): Draft {
-  return {
-    name: value.name, prompt: value.prompt,
-    workspacePath: workspaceForExistingAutomation(value.workspacePath),
-    scheduleKind: value.schedule.kind,
-    timezone: timezoneForExistingAutomation(value.schedule.timezone),
-    onceAt: value.schedule.onceAt?.slice(0, 16) ?? '', hour: value.schedule.hour ?? 9,
-    minute: value.schedule.minute ?? 0, everyHours: value.schedule.everyHours ?? 1,
-    dayOfMonth: value.schedule.dayOfMonth ?? 1, cron: value.schedule.cron ?? '0 9 * * *',
-    access: value.grant.preset, notifySuccess: value.notifications.succeeded,
-    notifySuccessOnlyOnChange: value.notifications.succeededOnlyOnChange ?? true,
-    timeoutMinutes: Math.max(1, Math.round(value.budget.timeoutMs / 60_000)),
-  };
-}
-
-function inputFromDraft(draft: Draft): AutomationCreateInput {
-  const schedule = {
-    kind: draft.scheduleKind, timezone: draft.timezone,
-    ...(draft.scheduleKind === 'once' ? { onceAt: new Date(draft.onceAt).toISOString() } : {}),
-    ...(draft.scheduleKind === 'hourly' ? { everyHours: draft.everyHours, minute: draft.minute } : {}),
-    ...(['daily', 'weekdays', 'weekly', 'monthly'].includes(draft.scheduleKind) ? { hour: draft.hour, minute: draft.minute } : {}),
-    ...(draft.scheduleKind === 'weekly' ? { weekdays: [1] } : {}),
-    ...(draft.scheduleKind === 'monthly' ? { dayOfMonth: draft.dayOfMonth } : {}),
-    ...(draft.scheduleKind === 'custom_cron' ? { cron: draft.cron } : {}),
-  } as AutomationCreateInput['schedule'];
-  const writing = draft.access === 'work_in_workspace';
-  return {
-    name: draft.name.trim(), prompt: draft.prompt.trim(), workspacePath: draft.workspacePath.trim(), schedule,
-    grant: {
-      preset: draft.access, workspacePath: draft.workspacePath.trim(),
-      allowedCapabilityIds: writing
-        ? ['local.file.read', 'local.file.write', 'local.shell.exec']
-        : ['local.file.read'],
-      askCapabilityIds: [],
-      blockedCapabilityIds: writing ? [] : ['local.file.write', 'local.shell.exec'],
-      confirmedAt: new Date().toISOString(), version: 1,
-    },
-    notifications: {
-      needsAttention: 'system_and_badge', failed: true, succeeded: draft.notifySuccess,
-      succeededOnlyOnChange: draft.notifySuccessOnlyOnChange,
-    },
-    budget: { timeoutMs: draft.timeoutMinutes * 60_000 }, missedRunPolicy: 'run_latest',
-    overlapPolicy: 'skip', enable: true,
-  };
-}
 
 function Icon({ name }: { name: 'plus' | 'pause' | 'play' | 'back' | 'run' | 'chevronDown' | 'chevronRight' }) {
   const paths = {
@@ -125,6 +47,7 @@ function Icon({ name }: { name: 'plus' | 'pause' | 'play' | 'back' | 'run' | 'ch
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }
 
+
 export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onOpenConversation, onCreateNew }: {
   readonly isZh: boolean;
   readonly defaultWorkspace: string;
@@ -134,59 +57,55 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
 }) {
   const copy = getAutomationCopy(isZh);
   const locale = isZh ? 'zh' : 'en';
-  const [items, setItems] = useState<readonly AutomationSummary[]>([]);
-  const [globallyPaused, setGloballyPaused] = useState(false);
   const [view, setView] = useState<CenterView>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<AutomationRun | null>(null);
-  const [runs, setRuns] = useState<readonly AutomationRun[]>([]);
   const [tab, setTab] = useState<DetailTab>('overview');
-  const [draft, setDraft] = useState(() => blankDraft(defaultWorkspace));
+  const [draft, setDraftState] = useState(() => blankDraft(defaultWorkspace));
   const [editing, setEditing] = useState<AutomationDefinition | null>(null);
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const i18n = useMemo(() => createI18n(locale), [locale]);
+  const resources = useAutomationResources(selectedId, selectedRun?.runId ?? initialRunTarget?.runId ?? null);
+  const { bootstrap, runs: runList, run: runRead, actions } = resources;
+  const items = bootstrap.value?.automations ?? [];
+  const globallyPaused = bootstrap.value?.runtime.globallyPaused ?? false;
+  const loading = bootstrap.loading;
+  const action = actions.get('command');
+  const editorKey = JSON.stringify([editing?.workspacePath ?? draft.workspacePath, editing?.automationId ?? 'new']);
+  const retainedEditor = useSyncExternalStore(automationEditorDrafts.subscribe, () => automationEditorDrafts.get(editorKey));
+  const busy = action.pending || retainedEditor?.state === 'pending';
   const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const result = await clientApi.automationsBootstrap();
-      setItems(result.automations);
-      setGloballyPaused(result.runtime.globallyPaused);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  useEffect(() => clientApi.onAutomationsChanged(() => {
-    void refresh();
-    if (selectedId) {
-      void clientApi.automationRunsList({ automationId: selectedId, limit: 100 })
-        .then(setRuns)
-        .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-    }
-    if (selectedRun?.runId) {
-      void clientApi.automationRunsGet({ runId: selectedRun.runId })
-        .then((run) => { if (run) setSelectedRun(run); })
-        .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-    }
-  }), [refresh, selectedId, selectedRun?.runId]);
-
+  const [definitionReceipt, setDefinitionReceipt] = useState<AutomationDefinition | null>(null);
+  const setDraft = (value: Draft) => {
+    automationEditorDrafts.retain(editorKey, value, editing); setDraftState(value);
+  };
+  const refresh = bootstrap.reload;
+  const [reviewedAfterError, setReviewedAfterError] = useState(false);
+  const reread = async () => {
+    const read = await Promise.all([refresh(), selectedId ? runList.reload() : Promise.resolve(true),
+      selectedRun?.runId || initialRunTarget?.runId ? runRead.reload() : Promise.resolve(true)]);
+    if (read.every(Boolean)) { setReviewedAfterError(true); automationEditorDrafts.reviewed(editorKey); }
+  };
+  const feedback = <>
+    <ResourceFeedback i18n={i18n} loading={bootstrap.loading && !bootstrap.loaded} error={bootstrap.error} onReload={reread} />
+    <ResourceFeedback i18n={i18n} action={retainedEditor?.state === 'pending' ? { pending: true, confirmed: false, error: false }
+      : retainedEditor?.state === 'unconfirmed' ? { pending: false, confirmed: false, error: true }
+        : retainedEditor?.state === 'confirmed' ? { pending: false, confirmed: true, error: false } : action} onReload={reread} />
+    {error ? <p className="automation-alert" role="alert">{error}</p> : null}
+  </>;
   useEffect(() => {
     if (!initialRunTarget?.runId) return;
-    void (async () => {
-      const run = await clientApi.automationRunsGet({ runId: initialRunTarget.runId });
-      if (!run) return;
-      setSelectedId(initialRunTarget.automationId);
-      setSelectedRun(run);
-      setView('run');
-    })();
+    setSelectedId(initialRunTarget.automationId); setSelectedRun(null); setView('run');
   }, [initialRunTarget?.automationId, initialRunTarget?.runId]);
-
-  const selected = items.find((item) => item.definition.automationId === selectedId) ?? null;
+  const stored = items.find((item) => item.definition.automationId === selectedId) ?? null;
+  const receipt = definitionReceipt?.automationId === selectedId ? definitionReceipt : null;
+  const selected: AutomationSummary | null = receipt && (!stored || receipt.version > stored.definition.version)
+    ? { ...stored, definition: receipt, needsAttention: stored?.needsAttention ?? false } : stored;
+  const runs = runList.value ?? [];
+  const currentRun = runRead.value ?? selectedRun;
+  const currentDefinition = editing ? items.find(item => item.definition.automationId === editing.automationId)?.definition : null;
+  const staleEditor = Boolean(editing && currentDefinition && editing.version !== currentDefinition.version);
+  const missingEditor = Boolean(editing && bootstrap.loaded && !bootstrap.error && !currentDefinition);
   const counts = useMemo(() => automationCounts(items), [items]);
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -195,16 +114,14 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
 
   const openDefinition = useCallback(async (automationId: string, nextTab: DetailTab = 'overview') => {
     setSelectedId(automationId); setTab(nextTab); setView('detail'); setSelectedRun(null);
-    try { setRuns(await clientApi.automationRunsList({ automationId, limit: 100 })); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }, []);
 
-  const runAction = useCallback(async (action: () => Promise<unknown>) => {
-    setBusy(true); setError(null);
-    try { await action(); await refresh(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
-  }, [refresh]);
+  const runAction = async (write: () => Promise<unknown>) => {
+    setError(null); setReviewedAfterError(false);
+    const confirmed = await actions.run('command', write);
+    if (confirmed) { void refresh(); if (selectedId) void runList.reload(); }
+    return confirmed;
+  };
 
   const openEditor = (definition?: AutomationDefinition) => {
     if (!definition && !hasBoundAutomationWorkspace(defaultWorkspace)) {
@@ -212,7 +129,11 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
       return;
     }
     setError(null);
-    setEditing(definition ?? null); setDraft(definition ? draftFromDefinition(definition) : blankDraft(defaultWorkspace, copy.promptTemplate));
+    const key = JSON.stringify([definition?.workspacePath ?? defaultWorkspace, definition?.automationId ?? 'new']);
+    let retained = automationEditorDrafts.get(key);
+    if (retained?.state === 'confirmed') { automationEditorDrafts.discard(key); retained = undefined; }
+    setEditing(retained?.definition ?? definition ?? null);
+    setDraftState(retained?.draft ?? (definition ? draftFromDefinition(definition) : blankDraft(defaultWorkspace, copy.promptTemplate)));
     setView('editor');
   };
 
@@ -222,31 +143,54 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
       setError(copy.workspaceRequired);
       return;
     }
-    const input = inputFromDraft(nextDraft);
     await runAction(async () => {
-      const definition = editing
-        ? await clientApi.automationsUpdate({ automationId: editing.automationId, expectedVersion: editing.version, patch: input })
-        : await clientApi.automationsCreate(input);
-      setSelectedId(definition.automationId); setView('detail'); setTab('overview');
+      const ticket = automationEditorDrafts.begin(editorKey, nextDraft, editing);
+      try {
+        const input = inputFromDraft(nextDraft);
+        const definition = editing
+          ? await clientApi.automationsUpdate({ automationId: editing.automationId, expectedVersion: editing.version, patch: input })
+          : await clientApi.automationsCreate(input);
+        automationEditorDrafts.finish(editorKey, ticket, true, definition);
+        setDefinitionReceipt(definition); setSelectedId(definition.automationId); setView('detail'); setTab('overview');
+      } catch (cause) { automationEditorDrafts.finish(editorKey, ticket, false); throw cause; }
     });
   };
 
   const openRun = (run: AutomationRun) => { setSelectedRun(run); setView('run'); };
 
-  if (view === 'editor') return <Editor copy={copy} locale={locale} draft={draft} setDraft={setDraft} editing={editing}
-    busy={busy} onCancel={() => setView(editing ? 'detail' : 'list')} onSave={(next) => void save(next)} />;
+  if (view === 'editor' && retainedEditor?.state === 'confirmed' && retainedEditor.definition) return <>{feedback}
+    <section className="automation-center"><p>{retainedEditor.definition.name}</p>
+      <button type="button" className="ui-button" onClick={() => {
+        setDefinitionReceipt(retainedEditor.definition); void openDefinition(retainedEditor.definition!.automationId);
+      }}>{copy.details}</button>
+      <button type="button" className="ui-button" onClick={() => openEditor()}>{copy.newAutomation}</button>
+      <button type="button" className="ui-button" onClick={() => setView('list')}>{copy.back}</button>
+    </section></>;
 
-  if (view === 'run' && selectedRun) return <RunReceipt copy={copy} locale={locale} run={selectedRun} busy={busy}
-    onBack={() => { setView('detail'); setTab('runs'); }}
-    onRetry={() => void runAction(async () => { const run = await clientApi.automationRunsRetry({ runId: selectedRun.runId }); setSelectedRun(run); })}
-    onCancel={() => void runAction(async () => { const run = await clientApi.automationRunsCancel({ runId: selectedRun.runId }); setSelectedRun(run); })}
-    onConversation={onOpenConversation} />;
+  if (view === 'editor') return <>{feedback}
+    {staleEditor && currentDefinition ? <div className="automation-alert" role="status"><p>{i18n.t('resources.staleDraft')}</p>
+      <details><summary>{i18n.t('forms.savedValue')}</summary><pre>{JSON.stringify(draftFromDefinition(currentDefinition), null, 2)}</pre></details>
+      <button type="button" className="ui-button" disabled={busy || bootstrap.loading || bootstrap.error} onClick={() => {
+        setEditing(currentDefinition); automationEditorDrafts.retain(editorKey, draft, currentDefinition);
+      }}>{i18n.t('resources.reviewedVersion')}</button></div> : null}
+    {missingEditor ? <p role="alert">{i18n.t('resources.objectUnavailable')}</p> : null}
+    <Editor key={editorKey} copy={copy} locale={locale} draft={draft} setDraft={setDraft} editing={editing}
+    busy={busy} saveBlocked={retainedEditor?.state === 'unconfirmed' || (action.error && !reviewedAfterError) || staleEditor || missingEditor || bootstrap.error || bootstrap.loading} onDiscard={() => { automationEditorDrafts.discard(editorKey); setView(editing ? 'detail' : 'list'); }}
+    onCancel={() => setView(editing ? 'detail' : 'list')} onSave={(next) => void save(next)} /></>;
 
-  if (view === 'detail' && selected) return <AutomationDetail copy={copy} locale={locale} summary={selected} runs={runs} tab={tab}
-    setTab={setTab} busy={busy} onBack={() => setView('list')} onEdit={() => openEditor(selected.definition)}
+  if (view === 'run') return <>{feedback}<ResourceFeedback i18n={i18n} loading={runRead.loading && !runRead.loaded} error={runRead.error} onReload={runRead.reload} />
+    {currentRun ? <RunReceipt copy={copy} locale={locale} run={currentRun} busy={busy || !runRead.loaded || runRead.error || (action.error && !reviewedAfterError)}
+      onBack={() => { if (!busy) { setView('detail'); setTab('runs'); } }}
+      onRetry={() => void runAction(async () => { const run = await clientApi.automationRunsRetry({ runId: currentRun.runId }); if (run.runId === currentRun.runId) runRead.accept(run); setSelectedRun(run); })}
+      onCancel={() => void runAction(async () => { const run = await clientApi.automationRunsCancel({ runId: currentRun.runId }); if (run.runId === currentRun.runId) runRead.accept(run); setSelectedRun(run); })}
+      onConversation={onOpenConversation} /> : <button type="button" className="automation-back" onClick={() => setView('list')}>{copy.back}</button>}
+  </>;
+
+  if (view === 'detail' && selected) return <>{feedback}<ResourceFeedback i18n={i18n} loading={runList.loading && !runList.loaded} error={runList.error} onReload={runList.reload} /><AutomationDetail copy={copy} locale={locale} summary={selected} runs={runs} tab={tab}
+    setTab={setTab} runsAvailable={runList.loaded} busy={busy || bootstrap.error || !bootstrap.loaded || (action.error && !reviewedAfterError)} onBack={() => { if (!busy) setView('list'); }} onEdit={() => openEditor(selected.definition)}
     onRun={() => void runAction(async () => { await clientApi.automationsRunNow({ automationId: selected.definition.automationId }); await openDefinition(selected.definition.automationId, 'runs'); })}
-    onStatus={(status) => void runAction(() => clientApi.automationsUpdate({ automationId: selected.definition.automationId, expectedVersion: selected.definition.version, patch: { status } }))}
-    onOpenRun={openRun} />;
+    onStatus={(status) => void runAction(async () => { const definition = await clientApi.automationsUpdate({ automationId: selected.definition.automationId, expectedVersion: selected.definition.version, patch: { status } }); setDefinitionReceipt(definition); })}
+    onOpenRun={openRun} /></>;
 
   return <section className="automation-center motion-enter-rise" data-testid="automation-center" data-automation-view="list">
     <header className="automation-page-header">
@@ -255,27 +199,27 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
         <p className="automation-page-lede">{copy.subtitle}</p>
       </div>
       <div className="automation-header-actions">
-        <button className="automation-button secondary" disabled={busy} onClick={() => void runAction(async () => { await clientApi.automationsSetRuntimePaused({ paused: !globallyPaused }); })}>
+        <button className="automation-button secondary" disabled={busy || !bootstrap.loaded || bootstrap.error || (action.error && !reviewedAfterError)} onClick={() => void runAction(async () => { await clientApi.automationsSetRuntimePaused({ paused: !globallyPaused }); })}>
           <Icon name={globallyPaused ? 'play' : 'pause'} />{globallyPaused ? copy.resumeAll : copy.pauseAll}
         </button>
-        <button className="automation-button primary" onClick={() => (onCreateNew ? onCreateNew() : openEditor())}><Icon name="plus" />{copy.newAutomation}</button>
+        <button className="automation-button primary" disabled={busy} onClick={() => (onCreateNew ? onCreateNew() : openEditor())}><Icon name="plus" />{copy.newAutomation}</button>
       </div>
     </header>
-    {error ? <div className="automation-alert" role="alert">{error}<button onClick={() => void refresh()}>{copy.retry}</button></div> : null}
+    {feedback}
     {globallyPaused ? <div className="automation-runtime-banner">{copy.pausedBanner}</div> : null}
-    <div className="automation-metrics modern">
+    {bootstrap.loaded ? <div className="automation-metrics modern">
       <Metric label={copy.total} value={counts.total} /><Metric label={copy.active} value={counts.active} />
       <Metric label={copy.running} value={counts.running} /><Metric label={copy.needsAttention} value={counts.attention} attention={counts.attention > 0} />
-    </div>
+    </div> : null}
     <div className="automation-list-panel">
       <div className="automation-list-toolbar">
         <input aria-label={copy.search} placeholder={copy.search} value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
-      {loading ? <div className="automation-empty modern">{copy.loading}</div> : visible.length === 0 ? <div className="automation-empty modern">
+      {loading && !bootstrap.loaded ? <div className="automation-empty modern">{copy.loading}</div> : !bootstrap.loaded || (bootstrap.error && !items.length) ? null : visible.length === 0 ? <div className="automation-empty modern">
         <div className="automation-empty-icon"><PeerIcon name="repeat" size={22} /></div><h2>{items.length ? copy.noMatches : copy.emptyTitle}</h2>
         <p>{items.length ? copy.tryAnotherSearch : copy.emptyDetail}</p>
-        {!items.length ? <button className="automation-button primary" onClick={() => (onCreateNew ? onCreateNew() : openEditor())}><Icon name="plus" />{copy.createAutomation}</button> : null}
-      </div> : <div className="automation-list">{visible.map((summary) => <button key={summary.definition.automationId} className="automation-list-row" onClick={() => void openDefinition(summary.definition.automationId)}>
+        {!items.length ? <button className="automation-button primary" disabled={busy} onClick={() => (onCreateNew ? onCreateNew() : openEditor())}><Icon name="plus" />{copy.createAutomation}</button> : null}
+      </div> : <div className="automation-list">{visible.map((summary) => <button key={summary.definition.automationId} className="automation-list-row" disabled={busy} onClick={() => void openDefinition(summary.definition.automationId)}>
         <span className={`automation-status-dot ${summary.needsAttention ? 'attention' : summary.activeRun ? 'running' : summary.definition.status}`} />
         <span className="automation-list-main"><strong>{summary.definition.name}</strong><small>{definitionSubtitle(summary.definition, locale)}</small></span>
         <span className="automation-workspace">{summary.definition.workspacePath}</span>
@@ -304,9 +248,9 @@ function scheduleKindLabel(copy: AutomationCopy, kind: AutomationScheduleKind): 
   return labels[kind];
 }
 
-function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave }: {
+function Editor({ copy, locale, draft, setDraft, editing, busy, saveBlocked, onDiscard, onCancel, onSave }: {
   copy: AutomationCopy; locale: AutomationLocale; draft: Draft; setDraft: (value: Draft) => void; editing: AutomationDefinition | null;
-  busy: boolean; onCancel: () => void; onSave: (draft?: Draft) => void;
+  busy: boolean; saveBlocked: boolean; onDiscard: () => void; onCancel: () => void; onSave: (draft?: Draft) => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [detected, setDetected] = useState(() => Boolean(editing) || Boolean(draft.name.trim()));
@@ -316,6 +260,9 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
   const [modelOptions, setModelOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [detecting, setDetecting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const detection = useRef(0), detectionBusy = useRef(false);
+  const draftRef = useRef(draft); draftRef.current = draft;
+  useEffect(() => () => { detection.current++; }, []);
   const [detectNotice, setDetectNotice] = useState<string | null>(null);
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft({ ...draft, [key]: value });
   const input = useMemo(() => inputFromDraft(draft), [draft]);
@@ -406,7 +353,10 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
 
   const runDetection = async (force = true): Promise<Draft | null> => {
     const prompt = draft.prompt.trim();
-    if (!prompt) return null;
+    if (!prompt || detectionBusy.current || busy) return null;
+    detectionBusy.current = true;
+    const ticket = ++detection.current, original = draft;
+    const active = () => ticket === detection.current && original === draftRef.current;
     setDetectNotice(null);
     setDetecting(true);
     try {
@@ -419,20 +369,21 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
           });
           if (result?.success && result.text) {
             const parsed = parseLlmAutomationDetectionText(result.text);
-            if (parsed) {
+            if (parsed && active()) {
               return applyDetectionPatch(detectionToDraftPatch(parsed), force);
             }
           }
-          setDetectNotice(copy.detectFailed);
+          if (active()) setDetectNotice(copy.detectFailed);
         } catch {
-          setDetectNotice(copy.detectFailed);
+          if (active()) setDetectNotice(copy.detectFailed);
         }
       } else {
-        setDetectNotice(copy.detectNeedModel);
+        if (active()) setDetectNotice(copy.detectNeedModel);
       }
-      return applyInference(prompt, force);
+      return active() ? applyInference(prompt, force) : null;
     } finally {
-      setDetecting(false);
+      detectionBusy.current = false;
+      if (ticket === detection.current) setDetecting(false);
     }
   };
 
@@ -448,7 +399,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
     if (!draft.prompt.trim()) return;
     void (async () => {
       const next = await runDetection(true);
-      if (!next?.name.trim() && !draft.name.trim()) return;
+      if (!next || (!next.name.trim() && !draft.name.trim())) return;
       setConfirmOpen(true);
     })();
   };
@@ -463,7 +414,8 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
   } as const;
 
   return <section className={`automation-center narrow automation-editor motion-enter-rise${!editing ? ' automation-create-home' : ''}`} data-automation-view="editor">
-    <PageBack onClick={onCancel} label={copy.automations} />
+    <PageBack onClick={() => { if (!busy && !detecting) onCancel(); }} label={copy.automations} />
+    <p role="status">{locale === 'zh' ? '编辑在本次应用会话内保留，返回可继续。' : 'Your edit is kept for this app session; return to continue.'}</p>
     <header className="automation-page-header compact">
       <div className="automation-page-heading">
         <h1>{editing ? copy.editTitle : copy.createHomeTitle}</h1>
@@ -479,7 +431,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
       <strong>{draft.workspacePath || '—'}</strong>
     </div>
 
-    <div className="automation-form modern automation-form-single">
+    <fieldset disabled={busy || detecting} className="automation-editor-fields"><div className="automation-form modern automation-form-single">
       {!editing ? (
         <section className="automation-create-home-card">
           <label className="automation-create-home-label" htmlFor="automation-create-prompt">{copy.instructions}</label>
@@ -687,17 +639,19 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
           </div>
         </div>
       ) : null}
-    </div>
+    </div></fieldset>
 
     <div className="automation-form-actions single">
-      <button type="button" className="automation-button secondary" onClick={onCancel}>{copy.cancel}</button>
-      <button type="button" className="automation-button primary" disabled={!valid || busy || detecting} onClick={onPrimary}>
+      <button type="button" className="automation-button secondary" disabled={busy || detecting} onClick={onCancel}>{copy.back}</button>
+      <button type="button" className="automation-button secondary" disabled={busy || detecting} onClick={onDiscard}>{locale === 'zh' ? '舍弃编辑' : 'Discard edit'}</button>
+      <button type="button" className="automation-button primary" disabled={!valid || busy || detecting || saveBlocked} onClick={onPrimary}>
         {primaryLabel}
       </button>
     </div>
     {confirmOpen ? (
       <Overlay
         onClose={() => setConfirmOpen(false)}
+        onRequestClose={() => !busy && !detecting}
         ariaLabel={copy.confirmCreateTitle}
         backdropClassName="automation-confirm-overlay"
         panelClassName="automation-confirm-card"
@@ -720,7 +674,7 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
               <button
                 type="button"
                 className="automation-button primary"
-                disabled={busy || detecting || !draft.name.trim() || !draft.prompt.trim()}
+                disabled={busy || detecting || saveBlocked || !draft.name.trim() || !draft.prompt.trim()}
                 onClick={() => {
                   requestClose();
                   onSave(draft);
@@ -736,8 +690,8 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
   </section>;
 }
 
-function AutomationDetail({ copy, locale, summary, runs, tab, setTab, busy, onBack, onEdit, onRun, onStatus, onOpenRun }: {
-  copy: AutomationCopy; locale: AutomationLocale; summary: AutomationSummary; runs: readonly AutomationRun[]; tab: DetailTab; setTab: (tab: DetailTab) => void; busy: boolean;
+function AutomationDetail({ copy, locale, summary, runs, runsAvailable, tab, setTab, busy, onBack, onEdit, onRun, onStatus, onOpenRun }: {
+  copy: AutomationCopy; locale: AutomationLocale; summary: AutomationSummary; runs: readonly AutomationRun[]; runsAvailable: boolean; tab: DetailTab; setTab: (tab: DetailTab) => void; busy: boolean;
   onBack: () => void; onEdit: () => void; onRun: () => void; onStatus: (status: 'active' | 'paused') => void; onOpenRun: (run: AutomationRun) => void;
 }) {
   const definition = summary.definition;
@@ -745,7 +699,7 @@ function AutomationDetail({ copy, locale, summary, runs, tab, setTab, busy, onBa
   const latestResult = latestRun?.receipt?.summary ?? latestRun?.failureReason ?? latestRun?.blockedReason;
   return <section className="automation-center motion-enter-rise" data-automation-view="detail"><PageBack onClick={onBack} label={copy.automations} />
     <header className="automation-detail-header"><div className="automation-detail-heading"><div className="automation-detail-title"><span className={`automation-status-dot ${summary.needsAttention ? 'attention' : definition.status}`} /><h1>{definition.name}</h1></div><div className="automation-detail-meta"><span className={`automation-pill ${summary.needsAttention ? 'attention' : definition.status}`}>{definition.status === 'active' ? copy.activeState : copy.pausedState}</span><p className="automation-detail-subtitle">{definitionSubtitle(definition, locale)}</p></div></div>
-      <div className="automation-header-actions"><button className="automation-button secondary" onClick={onEdit}>{copy.edit}</button><button className="automation-button secondary" disabled={busy} onClick={() => onStatus(definition.status === 'paused' ? 'active' : 'paused')}>{definition.status === 'paused' ? copy.resume : copy.pause}</button><button className="automation-button primary" disabled={busy} onClick={onRun}><Icon name="run" />{copy.runNow}</button></div>
+      <div className="automation-header-actions"><button className="automation-button secondary" disabled={busy} onClick={onEdit}>{copy.edit}</button><button className="automation-button secondary" disabled={busy} onClick={() => onStatus(definition.status === 'paused' ? 'active' : 'paused')}>{definition.status === 'paused' ? copy.resume : copy.pause}</button><button className="automation-button primary" disabled={busy} onClick={onRun}><Icon name="run" />{copy.runNow}</button></div>
     </header>
     <div className="automation-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>{copy.overview}</button><button className={tab === 'runs' ? 'active' : ''} onClick={() => setTab('runs')}>{copy.runs} <span>{runs.length}</span></button></div>
     {tab === 'overview' ? <div className="automation-overview-grid">
@@ -757,8 +711,9 @@ function AutomationDetail({ copy, locale, summary, runs, tab, setTab, busy, onBa
       <div className="automation-panel wide"><h2>{copy.instructions}</h2><pre>{definition.prompt}</pre></div>
       <div className="automation-panel"><h2>{copy.schedule}</h2><Review label={copy.rule} value={scheduleLabel(definition.schedule, locale)} /><Review label={copy.timezone} value={definition.schedule.timezone} /><Review label={copy.nextRun} value={formatDateTime(definition.nextRunAt, locale)} /><Review label={copy.missedRuns} value={copy.runLatest} /><Review label={copy.overlap} value={copy.skip} /></div>
       <div className="automation-panel"><h2>{copy.access}</h2><Review label={copy.preset} value={definition.grant.preset === 'observe' ? copy.observe : copy.workInWorkspace} /><Review label={copy.workspace} value={definition.workspacePath} /><Review label={copy.execution} value={definition.grant.preset === 'observe' ? `${copy.currentWorkspace} · ${copy.observeDetail}` : copy.isolatedWorktree} /></div>
+      <div className="automation-panel"><h2>{copy.notifications}</h2><Review label={copy.notifySuccess} value={definition.notifications.succeeded ? copy.enabled : copy.disabled} /><Review label={copy.notifySuccessOnlyOnChange} value={definition.notifications.succeededOnlyOnChange ? copy.enabled : copy.disabled} /><p>{copy.notifyAttention}</p></div>
       <div className="automation-panel"><h2>{copy.health}</h2><Review label={copy.lastRun} value={formatDateTime(definition.lastRunAt, locale)} /><Review label={copy.failures} value={String(definition.consecutiveFailures)} /><Review label={copy.created} value={formatDateTime(definition.createdAt, locale)} /></div>
-    </div> : <RunsTable copy={copy} locale={locale} runs={runs} onOpen={onOpenRun} />}
+    </div> : runsAvailable ? <RunsTable copy={copy} locale={locale} runs={runs} onOpen={onOpenRun} /> : null}
   </section>;
 }
 
@@ -785,7 +740,7 @@ function RunReceipt({ copy, locale, run, busy, onBack, onRetry, onCancel, onConv
       <div className="automation-panel"><h2>{copy.usage}</h2><Review label={copy.inputTokens} value={String(receipt?.inputTokens ?? '—')} /><Review label={copy.outputTokens} value={String(receipt?.outputTokens ?? '—')} /><Review label={copy.cost} value={receipt?.costUsd == null ? '—' : `${receipt.costUsd.toFixed(4)}`} /><Review label={copy.duration} value={receipt?.durationMs == null ? '—' : copy.seconds(Math.round(receipt.durationMs / 1000))} /></div>
       <div className="automation-panel wide"><h2>{copy.changes}</h2>{receipt?.changes ? <><Review label={copy.branch} value={receipt.changes.branch ?? '—'} /><Review label={copy.worktree} value={receipt.changes.worktreePath ?? '—'} /><Review label={copy.files} value={receipt.changes.changedFiles.length ? receipt.changes.changedFiles.join(', ') : copy.noFilesChanged} /><Review label={copy.diff} value={`+${receipt.changes.additions ?? 0} −${receipt.changes.deletions ?? 0}`} /><Review label={copy.retention} value={receipt.changes.retained ? copy.retainedReview : copy.cleanedUp} /></> : <p>{copy.noWorkspaceChanges}</p>}</div>
       <div className="automation-panel wide"><h2>{copy.verification}</h2>{receipt?.verifications.length ? receipt.verifications.map((verification) => <div className="automation-verification" key={`${verification.command}-${verification.status}`}><span className={`automation-pill ${verification.status}`}>{verification.status}</span><code>{verification.command}</code><span>{verification.summary}</span></div>) : <p>{copy.noVerification}</p>}</div>
-      <div className="automation-panel wide"><h2>{copy.evidence}</h2>{receipt?.evidenceRefs.length ? <ul className="automation-evidence-list">{receipt.evidenceRefs.map((ref) => <li key={ref}><code>{ref}</code></li>)}</ul> : <p>{copy.noEvidence}</p>}</div>
+      <div className="automation-panel wide"><h2>{copy.evidence}</h2>{receipt?.evidenceRefs.length ? <EvidencePreview refs={receipt.evidenceRefs} i18n={createI18n(locale)} /> : <p>{copy.noEvidence}</p>}</div>
     </div>
   </section>;
 }

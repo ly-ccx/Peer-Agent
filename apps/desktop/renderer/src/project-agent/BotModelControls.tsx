@@ -1,10 +1,62 @@
+import { useMemo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotRoleModelView, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy, ProjectAgentActivity } from '@peer-agent/protocol';
-import { CascadingMenu } from '../app/components/CascadingMenu';
-import { ReasoningEffortSlider } from '../chat/components/thread/ReasoningEffortSlider';
+import { AnchoredModelSelectionMenu } from '../chat/components/thread/ModelSelectionPanel';
+import { isEffortLevel, type EffortLevel } from '../chat/state/preferences';
+import type { SelectionProviderGroup } from '../chat/components/thread/modelSelection';
 import { botConfiguredModelSelection, botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './state/botModelControls';
 import '../chat/styles/chat-surface.css';
 import './styles/bot-model-controls.css';
+
+const TIERS = ['strong', 'fast', 'economy', 'vision'] as const;
+
+function botPanelGroups(
+  models: readonly ModelRoutingMenuOption[],
+  view: BotRoleModelView | undefined,
+  isZh: boolean,
+  defaultsLabel: string,
+  inheritLabel: string,
+  tierLabel: (tier: typeof TIERS[number]) => string,
+): readonly SelectionProviderGroup[] {
+  const providers = botModelMenuGroups(models, view, isZh).map((group) => ({
+    id: group.id,
+    label: group.label,
+    disabled: group.disabled === true,
+    models: group.items.map((item) => {
+      const source = models.find((model) => model.id === item.id);
+      const levels = source?.reasoningEffortLevels ?? [];
+      return {
+        id: item.id,
+        label: item.label,
+        disabled: item.disabled === true,
+        supportsVision: source?.supportsVision === true,
+        authMethod: source?.authMethod ?? '',
+        supportsReasoning: levels.length > 1,
+        reasoningEffortLevels: levels,
+        reasoningDefaultEffort: source?.defaultReasoningEffort,
+      };
+    }),
+  }));
+  return [
+    ...providers,
+    {
+      id: 'bot-model-defaults',
+      label: defaultsLabel,
+      disabled: false,
+      models: [
+        { id: 'inherit', label: inheritLabel, disabled: false, supportsVision: false, authMethod: '', supportsReasoning: false },
+        ...TIERS.map((tier) => ({
+          id: `tier:${tier}`,
+          label: tierLabel(tier),
+          disabled: false,
+          supportsVision: false,
+          authMethod: '',
+          supportsReasoning: false,
+        })),
+      ],
+    },
+  ];
+}
 
 export function BotModelControls({ role, policy, models, view, busy, compact = false, activeSelection, i18n, onChange }: {
   readonly role: ModelRole;
@@ -15,53 +67,68 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   readonly compact?: boolean;
   readonly activeSelection?: ProjectAgentActivity['modelSelection'];
   readonly i18n: I18nRuntime;
-  readonly onChange: (policy: ProjectModelPolicy) => void | Promise<void>;
+  readonly onChange: (policy: ProjectModelPolicy) => void | Promise<unknown>;
 }) {
   const isZh = i18n.locale.startsWith('zh');
-  const selection = activeSelection ?? botConfiguredModelSelection(policy, role, models, view)
+  const selection = botConfiguredModelSelection(policy, role, models, view)
     ?? (view?.resolution.ok ? view.resolution.selection : undefined);
   const model = models.find(item => item.id === selection?.modelProviderId);
   const levels = model?.reasoningEffortLevels ?? [];
   const effort = selection?.reasoningEffort ?? model?.defaultReasoningEffort;
   const setting = policy?.overrides?.[role];
-  const groups = [
-    ...botModelMenuGroups(models, view, isZh),
-    { id: 'bot-model-defaults', label: i18n.t('projectAgent.model.defaults'), items: [
-      { id: 'inherit', label: i18n.t('projectAgent.policy.inherit') },
-      ...(['strong', 'fast', 'economy', 'vision'] as const).map(tier => ({ id: `tier:${tier}`, label: i18n.t(`modelRouting.tier.${tier}`) })),
-    ] },
-  ];
+  const groups = useMemo(() => botPanelGroups(
+    models,
+    view,
+    isZh,
+    i18n.t('projectAgent.model.defaults'),
+    i18n.t('projectAgent.policy.inherit'),
+    (tier) => i18n.t(`modelRouting.tier.${tier}`),
+  ), [i18n, isZh, models, view]);
   const changeModel = (id: string) => {
     if (id === 'inherit') onChange(botInheritModelPolicy(policy, role));
     else if (id.startsWith('tier:')) onChange({ ...policy, overrides: { ...policy?.overrides,
       [role]: { mode: 'tier', tier: id.slice(5) as 'strong' | 'fast' | 'economy' | 'vision' } } });
     else {
       const next = models.find(item => item.id === id);
-      if (next && view?.eligibleModelIds.includes(id)) onChange(botFixedModelPolicy(policy, role, next, effort));
+      if (next && view?.eligibleModelIds.includes(id)) {
+        onChange(botFixedModelPolicy(policy, role, next, effort, setting?.mode === 'fixed' && setting.fastMode === true));
+      }
     }
   };
-  const hasEffort = Boolean(model && effort && levels.includes(effort as typeof levels[number]));
   const source = !setting ? i18n.t('projectAgent.policy.inherit') : setting.mode === 'tier'
     ? i18n.t(`modelRouting.tier.${setting.tier}`) : setting.mode === 'auto'
       ? i18n.t('projectAgent.policy.autoPool') : i18n.t('projectAgent.model.botOnly');
+  const selectedId = !setting ? 'inherit' : setting.mode === 'tier' ? `tier:${setting.tier}` : setting.mode === 'fixed' ? setting.modelProviderId : model?.id ?? 'inherit';
+  const label = setting?.mode === 'tier'
+    ? i18n.t(`modelRouting.tier.${setting.tier}`)
+    : (model?.label ?? i18n.t('projectAgent.model.unavailable'));
+  const effortLevel: EffortLevel = isEffortLevel(effort) ? effort : 'default';
+  const fastMode = setting?.mode === 'fixed' && setting.fastMode === true;
   return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''}>
-    <div className={`bot-model-control-row${hasEffort ? ' has-effort' : ''}`}>
-      <CascadingMenu className="bot-model-picker" value={model?.id ?? ''} groups={groups}
-        triggerLabel={model?.label}
-        onChange={changeModel} disabled={busy || models.length === 0} menuPlacement={compact ? 'up' : 'down'}
-        placeholder={i18n.t('projectAgent.model.unavailable')}
-        ariaLabel={`${i18n.t('projectAgent.model.select')}：${model?.label ?? i18n.t('projectAgent.model.unavailable')}`}
-        title={`${model?.label ?? ''} · ${source} · ${i18n.t(activeSelection ? 'projectAgent.model.runningReply' : 'projectAgent.model.nextReply')}`} />
-      {model && effort && levels.includes(effort as typeof levels[number]) ? (
-        <ReasoningEffortSlider key={model.id} effort={effort as typeof levels[number]} effortLevels={levels}
-          disabled={busy || levels.length < 2} isZh={isZh} fastAvailable={false} fastMode={false}
-          onFastModeChange={() => {}} onEffortChange={value => onChange(botFixedModelPolicy(policy, role, model, value))} />
-      ) : null}
+    <div className="bot-model-control-row">
+      <AnchoredModelSelectionMenu
+        className="bot-model-picker"
+        groups={groups}
+        selectedModelId={selectedId}
+        effort={effortLevel}
+        fastMode={fastMode}
+        isZh={isZh}
+        disabled={busy || !view}
+        label={label}
+        title={`${label} · ${source} · ${i18n.t('projectAgent.model.nextReply')}`}
+        onSelectModel={changeModel}
+        onEffortChange={(value) => {
+          if (!model || !view?.eligibleModelIds.includes(model.id)) return;
+          onChange(botFixedModelPolicy(policy, role, model, value, fastMode));
+        }}
+        onFastModeChange={(enabled) => {
+          if (!model || !view?.eligibleModelIds.includes(model.id)) return;
+          onChange(botFixedModelPolicy(policy, role, model, effort, enabled));
+        }}
+      />
     </div>
-    {!compact ? <div className={`bot-model-captions${hasEffort ? ' has-effort' : ''}`}>
-      <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
-        {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p>
-      {hasEffort ? <p className="bot-model-source">{isZh ? '推理强度' : 'Reasoning effort'}</p> : null}
-    </div> : null}
+    {activeSelection ? <p className="bot-model-source">{i18n.t('projectAgent.model.runningReply')}: {models.find(item => item.id === activeSelection.modelProviderId)?.label ?? activeSelection.modelId} · {i18n.t('projectAgent.model.nextReply')}</p> : null}
+    {!compact ? <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
+      {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p> : null}
   </div>;
 }

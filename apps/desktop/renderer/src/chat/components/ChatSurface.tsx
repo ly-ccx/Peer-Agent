@@ -1102,7 +1102,7 @@ export function ChatSurface({
       ),
     }).then((target) => {
       if (!target) return;
-      target.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+      target.scrollIntoView({ behavior: 'auto', block: 'center' });
       target.classList.remove('chat-msg-flash');
       void target.offsetWidth;
       target.classList.add('chat-msg-flash');
@@ -2114,7 +2114,7 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId: targetConversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, fastMode, mode, conversationId: targetConversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
     return true;
   }, [
     isStreaming,
@@ -2124,6 +2124,7 @@ export function ChatSurface({
     messages,
     onConversationUpdated,
     effort,
+    fastMode,
     mode,
     modelProviderId,
     systemInstructions,
@@ -2783,6 +2784,7 @@ export function ChatSurface({
       modelOptions={modelOptions}
       canSwitchModel={canSwitchModel}
       onModelChange={handleModelChange}
+      onManageModels={onOpenSettings}
       onContextWindowChange={handleContextWindowChange}
       selectedModelProviderId={modelProviderId}
       showContextUsage={false}

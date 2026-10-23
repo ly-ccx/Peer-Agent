@@ -13,8 +13,10 @@ export function useComposerAttachments(isZh: boolean, controlled?: { attachments
   const reads = useRef(0);
   const queue = useRef(Promise.resolve());
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const generation = useRef(0);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; }; }, []);
   const replace = useCallback((next: readonly ProjectInputAttachment[]) => {
+    if (!mounted.current) return;
     current.current = next;
     changed.current?.(next);
     if (mounted.current) setAttachments(next);
@@ -23,8 +25,11 @@ export function useComposerAttachments(isZh: boolean, controlled?: { attachments
     if (!files.length) return;
     reads.current += 1;
     setReading(true);
+    const ticket = generation.current;
     queue.current = queue.current.then(async () => {
+      if (!mounted.current || ticket !== generation.current) return;
       const result = await intakeAttachments([...files], current.current.length, isZh);
+      if (!mounted.current || ticket !== generation.current) return;
       replace([...current.current, ...result.attachments]);
       setError(result.error);
     }).catch(cause => {
