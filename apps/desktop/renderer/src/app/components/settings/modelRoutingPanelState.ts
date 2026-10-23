@@ -1,5 +1,6 @@
 import type { TranslationKey } from '@peer-agent/i18n';
-import { buildModelMenuGroups, modelMenuChannelName } from '@peer-agent/protocol';
+import { buildModelMenuGroups, modelMenuChannelName, modelReasoningLevels,
+  type ModelReasoningEffort, type ModelTierBinding, type RoleSetting } from '@peer-agent/protocol';
 
 export const MODEL_TIERS = ['strong', 'fast', 'economy', 'vision'] as const;
 export const MODEL_ROLES = [
@@ -28,6 +29,27 @@ export interface RoutingModelOption {
   readonly supportsTools: boolean;
   readonly supportsStructured: boolean;
   readonly contextTokens: number;
+  readonly reasoningEffortLevels?: readonly ModelReasoningEffort[];
+  readonly defaultReasoningEffort?: ModelReasoningEffort;
+}
+
+/** A role override must be usable by every eligible candidate without changing its routing mode. */
+export function routingReasoningLevels(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
+  options: readonly RoutingModelOption[], role: ModelRoleName): readonly ModelReasoningEffort[] {
+  const binding = setting.mode === 'tier' ? tiers[setting.tier] : undefined;
+  const ids = setting.mode === 'fixed' ? [setting.modelProviderId] : setting.mode === 'auto' ? setting.pool
+    : binding ? [binding.primary, ...(binding.fallbacks ?? [])] : [];
+  const candidates = ids.flatMap(id => {
+    const option = options.find(item => item.id === id);
+    return option && !optionRejectReason(option, { kind: 'role', role }) ? [option] : [];
+  });
+  if (!candidates.length) return [];
+  return modelReasoningLevels(candidates[0]!).filter(level => candidates.every(option => modelReasoningLevels(option).includes(level)));
+}
+
+export function setRoutingReasoning(setting: RoleSetting, effort?: ModelReasoningEffort): RoleSetting {
+  const { reasoningEffort: _previous, ...route } = setting;
+  return { ...route, ...(effort !== undefined ? { reasoningEffort: effort } : {}) };
 }
 
 export function routingMenuGroups(
@@ -67,7 +89,7 @@ const EXPLORER_MIN_CONTEXT = 8_000;
 const ESSENTIAL_ROLES = new Set<ModelRoleName>(['project_agent', 'session_worker']);
 
 export function isRoutingReadOnly(providerCount: number): boolean {
-  return providerCount <= 1;
+  return providerCount === 0;
 }
 
 export function isEssentialRole(role: string): boolean {

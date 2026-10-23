@@ -206,6 +206,24 @@ test('clearing a role spend cap removes that key', () => {
   assert.equal(calls.filter((call) => call[0] === 'merge').length, mergesBefore);
 });
 
+test('one model can persist a tier effort, preview the resolved value and reject unsupported writes', () => {
+  const { service, calls, getSettings } = createHarness({ settings: {} });
+  const providers = [{ id: 'one', model: 'reasoner', provider: 'openai', enabled: true, apiKeyConfigured: true,
+    supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' }];
+  service.updateModelRouting({ roles: { project_agent: { mode: 'tier', tier: 'fast', reasoningEffort: 'high' } } }, providers);
+  const role = service.describeModelRouting(providers).routing.roles.project_agent;
+  assert.deepEqual(role, { mode: 'tier', tier: 'fast', reasoningEffort: 'high' });
+  const preview = service.previewModelRouting(providers).resolutions.find(row => row.role === 'project_agent');
+  assert.equal(preview.modelProviderId, 'one');
+  assert.equal(preview.reasoningEffort, 'high');
+  const count = calls.length;
+  assert.throws(() => service.updateModelRouting({ roles: { project_agent: { ...role, reasoningEffort: 'max' } } }, providers), /INVALID_REASONING_EFFORT/);
+  assert.equal(calls.length, count);
+  assert.equal(getSettings().modelRouting.roles.project_agent.reasoningEffort, 'high');
+  service.updateModelRouting({ roles: { project_agent: { mode: 'tier', tier: 'fast' } } }, providers);
+  assert.equal(service.previewModelRouting(providers).resolutions.find(row => row.role === 'project_agent').reasoningEffort, 'low');
+});
+
 test('project agent settings keep the standard level and merge quiet hours', () => {
   const { service, getSettings } = createHarness();
   const first = service.update({ projectAgent: { proactivity: 'high', digestTime: '18:30' } });

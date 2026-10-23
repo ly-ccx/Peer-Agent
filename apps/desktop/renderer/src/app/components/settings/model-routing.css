@@ -73,7 +73,7 @@
 }
 
 .model-routing-role {
-  grid-template-columns: minmax(96px, 132px) 156px 168px minmax(72px, 1fr) minmax(136px, 168px);
+  grid-template-columns: minmax(80px, 104px) 124px minmax(120px, 168px) minmax(112px, 144px) minmax(72px, 1fr) 128px;
   column-gap: var(--space-3);
 }
 
@@ -200,6 +200,14 @@
   white-space: nowrap;
 }
 
+.model-routing-reasoning { min-width: 0; }
+.model-routing-reasoning-note {
+  margin: 4px 0 0;
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-caption, 12px);
+  line-height: 1.45;
+}
+
 .model-routing-spend input {
   width: 100%;
   min-height: 32px;
@@ -243,7 +251,7 @@
   font-size: 0.78rem;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1100px) {
   .model-routing-head.model-routing-role {
     display: none;
   }
@@ -263,6 +271,7 @@
   }
 
   .model-routing-resolved::before,
+  .model-routing-reasoning::before,
   .model-routing-spend::before {
     content: attr(data-label);
     display: block;

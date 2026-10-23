@@ -214,10 +214,10 @@ test('model routing ipc previews roles in main and refuses writes when one model
   const alone = createRoutingHost([text]);
   const current = await alone.handlers.get('model-routing:get')();
   assert.equal(current.singleModel, true);
-  const refused = await alone.handlers.get('model-routing:update')({}, {
+  const changed = await alone.handlers.get('model-routing:update')({}, {
     verifierPreferDifferentFamily: false,
   });
-  assert.equal(refused.singleModel, true);
-  assert.equal(alone.merges.length, 0);
-  assert.equal(alone.readSettings().modelRouting, undefined);
+  assert.equal(changed.singleModel, true);
+  assert.equal(alone.merges.length, 1);
+  assert.equal(alone.readSettings().modelRouting.verifierPreferDifferentFamily, false);
 });

@@ -39,9 +39,8 @@ export function profilePolicyPatch(payload, models = []) {
           const valid = setting.mode === 'tier' && TIERS.has(setting.tier)
             || setting.mode === 'fixed' && allowed.has(setting.modelProviderId)
             || setting.mode === 'auto' && ids(setting.pool) && setting.pool.length > 0;
-          if (setting.reasoningEffort !== undefined && (setting.mode !== 'fixed'
-            || !isModelReasoningEffort(setting.reasoningEffort)
-            || !modelReasoningLevels(models.find(model => model.id === setting.modelProviderId) || {}).includes(setting.reasoningEffort))) {
+          if (setting.reasoningEffort !== undefined && (!isModelReasoningEffort(setting.reasoningEffort)
+            || setting.mode === 'fixed' && !modelReasoningLevels(models.find(model => model.id === setting.modelProviderId) || {}).includes(setting.reasoningEffort))) {
             return { ok: false, code: 'INVALID_REASONING_EFFORT' };
           }
           if (setting.fastMode !== undefined) {

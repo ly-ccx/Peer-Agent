@@ -3,6 +3,8 @@ import { useUnsavedChanges } from '../../../ui/forms/UnsavedChanges';
 import { FormFeedback } from '../../../ui/forms/FormFeedback';
 import { readRoutingDraft, editRoutingDraft, routingDraftPatch, type RoutingDraft } from './routingDraft';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { isModelReasoningEffort, type RoleSetting } from '@peer-agent/protocol';
+import { effortLabel } from '../../../chat/state/preferences';
 import { useEffect, useId, useState } from 'react';
 import { clientApi } from '../../../clientApi';
 import type {
@@ -25,6 +27,8 @@ import {
   reasonTranslationKey,
   roleTranslationKey,
   routingMenuGroups,
+  routingReasoningLevels,
+  setRoutingReasoning,
   tierTranslationKey,
   validateAutoPool,
   withoutId,
@@ -45,6 +49,8 @@ function asOptions(providers: readonly ModelRoutingProviderOption[]): RoutingMod
     supportsTools: provider.supportsTools,
     supportsStructured: provider.supportsStructured,
     contextTokens: provider.contextTokens,
+    reasoningEffortLevels: provider.reasoningEffortLevels,
+    defaultReasoningEffort: provider.defaultReasoningEffort,
   }));
 }
 
@@ -208,15 +214,18 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
           <span />
           <span />
           <span />
+          <span>{i18n.t('modelRouting.reasoning')}</span>
           <span>{i18n.t('modelRouting.resolved')} · {i18n.t('forms.savedValue')}</span>
           <span>{i18n.t('modelRouting.spendCap')}</span>
         </div>
         <div>
           {MODEL_ROLES.map((role) => {
-            const setting = view.routing.roles[role] || { mode: 'tier', tier: 'economy' };
+            const setting: RoleSetting = view.routing.roles[role] || { mode: 'tier', tier: 'economy' };
             const resolved = resolutionFor(role);
             const roleLabel = i18n.t(roleTranslationKey(role) || 'modelRouting.unresolved');
             const resolvedLabel = resolutionText(resolved, role, i18n);
+            const levels = routingReasoningLevels(setting, view.routing.tiers, options, role);
+            const invalidEffort = setting.reasoningEffort !== undefined && !levels.includes(setting.reasoningEffort);
             return (
               <div className={`model-routing-row model-routing-role${setting.mode === 'auto' ? ' is-auto' : ''}`} key={role}>
                 <div className="model-routing-name">{roleLabel}</div>
@@ -231,14 +240,14 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                   ]}
                   onChange={(mode) => {
                     if (mode === 'tier') {
-                      void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy' }));
+                      void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', reasoningEffort: setting.reasoningEffort }));
                     } else if (mode === 'fixed') {
                       const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
                       if (!capable) {
                         setError(i18n.t('modelRouting.poolInvalid'));
                         return;
                       }
-                      void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id }));
+                      void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, reasoningEffort: setting.reasoningEffort }));
                     } else {
                       const capable = options.filter((option) => !optionRejectReason(option, { kind: 'role', role }));
                       const pool = capable.slice(0, 1).map((option) => option.id);
@@ -247,7 +256,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                         setError(i18n.t('modelRouting.poolInvalid'));
                         return;
                       }
-                      void save(rolePatch(role, { mode: 'auto', pool }));
+                      void save(rolePatch(role, { mode: 'auto', pool, reasoningEffort: setting.reasoningEffort }));
                     }
                   }}
                 />
@@ -260,7 +269,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                       value: tierName,
                       label: i18n.t(tierTranslationKey(tierName)),
                     }))}
-                    onChange={(tierName) => save(rolePatch(role, { mode: 'tier', tier: tierName as ModelTierName }))}
+                    onChange={(tierName) => save(rolePatch(role, { ...setting, tier: tierName as ModelTierName }))}
                   />
                 ) : null}
                 {setting.mode === 'fixed' ? (
@@ -271,7 +280,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     disabled={readOnly}
                     ariaLabel={roleLabel}
                     i18n={i18n}
-                    onChange={(id) => save(rolePatch(role, { mode: 'fixed', modelProviderId: id }))}
+                    onChange={(id) => save(rolePatch(role, { ...setting, modelProviderId: id }))}
                   />
                 ) : null}
                 {setting.mode === 'auto' ? (
@@ -292,7 +301,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                                 return;
                               }
                               setError('');
-                              void save(rolePatch(role, { mode: 'auto', pool }));
+                              void save(rolePatch(role, { ...setting, pool }));
                             }}
                           />
                           {optionLabel(option, reason, i18n)}
@@ -301,6 +310,24 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     })}
                   </div>
                 ) : null}
+                <div className="model-routing-reasoning" data-label={i18n.t('modelRouting.reasoning')}>
+                  <Dropdown
+                    value={setting.reasoningEffort ?? 'model-default'}
+                    disabled={readOnly || (!levels.length && !invalidEffort)}
+                    ariaLabel={`${roleLabel} ${i18n.t('modelRouting.reasoning')}`}
+                    options={[
+                      { value: 'model-default', label: i18n.t('modelRouting.reasoningDefault') },
+                      ...levels.map(level => ({ value: level, label: effortLabel(level, i18n.locale.startsWith('zh')) })),
+                      ...(invalidEffort ? [{ value: setting.reasoningEffort!, label: `${effortLabel(setting.reasoningEffort!, i18n.locale.startsWith('zh'))} · ${i18n.t('modelRouting.reasoningInvalid')}`, disabled: true }] : []),
+                    ]}
+                    onChange={value => {
+                      if (value === 'model-default' || isModelReasoningEffort(value) && levels.includes(value)) {
+                        void save(rolePatch(role, setRoutingReasoning(setting, isModelReasoningEffort(value) ? value : undefined)));
+                      }
+                    }}
+                  />
+                  {!levels.length ? <p className="model-routing-reasoning-note">{i18n.t(setting.mode === 'fixed' ? 'projectAgent.model.noEffort' : 'modelRouting.reasoningNoCommon')}</p> : null}
+                </div>
                 <div className="model-routing-resolved" data-label={i18n.t('modelRouting.resolved')} title={resolvedLabel}>
                   {resolvedLabel}
                 </div>
@@ -330,12 +357,14 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
 
 function resolutionText(row: ModelRoutingPreviewRow | undefined, role: ModelRoleName, i18n: I18nRuntime) {
   if (!row) return i18n.t('modelRouting.unresolved');
+  const label = row.ok ? `${row.label} · ${isModelReasoningEffort(row.reasoningEffort)
+    ? effortLabel(row.reasoningEffort, i18n.locale.startsWith('zh')) : i18n.t('modelRouting.reasoningDefault')}` : row.label;
   if (row.spendExceeded && isEssentialRole(role)) {
-    return `${row.label} · ${i18n.t('modelRouting.essentialSpend')}`;
+    return `${label} · ${i18n.t('modelRouting.essentialSpend')}`;
   }
   if (!row.ok && row.reason === 'spend_cap_reached') return i18n.t('modelRouting.spendExceeded');
   if (!row.ok) return i18n.t('modelRouting.unresolved');
-  return row.label;
+  return label;
 }
 
 function ModelDropdown({

@@ -46,4 +46,3 @@ test('reply echo truncates by display columns with an ellipsis',()=>{
     expect(echoed).not.toContain('\n');
   }
 });
-

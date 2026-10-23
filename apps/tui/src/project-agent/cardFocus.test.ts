@@ -17,4 +17,7 @@ test('focused cards expose navigation and activation while Escape and lost cards
   expect(cardFocusIntent({ name: 'enter', isComposing: true }, true, true)).toBe('none');
   expect(cardFocusIntent({ name: 'enter', eventType: 'repeat' }, true, true)).toBe('none');
   expect(cardFocusIntent({ name: 'enter', eventType: 'release' }, true, true)).toBe('none');
+  expect(cardFocusIntent({ name: 'x', sequence: 'X' }, true, true)).toBe('type');
+  expect(cardFocusIntent({ name: 'x', ctrl: true }, true, true)).toBe('none');
+  expect(cardFocusIntent({ name: 'escape', sequence: '\u001b' }, true, true)).toBe('leave');
 });

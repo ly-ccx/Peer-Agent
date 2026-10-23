@@ -35,6 +35,19 @@ const visionModel = provider({
   isDefault: false,
 });
 
+test('stored tier and auto reasoning overrides survive normalization and reach the shared resolver', () => {
+  const model = provider({ ...textModel, supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' });
+  for (const setting of [{ mode: 'tier', tier: 'fast' }, { mode: 'auto', pool: [model.id] }]) {
+    const stored = { roles: { project_agent: { ...setting, reasoningEffort: 'high' } } };
+    const routing = resolveStoredModelRouting(stored, [model]);
+    assert.deepEqual(routing.roles.project_agent, stored.roles.project_agent);
+    const result = resolveRoleRoute({ providers: [model], role: 'project_agent', routing });
+    assert.equal(result.ok, true);
+    assert.equal(result.selection.reasoningEffort, 'high');
+    assert.equal(result.selection.modelProviderId, model.id);
+  }
+});
+
 test('provider family prefers provider type, then group id', () => {
   assert.equal(providerFamily({ provider: 'OpenAI', groupId: 'group-a' }), 'openai');
   assert.equal(providerFamily({ providerType: 'Anthropic', provider: 'openai' }), 'anthropic');

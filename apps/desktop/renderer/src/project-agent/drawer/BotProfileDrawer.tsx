@@ -354,6 +354,7 @@ export function BotProfileDrawer({
   return (
     <div className={`bot-drawer-dock-frame${dockPhase === 'on' ? ' is-open' : ''}`} inert={!memory.open}>
       <BotDrawerResizer
+        enabled={memory.open && dockPhase === 'on'}
         width={memory.width}
         isZh={isZh}
         onResize={(next) => onMemory(resizeDrawer(memory, next))}

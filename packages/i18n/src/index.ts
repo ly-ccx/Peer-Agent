@@ -904,6 +904,10 @@ export type TranslationKey =
   | 'modelRouting.pool'
   | 'modelRouting.poolInvalid'
   | 'modelRouting.resolved'
+  | 'modelRouting.reasoning'
+  | 'modelRouting.reasoningDefault'
+  | 'modelRouting.reasoningInvalid'
+  | 'modelRouting.reasoningNoCommon'
   | 'modelRouting.unresolved'
   | 'modelRouting.preferDifferentFamily'
   | 'modelRouting.spendCap'
@@ -1594,7 +1598,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.nav': '模型分工',
     'modelRouting.title': '模型分工',
     'modelRouting.description': '为不同工作选择档位或具体模型。普通对话仍使用会话里选中的模型。',
-    'modelRouting.singleModel': '只有一个模型时，所有工作都用它',
+    'modelRouting.singleModel': '只有一个模型时，各角色使用同一模型，仍可分别设置思考强度。',
     'modelRouting.noModel': '没有可用的模型',
     'modelRouting.tiers': '档位',
     'modelRouting.roles': '角色',
@@ -1610,6 +1614,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.pool': '模型池',
     'modelRouting.poolInvalid': '自动池里需要至少一个满足该角色能力的模型',
     'modelRouting.resolved': '当前解析',
+    'modelRouting.reasoning': '思考强度',
+    'modelRouting.reasoningDefault': '跟随模型默认',
+    'modelRouting.reasoningInvalid': '当前候选不支持',
+    'modelRouting.reasoningNoCommon': '候选模型没有共同支持的强度，可固定模型后设置。',
     'modelRouting.unresolved': '没有可用的模型',
     'modelRouting.preferDifferentFamily': '复核优先不同源',
     'modelRouting.spendCap': '日花费上限（美元）',
@@ -2985,7 +2993,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.nav': 'Model routing',
     'modelRouting.title': 'Model routing',
     'modelRouting.description': 'Choose a tier or a specific model for each kind of work. Ordinary chat still uses the model selected in the conversation.',
-    'modelRouting.singleModel': 'When only one model is available, every kind of work uses it',
+    'modelRouting.singleModel': 'Roles share the available model, but can use different reasoning efforts.',
     'modelRouting.noModel': 'No usable model',
     'modelRouting.tiers': 'Tiers',
     'modelRouting.roles': 'Roles',
@@ -3001,6 +3009,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.pool': 'Pool',
     'modelRouting.poolInvalid': 'An automatic pool needs at least one model that meets the role.',
     'modelRouting.resolved': 'Resolved',
+    'modelRouting.reasoning': 'Reasoning effort',
+    'modelRouting.reasoningDefault': 'Model default',
+    'modelRouting.reasoningInvalid': 'Unsupported by current candidates',
+    'modelRouting.reasoningNoCommon': 'No shared effort level. Choose a fixed model to configure its effort.',
     'modelRouting.unresolved': 'No usable model',
     'modelRouting.preferDifferentFamily': 'Prefer a different family for verification',
     'modelRouting.spendCap': 'Daily spend cap (USD)',

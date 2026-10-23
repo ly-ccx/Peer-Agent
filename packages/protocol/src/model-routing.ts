@@ -16,10 +16,11 @@ export type ModelRole =
   | 'objective_probe'
   | 'compactor';
 
-export type RoleSetting =
+export type RoleSetting = (
   | { readonly mode: 'tier'; readonly tier: ModelTier }
-  | { readonly mode: 'fixed'; readonly modelProviderId: string; readonly reasoningEffort?: ModelReasoningEffort; readonly fastMode?: boolean }
-  | { readonly mode: 'auto'; readonly pool: readonly string[] };
+  | { readonly mode: 'fixed'; readonly modelProviderId: string; readonly fastMode?: boolean }
+  | { readonly mode: 'auto'; readonly pool: readonly string[] }
+) & { readonly reasoningEffort?: ModelReasoningEffort };
 
 export interface ModelTierBinding {
   readonly primary: string;
@@ -371,7 +372,7 @@ export function resolveRoleModel(input: RoleModelRequest): ModelResolution {
     const ordered = orderCandidates(eligible, input);
     const chosen = ordered[0];
     if (!chosen) return fail(input, 'empty');
-    const requestedEffort = layer.setting.mode === 'fixed' ? layer.setting.reasoningEffort : undefined;
+    const requestedEffort = layer.setting.reasoningEffort;
     if (requestedEffort !== undefined && !chosen.reasoningEffortLevels?.includes(requestedEffort)) return fail(input, 'reasoning');
     const requestedFast = layer.setting.mode === 'fixed' && layer.setting.fastMode === true;
     const source: ModelSelectionSource = layer.setting.mode === 'auto' ? 'auto' : layer.source;

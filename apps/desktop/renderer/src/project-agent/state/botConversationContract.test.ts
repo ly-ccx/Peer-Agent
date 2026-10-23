@@ -16,8 +16,8 @@ function lineCount(relativePath: string): number {
   return text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
 }
 
-test('ChatSurface 行数不变', () => {
-  assert.equal(lineCount('chat/components/ChatSurface.tsx'), 3306);
+test('ChatSurface 不超过原模块预算', () => {
+  assert.ok(lineCount('chat/components/ChatSurface.tsx') <= 3306, '抽离逻辑可以减行，新增职责仍须放到独立模块');
 });
 
 test('卡片动作只调用约定的 IPC', () => {

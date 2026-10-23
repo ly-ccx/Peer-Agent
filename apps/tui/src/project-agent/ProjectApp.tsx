@@ -127,6 +127,10 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(view==='conversation') {
       const intent=cardFocusIntent(key,cardFocus,cards.length>0);
       if(intent==='enter'||intent==='leave'){key.preventDefault();key.stopPropagation();if(intent==='enter'){selectFocusedCard(Math.min(cardIndex,cards.length-1));editor.current?.blur();}setCardFocus(intent==='enter');return;}
+      if(intent==='type'){
+        key.preventDefault();key.stopPropagation();setCardFocus(false);
+        editor.current?.focus();editor.current?.insertText(key.sequence??key.name);inputDraft.changed();return;
+      }
       if(cardFocus){
         key.preventDefault();key.stopPropagation();
         if(intent==='card')selectFocusedCard(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));

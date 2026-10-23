@@ -22,7 +22,7 @@ import type {
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
 import { encodeProviderToolResult, evaluateWorkSessionWrite, agentCommunicationExcludedPrefixes } from '@peer-agent/runtime-node';
-import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
+import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
 
 import type {
   ChatMessage,
@@ -171,12 +171,7 @@ const DEFAULT_STREAM_RETRY_DELAYS_MS = [500, 1_500] as const;
 
 export const STREAM_CONNECTION_CLOSED = 'peer.connection_closed';
 
-export interface StreamDraftDiscard {
-  readonly type: 'stream.discard';
-  readonly streamId: string;
-  readonly textChars: number;
-  readonly reasoningChars: number;
-}
+export type StreamDraftDiscard = Pick<RuntimeSdkStreamDiscardEvent, 'type' | 'streamId' | 'textChars' | 'reasoningChars'>;
 
 export function streamDraftDiscardFrom(
   event: { readonly type: string },
@@ -598,7 +593,6 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           return { compacted: true, state: { messages: nextMessages } };
         },
         send(request) {
-          const emitDiscard = context.emit as (event: StreamDraftDiscard) => void;
           return streamWithSafeRetry(activeProvider, {
             ...request,
             signal: context.signal,
@@ -615,7 +609,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             waitImpl: options.streamRetryWait,
             onDiscardDraft(draft) {
               if (draft.textChars <= 0 && draft.reasoningChars <= 0) return;
-              emitDiscard({ type: 'stream.discard', streamId, ...draft });
+              context.emit({ type: 'stream.discard', streamId, ...draft });
             },
           });
         },

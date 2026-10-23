@@ -107,13 +107,14 @@ function cleanTier(value) {
 
 function cleanRole(value) {
   if (!isRecord(value)) return null;
-  if (value.mode === 'tier' && TIERS.includes(value.tier)) return { mode: 'tier', tier: value.tier };
+  const effort = isModelReasoningEffort(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {};
+  if (value.mode === 'tier' && TIERS.includes(value.tier)) return { mode: 'tier', tier: value.tier, ...effort };
   if (value.mode === 'fixed' && text(value.modelProviderId)) {
     return { mode: 'fixed', modelProviderId: text(value.modelProviderId),
-      ...(isModelReasoningEffort(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {}) };
+      ...effort };
   }
   if (value.mode === 'auto' && Array.isArray(value.pool)) {
-    return { mode: 'auto', pool: value.pool.map(text).filter(Boolean) };
+    return { mode: 'auto', pool: value.pool.map(text).filter(Boolean), ...effort };
   }
   return null;
 }

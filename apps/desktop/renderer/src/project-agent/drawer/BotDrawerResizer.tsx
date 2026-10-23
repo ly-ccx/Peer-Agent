@@ -1,4 +1,6 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { usePointerResize } from '../../app/hooks/usePointerResize';
+import { isImeKey } from '../../chat/state/compositionGuard';
 import { DRAWER_MAX_WIDTH, DRAWER_MIN_WIDTH, clampDrawerWidth } from '../state/drawerState';
 
 interface BotDrawerResizerProps {
@@ -7,6 +9,7 @@ interface BotDrawerResizerProps {
   readonly isZh: boolean;
   /** 拖拽落定宽度（已夹紧）。 */
   readonly onResize: (width: number) => void;
+  readonly enabled?: boolean;
 }
 
 /** 与 .bot-drawer-dock 和 .bot-drawer-panel 的 --pa-drawer-width 默认值保持一致。 */
@@ -25,8 +28,10 @@ const CSS_DEFAULT_WIDTH = 414;
  * - 宽度夹紧在 [DRAWER_MIN_WIDTH, DRAWER_MAX_WIDTH]，保证中间会话区不被压没。
  * - 双击重置回默认宽度；键盘左右微调，Home/End 跳到最小/最大。
  */
-export function BotDrawerResizer({ width, isZh, onResize }: BotDrawerResizerProps) {
+export function BotDrawerResizer({ width, isZh, onResize, enabled = true }: BotDrawerResizerProps) {
   const elRef = useRef<HTMLDivElement | null>(null);
+  const gesture = usePointerResize();
+  useEffect(() => { if (!enabled) gesture.cancel(); }, [enabled]);
 
   const currentWidth = () => width ?? CSS_DEFAULT_WIDTH;
 
@@ -46,46 +51,19 @@ export function BotDrawerResizer({ width, isZh, onResize }: BotDrawerResizerProp
   };
 
   const onPointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
-    ev.preventDefault();
+    if (!enabled) return;
     const startX = ev.clientX;
     const startWidth = currentWidth();
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-    elRef.current?.setAttribute('data-active', 'true');
-    setResizing(true);
-
-    let latestX = startX;
-    let rafId = 0;
-
-    const flush = () => {
-      rafId = 0;
-      // 抽屉贴右缘：指针左移（dx<0）应让面板变宽，故取反。
-      applyWidth(clampDrawerWidth(startWidth - (latestX - startX)));
-    };
-
-    const onMove = (e: PointerEvent) => {
-      latestX = e.clientX;
-      if (rafId === 0) rafId = requestAnimationFrame(flush);
-    };
-
-    const onUp = () => {
-      if (rafId !== 0) {
-        cancelAnimationFrame(rafId);
-        rafId = 0;
-      }
-      flush();
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-      elRef.current?.removeAttribute('data-active');
-      // 先落 state（写入持久化宽度），再恢复过渡，避免松手瞬间再次动画。
-      onResize(clampDrawerWidth(startWidth - (latestX - startX)));
-      setResizing(false);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    let latestWidth = startWidth;
+    if (gesture.start(ev, {
+      onMove: x => { latestWidth = clampDrawerWidth(startWidth - (x - startX)); applyWidth(latestWidth); },
+      onEnd: committed => {
+        if (committed) onResize(latestWidth);
+        else applyWidth(startWidth);
+        elRef.current?.removeAttribute('data-active');
+        setResizing(false);
+      },
+    })) { elRef.current?.setAttribute('data-active', 'true'); setResizing(true); }
   };
 
   const onDoubleClick = () => {
@@ -94,6 +72,7 @@ export function BotDrawerResizer({ width, isZh, onResize }: BotDrawerResizerProp
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!enabled || isImeKey(e.nativeEvent)) return;
     const STEP = 16;
     // 方向键按「屏幕方向」理解：左键让面板变宽。
     if (e.key === 'ArrowLeft') {
@@ -121,7 +100,7 @@ export function BotDrawerResizer({ width, isZh, onResize }: BotDrawerResizerProp
       aria-valuemin={DRAWER_MIN_WIDTH}
       aria-valuemax={DRAWER_MAX_WIDTH}
       aria-valuenow={currentWidth()}
-      tabIndex={0}
+      tabIndex={enabled ? 0 : -1}
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
