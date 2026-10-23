@@ -7,19 +7,22 @@ export async function scrollToBotMessage(page, message) {
     // Numeric IDs belong to this ordered 10,000-message fixture, not production identity.
     const match = /#bot-msg-rc-message-(\d+)/.exec(message.toString());
     const target = match ? Number(match[1]) : null;
-    if (target === null) await thread.evaluate(node => { node.scrollTop = 0; });
+    if (target === null) { await thread.focus(); await thread.press('Home'); }
     for (let step = 0; step < 240; step++) {
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       if (await message.count()) break;
-      const state = await thread.evaluate(node => ({ busy: node.getAttribute('aria-busy') === 'true',
+      const state = await thread.evaluate(node => ({ busy: node.getAttribute('aria-busy') === 'true', top: node.scrollTop,
         ids: [...node.querySelectorAll('[id^="bot-msg-rc-message-"]')].map(row => Number(row.id.match(/(\d+)$/)?.[1])).filter(Number.isFinite) }));
       if (state.busy) { await page.locator('.bot-thread[aria-busy="false"]').waitFor(); continue; }
       const direction = target === null ? 1 : !state.ids.length || target < Math.min(...state.ids) ? -1 : 1;
-      const moved = await thread.evaluate((node, direction) => {
-        const before = node.scrollTop;
-        node.scrollTop += direction * Math.max(80, node.clientHeight * 0.65);
-        return node.scrollTop !== before;
-      }, direction);
+      // Programmatic scrollTop changes are layout, not reading intent. A real
+      // wheel gesture releases follow-latest before virtual rows are measured.
+      const bounds = await thread.boundingBox();
+      assert.ok(bounds, 'conversation scroller must be visible');
+      await page.mouse.move(bounds.x + Math.min(24, bounds.width / 2), bounds.y + bounds.height / 2);
+      await page.mouse.wheel(0, direction * Math.max(80, bounds.height * 0.65));
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const moved = await thread.evaluate((node, before) => node.scrollTop !== before, state.top);
       if (!moved) {
         const older = page.locator('.bot-thread-older');
         if (direction < 0 && await older.count() && await older.isEnabled()) { await older.click(); continue; }
@@ -27,6 +30,7 @@ export async function scrollToBotMessage(page, message) {
       }
     }
   }
+  assert.ok(await message.count(), `message must mount after scrolling the real conversation: ${message}`);
   await message.scrollIntoViewIfNeeded();
 }
 
