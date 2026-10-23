@@ -4,18 +4,32 @@ import {testRender} from '@opentui/react/test-utils';
 import {mkdtempSync,mkdirSync,rmSync,writeFileSync} from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {createTuiThemeStore} from '../tui-theme.ts';
 import {createTuiProjectHost} from './tui-project-host.ts';import {createTuiProjectClient} from './tui-project-client.ts';import {ProjectApp} from './ProjectApp.tsx';
-async function harness() {
+async function harness(initialView:'bind'|'bots'|'conversation'='bind') {
   const root=mkdtempSync(path.join(os.tmpdir(),'peer-terminal-surface-')),workspace=path.join(root,'project');mkdirSync(workspace);
   writeFileSync(path.join(root,'llm-providers.json'),JSON.stringify([{id:'configured',provider:'openai',model:'fixture',enabled:true,apiKeyConfigured:true,supportsTools:true,supportsStructured:true,isDefault:true}]));
   const host=createTuiProjectHost({dataHome:root,workspacePath:workspace,autoStart:false,getSettings:()=>({memory:{enabled:false}}),executeTurn:async()=>({ok:true,text:'scripted UI reply',toolCalls:[]})});
   const client=createTuiProjectClient({dataHome:root,host,autoStart:false});let classic=0;
-  const setup=await testRender(<ProjectApp host={host} client={client} initialView="bind" workspacePath={workspace} locale="en-US" themeStore={createTuiThemeStore({userDataPath:root})} onClassic={async()=>{classic++;}} onQuit={()=>{}}/>,{width:90,height:30});
+  if(initialView!=='bind'){
+    const entry=host.registry.ensureForPath(workspace);
+    host.lifecycle.ensureBot(entry.workspaceId);
+    await client.select(entry.workspaceId);
+  }
+  const setup=await testRender(<ProjectApp host={host} client={client} initialView={initialView} workspacePath={workspace} locale="en-US" themeStore={createTuiThemeStore({userDataPath:root})} onClassic={async()=>{classic++;}} onQuit={()=>{}}/>,{width:90,height:30});
   async function frame(){await act(async()=>{await Bun.sleep(25);});await setup.flush();await setup.renderOnce();return setup.captureCharFrame();}
   return {host,client,setup,frame,press:async(key:Parameters<typeof setup.mockInput.pressKey>[0])=>{await act(async()=>{setup.mockInput.pressKey(key);await Bun.sleep(20);});},type:async(text:string)=>{await act(async()=>{await setup.mockInput.typeText(text);});},classic:()=>classic,async close(){await act(async()=>{setup.renderer.destroy();});client.close();await host.close();rmSync(root,{recursive:true,force:true});}};
 }
 test('binding refusal enters classic without creating any bot',async()=>{
   const f=await harness();try{expect(await f.frame()).toContain('Bind this directory');await f.press('n');await f.frame();
     expect(f.classic()).toBe(1);expect(f.host.directory.list()).toHaveLength(0);
+  }finally{await f.close();}
+});
+for(const view of ['conversation','bots'] as const)test(`F2 opens task mode from a bound bot ${view} without unbinding`,async()=>{
+  const f=await harness(view);try{
+    const workspaceId=f.host.workspaceId();
+    expect(await f.frame()).toContain('F2');
+    await f.press('F2');await f.frame();
+    expect(f.classic()).toBe(1);
+    expect(f.host.profiles.read(workspaceId)?.status).toBe('active');
   }finally{await f.close();}
 });
 test('binding, message submission, list navigation and cards work through the actual terminal renderer',async()=>{

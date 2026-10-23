@@ -16,10 +16,12 @@ import {CardLine} from './CardLine.tsx';
 import {cardAction,createCardNumbers,parseProjectCommand,terminalText} from './commands.ts';
 import {runProjectCardAction} from './card-actions.ts';
 import {projectCopy,projectStatus} from './project-copy.ts';
+import {isRecoveryCard} from './card-presentation.ts';
+import {isEnterKeyName} from '../runtime-controls.ts';
 
 type Host=ReturnType<typeof createTuiProjectHost>;
 type Client=ReturnType<typeof createTuiProjectClient>;
-type View='bind'|'bots'|'conversation'|'tasks'|'task'|'memory'|'objectives'|'cards'|'help';
+type View='bind'|'bots'|'conversation'|'tasks'|'task'|'memory'|'objectives'|'cards'|'diagnostics'|'help';
 export function ProjectApp({host,client,initialView,workspacePath,locale,themeStore,onClassic,onQuit}:{host:Host;client:Client;initialView:'bind'|'bots'|'conversation';workspacePath:string;locale:TuiLocale;themeStore:TuiThemeStore;onClassic():Promise<void>;onQuit():void}) {
   const terminal=useTerminalDimensions(), editor=useRef<TextareaRenderable|null>(null),numbers=useRef(createCardNumbers());
   const [snapshot,setSnapshot]=useState(()=>client.current()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
@@ -52,6 +54,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     const selectedBot=snapshot.bots[index];if(!selectedBot)return;
     await perform(async()=>{setSnapshot(await client.select(selectedBot.workspaceId));setView('conversation');setEarlier(false);});
   }
+  function openClassic() {setNotice(copy('leaving'));void perform(onClassic);}
   function submit(text:string) {
     const command=parseProjectCommand(text);
     if(command.kind==='text'){if(command.text)void perform(async()=>{void client.latest().catch(()=>{});setEarlier(false);setView('conversation');return inputDraft.session.send({text:command.text});},copy('received'));return;}
@@ -59,7 +62,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(command.kind==='save_draft'){void (inputDraft.state.ready?inputDraft.session.flush():inputDraft.session.load());return;}
     if(command.kind==='invalid'){setNotice(copy('invalid'));return;}
     if(command.kind==='view'){inputDraft.session.edit({text:''});setView(command.view);setSelected(0);setCardIndex(0);setOption(0);return;}
-    if(command.kind==='classic'){setNotice(copy('leaving'));void perform(onClassic);return;}
+    if(command.kind==='classic'){openClassic();return;}
     if(command.kind==='takeover'){void perform(()=>host.takeover(),copy('takeover'));return;}
     if(command.kind==='older'){inputDraft.session.edit({text:''});void client.earlier().then(setSnapshot);setEarlier(true);setView('conversation');return;}
     if(command.kind==='latest'){inputDraft.session.edit({text:''});void client.latest().then(setSnapshot);setEarlier(false);setView('conversation');return;}
@@ -85,11 +88,12 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if((key as {isComposing?:boolean}).isComposing)return;
     if(key.ctrl&&key.name==='c'){key.preventDefault();setNotice(copy('leaving'));onQuit();return;}
     if(busy)return;
+    if(key.name==='f2'){key.preventDefault();key.stopPropagation();openClassic();return;}
     if(key.name==='escape'){key.preventDefault();if(view==='bind')void perform(onClassic);else setView('conversation');return;}
     if(view==='bind'){
       if(['left','right','up','down','tab'].includes(key.name)){key.preventDefault();setBindYes(!bindYes);}
-      if(['y','n','enter','return'].includes(key.name)){
-        key.preventDefault();const accept=key.name==='y'||(['enter','return'].includes(key.name)&&bindYes);
+      if(key.name==='y'||key.name==='n'||isEnterKeyName(key.name)){
+        key.preventDefault();const accept=key.name==='y'||(isEnterKeyName(key.name)&&bindYes);
         if(!accept){void perform(onClassic);return;}
         void perform(async()=>{const entry=host.registry.ensureForPath(workspacePath);const created=host.lifecycle.ensureBot(entry.workspaceId) as any;
           if(!created.ok)return created;if(created.profile.status==='archived')host.lifecycle.restoreBot(entry.workspaceId);
@@ -98,27 +102,29 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     }
     if(view==='bots'){
       if(key.name==='down'||key.name==='up'){key.preventDefault();setSelected(Math.max(0,Math.min(snapshot.bots.length-1,selected+(key.name==='down'?1:-1))));}
-      if(key.name==='enter'||key.name==='return'){key.preventDefault();void openBot(selected);}return;
+      if(isEnterKeyName(key.name)){key.preventDefault();void openBot(selected);}return;
     }
     if(key.name==='tab'&&cards.length){key.preventDefault();setView(view==='cards'?'conversation':'cards');return;}
     if(view==='cards'){
       key.preventDefault();
       if(key.name==='down'||key.name==='up'){setCardIndex(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));setOption(0);}
       if(key.name==='left'||key.name==='right')setOption(Math.max(0,Math.min((cards[cardIndex]?.card.actions?.length??1)-1,option+(key.name==='right'?1:-1))));
-      if(key.name==='enter'||key.name==='return')selectedCardAction();
+      if(isEnterKeyName(key.name))selectedCardAction();
     }
   });
   const recordReader=useMemo(()=>createProjectReadState(),[snapshot.workspaceId]);
   const records=view==='objectives'?recordReader.read<any>('objectives',()=>host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any)
     :view==='memory'?recordReader.read<any>('memory',()=>host.memory.list({workspaceId:snapshot.workspaceId})):null;
   const rows:string[]=view==='tasks'?snapshot.sessions.map((row,index)=>`${index+1}. ${terminalText(row.title)} · ${projectStatus(locale,row.status)} · /task ${index+1}`)
+    :view==='diagnostics'?snapshot.messages.flatMap(message=>(message.cards??[]).filter(isRecoveryCard).map((card:any)=>`${terminalText(card.cardId)}\n${terminalText(card.content)}`))
     :view==='memory'?(records?.rows??[]).map((row:any)=>`${projectStatus(locale,row.kind)} · ${projectStatus(locale,row.trust)} · ${projectStatus(locale,row.status)}\n${terminalText(row.text)}`)
     :view==='objectives'?(records?.rows??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.outcome??row.description??row.brief??'')}`)
     :view==='task'?[terminalText(detail?.title),projectStatus(locale,detail?.status??''),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).map(terminalText)]:[];
   const currentCard=cards[Math.min(cardIndex,cards.length-1)];
   return <box flexDirection="column" height={terminal.height} width={terminal.width} backgroundColor={COLOR.background} padding={1}>
     <box flexDirection="row" justifyContent="space-between" marginBottom={1}>
-      <ThemedText fg={COLOR.accent}>Peer · {terminalText(bot?.profile.displayName??copy('bots'))}</ThemedText>
+      <ThemedText fg={COLOR.accent}>Peer · {terminalText(bot?.profile.displayName??copy('bots'))} · {copy('botMode')}</ThemedText>
+      <ThemedText fg={COLOR.link} onMouseDown={openClassic}>{copy('switchClassic')}</ThemedText>
       <ThemedText fg={COLOR.muted}>{snapshot.workspaceId?snapshot.isHost?copy('host'):copy('client'):''}</ThemedText>
     </box>
     {snapshot.messageState==='unavailable'?<ThemedText fg={COLOR.info}>{copy('messageUnavailable')}</ThemedText>:null}
@@ -140,7 +146,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
           submit(text);
         }
       }}/>
-      <ThemedText fg={COLOR.muted}>/help · {earlier?copy('earlier'):copy('latest')} · {copy('cardKeys')}</ThemedText>
+      <ThemedText fg={COLOR.muted}>/help · {copy('switchHint')} · {earlier?copy('earlier'):copy('latest')}</ThemedText>
+      {cards.length?<ThemedText fg={COLOR.muted}>/cards · {copy('cardKeys')}</ThemedText>:null}
     </box>:null}
   </box>;
 }

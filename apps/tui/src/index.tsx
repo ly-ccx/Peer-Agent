@@ -76,6 +76,9 @@ const shutdown = createAsyncTuiShutdown({
 });
 
 async function openClassic() {
+  // OpenTUI's root.render creates a new React container on every call. Unmount
+  // the bot surface first so its pending updates cannot reclaim input focus.
+  root.unmount();
   projectClient?.close(); await projectHost?.close(); projectHost = null; projectClient = null;
   const classic = createTuiRuntime({ workspaceRoot, userDataPath, accessLevel: localAccessStore.getAccessLevel(),
     persistAccessLevel: accessLevel => localAccessStore.setAccessLevel(accessLevel) });
