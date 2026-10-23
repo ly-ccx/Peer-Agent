@@ -51,6 +51,7 @@ function mountConversation(rows: unknown[] = []) {
   const view = exports.useConversationWindow(rows, null, 0, 0,
     { identity: 'clicked-bot', ready: true, hasOlder: false, locateMessage: async () => false });
   let scrollTop = 0;
+  const nativeScroll = new Set<() => void>();
   const scroller = {
     get scrollTop() { return scrollTop; },
     set scrollTop(value: number) { scrollTop = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)); },
@@ -58,11 +59,14 @@ function mountConversation(rows: unknown[] = []) {
     getBoundingClientRect: () => ({ top: 0 }),
     querySelectorAll: () => rows.map((_row, index) => ({ dataset: { conversationRow: `m${index}` },
       getBoundingClientRect: () => ({ top: index * 72 - scrollTop, bottom: (index + 1) * 72 - scrollTop, height: 72 }) })),
-    addEventListener() {}, removeEventListener() {},
+    addEventListener(type: string, listener: () => void, options?: { capture?: boolean }) {
+      if (type === 'scroll' && options?.capture) nativeScroll.add(listener);
+    },
+    removeEventListener(type: string, listener: () => void) { if (type === 'scroll') nativeScroll.delete(listener); },
   };
   view.scrollerRef.current = scroller;
   const cleanups = [...layoutEffects, ...effects].map(effect => effect());
-  return { view, scroller, memory, frames, layoutEffects, cleanups,
+  return { view, scroller, memory, frames, layoutEffects, cleanups, nativeScroll,
     get requested() { return requested; }, get cancelled() { return cancelled; },
     flush() { const pending = [...frames.values()]; frames.clear(); pending.forEach(frame => frame()); },
     dispose() { cleanups.reverse().forEach(cleanup => { if (typeof cleanup === 'function') cleanup(); }); },
@@ -79,15 +83,16 @@ test('mounting and leaving a conversation invoke frame APIs with their browser r
 });
 
 // Execute the hook against simulated DOM geometry, without delivering onScroll.
-test('wheel intent captures the applied browser position before delayed scroll delivery', () => {
+test('native scroll captures the applied gesture position before delayed React delivery', () => {
   const mounted = mountConversation(Array.from({ length: 50 }, (_, index) => ({
     type: 'message', message: { id: `m${index}`, kind: 'user_input' },
   })));
   mounted.flush();
   const before = mounted.scroller.scrollTop;
   mounted.view.onWheel({ deltaY: -350 });
-  mounted.scroller.scrollTop -= 350; // The browser default action follows wheel dispatch.
-  mounted.flush();
+  mounted.flush(); // An animation frame may precede the compositor's default scroll.
+  mounted.scroller.scrollTop -= 350;
+  mounted.nativeScroll.forEach(capture => capture()); // React's onScroll is still withheld.
   const saved = mounted.memory.read('clicked-bot');
   assert.equal(saved?.following, false);
   assert.equal(saved?.top, before - 350);
@@ -97,5 +102,6 @@ test('wheel intent captures the applied browser position before delayed scroll d
   assert.equal(mounted.scroller.scrollTop, before - 350);
   mounted.view.onWheel({ deltaY: -80 });
   mounted.dispose();
-  assert.equal(mounted.frames.size, 0, 'leaving cancels pending reading capture as well as follow frames');
+  assert.equal(mounted.frames.size, 0, 'leaving cancels pending follow frames');
+  assert.equal(mounted.nativeScroll.size, 0, 'leaving releases native reading capture');
 });

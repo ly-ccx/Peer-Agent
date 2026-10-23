@@ -23,7 +23,6 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   const located = useRef<string | null>(null), restoration = useRef(0), navigationEpoch = useRef(0);
   const gesture = useRef<{ active: boolean; direction: Direction }>({ active: false, direction: 'unknown' });
   const gestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), touchY = useRef<number | null>(null);
-  const readingFrame = useRef<number | null>(null);
   const [revision, setRevision] = useState(0), [top, setTop] = useState(initial.current?.top ?? 0), [height, setHeight] = useState(0);
   const [following, setFollowing] = useState(pinned.current), [restoreStatus, setRestoreStatus] = useState<'none' | 'loading' | 'more' | 'missing'>('none');
   const [referenceStatus, setReferenceStatus] = useState<'none' | 'loading' | 'missing'>('none');
@@ -62,7 +61,6 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   };
   const cancelRestore = () => { pendingRestore.current = null; restoration.current++; setRestoreStatus('none'); };
   const followLatest = () => {
-    if (readingFrame.current !== null) { window.cancelAnimationFrame(readingFrame.current); readingFrame.current = null; }
     navigationEpoch.current++;
     referenceRequest.current++; setReferenceStatus('none');
     located.current = highlightedId ? `${highlightRequestId}:${highlightedId}` : null;
@@ -72,20 +70,29 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     if (node) { node.scrollTop = node.scrollHeight; updateTop(node.scrollTop); }
     persist();
   };
-  const schedulerCallbacks = useRef({ follow: () => {}, refresh: () => {} });
+  const schedulerCallbacks = useRef({ follow: () => {}, refresh: () => {}, readGesture: () => {} });
   schedulerCallbacks.current = {
     follow: () => { const node = scrollerRef.current; if (pinned.current && node) { node.scrollTop = node.scrollHeight; updateTop(node.scrollTop); } },
     refresh: () => { const node = scrollerRef.current; if (node) updateTop(node.scrollTop); },
+    readGesture: () => {
+      if (!pinned.current && !pendingRestore.current && gesture.current.active) {
+        remember(); updateTop(scrollerRef.current?.scrollTop ?? top); persist();
+      }
+    },
   };
   const scheduler = useRef<ReturnType<typeof createStreamingScrollScheduler> | null>(null);
   useLayoutEffect(() => {
+    const node = scrollerRef.current;
+    // Read the applied native position before delayed delegated scroll handlers.
+    // Only a previously acknowledged gesture can admit this reading anchor.
+    const capture = () => schedulerCallbacks.current.readGesture();
+    node?.addEventListener('scroll', capture, { capture: true, passive: true });
     scheduler.current = createStreamingScrollScheduler({ scheduler: { request: callback => window.requestAnimationFrame(callback), cancel: frameId => window.cancelAnimationFrame(frameId) },
       follow: () => schedulerCallbacks.current.follow(), refresh: () => schedulerCallbacks.current.refresh() });
-    return () => { scheduler.current?.cancel(); scheduler.current = null; };
+    return () => { node?.removeEventListener('scroll', capture, true); scheduler.current?.cancel(); scheduler.current = null; };
   }, []);
   useEffect(() => () => {
     clearTimeout(gestureTimer.current); restoration.current++; referenceRequest.current++;
-    if (readingFrame.current !== null) window.cancelAnimationFrame(readingFrame.current);
   }, []);
   const previousFollow = useRef(followRequestId);
   useLayoutEffect(() => {
@@ -179,15 +186,6 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     clearTimeout(gestureTimer.current);
     gestureTimer.current = setTimeout(() => { gesture.current.active = false; }, 120);
     if (direction !== 'down') { pinned.current = false; setFollowing(false); remember(); persist(); }
-    // Wheel/touch input arrives before the browser applies its scroll. Capture
-    // that position on the next frame even if scroll delivery is delayed.
-    if (readingFrame.current !== null) window.cancelAnimationFrame(readingFrame.current);
-    readingFrame.current = window.requestAnimationFrame(() => {
-      readingFrame.current = null;
-      if (!pinned.current && !pendingRestore.current) {
-        remember(); updateTop(scrollerRef.current?.scrollTop ?? top); persist();
-      }
-    });
   };
   return { scrollerRef, originRef, tailRef, view, visibleRows: rows.slice(view.start, view.end), following, followLatest, restoreStatus, restoreReading, referenceStatus, locateReference, navigationEpoch: navigationEpoch.current,
     onWheel: (event: React.WheelEvent<HTMLElement>) => { if (event.deltaY) userGesture(event.deltaY < 0 ? 'up' : 'down'); },
