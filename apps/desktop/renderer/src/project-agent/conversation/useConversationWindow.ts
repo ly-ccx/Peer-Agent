@@ -77,7 +77,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   };
   const scheduler = useRef<ReturnType<typeof createStreamingScrollScheduler> | null>(null);
   useLayoutEffect(() => {
-    scheduler.current = createStreamingScrollScheduler({ scheduler: { request: requestAnimationFrame, cancel: cancelAnimationFrame },
+    scheduler.current = createStreamingScrollScheduler({ scheduler: { request: callback => window.requestAnimationFrame(callback), cancel: frameId => window.cancelAnimationFrame(frameId) },
       follow: () => schedulerCallbacks.current.follow(), refresh: () => schedulerCallbacks.current.refresh() });
     return () => { scheduler.current?.cancel(); scheduler.current = null; };
   }, []);
