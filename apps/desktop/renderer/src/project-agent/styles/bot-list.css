@@ -785,6 +785,11 @@
   font-size: 11px;
 }
 
+/* ── 跨栏拖拽条（左栏右缘，镜像 .bot-drawer-resizer）──
+ * 6px 透明命中区只负责手感，可见指示条由 ::after 表达：常态透明不画线
+ * （分界线本身由 .bot-column 的 border-right 或毛玻璃下 .bot-main 的描边提供），
+ * 只有 hover / 聚焦 / 拖拽中才浮出 2px 强调色。
+ * resizer 相对 .bot-column 定位，right 值按各模式下「缝」的位置反推。 */
 .bot-column-resizer {
   position: absolute;
   top: 0;
@@ -793,6 +798,24 @@
   z-index: 2;
   width: 6px;
   cursor: col-resize;
+}
+
+.bot-column-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 2px;
+  width: 2px;
+  pointer-events: none;
+  background: transparent;
+  transition: background var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-column-resizer:hover::after,
+.bot-column-resizer:focus-visible::after,
+.bot-column-resizer[data-active='true']::after {
+  background: var(--za-accent, #4c8dff);
 }
 
 .bot-column-resizer:focus-visible,
@@ -1292,4 +1315,11 @@ html[data-vibrancy='true'] .bot-main {
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   box-shadow: var(--glass-edge-highlight), var(--shadow-card);
+}
+
+/* 毛玻璃下可见分界线改由 .bot-main 的 1px 描边表达（在玻璃缝右侧），
+ * .bot-column 的 border-right 被置 0。命中区要落在缝里并居中：
+ * 缝 = [column 右缘, column 右缘 + gap)，6px 居中 → 右缘需再外扩 (gap+6)/2。 */
+html[data-vibrancy='true'] .bot-column-resizer {
+  right: calc(-1 * (var(--bot-float-gap) + 6px) / 2);
 }

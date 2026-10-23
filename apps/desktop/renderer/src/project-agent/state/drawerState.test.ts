@@ -3,9 +3,14 @@ import test from 'node:test';
 import { createI18n } from '@peer-agent/i18n';
 import {
   briefFromMemories,
+  clampDrawerWidth,
   closeDrawer,
   conversationModelLabel,
   drawerLayout,
+  drawerStorageKey,
+  DRAWER_MAX_WIDTH,
+  DRAWER_MIN_WIDTH,
+  DRAWER_WIDTH,
   formatDrawerStamp,
   formatDrawerSessionStatus,
   groupDrawerSessions,
@@ -17,6 +22,7 @@ import {
   readMemoryItems,
   readMemoryRecords,
   readMemorySwitches,
+  resizeDrawer,
   writeDrawerMemory,
   type DrawerMemory,
   type DrawerSession,
@@ -217,4 +223,41 @@ test('task origin and persisted drawer state retain objective navigation',()=>{
   assert.equal(readDrawerSession({sessionId:'s',status:'running',origin:{objectiveId:'objective-x'}})?.objectiveId,'objective-x');
   const store=memoryStore();writeDrawerMemory('w',{open:true,tab:'objectives',sessionId:null,objectiveId:'objective-x'},store);
   assert.equal(readDrawerMemory('w',store).objectiveId,'objective-x');
+});
+
+test('drawer width clamps to its bounds and rejects non-finite input', () => {
+  assert.equal(clampDrawerWidth(DRAWER_MIN_WIDTH - 100), DRAWER_MIN_WIDTH);
+  assert.equal(clampDrawerWidth(DRAWER_MAX_WIDTH + 100), DRAWER_MAX_WIDTH);
+  assert.equal(clampDrawerWidth(400), 400);
+  assert.equal(clampDrawerWidth(400.6), 401);
+  assert.equal(clampDrawerWidth(Number.NaN), DRAWER_WIDTH);
+  assert.equal(clampDrawerWidth(Number.POSITIVE_INFINITY), DRAWER_WIDTH);
+});
+
+test('resizeDrawer keeps memory intact and only writes a legal width', () => {
+  const base: DrawerMemory = { open: true, tab: 'settings', sessionId: 's-1' };
+  const widened = resizeDrawer(base, DRAWER_MAX_WIDTH + 999);
+  assert.equal(widened.width, DRAWER_MAX_WIDTH);
+  assert.equal(widened.open, true);
+  assert.equal(widened.tab, 'settings');
+  assert.equal(widened.sessionId, 's-1');
+  // 非法输入不改动原对象，避免把 NaN 写进持久化。
+  assert.equal(resizeDrawer(base, Number.NaN), base);
+});
+
+test('persisted drawer width survives a round trip and is re-clamped on read', () => {
+  const store = memoryStore();
+  writeDrawerMemory('w', { open: true, tab: 'settings', sessionId: null, width: 460 }, store);
+  assert.equal(readDrawerMemory('w', store).width, 460);
+  // 旧数据被外部改坏（越界 / 非数字）时，读回必须收敛到合法区间。
+  store.set(drawerStorageKey('w'), JSON.stringify({ open: true, tab: 'settings', sessionId: null, width: 9999 }));
+  assert.equal(readDrawerMemory('w', store).width, DRAWER_MAX_WIDTH);
+  store.set(drawerStorageKey('w'), JSON.stringify({ open: true, tab: 'settings', sessionId: null, width: 'wide' }));
+  assert.equal(readDrawerMemory('w', store).width, undefined);
+});
+
+test('drawer memory without a width never fabricates one', () => {
+  const store = memoryStore();
+  writeDrawerMemory('w', { open: true, tab: 'overview', sessionId: null }, store);
+  assert.equal(readDrawerMemory('w', store).width, undefined);
 });
