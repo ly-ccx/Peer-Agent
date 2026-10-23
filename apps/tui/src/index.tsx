@@ -108,7 +108,8 @@ else {
   const { createTuiLanguageStore } = await import('./tui-language.ts');
   const { createTuiThemeStore } = await import('./tui-theme.ts');
   projectHost = createTuiProjectHost({dataHome:userDataPath,workspacePath:workspaceRoot});
-  projectClient = createTuiProjectClient({dataHome:userDataPath,host:projectHost});
+  // ProjectApp owns visible refreshes; avoid a second client polling timer.
+  projectClient = createTuiProjectClient({dataHome:userDataPath,host:projectHost,autoStart:false});
   const route = projectEntry(command, projectHost.profiles.read(projectHost.workspaceId())?.status === 'active');
   root.render(<ProjectApp host={projectHost} client={projectClient} initialView={route as 'bind'|'bots'|'conversation'}
     workspacePath={workspaceRoot} locale={createTuiLanguageStore({userDataPath}).getLocale()}
