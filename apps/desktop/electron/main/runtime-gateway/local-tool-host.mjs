@@ -1,4 +1,4 @@
-import { createNodeRuntimeHostAdapter } from '@peer-agent/runtime-node';
+import { createNodeRuntimeHostAdapter, createLocalGitProvider } from '@peer-agent/runtime-node';
 import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
@@ -35,6 +35,7 @@ export function createLocalToolHost({
   mcpCredentialResolver = null,
   fileProvider = createLocalFileProvider({ workspaceRoot }),
   imageProvider = createDesktopLocalImageProvider({ workspaceRoot }),
+  gitProvider = createLocalGitProvider({ workspaceRoot, artifactBaseDir: userDataPath ? `${userDataPath}/artifacts` : undefined }),
   shellProvider = null,
   goalProvider = createLocalGoalProvider(),
   delegationProvider = null,
@@ -90,6 +91,7 @@ export function createLocalToolHost({
     providers: providers ?? [
       fileProvider,
       imageProvider,
+      gitProvider,
       activeShellProvider,
       goalProvider,
       activeDelegationProvider,

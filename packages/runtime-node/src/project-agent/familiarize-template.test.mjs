@@ -21,7 +21,7 @@ test('空目录和只有点文件时不问任务，直接问职责', () => {
   assert.equal(blank.question, '这个机器人主要负责什么');
 });
 
-test('非空项目的熟悉任务只有读取能力，git 信息来自调用方', () => {
+test('非空项目的熟悉任务只有结构化读取能力，旧 git 快照必须重新核对', () => {
   const plan = buildFamiliarizePlan({
     displayName: '演示',
     entries: ['src', 'AGENTS.md'],
@@ -37,8 +37,10 @@ test('非空项目的熟悉任务只有读取能力，git 信息来自调用方'
   }
   assert.equal(familiarizeAllowsCapability('local.file.write'), false);
   assert.equal(familiarizeAllowsCapability('local.shell.exec'), false);
-  assert.match(plan.task.brief, /当前分支：main/);
-  assert.match(plan.task.brief, /当前提交：abc123/);
+  assert.match(plan.task.brief, /建立任务时的分支快照（需重新核对）：main/);
+  assert.match(plan.task.brief, /建立任务时的提交快照（需重新核对）：abc123/);
+  assert.ok(plan.task.requiredCapabilities.includes('local.git.query'));
+  assert.match(plan.task.brief, /git_query/);
   const missing = buildFamiliarizePlan({ displayName: '演示', entries: ['README.md'] });
   assert.match(missing.task.brief, /没有可读的 git 分支/);
   assert.equal(missing.task.brief.includes('main'), false);

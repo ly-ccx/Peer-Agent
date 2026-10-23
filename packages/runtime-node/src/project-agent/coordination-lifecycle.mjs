@@ -5,7 +5,7 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, checkTakeover, spawn, requestCancel, send, takeover, holdsLease, isEnabled = () => true }) {
+export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
@@ -83,6 +83,10 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       .filter(row => [...(mandate?.rootInputIds || []), ...(mandate?.revisionInputIds || [])].includes(row.inputId || row.id) && isCanonicalUserInput(row)).map(row => row.id)])];
     if (!anchors.length) return { ok: false, error: 'current_user_required' };
     if (input.task && input.task.anchorMessageIds.some(id => !anchors.includes(id))) return { ok: false, error: 'material_out_of_scope' };
+    if (input.task && ['parallel', 'replace'].includes(input.action)) {
+      const admission = await admitTask(input.task, { workspaceId, parentConversationId });
+      if (!admission.ok) return admission;
+    }
     const decision = { operationId, workId, expectedRevision: input.expectedRevision ?? (input.action === 'parallel' ? mandate?.goalRevision || 0 : -1),
       action: input.action, sourceInputIds, sourceEventIds: sourceInputIds.length ? [] : eventIds,
       ...(target ? { sessionId: target.sessionId } : {}), reason: input.reason,
@@ -106,7 +110,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     return { ok: !transition.error, replayed, workId: decision.workId, goalRevision: decision.goalRevision,
       operationId, phase: transition.phase, sessionId: transition.replacementSessionId || transition.oldSessionId,
       ...(decision.action === 'query' ? { session: readSession({sessionId: transition.oldSessionId, detail: 'report'}) } : {}),
-      ...(transition.error ? { error: transition.error } : {}) };
+      ...(transition.error ? { error: transition.error } : {}), ...(transition.diagnostic ? { diagnostic: transition.diagnostic } : {}) };
   }
   async function effect(store, transition) {
     // Rollback continues registered cancellation, without dispatching new work.
@@ -123,6 +127,10 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const payload = decision.payload, context = { ...payload.context, workId: mandate.workId, coordinationBinding: binding, coordinationOperationId: transition.operationId, deliveryKey: transition.operationId };
     const old = transition.oldSessionId ? readSession({ sessionId: transition.oldSessionId, detail: 'report' }) : null;
     if (transition.phase === 'recorded') {
+      if (payload.task && ['parallel', 'replace'].includes(transition.action)) {
+        const admission = await admitTask(payload.task, context);
+        if (!admission.ok) { move('blocked', { error: admission.error, diagnostic: admission.diagnostic }); return; }
+      }
       if (['replace', 'cancel', 'handoff', 'revise'].includes(transition.action) && old && !ended.has(old.status)) {
         move('stopping');
         if (['replace', 'cancel'].includes(transition.action)) {
@@ -159,7 +167,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       const handoff = read().handoff;
       const result = await spawn({ ...payload.task, anchorMessageIds: payload.task.anchorMessageIds,
         ...(handoff?.summary ? { brief: `${payload.task.brief}\nRetained work (historical facts, recheck applicability):\n${handoff.summary}`.slice(0, 4000) } : {}) }, context);
-      if (!result?.sessionId || result.error) { move('blocked', { error: result?.error || 'spawn_failed' }); return; }
+      if (!result?.sessionId || result.error) { move('blocked', { error: result?.error || 'spawn_failed', ...(result?.diagnostic ? { diagnostic: result.diagnostic } : {}) }); return; }
       move('started', { replacementSessionId: result.sessionId });
       move('completed'); return;
     }

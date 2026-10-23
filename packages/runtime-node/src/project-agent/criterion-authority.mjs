@@ -1,4 +1,5 @@
 const KINDS = new Set(['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual']);
+import { validCapabilityRequirements } from './capability-admission.mjs';
 
 /** Host admission. Authority is supplied by a trusted policy/input adapter, never model arguments. */
 export function admitDelegationCriteria(items, { anchorMessageIds = [], manualAuthorities = [] } = {}) {
@@ -8,7 +9,8 @@ export function admitDelegationCriteria(items, { anchorMessageIds = [], manualAu
   for (const [index, item] of items.entries()) {
     if (!item || typeof item !== 'object' || Array.isArray(item) || !KINDS.has(item.kind)
       || typeof item.description !== 'string' || !item.description.trim()
-      || Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect'].includes(key))) {
+      || Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect', 'requiredCapabilities'].includes(key))
+      || item.requiredCapabilities !== undefined && !validCapabilityRequirements(item.requiredCapabilities)) {
       return { ok: false, error: 'invalid_criteria' };
     }
     if (item.description.length > 500 || item.id !== undefined && (typeof item.id !== 'string' || !item.id.trim() || item.id.length > 200)

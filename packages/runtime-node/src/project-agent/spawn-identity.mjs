@@ -20,8 +20,10 @@ export function spawnIdentity(parentConversationId, input) {
     anchorMessageIds: [...new Set(input.anchorMessageIds || [])].sort(),
     kind: input.kind,
     readOnly: input.readOnly === true,
-    successCriteria: criteria.map(item => Object.fromEntries(['kind', ...OPERATIONS[item.kind]]
-      .map(key => [key, item[key]]))).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    ...(input.requiredCapabilities !== undefined ? { requiredCapabilities: [...input.requiredCapabilities].sort() } : {}),
+    successCriteria: criteria.map(item => ({ ...Object.fromEntries(['kind', ...OPERATIONS[item.kind]]
+      .map(key => [key, item[key]])), ...(item.requiredCapabilities !== undefined ? { requiredCapabilities: [...item.requiredCapabilities].sort() } : {}) }))
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
     dependsOn: [...new Set(input.dependsOn || [])].sort(),
     supersedes: input.supersedes || '',
     isolation: input.isolation || 'auto',

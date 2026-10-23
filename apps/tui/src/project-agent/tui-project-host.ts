@@ -104,6 +104,7 @@ export function createTuiProjectHost(options: {
     readReport: (plan: any) => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
     completeRecheck: (input: any) => goalRunner.completeRecheck(input)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
+    readDelegationCapabilities: (input: { readOnly: boolean; workspaceId: string }) => executor.readDelegationCapabilities(input),
     executionScheduler: scheduler, deferRecovery: true, approvalStore: approvals, memoryStore: memory, canManageWorkspace: holds,
     objectives: {prepareSpawn: (...args: any[]) => (objectives.prepareSpawn as any)(...args), linkSession: (...args: any[]) => (objectives.linkSession as any)(...args)},
     resolveModel: (input: any) => turns.resolveGoalRole({...input, workerModelProviderId: input.workerModel?.modelProviderId, projectPolicy: profiles.read(input.workspaceId)?.modelPolicy}),

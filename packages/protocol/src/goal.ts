@@ -387,7 +387,7 @@ export interface EvidenceIndexRecord {
   readonly createdAt: string;
   readonly artifactRefs?: readonly string[];
   /** Redacted, bounded execution-time snapshot of a successful local Tool Result. */
-  readonly bodyPreview?: { readonly kind: 'file' | 'command'; readonly text: string; readonly truncated: boolean };
+  readonly bodyPreview?: { readonly kind: 'file' | 'command' | 'observation'; readonly text: string; readonly truncated: boolean };
 }
 
 /** 批准事实（Evidence）。 */
@@ -841,6 +841,7 @@ export type GoalSuccessCriterionKind =
   | 'manual';
 
 export interface GoalSuccessCriterion {
+  readonly requiredCapabilities?: readonly string[];
   readonly id: string;
   readonly kind: GoalSuccessCriterionKind;
   readonly description: string;

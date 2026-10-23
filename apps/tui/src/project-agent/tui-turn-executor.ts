@@ -4,6 +4,7 @@ import {
   runBoundedVerification, isVerificationTurn, verificationExecutionBudget,
   createFailedClientToolResult,
   createGoalPlanStore,
+  evaluateWorkSessionWrite,
   loadSharedModelMetadataList,
   type ModelMessage,
 } from '@peer-agent/runtime-node';
@@ -14,7 +15,7 @@ import { streamDraftDiscardFrom } from '../provider-chat-model.ts';
 import type { TuiRuntimeMode } from '../tui-mode.ts';
 import { createTuiRuntime, type TuiRuntime } from '../tui-runtime.ts';
 import { resolvePersistedModelSelection } from '../tui-model-selection.ts';
-import type { PendingApproval, TuiCapabilityProvider } from '../tui-host.ts';
+import { createTuiHost, type PendingApproval, type TuiCapabilityProvider } from '../tui-host.ts';
 
 export interface TuiTurnRequest {
   conversationId?: string | null;
@@ -109,6 +110,7 @@ export function createTuiTurnExecutor(options: {
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
+      permissionPolicy: input.permissionPolicy,
       mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: publicFacts ?? options.readMessages(input.conversationId ?? ''),
       currentInputAnchors: (profile.context?.inputAnchors ?? []).map((row: any) => row.messageId),
       objectiveWakeIds: (profile.context?.events ?? []).filter((row: any) => row.kind === 'objective_signal' && row.workspaceId === workspaceId).map((row: any) => row.objectiveId),
@@ -244,6 +246,15 @@ export function createTuiTurnExecutor(options: {
     return done;
   }
   return { runTurn, resolveGoalRole, executionScheduler,
+    async readDelegationCapabilities({ readOnly, workspaceId }: { readOnly: boolean; workspaceId: string }) {
+      const host = createTuiHost({ workspaceRoot: options.resolveWorkspacePath(workspaceId), userDataPath: options.dataHome,
+        accessLevel: options.getSettings().localAccessLevel, providers: options.getProviders(), goalPlanStore: options.goalPlanStore });
+      try {
+        return (host.toolDefinitionsForMode?.('goal') || []).filter(tool => !tool.capabilityId.startsWith('local.web.control.')
+          && evaluateWorkSessionWrite({ delegationOrigin: { readOnly } }, { capabilityId: tool.capabilityId, riskLevel: tool.metadata?.riskLevel }).allowed)
+          .map(tool => tool.capabilityId);
+      } finally { await host.dispose(); }
+    },
     async stop(workspaceId?: string) {
       const turns = [...active.values()].filter(turn => !workspaceId || turn.workspaceId === workspaceId);
       turns.forEach(turn => turn.controller.abort());

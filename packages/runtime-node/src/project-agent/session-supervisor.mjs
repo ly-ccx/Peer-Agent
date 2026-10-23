@@ -15,6 +15,7 @@ import { verificationProgressFromPlan } from './verification-progress.mjs';
 import { buildVerificationDetail } from './verification-detail.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { admitDelegationCriteria } from './criterion-authority.mjs';
+import { evaluateDelegationCapabilities, validCapabilityRequirements } from './capability-admission.mjs';
 import { isHostHandoffPause } from './session-host-handoff.mjs';
 import { hasCurrentUserUrgency } from './user-priority.mjs';
 import path from 'node:path';
@@ -58,6 +59,7 @@ const WRITE_KINDS = new Set(['file-write', 'shell']);
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'bash']);
 const READ_ONLY_CAPABILITIES = new Set([
   'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate', 'local.image.read',
+  'local.git.query',
   'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
   'local.goal.record_evidence', 'local.interaction.request_user_input',
   'local.goal.explore',
@@ -117,6 +119,7 @@ export function createSessionSupervisor({
   readPlanApproval = null,
   readManualCriterionAuthorities = null,
   readLegacyCriterionProvenance = () => null,
+  readDelegationCapabilities = null,
   autonomousCoordinationEnabled = () => process.env.PEER_AUTONOMOUS_COORDINATION !== '0',
   now = () => new Date().toISOString(),
 } = {}) {
@@ -166,6 +169,7 @@ export function createSessionSupervisor({
   const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
+    admitTask: (input, context) => checkDelegationCapabilities(input, context),
     readSessionSummary: input => {
       const plan = findBySession(input.sessionId);
       return plan ? summaries({ workspaceId: plan.delegationOrigin.workspaceId, sessionIds: [input.sessionId] })[0] : null;
@@ -361,6 +365,17 @@ export function createSessionSupervisor({
     }
   }
 
+  async function checkDelegationCapabilities(input, { workspaceId } = {}) {
+    if (input.requiredCapabilities !== undefined && !validCapabilityRequirements(input.requiredCapabilities)
+      || (input.successCriteria || []).some(criterion => criterion.requiredCapabilities !== undefined && !validCapabilityRequirements(criterion.requiredCapabilities))) {
+      return { ok: false, error: 'invalid_capability_requirements' };
+    }
+    let availableCapabilities;
+    try { availableCapabilities = await readDelegationCapabilities?.({ readOnly: input.readOnly === true, workspaceId }); }
+    catch { availableCapabilities = undefined; }
+    return evaluateDelegationCapabilities(input, availableCapabilities);
+  }
+
   async function spawnLocked(input, context) {
     const parentConversationId = text(context?.parentConversationId);
     const workspaceId = text(context?.workspaceId);
@@ -385,6 +400,7 @@ export function createSessionSupervisor({
     });
     if (!admitted.ok) return admitted;
     const admittedCriteria = admitted.criteria;
+    if (input.requiredCapabilities !== undefined && !validCapabilityRequirements(input.requiredCapabilities)) return { error: 'invalid_capability_requirements' };
     const supersedes = text(input?.supersedes);
     const key = objectiveActionId ? spawnIdentity(parentConversationId, {objectiveActionId}) : spawnIdentity(parentConversationId, {
       ...(context.coordinationOperationId ? { coordinationOperationId: context.coordinationOperationId } : {}),
@@ -394,6 +410,7 @@ export function createSessionSupervisor({
       kind: input?.kind,
       readOnly: input?.readOnly,
       successCriteria: input?.successCriteria,
+      ...(input.requiredCapabilities ? { requiredCapabilities: input.requiredCapabilities } : {}),
       dependsOn: input?.dependsOn,
       isolation: input?.isolation || 'auto',
       ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
@@ -408,6 +425,9 @@ export function createSessionSupervisor({
         replayed: true,
       };
     }
+
+    const capabilityAdmission = await checkDelegationCapabilities({ ...input, successCriteria: admittedCriteria }, { workspaceId });
+    if (!capabilityAdmission.ok) return capabilityAdmission;
 
     const dependencies = stringList(input?.dependsOn);
     if (dependencies.some(id => findBySession(id)?.delegationOrigin.workspaceId !== workspaceId)) {
@@ -527,6 +547,8 @@ export function createSessionSupervisor({
           parentConversationId,
           readOnly: input.readOnly === true,
           priority: input.priority || 'normal',
+          capabilityAdmission: { required: capabilityAdmission.required, inventoryHash: capabilityAdmission.inventoryHash,
+            inventoryKnown: capabilityAdmission.inventoryKnown, requirementsDeclared: capabilityAdmission.requirementsDeclared, checkedAt: now() },
           isolation: input.isolation || 'auto',
           ...(input.objectiveId ? {objectiveId:input.objectiveId} : {}),
           ...(objectiveActionId ? {objectiveActionId} : {}),

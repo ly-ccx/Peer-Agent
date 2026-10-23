@@ -31,6 +31,7 @@ export interface CoordinationDecision {
 }
 export type TaskTransitionPhase = 'recorded' | 'stopping' | 'awaiting_outcome' | 'ready' | 'started' | 'completed' | 'blocked';
 export interface TaskTransition {
+  diagnostic?: import('./capability-admission.ts').CapabilityBlocker;
   schemaVersion: 1;
   operationId: string;
   workId: string;

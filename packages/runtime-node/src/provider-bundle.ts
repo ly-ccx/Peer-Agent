@@ -17,6 +17,7 @@ import {
 } from '@peer-agent/runtime-sdk';
 
 import { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
+import { createNodeGitProvider, NODE_GIT_CAPABILITY_MANIFESTS } from './git-provider.ts';
 import { createNodeRuntimeHostAdapter } from './host-adapter.ts';
 import type {
   CreateNodeProviderBundleOptions,
@@ -44,10 +45,10 @@ import {
 
 const CANONICAL_MODEL_TOOL_NAMES: Readonly<Record<string, string>> = Object.freeze(
   Object.fromEntries(
-    SHARED_LOCAL_TOOL_CONTRACT_LIST.map((contract) => [
+    [...SHARED_LOCAL_TOOL_CONTRACT_LIST.map((contract) => [
       contract.capabilityId,
       contract.toolName,
-    ]),
+    ]), ['local.git.query', 'git_query']],
   ),
 );
 
@@ -81,6 +82,8 @@ function toCoreContext(
     signal: context.signal instanceof AbortSignal ? context.signal : undefined,
     metadata: {
       ...(typeof context.locale === 'string' ? { locale: context.locale } : {}),
+      ...(context.toolContext && typeof context.toolContext === 'object'
+        ? { permissionPolicy: (context.toolContext as { permissionPolicy?: unknown }).permissionPolicy } : {}),
       ...(typeof context.conversationId === 'string'
         ? { conversationId: context.conversationId }
         : {}),
@@ -103,6 +106,7 @@ export function createNodeProviderBundle(
   const requestCapabilityApproval = options.requestCapabilityApproval
     ?? options.requestPermission;
   const providers = [
+    ...(options.git === false ? [] : [createNodeGitProvider(options)]),
     ...(options.file === false ? [] : [
       createNodeFileProvider({
         workspaceRoot,
@@ -136,6 +140,7 @@ export function createNodeProviderBundle(
     })]),
   ];
   const manifests = Object.freeze([
+    ...(options.git === false ? [] : NODE_GIT_CAPABILITY_MANIFESTS),
     ...(options.file === false ? [] : NODE_FILE_CAPABILITY_MANIFESTS),
     ...(options.file === false ? [] : NODE_SEARCH_AGGREGATE_CAPABILITY_MANIFESTS),
     ...(options.shell === false ? [] : NODE_SHELL_CAPABILITY_MANIFESTS),

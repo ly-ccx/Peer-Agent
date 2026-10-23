@@ -15,6 +15,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
   const active = new Map();
   return {
     executionScheduler,
+    readDelegationCapabilities(input) { return llmChatService.readDelegationCapabilities?.(input); },
     async stop(workspaceId) {
       const turns = [...active.values()].filter(turn => !workspaceId || turn.workspaceId === workspaceId);
       for (const turn of turns) turn.controller.abort();

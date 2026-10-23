@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { buildRuntimeTools } from '../llm-chat-service.mjs';
 import { createGoalPlanStore, createSessionSupervisor } from '@peer-agent/runtime-node';
 import { createDesktopGoalRunnerHost } from '../agent-host/goal-runner-host.mjs';
 import { createGoalWorktreeAdapter } from '../goal-worktree-adapter.mjs';
@@ -65,6 +66,9 @@ test('three real Git worktrees run concurrently through the production host and 
   const model = { modelProviderId: 'worker', providerId: 'local', modelId: 'worker', family: 'f', tools: true, vision: true, contextTokens: 32_000 };
   const supervisor = createSessionSupervisor({ goalPlanStore: store, conversationStore: conversations,
     goalRunner: host.goalRunner, canManageWorkspace: () => true, catalog: [model],
+    readDelegationCapabilities: ({ readOnly }) => buildRuntimeTools({ mode: 'goal', readOnlyWorkSession: readOnly,
+      excludeCapabilityPrefixes: ['local.web.control.'] }).runtimeProjection.capabilities
+      .filter(item => ['available', 'needs_permission'].includes(item.health)).map(item => item.capabilityId),
     routing: { tiers: { strong: { primary: 'worker' }, vision: { primary: 'worker' } },
       roles: Object.fromEntries(['session_worker', 'explorer', 'verifier', 'visual_verifier'].map(role => [role, { mode: 'tier', tier: 'strong' }])) },
     resolveAcceptancePolicy: () => 'confirm', readSessionFacts: () => ({ hostAuthority: { independentVerifier: 'passed' } }) });
@@ -154,6 +158,9 @@ test('a superseded real worktree retains uncommitted edits and the restored prod
   const model = { modelProviderId: 'worker', providerId: 'local', modelId: 'worker', family: 'f', tools: true, vision: true, contextTokens: 32_000 };
   const supervisor = createSessionSupervisor({ goalPlanStore: store, conversationStore: conversations,
     goalRunner: host.goalRunner, canManageWorkspace: () => true, catalog: [model],
+    readDelegationCapabilities: ({ readOnly }) => buildRuntimeTools({ mode: 'goal', readOnlyWorkSession: readOnly,
+      excludeCapabilityPrefixes: ['local.web.control.'] }).runtimeProjection.capabilities
+      .filter(item => ['available', 'needs_permission'].includes(item.health)).map(item => item.capabilityId),
     routing: { tiers: { strong: { primary: 'worker' }, vision: { primary: 'worker' } },
       roles: Object.fromEntries(['session_worker', 'explorer', 'verifier', 'visual_verifier'].map(role => [role, { mode: 'tier', tier: 'strong' }])) } });
   await supervisor.reconciled;
