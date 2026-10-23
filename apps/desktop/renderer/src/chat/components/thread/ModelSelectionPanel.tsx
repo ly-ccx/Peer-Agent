@@ -242,7 +242,9 @@ export function ModelSelectionPanel({
         providerButtonRef.current?.focus();
         return;
       }
-      onDismiss?.();
+      if (onDismiss) {
+        event.preventDefault(); event.stopPropagation(); onDismiss();
+      }
       return;
     }
     if (disabled) return;
