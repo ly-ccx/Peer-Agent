@@ -14,6 +14,7 @@ import {
   collectConversationSearchDocuments,
   createConversationSearchIndex,
   createImageReadAuthority,
+  createProjectInputDraftStore,
   resolvePermissionPrincipal,
   projectClassicGoals,
   projectHistory,
@@ -68,6 +69,7 @@ export function createProjectAgentApplicationService({
   lifecycle = null,
   profileStore = null,
   inputQueue = null,
+  inputDrafts = createProjectInputDraftStore(),
   sessions = null,
   approvals = null,
   bindWorkspace = null,
@@ -270,6 +272,12 @@ export function createProjectAgentApplicationService({
     });
     if (result?.ok || result?.archived) queueChanged(payload.workspaceId);
     return result;
+  }
+
+  function draftRequest(payload, operation) {
+    if (!open()) return disabled();
+    if (!['desktop', 'quick_chat', 'tui'].includes(payload?.surface) || !directory.get(payload?.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
+    return inputDrafts[operation](payload);
   }
 
   async function submitInput(payload = {}) {
@@ -755,6 +763,8 @@ export function createProjectAgentApplicationService({
     updateModelSelection: createBotModelSelectionUpdater({ get, updateProfile }),
     deleteBot,
     submitInput,
+    readInputDraft: payload => draftRequest(payload, 'read'),
+    writeInputDraft: payload => draftRequest(payload, 'write'),
     readConversation,
     stopResponse,
     listSessions,

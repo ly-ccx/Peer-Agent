@@ -1068,11 +1068,14 @@ export interface BootstrapPreloadApi {
   readonly projectAgentUpdateModelSelection: (params: import('@peer-agent/protocol').BotModelSelectionUpdateRequest) => Promise<import('@peer-agent/protocol').BotModelSelectionUpdateResult>;
   readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; regenerateAvatar?: boolean; avatarColor?: string; chooseAvatar?: boolean; planApproval?: 'never' | 'writes' | 'always'; acceptancePolicy?: 'auto' | 'confirm'; autoHandoffOnPolicyAccept?: boolean; modelPolicy?: import('@peer-agent/protocol').ProjectModelPolicy | null }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentDelete: (params: { workspaceId: string; confirmManaged?: boolean }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentReadInputDraft: (params: import('@peer-agent/protocol').ProjectInputDraftReadRequest) => Promise<import('@peer-agent/protocol').ProjectInputDraftReadResult>;
+  readonly projectAgentWriteInputDraft: (params: import('@peer-agent/protocol').ProjectInputDraftWriteRequest) => Promise<import('@peer-agent/protocol').ProjectInputDraftWriteResult>;
   readonly projectAgentSubmitInput: (params: {
     workspaceId: string;
     inputId: string;
     text: string;
     surface?: string;
+    attachments?: readonly import('@peer-agent/protocol').ProjectInputAttachment[];
     quoteRefs?: readonly string[];
     anchorRefs?: readonly string[];
     attachmentRefs?: readonly string[];

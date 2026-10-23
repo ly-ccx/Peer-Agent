@@ -1,6 +1,10 @@
+import { useEditableResource } from '../../ui/forms/useEditableResource';
+import { useSettingsAction } from '../../ui/forms/useSettingsAction';
+import { FormFeedback } from '../../ui/forms/FormFeedback';
+import { useUnsavedChanges } from '../../ui/forms/UnsavedChanges';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocaleCode } from '@peer-agent/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { clientApi } from '../../clientApi';
 import { projectAgentShellOf, publishProjectAgentShell, type ProjectAgentShell } from '../../project-agent/onboarding/botShell';
 import { Switch } from '../../ui/boolean-controls/Switch';
@@ -54,6 +58,10 @@ function readBots(settings: Record<string, unknown> | null | undefined) {
   };
 }
 
+function readGeneral(settings: Record<string, unknown> | null | undefined) {
+  return { ...readBots(settings), shell: projectAgentShellOf(settings), replyLanguage: readReplyLanguage(settings) };
+}
+
 export interface GeneralPanelProps {
   readonly availableLocales: readonly LocaleCode[];
   readonly i18n: I18nRuntime;
@@ -62,40 +70,29 @@ export interface GeneralPanelProps {
 }
 
 export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyLanguageChanged }: GeneralPanelProps) {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [replyLanguage, setReplyLanguage] = useState(() => readReplyLanguage(clientApi.initialSettings));
-  const initialBots = readBots(clientApi.initialSettings);
-  const [proactivity, setProactivity] = useState(initialBots.proactivity);
-  const [quietEnabled, setQuietEnabled] = useState(initialBots.quietEnabled);
-  const [quietStart, setQuietStart] = useState(initialBots.quietStart);
-  const [quietEnd, setQuietEnd] = useState(initialBots.quietEnd);
-  const [digestTime, setDigestTime] = useState(initialBots.digestTime);
-  const [shell, setShell] = useState<ProjectAgentShell>(() => projectAgentShellOf(clientApi.initialSettings));
-  const controlsDisabled = isLoading || isSaving;
-
-  useEffect(() => {
-    let cancelled = false;
-    void clientApi.getSettings().then((settings) => {
-      if (cancelled) return;
-      const bots = readBots(settings);
-      setShell(projectAgentShellOf(settings));
-      setReplyLanguage(readReplyLanguage(settings));
-      setProactivity(bots.proactivity);
-      setQuietEnabled(bots.quietEnabled);
-      setQuietStart(bots.quietStart);
-      setQuietEnd(bots.quietEnd);
-      setDigestTime(bots.digestTime);
-      setIsLoading(false);
-    }).catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : i18n.t('settings.general.loadFailed'));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  const localeAction = useSettingsAction();
+  const form = useEditableResource('settings.general', readGeneral(clientApi.initialSettings), {
+    read: async () => readGeneral(await clientApi.getSettings()),
+    write: async (draft, saved) => {
+      const projectAgent: Record<string, unknown> = {};
+      if (draft.shell !== saved.shell) projectAgent.shell = draft.shell;
+      if (draft.proactivity !== saved.proactivity) projectAgent.proactivity = draft.proactivity;
+      if (draft.quietEnabled !== saved.quietEnabled || draft.quietStart !== saved.quietStart || draft.quietEnd !== saved.quietEnd) projectAgent.quietHours = { enabled: draft.quietEnabled, start: draft.quietStart, end: draft.quietEnd };
+      if (draft.digestTime !== saved.digestTime) projectAgent.digestTime = draft.digestTime;
+      const patch = { ...(Object.keys(projectAgent).length ? { projectAgent } : {}), ...(draft.replyLanguage !== saved.replyLanguage ? { replyLanguage: draft.replyLanguage === 'follow' ? i18n.locale : draft.replyLanguage } : {}) };
+      const receipt = readGeneral(await clientApi.updateSettings(patch));
+      if (receipt.replyLanguage !== saved.replyLanguage) onReplyLanguageChanged?.(receipt.replyLanguage);
+      if (receipt.shell !== saved.shell) publishProjectAgentShell(receipt.shell);
+      return receipt;
+    },
+  });
+  useUnsavedChanges({ dirty: form.dirty, busy: form.saving || localeAction.busy, save: form.save, discard: form.reset });
+  const { replyLanguage, proactivity, quietEnabled, quietStart, quietEnd, digestTime, shell } = form.draft;
+  const controlsDisabled = !form.loaded || form.saving || localeAction.busy;
+  async function change(next: Partial<ReturnType<typeof readGeneral>>) {
+    if (controlsDisabled) return;
+    form.edit({ ...form.draft, ...next }); await form.save();
+  }
   const localeOptions = useMemo(() => {
     const locales = availableLocales.length > 0 ? availableLocales : ([i18n.locale] as readonly LocaleCode[]);
     return locales.map((locale) => ({ value: locale, label: LOCALE_LABELS[locale] ?? locale }));
@@ -115,98 +112,13 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
     [i18n],
   );
 
-  async function handleShellChange(next: ProjectAgentShell) {
-    if (next === shell || controlsDisabled) return;
-    const previous = shell;
-    setShell(next);
-    setIsSaving(true);
-    setError(null);
-    try {
-      await clientApi.updateSettings({ projectAgent: { shell: next } });
-      publishProjectAgentShell(next);
-    } catch (err) {
-      setShell(previous);
-      setError(err instanceof Error ? err.message : 'Failed to update interface.');
-    } finally {
-      setIsSaving(false);
-    }
+  const handleShellChange = (shell: ProjectAgentShell) => change({ shell });
+  async function handleLocaleChange(next: LocaleCode) {
+    if (next === i18n.locale || controlsDisabled) return;
+    await localeAction.run(async () => { await clientApi.setLocale(next); await onLocaleChanged(); });
   }
-
-  async function handleLocaleChange(nextLocale: LocaleCode) {
-    if (nextLocale === i18n.locale || controlsDisabled) return;
-
-    setIsSaving(true);
-    setError(null);
-    try {
-      await clientApi.setLocale(nextLocale);
-      await onLocaleChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update language.');
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function saveBots(next: {
-    proactivity?: typeof proactivity;
-    quietEnabled?: boolean;
-    quietStart?: string;
-    quietEnd?: string;
-    digestTime?: string;
-  }) {
-    if (controlsDisabled) return;
-    const previous = { proactivity, quietEnabled, quietStart, quietEnd, digestTime };
-    const merged = { ...previous, ...next };
-    setProactivity(merged.proactivity);
-    setQuietEnabled(merged.quietEnabled);
-    setQuietStart(merged.quietStart);
-    setQuietEnd(merged.quietEnd);
-    setDigestTime(merged.digestTime);
-    setIsSaving(true);
-    setError(null);
-    try {
-      await clientApi.updateSettings({
-        projectAgent: {
-          proactivity: merged.proactivity,
-          quietHours: {
-            enabled: merged.quietEnabled,
-            start: merged.quietStart,
-            end: merged.quietEnd,
-          },
-          digestTime: merged.digestTime,
-        },
-      });
-    } catch (err) {
-      setProactivity(previous.proactivity);
-      setQuietEnabled(previous.quietEnabled);
-      setQuietStart(previous.quietStart);
-      setQuietEnd(previous.quietEnd);
-      setDigestTime(previous.digestTime);
-      setError(err instanceof Error ? err.message : 'Failed to update bot settings.');
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleReplyLanguageChange(nextValue: string) {
-    if (nextValue === replyLanguage || controlsDisabled) return;
-
-    // 'follow' 持久化为当前界面 locale，使指令具体、稳定，不随界面再切换而漂移。
-    const persisted = nextValue === 'follow' ? i18n.locale : nextValue;
-    const previous = replyLanguage;
-    setReplyLanguage(nextValue);
-    setIsSaving(true);
-    setError(null);
-    try {
-      await clientApi.updateSettings({ replyLanguage: persisted });
-      onReplyLanguageChanged?.(persisted);
-    } catch (err) {
-      setReplyLanguage(previous);
-      setError(err instanceof Error ? err.message : 'Failed to update reply language.');
-    } finally {
-      setIsSaving(false);
-    }
-  }
+  const saveBots = (next: Partial<ReturnType<typeof readBots>>) => change(next);
+  const handleReplyLanguageChange = (replyLanguage: string) => change({ replyLanguage });
 
   return (
     <div className="general-panel">
@@ -311,7 +223,8 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
               onChange={value => { void saveBots({ digestTime: value }); }} />
           </div>
       </SettingsGroup>
-      {error ? <p className="general-setting-error" role="alert">{error}</p> : null}
+      <FormFeedback i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
+      <FormFeedback i18n={i18n} saving={localeAction.busy} saveError={localeAction.error} onRetry={localeAction.retry} />
     </div>
   );
 }

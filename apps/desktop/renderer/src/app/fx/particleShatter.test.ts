@@ -103,3 +103,28 @@ test('fallback particles read theme tokens instead of hard-coded dark fill', asy
   assert.match(source, /readThemeCssColor\(\s*'--za-line'/);
   assert.match(source, /isDark \? '#1E232C' : '#F7F9FC'/);
 });
+
+test('reduced or hidden motion short-circuits the engine before canvas work or frame allocation', async () => {
+  const { runParticleShatter } = await import('./particleShatter.ts');
+  let contexts = 0, frames = 0, done = 0;
+  const handle = runParticleShatter({ canvas: { getContext() { contexts++; } } as unknown as HTMLCanvasElement, particles: [],
+    requestFrame() { frames++; return 1; }, environment: { allowed: () => false, subscribe: () => () => {} }, onDone: () => done++ });
+  handle.stop(); assert.equal(contexts, 0); assert.equal(frames, 0); assert.equal(done, 1);
+});
+test('an in-flight particle frame is cancelled once on preference change and never restarts', async () => {
+  const { runParticleShatter } = await import('./particleShatter.ts');
+  let enabled = true, change: (() => void) | undefined, requested = 0, cancelled = 0, done = 0;
+  const canvas = { width: 100, height: 100, getContext: () => ({ clearRect() {}, fillRect() {} }) } as unknown as HTMLCanvasElement;
+  const handle = runParticleShatter({ canvas, particles: sampleParticlesFromImageData(makeOpaqueImageData(4, 4), 4, 4), now: () => 0,
+    requestFrame() { return ++requested; }, cancelFrame() { cancelled++; },
+    environment: { allowed: () => enabled, subscribe(fn) { change = fn; return () => { change = undefined; }; } }, onDone: () => done++ });
+  enabled = false; change?.(); handle.stop(); enabled = true; change?.();
+  assert.equal(requested, 1); assert.equal(cancelled, 1); assert.equal(done, 1);
+});
+
+test('an aborted capture leaves the source untouched before measuring or allocating pixels', async () => {
+  const { sampleElementParticles } = await import('./particleShatter.ts');
+  const controller = new AbortController(); controller.abort();
+  const source = { getBoundingClientRect() { throw Error('aborted sampling must not measure'); } } as unknown as HTMLElement;
+  assert.deepEqual(await sampleElementParticles(source, { signal: controller.signal }), []);
+});

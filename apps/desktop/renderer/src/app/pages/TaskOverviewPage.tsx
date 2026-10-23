@@ -1,3 +1,4 @@
+import { watchVisualMotion } from '../state/visualMotion';
 import { createI18n } from '@peer-agent/i18n';
 import type { TaskOverviewArtifact, TaskOverviewItem } from '@peer-agent/protocol';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
@@ -486,7 +487,7 @@ function HeroLayout({
   const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const [backgroundBarHost, setBackgroundBarHost] = useState<HTMLElement | null>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
-  const transitionTimers = useRef<Set<number>>(new Set());
+  const transitionTimers = useRef<Set<ReturnType<typeof watchVisualMotion>>>(new Set());
 
   useEffect(() => {
     const sentinel = headerSentinelRef.current;
@@ -508,7 +509,7 @@ function HeroLayout({
 
   useEffect(
     () => () => {
-      for (const timer of transitionTimers.current) window.clearTimeout(timer);
+      for (const timer of transitionTimers.current) timer.cancel();
       transitionTimers.current.clear();
     },
     [],
@@ -521,11 +522,11 @@ function HeroLayout({
   }, [acceptanceOrderSnapshot.length, acceptanceTransitions]);
 
   const scheduleTransition = useCallback((callback: () => void, delayMs: number) => {
-    const timer = window.setTimeout(() => {
-      transitionTimers.current.delete(timer);
-      callback();
-    }, delayMs);
-    transitionTimers.current.add(timer);
+    let completed = false, motion: ReturnType<typeof watchVisualMotion> | undefined;
+    motion = watchVisualMotion([], () => {
+      completed = true; if (motion) transitionTimers.current.delete(motion); callback();
+    }, { durationMs: delayMs });
+    if (!completed) transitionTimers.current.add(motion);
   }, []);
 
   const handleAccept = useCallback(async (item: TaskOverviewItem) => {

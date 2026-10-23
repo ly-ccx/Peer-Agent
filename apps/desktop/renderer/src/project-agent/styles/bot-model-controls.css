@@ -1,7 +1,7 @@
 .bot-model-control { min-width: 0; }
 .bot-model-control-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .bot-model-picker { flex: 1; min-width: 0; }
-.bot-model-picker > button { width: 100%; min-width: 0; font-size: 12px; }
+.bot-model-picker > button { width: 100%; min-width: 0; font-size: var(--ui-font-control); }
 .bot-model-picker > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bot-model-picker > button > .pa-cascading-value { display: inline-flex; align-items: center; gap: 4px; text-overflow: clip; }
 .bot-model-picker .model-selection-trigger-label { color: var(--graphite-base); font-weight: 560; }
@@ -12,17 +12,17 @@
   font-weight: 420;
   letter-spacing: 0.02em;
 }
-.bot-model-source { margin: 5px 0 0; color: var(--graphite-soft); font-size: 11px; line-height: 1.5; }
-.bot-model-control .reasoning-effort-trigger { color: var(--graphite-soft); font-size: 12px; flex-shrink: 0; }
+.bot-model-source { margin: 5px 0 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); line-height: 1.5; }
+.bot-model-control .reasoning-effort-trigger { color: var(--graphite-soft); font-size: var(--ui-font-control); flex-shrink: 0; }
 .bot-model-control:not(.is-compact) .bot-model-picker > button { max-width: none; justify-content: space-between; border: 1px solid var(--ui-border-subtle, var(--za-line)); border-radius: var(--ui-radius-control); padding: 9px 10px; background: var(--paper-sheet); }
 .bot-model-control:not(.is-compact) .bot-model-picker .pa-cascading-value { flex: 1; text-align: left; }
-.bot-settings-row.bot-model-settings-row { align-items: start; grid-template-columns: 78px minmax(0, 1fr); }
+.bot-settings-row.bot-model-settings-row { align-items: start; grid-template-columns: minmax(0, 5rem) minmax(0, 1fr); }
 .bot-model-settings-row > span { padding-top: 9px; }
 .bot-model-toolbar { display: flex; min-width: 0; max-width: 100%; align-items: center; }
 .bot-model-toolbar .bot-model-picker > button { padding: 5px 6px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-soft); }
 .bot-model-toolbar .bot-model-picker > button:hover { background: var(--composer-addon-hover-bg); color: var(--graphite-base); }
 .bot-model-toolbar .bot-model-control-row { gap: 3px; }
-.bot-model-error { margin: 4px 0; color: var(--graphite-soft); font-size: 12px; }
+.bot-model-error { margin: 4px 0; color: var(--graphite-soft); font-size: var(--ui-font-control); }
 .bot-composer-actions .bot-model-toolbar { flex: 0 1 auto; min-width: 0; }
 .bot-composer-actions .bot-model-control { min-width: 0; max-width: 100%; }
 .bot-composer-bar .bot-model-control-row { gap: 2px; }
@@ -32,8 +32,8 @@
   .bot-model-control-row { gap: 2px; }
 }
 
-.bot-composer-bar .bot-model-picker > button { width: 100%; height: 30px; justify-content: flex-start; gap: 5px; background: transparent; color: var(--graphite-soft); font-size: 12px; border-radius: var(--ui-radius-control); }
-.bot-composer-bar .reasoning-effort-trigger { display: inline-grid; width: auto; height: 30px; padding: 4px 7px; background: transparent; color: var(--graphite-soft); font-size: 12px; border-radius: var(--ui-radius-control); }
+.bot-composer-bar .bot-model-picker > button { width: 100%; min-height: var(--ui-control-height-compact); height: auto; justify-content: flex-start; gap: 5px; background: transparent; color: var(--graphite-soft); font-size: var(--ui-font-control); border-radius: var(--ui-radius-control); }
+.bot-composer-bar .reasoning-effort-trigger { display: inline-grid; width: auto; min-height: var(--ui-control-height-compact); height: auto; padding: 4px 7px; background: transparent; color: var(--graphite-soft); font-size: var(--ui-font-control); border-radius: var(--ui-radius-control); }
 .bot-composer-bar .reasoning-effort-trigger:active:not(:disabled) { transform: none; }
 
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-control-row,
@@ -41,21 +41,21 @@
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-control-row.has-effort,
 .bot-drawer-body .bot-model-captions.has-effort { grid-template-columns: minmax(0, 1fr) 112px; }
 .bot-drawer-body .bot-model-control:not(.is-compact) .bot-model-picker > button,
-.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger { height: auto; min-height: 34px; width: 100%; padding: 6px 12px; border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); color: var(--graphite-base); font-size: .75rem; }
+.bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger { height: auto; min-height: var(--ui-control-height); width: 100%; padding: 6px 12px; border: 1px solid transparent; border-radius: var(--ui-radius-control); background: var(--control-fill); color: var(--graphite-base); font-size: var(--ui-font-control); }
 .bot-drawer-body .bot-model-control:not(.is-compact) .reasoning-effort-trigger:hover:not(:disabled) { background: var(--control-fill-hover); }
 .bot-model-captions .bot-model-source { margin-top: 5px; font-size: .6875rem; }
 .bot-model-captions .bot-model-source:last-child:not(:first-child) { text-align: center; }
 
-.bot-composer-bar .bot-model-picker > button { min-height: 32px; height: 32px; padding: 6px; border-radius: var(--ui-radius-control); }
+.bot-composer-bar .bot-model-picker > button { min-height: var(--ui-control-height-compact); height: auto; padding: 6px; border-radius: var(--ui-radius-control); }
 .bot-composer-bar .bot-model-picker > button:is(:hover, .open):not(:disabled) { background: var(--control-fill); }
 .bot-composer-bar :is(.bot-model-picker > button, .reasoning-effort-trigger):disabled { background: transparent; box-shadow: none; }
-.bot-composer-bar .reasoning-effort-trigger { min-height: 32px; height: 32px; padding: 0; border-radius: var(--ui-radius-control); }
+.bot-composer-bar .reasoning-effort-trigger { min-height: var(--ui-control-height-compact); height: auto; padding: 0; border-radius: var(--ui-radius-control); }
 .bot-composer-bar .reasoning-effort-trigger:is(:hover, .open):not(:disabled) { background: transparent; }
 .bot-composer-bar .reasoning-effort-trigger-size { padding: 6px; }
 .bot-composer-bar .reasoning-effort-trigger-content {
-  justify-self: start; max-width: 100%; min-height: 32px; box-sizing: border-box;
+  justify-self: start; max-width: 100%; min-height: var(--ui-control-height-compact); height: auto; box-sizing: border-box;
   padding: 6px; border-radius: var(--ui-radius-control);
-  transition: background 160ms ease, color 160ms ease;
+  transition: background-color var(--za-motion-fast) var(--za-ease-standard), color var(--za-motion-fast) var(--za-ease-standard);
 }
 .bot-composer-bar .reasoning-effort-trigger:is(:hover, .open):not(:disabled) .reasoning-effort-trigger-content { background: var(--control-fill); }
 @media (prefers-reduced-motion: reduce) {
@@ -64,3 +64,8 @@
 @supports (corner-shape: superellipse(1.4)) {
   .bot-model-control :is(.pa-cascading-trigger, .reasoning-effort-trigger, .reasoning-effort-trigger-content) { corner-shape: var(--control-corner); }
 }
+
+.bot-model-feedback { padding: var(--space-2); }
+.bot-model-control .bot-model-source { overflow-wrap: anywhere; }
+
+@media (max-width: 420px) { .bot-settings-row.bot-model-settings-row { grid-template-columns: minmax(0, 1fr); } }

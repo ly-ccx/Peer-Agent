@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { selectionNavigation } from '../app/components/selectionNavigation';
+import { isImeKey } from '../chat/state/compositionGuard';
 
 export interface ResourceTabItem {
   readonly id: string;
@@ -6,7 +8,10 @@ export interface ResourceTabItem {
   readonly icon: ReactNode;
 }
 
+export const resourceTabIds = (prefix: string, id: string) => ({ tab: `${prefix}-tab-${encodeURIComponent(id)}`, panel: `${prefix}-panel-${encodeURIComponent(id)}` });
+
 interface ResourceTabStripProps {
+  readonly idPrefix: string;
   readonly ariaLabel: string;
   readonly items: readonly ResourceTabItem[];
   readonly activeId: string | null;
@@ -38,6 +43,7 @@ function CloseIcon() {
 
 export function ResourceTabStrip({
   ariaLabel,
+  idPrefix,
   items,
   activeId,
   closeLabel,
@@ -45,12 +51,28 @@ export function ResourceTabStrip({
   onClose,
   action,
 }: ResourceTabStripProps) {
-  if (items.length === 0) {
+  const root = useRef<HTMLDivElement>(null), pendingFocus = useRef<{ id: string | null; from: HTMLElement } | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const close = (id: string, from: HTMLElement) => {
+    const index = items.findIndex(item => item.id === id);
+    if (from.closest('.resource-tab')?.contains(document.activeElement)) pendingFocus.current = { id: items[index + 1]?.id ?? items[index - 1]?.id ?? null, from };
+    onClose(id);
+  };
+  useLayoutEffect(() => {
+    const request = pendingFocus.current;
+    if (!request || request.from.isConnected) return;
+    pendingFocus.current = null;
+    if (document.activeElement !== document.body) return;
+    const next = request.id ? document.getElementById(resourceTabIds(idPrefix, request.id).tab) : null;
+    (next ?? root.current?.querySelector<HTMLElement>('.resource-tab-action') ?? root.current)?.focus({ preventScroll: true });
+  }, [items, idPrefix]);
+  const selectedId = items.some(item => item.id === activeId) ? activeId : items[0]?.id;
+  if (items.length === 0 && !action) {
     return null;
   }
   return (
-    <div className="resource-tab-strip">
-      <div className="resource-tabs" role="tablist" aria-label={ariaLabel}>
+    <div className="resource-tab-strip" ref={root} tabIndex={-1}>
+      <div className="resource-tabs" role="tablist" aria-label={ariaLabel} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(null); }}>
         {items.map((item) => {
           const selected = item.id === activeId;
           return (
@@ -63,8 +85,18 @@ export function ResourceTabStrip({
                 type="button"
                 className="resource-tab-select"
                 role="tab"
+                id={resourceTabIds(idPrefix, item.id).tab} aria-controls={resourceTabIds(idPrefix, item.id).panel}
+                onFocus={() => setFocused(item.id)}
+                onKeyDown={event => {
+                  if (isImeKey(event.nativeEvent)) return;
+                  if (event.key === 'Delete') { event.preventDefault(); close(item.id, event.currentTarget); return; }
+                  const next = selectionNavigation(items.map(() => ({})), items.findIndex(row => row.id === item.id), event.key, 'horizontal', getComputedStyle(event.currentTarget).direction === 'rtl');
+                  if (next === null) return; event.preventDefault();
+                  const target = items[next]!; onActivate(target.id);
+                  document.getElementById(resourceTabIds(idPrefix, target.id).tab)?.focus({ preventScroll: true });
+                }}
                 aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
+                tabIndex={item.id === (focused && items.some(row => row.id === focused) ? focused : selectedId) ? 0 : -1}
                 title={item.label}
                 onClick={() => onActivate(item.id)}
               >
@@ -78,7 +110,7 @@ export function ResourceTabStrip({
                 title={closeLabel}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onClose(item.id);
+                  close(item.id, event.currentTarget);
                 }}
               >
                 <CloseIcon />

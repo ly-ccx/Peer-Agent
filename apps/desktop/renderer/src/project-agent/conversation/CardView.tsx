@@ -1,10 +1,12 @@
+import { approvalCardReceipt, cardDecisionKey } from '../state/cardDecisionReceipt';
+import { inputRecoveryFor } from '../state/useInputRecovery';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useContext, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { PeerIcon } from '../../ui/icons';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
-import { agentFailurePresentation } from '../state/botConversationState';
+import { readBotCards, agentFailurePresentation } from '../state/botConversationState';
 import { budgetFailureDetail } from '../state/replyRecoveryState';
 import { cardActionErrorKey } from '../state/cardActionError';
 import { CompletionReview } from './CompletionReview';
@@ -50,7 +52,7 @@ export function CardDiagnostics({ cards, i18n }: { readonly cards: readonly BotC
 
 function CardItem({
   workspaceId,
-  card,
+  card: sourceCard,
   i18n,
   onDone,
   onClosed,
@@ -63,24 +65,40 @@ function CardItem({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
+  const [receipt, setReceipt] = useState<{ key: string; source: BotChatCard; card: BotChatCard } | null>(null);
+  const [submitted, setSubmitted] = useState<string | null>(null);
+  const [retired, setRetired] = useState<{ key: string; source: BotChatCard } | null>(null);
+  const key = `${workspaceId}:${cardDecisionKey(sourceCard)}`;
+  const card = sourceCard.resolvedState === 'resolved' ? sourceCard : receipt?.key === key && receipt.source === sourceCard ? receipt.card : sourceCard;
+  const waitingForFacts = submitted === key && card.resolvedState !== 'resolved';
   const sending = useRef(false);
   const submitInput = useContext(BotInputContext);
-  const resolved = done || card.resolvedState === 'resolved';
+  const resolved = card.resolvedState === 'resolved';
   const failure = card.kind === 'agent_unavailable' ? agentFailurePresentation(card) : undefined;
   const budgetDetail = failure && !failure.recovering ? budgetFailureDetail(card.recoveryAction) : null;
   const actions = card.actions?.filter(action => action.id !== 'retry' || failure?.retryAllowed !== false);
   const imageApproval = card.kind === 'approval' && (card.refs?.capabilityId === 'local.image.read' || actions?.some(a => a.payload?.capabilityId === 'local.image.read'));
   const imageState = card.resolution?.state;
-  const imageNotice = card.refs?.decisionReason === 'permission_timeout' ? 'projectAgent.chat.imageTimeout'
+  const imageNotice = card.refs?.decisionReason === 'permission_policy_changed' ? 'projectAgent.access.changed' : card.refs?.decisionReason === 'permission_timeout' ? 'projectAgent.chat.imageTimeout'
     : card.refs?.decisionReason === 'permission_unavailable' ? 'projectAgent.chat.imageUnavailable'
     : imageState === 'cancelled' ? 'projectAgent.chat.imageCancelled'
     : imageState === 'denied' ? 'projectAgent.chat.imageDenied'
-    : imageState === 'approved' ? 'projectAgent.chat.imageApproved' : 'projectAgent.chat.imageReadNotice';
+    : imageState === 'approved' ? 'projectAgent.chat.imageApproved' : imageState === 'expired' ? 'projectAgent.chat.imageUnavailable' : 'projectAgent.chat.imageReadNotice';
+  async function refreshFacts() {
+    try {
+      const latest = await clientApi.projectAgentReadConversation({ workspaceId, view: 'cards' });
+      if (!latest.ok || !Array.isArray(latest.cards)) throw new Error('unavailable');
+      const current = readBotCards(latest.cards).find(item => item.cardId === sourceCard.cardId);
+      if (current) setReceipt({ key, source: sourceCard, card: current });
+      else setRetired({ key, source: sourceCard });
+      onDone?.();
+    } catch { setError(i18n.t('projectAgent.chat.cardsUnavailable')); }
+  }
   const question = card.kind === 'question';
-  const dismissal = useQuestionDismissal(question && resolved, onClosed);
-  if (question && !dismissal.present) return null;
-  if (card.kind === 'approval' && resolved) return <ApprovalReceipt card={card} i18n={i18n} notice={imageApproval ? imageNotice : undefined} />;
+  const dismissal = useQuestionDismissal(question && resolved, onClosed, node =>
+    node.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea:not(:disabled)') ?? null);
+  if (retired?.key === key && retired.source === sourceCard || question && !dismissal.present) return null;
+  if (['approval', 'plan_approval'].includes(card.kind) && resolved) return <ApprovalReceipt card={card} i18n={i18n} notice={imageApproval ? imageNotice : undefined} />;
   return (
     <section ref={dismissal.ref} aria-busy={busy} inert={question && resolved ? true : undefined} aria-hidden={question && resolved ? true : undefined}
       className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
@@ -99,9 +117,9 @@ function CardItem({
             <button
               key={`${action.id}-${index}`}
               type="button"
-              disabled={busy || resolved}
+              disabled={busy || waitingForFacts || resolved}
               onClick={() => {
-                if (sending.current || resolved) return;
+                if (sending.current || waitingForFacts || resolved) return;
                 sending.current = true;
                 setBusy(true); setError('');
                 const text = typeof action.payload?.text === 'string' ? action.payload.text : '';
@@ -109,11 +127,14 @@ function CardItem({
                 const request = submitInput && action.channel === 'project-agent:submit-input'
                   ? submitInput(text, answerTo) : runCardAction(workspaceId, action);
                 void request.then(result => {
-                  if (!result?.ok) { setError(i18n.t(cardActionErrorKey(result?.code))); if (result?.code === 'QUESTION_CLOSED') onDone?.(); return; }
+                  const factualReceipt = approvalCardReceipt(workspaceId, sourceCard, result);
+                  if (factualReceipt) setReceipt({ key, source: sourceCard, card: factualReceipt });
+                  if (!result?.ok) { setError(i18n.t(cardActionErrorKey(result?.code))); void refreshFacts(); return; }
                   if (submitInput && action.channel === 'project-agent:submit-input') {
                     dismissal.ref.current?.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea')?.focus({ preventScroll: true });
                   }
-                  setDone(true); onDone?.();
+                  if (!factualReceipt) { setSubmitted(key); void refreshFacts(); }
+                  else onDone?.();
                 }).catch(() => setError(i18n.t('projectAgent.chat.actionFailed'))).finally(() => { sending.current = false; setBusy(false); });
               }}
             >
@@ -122,6 +143,7 @@ function CardItem({
           ))}
         </div>
       )}
+      {waitingForFacts ? <p role="status">{i18n.t('projectAgent.chat.decisionUpdating')} <button type="button" onClick={() => void refreshFacts()}>{i18n.t('projectAgent.history.retry')}</button></p> : null}
       {!resolved && error ? <p role="alert" className="bot-drawer-note">{error}</p> : null}
     </section>
   );
@@ -162,7 +184,7 @@ async function runCardAction(workspaceId: string, action: BotChatCardAction): Pr
     const text = typeof payload.text === 'string' ? payload.text.trim() : '';
     const answerTo = typeof payload.answerTo === 'string' ? payload.answerTo : '';
     if (!text) return { ok: false, code: 'INVALID_INPUT' };
-    return clientApi.projectAgentSubmitInput({ workspaceId, inputId: crypto.randomUUID(), text, surface: 'desktop', ...(answerTo ? { answerTo } : {}) });
+    return inputRecoveryFor(workspaceId).send({ text, answerTo, useDraft: false });
   }
   if (action.channel === 'project-agent:start-familiarize') return clientApi.projectAgentStartFamiliarize({ workspaceId });
   if (action.channel === 'project-agent:confirm-result' && typeof payload.sessionId === 'string') {

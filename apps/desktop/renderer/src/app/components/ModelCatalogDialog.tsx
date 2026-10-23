@@ -1,3 +1,4 @@
+import { useGuardedNavigation, useUnsavedChanges } from '../../ui/forms/UnsavedChanges';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmModelInfo, LlmModelListResult, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -44,6 +45,7 @@ export function ModelCatalogDialog({
   allowManualModel = false,
   onClose,
   onAppliedClose,
+  pendingCreation = false,
 }: {
   readonly i18n: I18nRuntime;
   readonly providerName: string;
@@ -62,6 +64,7 @@ export function ModelCatalogDialog({
   readonly allowManualModel?: boolean;
   readonly onClose: () => void;
   readonly onAppliedClose?: () => void;
+  readonly pendingCreation?: boolean;
 }) {
   const zh = i18n.locale === 'zh-CN';
   const [query, setQuery] = useState('');
@@ -74,7 +77,8 @@ export function ModelCatalogDialog({
   );
   const [importing, setImporting] = useState(false);
   const [applyState, setApplyState] = useState<'idle' | 'applying' | 'success'>('idle');
-  const appliedSuccessfullyRef = useRef(false);
+  const appliedSuccessfullyRef = useRef(false), importLock = useRef(false);
+  const navigate = useGuardedNavigation();
   const [importError, setImportError] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState('');
   const [importedModels, setImportedModels] = useState<readonly LlmProviderConfigView[]>(configuredModels);
@@ -85,10 +89,12 @@ export function ModelCatalogDialog({
   const isInitialLoading = loading && catalog.length === 0;
   const isRefreshing = loading && catalog.length > 0;
   const fetchState = isInitialLoading ? 'initial-loading' : isRefreshing ? 'refreshing' : showFetchComplete ? 'complete' : 'idle';
+  const configuredKey = JSON.stringify(configuredModels);
   useEffect(() => {
     setImportedModels(configuredModels);
-    setSelected(new Set(configuredModels.map((model) => model.model)));
-  }, [configuredModels]);
+    if (!hasSelectionChanges) setSelected(new Set(configuredModels.map((model) => model.model)));
+    // Array identity can change on unrelated parent renders; only real catalogue changes enter here.
+  }, [configuredKey]);
   useEffect(() => {
     const justCompleted = wasLoadingRef.current && !loading && !error;
     wasLoadingRef.current = loading;
@@ -118,13 +124,22 @@ export function ModelCatalogDialog({
     });
   };
 
+  const dirty = !appliedSuccessfullyRef.current && (pendingCreation || hasSelectionChanges || Boolean(manualModel.trim()));
+  useUnsavedChanges({ dirty, busy: importing && !appliedSuccessfullyRef.current, discard: onClose });
+  const guardClose = () => {
+    if (appliedSuccessfullyRef.current) return true;
+    if (importing) return false;
+    if (dirty) { navigate(onClose); return false; }
+    return true;
+  };
   const importSelected = async (requestClose: () => void) => {
+    if (importLock.current) return;
     if (wouldRemoveAll) {
       setImportError(zh ? '渠道至少需要保留一个模型。' : 'A provider must keep at least one model.');
       return;
     }
     if (!hasSelectionChanges || remoteSelectionBlocked) return;
-    setImporting(true);
+    importLock.current = true; setImporting(true);
     setApplyState('applying');
     setImportError(null);
     try {
@@ -132,27 +147,29 @@ export function ModelCatalogDialog({
       if (imported) setImportedModels(imported);
       appliedSuccessfullyRef.current = true;
       setApplyState('success');
-      window.setTimeout(requestClose, 420);
+      requestClose();
     } catch (error: unknown) {
       setApplyState('idle');
       setImportError(error instanceof Error ? error.message : 'model_import_failed');
-      setImporting(false);
+      importLock.current = false; setImporting(false);
     }
   };
 
-  const importManualModel = async () => {
+  const importManualModel = async (requestClose: () => void) => {
     const id = manualModel.trim();
-    if (!id) return;
-    setImporting(true);
+    if (!id || importLock.current) return;
+    importLock.current = true; setImporting(true);
     setImportError(null);
     try {
       const imported = await onImport([{ id, label: id }], 'manual');
       if (imported) setImportedModels(imported);
+      if (imported) setSelected(new Set(imported.map(model => model.model)));
       setManualModel('');
+      if (pendingCreation) { appliedSuccessfullyRef.current = true; setApplyState('success'); requestClose(); }
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'model_import_failed');
     } finally {
-      setImporting(false);
+      importLock.current = false; setImporting(false);
     }
   };
 
@@ -162,6 +179,8 @@ export function ModelCatalogDialog({
         if (appliedSuccessfullyRef.current) (onAppliedClose ?? onClose)();
         else onClose();
       }}
+      onRequestClose={guardClose}
+      onEscape={() => importing && !appliedSuccessfullyRef.current}
       closeOnBackdrop={!importing}
       ariaLabel={zh ? '获取模型列表' : 'Import models'}
       panelClassName={`llm-catalog-dialog is-${applyState}`}
@@ -297,8 +316,8 @@ export function ModelCatalogDialog({
                 <small>{zh ? '仅保存你输入的 Model ID，其余元数据保持未知。' : 'Only the Model ID is saved; other metadata stays unknown.'}</small>
               </div>
               <div className="llm-catalog-manual-controls">
-                <input value={manualModel} placeholder="Model ID" onChange={(event) => setManualModel(event.target.value)} />
-                <button type="button" onClick={() => void importManualModel()} disabled={!manualModel.trim() || importing}>{zh ? '添加' : 'Add'}</button>
+                <input disabled={importing} value={manualModel} placeholder="Model ID" onChange={(event) => setManualModel(event.target.value)} />
+                <button type="button" onClick={() => void importManualModel(requestClose)} disabled={!manualModel.trim() || importing}>{zh ? '添加' : 'Add'}</button>
               </div>
             </div>
           ) : null}

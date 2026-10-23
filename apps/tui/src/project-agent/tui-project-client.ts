@@ -1,5 +1,6 @@
+import { createProjectInputRecovery, type ProjectInputRecovery } from '@peer-agent/runtime-core';
+import { createProjectInputDraftStore } from '@peer-agent/runtime-node';
 import path from 'node:path';
-import { readdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { createTuiProjectHost } from './tui-project-host.ts';
 import { projectConversationCards } from './conversation-cards.ts';
@@ -16,40 +17,36 @@ export function createTuiProjectClient(options: {
   autoStart?: boolean;
 }) {
   const { host, dataHome } = options;
-  let stamp = '', snapshot: ProjectSnapshot = emptySnapshot(), closed = false, generation = 0;
-  let pageBefore: string | null = null;
-  let pageSourceVersion: string | undefined;
-  let flight: { key: string; source: string; promise: Promise<ProjectSnapshot> } | null = null;
-  function conversationVersion(workspaceId: string) {
-    try { const id = host.directory.conversationId(workspaceId), s = statSync(path.join(dataHome, 'conversations', id + '.jsonl'), { bigint: true });
-      return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
-    } catch { return 'missing'; }
-  }
-  function fingerprint() {
-    const parts = [host.workspaceId(), String(host.holdsLease(host.workspaceId())), pageBefore ?? ''];
-    const inspect = (file: string, depth: number) => {
-      try {
-        const info = statSync(file);
-        parts.push(`${file}:${info.mtimeMs}:${info.size}`);
-        if (info.isDirectory() && depth > 0) for (const name of readdirSync(file).sort()) inspect(path.join(file, name), depth - 1);
-      } catch { parts.push(`${file}:missing`); }
-    };
-    for (const name of ['projects', 'conversations', 'project-runtime', 'memory', 'goal-plans'])
-      inspect(path.join(dataHome, name), name === 'projects' || name === 'project-runtime' ? 2 : 1);
-    return parts.join('|');
-  }
-  async function poll(force = false): Promise<ProjectSnapshot> {
-    const next = fingerprint(), workspaceId = host.workspaceId(), before = pageBefore;
-    if (!force && next === stamp && (!pageSourceVersion || pageSourceVersion === conversationVersion(workspaceId))) return snapshot;
-    const key = `${workspaceId}:${before ?? ''}`;
-    if (flight?.key === key) {
-      const active = flight, changed = next !== active.source;
-      return active.promise.then(result => {
-        if (!force || !changed) return result;
-        if (flight === active) flight = null;
-        return poll(true);
-      });
+  const drafts = createProjectInputDraftStore({ rootDir: path.join(dataHome, 'project-runtime') });
+  const recoverySessions = new Map<string, ProjectInputRecovery>();
+  function recovery(workspaceId = host.workspaceId()) {
+    let session = recoverySessions.get(workspaceId);
+    if (!session) {
+      session = createProjectInputRecovery({ workspaceId, surface: 'tui', createId: randomUUID, port: {
+        read: async request => host.directory.get(request.workspaceId)?.ok ? drafts.read(request) : { ok: false, code: 'NOT_FOUND' },
+        write: async request => host.directory.get(request.workspaceId)?.ok ? drafts.write(request) : { ok: false, code: 'NOT_FOUND' },
+        submit: async request => {
+          if (closed) return { ok: false, code: 'CLIENT_CLOSED' };
+          if (!host.directory.get(request.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
+          const input = host.inputs.submitInput(request);
+          void host.tick().catch(() => {}); void poll(true).catch(() => {});
+          return { ok: true, input };
+        },
+      } });
+      recoverySessions.set(workspaceId, session);
     }
+    return session;
+  }
+  let snapshot: ProjectSnapshot = emptySnapshot(), closed = false, generation = 0;
+  let pageBefore: string | null = null;
+  let flight: { key: string; promise: Promise<ProjectSnapshot> } | null = null;
+  // Poll the existing indexed public projection. Never recursively stat every project/log
+  // to decide whether a bounded read is needed; that work grows with lifetime history.
+  async function poll(_force = false): Promise<ProjectSnapshot> {
+    if (closed) return snapshot;
+    const workspaceId = host.workspaceId(), before = pageBefore;
+    const key = JSON.stringify([workspaceId, before]);
+    if (flight?.key === key) return flight.promise;
     const ticket = ++generation;
     const promise = (async () => {
       let conversation: any, unavailable = false, cardsUnavailable = false;
@@ -76,35 +73,46 @@ export function createTuiProjectClient(options: {
         sessions, approvals,
         messageState: unavailable ? 'unavailable' : 'ready', cardsUnavailable,
       };
-      if (closed || ticket !== generation) return snapshot;
-      pageSourceVersion = conversation?.ok ? conversation.sourceVersion : undefined;
-      stamp = fingerprint();
+      if (closed || ticket !== generation || workspaceId !== host.workspaceId() || before !== pageBefore) return snapshot;
+      recoverySessions.get(workspaceId)?.observeReceived(messages.filter((row: any) => row.kind === 'user_input').flatMap((row: any) => typeof row.inputId === 'string' ? [row.inputId] : row.id?.startsWith('input-') ? [row.id.slice(6)] : []));
       if (JSON.stringify(snapshot) === JSON.stringify(result)) return snapshot;
       snapshot = result;
       options.onChanged?.(snapshot); return snapshot;
     })();
-    flight = { key, source: next, promise };
+    flight = { key, promise };
     try { return await promise; } finally { if (flight?.promise === promise) flight = null; }
+  }
+  async function flushDrafts() {
+    for (const session of recoverySessions.values()) {
+      const value = session.getSnapshot();
+      if (!value.ready && !value.draft.text && !value.draft.quote && !value.draft.attachments.length && !value.pending.length) continue;
+      if (!await session.flush()) throw Error('project_draft_save_failed');
+    }
   }
   const timer = options.autoStart === false ? null : setInterval(() => { void poll().catch(() => {}); }, 1000);
   timer?.unref();
   return {
-    poll, current: () => snapshot,
+    poll, recovery, flushDrafts, current: () => snapshot,
     latest() { pageBefore = null; return poll(true); },
     earlier() { if (snapshot.nextCursor) pageBefore = snapshot.nextCursor; return poll(true); },
-    async select(workspaceId: string) { pageBefore = null; await host.selectWorkspace(workspaceId); return poll(true); },
+    async select(workspaceId: string) { if (closed) return snapshot; generation++; flight = null; pageBefore = null; await host.selectWorkspace(workspaceId); return poll(true); },
     submit(text: string, input: { inputId?: string; answerTo?: string } = {}) {
       const workspaceId = host.workspaceId();
+      if (closed) throw new Error('project_client_closed');
       if (!workspaceId || !text.trim()) throw new Error('project_input_required');
       const receipt = host.inputs.submitInput({ workspaceId, inputId: input.inputId ?? randomUUID(), text,
         surface: 'tui', ...(input.answerTo ? { answerTo: input.answerTo } : {}) });
       void host.tick().catch(() => {}); void poll(true).catch(() => {}); return receipt;
     },
-    async decide(approvalId: string, decision: 'approve' | 'deny', duration: 'once'|'task' = 'once') {
+    async decide(approvalId: string, decision: 'approve' | 'deny' | 'cancel', duration: 'once'|'task' = 'once') {
+      if (closed) return { ok: false, error: 'project_client_closed' };
       if (!host.holdsLease(host.workspaceId())) return { ok: false, error: 'desktop_approval_required' };
       const result = await host.decideApproval(approvalId, decision, duration); await poll(true); return result;
     },
-    close() { closed = true; generation++; if (timer) clearInterval(timer); },
+    async close() {
+      await flushDrafts();
+      closed = true; generation++; if (timer) clearInterval(timer);
+    },
   };
 }
 

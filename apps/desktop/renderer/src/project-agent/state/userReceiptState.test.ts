@@ -26,3 +26,10 @@ test('pending delivery and failure take precedence over historical replies, and 
   assert.equal(userReceipt({ inputId: 'u', dispositions: [] }, false).labelKey, 'projectAgent.chat.received');
   assert.equal(userReceipt({ dispositions: [] }, false).labelKey, null);
 });
+
+
+test('unknown delivery is neither received nor a definitive failure and retains the retry identity', () => {
+  const receipt = userReceipt({inputId:'same-id',pending:'unknown',dispositions:[]},false);
+  assert.equal(receipt.labelKey,'projectAgent.chat.inputUnconfirmed');
+  assert.equal(receipt.retryInputId,'same-id');
+});

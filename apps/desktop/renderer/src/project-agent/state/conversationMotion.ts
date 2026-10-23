@@ -1,9 +1,4 @@
-/** Registered CSS time properties may be serialized as seconds by the browser. */
-export function motionDurationMs(value: string, fallback = 200): number {
-  const time = value.trim();
-  const match = /^(\d*\.?\d+)(ms|s)$/.exec(time);
-  return match ? Number(match[1]) * (match[2] === 's' ? 1000 : 1) : fallback;
-}
+export { motionDurationMs } from '../../app/state/visualMotion.ts';
 
 /** RAF can supply a frame timestamp just before the layout effect started. */
 export function sendScrollProgress(now: number, started: number, duration: number): number {

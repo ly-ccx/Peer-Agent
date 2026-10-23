@@ -1,3 +1,5 @@
+import { resourcesZh, resourcesEn, type ResourcesTranslationKey } from './resources.ts';
+import { formsZh, formsEn, type FormsTranslationKey } from './forms.ts';
 import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
 import {remoteAccessZh,remoteAccessEn,type RemoteAccessTranslationKey} from './remote-access.ts';
 
@@ -9,6 +11,8 @@ export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly 
 
 export type TranslationKey =
   | RemoteAccessTranslationKey
+  | ResourcesTranslationKey
+  | FormsTranslationKey
   | 'app.newTask'
   | 'searchChats.open'
   | 'searchChats.placeholder'
@@ -256,6 +260,9 @@ export type TranslationKey =
   | 'projectAgent.chat.stopped'
   | 'projectAgent.chat.stopFailed'
   | 'projectAgent.chat.latest'
+  | 'projectAgent.chat.restoringReading'
+  | 'projectAgent.chat.readingUnavailable'
+  | 'projectAgent.chat.restoreReading'
   | 'projectAgent.chat.received'
   | 'projectAgent.chat.loadOlder'
   | 'projectAgent.chat.loadingOlder'
@@ -524,6 +531,15 @@ export type TranslationKey =
   | 'projectAgent.chat.resultChanged'
   | 'projectAgent.chat.acceptReadme'
   | 'projectAgent.chat.actionFailed'
+  | 'projectAgent.chat.draftLoading'
+  | 'projectAgent.chat.draftSaveFailed'
+  | 'projectAgent.chat.draftConflict'
+  | 'projectAgent.chat.inputUnconfirmed'
+  | 'projectAgent.chat.retrySameInput'
+  | 'projectAgent.chat.inputDeliveryIssue'
+  | 'projectAgent.chat.planDecisionRecord'
+  | 'projectAgent.chat.decisionUpdating'
+  | 'projectAgent.chat.verificationPending'
   | 'projectAgent.drawer.title'
   | 'projectAgent.drawer.close'
   | 'projectAgent.drawer.back'
@@ -1422,6 +1438,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}：分钟",
 
     ...remoteAccessZh,
+    ...resourcesZh,
+    ...formsZh,
     'app.newTask': '新任务',
     'searchChats.open': '搜索任务',
     'searchChats.placeholder': '搜索任务',
@@ -1848,6 +1866,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': '生成已停止，以上内容未完成',
     'projectAgent.chat.stopFailed': '停止失败，请再试一次。',
     'projectAgent.chat.latest': '回到最新消息',
+    'projectAgent.chat.restoringReading': '正在恢复原阅读位置…',
+    'projectAgent.chat.readingUnavailable': '原阅读位置尚未找到或暂不可用；可继续分批查找，或回到最新消息。',
+    'projectAgent.chat.restoreReading': '继续恢复阅读位置',
     'projectAgent.chat.received': '已收到',
     'projectAgent.chat.loadOlder': '查看更早消息',
     'projectAgent.chat.loadingOlder': '正在加载更早消息',
@@ -2070,7 +2091,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approvalReceipt.approved': '已授权',
     'projectAgent.chat.approvalReceipt.denied': '已拒绝',
     'projectAgent.chat.approvalReceipt.cancelled': '已取消',
-    'projectAgent.chat.approvalReceipt.expired': '已超时',
+    'projectAgent.chat.approvalReceipt.expired': '已失效',
     'projectAgent.chat.approvalReceipt.closed': '已结束',
     'projectAgent.chat.imageUnavailable': '本次授权请求已结束，没有读取图片。需要查看时可以重新发起。',
     'projectAgent.chat.imageReadNotice': '读取这张图片并交给当前模型。选择“本轮允许”后，仅此图片可供当前机器人及其任务使用，30 分钟内有效。',
@@ -2116,6 +2137,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.resultChanged': '任务状态已变化，暂时不能确认。已刷新，请查看最新进展。',
     'projectAgent.chat.acceptReadme': '写 README',
     'projectAgent.chat.actionFailed': '操作失败，请重试',
+    'projectAgent.chat.draftLoading': '正在恢复草稿…',
+    'projectAgent.chat.draftSaveFailed': '草稿暂未保存，内容仍保留在此窗口。请重试；未保存的输入不会发出。',
+    'projectAgent.chat.draftConflict': '另一个窗口更新了这份草稿。当前内容仍在此窗口，请复制保留后重新打开，避免覆盖另一份编辑。',
+    'projectAgent.chat.inputUnconfirmed': '发送结果尚未确认，原消息已保留。',
+    'projectAgent.chat.retrySameInput': '重试同一消息',
+    'projectAgent.chat.inputDeliveryIssue': '输入已收到，后续交接未完成。请回原任务处理。',
+    'projectAgent.chat.planDecisionRecord': '计划决定记录',
+    'projectAgent.chat.decisionUpdating': '决定已提交，正在读取当前状态…',
+    'projectAgent.chat.verificationPending': '核验尚未得出结论',
     'projectAgent.drawer.title': '机器人设置',
     'projectAgent.drawer.close': '关闭',
     'projectAgent.drawer.back': '任务列表',
@@ -2799,6 +2829,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}: minute",
 
     ...remoteAccessEn,
+    ...resourcesEn,
+    ...formsEn,
     'app.newTask': 'New task',
     'searchChats.open': 'Search tasks',
     'searchChats.placeholder': 'Search tasks',
@@ -3225,6 +3257,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': 'Generation stopped. The content above is incomplete.',
     'projectAgent.chat.stopFailed': 'Could not stop. Please try again.',
     'projectAgent.chat.latest': 'Jump to latest message',
+    'projectAgent.chat.restoringReading': 'Restoring your reading position…',
+    'projectAgent.chat.readingUnavailable': 'Your reading position is not loaded or is unavailable. Continue looking in batches, or jump to latest.',
+    'projectAgent.chat.restoreReading': 'Continue restoring reading position',
     'projectAgent.chat.received': 'Received',
     'projectAgent.chat.loadOlder': 'Earlier messages',
     'projectAgent.chat.loadingOlder': 'Loading earlier messages',
@@ -3447,7 +3482,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approvalReceipt.approved': 'Permission granted',
     'projectAgent.chat.approvalReceipt.denied': 'Denied',
     'projectAgent.chat.approvalReceipt.cancelled': 'Cancelled',
-    'projectAgent.chat.approvalReceipt.expired': 'Timed out',
+    'projectAgent.chat.approvalReceipt.expired': 'Expired',
     'projectAgent.chat.approvalReceipt.closed': 'Closed',
     'projectAgent.chat.imageUnavailable': 'This permission request ended without reading the image. Start a new request if needed.',
     'projectAgent.chat.imageReadNotice': 'Read this image for the current model. Allowing it for this session covers only this image, for this bot and its tasks, valid for 30 minutes.',
@@ -3493,6 +3528,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.resultChanged': 'The task state changed and cannot be confirmed yet. The latest progress has been refreshed.',
     'projectAgent.chat.acceptReadme': 'Write README',
     'projectAgent.chat.actionFailed': 'Action failed. Please try again',
+    'projectAgent.chat.draftLoading': 'Restoring draft…',
+    'projectAgent.chat.draftSaveFailed': 'Draft not saved. Its contents remain in this window. Retry; unsaved input will not be sent.',
+    'projectAgent.chat.draftConflict': 'Another window changed this draft. Copy the contents in this window before reopening to preserve both edits.',
+    'projectAgent.chat.inputUnconfirmed': 'Delivery is unconfirmed. The original message is retained.',
+    'projectAgent.chat.retrySameInput': 'Retry same message',
+    'projectAgent.chat.inputDeliveryIssue': 'Input received; the subsequent handoff needs attention in the original task.',
+    'projectAgent.chat.planDecisionRecord': 'Plan decision record',
+    'projectAgent.chat.decisionUpdating': 'Decision submitted. Reading the current state…',
+    'projectAgent.chat.verificationPending': 'Verification has no conclusion yet',
     'projectAgent.drawer.title': 'Bot settings',
     'projectAgent.drawer.close': 'Close',
     'projectAgent.drawer.back': 'Back to tasks',

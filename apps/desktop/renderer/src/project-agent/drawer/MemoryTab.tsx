@@ -1,8 +1,11 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { Switch } from '../../ui/boolean-controls';
+import { ResourceFeedback } from '../../ui/resources/ResourceFeedback';
+import { ResourceEditor } from '../../ui/resources/ResourceEditor';
+import { useResourceActions, useResourceRead } from '../../ui/resources/useResourceState';
 import { PeerIcon } from '../../ui/icons';
 import { memoryPage } from '../state/memoryPage';
 import {
@@ -10,7 +13,6 @@ import {
   readMemoryRecords,
   readMemorySwitches,
   type DrawerMemoryItem,
-  type MemoryRecord,
   type MemorySwitches,
 } from '../state/drawerState';
 
@@ -40,7 +42,12 @@ function memoryLabel(i18n: I18nRuntime, value: string, options: readonly { value
   return option ? i18n.t(option.key) : value;
 }
 
-export function MemoryTab({
+export function MemoryTab(props: MemoryTabProps) { return <MemoryScope key={props.workspaceId} {...props} />; }
+interface MemoryTabProps {
+  readonly workspaceId: string; readonly i18n: I18nRuntime; readonly onItems?: (items: readonly DrawerMemoryItem[]) => void;
+}
+
+function MemoryScope({
   workspaceId,
   i18n,
   onItems,
@@ -49,42 +56,45 @@ export function MemoryTab({
   readonly i18n: I18nRuntime;
   readonly onItems?: (items: readonly DrawerMemoryItem[]) => void;
 }) {
-  const [items, setItems] = useState<readonly MemoryRecord[]>([]);
-  const [switches, setSwitches] = useState<MemorySwitches>({
-    memoryEnabled: true,
-    useMemory: true,
-    learnPreferences: true,
+  const resource = useResourceRead(workspaceId, async () => {
+    const result = await clientApi.projectMemoryList({ workspaceId });
+    if (!result.ok || !result.items || !result.switches) throw Error(result.code || 'READ_FAILED');
+    return { items: readMemoryRecords(result.items), switches: readMemorySwitches(result.switches) };
   });
+  useEffect(() => clientApi.onProjectAgentChanged(event => {
+    if (event.workspaceIds?.includes(workspaceId)) void resource.reload();
+  }), [workspaceId, resource.reload]);
+  const actions = useResourceActions(workspaceId);
+  const items = resource.value?.items ?? [];
+  const switches = resource.value?.switches;
+  const notify = useRef(onItems); notify.current = onItems;
+  useEffect(() => { if (resource.value) notify.current?.(readMemoryItems(resource.value.items)); }, [resource.value]);
+  const [exported, setExported] = useState<string | null>(null);
+  const memoryRoot = useRef<HTMLDivElement | null>(null);
+  const editorTrigger = useRef<HTMLButtonElement | null>(null);
+  const locked = !resource.loaded || resource.error;
   const [kind, setKind] = useState('');
   const [trust, setTrust] = useState('');
   const [status, setStatus] = useState('');
   const [pageState, setPageState] = useState({ scope: '', index: 0 });
   const [editingId, setEditingId] = useState('');
-  const [draft, setDraft] = useState('');
-
-  async function reload() {
-    const result = await clientApi.projectMemoryList({ workspaceId });
-    const next = readMemoryRecords(result?.items);
-    setItems(next);
-    setSwitches(readMemorySwitches(result?.switches));
-    onItems?.(readMemoryItems(next));
+  const editingRef = useRef(editingId); editingRef.current = editingId;
+  const reload = resource.reload;
+  const restoreEditorFocus = useRef(false);
+  const closeEditor = () => { restoreEditorFocus.current = true; setEditingId(''); };
+  useLayoutEffect(() => { if (!editingId && restoreEditorFocus.current) { restoreEditorFocus.current = false; (editorTrigger.current?.isConnected ? editorTrigger.current : memoryRoot.current)?.focus({ preventScroll: true }); } }, [editingId]);
+  async function command(key: string, write: () => Promise<{ ok: boolean; code?: string }>) {
+    const confirmed = await actions.run(key, async () => { const result = await write(); if (!result.ok) throw Error(result.code); });
+    if (confirmed) void reload();
   }
-
-  useEffect(() => {
-    let cancelled = false;
-    void clientApi.projectMemoryList({ workspaceId }).then((result) => {
-      if (cancelled) return;
-      const next = readMemoryRecords(result?.items);
-      setItems(next);
-      setSwitches(readMemorySwitches(result?.switches));
-      onItems?.(readMemoryItems(next));
-    }).catch(() => {
-      if (!cancelled) setItems([]);
+  async function exportMemory(format: 'json' | 'markdown') {
+    await actions.run('export', async () => {
+      const result = await clientApi.projectMemoryExport({ workspaceId, format });
+      if (!result.ok && result.code === 'CANCELLED') return false;
+      if (!result.ok || !result.path) throw Error(result.code || 'NO_EXPORT_PATH');
+      setExported(result.path);
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [onItems, workspaceId]);
+  }
 
   const pageScope = JSON.stringify([workspaceId, kind, trust, status]);
   useEffect(() => { setPageState({ scope: pageScope, index: 0 }); }, [pageScope]);
@@ -92,14 +102,16 @@ export function MemoryTab({
   const visible = page.items;
 
   function updateSwitch(patch: Partial<MemorySwitches>) {
-    void clientApi.projectMemorySetSwitches({ workspaceId, ...patch }).then(() => reload());
+    void command('switches', () => clientApi.projectMemorySetSwitches({ workspaceId, ...patch }));
   }
 
   return (
-    <div className="bot-drawer-tab bot-memory-tab">
+    <div ref={memoryRoot} tabIndex={-1} className="bot-drawer-tab bot-memory-tab">
       <section className="bot-memory-section">
         <h2>{i18n.t('projectAgent.drawer.memory.saved')}</h2>
-        {items.length === 0 ? (
+        <p className="bot-drawer-note">{i18n.t('resources.memoryScope')}</p>
+        <ResourceFeedback i18n={i18n} loading={resource.loading && !resource.loaded} error={resource.error} onReload={reload} />
+        {resource.loaded && !resource.error && items.length === 0 ? (
           <div className="bot-memory-empty" role="status">
             <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
               <path d="M8 10c4-2 8-2 12 0 4-2 8-2 12 0v20c-4-2-8-2-12 0-4-2-8-2-12 0V10Z" />
@@ -108,7 +120,7 @@ export function MemoryTab({
             <strong>{i18n.t('projectAgent.drawer.memory.empty')}</strong>
             <p>{i18n.t('projectAgent.drawer.memory.emptyHint')}</p>
           </div>
-        ) : (
+        ) : resource.loaded ? (
           <>
             <div className="bot-memory-filters">
               <div className="bot-memory-filter">
@@ -142,7 +154,7 @@ export function MemoryTab({
                 />
               </div>
             </div>
-            {visible.length === 0 ? <p className="bot-memory-filter-empty">{i18n.t('projectAgent.drawer.memory.filterEmpty')}</p> : null}
+            {visible.length === 0 && !resource.error && !resource.loading ? <p className="bot-memory-filter-empty">{i18n.t('projectAgent.drawer.memory.filterEmpty')}</p> : null}
             <ul className="bot-memory-list">
               {visible.map((item) => (
                 <li key={item.id}>
@@ -152,7 +164,19 @@ export function MemoryTab({
                     {item.needsReverify ? <span>{i18n.t('projectAgent.drawer.memory.needsReverify')}</span> : null}
                   </div>
                   {editingId === item.id ? (
-                    <input aria-label={i18n.t('projectAgent.drawer.memory.edit')} value={draft} onChange={(event) => setDraft(event.target.value)} />
+                    <ResourceEditor identity={`memory:${workspaceId}:${item.id}`} initial={{ text: item.text }} i18n={i18n}
+                      fields={[{ key: 'text', label: i18n.t('projectAgent.drawer.memory.edit'), multiline: true }]}
+                      read={async () => {
+                        const result = await clientApi.projectMemoryList({ workspaceId, ids: [item.id] });
+                        const current = result.items?.find(row => row.id === item.id);
+                        if (!result.ok || !current || current.status !== 'active') throw Error('MEMORY_UNAVAILABLE');
+                        return { text: current.text };
+                      }}
+                      write={async draft => {
+                        const result = await clientApi.projectMemoryEdit({ workspaceId, id: item.id, text: draft.text });
+                        if (!result.ok || !result.item) throw Error(result.code);
+                        void reload(); return { text: result.item.text };
+                      }} onClose={closeEditor} onSaved={() => { if (editingRef.current === item.id) closeEditor(); }} />
                   ) : (
                     <p>{item.text}</p>
                   )}
@@ -160,19 +184,20 @@ export function MemoryTab({
                     <p>{memoryLabel(i18n, item.trust, TRUSTS)}</p>
                     {item.sourceRefs?.length ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.sources')}: <code>{item.sourceRefs.join(' · ')}</code></p> : null}
                   </details>
-                  <div className="bot-memory-item-actions">
-                    {item.status === 'conflicted' ? <button type="button" onClick={() => {
-                      void clientApi.projectMemoryRestore({ workspaceId, id: item.id, resolveConflict: true }).then(() => reload());
+                  <ResourceFeedback i18n={i18n} action={actions.get(item.id)} onReload={reload} />
+                  <div className="bot-memory-item-actions" aria-busy={actions.get(item.id).pending}>
+                    {item.status === 'conflicted' ? <button type="button" disabled={locked || actions.get(item.id).pending || editingId === item.id} onClick={() => {
+                      void command(item.id, () => clientApi.projectMemoryRestore({ workspaceId, id: item.id, resolveConflict: true }));
                     }}>{i18n.t('projectAgent.drawer.memory.keepThis')}</button> : null}
                     {item.status === 'active' ? (
                       <button
-                        type="button"
+                        type="button" disabled={locked || actions.get(item.id).pending || editingId === item.id}
                         onClick={() => {
-                          void clientApi.projectMemoryPin({
+                          void command(item.id, () => clientApi.projectMemoryPin({
                             workspaceId,
                             id: item.id,
                             pinned: item.pinned !== true,
-                          }).then(() => reload());
+                          }));
                         }}
                       >
                         {i18n.t(item.pinned ? 'projectAgent.drawer.memory.unpin' : 'projectAgent.drawer.memory.pin')}
@@ -180,43 +205,28 @@ export function MemoryTab({
                     ) : null}
                     {item.status === 'forgotten' ? (
                       <button
-                        type="button"
+                        type="button" disabled={locked || actions.get(item.id).pending || editingId === item.id}
                         onClick={() => {
-                          void clientApi.projectMemoryRestore({ workspaceId, id: item.id }).then(() => reload());
+                          void command(item.id, () => clientApi.projectMemoryRestore({ workspaceId, id: item.id }));
                         }}
                       >
                         {i18n.t('projectAgent.drawer.memory.restore')}
                       </button>
                     ) : (
                       <button
-                        type="button"
+                        type="button" disabled={locked || actions.get(item.id).pending || editingId === item.id}
                         onClick={() => {
-                          void clientApi.projectMemoryForget({ workspaceId, id: item.id }).then(() => reload());
+                          void command(item.id, () => clientApi.projectMemoryForget({ workspaceId, id: item.id }));
                         }}
                       >
                         {i18n.t('projectAgent.drawer.memory.revoke')}
                       </button>
                     )}
-                    {item.status === 'active' && editingId === item.id ? (
+                    {item.status === 'active' ? (
                       <button
-                        type="button"
-                        onClick={() => {
-                          void clientApi.projectMemoryEdit({ workspaceId, id: item.id, text: draft }).then(() => {
-                            setEditingId('');
-                            setDraft('');
-                            return reload();
-                          });
-                        }}
-                      >
-                        {i18n.t('projectAgent.drawer.memory.save')}
-                      </button>
-                    ) : null}
-                    {item.status === 'active' && editingId !== item.id ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingId(item.id);
-                          setDraft(item.text);
+                        type="button" disabled={locked || actions.get(item.id).pending || editingId === item.id}
+                        onClick={event => {
+                          editorTrigger.current = event.currentTarget; setEditingId(item.id);
                         }}
                       >
                         {i18n.t('projectAgent.drawer.memory.edit')}
@@ -236,25 +246,32 @@ export function MemoryTab({
               </button>
             </div> : null}
             <div className="bot-memory-export-actions">
-              <button type="button" onClick={() => { void clientApi.projectMemoryExport({ workspaceId, format: 'json' }); }}>
+              <button type="button" disabled={locked || actions.get('export').pending} onClick={() => { void exportMemory('json'); }}>
                 {i18n.t('projectAgent.drawer.memory.exportJson')}
               </button>
-              <button type="button" onClick={() => { void clientApi.projectMemoryExport({ workspaceId, format: 'markdown' }); }}>
+              <button type="button" disabled={locked || actions.get('export').pending} onClick={() => { void exportMemory('markdown'); }}>
                 {i18n.t('projectAgent.drawer.memory.exportMarkdown')}
               </button>
             </div>
           </>
-        )}
+        ) : null}
       </section>
+      <ResourceFeedback i18n={i18n} action={actions.get('export')} onReload={reload} />
+      {exported ? <div><p>{i18n.t('resources.exported')}: <code>{exported}</code></p>
+        <button type="button" className="ui-button" disabled={actions.get('openExport').pending} onClick={() => void actions.run('openExport', async () => {
+          const result = await clientApi.openPath(exported, undefined, { mode: 'reveal' }); if (!result.ok) throw Error('OPEN_FAILED');
+        })}>{i18n.t('resources.openFile')}</button><ResourceFeedback i18n={i18n} action={actions.get('openExport')} /></div> : null}
+      <ResourceFeedback i18n={i18n} action={actions.get('switches')} onReload={reload} />
       <details className="bot-memory-controls">
         <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.memory.controls')}</summary>
-        <div className="bot-memory-settings-card">
+        <div className="bot-memory-settings-card" hidden={!switches}>
           <div className="bot-memory-setting-group">
             <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.project')}</span>
             <div className="bot-memory-setting-row">
               <span>{i18n.t('projectAgent.drawer.memory.projectSwitch')}</span>
               <Switch
-                checked={switches.memoryEnabled}
+                disabled={locked || actions.get('switches').pending}
+                checked={switches?.memoryEnabled ?? false}
                 aria-label={i18n.t('projectAgent.drawer.memory.projectSwitch')}
                 onCheckedChange={(checked) => updateSwitch({ memoryEnabled: checked })}
               />
@@ -265,7 +282,8 @@ export function MemoryTab({
             <div className="bot-memory-setting-row">
               <span>{i18n.t('projectAgent.drawer.memory.useMemory')}</span>
               <Switch
-                checked={switches.useMemory}
+                disabled={locked || actions.get('switches').pending}
+                checked={switches?.useMemory ?? false}
                 aria-label={i18n.t('projectAgent.drawer.memory.useMemory')}
                 onCheckedChange={(checked) => updateSwitch({ useMemory: checked })}
               />
@@ -273,7 +291,8 @@ export function MemoryTab({
             <div className="bot-memory-setting-row">
               <span>{i18n.t('projectAgent.drawer.memory.learnPreferences')}</span>
               <Switch
-                checked={switches.learnPreferences}
+                disabled={locked || actions.get('switches').pending}
+                checked={switches?.learnPreferences ?? false}
                 aria-label={i18n.t('projectAgent.drawer.memory.learnPreferences')}
                 onCheckedChange={(checked) => updateSwitch({ learnPreferences: checked })}
               />

@@ -1,11 +1,14 @@
+import { useEditableResource } from '../../../ui/forms/useEditableResource';
+import { useUnsavedChanges } from '../../../ui/forms/UnsavedChanges';
+import { FormFeedback } from '../../../ui/forms/FormFeedback';
+import { readRoutingDraft, editRoutingDraft, routingDraftPatch, type RoutingDraft } from './routingDraft';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { clientApi } from '../../../clientApi';
 import type {
   ModelRoutingPatch,
   ModelRoutingPreviewRow,
   ModelRoutingProviderOption,
-  ModelRoutingView,
 } from '../../../preload/contracts/bootstrapPreloadApi';
 import { Checkbox, Switch } from '../../../ui/boolean-controls';
 import { SettingsGroup } from '../../../ui/settings/SettingsGroup';
@@ -61,54 +64,32 @@ function rolePatch(role: ModelRoleName, setting: NonNullable<ModelRoutingPatch['
   return { roles };
 }
 
-function capPatch(role: ModelRoleName, amount: number | null): ModelRoutingPatch {
-  const roleSpendCaps: NonNullable<ModelRoutingPatch['roleSpendCaps']> = {};
-  roleSpendCaps[role] = amount;
-  return { roleSpendCaps };
-}
 
 export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
-  const [view, setView] = useState<ModelRoutingView | null>(null);
   const [resolutions, setResolutions] = useState<readonly ModelRoutingPreviewRow[]>([]);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(''), [previewError, setPreviewError] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const preferLabelId = useId();
-
-  const reload = useCallback(async () => {
-    const [next, preview] = await Promise.all([
-      clientApi.modelRoutingGet(),
-      clientApi.modelRoutingPreview(),
-    ]);
-    setView(next);
-    setResolutions(preview.resolutions);
-  }, []);
-
+  const form = useEditableResource<RoutingDraft | null>('settings.model-routing', null, {
+    read: async () => readRoutingDraft(await clientApi.modelRoutingGet()),
+    write: async (draft, saved) => {
+      if (!draft || !saved) throw Error('NOT_LOADED');
+      return readRoutingDraft(await clientApi.modelRoutingUpdate(routingDraftPatch(draft, saved)));
+    },
+  });
+  useUnsavedChanges({ dirty: form.dirty, busy: form.saving, save: form.save, discard: form.reset });
   useEffect(() => {
-    let cancelled = false;
-    reload()
-      .catch(() => {
-        if (!cancelled) setError(i18n.t('modelRouting.loadFailed'));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [i18n, reload]);
-
+    let live = true;
+    setResolutions([]);
+    void clientApi.modelRoutingPreview().then(preview => { if (live) { setResolutions(preview.resolutions); setPreviewError(false); } }).catch(() => { if (live) setPreviewError(true); });
+    return () => { live = false; };
+  }, [form.saved, previewVersion]);
+  const view = form.draft ? { ...form.draft.view, providers: form.saved?.view.providers ?? form.draft.view.providers } : null;
   async function save(partial: ModelRoutingPatch) {
-    if (!view || isRoutingReadOnly(view.providers.length)) return;
-    setError('');
-    try {
-      await clientApi.modelRoutingUpdate(partial);
-      await reload();
-    } catch {
-      setError(i18n.t('modelRouting.saveFailed'));
-    }
+    if (!form.draft || form.saving || isRoutingReadOnly(form.draft.view.providers.length)) return;
+    setError(''); form.edit(editRoutingDraft(form.draft, partial)); await form.save();
   }
-
-  if (loading && !view) {
+  if (!form.readError && !view) {
     return (
       <div className="settings-panel model-routing-panel">
         <p className="settings-status">{i18n.t('settings.usage.loading')}</p>
@@ -118,13 +99,13 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   if (!view) {
     return (
       <div className="settings-panel model-routing-panel">
-        <p className="settings-status">{error || i18n.t('modelRouting.loadFailed')}</p>
+        <FormFeedback i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
       </div>
     );
   }
 
   const options = asOptions(view.providers);
-  const readOnly = isRoutingReadOnly(options.length);
+  const readOnly = form.saving || isRoutingReadOnly(options.length);
   const resolutionFor = (role: string) => resolutions.find((row) => row.role === role);
 
   return (
@@ -135,7 +116,10 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
       </header>
       {options.length === 1 ? <p className="model-routing-banner">{i18n.t('modelRouting.singleModel')}</p> : null}
       {options.length === 0 ? <p className="model-routing-banner">{i18n.t('modelRouting.noModel')}</p> : null}
-      {error ? <p className="settings-warning">{error}</p> : null}
+      <FormFeedback i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
+      {form.dirty ? <p className="ui-form-feedback">{i18n.t('forms.pendingSelection')}<button type="button" className="ui-button is-compact" disabled={form.saving} onClick={() => { void form.save(); }}>{i18n.t('forms.retry')}</button><button type="button" className="ui-button is-compact" disabled={form.saving} onClick={form.reset}>{i18n.t('forms.discard')}</button></p> : null}
+      {previewError ? <p className="ui-form-feedback" role="status">{i18n.t('forms.previewFailed')}<button type="button" className="ui-button" onClick={() => setPreviewVersion(value => value + 1)}>{i18n.t('forms.retry')}</button></p> : null}
+      {error ? <p className="settings-warning" role="alert">{error}</p> : null}
 
       <SettingsGroup className="model-routing-card" title={i18n.t('modelRouting.tiers')}>
         <div className="model-routing-head model-routing-tier" aria-hidden="true">
@@ -224,7 +208,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
           <span />
           <span />
           <span />
-          <span>{i18n.t('modelRouting.resolved')}</span>
+          <span>{i18n.t('modelRouting.resolved')} · {i18n.t('forms.savedValue')}</span>
           <span>{i18n.t('modelRouting.spendCap')}</span>
         </div>
         <div>
@@ -328,20 +312,11 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     placeholder="—"
                     disabled={readOnly}
                     aria-label={i18n.t('modelRouting.spendCap')}
-                    defaultValue={view.routing.roleSpendCaps?.[role] ?? ''}
-                    key={`${role}:${view.routing.roleSpendCaps?.[role] ?? ''}`}
-                    onBlur={(event) => {
-                      const raw = event.target.value.trim();
-                      const previous = view.routing.roleSpendCaps?.[role];
-                      if (raw === '') {
-                        if (previous == null) return;
-                        void save(capPatch(role, null));
-                        return;
-                      }
-                      const amount = Number(raw);
-                      if (!Number.isFinite(amount) || amount < 0 || amount === previous) return;
-                      void save(capPatch(role, amount));
-                    }}
+                    value={form.draft?.caps[role] ?? ''}
+                    aria-invalid={form.saveError || Boolean(error) || undefined}
+                    onChange={event => { if (form.draft) form.edit({ ...form.draft, caps: { ...form.draft.caps, [role]: event.target.value } }); }}
+                    onBlur={() => { if (form.dirty && !form.saving) void form.save(); }}
+
                   />
                 </label>
               </div>

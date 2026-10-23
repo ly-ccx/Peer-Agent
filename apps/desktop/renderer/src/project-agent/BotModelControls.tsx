@@ -67,10 +67,10 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   readonly compact?: boolean;
   readonly activeSelection?: ProjectAgentActivity['modelSelection'];
   readonly i18n: I18nRuntime;
-  readonly onChange: (policy: ProjectModelPolicy) => void | Promise<void>;
+  readonly onChange: (policy: ProjectModelPolicy) => void | Promise<unknown>;
 }) {
   const isZh = i18n.locale.startsWith('zh');
-  const selection = activeSelection ?? botConfiguredModelSelection(policy, role, models, view)
+  const selection = botConfiguredModelSelection(policy, role, models, view)
     ?? (view?.resolution.ok ? view.resolution.selection : undefined);
   const model = models.find(item => item.id === selection?.modelProviderId);
   const levels = model?.reasoningEffortLevels ?? [];
@@ -98,9 +98,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   const source = !setting ? i18n.t('projectAgent.policy.inherit') : setting.mode === 'tier'
     ? i18n.t(`modelRouting.tier.${setting.tier}`) : setting.mode === 'auto'
       ? i18n.t('projectAgent.policy.autoPool') : i18n.t('projectAgent.model.botOnly');
-  const selectedId = setting?.mode === 'tier'
-    ? `tier:${setting.tier}`
-    : model?.id ?? 'inherit';
+  const selectedId = !setting ? 'inherit' : setting.mode === 'tier' ? `tier:${setting.tier}` : setting.mode === 'fixed' ? setting.modelProviderId : model?.id ?? 'inherit';
   const label = setting?.mode === 'tier'
     ? i18n.t(`modelRouting.tier.${setting.tier}`)
     : (model?.label ?? i18n.t('projectAgent.model.unavailable'));
@@ -115,9 +113,9 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         effort={effortLevel}
         fastMode={fastMode}
         isZh={isZh}
-        disabled={busy || models.length === 0}
+        disabled={busy || !view}
         label={label}
-        title={`${label} · ${source} · ${i18n.t(activeSelection ? 'projectAgent.model.runningReply' : 'projectAgent.model.nextReply')}`}
+        title={`${label} · ${source} · ${i18n.t('projectAgent.model.nextReply')}`}
         onSelectModel={changeModel}
         onEffortChange={(value) => {
           if (!model || !view?.eligibleModelIds.includes(model.id)) return;
@@ -129,6 +127,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         }}
       />
     </div>
+    {activeSelection ? <p className="bot-model-source">{i18n.t('projectAgent.model.runningReply')}: {models.find(item => item.id === activeSelection.modelProviderId)?.label ?? activeSelection.modelId} · {i18n.t('projectAgent.model.nextReply')}</p> : null}
     {!compact ? <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
       {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p> : null}
   </div>;

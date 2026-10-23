@@ -1,5 +1,7 @@
 export type ProjectCommand =
   | { kind: 'text'; text: string }
+  | { kind: 'retry_input'; inputId: string }
+  | { kind: 'save_draft' }
   | { kind: 'view'; view: 'bots'|'tasks'|'memory'|'objectives'|'cards'|'diagnostics' }
   | { kind: 'task'; number: number }
   | { kind: 'card'; operation: 'approve'|'deny'|'answer'|'action'; number: number; text: string; option?: number }
@@ -12,6 +14,8 @@ export function parseProjectCommand(input: string): ProjectCommand {
   const [name, ...args] = text.slice(1).split(/\s+/);
   if (['bots','tasks','memory','objectives','cards','diagnostics'].includes(name!) && !args.length) return {kind:'view',view:name as any};
   if (['takeover','classic','older','latest','help'].includes(name!) && !args.length) return {kind:name as any};
+  if (name === 'save-draft' && !args.length) return {kind:'save_draft'};
+  if (name === 'retry-input' && args.length === 1 && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(args[0]!)) return {kind:'retry_input',inputId:args[0]!};
   const number = Number(args[0]);
   if (!/^[1-9]\d{0,5}$/.test(args[0] ?? '')) return {kind:'invalid'};
   if (name === 'task' && args.length === 1) return {kind:'task',number};

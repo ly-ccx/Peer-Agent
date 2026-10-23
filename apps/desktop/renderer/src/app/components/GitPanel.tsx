@@ -1,87 +1,44 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useState } from 'react';
-import {
-  DEFAULT_GIT_BRANCH_PREFIX,
-  readGitBranchPrefixFromSettings,
-  resolveGitBranchPrefix,
-} from '../gitBranchPrefix';
+import { useId } from 'react';
+import { DEFAULT_GIT_BRANCH_PREFIX, readGitBranchPrefixFromSettings, resolveGitBranchPrefix } from '../gitBranchPrefix';
 import { SettingsGroup } from '../../ui/settings/SettingsGroup';
+import { SettingsRow } from '../../ui/settings/SettingsRow';
+import { FormFeedback } from '../../ui/forms/FormFeedback';
+import { useEditableResource } from '../../ui/forms/useEditableResource';
+import { useUnsavedChanges } from '../../ui/forms/UnsavedChanges';
+import { isImeKey } from '../../chat/state/compositionGuard';
 import { clientApi } from '../../clientApi';
 
 export interface GitPanelProps {
-  readonly i18n: I18nRuntime;
-  readonly workspacePath: string | null;
-  /** 保存成功后回调通知上层（App），使 gitBranchPrefix 热生效、无需重启。 */
+  readonly i18n: I18nRuntime; readonly workspacePath: string | null;
   readonly onGitBranchPrefixChanged?: (value: string) => void;
 }
 
-/**
- * GitPanel 是「Git」设置分区的表达层：全局分支前缀。
- *
- * ADR 79：预配置基准分支（源头分支）已移除——交付绑定跟随工作区实时 HEAD，
- * 无需任何设置项。
- */
-export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitPanelProps) {
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [branchPrefix, setBranchPrefix] = useState(() =>
-    readGitBranchPrefixFromSettings(clientApi.initialSettings));
-  const [savedPrefix, setSavedPrefix] = useState(branchPrefix);
-
-  async function handleSavePrefix() {
-    const next = resolveGitBranchPrefix(branchPrefix);
-    if (next === savedPrefix || isSaving) {
-      if (next !== branchPrefix) setBranchPrefix(next);
-      return;
-    }
-
-    const previous = savedPrefix;
-    setBranchPrefix(next);
-    setSavedPrefix(next);
-    setIsSaving(true);
-    setError(null);
-    try {
-      await clientApi.updateSettings({ gitBranchPrefix: next });
-      onGitBranchPrefixChanged?.(next);
-    } catch (err) {
-      setBranchPrefix(previous);
-      setSavedPrefix(previous);
-      setError(err instanceof Error ? err.message : 'Failed to update branch prefix.');
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  return (
-    <div className="general-panel">
-      <header className="frost-page-heading"><h1>{i18n.t('settings.git')}</h1></header>
-      <SettingsGroup title={i18n.t('settings.git.branchNaming')} className="general-card">
-        <div className="general-setting-row">
-          <div className="general-setting-copy">
-            <h3>{i18n.t('settings.git.branchPrefix')}</h3>
-            <p>{i18n.t('settings.git.branchPrefix.description')}</p>
-          </div>
-          <div className="general-language-select">
-            <input
-              type="text"
-              value={branchPrefix}
-              spellCheck={false}
-              disabled={isSaving}
-              placeholder={DEFAULT_GIT_BRANCH_PREFIX}
-              aria-label={i18n.t('settings.git.branchPrefix')}
-              onChange={(event) => setBranchPrefix(event.target.value)}
-              onBlur={() => void handleSavePrefix()}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-              }}
-            />
-          </div>
+export function GitPanel({ i18n, onGitBranchPrefixChanged }: GitPanelProps) {
+  const statusId = useId();
+  const form = useEditableResource('settings.git-prefix', readGitBranchPrefixFromSettings(clientApi.initialSettings), {
+    read: async () => readGitBranchPrefixFromSettings(await clientApi.getSettings()),
+    write: async draft => {
+      const saved = readGitBranchPrefixFromSettings(await clientApi.updateSettings({ gitBranchPrefix: resolveGitBranchPrefix(draft) }));
+      onGitBranchPrefixChanged?.(saved); return saved;
+    },
+  });
+  useUnsavedChanges({ dirty: form.dirty, busy: form.saving, save: form.save, discard: form.reset });
+  return <div className="general-panel">
+    <header className="frost-page-heading"><h1>{i18n.t('settings.git')}</h1></header>
+    <SettingsGroup title={i18n.t('settings.git.branchNaming')} className="general-card">
+      <SettingsRow label={i18n.t('settings.git.branchPrefix')} description={i18n.t('settings.git.branchPrefix.description')}>
+        {ids => <input {...ids} className="ui-input" type="text" value={form.draft} spellCheck={false} disabled={!form.loaded || form.saving} placeholder={DEFAULT_GIT_BRANCH_PREFIX}
+          aria-describedby={`${ids['aria-describedby']} ${statusId}`} aria-invalid={form.saveError || undefined}
+          onChange={event => form.edit(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !isImeKey(event)) { event.preventDefault(); void form.save(); } }} />}
+      </SettingsRow>
+      <div className="ui-editor-body">
+        <FormFeedback id={statusId} i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
+        <div className="ui-form-actions">
+          <button type="button" className="ui-button" disabled={!form.dirty || form.saving} onClick={form.reset}>{i18n.t('forms.reset')}</button>
+          <button type="button" className="ui-button is-primary" disabled={!form.loaded || !form.dirty || form.saving} onClick={() => { void form.save(); }}>{i18n.t(form.saving ? 'forms.saving' : 'forms.save')}</button>
         </div>
-        {error ? <p className="general-setting-error">{error}</p> : null}
-      </SettingsGroup>
-    </div>
-  );
+      </div>
+    </SettingsGroup>
+  </div>;
 }

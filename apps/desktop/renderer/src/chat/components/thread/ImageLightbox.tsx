@@ -11,11 +11,12 @@
  * - 附件来源请通过 imageLightboxSourceFromAttachment 归一化，避免各入口自拼字段。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../../clientApi';
 import { Overlay } from '../../../app/components/Overlay';
 import { formatBytes } from '../../state/format';
-import { loadLocalImageDataUrl } from '../../state/localImagePreview';
+import { invalidateLocalImagePreview, loadLocalImageDataUrl } from '../../state/localImagePreview';
+import { useResourceActions, useResourceRead } from '../../../ui/resources/useResourceState';
 import type { ChatAttachment } from '../../state/types';
 
 /** 灯箱数据源：path 必备；name/dataUrl 缺省时组件自行推导或按需加载。 */
@@ -42,7 +43,7 @@ export function imageLightboxSourceFromAttachment(attachment: ChatAttachment): I
 }
 
 function looksLikeRealPath(path: string): boolean {
-  return /[\\/]/.test(path);
+  return /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path);
 }
 
 /**
@@ -60,36 +61,38 @@ export function ImageLightbox({
 }) {
   const fileName = source.name ?? source.path.split(/[\\/]/).pop() ?? source.path;
   const realPath = looksLikeRealPath(source.path) ? source.path : null;
-  const [src, setSrc] = useState<string>(() => (source.dataUrl ? source.dataUrl : ''));
+  const identity = useMemo(() => ({ path: source.path, dataUrl: source.dataUrl }), [source.path, source.dataUrl]);
+  const [attempt, setAttempt] = useState(0);
+  const retrySource = useMemo(() => ({ fromPath: false }), [identity]);
+  const image = useResourceRead(identity, async () => {
+    const url = retrySource.fromPath && realPath ? await loadLocalImageDataUrl(realPath) : source.dataUrl || (realPath ? await loadLocalImageDataUrl(realPath) : null);
+    if (!url?.startsWith('data:image/')) throw Error('IMAGE_UNAVAILABLE');
+    return url;
+  });
+  const actions = useResourceActions(identity);
   const [zoomed, setZoomed] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [decodeFailed, setDecodeFailed] = useState(false);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-
-  useEffect(() => {
-    if (source.dataUrl) {
-      setSrc(source.dataUrl);
-      return;
-    }
+  const src = image.value;
+  const copied = actions.get('copy').confirmed;
+  useEffect(() => { setAttempt(0); setZoomed(false); setDims(null); setDecodeFailed(false); }, [identity]);
+  const retry = () => {
+    retrySource.fromPath = true;
+    if (realPath) invalidateLocalImagePreview(realPath);
+    setDecodeFailed(false); setDims(null); setZoomed(false); setAttempt(value => value + 1);
+    void image.reload();
+  };
+  const reveal = () => actions.run('reveal', async () => {
     if (!realPath) return;
-    let cancelled = false;
-    void loadLocalImageDataUrl(realPath).then((url) => {
-      if (!cancelled && url) setSrc(url);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [source.dataUrl, realPath]);
-
+    const result = await clientApi.openPath(realPath, undefined, { mode: 'reveal' });
+    if (!result.ok) throw Error('OPEN_FAILED');
+  });
   const zoomLabel = zoomed
     ? (isZh ? '适应窗口' : 'Fit to window')
     : (isZh ? '查看原始尺寸' : 'View actual size');
 
   const handleCopyPath = () => {
-    if (!realPath) return;
-    void navigator.clipboard.writeText(realPath).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    if (realPath) void actions.run('copy', () => navigator.clipboard.writeText(realPath));
   };
 
   const dimsLabel = dims ? (isZh ? `${dims.w} × ${dims.h}` : `${dims.w} × ${dims.h}`) : null;
@@ -104,24 +107,32 @@ export function ImageLightbox({
       {({ requestClose }) => (
         <>
           <div className="markdown-local-image-lightbox-stage">
-            {src ? (
+            {src && !image.loading && !decodeFailed && !image.error ? (
               <img
+                key={attempt}
                 src={src}
                 alt={fileName}
                 draggable={false}
                 title={zoomLabel}
                 onClick={() => setZoomed((value) => !value)}
+                onError={() => { setDecodeFailed(true); setDims(null); setZoomed(false); }}
                 onLoad={(event) => {
                   const img = event.currentTarget;
                   setDims({ w: img.naturalWidth, h: img.naturalHeight });
                 }}
               />
             ) : (
-              <span className="markdown-local-image-lightbox-pending">
-                {isZh ? '加载中…' : 'Loading…'}
-              </span>
+              <div className="markdown-local-image-lightbox-pending" role={image.error || decodeFailed ? 'alert' : 'status'}>
+                <p>{image.error || decodeFailed
+                  ? (isZh ? '图片不可用：读取或解码失败，原附件仍保留。' : 'Image unavailable: reading or decoding failed. The original attachment is preserved.')
+                  : (isZh ? '加载中…' : 'Loading…')}</p>
+                {image.error || decodeFailed ? <button type="button" className="ui-button" onClick={retry}>{isZh ? '重新加载' : 'Load again'}</button> : null}
+              </div>
             )}
           </div>
+          {actions.get('copy').error || actions.get('reveal').error ? <p className="markdown-local-image-lightbox-pending" role="alert">
+            {isZh ? '操作未确认。可再次复制，或检查文件路径后重试打开。' : 'Operation not confirmed. Copy again, or check the path before opening again.'}
+          </p> : null}
           <div className="markdown-local-image-lightbox-bar">
             <div className="markdown-local-image-lightbox-info">
               <span className="markdown-local-image-lightbox-name">{fileName}</span>
@@ -139,6 +150,7 @@ export function ImageLightbox({
               <button
                 type="button"
                 title={zoomLabel}
+                disabled={!dims}
                 aria-label={zoomLabel}
                 onClick={() => setZoomed((value) => !value)}
               >
@@ -157,7 +169,8 @@ export function ImageLightbox({
                   type="button"
                   title={isZh ? '在文件管理器中显示' : 'Reveal in file manager'}
                   aria-label={isZh ? '在文件管理器中显示' : 'Reveal in file manager'}
-                  onClick={() => void clientApi.openPath(realPath, undefined, { mode: 'reveal' })}
+                  disabled={actions.get('reveal').pending}
+                  onClick={() => void reveal()}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -169,6 +182,7 @@ export function ImageLightbox({
                   type="button"
                   title={copied ? (isZh ? '已复制' : 'Copied') : (isZh ? '复制路径' : 'Copy path')}
                   aria-label={copied ? (isZh ? '已复制' : 'Copied') : (isZh ? '复制路径' : 'Copy path')}
+                  disabled={actions.get('copy').pending}
                   onClick={handleCopyPath}
                 >
                   {copied ? (

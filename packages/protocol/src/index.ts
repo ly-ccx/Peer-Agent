@@ -1111,3 +1111,4 @@ export * from './local-image.ts';
 export * from './bot-conversation-read.ts';
 export * from './local-git.ts';
 export type { CapabilityBlocker, DelegationCapabilityAdmission } from './capability-admission.ts';
+export * from './project-input-recovery.ts';

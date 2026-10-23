@@ -1,3 +1,6 @@
+import { selectionNavigation } from './selectionNavigation';
+import { useInteractionLayer } from '../hooks/useInteractionLayer';
+import { isImeKey } from '../../chat/state/compositionGuard';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -101,6 +104,8 @@ export function Dropdown({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const listId = useId();
+  useInteractionLayer(open, { roots: [menuRef], trigger: triggerRef, outside: true, closeOnTriggerRemoval: true, dismissOnTab: true,
+    onClose: () => setOpen(false), onEnter: () => (searchRef.current ?? menuRef.current?.querySelector<HTMLElement>('[role=listbox]'))?.focus({ preventScroll: true }) });
 
   const selected = options.find((o) => o.value === value);
   const triggerLabel = triggerLabelOverride ?? selected?.label ?? placeholder ?? value;
@@ -144,20 +149,7 @@ export function Dropdown({
     setCoords({ left: placed.left, top: placed.top, width: rect.width, placement: placed.placement });
   }, [menuPlacement]);
 
-  // 点击/触摸组件外部时关闭。菜单已被 portal 移出 root，需同时排除菜单自身。
-  useEffect(() => {
-    if (!open) return undefined;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      const inRoot = rootRef.current?.contains(target) ?? false;
-      const inMenu = menuRef.current?.contains(target) ?? false;
-      if (!inRoot && !inMenu) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [open]);
+
 
   useEffect(() => {
     if (!open) {
@@ -174,9 +166,6 @@ export function Dropdown({
     if (!open) return;
     if (tabList) {
       setActiveTab(resolveDropdownActiveTab({ tabs: tabList, options, value }));
-    }
-    if (searchable) {
-      searchRef.current?.focus();
     }
     // Snap the tab only when the menu opens, not when the user switches tabs.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- open is the intended trigger
@@ -221,12 +210,15 @@ export function Dropdown({
   }, [footerAction, footerDisabled, query]);
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.defaultPrevented || isImeKey(event.nativeEvent)) return;
+    if ((event.target as HTMLElement).closest('.pa-dropdown-footer,[role=radio]')) return;
     switch (event.key) {
-      case 'Escape':
-        event.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-        break;
+      case 'Home':
+        if (event.target instanceof HTMLInputElement) break;
+        event.preventDefault(); setActiveIndex(visibleOptions.findIndex(item => !item.disabled)); break;
+      case 'End':
+        if (event.target instanceof HTMLInputElement) break;
+        event.preventDefault(); setActiveIndex(visibleOptions.map(item => !item.disabled).lastIndexOf(true)); break;
       case 'ArrowDown':
         event.preventDefault();
         setActiveIndex((i) => moveEnabledIndex(visibleOptions, i, 1));
@@ -244,7 +236,7 @@ export function Dropdown({
         }
         break;
       case ' ':
-        if (event.currentTarget instanceof HTMLInputElement) break;
+        if (event.target instanceof HTMLInputElement) break;
         event.preventDefault();
         commit(activeIndex);
         break;
@@ -254,6 +246,7 @@ export function Dropdown({
   };
 
   const onTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (isImeKey(event.nativeEvent)) return;
     if (disabled) return;
     if (!open) {
       if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -294,7 +287,9 @@ export function Dropdown({
         {showGroup ? <div className="pa-dropdown-group">{opt.group}</div> : null}
         <button
           type="button"
+          id={`${listId}-option-${index}`}
           role="option"
+          tabIndex={-1}
           aria-selected={opt.value === value}
           aria-disabled={opt.disabled || undefined}
           disabled={opt.disabled === true}
@@ -302,10 +297,8 @@ export function Dropdown({
           onMouseEnter={() => {
             if (!opt.disabled) setActiveIndex(index);
           }}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            commit(index);
-          }}
+          onMouseDown={event => event.preventDefault()}
+          onClick={() => commit(index)}
         >
           <span className="pa-dropdown-check" aria-hidden>
             {opt.value === value ? <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -326,8 +319,7 @@ export function Dropdown({
         <div
           ref={menuRef}
           className={`pa-dropdown-menu ${className ?? ''} ${searchable ? 'is-searchable' : ''} ${coords?.placement === 'up' ? 'is-up' : 'is-down'}`.trim()}
-          role="listbox"
-          id={listId}
+          onKeyDown={onListKeyDown}
           aria-label={ariaLabel}
           style={menuStyle}
         >
@@ -340,23 +332,30 @@ export function Dropdown({
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder || ariaLabel}
                 onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={onListKeyDown}
+                role="combobox" aria-expanded={open} aria-controls={listId}
+                aria-activedescendant={activeIndex >= 0 ? `${listId}-option-${activeIndex}` : undefined}
               />
             </div>
           ) : null}
           {tabList ? (
-            <div className="pa-dropdown-tabs" role="tablist" aria-label={tabsAriaLabel}>
+            <div className="pa-dropdown-tabs" role="radiogroup" aria-label={tabsAriaLabel}>
               {tabList.map((tab) => {
                 const selectedTab = tab.id === menuTab;
                 return (
                   <button
                     key={tab.id}
                     type="button"
-                    role="tab"
+                    role="radio"
                     className={`pa-dropdown-tab${selectedTab ? ' is-active' : ''}`}
-                    aria-selected={selectedTab}
+                    aria-checked={selectedTab}
                     tabIndex={selectedTab ? 0 : -1}
                     onMouseDown={(event) => event.preventDefault()}
+                    onKeyDown={event => {
+                      if (isImeKey(event.nativeEvent)) return;
+                      const next = selectionNavigation(tabList.map(() => ({})), tabList.findIndex(item => item.id === tab.id), event.key, 'horizontal', getComputedStyle(event.currentTarget).direction === 'rtl');
+                      if (next === null) return; event.preventDefault(); setActiveTab(tabList[next]!.id);
+                      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role=radio]')[next]?.focus({ preventScroll: true });
+                    }}
                     onClick={() => setActiveTab(tab.id)}
                   >
                     {tab.label}
@@ -365,7 +364,8 @@ export function Dropdown({
               })}
             </div>
           ) : null}
-          <div className="pa-dropdown-list">
+          <div className="pa-dropdown-list" role="listbox" id={listId} tabIndex={-1} aria-label={ariaLabel}
+            aria-activedescendant={activeIndex >= 0 ? `${listId}-option-${activeIndex}` : undefined}>
             {optionNodes}
             {visibleOptions.length === 0 ? (
               <div className="pa-dropdown-empty">{emptyLabel || 'No matches'}</div>
@@ -376,10 +376,7 @@ export function Dropdown({
               type="button"
               className="pa-dropdown-footer"
               disabled={footerDisabled}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                runFooter();
-              }}
+              onClick={runFooter}
             >
               {footerLabel}
             </button>
@@ -398,7 +395,7 @@ export function Dropdown({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-controls={listId}
+        aria-controls={open ? listId : undefined}
         aria-label={ariaLabel}
         onClick={() => !disabled && setOpen((v) => !v)}
         onKeyDown={onTriggerKeyDown}

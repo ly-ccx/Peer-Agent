@@ -647,3 +647,4 @@ export { LOCAL_GIT_TOOL_DEFINITIONS } from './local-git-tools.mjs';
 export { createNodeGitProvider, NODE_GIT_CAPABILITY_MANIFESTS } from './git-provider.ts';
 export { evaluateDelegationCapabilities, delegationCapabilityRequirements } from './project-agent/capability-admission.mjs';
 export { capabilityDenial } from './project-agent/capability-denial.mjs';
+export * from './project-agent/input-draft-store.mjs';

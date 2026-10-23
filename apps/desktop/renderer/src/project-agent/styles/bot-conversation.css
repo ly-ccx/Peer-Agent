@@ -1113,3 +1113,12 @@
   .bot-user.is-arriving .bot-user-content { animation: none; }
   .bot-composer { transition-duration: 1ms; }
 }
+
+.bot-attachment-preview { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; text-align: start; cursor: pointer; }
+.bot-attachment-text-preview { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: var(--space-5); background: var(--za-surface); color: var(--za-text); border: 1px solid var(--za-border); border-radius: var(--ui-radius-panel); }
+.bot-attachment-text-preview header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-3); }
+.bot-attachment-text-preview h2 { overflow-wrap: anywhere; }
+.bot-attachment-text-preview pre { max-height: 65dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bot-attachment-preview:focus-visible, .bot-attachment-image:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+
+.bot-evidence-preview { width: min(640px, 95vw); overflow: auto; padding: var(--space-4); }

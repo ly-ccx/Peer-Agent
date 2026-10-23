@@ -1,3 +1,6 @@
+import { useCompositionGuard } from '../hooks/useCompositionGuard';
+import { useInputRecovery } from '../../project-agent/state/useInputRecovery';
+import { InputRecoveryNotice } from '../../project-agent/conversation/InputRecoveryNotice';
 import { createI18n } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons/PeerIcon';
 import { useQuickChatBotModel } from '../../project-agent/state/useQuickChatBotModel';
@@ -59,7 +62,12 @@ export function QuickChatWindow() {
   const [bots, setBots] = useState<readonly { workspaceId: string; name: string; lastActiveAt: string }[]>([]);
   const [botId, setBotId] = useState('');
   const botModel = useQuickChatBotModel(botMode ? botId : null);
-  const [draft, setDraft] = useState(() => localStorage.getItem('quick-chat:draft') ?? '');
+  const [classicDraft, setClassicDraft] = useState(() => localStorage.getItem('quick-chat:draft') ?? '');
+  const recovery = useInputRecovery(botMode ? botId : '', 'quick_chat');
+  const composition = useCompositionGuard();
+  const activeBot = useRef(botId); activeBot.current = botMode ? botId : '';
+  const draft = botMode ? recovery.state.draft.text : classicDraft;
+  const setDraft = (text: string) => botMode ? recovery.session.edit({ text }) : setClassicDraft(text);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
@@ -144,7 +152,7 @@ export function QuickChatWindow() {
     loadBotRouting();
   }, [loadBotRouting]);
 
-  useEffect(() => { localStorage.setItem('quick-chat:draft', draft); }, [draft]);
+  useEffect(() => { localStorage.setItem('quick-chat:draft', classicDraft); }, [classicDraft]);
   useEffect(() => {
     if (workspacePath) localStorage.setItem('quick-chat:workspace', workspacePath);
   }, [workspacePath]);
@@ -388,9 +396,10 @@ export function QuickChatWindow() {
   }, []);
 
   async function submit(openMainWindow: boolean) {
+    if (composition.active()) return;
     const text = draft.trim();
     if (botMode) {
-      if (botModel.busy || !botModel.ready) return;
+      if (botModel.busy || !botModel.ready || !recovery.state.ready || composition.active()) return;
       if (attachments.length) {
         setError(i18n.t('projectAgent.quick.textOnly'));
         return;
@@ -403,20 +412,12 @@ export function QuickChatWindow() {
       setSending(true);
       setError('');
       await runQuickChatSubmission(async () => {
-        const result = await clientApi.projectAgentSubmitInput({
-          workspaceId: routed.workspaceId,
-          inputId: `qc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-          text: routed.text,
-          surface: routed.surface,
-        });
-        if (!result?.ok) throw new Error(result?.code || i18n.t('projectAgent.quick.failed'));
-        setDraft('');
-        setAttachments([]);
-        localStorage.removeItem('quick-chat:draft');
-        await clientApi.quickChatHide?.();
+        const result = await recovery.session.send();
+        if (!result.ok) throw new Error(result.input ? i18n.t('projectAgent.chat.inputDeliveryIssue') : i18n.t('projectAgent.chat.inputUnconfirmed'));
+        // A late receipt never clears or hides a new draft typed while the request was pending.
+        if (activeBot.current === routed.workspaceId && !recovery.session.getSnapshot().draft.text && !recovery.session.getSnapshot().pending.length) await clientApi.quickChatHide?.();
       }, (reason) => {
-        setError(reason instanceof Error ? reason.message : String(reason));
-        inputRef.current?.focus();
+        if (activeBot.current === routed.workspaceId) setError(reason instanceof Error ? reason.message : String(reason));
       }, () => setSending(false));
       return;
     }
@@ -455,6 +456,7 @@ export function QuickChatWindow() {
   return (
     <main className={`quick-chat-shell${botMode ? ' quick-chat-shell--bots' : ''}${popoverState ? ' has-open-popover' : ''}`}>
       <section ref={barRef} className={`quick-chat-bar${error ? ' quick-chat-bar--error' : ''}${sending ? ' quick-chat-bar--sending' : ''}`} aria-label={i18n.t('projectAgent.quick.title')} aria-busy={sending}>
+        {botMode && botId ? <InputRecoveryNotice state={recovery.state} session={recovery.session} i18n={i18n} pending /> : null}
         <div
           className={`quick-chat-composer${dragActive ? ' is-drag-active' : ''}`}
           onDragOver={(event) => {
@@ -484,10 +486,12 @@ export function QuickChatWindow() {
             />
           ) : null}
           <div className="quick-chat-input-row">
-            <textarea ref={inputRef} rows={1} value={draft} placeholder={botMode && selectedBot ? i18n.t('projectAgent.chat.placeholder', { name: selectedBot.name }) : i18n.t('projectAgent.quick.placeholder')} aria-label={i18n.t('projectAgent.quick.content')} onChange={(event) => { setDraft(event.target.value); setError(''); }} onPaste={(event) => {
+            <textarea ref={inputRef} rows={1} value={draft} disabled={botMode && !recovery.state.ready} placeholder={botMode && selectedBot ? i18n.t('projectAgent.chat.placeholder', { name: selectedBot.name }) : i18n.t('projectAgent.quick.placeholder')} aria-label={i18n.t('projectAgent.quick.content')} onChange={(event) => { setDraft(event.target.value); setError(''); }} onPaste={(event) => {
               const files = getClipboardFiles(event.clipboardData.items);
               if (files.length) { event.preventDefault(); void addFiles(files); }
-            }} onKeyDown={(event) => {
+            }} onCompositionStart={event => composition.start(event.currentTarget)} onCompositionEnd={event => composition.end(event.currentTarget)}
+            onKeyUp={event => composition.keyUp(event.nativeEvent)} onBlur={() => composition.reset()} onKeyDown={(event) => {
+              if (composition.keyDown(event.nativeEvent)) return;
               if (event.key === 'Escape') {
                 if (popoverState) dismissPopover();
                 else void clientApi.quickChatHide?.();
@@ -510,7 +514,7 @@ export function QuickChatWindow() {
                 <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>}
-            <button type="button" className="quick-chat-send" aria-label={i18n.t(sending ? 'projectAgent.quick.sending' : 'projectAgent.chat.send')} disabled={(botMode ? !draft.trim() || !botId || !botModel.ready || botModel.busy : ((!draft.trim() && !attachments.length) || !workspacePath)) || sending} onClick={() => void submit(false)}>
+            <button type="button" className="quick-chat-send" aria-label={i18n.t(sending ? 'projectAgent.quick.sending' : 'projectAgent.chat.send')} disabled={(botMode ? !draft.trim() || !botId || !recovery.state.ready || !botModel.ready || botModel.busy : ((!draft.trim() && !attachments.length) || !workspacePath)) || sending} onClick={() => void submit(false)}>
               {sending ? <PeerIcon name="loader" className="quick-chat-spinner" /> : (
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" />
