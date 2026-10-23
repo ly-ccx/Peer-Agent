@@ -13,6 +13,22 @@ export async function setFixtureBotAccess(page, workspaceId, accessLevel) {
   return result.policy;
 }
 
+async function openTaskScene(page, scene) {
+  const information = page.locator('.bot-task-information');
+  if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
+  // Native details keeps descendant rectangles at their final positions while
+  // its clipped content is still expanding. Wait for that real transition
+  // before dispatching the single pointer action into the revealed content.
+  await information.evaluate(async node => {
+    await Promise.all(node.getAnimations({ subtree: true })
+      .filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+      .map(animation => animation.finished.catch(() => {})));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await page.locator('.bot-task-scene').click();
+  await scene.waitFor({ state: 'visible' });
+}
+
 /** Uses production local IPC/persistence and actual child conversation metadata. No model calls. */
 export async function checkBotAccessPolicy({ page, until, report, captureDirectory, home, bots, commandFile }) {
   if (await page.locator('.bot-drawer-dock.is-open').count()) await page.getByRole('button', { name: '关闭', exact: true }).click();
@@ -44,15 +60,16 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const command = { ...initial, seq: initial.seq + 1, sessions: [{ ...initial.sessions[0], conversationId: child.id }] };
   writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
+  await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentListSessions({ workspaceId }), bots[0].workspaceId),
+    result => result.sessions?.some(session => session.sessionId === command.sessions[0].sessionId && session.conversationId === child.id));
   await page.locator('.bot-profile').click();
   // The preceding 760px case must reach its cover layout before opening a child.
   await page.locator('.bot-drawer-panel .bot-drawer-body').waitFor({ state: 'visible' });
   await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
-  await page.locator('.bot-task-row').first().click();
-  await page.locator('.bot-task-information > summary').click();
-  await page.locator('.bot-task-scene').click();
+  await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
   const scene = page.locator('.conversation-chat-drawer--nested');
+  await openTaskScene(page, scene);
   const status = scene.locator('.conversation-access-inherited');
   await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
   assert.equal(await scene.locator('.composer-access-dropdown').count(), 0);
@@ -72,9 +89,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
       && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility()));
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (!await scene.count()) {
-      const information = page.locator('.bot-task-information');
-      if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
-      await page.locator('.bot-task-scene').click();
+      await openTaskScene(page, scene);
     }
     await scene.waitFor({ state: 'visible' });
     await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
