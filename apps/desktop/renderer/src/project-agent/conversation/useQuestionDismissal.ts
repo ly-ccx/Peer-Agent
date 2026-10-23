@@ -9,16 +9,39 @@ export function useQuestionDismissal(resolved: boolean, onClosed?: () => void,
   const closed = useRef(onClosed); closed.current = onClosed;
   const target = useRef(focusTarget); target.current = focusTarget;
   const hadFocus = useRef(false), settled = useRef(false);
+  const stopFocusTracking = useRef<() => void>(() => {});
+  useLayoutEffect(() => () => stopFocusTracking.current(), []);
+  const captureFocus = () => {
+    stopFocusTracking.current();
+    const node = ref.current;
+    hadFocus.current = Boolean(node?.contains(document.activeElement));
+    if (!node || !hadFocus.current) return;
+    const interrupt = (event: Event) => {
+      // A disabled button can release focus to body without user navigation.
+      if (event.type === 'focusin' && event.target === document.body) return;
+      if (!node.contains(event.target as Node)) { hadFocus.current = false; stopFocusTracking.current(); }
+    };
+    document.addEventListener('pointerdown', interrupt, true);
+    document.addEventListener('focusin', interrupt, true);
+    stopFocusTracking.current = () => {
+      document.removeEventListener('pointerdown', interrupt, true);
+      document.removeEventListener('focusin', interrupt, true);
+      stopFocusTracking.current = () => {};
+    };
+  };
   if (resolved && present && ref.current?.contains(document.activeElement)) hadFocus.current = true;
   useLayoutEffect(() => {
     if (!resolved) { if (ref.current) ref.current.style.display = ''; hadFocus.current = false; settled.current = false; setPresent(true); return; }
     if (!present || settled.current) return;
     const node = ref.current;
-    if (node && hadFocus.current && (node.contains(document.activeElement) || document.activeElement === document.body)) {
+    const returnFocus = node && hadFocus.current && !document.hidden
+      && (typeof document.hasFocus !== 'function' || document.hasFocus())
+      && (node.contains(document.activeElement) || document.activeElement === document.body);
+    hadFocus.current = false; stopFocusTracking.current();
+    if (node && returnFocus) {
       const destination = target.current?.(node);
       if (destination?.isConnected && !destination.closest('[inert]')) destination.focus({ preventScroll: true });
     }
-    hadFocus.current = false;
     const finish = () => {
       if (settled.current) return;
       settled.current = true;
@@ -38,5 +61,5 @@ export function useQuestionDismissal(resolved: boolean, onClosed?: () => void,
     } catch { finish(); return; }
     return motion.cancel;
   }, [resolved, present]);
-  return { ref, present };
+  return { ref, present, captureFocus };
 }

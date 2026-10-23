@@ -6,17 +6,24 @@ import ts from 'typescript';
 import { motionDurationMs, watchVisualMotion } from '../../app/state/visualMotion.ts';
 
 /** Executes production surfaces with simulated React scheduling and DOM APIs. */
-function mount(file: string, props: unknown, modules: Record<string, unknown>, supported = true, question = false) {
+function mount(file: string, props: unknown, modules: Record<string, unknown>, supported = true, question = false,
+  activate?: (view: any, node: any, document: any) => void, focusTarget?: () => unknown) {
   const effects: (() => void | (() => void))[] = [], states: unknown[] = [];
   let cancelled = 0;
   const animation = { animationName: 'motion-enter-layout', finished: new Promise(() => {}), ready: Promise.resolve(),
     cancel() { cancelled++; }, currentTime: 0, playbackRate: 1, effect: { getComputedTiming: () => ({ endTime: 200 }) } };
   const node = { style: { display: '' }, contains: () => false, getBoundingClientRect: () => ({ height: 100 }), getAnimations: () => [animation] };
   const ref = { current: node };
+  const events = new Map<string, (event: unknown) => void>();
+  const document = { activeElement: null as unknown, body: {},
+    addEventListener(type: string, listener: (event: unknown) => void) { events.set(type, listener); },
+    removeEventListener(type: string) { events.delete(type); },
+    dispatch(event: { type: string; target: unknown }) { events.get(event.type)?.(event); },
+  };
   const exports: Record<string, any> = {};
   const source = readFileSync(new URL(file, import.meta.url), 'utf8');
   runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
-    exports, CSS: { supports: () => supported }, document: { activeElement: null, body: {} },
+    exports, CSS: { supports: () => supported }, document,
     getComputedStyle: () => ({ marginTop: '7px', paddingTop: '15px', getPropertyValue: (key: string) => key === '--za-motion-medium' ? '200ms' : 'ease' }),
     require(id: string) {
       if (id === 'react') return {
@@ -29,9 +36,10 @@ function mount(file: string, props: unknown, modules: Record<string, unknown>, s
       throw Error('Unexpected dependency: ' + id);
     },
   });
-  const view = question ? exports.useQuestionDismissal(true, props) : exports.ConversationRow(props);
+  const view = question ? exports.useQuestionDismissal(true, props, focusTarget) : exports.ConversationRow(props);
+  activate?.(view, node, document);
   const cleanups = effects.map(effect => effect());
-  return { node, view, states, cancelled: () => cancelled, close: () => cleanups.forEach(cleanup => { if (typeof cleanup === 'function') cleanup(); }) };
+  return { node, view, states, events, cancelled: () => cancelled, close: () => cleanups.forEach(cleanup => { if (typeof cleanup === 'function') cleanup(); }) };
 }
 
 test('an interrupted layout entry settles once and cannot replay when motion returns', () => {
@@ -68,4 +76,27 @@ test('question completion fixes the zero footprint before React commits removal'
   finish();
   assert.equal(f.node.style.display, 'none'); assert.deepEqual(f.states, [false]); assert.equal(closed, 1);
   finish(); assert.equal(closed, 1); f.close();
+});
+
+test('instant question removal returns owned focus; navigation or a hidden document prevents stealing focus', () => {
+  for (const [leave, hidden] of [[false, false], [true, false], [false, true]] as const) {
+    let focused = 0;
+    const destination = { isConnected: true, closest: () => null, focus: () => { focused++; } };
+    const f = mount('./useQuestionDismissal.ts', () => {}, {
+      '../../app/state/visualMotion': { motionDurationMs, animateVisual: (_node: unknown, _frames: unknown, _timing: unknown, done: () => void) => { done(); return { cancel() {} }; } },
+    }, true, true, (view, node, document) => {
+      const button = {};
+      node.contains = (target: unknown) => target === button;
+      document.activeElement = button;
+      view.captureFocus();
+      document.activeElement = document.body; // Disabling the submitted control releases native focus.
+      document.hidden = hidden;
+      if (leave) {
+        // Explicitly clicking the background is user navigation, even if focus stays on body.
+        document.dispatch({ type: 'pointerdown', target: document.body });
+      }
+    }, () => destination);
+    assert.equal(focused, leave || hidden ? 0 : 1);
+    assert.equal(f.node.style.display, 'none'); f.close(); assert.equal(f.events.size, 0);
+  }
 });

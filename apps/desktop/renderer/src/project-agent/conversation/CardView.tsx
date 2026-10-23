@@ -120,6 +120,7 @@ function CardItem({
               disabled={busy || waitingForFacts || resolved}
               onClick={() => {
                 if (sending.current || waitingForFacts || resolved) return;
+                if (question && action.channel === 'project-agent:submit-input') dismissal.captureFocus();
                 sending.current = true;
                 setBusy(true); setError('');
                 const text = typeof action.payload?.text === 'string' ? action.payload.text : '';
@@ -130,9 +131,6 @@ function CardItem({
                   const factualReceipt = approvalCardReceipt(workspaceId, sourceCard, result);
                   if (factualReceipt) setReceipt({ key, source: sourceCard, card: factualReceipt });
                   if (!result?.ok) { setError(i18n.t(cardActionErrorKey(result?.code))); void refreshFacts(); return; }
-                  if (submitInput && action.channel === 'project-agent:submit-input') {
-                    dismissal.ref.current?.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea')?.focus({ preventScroll: true });
-                  }
                   if (!factualReceipt) { setSubmitted(key); void refreshFacts(); }
                   else onDone?.();
                 }).catch(() => setError(i18n.t('projectAgent.chat.actionFailed'))).finally(() => { sending.current = false; setBusy(false); });
