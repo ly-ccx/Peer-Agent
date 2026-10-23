@@ -1,15 +1,16 @@
-import { isImeKey } from '../../chat/state/compositionGuard';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useFocusScope } from '../hooks/useFocusScope';
 import { positionAnchoredOverlay } from './anchoredOverlay';
 import { createPortal } from 'react-dom';
-import { isTopmostOverlay, OVERLAY_SELECTOR } from './overlayStack';
+import { interactionLayers } from './interactionLayers';
+import { InteractionLayerContext, useInteractionLayer } from '../hooks/useInteractionLayer';
 import { overlayCloseTarget } from './overlayCloseTarget';
+import { watchVisualMotion } from '../state/visualMotion';
 
 /**
  * Overlay —— 统一浮层基座（默认模态；anchor 为非模态，均仅负责表达）。
  *
- * 设计语言依据：peer-knowledge/knowledge/specifications/14-product-design-language.md §11.3「弹出层动效准入」。
+ * 设计语言依据：peer-knowledge/knowledge/specifications/peer-product-experience-standard.md、motion-system.md 与 transition-system.md。
  * 所有模态 / 浮层必须经由本组件挂载，避免每处手写 backdrop 而漏掉过渡动效。
  *
  * 统一职责：
@@ -32,14 +33,19 @@ export function Overlay({
   anchor,
   id,
   onEscape,
+  onRequestClose,
   closeTarget,
+  restoreFocusRef,
   children,
 }: {
   /** Supplying an anchor selects the non-modal, viewport-clamped variant. */
   readonly anchor?: HTMLElement;
+  readonly restoreFocusRef?: RefObject<HTMLElement | null>;
   readonly id?: string;
   /** Return true when an inner confirmation consumed Escape. */
   readonly onEscape?: () => boolean;
+  /** Return false to retain the live layer while its editor resolves unsaved work. */
+  readonly onRequestClose?: () => boolean;
   /** Optional destination for an action that continues in another visible control. */
   readonly closeTarget?: () => HTMLElement | null;
   readonly onClose?: () => void;
@@ -61,7 +67,14 @@ export function Overlay({
   const [closingStyle, setClosingStyle] = useState<CSSProperties>();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  useFocusScope(panelRef, !anchor, { trap: true, ownsScope: () => isTopmostOverlay(overlayRef.current, Array.from(document.querySelectorAll(OVERLAY_SELECTOR))) });
+  const requestGuard = useRef(onRequestClose); requestGuard.current = onRequestClose;
+  const closeRef = useRef(onClose); closeRef.current = onClose;
+  const closingRef = useRef(false), finished = useRef(false);
+  const acceptedClose = useRef<(() => void) | null>(null);
+  const anchorRef = useRef<HTMLElement | null>(anchor ?? null); anchorRef.current = anchor ?? null;
+  const layer = useInteractionLayer(true, { roots: [panelRef], trigger: restoreFocusRef ?? (anchor ? anchorRef : undefined), modal: !anchor, closeOnTriggerRemoval: Boolean(anchor), outside: closeOnBackdrop,
+    onClose: onClose ? () => requestClose() : undefined, onEscape });
+  useFocusScope(panelRef, !anchor, { trap: true, restoreFocus: false, ownsScope: () => interactionLayers.topInteractive() === interactionLayers.layerFor(panelRef.current) });
   const [placement, setPlacement] = useState<CSSProperties>({ visibility: 'hidden' });
 
   useLayoutEffect(() => {
@@ -80,92 +93,37 @@ export function Overlay({
       { width: window.innerWidth, height: window.innerHeight },
     ));
     place();
-    const observer = new ResizeObserver(place);
-    observer.observe(panel);
-    observer.observe(anchor);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(panel);
+    observer?.observe(anchor);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
-    panel.focus({ preventScroll: true });
+    if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
-      // Outside clicks keep their new focus; keyboard/close-button dismissal restores the trigger.
-      if (anchor.isConnected && (panel.contains(document.activeElement) || document.activeElement === document.body)) {
-        anchor.focus({ preventScroll: true });
-      }
+
     };
   }, [anchor]);
-  // 退场动画兜底定时器：防止 animationend 事件因故丢失导致浮层卡死不卸载。
-  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 请求关闭：先进入退场态播动画，真正的 onClose 卸载交由 finishClose 收尾。
   const requestClose = useCallback(() => {
-    if (!onClose) return;
-    setClosing(true);
-  }, [onClose]);
-
-  // 退场动画结束（或兜底超时）后，执行调用方传入的真正卸载。
+    if (!closeRef.current || closingRef.current || requestGuard.current?.() === false) return;
+    acceptedClose.current = closeRef.current; closingRef.current = true; setClosing(true);
+  }, []);
   const finishClose = useCallback(() => {
-    if (fallbackTimer.current) {
-      clearTimeout(fallbackTimer.current);
-      fallbackTimer.current = null;
-    }
-    onClose?.();
-  }, [onClose]);
-
+    if (!closingRef.current || finished.current) return;
+    finished.current = true;
+    (acceptedClose.current ?? closeRef.current)?.();
+  }, []);
   useEffect(() => {
-    if (!onClose) return undefined;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || isImeKey(event)) return;
-      const overlays = Array.from(document.querySelectorAll(OVERLAY_SELECTOR));
-      if (!isTopmostOverlay(overlayRef.current, overlays)) return;
-      event.stopImmediatePropagation();
-      event.preventDefault();
-      if (!onEscape?.()) requestClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, onEscape, requestClose]);
-
-  useEffect(() => {
-    if (!anchor || !closeOnBackdrop) return;
-    const outside = (event: PointerEvent) => {
-      if (!isTopmostOverlay(overlayRef.current, Array.from(document.querySelectorAll(OVERLAY_SELECTOR)))) return;
-      const target = event.target;
-      if (target instanceof Node && !panelRef.current?.contains(target) && !anchor.contains(target)) requestClose();
-    };
-    document.addEventListener('pointerdown', outside, true);
-    return () => document.removeEventListener('pointerdown', outside, true);
-  }, [anchor, closeOnBackdrop, requestClose]);
-
-  // Start the duration fallback after the native animation is ready. Under
-  // renderer load its pending start may outlast the old duration-only timer.
-  useEffect(() => {
-    if (!closing) return undefined;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { finishClose(); return undefined; }
-    let current = true;
-    const animations = panelRef.current?.getAnimations() ?? [];
-    // A broken/never-started animation must still release the overlay.
-    fallbackTimer.current = setTimeout(finishClose, 2000);
-    void Promise.allSettled(animations.map(animation => animation.ready)).then(() => {
-      if (!current) return;
-      const remaining = animations.map(animation => {
-        const end = animation.effect?.getComputedTiming().endTime;
-        const time = typeof animation.currentTime === 'number' ? animation.currentTime : 0;
-        return typeof end === 'number' && Number.isFinite(end)
-          ? Math.max(0, end - time) / (Math.abs(animation.playbackRate) || 1) : 0;
-      });
-      if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
-      fallbackTimer.current = setTimeout(finishClose, Math.max(240, ...remaining.map(duration => duration + 60)));
-    });
-    return () => {
-      current = false;
-      if (fallbackTimer.current) {
-        clearTimeout(fallbackTimer.current);
-        fallbackTimer.current = null;
-      }
-    };
+    if (!closing) return;
+    let animations: Animation[] = [];
+    try { animations = panelRef.current?.getAnimations?.() ?? []; } catch { /* Static close. */ }
+    const motion = watchVisualMotion(animations, finishClose, { durationMs: animations.length ? 240 : 0 });
+    const panel = panelRef.current;
+    const cancel = (event: AnimationEvent) => { if (event.target === panel) motion.finish(); };
+    panel?.addEventListener('animationcancel', cancel);
+    return () => { panel?.removeEventListener('animationcancel', cancel); motion.cancel(); };
   }, [closing, closingStyle, finishClose]);
 
   const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : 'pa-overlay-backdrop';
@@ -177,7 +135,8 @@ export function Overlay({
       data-peer-overlay="true"
       className={`${backdropBase}${anchor ? ' pa-overlay--anchored' : ''}${backdropClassName ? ` ${backdropClassName}` : ''}`}
       role="presentation"
-      onClick={closeOnBackdrop && onClose ? requestClose : undefined}
+      onClickCapture={closing ? event => { event.preventDefault(); event.stopPropagation(); } : undefined}
+      onKeyDownCapture={closing ? event => { if (event.key !== 'Tab' && event.key !== 'Escape') { event.preventDefault(); event.stopPropagation(); } } : undefined}
     >
       <div
         className={panelClassName ? `${panelBase} ${panelClassName}` : panelBase}
@@ -191,7 +150,7 @@ export function Overlay({
         onClick={(event) => event.stopPropagation()}
         onAnimationEnd={closing ? event => { if (event.target === event.currentTarget) finishClose(); } : undefined}
       >
-        {typeof children === 'function' ? children({ requestClose }) : children}
+        <InteractionLayerContext.Provider value={layer}>{typeof children === 'function' ? children({ requestClose }) : children}</InteractionLayerContext.Provider>
       </div>
     </div>
   );

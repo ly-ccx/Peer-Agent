@@ -1,13 +1,11 @@
 import {
-  buildModelMenuGroups,
   resolveLlmModelOptionValues,
   type ContextAccountingSnapshot,
   type ContextUsageBreakdown,
   type LlmProviderConfigView,
 } from '@peer-agent/protocol';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dropdown, type DropdownOption } from '../../../app/components/Dropdown';
-import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import { accountUsageViewIdentity } from '../../../app/components/accountUsageIdentity';
 import { ContextAccountUsage } from './ContextAccountUsage';
 import { supportsSubscriptionQuotaMethod } from '../../../app/components/llmSubscriptionQuota';
@@ -17,8 +15,7 @@ import {
 } from '../../../app/components/llmModelConfiguration';
 import { type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
-import { getProviderDisplayName } from '../../state/providerDisplay';
-import { ReasoningEffortSlider } from './ReasoningEffortSlider';
+import { ComposerModelMenu } from './ModelSelectionPanel';
 import type { TokenUsageState } from '../../state/types';
 import { ContextUsagePanel } from './ContextUsagePanel';
 import { contextDisplayScopeKey, resolveStickyContextDisplay } from './stickyContextDisplay';
@@ -51,14 +48,12 @@ export function TokenUsageDisplay({
   isStreaming,
   isZh,
   effort,
-  effortLevels,
   onEffortChange,
   fastMode = false,
   onFastModeChange,
-  modelOptions = [],
   modelLoading = false,
-  canSwitchModel = false,
   onModelChange,
+  onManageModels,
   selectedModelProviderId = null,
   showContextUsage = true,
   showModelControls = true,
@@ -85,6 +80,8 @@ export function TokenUsageDisplay({
   readonly canSwitchModel?: boolean;
   /** onModelChange 回传选中项的已配置模型记录 id，会话据此绑定模型。 */
   readonly onModelChange?: (providerId: string) => void;
+  /** Opens the existing model settings page. */
+  readonly onManageModels?: () => void;
   /** 会话级绑定的模型记录 id；决定下拉选中项与展示的模型/价格/上下文窗口。null=用全局默认。 */
   readonly selectedModelProviderId?: string | null;
   /** 首页框内只保留模型/思考；框下右侧单独放上下文统计。 */
@@ -159,19 +156,6 @@ export function TokenUsageDisplay({
     });
   }, [stickyScopeKey, liveCtxPercent, liveContextTokens, liveBreakdown]);
 
-  // 级联菜单分组：一级 provider（按 groupId 折叠同一凭证下的多模型），二级为该 provider 下的模型。
-  // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
-  // 未配置 API Key 的模型也一并列出，但置灰（disabled）不可选；整组模型都未配置时整组置灰。
-  // 注意：必须在 hasInfo early return 之前调用 hooks，否则 hasInfo 从 false→true 会触发 React #310。
-  const modelGroups: readonly CascadingMenuGroup[] = useMemo(() => buildModelMenuGroups(
-    providers.map((prov) => ({
-      id: prov.id, groupId: prov.groupId, groupLabel: getProviderDisplayName(prov, isZh),
-      model: prov.model, modelLabel: prov.modelLabel, available: Boolean(prov.apiKeyConfigured),
-    })),
-  ), [providers, isZh]);
-  const handleModelMenuChange = useCallback((next: string) => {
-    onModelChange?.(next);
-  }, [onModelChange]);
   // 这三份 useMemo 必须留在 hasInfo early return 之前。草稿态（无 provider /
   // 无 usage）hasInfo=false；打开会话后 contextAccounting 一到 hasInfo=true，
   // 若此时才第一次调用 hook，会触发 React #310。
@@ -280,41 +264,26 @@ export function TokenUsageDisplay({
     selectedContextWindow ?? contextWindow ?? defaultProvider?.contextWindow,
   );
 
-  const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
-  const modelDisplayName = defaultProvider?.modelLabel || defaultProvider?.model;
-  const modelTitle = defaultProvider?.modelLabel && defaultProvider.modelLabel !== defaultProvider.model
-    ? `${isZh ? '当前会话使用的模型' : 'Model used for this conversation'}: ${defaultProvider.model}`
+  const modelTitle = modelLoading
+    ? (isZh ? '正在加载模型列表' : 'Loading models')
     : (isZh ? '当前会话使用的模型' : 'Model used for this conversation');
 
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
-        {showModelControls && defaultProvider?.model ? (
-          shouldShowModelDropdown ? (
-            <CascadingMenu
-              className="composer-cascading-menu composer-model-dropdown"
-              value={defaultProvider.id}
-              groups={modelGroups}
-              onChange={handleModelMenuChange}
-              ariaLabel={isZh ? '切换模型' : 'Switch model'}
-              title={modelLoading ? (isZh ? '正在加载模型列表' : 'Loading models') : modelTitle}
-              menuPlacement="up"
-              disabled={isStreaming || modelLoading}
-            />
-          ) : (
-            <span className="token-usage-model" title={modelTitle}>{modelDisplayName}</span>
-          )
-        ) : null}
-        {showModelControls && effortLevels.length > 0 ? (
-          <ReasoningEffortSlider
+        {showModelControls && onModelChange ? (
+          <ComposerModelMenu
+            providers={providers}
+            selectedModelId={defaultProvider?.id ?? null}
             effort={effort}
-            effortLevels={effortLevels}
-            fastAvailable={(defaultProvider?.authMethod === 'oauth_chatgpt' || defaultProvider?.authMethod === 'oauth_grok') && Boolean(onFastModeChange)}
             fastMode={fastMode}
             isZh={isZh}
-            disabled={Boolean(isStreaming)}
+            disabled={Boolean(isStreaming || modelLoading)}
+            title={modelTitle}
+            onSelectModel={onModelChange}
             onEffortChange={onEffortChange}
-            onFastModeChange={onFastModeChange ?? (() => undefined)}
+            onFastModeChange={onFastModeChange}
+            onManageModels={onManageModels}
           />
         ) : null}
         {showModelControls && canSwitchContextWindow && contextOptionDefinition && defaultProvider ? (

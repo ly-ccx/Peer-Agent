@@ -286,6 +286,17 @@ export function effortLabel(level: EffortLevel, isZh: boolean): string {
   return isZh ? '标准思考' : 'Default reasoning';
 }
 
+/** Compact effort shown beside the model name. */
+export function effortShortLabel(level: EffortLevel, isZh: boolean): string {
+  if (level === 'off') return isZh ? '关' : 'Off';
+  if (level === 'low') return isZh ? '低' : 'Low';
+  if (level === 'medium') return isZh ? '中' : 'Med';
+  if (level === 'high') return isZh ? '高' : 'High';
+  if (level === 'xhigh') return isZh ? '极高' : 'Max+';
+  if (level === 'max') return isZh ? '最大' : 'Max';
+  return isZh ? '标准' : 'Std';
+}
+
 /** 合法对话模式枚举。 */
 // 产品层只暴露 Agent(chat) / Plan；legacy goal 仍可从会话读取，但不进模式切换器。
 export const CHAT_MODES: readonly ChatMode[] = ['chat', 'plan'];

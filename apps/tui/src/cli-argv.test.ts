@@ -147,4 +147,6 @@ test('bots and classic are explicit interactive entry routes',()=>{
   expect(parsePeerArgv(['--classic'])).toEqual({kind:'tui',classic:true});
   expect(formatPeerHelp('root')).toContain('peer bots');
   expect(formatPeerHelp('root')).toContain('peer --classic');
+  expect(formatPeerHelp('root')).toContain('even when a bot is bound');
+  expect(formatPeerHelp('root')).toContain('F2 or type /classic');
 });

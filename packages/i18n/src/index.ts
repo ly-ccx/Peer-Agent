@@ -1,3 +1,5 @@
+import { resourcesZh, resourcesEn, type ResourcesTranslationKey } from './resources.ts';
+import { formsZh, formsEn, type FormsTranslationKey } from './forms.ts';
 import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
 import {remoteAccessZh,remoteAccessEn,type RemoteAccessTranslationKey} from './remote-access.ts';
 
@@ -9,6 +11,8 @@ export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly 
 
 export type TranslationKey =
   | RemoteAccessTranslationKey
+  | ResourcesTranslationKey
+  | FormsTranslationKey
   | 'app.newTask'
   | 'searchChats.open'
   | 'searchChats.placeholder'
@@ -256,6 +260,9 @@ export type TranslationKey =
   | 'projectAgent.chat.stopped'
   | 'projectAgent.chat.stopFailed'
   | 'projectAgent.chat.latest'
+  | 'projectAgent.chat.restoringReading'
+  | 'projectAgent.chat.readingUnavailable'
+  | 'projectAgent.chat.restoreReading'
   | 'projectAgent.chat.received'
   | 'projectAgent.chat.loadOlder'
   | 'projectAgent.chat.loadingOlder'
@@ -1431,6 +1438,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}：分钟",
 
     ...remoteAccessZh,
+    ...resourcesZh,
+    ...formsZh,
     'app.newTask': '新任务',
     'searchChats.open': '搜索任务',
     'searchChats.placeholder': '搜索任务',
@@ -1730,7 +1739,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.attention.closed': '这个问题已被回答或后续流程取代，已刷新待处理事项。',
     'projectAgent.list.needsYou': '需要你 {count}',
     'projectAgent.list.empty': '还没有机器人',
-    'projectAgent.list.emptyHint': '用左上角 + 绑定文件夹，或建一个空白机器人。',
+    'projectAgent.list.emptyHint': '用左上角 + 给机器人起名，或绑定一个已有文件夹。',
     'projectAgent.list.emptyNeedsYou': '现在没有需要你处理的事。',
     'projectAgent.list.emptySearch': '没有匹配的机器人。',
     'projectAgent.list.me': '我',
@@ -1774,7 +1783,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.onboarding.connectBody': '接入之后才能新建机器人。',
     'projectAgent.onboarding.connectAction': '接入模型',
     'projectAgent.onboarding.createTitle': '新建机器人',
-    'projectAgent.onboarding.createBody': '绑定一个文件夹，或建一个空白机器人。',
+    'projectAgent.onboarding.createBody': '先给机器人起名，或绑定一个已有文件夹。',
     'projectAgent.onboarding.createAction': '新建机器人',
     'projectAgent.search.placeholder': '搜索机器人、消息、任务、记忆',
     'projectAgent.search.empty': '没有匹配',
@@ -1798,9 +1807,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.newSheetTitle': '新建机器人',
     'projectAgent.list.bindFolder': '选择文件夹',
     'projectAgent.list.bindFolderHint': '绑定已有项目。机器人会先只读熟悉这个文件夹。',
-    'projectAgent.list.blankBot': '空白机器人',
-    'projectAgent.list.blankBotHint': '输入名字，在本机受管目录里建一个空项目。',
-    'projectAgent.list.namePlaceholder': '机器人名字',
+    'projectAgent.list.blankBot': '机器人名称',
+    'projectAgent.list.blankBotHint': '用这个名称，在本机受管目录里建一个空项目。',
+    'projectAgent.list.namePlaceholder': '机器人名称',
     'projectAgent.list.nameInvalid': '这个名字不能用',
     'projectAgent.list.nameWillUse': '将使用「{name}」',
     'projectAgent.list.create': '建立',
@@ -1857,6 +1866,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': '生成已停止，以上内容未完成',
     'projectAgent.chat.stopFailed': '停止失败，请再试一次。',
     'projectAgent.chat.latest': '回到最新消息',
+    'projectAgent.chat.restoringReading': '正在恢复原阅读位置…',
+    'projectAgent.chat.readingUnavailable': '原阅读位置尚未找到或暂不可用；可继续分批查找，或回到最新消息。',
+    'projectAgent.chat.restoreReading': '继续恢复阅读位置',
     'projectAgent.chat.received': '已收到',
     'projectAgent.chat.loadOlder': '查看更早消息',
     'projectAgent.chat.loadingOlder': '正在加载更早消息',
@@ -2817,6 +2829,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}: minute",
 
     ...remoteAccessEn,
+    ...resourcesEn,
+    ...formsEn,
     'app.newTask': 'New task',
     'searchChats.open': 'Search tasks',
     'searchChats.placeholder': 'Search tasks',
@@ -3116,7 +3130,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.attention.closed': 'This question was answered or superseded. The attention list has been refreshed.',
     'projectAgent.list.needsYou': 'Needs you {count}',
     'projectAgent.list.empty': 'No bots yet',
-    'projectAgent.list.emptyHint': 'Use + to bind a folder, or create a blank bot.',
+    'projectAgent.list.emptyHint': 'Use + to name a bot, or bind an existing folder.',
     'projectAgent.list.emptyNeedsYou': 'Nothing needs you right now.',
     'projectAgent.list.emptySearch': 'No matching bots.',
     'projectAgent.list.me': 'Me',
@@ -3160,7 +3174,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.onboarding.connectBody': 'A bot needs a model before it can start.',
     'projectAgent.onboarding.connectAction': 'Connect a model',
     'projectAgent.onboarding.createTitle': 'New bot',
-    'projectAgent.onboarding.createBody': 'Bind a folder, or create a blank bot.',
+    'projectAgent.onboarding.createBody': 'Name a bot first, or bind an existing folder.',
     'projectAgent.onboarding.createAction': 'New bot',
     'projectAgent.search.placeholder': 'Search bots, messages, tasks, and memory',
     'projectAgent.search.empty': 'No matches',
@@ -3184,8 +3198,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.newSheetTitle': 'New bot',
     'projectAgent.list.bindFolder': 'Choose a folder',
     'projectAgent.list.bindFolderHint': 'Bind an existing project. The bot will familiarize itself by reading only.',
-    'projectAgent.list.blankBot': 'Blank bot',
-    'projectAgent.list.blankBotHint': 'Type a name to create an empty project in the managed folder.',
+    'projectAgent.list.blankBot': 'Bot name',
+    'projectAgent.list.blankBotHint': 'Use this name to create an empty project in the managed folder.',
     'projectAgent.list.namePlaceholder': 'Bot name',
     'projectAgent.list.nameInvalid': 'This name cannot be used',
     'projectAgent.list.nameWillUse': 'Will use “{name}”',
@@ -3243,6 +3257,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': 'Generation stopped. The content above is incomplete.',
     'projectAgent.chat.stopFailed': 'Could not stop. Please try again.',
     'projectAgent.chat.latest': 'Jump to latest message',
+    'projectAgent.chat.restoringReading': 'Restoring your reading position…',
+    'projectAgent.chat.readingUnavailable': 'Your reading position is not loaded or is unavailable. Continue looking in batches, or jump to latest.',
+    'projectAgent.chat.restoreReading': 'Continue restoring reading position',
     'projectAgent.chat.received': 'Received',
     'projectAgent.chat.loadOlder': 'Earlier messages',
     'projectAgent.chat.loadingOlder': 'Loading earlier messages',

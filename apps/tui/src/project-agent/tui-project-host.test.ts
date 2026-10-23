@@ -169,13 +169,16 @@ test('a terminal client writes only the queue; active desktop owns consumption a
   expect(turns).toBe(1);
 });
 
-test('unchanged client polls reuse the projection without rereading conversation bodies', async () => {
+test('unchanged client polls retain snapshot identity and read only public pages and current cards', async () => {
   const f = fixture(), host = start(f, async () => ({ ok: true, text: 'hello' }));
   const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
   cleanups.push(() => client.close());
-  const first = await client.poll();
   const original = host.directory.readConversation;
-  host.directory.readConversation = (() => { throw new Error('unchanged poll read a body'); }) as typeof original;
+  host.directory.readConversation = ((workspaceId: string, params: any) => {
+    expect(params.view).toBe('cards');
+    return original(workspaceId, params);
+  }) as typeof original;
+  const first = await client.poll();
   expect(await client.poll()).toBe(first);
   host.directory.readConversation = original;
 });
@@ -324,4 +327,36 @@ test('terminal cancellation keeps its own durable state and cannot replay as an 
   expect((cancelled as any).approval.decisionReason).toBe('permission_cancelled');
   const replay = await host.decideApproval('image-cancel', 'approve');
   expect((replay as any).approval.state).toBe('cancelled'); expect(resumed).toBe(0);
+});
+
+test('terminal client coalesces bounded reads and drops a late result after close', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  let complete!: (value: any) => void, reads = 0, published = 0;
+  (host.directory as any).readInteractions = async (_id: string, params: any) => {
+    reads++; expect(params.limit).toBe(50);
+    return await new Promise(resolve => { complete = resolve; });
+  };
+  const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false, onChanged: () => { published++; } });
+  const first = client.poll(), second = client.poll(true);
+  expect(reads).toBe(1);
+  await client.close();
+  complete({ ok: true, messages: [{ id: 'late', kind: 'agent_reply', content: 'late' }], nextCursor: null });
+  await Promise.all([first, second]);
+  expect(published).toBe(0); expect(client.current().messages).toEqual([]);
+});
+test('terminal mode close saves drafts and refuses to detach when saving fails', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
+  const session = client.recovery(f.workspaceId); await session.load();
+  const get = host.directory.get;
+  (host.directory as any).get = () => ({ ok: false });
+  session.edit({ text: 'preserve on switch' });
+  await expect(client.close()).rejects.toThrow('project_draft_save_failed');
+  (host.directory as any).get = get;
+  await client.close();
+  const reopened = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
+  cleanups.push(() => reopened.close());
+  const recovered = reopened.recovery(f.workspaceId); await recovered.load();
+  expect(recovered.getSnapshot().draft.text).toBe('preserve on switch');
+  expect(() => client.submit('after close')).toThrow('project_client_closed');
 });

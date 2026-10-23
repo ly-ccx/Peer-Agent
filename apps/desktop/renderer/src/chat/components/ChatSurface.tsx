@@ -1,3 +1,4 @@
+import { useThreadScrollGesture } from '../hooks/useThreadScrollGesture';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
 import type {
@@ -88,6 +89,7 @@ import {
   type MessageRailItemCache,
 } from '../state/messageRailItems';
 import { findMessageTargetWithRetry } from '../state/messageNavigation';
+import { restoreThreadReading, type ThreadScrollSnapshot } from '../state/threadReadingRestore';
 import { intakeAttachments } from '../state/attachmentIntake';
 import {
   normalizeStreamSegment,
@@ -308,12 +310,7 @@ interface TokenUsageState {
   cacheRead?: number;
 }
 
-interface ThreadScrollSnapshot {
-  top: number;
-  atBottom: boolean;
-  turnId: string | null;
-  turnOffset: number;
-}
+
 
 let msgSeq = 0;
 function nextId() { return `msg-${++msgSeq}-${Date.now()}`; }
@@ -897,8 +894,6 @@ export function ChatSurface({
   const shouldAutoScrollRef = useRef(true);
   // 用户主动滚动意图：只有 wheel/touch/pointer 等手势可退出 follow。
   // 流式增高、虚拟列表重测、程序贴底触发的 scroll 不得清掉 follow。
-  const userScrollIntentRef = useRef(false);
-  const userScrollIntentClearTimerRef = useRef<number | null>(null);
   const threadScrollSnapshotsRef = useRef(new Map<string, ThreadScrollSnapshot>());
   const pendingThreadScrollRestoreRef = useRef<{
     conversationId: string;
@@ -909,36 +904,31 @@ export function ChatSurface({
   const messageNavigationRequestRef = useRef(0);
   const lastAppliedMessageTargetRequestId = useRef<number | null>(null);
 
+  const userScroll = useThreadScrollGesture(direction => {
+    pendingThreadScrollRestoreRef.current = null; messageNavigationRequestRef.current++;
+    if (direction !== 'down') { shouldAutoScrollRef.current = false; setIsThreadAtBottom(false); }
+  });
+  const markUserScrollIntent = userScroll.mark;
+
   // 打开会话时在 render 阶段挂上贴底 pending，让同帧 layout restore 能等到列表挂载后再滚到底。
   // 不能放进 conversationId 的 useEffect：那会在首帧虚拟列表已经停在顶部之后才写入 pending。
   if (lastThreadOpenConversationIdRef.current !== conversationId) {
-    lastThreadOpenConversationIdRef.current = conversationId;
-    const openPlan = planThreadScrollOnConversationOpen({
-      hasExplicitMessageTarget: Boolean(
+    lastThreadOpenConversationIdRef.current = conversationId; userScroll.clear();
+    const explicitTarget = Boolean(
         conversationId
         && messageTarget
         && messageTarget.conversationId === conversationId
         && lastAppliedMessageTargetRequestId.current !== messageTarget.requestId,
-      ),
-    });
-    pendingThreadScrollRestoreRef.current = conversationId && openPlan.stickToBottom
-      ? { conversationId, snapshot: null }
+      );
+    const snapshot = conversationId ? threadScrollSnapshotsRef.current.get(conversationId) ?? null : null;
+    const openPlan = planThreadScrollOnConversationOpen({ hasExplicitMessageTarget: explicitTarget, savedFollowing: snapshot?.atBottom });
+    pendingThreadScrollRestoreRef.current = conversationId && !explicitTarget
+      ? { conversationId, snapshot }
       : null;
     shouldAutoScrollRef.current = Boolean(conversationId) && openPlan.stickToBottom;
     previousMessageCountRef.current = messages.length;
   }
 
-  const markUserScrollIntent = useCallback(() => {
-    userScrollIntentRef.current = true;
-    if (userScrollIntentClearTimerRef.current != null) {
-      window.clearTimeout(userScrollIntentClearTimerRef.current);
-    }
-    // 手势后的惯性滚动仍可能继续触发 scroll；短暂保持 intent，避免误 reaffirm。
-    userScrollIntentClearTimerRef.current = window.setTimeout(() => {
-      userScrollIntentRef.current = false;
-      userScrollIntentClearTimerRef.current = null;
-    }, 120);
-  }, []);
 
   const updateThreadBottomState = useCallback((
     container: HTMLDivElement | null,
@@ -951,6 +941,7 @@ export function ChatSurface({
       currentlyFollowing: shouldAutoScrollRef.current,
       atBottom,
       userInitiated: options?.userInitiated === true,
+      direction: userScroll.state.current.direction,
     });
     shouldAutoScrollRef.current = decision.nextFollowing;
     // Equality gate: avoid re-rendering ChatSurface when stick-to-bottom flag is unchanged.
@@ -969,7 +960,6 @@ export function ChatSurface({
     currentTurnId?: string | null,
   ) => {
     if (!id || !container) return;
-    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const turnId = currentTurnId === undefined
       ? findCurrentTurnIdForScroll(container)
       : currentTurnId;
@@ -978,10 +968,11 @@ export function ChatSurface({
       : null;
     threadScrollSnapshotsRef.current.set(id, {
       top: container.scrollTop,
-      atBottom: distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX,
+      atBottom: shouldAutoScrollRef.current,
       turnId,
       turnOffset: turnElement ? container.scrollTop - turnElement.offsetTop : 0,
     });
+    while (threadScrollSnapshotsRef.current.size > 40) threadScrollSnapshotsRef.current.delete(threadScrollSnapshotsRef.current.keys().next().value!);
   }, []);
 
   const updateCurrentTurnContext = useCallback((
@@ -1001,11 +992,7 @@ export function ChatSurface({
     // 观测：这是每个流式写入后都要走一遍的提交，内部包含多次强制同步布局。
     getStreamProfiler().measure('scroll.bottom', () => {
       // 程序贴底：进入 follow，并清掉用户上滑意图，避免紧随其后的 scroll 事件误退出。
-      userScrollIntentRef.current = false;
-      if (userScrollIntentClearTimerRef.current != null) {
-        window.clearTimeout(userScrollIntentClearTimerRef.current);
-        userScrollIntentClearTimerRef.current = null;
-      }
+      userScroll.clear();
       container.scrollTo({ top: container.scrollHeight, behavior });
       shouldAutoScrollRef.current = true;
       setIsThreadAtBottom((previous) => (previous ? previous : true));
@@ -1029,14 +1016,6 @@ export function ChatSurface({
   const updateCurrentTurnContextRef = useRef(updateCurrentTurnContext);
   updateCurrentTurnContextRef.current = updateCurrentTurnContext;
 
-  /**
-   * 流式追加时的滚动调度器。
-   *
-   * messages 每次写入都会换引用，下面那个 useLayoutEffect 因此每个 delta 都要提交一次
-   * 滚动，而每次提交内部包含多次强制同步布局（scrollHeight / getBoundingClientRect /
-   * elementFromPoint 命中测试）。输出快时每秒几十次，主线程被布局吃满，整个界面卡死。
-   * 调度器把它收敛为「每帧最多一次」，且与绘制同帧（rAF 在 paint 之前），观感不变。
-   */
   const streamingScrollSchedulerRef = useRef<StreamingScrollScheduler | null>(null);
   if (streamingScrollSchedulerRef.current === null) {
     streamingScrollSchedulerRef.current = createStreamingScrollScheduler({
@@ -1087,7 +1066,7 @@ export function ChatSurface({
   }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
-    const userInitiated = userScrollIntentRef.current;
+    const userInitiated = userScroll.state.current.active;
     // Scroll can dispatch far faster than React can commit a long thread. Keep the latest
     // container state and coalesce virtual range updates and geometry probes to one pass per frame.
     // Virtual viewport only setStates when the window indices/padding change; bottom/turn/scrolled
@@ -1099,10 +1078,6 @@ export function ChatSurface({
 
   useEffect(() => () => {
     threadScrollCoalescerRef.current.cancel();
-    if (userScrollIntentClearTimerRef.current != null) {
-      window.clearTimeout(userScrollIntentClearTimerRef.current);
-      userScrollIntentClearTimerRef.current = null;
-    }
   }, []);
 
   // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
@@ -1127,7 +1102,7 @@ export function ChatSurface({
       ),
     }).then((target) => {
       if (!target) return;
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.scrollIntoView({ behavior: 'auto', block: 'center' });
       target.classList.remove('chat-msg-flash');
       void target.offsetWidth;
       target.classList.add('chat-msg-flash');
@@ -1811,6 +1786,14 @@ export function ChatSurface({
       return;
     }
 
+    if (pending.snapshot && !pending.snapshot.atBottom) {
+      shouldAutoScrollRef.current = false; setIsThreadAtBottom(false);
+      return restoreThreadReading({ container, snapshot: pending.snapshot,
+        locateTurn: id => { const index = chatTurns.findIndex(turn => turn.id === id); if (index >= 0) scrollToTurn(index, { align: 'start' }); },
+        isActive: () => pendingThreadScrollRestoreRef.current === pending && conversationIdRef.current === pending.conversationId,
+        finish: finishRestore });
+    }
+
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom((previous) => (previous ? previous : true));
     scrollThreadToBottom('auto');
@@ -1840,6 +1823,7 @@ export function ChatSurface({
     loadStatus,
     messageTarget,
     messages,
+    chatTurns, scrollToTurn,
     saveThreadScrollSnapshot,
     scrollThreadToBottom,
     updateCurrentTurnContext,
@@ -1903,22 +1887,18 @@ export function ChatSurface({
     scheduleScrollStateRefresh,
   ]);
 
-  // 手动 /compact 不改 messages，上面的自动滚动 effect 不会重跑；而压缩进度横幅
-  // 渲染在滚动容器最底部。若用户此时已向上滚，横幅会落在视口外，造成"点了没反应"
-  // 的错觉。压缩一开始就强制滚到底，让进度横幅立即进入视口。
-  // 压缩结束（finalizing -> done/idle）时再清一次测量并贴底，避免 merge 后仍停在顶部。
+  // Compaction may remeasure the thread but cannot reclaim a reading viewport.
   const wasCompactionActiveRef = useRef(false);
   useLayoutEffect(() => {
     if (isCompactionActive) {
       wasCompactionActiveRef.current = true;
-      shouldAutoScrollRef.current = true;
-      scrollThreadToBottom('auto');
+      if (shouldAutoScrollRef.current) scrollThreadToBottom('auto');
       return;
     }
     if (wasCompactionActiveRef.current) {
       wasCompactionActiveRef.current = false;
-      shouldAutoScrollRef.current = true;
       resetVirtualMeasurements();
+      if (!shouldAutoScrollRef.current) return;
       scrollThreadToBottom('auto');
       const outer = requestAnimationFrame(() => {
         if (!shouldAutoScrollRef.current) return;
@@ -2134,7 +2114,7 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId: targetConversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, fastMode, mode, conversationId: targetConversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
     return true;
   }, [
     isStreaming,
@@ -2144,6 +2124,7 @@ export function ChatSurface({
     messages,
     onConversationUpdated,
     effort,
+    fastMode,
     mode,
     modelProviderId,
     systemInstructions,
@@ -2803,6 +2784,7 @@ export function ChatSurface({
       modelOptions={modelOptions}
       canSwitchModel={canSwitchModel}
       onModelChange={handleModelChange}
+      onManageModels={onOpenSettings}
       onContextWindowChange={handleContextWindowChange}
       selectedModelProviderId={modelProviderId}
       showContextUsage={false}
@@ -2878,6 +2860,7 @@ export function ChatSurface({
       {findOpen ? (
         <ChatFindBar
           containerRef={threadRef}
+          onNavigate={() => { pendingThreadScrollRestoreRef.current = null; messageNavigationRequestRef.current++; shouldAutoScrollRef.current = false; setIsThreadAtBottom(false); }}
           isZh={isZh}
           onClose={() => setFindOpen(false)}
           recomputeKey={messages.length}
@@ -2894,6 +2877,7 @@ export function ChatSurface({
         className="chat-thread"
         ref={threadRef}
         onScroll={handleThreadScroll}
+        tabIndex={0} onKeyDown={markUserScrollIntent} onPointerDown={markUserScrollIntent}
         onWheel={markUserScrollIntent}
         onTouchMove={markUserScrollIntent}
       >

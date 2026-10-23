@@ -1,6 +1,11 @@
+import { useEditableResource } from '../../ui/forms/useEditableResource';
+import { FormFeedback } from '../../ui/forms/FormFeedback';
+import { useSettingsAction } from '../../ui/forms/useSettingsAction';
+import { readBotDetails } from '../state/botDetails';
+import { BotModelFeedback } from '../BotModelFeedback';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { BOT_AVATAR_COLORS, type BotProfile } from '@peer-agent/protocol';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
@@ -47,161 +52,90 @@ export function BotSettingsTab({
   readonly onProfile: (profile: BotProfile) => void;
   readonly onDeleted: () => void;
 }) {
-  const [name, setName] = useState(profile.displayName);
-  const [level, setLevel] = useState<ProactivityLevel>(profile.proactivity || 'inherit');
-  const [error, setError] = useState('');
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [concurrency, setConcurrency] = useState('4');
+  const nameId = useId();
+  const action = useSettingsAction();
+  const nameForm = useEditableResource(`bot.${workspaceId}.name`, profile.displayName, {
+    read: async () => { const got = await readBotDetails(workspaceId); if (!got.ok || !got.profile) throw Error('read'); return got.profile.displayName; },
+    write: async draft => { const displayName = draft.trim(); if (!displayName) throw Error('name'); const got = await clientApi.projectAgentUpdateProfile({ workspaceId, displayName }); if (!got.ok || !got.profile) throw Error('save'); onProfile(got.profile); return got.profile.displayName; },
+  });
+  const concurrencyForm = useEditableResource('settings.bot-concurrency', '4', {
+    read: async () => { const settings = await clientApi.getSettings(); return String((settings.projectAgent as { concurrency?: number } | undefined)?.concurrency || 4); },
+    write: async draft => { const saved = await clientApi.updateSettings({ projectAgent: { concurrency: Number(draft) } }); return String((saved.projectAgent as { concurrency?: number } | undefined)?.concurrency || 4); },
+  });
+  const previousName = useRef(profile.displayName);
   useEffect(() => {
-    let live = true;
-    void clientApi.getSettings().then(settings => {
-      if (!live) return;
-      const project = settings.projectAgent as { concurrency?: number } | undefined;
-      setConcurrency(String(project?.concurrency || 4));
-    }).catch(() => { if (live) setError('FAILED'); });
-    return () => { live = false; };
-  }, []);
-  async function saveConcurrency(value: string) {
-    if (busy) return;
-    setBusy(true); setError('');
-    try {
-      const saved = await clientApi.updateSettings({ projectAgent: { concurrency: Number(value) } });
-      const project = saved.projectAgent as { concurrency?: number } | undefined;
-      setConcurrency(String(project?.concurrency || 4));
-    } catch { setError('FAILED'); }
-    finally { setBusy(false); }
-  }
-
-
-  async function saveName() {
-    const displayName = name.trim();
-    if (!displayName || busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      const result = await clientApi.projectAgentUpdateProfile({ workspaceId, displayName });
-      if (!result?.ok || !result.profile) {
-        setError(result?.code || 'FAILED');
-        return;
-      }
-      onProfile(result.profile);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveProactivity(next: string) {
+    if (previousName.current !== profile.displayName && !nameForm.saving) void nameForm.reload();
+    previousName.current = profile.displayName;
+  }, [profile.displayName, nameForm.reload]);
+  const name = nameForm.draft, level = profile.proactivity || 'inherit';
+  const busy = action.busy || nameForm.saving || concurrencyForm.saving;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const saveConcurrency = async (value: string) => { concurrencyForm.edit(value); await concurrencyForm.save(); };
+  const saveName = nameForm.save;
+  const saveProactivity = async (next: string) => {
     if (!isProactivityLevel(next)) return;
-    const previous = level;
-    setLevel(next);
-    setBusy(true);
-    setError('');
-    try {
-      const result = await clientApi.projectAgentUpdateProfile({ workspaceId, proactivity: next });
-      if (!result?.ok || !result.profile) {
-        setLevel(previous);
-        setError(result?.code || 'FAILED');
-        return;
-      }
-      onProfile(result.profile);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function savePolicy(patch: Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy' | 'autoHandoffOnPolicyAccept'>) {
+    await savePolicy({ proactivity: next });
+  };
+  async function savePolicy(patch: Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy' | 'autoHandoffOnPolicyAccept' | 'proactivity'>) {
     if (busy) return;
-    setBusy(true); setError('');
-    try {
+    await action.run(async () => {
       const result = await clientApi.projectAgentUpdateProfile({ workspaceId, ...patch });
-      if (!result?.ok || !result.profile) { setError(result?.code || 'FAILED'); return; }
+      if (!result.ok || !result.profile) throw Error(result.code || 'FAILED');
       onProfile(result.profile);
-    } catch { setError('FAILED'); }
-    finally { setBusy(false); }
+    });
   }
-
   async function changeAvatar(kind: 'regenerate' | 'upload') {
     if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      const result = await clientApi.projectAgentUpdateProfile(
-        kind === 'regenerate'
-          ? { workspaceId, regenerateAvatar: true }
-          : { workspaceId, chooseAvatar: true },
-      );
-      if (!result?.ok || !result.profile) {
-        if (result?.code !== 'CANCELLED') setError(result?.code || 'FAILED');
-        return;
-      }
+    await action.run(async () => {
+      const result = await clientApi.projectAgentUpdateProfile(kind === 'regenerate' ? { workspaceId, regenerateAvatar: true } : { workspaceId, chooseAvatar: true });
+      if (result.code === 'CANCELLED') return false;
+      if (!result.ok || !result.profile) throw Error(result.code || 'FAILED');
       onProfile(result.profile);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
-
   async function changeAvatarColor(color: string) {
     if (busy || profile.avatar.kind === 'generated' && botAvatarDisplayColor(profile.avatar.color) === color) return;
-    setBusy(true);
-    setError('');
-    try {
+    await action.run(async () => {
       const result = await clientApi.projectAgentUpdateProfile({ workspaceId, avatarColor: color });
-      if (!result?.ok || !result.profile) {
-        setError(result?.code || 'FAILED');
-        return;
-      }
+      if (!result.ok || !result.profile) throw Error(result.code || 'FAILED');
       onProfile(result.profile);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
-
   async function remove() {
-    if (profile.managed === true && !confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try {
-      const result = await clientApi.projectAgentDelete({
-        workspaceId,
-        confirmManaged: profile.managed === true,
-      });
-      if (!result?.ok) {
-        setError(result?.code || 'FAILED');
-        return;
-      }
+    if (busy) return;
+    if (profile.managed === true && !confirmDelete) { setConfirmDelete(true); return; }
+    await action.run(async () => {
+      const result = await clientApi.projectAgentDelete({ workspaceId, confirmManaged: profile.managed === true });
+      if (!result.ok) throw Error(result.code || 'FAILED');
       onDeleted();
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (
     <div className="bot-drawer-tab bot-settings-tab">
       <BotPolicyFields profile={profile} models={modelControls.models} views={modelControls.views} busy={busy || modelControls.busy} i18n={i18n}
         onChange={patch => patch.modelPolicy ? modelControls.save(patch.modelPolicy) : undefined} />
-      {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
+      <BotModelFeedback state={modelControls} i18n={i18n} />
       <SettingsGroup className="bot-settings-section bot-settings-identity" title={i18n.t('projectAgent.drawer.settings.appearance')}>
       <div className="bot-settings-field">
-        <label htmlFor="bot-settings-name">{i18n.t('projectAgent.drawer.settings.name')}</label>
+        <label htmlFor={nameId}>{i18n.t('projectAgent.drawer.settings.name')}</label>
         <div className="bot-settings-name-row">
-          <input id="bot-settings-name" value={name} onChange={(event) => setName(event.target.value)} />
-          <button type="button" disabled={busy || !name.trim() || name.trim() === profile.displayName} onClick={() => { void saveName(); }}>
+          <input id={nameId} className="ui-input" value={name} disabled={!nameForm.loaded || nameForm.saving} aria-describedby={`${nameId}-status`} aria-invalid={nameForm.saveError || undefined} onChange={(event) => nameForm.edit(event.target.value)} />
+          <button type="button" className="ui-button is-primary" disabled={busy || !nameForm.loaded || !name.trim() || !nameForm.dirty} onClick={() => { void saveName(); }}>
             {i18n.t('projectAgent.drawer.settings.save')}
           </button>
         </div>
       </div>
+      <FormFeedback id={`${nameId}-status`} i18n={i18n} {...nameForm} onReload={nameForm.reload} onRetry={nameForm.save} />
+      {nameForm.dirty ? <p className="bot-drawer-note">{i18n.t('forms.retainedDraft')}</p> : null}
       <div className="bot-settings-avatar-section">
         <div className="bot-avatar-settings">
           <BotAvatar avatar={profile.avatar} label={profile.displayName} workspaceId={workspaceId} />
           <div className="bot-avatar-settings-actions">
-            <button type="button" disabled={busy} onClick={() => { void changeAvatar('upload'); }}>
+            <button type="button" className="ui-button" disabled={busy} onClick={() => { void changeAvatar('upload'); }}>
               {i18n.t('projectAgent.drawer.settings.avatarUpload')}
             </button>
-            <button type="button" disabled={busy} onClick={() => { void changeAvatar('regenerate'); }}>
+            <button type="button" className="ui-button" disabled={busy} onClick={() => { void changeAvatar('regenerate'); }}>
               {i18n.t('projectAgent.drawer.settings.avatarNew')}
             </button>
           </div>
@@ -254,18 +188,19 @@ export function BotSettingsTab({
             <span className="bot-settings-scope">{i18n.t('projectAgent.drawer.settings.globalScope')}</span>
             <div className="bot-settings-row">
               <span>{i18n.t('projectAgent.drawer.settings.concurrency')}</span>
-              <Dropdown value={concurrency} disabled={busy}
+              <Dropdown value={concurrencyForm.draft} disabled={busy || !concurrencyForm.loaded}
                 ariaLabel={i18n.t('projectAgent.drawer.settings.concurrency')}
                 options={Array.from({ length: 8 }, (_, index) => ({ value: String(index + 1), label: String(index + 1) }))}
                 onChange={value => { void saveConcurrency(value); }} />
             </div>
+            <FormFeedback i18n={i18n} {...concurrencyForm} onReload={concurrencyForm.reload} onRetry={concurrencyForm.save} />
             <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.concurrencyHint')}</p>
           </div>
         </div>
       </details>
-      {error ? <p className="bot-drawer-note" role="alert">{error}</p> : null}
+      <FormFeedback i18n={i18n} saving={action.busy} saveError={action.error} committed={action.committed} onRetry={action.retry} />
       <div className="bot-settings-danger">
-      <button type="button" disabled={busy} onClick={() => { void remove(); }}>
+      <button type="button" className="ui-button" disabled={busy} onClick={() => { void remove(); }}>
         {confirmDelete
           ? i18n.t('projectAgent.drawer.settings.deleteConfirm')
           : profile.managed

@@ -11,7 +11,7 @@ const ROLES: readonly ModelRole[] = ['project_agent', 'session_worker', 'verifie
 type Patch = Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy'>;
 type PolicyProps = {
   profile: BotProfile; busy: boolean; i18n: I18nRuntime;
-  onChange: (patch: Patch) => void | Promise<void>;
+  onChange: (patch: Patch) => void | Promise<unknown>;
 };
 
 export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps) {

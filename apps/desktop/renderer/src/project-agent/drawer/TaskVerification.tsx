@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { SessionVerificationDetail } from '@peer-agent/protocol';
+import { EvidencePreview } from './EvidencePreview';
 import { PeerIcon } from '../../ui/icons';
 
 const verdictLabels = {
@@ -24,6 +25,11 @@ export function TaskVerification({ detail, i18n }: { readonly detail: SessionVer
           : check.result === 'passed' ? 'projectAgent.drawer.task.verificationPassed' : 'projectAgent.drawer.task.verificationFailed')}</dd>
       </div>)}
     </dl>
+    <EvidencePreview refs={[...new Set(detail.checks.flatMap(check => check.evidenceRefs).concat(detail.outputs.map(output => output.evidenceRef)))]} i18n={i18n} />
+    {detail.outputs.length ? <details><summary><PeerIcon name="chevronRight" size={13} />{i18n.t('resources.outputs')}</summary>
+      {detail.outputs.map((output, index) => <section key={`${output.evidenceRef}-${index}`}><h4>{output.name}</h4><p>{output.summary}</p>
+        {output.truncated ? <p>{i18n.t('projectAgent.process.truncated')}</p> : null}</section>)}
+    </details> : null}
     {detail.reviewAttempts.length > 0 && <details>
       <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.task.verificationHistory')}</summary>
       <p className="bot-task-hint">{i18n.t('projectAgent.drawer.task.verificationHistorical')}</p>

@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { createAvatarMotionRegistry } from './avatarMotionRegistry';
+import { motionAllowed, subscribeMotionEnvironment } from '../../app/state/motionEnvironment';
 const registry = createAvatarMotionRegistry<Element>({
   observe(update) {
+    if (typeof IntersectionObserver !== 'function') return { observe(node: Element) { update(node, false); }, unobserve() {}, disconnect() {} };
     const observer = new IntersectionObserver(entries => entries.forEach(entry => update(entry.target, entry.isIntersecting)));
     return observer;
   },
-  allowed: () => !document.hidden && !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-  subscribe(update) {
-    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
-    document.addEventListener('visibilitychange', update); preference.addEventListener('change', update);
-    return () => { document.removeEventListener('visibilitychange', update); preference.removeEventListener('change', update); };
-  },
+  allowed: motionAllowed,
+  subscribe: subscribeMotionEnvironment,
 });
 export function useAvatarMotion(eligible = false) {
   const ref = useRef<HTMLSpanElement>(null), [active, setActive] = useState(false);

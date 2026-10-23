@@ -40,7 +40,8 @@ export type PeerIconName =
   | 'archive'
   | 'arrowRight'
   | 'panelRight'
-  | 'arrowRightOff';
+  | 'arrowRightOff'
+  | 'bolt';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
   loader: <path d="M20 12a8 8 0 1 1-5.5-7.6" />,
@@ -86,6 +87,7 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   arrowRight: <path d="M4 12h16m-6-6 6 6-6 6" />,
   panelRight: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></>,
   arrowRightOff: <><path d="M4 12h10m2 0h4m-6-6 6 6-3 3M3 3l18 18" /></>,
+  bolt: <path d="M13 2 4 14h7l-1 8 10-12h-7l0-8Z" />,
   stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   chevronUp: <path d="m6 15 6-6 6 6" />,

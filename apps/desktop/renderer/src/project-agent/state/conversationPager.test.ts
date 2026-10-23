@@ -115,3 +115,38 @@ test('latest decision stamp closes old question controls already retained in an 
   assert.equal(snapshot!.messages[0]!.cards[0]!.actions?.length, 0);
   assert.equal(snapshot!.messages[0]!.cards[1]!.actions?.length, 1, 'question retirement cannot resolve permissions');
 });
+
+
+test('restoring a reading checkpoint is bounded and can be continued without restarting at the newest page', async () => {
+  const history = Array.from({ length: 1000 }, (_, index) => ({ id: `m-${index}`, role: 'user', content: String(index), createdAt: '2026-10-23' }));
+  let reads = 0;
+  const pager = createConversationPager({ read: async params => {
+    reads++; const end = params.before ? Number(params.before) : history.length, start = Math.max(0, end - params.limit);
+    return { ok: true, messages: history.slice(start, end), nextCursor: start ? String(start) : null };
+  }, publish() {} });
+  await pager.refresh(); assert.equal(await pager.locate('m-650', 4), false); assert.equal(reads, 5);
+  assert.equal(await pager.locate('m-650', 4), true); assert.equal(reads, 7);
+  assert.equal(await pager.locate('m-100', 4, () => false), false); assert.equal(reads, 7);
+});
+
+test('a large refresh pauses at four pages, preserves the published window and resumes without a gap', async () => {
+  const { ConversationCatchUpRequired, CONVERSATION_REFRESH_PAGE_BUDGET } = await import('./conversationPager.ts');
+  const history = Array.from({ length: 100 }, (_, n) => ({ id: `m-${n}`, role: 'user', content: String(n), createdAt: '2026-10-24' }));
+  let reads = 0, snapshot: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0];
+  const pager = createConversationPager({ read: async params => {
+    reads++; const end = params.before ? Number(params.before) : history.length, start = Math.max(0, end - params.limit);
+    return { ok: true, messages: history.slice(start, end), nextCursor: start ? String(start) : null };
+  }, publish: value => { snapshot = value; } });
+  await pager.refresh();
+  history.push(...Array.from({ length: 300 }, (_, i) => ({ id: `m-${i + 100}`, role: 'user', content: String(i + 100), createdAt: '2026-10-24' })));
+  const before = reads;
+  await assert.rejects(pager.refresh(), ConversationCatchUpRequired);
+  assert.equal(reads - before, CONVERSATION_REFRESH_PAGE_BUDGET);
+  assert.equal(snapshot!.messages.at(-1)?.id, 'm-99');
+  const continued = reads;
+  await pager.refresh();
+  assert.ok(reads - continued <= CONVERSATION_REFRESH_PAGE_BUDGET);
+  assert.deepEqual(snapshot!.messages.map(row => row.id), history.slice(50).map(row => row.id));
+  await pager.older();
+  assert.deepEqual(snapshot!.messages.map(row => row.id), history.map(row => row.id));
+});

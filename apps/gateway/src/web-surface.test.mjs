@@ -289,3 +289,34 @@ test('读取失败时给出人话解释，而不是裸错误码', async () => {
   assert.match(text, /结果未知/, '超时必须说清是未知，而不是失败或完成');
   assert.match(harness.nodes.get('task-result').className, /task-result-alert/);
 });
+
+test('只读任务的 JSON 迟到不能在退出后恢复私有结果', async () => {
+  const h = createScriptHarness(); let finish;
+  const fetch = async url => url === '/api/tasks/read'
+    ? { status: 200, ok: true, json: () => new Promise(resolve => { finish = resolve; }) }
+    : url === '/api/devices' ? { status: 200, ok: true, json: async () => ({ devices: [] }) }
+      : url === '/api/delegations' ? { status: 200, ok: true, json: async () => ({ delegations: [{ deviceId: 'd', delegation: { workspaceIds: ['w'] } }] }) }
+        : { status: 200, ok: true };
+  runInNewContext(await remoteWebResponse('/assets/remote.js').text(), { document: h.document, fetch });
+  await new Promise(resolve => setImmediate(resolve));
+  const request = h.nodes.get('task-read').listeners.submit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  await h.nodes.get('logout').listeners.click(); finish({ result: { summary: 'private' } }); await request;
+  assert.equal(h.nodes.get('task-result').textContent, ''); assert.equal(h.nodes.get('task-read').hidden, true);
+});
+test('刷新保留设备和已选授权目标，失败不伪装成空列表', async () => {
+  const h = createScriptHarness(); let fail = false;
+  const entries = [{ deviceId: 'a', delegation: { workspaceIds: ['a1'] } }, { deviceId: 'b', delegation: { workspaceIds: ['b1', 'b2'] } }];
+  const fetch = async url => {
+    if (fail) throw Error('offline');
+    return { status: 200, ok: true, json: async () => url === '/api/devices' ? { devices: [{ name: 'Mac' }] } : { delegations: entries } };
+  };
+  runInNewContext(await remoteWebResponse('/assets/remote.js').text(), { document: h.document, fetch });
+  await new Promise(resolve => setImmediate(resolve));
+  h.nodes.get('task-device').value = 'b'; h.nodes.get('task-device').listeners.change(); h.nodes.get('task-workspace').value = 'b2';
+  await h.nodes.get('refresh').listeners.click(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.nodes.get('task-device').value, 'b'); assert.equal(h.nodes.get('task-workspace').value, 'b2');
+  fail = true; await h.nodes.get('refresh').listeners.click();
+  assert.equal(h.nodes.get('devices').children.length, 1); assert.equal(h.nodes.get('task-workspace').value, 'b2');
+  assert.match(h.nodes.get('status').textContent, /请重试/);
+});
