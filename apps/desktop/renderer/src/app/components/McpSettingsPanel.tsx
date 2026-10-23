@@ -1,5 +1,11 @@
+import { createI18n } from '@peer-agent/i18n';
+import { useProviderFormGuard } from '../hooks/useProviderFormGuard';
+import { useResourceRead } from '../../ui/resources/useResourceState';
+import { ResourceFeedback } from '../../ui/resources/ResourceFeedback';
+import { ChoiceStrip } from '../../ui/forms/ChoiceStrip';
+import { isImeKey } from '../../chat/state/compositionGuard';
 import type { LocalMcpServerUpsertRequest, McpConnectionProbeResult } from '@peer-agent/protocol';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Switch } from '../../ui/boolean-controls';
 import { PeerIcon } from '../../ui/icons';
@@ -148,8 +154,13 @@ type McpSettingsPanelProps = {
 
 export function McpSettingsPanel({ embedded = false, onServersCountChange }: McpSettingsPanelProps = {}) {
   const confirm = useConfirm();
-  const [servers, setServers] = useState<readonly McpServerView[]>([]);
-  const [credentials, setCredentials] = useState<readonly McpCredentialView[]>([]);
+  const operation = useRef(false);
+  const reader = useResourceRead('mcp-installed', async () => {
+    const [servers, credentials] = await Promise.all([clientApi.mcpListInstalled(), clientApi.mcpListCredentials()]);
+    return { servers: servers as readonly McpServerView[], credentials: credentials as readonly McpCredentialView[] };
+  });
+  const servers = reader.value?.servers ?? [], credentials = reader.value?.credentials ?? [];
+  const i18n = useMemo(() => createI18n('zh-CN'), []);
   const [displayName, setDisplayName] = useState('');
   const [transport, setTransport] = useState<McpTransportKind>('streamable_http');
   const [url, setUrl] = useState('');
@@ -179,18 +190,8 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [lastProbe, setLastProbe] = useState<McpConnectionProbeResult | null>(null);
 
-  const load = useCallback(async () => {
-    const [list, credentialList] = await Promise.all([
-      clientApi.mcpListInstalled() as Promise<readonly McpServerView[]>,
-      clientApi.mcpListCredentials() as Promise<readonly McpCredentialView[]>,
-    ]);
-    setServers(list);
-    setCredentials(credentialList);
-    // 不自动选中任何 server：Drawer 只由用户点击卡片打开，避免进入 MCP tab 时自动弹出。
-    onServersCountChange?.(list.length);
-  }, [onServersCountChange]);
-
-  useEffect(() => { void load(); }, [load]);
+  const load = useCallback(() => reader.reload(), [reader.reload]);
+  useEffect(() => { if (reader.value) onServersCountChange?.(reader.value.servers.length); }, [reader.value, onServersCountChange]);
 
   const handleDeleteCredential = useCallback(async (credentialRef: string, label?: string) => {
     if (!credentialRef) return;
@@ -201,7 +202,8 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       tone: 'danger',
     });
     if (!ok) return;
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     setStatus('正在删除凭证…');
     try {
       await clientApi.mcpDeleteCredential({ credentialRef });
@@ -210,7 +212,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } catch (error) {
       setStatus(`删除凭证失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      setBusy(false);
+      operation.current = false; setBusy(false);
     }
   }, [confirm, load]);
 
@@ -273,17 +275,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     setLastProbe(null);
   }, []);
 
-  useEffect(() => {
-    if (!showAddForm) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) {
-        resetForm();
-        setShowAddForm(false);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showAddForm, busy, resetForm]);
+
 
   const updateArgRow = useCallback((index: number, value: string) => {
     setArgRows((rows) => rows.map((row, i) => (i === index ? value : row)));
@@ -312,7 +304,8 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   }, []);
 
   const handleSave = useCallback(async () => {
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     setStatus('保存 MCP 连接中…');
     try {
       const args = argRows.map((item) => item.trim()).filter(Boolean);
@@ -418,12 +411,18 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '保存 MCP 连接失败');
     } finally {
-      setBusy(false);
+      operation.current = false; setBusy(false);
     }
   }, [argRows, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, cwd, displayName, envRows, load, oauthAuthorizationServerUrl, oauthClientId, oauthClientSecret, oauthRedirectUrl, oauthScopes, resetForm, showAdvancedSettings, transport, url]);
 
+  const closeForm = () => { resetForm(); setShowAddForm(false); };
+  const requestFormClose = useProviderFormGuard({ displayName, transport, url, command, argRows, envRows, cwd,
+    authMode, credentialLabel, credentialSecret, authHeaderName, authEnvName, oauthAuthorizationServerUrl,
+    oauthClientId, oauthClientSecret, oauthScopes }, showAddForm, busy, closeForm);
+
   const runServerAction = useCallback(async (message: string, action: () => Promise<unknown>) => {
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     setStatus(`${message}中…`);
     try {
       await action();
@@ -432,7 +431,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } catch (error) {
       setStatus(error instanceof Error ? error.message : `${message}失败`);
     } finally {
-      setBusy(false);
+      operation.current = false; setBusy(false);
     }
   }, [load]);
 
@@ -452,7 +451,8 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   // 授权服务器地址留空交后端自动发现；提升后展示“登录授权”按钮，
   // 由用户再点一次完成登录（保留确认步骤）。
   const handlePromoteToOAuth = useCallback(async (server: McpServerView) => {
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     setStatus('正在切换为 OAuth 2.0…');
     try {
       // 复用 server 已绑定的 credentialRef，避免每次点击都新建一条孤儿 oauth 凭证。
@@ -473,12 +473,13 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '切换为 OAuth 2.0 失败');
     } finally {
-      setBusy(false);
+      operation.current = false; setBusy(false);
     }
   }, [load]);
 
   const handleStartOAuth = useCallback(async (server: McpServerView) => {
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     setStatus('正在打开浏览器进行 OAuth 授权，请在浏览器中完成登录…');
     try {
       await clientApi.mcpStartOAuth({ serverId: serverIdOf(server) });
@@ -501,21 +502,22 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 : raw;
       setStatus(`OAuth 授权失败：${message}`);
     } finally {
-      setBusy(false);
+      operation.current = false; setBusy(false);
     }
   }, [load]);
 
   const refreshAll = useCallback(async () => {
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     const targets = servers.filter((server) => server.enabled !== false);
     if (targets.length === 0) {
       try {
-        await load();
-        setStatus('暂无启用的 MCP 连接，已重读列表。');
+        const loaded = await load();
+        setStatus(loaded ? '暂无启用的 MCP 连接，已重读列表。' : '列表尚未读到最新内容，请重新读取。');
       } catch (error) {
         setStatus(error instanceof Error ? error.message : '刷新列表失败');
       } finally {
-        setBusy(false);
+        operation.current = false; setBusy(false);
       }
       return;
     }
@@ -543,12 +545,13 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } else {
       setStatus(`已刷新 ${targets.length - failures.length}/${targets.length} 个连接，部分失败：${failures.join('；')}`);
     }
-    setBusy(false);
+    operation.current = false; setBusy(false);
   }, [load, servers]);
 
   const handleReadResource = useCallback(async (uri: string) => {
     if (!selected) return;
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     setStatus('读取 resource…');
     try {
       const result = await clientApi.mcpReadResource({ serverId: serverIdOf(selected), uri });
@@ -557,13 +560,14 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '读取 resource 失败');
     } finally {
-      setBusy(false);
+      operation.current = false; setBusy(false);
     }
   }, [selected]);
 
   const handleGetPrompt = useCallback(async (name: string) => {
     if (!selected) return;
-    setBusy(true);
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
     setStatus('获取 prompt…');
     try {
       const result = await clientApi.mcpGetPrompt({ serverId: serverIdOf(selected), name, arguments: {} });
@@ -572,7 +576,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '获取 prompt 失败');
     } finally {
-      setBusy(false);
+      operation.current = false; setBusy(false);
     }
   }, [selected]);
 
@@ -589,52 +593,55 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
             <>
               <span className="mcp-eyebrow">Local capability providers</span>
               <h2>MCP 连接</h2>
-              <p>管理本地 MCP server。工具先刷新 Manifest，再经 Runtime Projection、PermissionGrant 和 Evidence 链路执行。</p>
+              <p>连接外部工具与资源。可用范围和每次执行仍由本机授权控制。</p>
             </>
           ) : null}
         </div>
         <div className="mcp-hero__actions">
-          <button type="button" onClick={() => setShowAddForm(true)}>
+          <button type="button" className="ui-button" onClick={() => setShowAddForm(true)}>
             添加连接
           </button>
-          <button type="button" onClick={() => void refreshAll()} disabled={busy}>{busy ? '刷新中…' : '刷新列表'}</button>
+          <button type="button" className="ui-button" onClick={() => void refreshAll()} disabled={busy}>{busy ? '刷新中…' : '刷新列表'}</button>
         </div>
       </header>
 
-      {status ? <p className="settings-status mcp-status">{status}</p> : null}
+      <ResourceFeedback i18n={i18n} loading={reader.loading} error={reader.error} onReload={load} />
+      {status ? <p className="settings-status mcp-status" role="status">{status}</p> : null}
 
       {showAddForm ? (
         <Overlay
-          onClose={() => { resetForm(); setShowAddForm(false); }}
+          onClose={closeForm}
+          onRequestClose={requestFormClose}
           closeOnBackdrop={!busy}
+          onEscape={() => busy}
           ariaLabel="新增本地 MCP server"
           panelClassName="mcp-modal-card"
         >
             <header className="mcp-modal-header">
               <div>
                 <h3>新增本地 MCP server</h3>
-                <p>配置只保存连接元数据；Secret 会单独写入 main 进程凭证库。</p>
+                <p>连接信息保存在本机，访问密钥由本机凭证库保护。</p>
               </div>
               <button
                 type="button"
-                className="mcp-modal-close"
+                className="ui-button is-icon is-compact mcp-modal-close"
                 aria-label="关闭"
-                onClick={() => { resetForm(); setShowAddForm(false); }}
+                onClick={() => { if (requestFormClose()) closeForm(); }}
                 disabled={busy}
               >
                 <PeerIcon name="close" size={12} />
               </button>
             </header>
-            <div className="mcp-modal-body">
+            <fieldset className="ui-form-fields mcp-modal-body" disabled={busy}>
             <div className="settings-grid settings-grid--two">
             <label>
               名称
-              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="filesystem / sentry / internal-tools" />
+              <input className="ui-input" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="filesystem / sentry / internal-tools" />
             </label>
             {transport !== 'stdio' ? (
               <label>
                 URL
-                <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://mcp.example.com/mcp" />
+                <input className="ui-input" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://mcp.example.com/mcp" />
               </label>
             ) : null}
             <div className="settings-grid__wide mcp-field">
@@ -651,38 +658,20 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
             <>
             <div className="settings-grid__wide mcp-field">
               <span className="mcp-field__label">Transport</span>
-              <div className="mcp-segment" role="tablist" aria-label="Transport">
-                {([
-                  { value: 'stdio', label: 'STDIO' },
-                  { value: 'streamable_http', label: 'Streamable HTTP' },
-                  { value: 'sse', label: 'SSE' },
-                ] as const).map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="tab"
-                    aria-selected={transport === option.value}
-                    className={`mcp-segment__btn${transport === option.value ? ' is-active' : ''}`}
-                    onClick={() => {
-                      setTransport(option.value);
-                      setAuthMode('none');
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+              <ChoiceStrip kind="radio" value={transport} label="连接方式" className="mcp-segment" itemClassName="mcp-segment__btn"
+                options={[{ value: 'stdio', label: 'STDIO' }, { value: 'streamable_http', label: 'Streamable HTTP' }, { value: 'sse', label: 'SSE' }]}
+                onChange={next => { setTransport(next); setAuthMode('none'); }} />
             </div>
             {transport !== 'stdio' ? (
               <label className="settings-grid__wide">
                 Server URL
-                <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="http://127.0.0.1:3000/mcp" />
+                <input className="ui-input" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="http://127.0.0.1:3000/mcp" />
               </label>
             ) : (
               <>
                 <label className="settings-grid__wide">
                   Command to launch
-                  <input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="npx / uvx / node" />
+                  <input className="ui-input" value={command} onChange={(event) => setCommand(event.target.value)} placeholder="npx / uvx / node" />
                 </label>
                 <div className="settings-grid__wide mcp-field">
                   <span className="mcp-field__label">Arguments</span>
@@ -703,7 +692,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                       </button>
                     </div>
                   ))}
-                  <button type="button" className="mcp-row__add" onClick={addArgRow}>
+                  <button type="button" className="ui-button mcp-row__add" onClick={addArgRow}>
                     + 添加参数
                   </button>
                 </div>
@@ -731,13 +720,13 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                       </button>
                     </div>
                   ))}
-                  <button type="button" className="mcp-row__add" onClick={addEnvRow}>
+                  <button type="button" className="ui-button mcp-row__add" onClick={addEnvRow}>
                     + 添加环境变量
                   </button>
                 </div>
                 <label className="settings-grid__wide">
                   Working directory
-                  <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="~/code（可选）" />
+                  <input className="ui-input" value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="~/code（可选）" />
                 </label>
               </>
             )}
@@ -754,33 +743,39 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
               <>
                 <label>
                   凭证标签
-                  <input value={credentialLabel} onChange={(event) => setCredentialLabel(event.target.value)} placeholder="prod token / staging key" />
+                  <input className="ui-input" value={credentialLabel} onChange={(event) => setCredentialLabel(event.target.value)} placeholder="prod token / staging key" />
                 </label>
                 {authMode === 'oauth2' ? (
                   <>
                     <label className="settings-grid__wide">
                       Authorization Server URL（可选）
-                      <input value={oauthAuthorizationServerUrl} onChange={(event) => setOauthAuthorizationServerUrl(event.target.value)} placeholder="通常留空自动发现，仅自动发现失败时手动填" />
+                      <input className="ui-input" value={oauthAuthorizationServerUrl} onChange={(event) => setOauthAuthorizationServerUrl(event.target.value)} placeholder="通常留空自动发现，仅自动发现失败时手动填" />
                     </label>
                     <label>
                       Client ID
-                      <input value={oauthClientId} onChange={(event) => setOauthClientId(event.target.value)} placeholder="可选；留空则尝试动态注册" />
+                      <input className="ui-input" value={oauthClientId} onChange={(event) => setOauthClientId(event.target.value)} placeholder="可选；留空则尝试动态注册" />
                     </label>
                     <label>
                       Client Secret
-                      <input value={oauthClientSecret} onChange={(event) => setOauthClientSecret(event.target.value)} type="password" placeholder="可选；不会保存到 renderer" />
+                      <input className="ui-input" value={oauthClientSecret} onChange={(event) => setOauthClientSecret(event.target.value)} type="password" placeholder="可选；不会保存到 renderer" />
                     </label>
                     <label>
                       Scopes
-                      <input value={oauthScopes} onChange={(event) => setOauthScopes(event.target.value)} placeholder="以空格或逗号分隔" />
+                      <input className="ui-input" value={oauthScopes} onChange={(event) => setOauthScopes(event.target.value)} placeholder="以空格或逗号分隔" />
                     </label>
                     <label className="settings-grid__wide">
                       回调地址（应用固定，如认证服务器要求登记请复制加白名单）
                       <div className="settings-readonly-field">
-                        <input value={oauthRedirectUrl} readOnly onFocus={(event) => event.currentTarget.select()} />
+                        <input className="ui-input" value={oauthRedirectUrl} readOnly onFocus={(event) => event.currentTarget.select()} />
                         <button
                           type="button"
-                          onClick={() => void navigator.clipboard?.writeText(oauthRedirectUrl).then(() => setStatus('已复制回调地址。'))}
+                          className="ui-button is-compact"
+                          onClick={async () => {
+                            try {
+                              if (!navigator.clipboard) throw Error('clipboard unavailable');
+                              await navigator.clipboard.writeText(oauthRedirectUrl); setStatus('已复制回调地址。');
+                            } catch { setStatus('复制未完成，可选中上方回调地址手动复制。'); }
+                          }}
                         >
                           复制
                         </button>
@@ -791,18 +786,18 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                   <>
                     <label>
                       Secret
-                      <input value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} type="password" placeholder="不会保存到 renderer" />
+                      <input className="ui-input" value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} type="password" placeholder="不会保存到 renderer" />
                     </label>
                     {authMode === 'http_header' ? (
                       <label>
                         Header Name
-                        <input value={authHeaderName} onChange={(event) => setAuthHeaderName(event.target.value)} placeholder="X-API-Key" />
+                        <input className="ui-input" value={authHeaderName} onChange={(event) => setAuthHeaderName(event.target.value)} placeholder="X-API-Key" />
                       </label>
                     ) : null}
                     {authMode === 'stdio_env' ? (
                       <label>
                         Env Name
-                        <input value={authEnvName} onChange={(event) => setAuthEnvName(event.target.value)} placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" />
+                        <input className="ui-input" value={authEnvName} onChange={(event) => setAuthEnvName(event.target.value)} placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" />
                       </label>
                     ) : null}
                   </>
@@ -812,17 +807,18 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
             </>
             ) : null}
             </div>
-            <p className="settings-muted">默认保存会立即连接并检测认证状态；认证 Secret 只通过 IPC 送入 main 进程凭证库，renderer 不保存密钥。</p>
-            </div>
+            <p className="settings-muted">保存后检查连接与认证状态；访问密钥由本机凭证库保护。</p>
+            </fieldset>
             <div className="mcp-modal-footer">
-              <button type="button" className="mcp-modal-cancel" onClick={() => { resetForm(); setShowAddForm(false); }} disabled={busy}>取消</button>
-              <button type="button" className="mcp-modal-confirm" onClick={() => void handleSave()} disabled={busy || !canSave}>{showAdvancedSettings ? '保存连接' : '连接'}</button>
+              {status ? <p className="ui-form-feedback" role="status">{status}</p> : null}
+              <button type="button" className="ui-button mcp-modal-cancel" onClick={() => { if (requestFormClose()) closeForm(); }} disabled={busy}>取消</button>
+              <button type="button" className="ui-button mcp-modal-confirm" onClick={() => void handleSave()} disabled={busy || !canSave}>{showAdvancedSettings ? '保存连接' : '连接'}</button>
             </div>
         </Overlay>
       ) : null}
 
       <div className="mcp-grid-wrap">
-        {servers.length === 0 ? (
+        {reader.loaded && servers.length === 0 ? (
           <div className="mcp-empty-state">
             <strong>还没有 MCP 连接</strong>
             <p>点击右上角「添加连接」保存 server 后刷新 Manifest。</p>
@@ -839,14 +835,14 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                   role="button"
                   tabIndex={0}
                   onClick={() => { setSelectedId(id); setResourcePreview(null); setPromptPreview(null); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(id); setResourcePreview(null); setPromptPreview(null); } }}
+                  onKeyDown={(e) => { if (e.target !== e.currentTarget || isImeKey(e.nativeEvent)) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(id); setResourcePreview(null); setPromptPreview(null); } }}
                 >
                   <span className="skill-avatar" aria-hidden="true">{labelForServer(server).charAt(0).toUpperCase()}</span>
                   <div className="skill-card-body">
                     <div className="skill-card-title-row">
                       <strong className="skill-card-name">{labelForServer(server)}</strong>
                       <span className="skill-card-actions">
-                        {failed ? <span className="mcp-card-badge">FAILED</span> : null}
+                        {failed ? <span className="mcp-card-badge">连接未就绪</span> : null}
                         <Switch
                           checked={server.enabled !== false}
                           disabled={busy}
@@ -912,16 +908,16 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
               </dl>
 
               <div className="settings-actions settings-actions--wrap mcp-detail-actions">
-                <button type="button" disabled={busy} onClick={() => void runServerAction('刷新 Manifest', () => clientApi.mcpRefreshManifest({ serverId: serverIdOf(selected) }))}>刷新 Manifest</button>
+                <button type="button" className="ui-button" disabled={busy} onClick={() => void runServerAction('刷新 Manifest', () => clientApi.mcpRefreshManifest({ serverId: serverIdOf(selected) }))}>刷新 Manifest</button>
                 {selected.auth?.mode === 'oauth2' ? (
-                  <button type="button" disabled={busy} onClick={() => void handleStartOAuth(selected)}>
+                  <button type="button" className="ui-button" disabled={busy} onClick={() => void handleStartOAuth(selected)}>
                     {selected.auth?.oauth?.tokenStatus === 'available' ? '重新认证' : '登录授权'}
                   </button>
                 ) : selectedNeedsAuth ? (
-                  <button type="button" disabled={busy} onClick={() => void handlePromoteToOAuth(selected)}>进行身份验证</button>
+                  <button type="button" className="ui-button" disabled={busy} onClick={() => void handlePromoteToOAuth(selected)}>进行身份验证</button>
                 ) : null}
-                <button type="button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
-                <button type="button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
+                <button type="button" className="ui-button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
+                <button type="button" className="ui-button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
               </div>
 
               {selected.auth?.mode === 'oauth2' ? (
@@ -929,9 +925,9 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                   <p className="settings-help">推荐直接点击上方“{selected.auth?.oauth?.tokenStatus === 'available' ? '重新认证' : '登录授权'}”：会自动打开浏览器并完成回调换取 token，无需手动粘贴。access token 只会写入 main 进程凭证库。</p>
                   <label>
                     手动粘贴 authorization code（备用）
-                    <input value={oauthAuthorizationCode} onChange={(event) => setOauthAuthorizationCode(event.target.value)} placeholder="若自动回调不可用，浏览器授权后粘贴 code" />
+                    <input className="ui-input" value={oauthAuthorizationCode} onChange={(event) => setOauthAuthorizationCode(event.target.value)} placeholder="若自动回调不可用，浏览器授权后粘贴 code" />
                   </label>
-                  <button type="button" disabled={busy || !oauthAuthorizationCode.trim()} onClick={() => void handleFinishOAuth(selected)}>完成 OAuth 授权</button>
+                  <button type="button" className="ui-button" disabled={busy || !oauthAuthorizationCode.trim()} onClick={() => void handleFinishOAuth(selected)}>完成 OAuth 授权</button>
                 </div>
               ) : null}
 
@@ -1021,7 +1017,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                     <ul className="mcp-resource-list">
                       {selectedResources.map((resource) => (
                         <li key={resource.uri}>
-                          <button type="button" disabled={busy} onClick={() => void handleReadResource(resource.uri)}>{resource.name || resource.uri}</button>
+                          <button type="button" className="ui-button" disabled={busy} onClick={() => void handleReadResource(resource.uri)}>{resource.name || resource.uri}</button>
                           <small>{resource.uri}</small>
                         </li>
                       ))}
@@ -1041,7 +1037,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                     <ul className="mcp-resource-list">
                       {selectedPrompts.map((prompt) => (
                         <li key={prompt.name}>
-                          <button type="button" disabled={busy} onClick={() => void handleGetPrompt(prompt.name)}>{prompt.name}</button>
+                          <button type="button" className="ui-button" disabled={busy} onClick={() => void handleGetPrompt(prompt.name)}>{prompt.name}</button>
                           {prompt.description ? <small>{prompt.description}</small> : null}
                         </li>
                       ))}

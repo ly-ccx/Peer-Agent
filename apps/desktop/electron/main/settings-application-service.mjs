@@ -1,4 +1,4 @@
-import { projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import { isModelReasoningEffort, projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import {
   isRoutableProvider,
   normalizeProjectAgentSettings,
@@ -145,7 +145,7 @@ export function createSettingsApplicationService({
     return resolveStoredModelRouting(read().modelRouting, Array.isArray(providers) ? providers : []);
   }
 
-  function updateModelRouting(partial) {
+  function updateModelRouting(partial, providers) {
     const current = isRecord(read().modelRouting) ? read().modelRouting : {};
     const nextPartial = isRecord(partial) ? partial : {};
     const next = { ...current };
@@ -165,6 +165,14 @@ export function createSettingsApplicationService({
       }
       if (Object.keys(caps).length) next.roleSpendCaps = caps;
       else delete next.roleSpendCaps;
+    }
+    for (const [role, setting] of Object.entries(next.roles || {})) {
+      if (setting?.reasoningEffort === undefined) continue;
+      if (!isModelReasoningEffort(setting.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+      if (Array.isArray(providers)) {
+        const resolved = resolveRoleRoute({ role, providers, routing: next, spentUsd: Number.NaN });
+        if (!resolved.ok && resolved.reason === 'reasoning') throw new Error('INVALID_REASONING_EFFORT');
+      }
     }
     if (JSON.stringify(next) === JSON.stringify(current)) return current;
     merge({ modelRouting: next });
@@ -214,6 +222,7 @@ export function createSettingsApplicationService({
         role,
         ok: resolved.ok === true,
         modelProviderId: chosenId || null,
+        reasoningEffort: resolved.ok ? (resolved.selection.reasoningEffort ?? null) : null,
         label: chosen?.label || chosenId || '',
         source: resolved.ok ? (resolved.source || null) : null,
         missing: resolved.ok ? null : (resolved.missing || null),

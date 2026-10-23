@@ -12,14 +12,19 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
   assert.equal((await settingsMark.textContent()).trim(), '', 'the settings icon must not contain a character glyph');
   const footer = page.locator('.bot-column-footer');
   assert.equal(await page.locator('.bot-app-menu-details .sidebar-version-badge').count(), 1);
-  const initialFooter = await footer.boundingBox();
-  assert.ok(initialFooter.height <= 64, 'idle settings and update controls should form a compact footer');
+  // Compare one layout snapshot; separate remote reads can straddle window resize.
+  const geometry = await footer.evaluate(node => {
+    const box = element => { const rect = element.getBoundingClientRect(); return { y: rect.y, height: rect.height }; };
+    return { footer: box(node), settings: box(node.querySelector('.bot-app-menu-button')),
+      version: box(node.querySelector('.sidebar-version-badge')) };
+  });
+  report.updaterInitialGeometry = geometry;
+  assert.ok(geometry.footer.height <= 64, 'idle settings and update controls should form a compact footer');
   assert.equal(await badge.locator('.pa-dropdown-trigger').count(), 0, 'update channel belongs in settings only');
-  const settingsBox = await page.locator('.bot-app-menu-button').boundingBox();
-  const versionBox = await badge.boundingBox();
+  const settingsBox = geometry.settings, versionBox = geometry.version;
   assert.ok(Math.abs(settingsBox.y + settingsBox.height / 2 - versionBox.y - versionBox.height / 2) <= 1,
     'settings and version must share one row while idle');
-  report.updaterFooterHeight = initialFooter.height;
+  report.updaterFooterHeight = geometry.footer.height;
   checks.push('SVG settings entry and right-aligned update metadata form a compact footer without a fake account avatar');
   const settingsTrigger = page.locator('.bot-app-menu-button');
   assert.equal((await settingsTrigger.textContent()).trim(), '设置');

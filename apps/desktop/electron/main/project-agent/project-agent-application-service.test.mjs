@@ -20,6 +20,8 @@ const METHODS = [
   ['create', { kind: 'managed', name: '笔记' }],
   ['updateProfile', { workspaceId: 'ws-1', displayName: '新名字' }],
   ['deleteBot', { workspaceId: 'ws-1' }],
+  ['readInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
+  ['writeInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
   ['submitInput', { workspaceId: 'ws-1', inputId: 'in-1', text: '你好' }],
   ['readConversation', { workspaceId: 'ws-1' }],
   ['stopResponse', { workspaceId: 'ws-1', turnId: 't' }],
@@ -900,4 +902,21 @@ test('desktop forwards uploads on the existing input queue seam, including attac
   assert.equal(result.ok, true);
   assert.deepEqual(submitted.attachments, attachments);
   assert.equal(submitted.text, '');
+});
+
+
+test('draft persistence is gated by the existing bot directory and never submits or broadcasts execution', async () => {
+  const calls = [];
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    directory: { list: () => [], get: id => ({ ok: id === 'local' }) }, schedule: () => 1,
+    inputDrafts: { read: request => { calls.push(['read', request]); return { ok: true, snapshot: { revision: 0 } }; },
+      write: request => { calls.push(['write', request]); return { ok: true, revision: 1 }; } },
+    inputQueue: { submitInput() { assert.fail('draft writes never submit'); } },
+    broadcast() { assert.fail('draft writes never broadcast execution'); },
+  });
+  for (const surface of ['desktop', 'quick_chat', 'tui']) assert.equal(service.readInputDraft({ workspaceId: 'local', surface }).ok, true);
+  assert.equal(service.writeInputDraft({ workspaceId: 'local', surface: 'desktop', revision: 0 }).ok, true);
+  assert.equal(service.readInputDraft({ workspaceId: 'foreign', surface: 'desktop' }).ok, false);
+  assert.equal(service.writeInputDraft({ workspaceId: 'local', surface: 'remote' }).ok, false);
+  assert.equal(calls.length, 4);
 });

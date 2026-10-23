@@ -28,7 +28,7 @@
   gap: 0;
   min-height: 0;
   overflow: auto;
-  padding: 20px 0 28px;
+  padding: 20px 0 8px;
 }
 
 .bot-thread-shell {
@@ -78,9 +78,10 @@
 }
 
 .bot-thread-row {
+  --motion-layout-space: var(--space-4, 16px);
   display: flex;
   flex-direction: column;
-  padding-bottom: var(--space-4, 16px);
+  padding-bottom: var(--motion-layout-space);
 }
 
 /* A one-line status follows the message it belongs to. It does not take a full paragraph gap. */
@@ -89,6 +90,7 @@
 .bot-thread-row:has(> .bot-reply > .bot-reply-context:only-child),
 .bot-thread-row:has(+ .bot-thread-row > .bot-agent-activity),
 .bot-thread-row:has(+ .bot-thread-row > .bot-reply > .bot-reply-context:only-child) {
+  --motion-layout-space: 4px;
   padding-bottom: 4px;
 }
 
@@ -97,6 +99,7 @@
 ):has(
   + .bot-thread-row > .bot-system > .bot-cards > .bot-approval-receipt:only-child
 ) {
+  --motion-layout-space: 4px;
   padding-bottom: 4px;
 }
 
@@ -1005,6 +1008,17 @@
 
 .bot-thread-tail { display: flex; flex-direction: column; width: 100%; flex: none; }
 
+.bot-convo > .bot-background-work {
+  flex: none;
+  align-self: center;
+  width: var(--bot-column-width);
+  margin: 0 0 4px;
+}
+
+.bot-convo > .bot-background-work + .bot-composer {
+  margin-top: 0;
+}
+
 .bot-thread-tail > .bot-background-work {
   align-self: flex-start;
   margin: 0 0 4px;
@@ -1102,3 +1116,12 @@
   .bot-user.is-arriving .bot-user-content { animation: none; }
   .bot-composer { transition-duration: 1ms; }
 }
+
+.bot-attachment-preview { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; text-align: start; cursor: pointer; }
+.bot-attachment-text-preview { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: var(--space-5); background: var(--za-surface); color: var(--za-text); border: 1px solid var(--za-border); border-radius: var(--ui-radius-panel); }
+.bot-attachment-text-preview header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-3); }
+.bot-attachment-text-preview h2 { overflow-wrap: anywhere; }
+.bot-attachment-text-preview pre { max-height: 65dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bot-attachment-preview:focus-visible, .bot-attachment-image:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+
+.bot-evidence-preview { width: min(640px, 95vw); overflow: auto; padding: var(--space-4); }

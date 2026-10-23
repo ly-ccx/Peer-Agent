@@ -58,10 +58,9 @@ import {
   extractImagePathTokens,
   formatUserMessageBody,
   mergeImagePasteWithExistingDraft,
-  isSlashCommandInput,
-  loadLocalImageAttachments,
   registerImagePathKeys,
 } from './composer-image-paths.ts';
+import {createComposerSubmission} from './composer-submit.ts';
 import {
   approvalCardDetails,
   approvalDecisionForKey,
@@ -133,7 +132,7 @@ import {
   TUI_PERMISSION_POLICIES,
 } from './tui-permission-policy.ts';
 import { moveTuiSurfaceSelection } from './surface-state.ts';
-import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts';
+import { composerEnterAction, isEnterKeyName, runtimeControlAction } from './runtime-controls.ts';
 import { composerContentWidth, responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
 import {
   animatedToolStatusGlyph,
@@ -856,15 +855,15 @@ function ModelPickerMenu({
   );
 }
 
-function Composer({ controller, snapshot, disabled, focused, locale, onValueChange, onBeforeSend, onCommandInput, editorRef, imagePathRegistry, height = 1, backgroundColor }: {
+function Composer({ controller, disabled, focused, locale, onValueChange, onBeforeSend, onCommandInput, onNotice, editorRef, imagePathRegistry, height = 1, backgroundColor }: {
   readonly controller: ChatController;
-  readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
   readonly focused: boolean;
   readonly locale: TuiLocale;
   readonly onValueChange: (value: string) => void;
   readonly onBeforeSend: () => void;
   readonly onCommandInput: (input: string) => boolean;
+  readonly onNotice: (notice: string|null) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly imagePathRegistry: Map<string, string>;
   readonly height?: number;
@@ -873,6 +872,7 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
   const editor = editorRef;
   const chipifyPendingRef = useRef(false);
   const lastComposerValueRef = useRef('');
+  const submission = useRef(createComposerSubmission());
 
   const applyImageChips = () => {
     const current = editor.current;
@@ -902,30 +902,22 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
 
   const submit = () => {
     const value = editor.current?.plainText ?? '';
-    const trimmed = value.trim();
-    if (!trimmed || disabled || snapshot.status !== 'idle') return;
-    if (isSlashCommandInput(trimmed)) {
-      if (!onCommandInput(trimmed)) return;
-      editor.current?.clear();
-      lastComposerValueRef.current = '';
-      onValueChange('');
-      return;
-    }
-    editor.current?.clear();
-    lastComposerValueRef.current = '';
-    onValueChange('');
-    onBeforeSend();
-    void (async () => {
-      const attachment = await loadLocalImageAttachments(value, { pathByKey: imagePathRegistry });
-      // Keep typed text only. Pure-image turns send empty content + images[];
-      // ChatHistory renders a visible [Image] chip from message.images.
-      // Fall back to displayContent only when no images loaded (path missing).
-      const textToSend = attachment.text.trim()
-        ? attachment.text
-        : (attachment.images.length > 0 ? '' : attachment.displayContent);
-      if (!textToSend.trim() && attachment.images.length === 0) return;
-      void controller.send(textToSend, attachment.images.length > 0 ? { images: attachment.images } : undefined);
-    })();
+    if (disabled) return;
+    void submission.current.submit({ value, locale, controller, imagePathRegistry, onBeforeSend, onCommandInput, onNotice,
+      isCurrentDraft: () => editor.current?.plainText === value,
+      clearDraft: () => {
+        if (editor.current?.plainText !== value) return;
+        lastComposerValueRef.current = '';
+        editor.current?.clear();
+        onValueChange('');
+      },
+      restoreDraft: () => {
+        if (!editor.current || editor.current.plainText) return;
+        lastComposerValueRef.current = value;
+        editor.current.setText(value);
+        onValueChange(value);
+      },
+    });
   };
 
   return (
@@ -975,6 +967,7 @@ function ComposerDock({
   onValueChange,
   onBeforeSend,
   onCommandInput,
+  onNotice,
   editorRef,
   imagePathRegistry,
   status,
@@ -1005,6 +998,7 @@ function ComposerDock({
   readonly onValueChange: (value: string) => void;
   readonly onBeforeSend: () => void;
   readonly onCommandInput: (input: string) => boolean;
+  readonly onNotice: (notice: string|null) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly imagePathRegistry: Map<string, string>;
   readonly status: ComposerStatus;
@@ -1132,13 +1126,13 @@ function ComposerDock({
           <box flexGrow={1} paddingLeft={1}>
             <Composer
               controller={controller}
-              snapshot={snapshot}
               disabled={disabled}
               focused={focused}
               locale={locale}
               onValueChange={onValueChange}
               onBeforeSend={onBeforeSend}
               onCommandInput={onCommandInput}
+              onNotice={onNotice}
               editorRef={editorRef}
               imagePathRegistry={imagePathRegistry}
               height={composerLayout.inputRows}
@@ -1957,10 +1951,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     const updateCanPrompt = cliUpdateStatus.phase === 'available'
       && experience.surface.type === 'composer'
       && snapshot.status === 'idle'
+      && !composerDraft.trim()
       && !approval
       && !pendingUserInput
       && snapshot.plan?.status !== 'awaiting_approval';
-    if (updateCanPrompt && (key.name === 'y' || key.name === 'enter')) {
+    if (updateCanPrompt && (key.name === 'y' || isEnterKeyName(key.name))) {
       void cliUpdate?.install();
       return;
     }
@@ -2148,7 +2143,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         }));
         return;
       }
-      if (key.name === 'return' || key.name === 'enter') {
+      if (isEnterKeyName(key.name)) {
         const row = modelPickerSelectableRows[modelPickerSelection % modelPickerSelectableRows.length];
         if (!row || !modelSelection) return;
         if (modelPickerStage === 'models' && row.modelRef) {
@@ -2200,7 +2195,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         return;
       }
       const nextPolicy = permissionPolicyForKey(key.name)
-        ?? ((key.name === 'return' || key.name === 'enter')
+        ?? (isEnterKeyName(key.name)
           ? TUI_PERMISSION_POLICIES[permissionSelection % TUI_PERMISSION_POLICIES.length]?.policy ?? null
           : null);
       if (nextPolicy) {
@@ -2232,7 +2227,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         }));
         return;
       }
-      if (key.name === 'return' || key.name === 'enter') {
+      if (isEnterKeyName(key.name)) {
         handleResumeConversationSummary(resumeItems[resumeSurface.selectedIndex]);
         return;
       }
@@ -2372,7 +2367,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           : current);
         return;
       }
-      if (key.name === 'return' || key.name === 'enter') {
+      if (isEnterKeyName(key.name)) {
         const option = TUI_MODES[modeSelection];
         if (option) selectMode(option.mode);
         return;
@@ -2408,7 +2403,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           : current);
         return;
       }
-      if (key.name === 'return' || key.name === 'enter' || key.name === 'tab') {
+      if (isEnterKeyName(key.name) || key.name === 'tab') {
         key.preventDefault();
         key.stopPropagation();
         const command = slashItems[slashSelection] ?? slashItems[0];
@@ -2448,7 +2443,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           : current);
         return;
       }
-      if ((key.name === 'return' || key.name === 'enter') && goalPickerPlans.length > 0) {
+      if (isEnterKeyName(key.name) && goalPickerPlans.length > 0) {
         const plan = goalPickerPlans[goalPickerSelection] ?? goalPickerPlans[0];
         if (plan) selectGoalFromHistory(plan.planId);
         return;
@@ -2498,7 +2493,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         }
         return;
       }
-      if (skillSurface && (key.name === 'return' || key.name === 'enter')) {
+      if (skillSurface && isEnterKeyName(key.name)) {
         const skill = skillItems[selectedIndex] as TuiSkillSummary | undefined;
         if (!skill) return;
         const prompt = locale === 'zh-CN'
@@ -2552,7 +2547,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           : current);
         return;
       }
-      if ((key.name === 'return' || key.name === 'enter') && commandItems.length > 0) {
+      if (isEnterKeyName(key.name) && commandItems.length > 0) {
         const command = commandItems[commandSelection] ?? commandItems[0];
         if (!command) return;
         runCommand(command);
@@ -2619,7 +2614,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       }
       // Free-text draft in composer takes priority over Enter option confirm.
       const draft = (composerRef.current?.plainText ?? composerDraft).trim();
-      if ((key.name === 'return' || key.name === 'enter') && draft) {
+      if (isEnterKeyName(key.name) && draft) {
         return;
       }
       const answer = userInputDecisionForKey(key.name, userInputSelection, pendingUserInput.options);
@@ -2743,6 +2738,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 modelPickerShowHint={layout.showHints}
                 onBeforeSend={() => setRenderWindowState(createConversationRenderWindowState())}
                 onCommandInput={runSlashCommandInput}
+                onNotice={setCommandNotice}
                 onValueChange={(value) => {
                   setComposerDraft(value);
                   setExperience((current) => syncSlashSuggestions(current, value));
@@ -3141,6 +3137,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       {cliUpdateStatus.phase === 'available'
         && experience.surface.type === 'composer'
         && snapshot.status === 'idle'
+        && !composerDraft.trim()
         && !approval
         && !pendingUserInput
         && snapshot.plan?.status !== 'awaiting_approval' ? (
@@ -3222,6 +3219,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           modelPickerShowHint={layout.showHints}
           onBeforeSend={() => setRenderWindowState(createConversationRenderWindowState())}
           onCommandInput={runSlashCommandInput}
+          onNotice={setCommandNotice}
           onValueChange={(value) => {
             setComposerDraft(value);
             setExperience((current) => syncSlashSuggestions(current, value));

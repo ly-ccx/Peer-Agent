@@ -2,7 +2,7 @@
  * motion.css — 全局动效语义基元层（Single Source of Motion）
  * ----------------------------------------------------------------------------
  * 定位：把散落在各组件 CSS 的 keyframes 收敛为一组「语义命名」基元。
- *   - 5 组 / 13 个基元：入场 enter / 退场 exit / 脉冲 pulse / 流光 sheen / 进度 progress
+ *   - 入场 enter / 退场 exit / 脉冲 pulse / 流光 sheen / 进度 progress
  *   - 每个基元 = 一个 @keyframes motion-* + 一个 utility class .motion-*
  *   - 时长 / 缓动 / 位移一律引用 tokens.css 的 --za-motion-* 变量，禁止 magic number
  *   - 组件只需挂 class（或引用 animation-name），不再自定义时长曲线
@@ -22,6 +22,19 @@
 /* ---------------------------------------------------------------------------
  * 入场 enter — 元素挂载时的呈现（收敛自 ~15 个旧 keyframes）
  * ------------------------------------------------------------------------- */
+
+/* Fresh content expands its intrinsic footprint without moving existing rows at once. */
+@keyframes motion-enter-layout {
+  from { height: 0; padding-bottom: 0; }
+  to { height: auto; padding-bottom: var(--motion-layout-space, 0px); }
+}
+
+.motion-enter-layout {
+  interpolate-size: allow-keywords;
+  min-height: 0;
+  overflow: clip;
+  animation: motion-enter-layout var(--za-motion-medium) var(--za-ease-standard) backwards;
+}
 
 /* 纯淡入：最克制的入场，用于不需要位移的覆盖层内容 */
 @keyframes motion-enter-fade {

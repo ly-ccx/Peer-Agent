@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { checkEffortStability } from './bot-effort-stability-checks.mjs';
-import { checkModelSwitch } from './bot-model-switch-checks.mjs';
-import { modelMenuChannelName } from '@peer-agent/protocol';
+import { checkModelSwitch, chooseModelInPanel, openModelProvider } from './bot-model-switch-checks.mjs';
 
 /** Actual production DOM, keyboard and persistence; no replacement of product results. */
 export async function checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory, effortCommandFile }) {
@@ -40,8 +39,11 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   await checkSettings({ page, until, report, captureDirectory, effortCommandFile });
   await tabs.getByRole('tab', { name: '设置', exact: true }).focus();
   await page.keyboard.press('Home'); await page.keyboard.press('ArrowRight');
-  assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await focused(tabs.getByRole('tab', { name: '任务', exact: true })), true);
+  assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'arrows browse tabs without activating an expensive page');
+  assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'false');
   await page.keyboard.press('Enter');
+  assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('.bot-drawer-dock.is-open').count(), 1, 'tab Enter must not be intercepted by the shell');
   await trigger.click();
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'settings entry navigates from another drawer tab');
@@ -300,18 +302,13 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   await settingsFirstScreen(page);
   const row = role => form.locator('.bot-model-settings-row').filter({ has: page.getByText(role, { exact: true }) });
   const picker = role => row(role).locator('.pa-cascading-trigger');
-  const choose = async (role, model) => {
-    await picker(role).click();
-    const group = model ? modelMenuChannelName(model.providerName, model.model, model.authMethod, true) : '默认与档位';
-    await page.getByRole('menuitem', { name: group, exact: true }).click();
-    await page.getByRole('menuitemradio', { name: model?.label || '跟随全局', exact: true }).click();
-  };
+  const choose = (role, model) => chooseModelInPanel({ page, picker: picker(role), model });
   await choose('任务执行', second);
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.session_worker?.modelProviderId === second.id);
   await choose('对话模型', first);
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === first.id);
   const highEffort = first.reasoningEffortLevels.at(-1);
-  const strength = row('对话模型').locator('.reasoning-effort-trigger');
+  const strength = picker('对话模型');
   await until(() => strength.isEnabled(), Boolean);
   await strength.click();
   const slider = page.getByRole('slider');
@@ -324,13 +321,12 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.locator('.bot-profile').click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
-  await until(() => picker('对话模型').textContent(), text => text.includes(first.label));
-  assert.equal(await picker('任务执行').textContent(), second.label);
+  await until(() => picker('对话模型').locator('.model-selection-trigger-label').textContent(), text => text === first.label);
+  assert.equal(await picker('任务执行').locator('.model-selection-trigger-label').textContent(), second.label);
   assert.equal(await row('对话模型').locator('.bot-model-control').getAttribute('data-effort'), highEffort);
   if (captureDirectory) {
-    await picker('对话模型').click();
-    await page.getByRole('menuitem', { name: modelMenuChannelName(second.providerName, second.model, second.authMethod, true), exact: true }).click();
-    await page.getByRole('menuitemradio', { name: second.label, exact: true }).waitFor();
+    const panel = await openModelProvider({ page, picker: picker('对话模型'), model: second });
+    await panel.locator('.model-selection-model').filter({ has: page.getByText(second.label, { exact: true }) }).waitFor();
     await page.screenshot({ path: path.join(captureDirectory, 'settings-model-picker.png') });
     await page.keyboard.press('Escape');
   }
@@ -359,7 +355,7 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   await until(() => row('任务执行').locator('.bot-model-control').getAttribute('data-model-id'), id => id === restored.session_worker.resolution.selection.modelProviderId);
   if (effortCommandFile) {
     await page.getByRole('button', { name: '关闭', exact: true }).click();
-    const compactStrength = page.locator('.bot-composer .reasoning-effort-trigger');
+    const compactStrength = page.locator('.bot-composer .model-selection-trigger');
     await until(() => compactStrength.isEnabled(), Boolean); await compactStrength.click();
     await checkEffortStability({ page, slider: page.getByRole('slider'), strength: compactStrength, until,
       getBot: () => getBot(workspaceId), failNext: () => writeFileSync(effortCommandFile, JSON.stringify({ failNext: true })),
@@ -372,7 +368,7 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   report.botModelSettings = { fixedSelectionSaved: true, effortSaved: true, effortRetained: true, reopenRetained: true, modelSwitchSaved: true, inheritanceRestored: true,
     independentRoles: true, otherBotUnchanged: true, globalConfigUnchanged: true,
     scope: 'Production model catalogue projection, settings DOM, IPC validation and durable profile; no real model request' };
-  report.accessibility.push('bot models and declared reasoning strength save and survive reopen; cascading switch and inherit preserve other roles, bots and global routing');
+  report.accessibility.push('bot models and declared reasoning strength save and survive reopen; unified panel switch and inherit preserve other roles, bots and global routing');
 }
 
 async function settingsFirstScreen(page) {

@@ -18,8 +18,11 @@ function lineCount(relativePath: string): number {
 
 test('关闭抽屉时把焦点还给触发按钮', () => {
   const drawer = source('project-agent/drawer/BotProfileDrawer.tsx');
-  assert.match(drawer, /triggerRef\.current\?\.focus\(/);
-  assert.match(drawer, /Escape/);
+  assert.match(drawer, /useFocusScope\(bodyRef[\s\S]*restore: triggerRef/);
+  assert.match(drawer, /restoreFocusRef=\{triggerRef\}/);
+  assert.match(source('app/hooks/useFocusScope.ts'), /previous\?\.isConnected[\s\S]*previous\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(drawer, /useInteractionLayer[\s\S]*onClose: close/);
+  assert.match(source('app/hooks/useInteractionLayer.ts'), /event\.key === 'Escape'[\s\S]*latest\.current\.onClose\(\)/);
   assert.match(drawer, /from '\.\.\/\.\.\/app\/components\/Drawer'/);
 });
 
@@ -27,6 +30,8 @@ test('记忆页动作和回复芯片都经记忆 IPC', () => {
   const page = source('project-agent/drawer/MemoryTab.tsx');
   const calls = [...page.matchAll(/clientApi\.(\w+)/g)].map((match) => match[1]);
   assert.deepEqual([...new Set(calls)].sort(), [
+    'onProjectAgentChanged',
+    'openPath',
     'projectMemoryEdit',
     'projectMemoryExport',
     'projectMemoryForget',
@@ -52,6 +57,6 @@ test('设置项只经 IPC 写入', () => {
   assert.equal(settings.includes('modelRoutingUpdate'), false);
 });
 
-test('ChatSurface 行数不变', () => {
-  assert.equal(lineCount('chat/components/ChatSurface.tsx'), 3306);
+test('ChatSurface 不超过原模块预算', () => {
+  assert.ok(lineCount('chat/components/ChatSurface.tsx') <= 3306, '抽离逻辑可以减行，新增职责仍须放到独立模块');
 });

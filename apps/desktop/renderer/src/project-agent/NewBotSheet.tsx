@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef } from 'react';
+import { useId, useRef } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { useCompositionGuard } from '../app/hooks/useCompositionGuard';
 import { Overlay } from '../app/components/Overlay';
 import { PeerIcon } from '../ui/icons';
 import { validateManagedBotName } from './state/botListState';
@@ -18,6 +19,7 @@ interface NewBotSheetProps {
 
 function errorLabel(i18n: I18nRuntime, code: string): string {
   if (!code || code === 'CANCELLED') return '';
+  if (code === 'UNCONFIRMED') return i18n.t('forms.createUnconfirmed');
   if (code === 'INVALID_NAME') return i18n.t('projectAgent.list.nameInvalid');
   if (code === 'NAME_EXHAUSTED') return i18n.t('projectAgent.list.nameExhausted');
   return i18n.t('projectAgent.list.createFailed');
@@ -38,15 +40,13 @@ export function NewBotSheet({
   const nameRef = useRef<HTMLInputElement | null>(null);
   const checked = name.trim() ? validateManagedBotName(name) : null;
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const frame = window.requestAnimationFrame(() => nameRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [open]);
+  const composition = useCompositionGuard();
+  const hintId = `${titleId}-hint`, errorId = `${titleId}-error`;
 
   if (!open) return null;
 
-  const message = errorLabel(i18n, errorCode);
+  const invalid = checked?.ok === false;
+  const message = errorLabel(i18n, invalid ? 'INVALID_NAME' : errorCode);
   const hint = checked?.ok && checked.name !== name.trim()
     ? i18n.t('projectAgent.list.nameWillUse', { name: checked.name })
     : '';
@@ -65,7 +65,7 @@ export function NewBotSheet({
             <h2 id={titleId}>{i18n.t('projectAgent.list.newSheetTitle')}</h2>
             <button
               type="button"
-              className="bot-sheet-close"
+              className="bot-sheet-close ui-button is-icon"
               aria-label={i18n.t('projectAgent.list.close')}
               onClick={requestClose}
               disabled={busy}
@@ -75,25 +75,34 @@ export function NewBotSheet({
           </header>
           <form
             className="bot-sheet-blank"
+            aria-busy={busy}
+            onKeyDown={event => { if (composition.keyDown(event.nativeEvent) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }}
+            onKeyUp={event => composition.keyUp(event.nativeEvent)}
             onSubmit={(event) => {
               event.preventDefault();
-              if (!busy) onCreate();
+              if (!busy && checked?.ok && !composition.active()) onCreate();
             }}
           >
             <span className="bot-sheet-label">{i18n.t('projectAgent.list.blankBot')}</span>
             <span className="bot-sheet-copy">{i18n.t('projectAgent.list.blankBotHint')}</span>
             <input
               ref={nameRef}
-              className="bot-sheet-name"
+              data-overlay-autofocus
+              onCompositionStart={event => composition.start(event.currentTarget)}
+              onCompositionEnd={event => composition.end(event.currentTarget)}
+              aria-describedby={[hint ? hintId : null, message ? errorId : null].filter(Boolean).join(' ') || undefined}
+              aria-invalid={invalid || Boolean(message) || undefined}
+              className="bot-sheet-name ui-input"
               value={name}
               placeholder={i18n.t('projectAgent.list.namePlaceholder')}
               aria-label={i18n.t('projectAgent.list.namePlaceholder')}
               onChange={(event) => onName(event.target.value)}
               disabled={busy}
             />
-            {hint ? <p className="bot-sheet-hint">{hint}</p> : null}
-            {message ? <p className="bot-sheet-error" role="alert">{message}</p> : null}
-            <button type="submit" className="bot-sheet-submit" disabled={busy || !name.trim()}>
+            {hint ? <p id={hintId} className="bot-sheet-hint">{hint}</p> : null}
+            {message ? <p id={errorId} className="bot-sheet-error" role="alert">{message}</p> : null}
+            <span className="bot-sheet-hint" role="status">{busy ? i18n.t('projectAgent.list.creating') : ''}</span>
+            <button type="submit" className="bot-sheet-submit ui-button is-primary" disabled={busy || !checked?.ok}>
               {busy ? i18n.t('projectAgent.list.creating') : i18n.t('projectAgent.list.create')}
             </button>
           </form>

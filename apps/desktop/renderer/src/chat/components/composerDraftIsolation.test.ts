@@ -118,16 +118,18 @@ test('new task starts in main and stays on the first-run chat path', async () =>
 });
 
 test('Fast mode is a ChatGPT/Grok subscription composer control and follows both send paths', async () => {
-  const [surface, display, composer, settings] = await Promise.all([
+  const [surface, display, panel, selection, settings] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('./thread/TokenUsageDisplay.tsx'),
-    readSource('./thread/ReasoningEffortSlider.tsx'),
+    readSource('./thread/ModelSelectionPanel.tsx'),
+    readSource('./thread/modelSelection.ts'),
     readSource('../../app/components/LlmSettingsPanel.tsx'),
   ]);
 
-  assert.match(display, /defaultProvider\?\.authMethod === 'oauth_chatgpt' \|\| defaultProvider\?\.authMethod === 'oauth_grok'/);
-  assert.match(composer, /isZh \? '快速' : 'Fast'/);
-  assert.match(composer, /aria-pressed=\{fastMode\}/);
+  assert.match(selection, /authMethod === 'oauth_chatgpt' \|\| authMethod === 'oauth_grok'/);
+  assert.match(panel, /isZh \? '快速' : 'Fast'/);
+  assert.match(panel, /role="radio" aria-checked=\{fastMode\}/);
+  assert.match(display, /ComposerModelMenu/);
   assert.match(surface, /chatStartTask\(\{[\s\S]*fastMode/);
   assert.match(surface, /chatSend\(\{[^}]*fastMode/);
   assert.match(surface, /persistDraftComposer\(\{ fastMode: enabled \}\)/);

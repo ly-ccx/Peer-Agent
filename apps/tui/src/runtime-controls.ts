@@ -36,12 +36,18 @@ export function runtimeControlAction(input: RuntimeControlInput): RuntimeControl
 }
 
 export interface ComposerEnterInput {
+  readonly isComposing?: boolean;
   readonly keyName: string;
   readonly shift: boolean;
   readonly eventType: 'press' | 'repeat' | 'release';
 }
 
 export type ComposerEnterAction = 'submit' | 'newline' | 'suppress' | 'none';
+
+/** Raw LF and Kitty keypad Enter are distinct key names in OpenTUI. */
+export function isEnterKeyName(name: string): boolean {
+  return ['return', 'enter', 'linefeed', 'kpenter'].includes(name);
+}
 
 /**
  * Keeps the text area's multiline editing and message submission bindings separate.
@@ -50,7 +56,8 @@ export type ComposerEnterAction = 'submit' | 'newline' | 'suppress' | 'none';
  * while repeat/release events are suppressed so one physical key press acts once.
  */
 export function composerEnterAction(input: ComposerEnterInput): ComposerEnterAction {
-  const isEnter = input.keyName === 'return' || input.keyName === 'enter';
+  if (input.isComposing) return 'none';
+  const isEnter = isEnterKeyName(input.keyName);
   if (!isEnter) return 'none';
   if (input.eventType !== 'press') return 'suppress';
   return input.shift ? 'newline' : 'submit';

@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, wheelBotConversation, selectBotByName } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
 import { checkReplyPresence } from '../apps/desktop/scripts/bot-reply-presence-checks.mjs';
 import { runYieldFeedbackFixture } from '../apps/desktop/scripts/bot-yield-feedback-checks.mjs';
 import assert from 'node:assert/strict';
@@ -375,10 +375,10 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.setViewportSize(viewport);
   checks.push('second public paragraph arrives before completion, outside process; first DOM node and finished animation stay intact; reduced motion disables entry');
   // Return from another bot through read-conversation's live snapshot.
-  await page.locator('.bot-search').fill('project-001');
-  await page.locator('.bot-row').first().click(); await live.waitFor({ state: 'detached' });
-  await page.locator('.bot-search').fill('project-000');
-  await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-001'); await live.waitFor({ state: 'detached' });
+  await selectBotByName(page, 'project-000');
+  // Opening a bot restores its reading position; this scenario explicitly resumes latest.
+  if (await page.locator('.bot-thread-latest').count()) await page.locator('.bot-thread-latest').click();
   await live.getByText('我先看看项目的整体情况，整理好后告诉你重点。', { exact: true }).waitFor();
   checks.push('switching bots hides the other stream and restores the active snapshot');
   await openDetails(live);
@@ -387,7 +387,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     if (!(await delegated.evaluate(node => node.open))) await delegated.locator(':scope > summary').click();
   }
   // Reading history holds its position while the draft grows.
-  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = Math.max(1, node.scrollTop - 350); });
+  await wheelBotConversation(page, -350);
   await page.locator('.bot-thread-latest').waitFor();
   let readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 1.75);
@@ -425,12 +425,12 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   }
   await until(() => page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
   await page.locator('.bot-thread').evaluate(node => {
-    // Exercise a real DOM scroll whose event has not reached React when the delta arrives.
+    // Delay scroll delivery while preserving the actual wheel reading intent.
     const hold = event => event.stopImmediatePropagation();
     node.addEventListener('scroll', hold, true);
     globalThis.rcReleaseReadingScroll = () => node.removeEventListener('scroll', hold, true);
-    node.scrollTop = Math.max(1, node.scrollTop - 350);
   });
+  await wheelBotConversation(page, -350);
   readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 2.5);
   await until(() => live.textContent(), text => text.includes('项目概况看'));
@@ -604,8 +604,7 @@ export async function checkManualWakeRetry({ page, until, report, captureDirecto
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   command(0);
-  await page.locator('.bot-search').fill('project-001');
-  await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-001');
   const wakeFailure = page.locator('.bot-unavailable-reply').last();
   assert.equal(await wakeFailure.locator(':scope > p').innerText(), '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。');
   await wakeFailure.getByRole('button', { name: '继续尝试', exact: true }).click();
@@ -637,7 +636,7 @@ export async function checkManualWakeRetry({ page, until, report, captureDirecto
     noPrivateThinking: true, narrowFits: true, nativeLoaded: true, guardedCognitionDispatches: 1, persistedEventBatch: true };
   await page.setViewportSize(viewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
-  await page.locator('.bot-search').fill('project-000'); await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-000');
   checks.push('manual retry of persisted wake shows progress while pending, ends in one reply and retains public paragraphs');
 }
 

@@ -1,3 +1,4 @@
+import { useInteractionLayer } from '../hooks/useInteractionLayer';
 import {
   cloneElement,
   useCallback,
@@ -39,6 +40,8 @@ export function Tooltip({
   const anchorRef = useRef<HTMLElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intent = useRef({ anchor: false, tip: false, focus: false, dismissed: false });
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number; place: TooltipPlacement }>({
     top: 0,
@@ -55,18 +58,31 @@ export function Tooltip({
     }
   }, []);
 
-  const show = useCallback(() => {
-    if (!hasContent) return;
-    clearOpenTimer();
-    openTimer.current = setTimeout(() => setOpen(true), Math.max(0, openDelayMs));
-  }, [clearOpenTimer, hasContent, openDelayMs]);
-
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  }, []);
   const hide = useCallback(() => {
+    clearOpenTimer(); clearCloseTimer(); setOpen(false);
+  }, [clearOpenTimer, clearCloseTimer]);
+  const show = useCallback(() => {
+    clearCloseTimer();
+    if (!hasContent || intent.current.dismissed) return;
     clearOpenTimer();
-    setOpen(false);
-  }, [clearOpenTimer]);
-
-  useEffect(() => () => clearOpenTimer(), [clearOpenTimer]);
+    openTimer.current = setTimeout(() => {
+      if (!intent.current.dismissed && (intent.current.anchor || intent.current.focus || intent.current.tip)) setOpen(true);
+    }, Math.max(0, openDelayMs));
+  }, [clearOpenTimer, clearCloseTimer, hasContent, openDelayMs]);
+  const leave = useCallback(() => {
+    clearOpenTimer(); clearCloseTimer();
+    if (intent.current.anchor || intent.current.tip || intent.current.focus) return;
+    intent.current.dismissed = false;
+    // Bridge the measured anchor/tip gap without making the content disappear under the pointer.
+    closeTimer.current = setTimeout(hide, 100);
+  }, [clearOpenTimer, clearCloseTimer, hide]);
+  useEffect(() => () => { clearOpenTimer(); clearCloseTimer(); }, [clearOpenTimer, clearCloseTimer]);
+  useInteractionLayer(open && hasContent, { roots: [tooltipRef], trigger: anchorRef, passive: true, restoreFocus: false, closeOnTriggerRemoval: true,
+    onClose: () => { intent.current.dismissed = true; hide(); } });
 
   // 按锚点与浮层实际尺寸计算位置；视口上方空间不足时翻到下方。
   // 抽成 updatePosition，供打开后 layout 与滚动/resize 共用：
@@ -75,6 +91,7 @@ export function Tooltip({
     const anchor = anchorRef.current;
     const tip = tooltipRef.current;
     if (!anchor || !tip) return;
+    if (!anchor.isConnected) { hide(); return; }
     const a = anchor.getBoundingClientRect();
     const t = tip.getBoundingClientRect();
     const margin = 8;
@@ -88,7 +105,7 @@ export function Tooltip({
     let left = a.left + a.width / 2 - t.width / 2;
     left = Math.max(margin, Math.min(left, window.innerWidth - t.width - margin));
     setCoords({ top, left, place });
-  }, [placement]);
+  }, [placement, hide]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -115,21 +132,21 @@ export function Tooltip({
         (ref as { current: HTMLElement | null }).current = node;
       }
     },
-    'aria-describedby': hasContent ? tooltipId : undefined,
+    'aria-describedby': [(children.props as { 'aria-describedby'?: string })['aria-describedby'], open && hasContent ? tooltipId : ''].filter(Boolean).join(' ') || undefined,
     onMouseEnter: (e: unknown) => {
-      show();
+      intent.current.anchor = true; show();
       (children.props as { onMouseEnter?: (e: unknown) => void }).onMouseEnter?.(e);
     },
     onMouseLeave: (e: unknown) => {
-      hide();
+      intent.current.anchor = false; leave();
       (children.props as { onMouseLeave?: (e: unknown) => void }).onMouseLeave?.(e);
     },
     onFocus: (e: unknown) => {
-      show();
+      intent.current.focus = true; show();
       (children.props as { onFocus?: (e: unknown) => void }).onFocus?.(e);
     },
     onBlur: (e: unknown) => {
-      hide();
+      intent.current.focus = false; leave();
       (children.props as { onBlur?: (e: unknown) => void }).onBlur?.(e);
     },
   } as Record<string, unknown>);
@@ -141,6 +158,8 @@ export function Tooltip({
             ref={tooltipRef}
             id={tooltipId}
             role="tooltip"
+            onMouseEnter={() => { intent.current.tip = true; clearCloseTimer(); }}
+            onMouseLeave={() => { intent.current.tip = false; leave(); }}
             className={`app-tooltip app-tooltip--${coords.place}`}
             style={{ top: coords.top, left: coords.left } as CSSProperties}
           >

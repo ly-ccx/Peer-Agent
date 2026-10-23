@@ -50,7 +50,7 @@ import {
 } from './tui-mode.ts';
 import { normalizeLocalAccessLevel } from './tui-permission-policy.ts';
 
-export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny';
+export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny' | 'cancel';
 
 export interface PendingApproval {
   readonly prompt: NodeRuntimePermissionPrompt;
@@ -295,13 +295,13 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
           if (policyWatch) clearInterval(policyWatch);
           const policyChanged = accessFor(context).stamp !== access.stamp || !accessFor(context).valid;
           context?.signal?.removeEventListener('abort', abort);
-          let permitted = decision !== 'deny' && !context?.signal?.aborted && (!project || project.holdsLease())
+          let permitted = (decision === 'allow-once' || decision === 'allow-session') && !context?.signal?.aborted && (!project || project.holdsLease())
             && accessFor(context).valid && accessFor(context).stamp === access.stamp;
           let persistenceFailed = false;
           if (record) {
             try {
-              if (!store.append({ ...record, state: permitted ? 'approved' : policyChanged ? 'expired' : context?.signal?.aborted ? 'stale' : 'denied',
-                ...(policyChanged ? { decisionReason: 'permission_policy_changed' } : {}),
+              if (!store.append({ ...record, state: permitted ? 'approved' : policyChanged ? 'expired' : context?.signal?.aborted ? 'stale' : decision === 'cancel' ? 'cancelled' : 'denied',
+                ...(policyChanged ? { decisionReason: 'permission_policy_changed' } : decision === 'cancel' ? { decisionReason: 'permission_cancelled' } : {}),
                 decidedAt: new Date().toISOString(), decidedBy: policyChanged ? 'policy' : 'local_ui' })) persistenceFailed = true;
             } catch { persistenceFailed = true; }
             if (persistenceFailed) permitted = false;
@@ -313,7 +313,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
           } else if (permitted && decision === 'allow-session' && approvalKey) sessionApprovals.add(approvalKey);
           if (activeApproval === approval) completeApproval();
           else { const index = approvalQueue.indexOf(approval); if (index >= 0) approvalQueue.splice(index, 1); }
-          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : persistenceFailed ? 'permission_unavailable' : policyChanged ? 'permission_policy_changed' : 'denied_in_tui',
+          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : persistenceFailed ? 'permission_unavailable' : policyChanged ? 'permission_policy_changed' : decision === 'cancel' ? 'permission_cancelled' : 'denied_in_tui',
             ...(prompt.capabilityId === 'local.image.read' ? { validate: () => (access.stamp.startsWith('bot:') || requestedEpoch === accessEpoch)
               && !context?.signal?.aborted && (!project || project.holdsLease())
               && Boolean(resolvePermissionPrincipal({ workspaceId: project?.workspaceId, conversationId: context?.conversationId,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
+import { usePointerResize } from '../app/hooks/usePointerResize';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
 import { VersionBadge } from '../app/components/VersionBadge';
@@ -59,7 +60,6 @@ export interface BotListShellProps {
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
   readonly onOpenConversation: (conversationId: string | number) => void;
-  readonly onCreateAutomation: () => void;
   readonly onClosePage: () => void;
   readonly notificationFocus?: {
     readonly workspaceId: string;
@@ -90,11 +90,11 @@ export function BotListShell({
   onOpenAutomations,
   onOpenCapabilities,
   onOpenConversation,
-  onCreateAutomation,
   onClosePage,
   notificationFocus = null,
 }: BotListShellProps) {
   const list = useBotList();
+  const resizeGesture = usePointerResize();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
@@ -291,25 +291,15 @@ export function BotListShell({
             : i18n.t('projectAgent.list.empty');
 
   const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
     const handle = event.currentTarget;
     const startX = event.clientX;
     const startWidth = list.width;
-    document.body.style.cursor = 'col-resize';
     // 拖拽全程保持高亮：:hover 在指针移出 6px 命中区（含快速外甩）时会丢掉，
     // 只有 data-active 能让整段拖拽稳定显示强调色。与 SidebarResizer 同写法。
-    handle.setAttribute('data-active', 'true');
-    const move = (ev: PointerEvent) => {
-      list.setWidth(clampBotListWidth(startWidth + ev.clientX - startX));
-    };
-    const up = () => {
-      document.body.style.cursor = '';
-      handle.removeAttribute('data-active');
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    if (resizeGesture.start(event, {
+      onMove: x => list.setWidth(clampBotListWidth(startWidth + x - startX)),
+      onEnd: committed => { if (!committed) list.setWidth(startWidth); handle.removeAttribute('data-active'); },
+    })) handle.setAttribute('data-active', 'true');
   };
 
   return (
@@ -435,7 +425,6 @@ export function BotListShell({
                 defaultWorkspace={workspacePath}
                 initialRunTarget={automationRunTarget}
                 onOpenConversation={onOpenConversation}
-                onCreateNew={onCreateAutomation}
               />
             ) : (
               <CapabilitiesPanel />
@@ -608,7 +597,7 @@ export function BotListShell({
         onBind={() => {
           setErrorCode('');
           void list.createBind().then((result) => {
-            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
+            if (!result.ok && result.code !== 'CANCELLED' && result.code !== 'BUSY') setErrorCode(result.code || 'FAILED');
           });
         }}
         onCreate={() => {
@@ -619,8 +608,8 @@ export function BotListShell({
           }
           setErrorCode('');
           void list.createManaged(checked.name).then((result) => {
-            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
-            else setName('');
+            if (!result.ok && result.code !== 'CANCELLED' && result.code !== 'BUSY') setErrorCode(result.code || 'FAILED');
+            else if (result.ok) setName('');
           });
         }}
         onClose={() => {

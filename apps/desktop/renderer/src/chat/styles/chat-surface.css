@@ -2006,6 +2006,44 @@
   border-radius: var(--ui-radius-pill);
 }
 
+.model-selection-control {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.model-selection-trigger .pa-cascading-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+}
+
+.model-selection-trigger .model-selection-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--graphite-base);
+  font-weight: 560;
+}
+
+.model-selection-trigger .model-selection-trigger-effort {
+  flex: none;
+  margin-inline-start: 1px;
+  color: color-mix(in srgb, var(--graphite-mute) 92%, transparent);
+  font-size: 0.84em;
+  font-weight: 420;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.model-selection-fast-mark {
+  flex: none;
+  color: var(--azure-seal);
+}
+
+
 .composer-model-dropdown .pa-dropdown-trigger {
   max-width: 160px;
 }
@@ -4376,7 +4414,8 @@ button.chat-header-cap-item:focus-visible {
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.pa-cascading-trigger:disabled {
+.pa-cascading-trigger:disabled,
+.model-selection-trigger[aria-disabled=true] {
   cursor: default;
   opacity: 0.6;
 }

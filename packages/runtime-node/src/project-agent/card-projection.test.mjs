@@ -127,7 +127,7 @@ test('宿主已经终态的事实直接投影为已解决，不必另写', () =>
   }
 });
 
-test('卡片解决后重开存储，事实仍在时状态还在', () => {
+test('历史显示解决记录不能覆盖当前未决定的权限事实，重开仍以宿主事实为准', () => {
   const root = tempRoot();
   try {
     const first = createCardProjection({
@@ -151,13 +151,9 @@ test('卡片解决后重开存储，事实仍在时状态还在', () => {
     });
     assert.equal(again.length, 1);
     assert.equal(again[0].cardId, 'card:approval:ap-1');
-    assert.equal(again[0].resolvedState, 'resolved');
-    assert.deepEqual(again[0].resolution, {
-      source: 'store',
-      state: 'approved',
-      at: '2026-09-27T03:00:00.000Z',
-    });
-    assert.deepEqual(again[0].actions, []);
+    assert.equal(again[0].resolvedState, 'open');
+    assert.equal(again[0].resolution, undefined);
+    assert.ok(again[0].actions.length > 0);
     assert.deepEqual(reopened.project('ws-1', {
       approvals: [{ approvalId: 'ap-1', state: 'open', summary: '写文件' }],
     }), again);
@@ -261,4 +257,18 @@ test('image approvals retain a specific scope choice after restart and grant rec
   assert.equal(cards.length, 1);
   assert.equal(cards[0].content, '/tmp/screen.png');
   assert.equal(cards[0].actions.find(a => a.id === 'allow_task').payload.capabilityId, 'local.image.read');
+});
+
+
+test('stored approval and result acceptance claims cannot resolve open host facts', () => {
+  const snapshot = { approvals: [{approvalId:'permission',state:'open'}, {approvalId:'plan:a',capabilityId:'goal.plan',state:'stale'}],
+    confirmations:[{sessionId:'task',needsConfirm:true,accepted:false}] };
+  const records = [{cardId:'card:approval:permission',resolvedState:'resolved',resolution:'approved'},
+    {cardId:'card:plan_approval:plan:a',resolvedState:'resolved',resolution:'approved'},
+    {cardId:'card:confirm_result:task',resolvedState:'resolved',resolution:'accepted'}];
+  const cards = projectCards('ws', snapshot, records);
+  assert.equal(cards.length,3);
+  for (const card of cards) { assert.equal(card.resolvedState,'open'); assert.ok(card.actions.length); }
+  const expired = projectCards('ws',{approvals:[{approvalId:'permission',state:'expired',decisionReason:'permission_timeout'}]},records)[0];
+  assert.equal(expired.resolution.state,'expired'); assert.deepEqual(expired.actions,[]);
 });

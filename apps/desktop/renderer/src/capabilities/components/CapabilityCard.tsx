@@ -13,6 +13,7 @@ export function CapabilityCard({
     <button
       type="button"
       className={`capability-card ${active ? 'active' : ''} ${item.locality === 'local' ? 'local' : ''}`}
+      aria-pressed={active}
       onClick={() => onSelect(item)}
     >
       <span className="capability-card-marker" aria-hidden="true" />

@@ -26,6 +26,10 @@
 }
 
 .particle-shatter-source.is-shattering {
+  pointer-events: none;
+}
+
+.particle-shatter-source[data-peer-shatter-painted="true"] {
   visibility: hidden;
   pointer-events: none;
 }
@@ -57,9 +61,10 @@
     display: none !important;
   }
 
-  .particle-shatter-source.is-shattering {
-    opacity: 0;
-    transition: opacity 180ms ease;
+  .particle-shatter-source.is-shattering,
+  .particle-shatter-source[data-peer-shatter-painted="true"] {
+    visibility: visible;
+    opacity: 1;
   }
 
   .particle-shatter-host.is-exiting {

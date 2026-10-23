@@ -54,6 +54,32 @@ Starting a session in the knowledge repo does not make the knowledge repo the de
 
 Do not recreate, stage, or submit architecture / design knowledge under `docs/architecture/*` or other knowledge trees in this code repo unless the user explicitly asks. If a code change would normally require architecture documentation, explain the architecture impact in the response and write durable knowledge into `peer-knowledge` instead.
 
+## Product Experience Standard (2026-10-23)
+
+All future product design and implementation must follow Peer’s own experience standard. Resolve the companion knowledge root above, then read the relevant sections before changing a product surface, copy, input behavior, state feedback, keyboard/focus/scroll behavior, or animation:
+
+- `peer-knowledge/knowledge/specifications/peer-product-experience-standard.md` — the current Frost visual and component baseline.
+- `peer-knowledge/knowledge/specifications/peer-human-agent-interaction-contract.md` — the human/agent interaction contract.
+- `peer-knowledge/knowledge/specifications/motion-system.md` — motion semantics, shared primitives, interruption and reduced-motion behavior.
+- `peer-knowledge/knowledge/specifications/transition-system.md` — continuity of identity, drafts, focus, reading position and recovery across pages, layers and objects.
+- `peer-knowledge/playbook/product-experience-development.md` — implementation and review workflow.
+
+The product north star and architecture governance retain their respective authority. These standards supersede conflicting experience rules in older design documents; historical demos and source research are references, not competing standards. `peer-knowledge/design/product/open-claude-ui-study.md` records the upstream study and adoption decisions.
+
+Implementation rules:
+
+- Preserve six invariants: acknowledged intent, clear action ownership, bounded execution, evidence-backed results, recoverable interruption, and user control of attention.
+- Reuse existing Frost/`--ui-*` tokens, shared components, SVG icons, motion primitives and reducer/kernel seams. Do not import a second design system or copy upstream brand values and physics constants into components.
+- Protect IME composition, drafts, focus and reading position. Background progress must not steal focus or resume auto-scroll after the user has chosen to read history.
+- Render authorization, execution, verification and acceptance from existing structured facts. A click, timer, animation or assistant sentence must never create permission truth, successful execution or Evidence.
+- Treat motion as presentation: short, interruptible, semantically useful, and complete without animation. Preserve static end states and recovery when motion/transparency is reduced or APIs are unavailable.
+- Record the user goal, relevant states, fact source, controls and recovery for the changed flow. Migrate touched paths within scope; do not turn a small change into an unsolicited product rewrite.
+- Follow Validation Scope below: ordinary work receives content/diff review; tests and screenshot/interaction regression are deferred to release unless explicitly requested. This standard does not create a daily validation gate.
+
+Current surface/component coverage lives in `peer-knowledge/design/product/peer-interaction-standardization-matrix.md`; UI, motion and transition coverage lives in `peer-knowledge/design/product/peer-ui-motion-transition-matrix.md`. Follow `peer-knowledge/design/product/peer-product-renovation-plan.md` for scoped work packages. Update the relevant matrix entries when adding or changing pages, components or states; static implementation is not release acceptance.
+
+These are development instructions. They do not add runtime capabilities, change permission or acceptance policy, or authorize a new System Context injection path. Any such boundary change still requires A/B-level handling.
+
 ## Non-Negotiable Runtime Chain
 
 All local capabilities must flow through:

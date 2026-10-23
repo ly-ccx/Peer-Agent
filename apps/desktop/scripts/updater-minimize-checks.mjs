@@ -146,8 +146,11 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
         sample();
       }, { once: true });
     });
-    await completionButton.click();
-    await emitUpdaterEvent({ type: 'update-downloaded', version: '0.1.0-rc.99' });
+    // Arm host delivery before the real click. Waiting for Playwright's click
+    // round trip can otherwise deliver completion after the entire exit.
+    const completed = emitUpdaterEvent({ type: 'update-downloaded', version: '0.1.0-rc.99' }, { afterDownloadCall: 4 });
+    const [, completionReceipt] = await Promise.all([completionButton.click(), completed]);
+    assert.equal(completionReceipt.downloadCalls, 4, 'the completion fixture waits for the actual fourth download invocation');
     const completionFrames = await page.waitForFunction(() => window.rcUpdateCompletionFrames).then(handle => handle.jsonValue());
     report.updaterMinimize.completionFrames = completionFrames;
     const exitingFrames = completionFrames.filter(frame => frame.connected && frame.minimizing);

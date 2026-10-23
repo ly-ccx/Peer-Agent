@@ -19,6 +19,7 @@ export function AttentionSheet({ workspaceId, i18n, onClose, onLocate, onChanged
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [revision, setRevision] = useState(0);
   const epoch = useRef(0);
+  const refreshedDeadline = useRef<string | null>(null);
   const locateAfterClose = useRef<BotAttentionItem | null>(null);
   const reload = () => { setRevision(n => n + 1); onChanged(); };
   useEffect(() => {
@@ -43,6 +44,22 @@ export function AttentionSheet({ workspaceId, i18n, onClose, onLocate, onChanged
     const stopConversation = clientApi.onProjectAgentConversationChanged(changed);
     return () => { stop(); stopConversation(); if (timer) clearTimeout(timer); };
   }, [workspaceId]);
+  useEffect(() => {
+    if (state !== 'ready') return;
+    const due = items.filter(item => (!workspaceId || item.workspaceId === workspaceId) && Number.isFinite(Date.parse(item.expiresAt ?? '')))
+      .sort((a, b) => Date.parse(a.expiresAt!) - Date.parse(b.expiresAt!))[0];
+    if (!due) return;
+    const key = `${due.workspaceId}:${due.id}:${due.expiresAt}`;
+    if (refreshedDeadline.current === key) return;
+    // A deadline requests fresh host facts; the clock never resolves an item.
+    // One attempt per elapsed deadline also bounds retries under clock skew.
+    const timer = setTimeout(() => {
+      if (Date.now() >= Date.parse(due.expiresAt!)) refreshedDeadline.current = key;
+      setRevision(value => value + 1);
+      onChanged();
+    }, Math.min(2147483647, Math.max(0, Date.parse(due.expiresAt!) - Date.now()) + 25));
+    return () => clearTimeout(timer);
+  }, [items, state, workspaceId]);
   const grouped = new Map<string, BotAttentionItem[]>();
   for (const item of items) grouped.set(item.workspaceId, [...(grouped.get(item.workspaceId) || []), item]);
   return <Overlay ariaLabel={i18n.t('projectAgent.attention.title')} panelClassName="bot-sheet bot-attention-sheet" onClose={() => { const target = locateAfterClose.current; onClose(); if (target) onLocate(target); }}>

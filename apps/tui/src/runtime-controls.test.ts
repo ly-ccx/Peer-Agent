@@ -73,6 +73,13 @@ describe('runtime controls', () => {
     })).toBe('submit');
   });
 
+  for(const keyName of ['linefeed','kpenter'])test(`handles terminal ${keyName} as Enter without losing Shift or repeat semantics`,()=>{
+    expect(composerEnterAction({keyName,shift:false,eventType:'press'})).toBe('submit');
+    expect(composerEnterAction({keyName,shift:true,eventType:'press'})).toBe('newline');
+    expect(composerEnterAction({keyName,shift:false,eventType:'repeat'})).toBe('suppress');
+    expect(composerEnterAction({keyName,shift:false,eventType:'release'})).toBe('suppress');
+  });
+
   test('maps Shift+Enter to newline so the composer can insert a line', () => {
     expect(composerEnterAction({
       keyName: 'return',
@@ -111,4 +118,15 @@ describe('runtime controls', () => {
       eventType: 'press',
     })).toBe('none');
   });
+});
+
+
+test('Enter aliases submit once and composition never submits', () => {
+  for (const keyName of ['enter','return','linefeed','kpenter']) {
+    expect(composerEnterAction({keyName,shift:false,eventType:'press'})).toBe('submit');
+    expect(composerEnterAction({keyName,shift:false,eventType:'repeat'})).toBe('suppress');
+    expect(composerEnterAction({keyName,shift:false,eventType:'release'})).toBe('suppress');
+    expect(composerEnterAction({keyName,shift:true,eventType:'press'})).toBe('newline');
+    expect(composerEnterAction({keyName,shift:false,eventType:'press',isComposing:true})).toBe('none');
+  }
 });

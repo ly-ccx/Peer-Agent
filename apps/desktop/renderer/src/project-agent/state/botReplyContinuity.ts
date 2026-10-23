@@ -27,7 +27,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
   const answered = answeredInputIds(messages);
   const local = new Map(awaiting.map(input => [`input-${input.inputId}`, input]));
   for (const input of pending) {
-    if (input.state === 'failed') local.delete(`input-${input.inputId}`);
+    if (input.state === 'failed' || input.state === 'unknown') local.delete(`input-${input.inputId}`);
     else local.set(`input-${input.inputId}`, { ...local.get(`input-${input.inputId}`), ...input });
   }
   // Reopen only the most recent unanswered input run. Absence of Activity is not execution truth.
@@ -35,7 +35,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
   for (const message of [...messages].reverse()) {
     if (message.kind !== 'user_input' || !message.inputId) continue;
     if (answered.has(message.id) || message.dispositions.some(mark => ['stopped', 'superseded', 'out_of_scope'].includes(mark.kind))) break;
-    if (message.pending !== 'failed') restored.set(message.id, { inputId: message.inputId, createdAt: message.createdAt });
+    if (message.pending !== 'failed' && message.pending !== 'unknown') restored.set(message.id, { inputId: message.inputId, createdAt: message.createdAt });
   }
   const result: BotConversationViewRow[] = [];
   const open = new Map<string, MutableReply>();

@@ -6,6 +6,6 @@ const readAppSource = () => readFile(new URL('../App.tsx', import.meta.url), 'ut
 
 test('app boots into the current task page by default', async () => {
   const app = await readAppSource();
-  assert.match(app, /const \[activePage, setActivePage\] = useState<AppPage>\('chat'\);/);
-  assert.doesNotMatch(app, /const \[activePage, setActivePage\] = useState<AppPage>\('home'\);/);
+  assert.match(app, /const \[activePage, setActivePage\] = useSettingsAwarePage<AppPage>\('chat'\);/);
+  assert.doesNotMatch(app, /const \[activePage, setActivePage\] = useSettingsAwarePage<AppPage>\('home'\);/);
 });

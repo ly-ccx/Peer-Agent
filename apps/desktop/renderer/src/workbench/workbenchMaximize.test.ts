@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 const contextSource = readFileSync(new URL('./WorkbenchContext.tsx', import.meta.url), 'utf8');
+const resizeSource = readFileSync(new URL('../app/hooks/usePointerResize.ts', import.meta.url), 'utf8');
 const panelSource = readFileSync(new URL('./WorkbenchPanel.tsx', import.meta.url), 'utf8');
 const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.meta.url), 'utf8');
 const sidebarStyles = readFileSync(new URL('../styles/sidebar.css', import.meta.url), 'utf8');
@@ -51,9 +52,11 @@ describe('workbench maximize behavior', () => {
   });
 
   it('captures the workbench resizer pointer and clears the drag session on cancel', () => {
-    assert.match(panelSource, /setPointerCapture\(pointerId\)/);
-    assert.match(panelSource, /addEventListener\('pointercancel', onUp\)/);
-    assert.match(panelSource, /addEventListener\('lostpointercapture', onUp\)/);
+    assert.match(panelSource, /usePointerResize\(\)/);
+    assert.match(panelSource, /resize\.start\(event/);
+    assert.match(resizeSource, /setPointerCapture\(pointerId\)/);
+    assert.match(resizeSource, /addEventListener\('pointercancel', abortPointer\)/);
+    assert.match(resizeSource, /addEventListener\('lostpointercapture', abort\)/);
     assert.match(panelSource, /dataset\.workbenchResizing = 'true'/);
     assert.match(panelSource, /delete document\.documentElement\.dataset\.workbenchResizing/);
     assert.match(panelSource, /delete resizer\.dataset\.active/);

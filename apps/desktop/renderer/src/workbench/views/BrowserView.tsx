@@ -2,6 +2,7 @@ import { PeerIcon } from '../../ui/icons';
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -11,7 +12,7 @@ import {
   type Ref,
 } from 'react';
 import { clientApi } from '../../clientApi';
-import { ResourceTabStrip } from '../ResourceTabStrip';
+import { ResourceTabStrip, resourceTabIds } from '../ResourceTabStrip';
 import {
   BROWSER_HOME_URL,
   activateBrowserTab,
@@ -87,6 +88,7 @@ interface BrowserTabRuntimeState {
 }
 
 interface BrowserPageProps {
+  readonly idPrefix: string;
   readonly tab: BrowserTabSession;
   readonly active: boolean;
   readonly conversationId: string | null;
@@ -222,6 +224,7 @@ function IconMore() {
 }
 
 function BrowserPage({
+  idPrefix,
   tab,
   active,
   conversationId,
@@ -357,6 +360,8 @@ function BrowserPage({
     <webview
       ref={webviewRef as unknown as Ref<HTMLElement>}
       className="browser-webview"
+      id={resourceTabIds(idPrefix, tab.id).panel} role="tabpanel" aria-labelledby={resourceTabIds(idPrefix, tab.id).tab}
+      tabIndex={active ? 0 : -1} aria-hidden={!active} inert={!active}
       data-active={active}
       src={initialUrlRef.current}
       partition={BROWSER_PARTITION}
@@ -371,6 +376,7 @@ export function BrowserView({
   onSessionChange,
   claimForeground = true,
 }: BrowserViewProps) {
+  const tabsId = useId();
   const handlesRef = useRef(new Map<string, WebviewElement>());
   const sessionTabsRef = useRef(session.tabs);
   sessionTabsRef.current = session.tabs;
@@ -600,7 +606,7 @@ export function BrowserView({
 
   return (
     <div className="browser-view">
-      <ResourceTabStrip
+      <ResourceTabStrip idPrefix={tabsId}
         ariaLabel={isZh ? '网页标签' : 'Browser tabs'}
         items={tabItems}
         activeId={session.activeTabId}
@@ -731,7 +737,7 @@ export function BrowserView({
         <div className={`browser-progress${activeRuntime.loading ? ' browser-progress--active' : ''}`} />
 
         {session.tabs.map((tab) => (
-          <BrowserPage
+          <BrowserPage idPrefix={tabsId}
             key={tab.id}
             tab={tab}
             active={tab.id === session.activeTabId}

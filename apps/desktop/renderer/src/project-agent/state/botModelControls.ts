@@ -22,12 +22,16 @@ export function botModelMenuGroups(models: readonly ModelRoutingMenuOption[], vi
 
 /** One atomic role patch, retaining the other roles and scope. Changing effort pins the resolved model. */
 export function botFixedModelPolicy(policy: ProjectModelPolicy | null | undefined, role: ModelRole,
-  model: ModelRoutingMenuOption, currentEffort?: string): ProjectModelPolicy {
+  model: ModelRoutingMenuOption, currentEffort?: string, fastMode?: boolean): ProjectModelPolicy {
   const levels = model.reasoningEffortLevels ?? [];
   const effort = currentEffort && levels.includes(currentEffort as ModelReasoningEffort)
     ? currentEffort as ModelReasoningEffort : model.defaultReasoningEffort;
+  const previous = policy?.overrides?.[role];
+  const keptFast = fastMode ?? (previous?.mode === 'fixed' && previous.fastMode === true);
+  const allowFast = (model.authMethod === 'oauth_chatgpt' || model.authMethod === 'oauth_grok') && keptFast === true;
   return { ...policy, overrides: { ...policy?.overrides, [role]: { mode: 'fixed', modelProviderId: model.id,
     ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+    ...(allowFast ? { fastMode: true } : {}),
   } } };
 }
 

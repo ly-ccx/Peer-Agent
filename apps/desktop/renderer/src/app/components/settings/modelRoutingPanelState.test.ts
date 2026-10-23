@@ -8,6 +8,8 @@ import {
   optionRejectReason,
   roleTranslationKey,
   routingMenuGroups,
+  routingReasoningLevels,
+  setRoutingReasoning,
   validateAutoPool,
   type RoutingModelOption,
 } from './modelRoutingPanelState.ts';
@@ -49,6 +51,10 @@ const I18N_KEYS = [
   'modelRouting.pool',
   'modelRouting.poolInvalid',
   'modelRouting.resolved',
+  'modelRouting.reasoning',
+  'modelRouting.reasoningDefault',
+  'modelRouting.reasoningInvalid',
+  'modelRouting.reasoningNoCommon',
   'modelRouting.unresolved',
   'modelRouting.preferDifferentFamily',
   'modelRouting.spendCap',
@@ -99,8 +105,8 @@ test('routing menu groups models by channel and greys out the wrong capability',
   assert.equal(groups[0]?.disabled, true);
 });
 
-test('one usable model makes the routing tables read only', () => {
-  assert.equal(isRoutingReadOnly(1), true);
+test('one usable model still allows role reasoning configuration', () => {
+  assert.equal(isRoutingReadOnly(1), false);
   assert.equal(isRoutingReadOnly(0), true);
   assert.equal(isRoutingReadOnly(2), false);
 });
@@ -119,6 +125,20 @@ test('fallback order moves inside the list and stays put at the ends', () => {
   assert.deepEqual(moveListItem(['a', 'b'], 'b', 1), ['a', 'b']);
 });
 
+test('reasoning choices intersect the declared eligible candidates without pinning a tier', () => {
+  const a = { ...text, id: 'a', reasoningEffortLevels: ['high', 'max'] as const };
+  const b = { ...text, id: 'b', reasoningEffortLevels: ['low', 'high'] as const };
+  const tiers = { strong: { primary: 'a', fallbacks: ['b'] } };
+  const tier = { mode: 'tier' as const, tier: 'strong' as const };
+  assert.deepEqual(routingReasoningLevels(tier, tiers, [a, b], 'session_worker'), ['high']);
+  assert.deepEqual(routingReasoningLevels({ mode: 'auto', pool: ['a', 'b'] }, tiers, [a, b], 'session_worker'), ['high']);
+  assert.deepEqual(routingReasoningLevels({ mode: 'fixed', modelProviderId: 'a' }, tiers, [a, b], 'session_worker'), ['high', 'max']);
+  assert.deepEqual(routingReasoningLevels(tier, tiers, [a, { ...b, reasoningEffortLevels: undefined }], 'session_worker'), []);
+  const changed = setRoutingReasoning(tier, 'high');
+  assert.deepEqual(changed, { mode: 'tier', tier: 'strong', reasoningEffort: 'high' });
+  assert.deepEqual(setRoutingReasoning(changed), tier);
+});
+
 test('model routing copy exists in both locales', () => {
   const zh = createI18n('zh-CN');
   const en = createI18n('en-US');
@@ -127,12 +147,12 @@ test('model routing copy exists in both locales', () => {
     assert.notEqual(en.t(key), key, key);
     assert.equal(roleTranslationKey('explorer'), 'modelRouting.role.explorer');
   }
-  assert.equal(zh.t('modelRouting.singleModel'), '只有一个模型时，所有工作都用它');
+  assert.match(zh.t('modelRouting.singleModel'), /分别设置思考强度/);
   assert.notEqual(en.t('modelRouting.singleModel'), zh.t('modelRouting.singleModel'));
 });
 
 test('LlmSettingsPanel.tsx keeps its smaller extracted baseline', () => {
   const source = readFileSync(new URL('../LlmSettingsPanel.tsx', import.meta.url), 'utf8');
   const lines = source.endsWith('\n') ? source.split('\n').length - 1 : source.split('\n').length;
-  assert.equal(lines, 2214);
+  assert.ok(lines <= 2214, 'extraction may shrink the module without increasing its budget');
 });
