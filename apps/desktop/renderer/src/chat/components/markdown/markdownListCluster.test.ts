@@ -24,7 +24,7 @@ test('a blank-line-separated bullet list stays one block', () => {
   const lists = listsOf('- item one\n\n- item two');
   assert.equal(lists.length, 1);
   assert.deepEqual(
-    { ordered: (lists[0] as { ordered: boolean }).ordered, items: (lists[0] as { items: string[] }).items },
+    { ordered: (lists[0] as { ordered: boolean }).ordered, items: lists[0]?.items },
     { ordered: false, items: ['item one', 'item two'] },
   );
 });
