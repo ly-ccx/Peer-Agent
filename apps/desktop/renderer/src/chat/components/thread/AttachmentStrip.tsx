@@ -7,7 +7,7 @@ import type { ChatAttachment } from '../../state/types';
 export const PEER_ATTACHMENT_DND_TYPE = 'application/x-peer-attachment-id';
 
 /** 按附件 id 缓存已降采样的缩略图，避免每字输入反复解码 2MB 原图 dataUrl。 */
-const attachmentThumbCache = new Map<string, string>();
+const attachmentThumbCache = new Map<string, { source: string; thumbnail: string }>();
 
 /** 输入区与已发送消息都是 88px 小图；缓存 360px 边长覆盖 2x 屏。 */
 const THUMB_EDGE_PX = 360;
@@ -266,7 +266,7 @@ const ResolvedImageChip = memo(function ResolvedImageChip({
     return (
       <button
         type="button"
-        className="attachment-thumb-btn"
+        className="attachment-thumb-btn" disabled={!onPreviewImage}
         onClick={() => onPreviewImage?.(previewAttachment)}
         title={attachment.name}
         aria-label={isZh ? `预览图片 ${attachment.name}` : `Preview image ${attachment.name}`}
@@ -282,14 +282,14 @@ const ResolvedImageChip = memo(function ResolvedImageChip({
 
   if (attachment.appshot || loadFailed) {
     return (
-      <span
+      <button type="button" disabled={!onPreviewImage} onClick={() => onPreviewImage?.(attachment)}
         className="attachment-kind-badge attachment-appshot-missing"
         title={
           isZh
-            ? `截图不可用：${attachment.name}${attachment.artifactRef ? `（${attachment.artifactRef}）` : ''}`
-            : `Screenshot unavailable: ${attachment.name}${attachment.artifactRef ? ` (${attachment.artifactRef})` : ''}`
+            ? `图片不可用：${attachment.name}${attachment.artifactRef ? `（${attachment.artifactRef}）` : ''}`
+            : `Image unavailable: ${attachment.name}${attachment.artifactRef ? ` (${attachment.artifactRef})` : ''}`
         }
-        aria-label={isZh ? `截图不可用 ${attachment.name}` : `Screenshot unavailable ${attachment.name}`}
+        aria-label={isZh ? `重新查看图片 ${attachment.name}` : `Retry image preview ${attachment.name}`}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -298,7 +298,7 @@ const ResolvedImageChip = memo(function ResolvedImageChip({
           <path d="M4 4l16 16" />
         </svg>
         <span className="attachment-name">{isZh ? '截图不可用' : 'Unavailable'}</span>
-      </span>
+      </button>
     );
   }
 
@@ -314,25 +314,29 @@ const AttachmentThumb = memo(function AttachmentThumb({
   readonly dataUrl: string;
   readonly loading: 'lazy' | 'eager';
 }) {
-  const [thumbSrc, setThumbSrc] = useState<string>(() => attachmentThumbCache.get(attachmentId) ?? '');
+  const [decodeFailed, setDecodeFailed] = useState(false);
+  useEffect(() => setDecodeFailed(false), [dataUrl]);
+  const [thumb, setThumb] = useState(() => attachmentThumbCache.get(attachmentId) ?? null);
+  const thumbSrc = thumb?.source === dataUrl ? thumb.thumbnail : '';
 
   useEffect(() => {
     const cached = attachmentThumbCache.get(attachmentId);
-    if (cached) {
-      setThumbSrc(cached);
+    if (cached?.source === dataUrl) {
+      setThumb(cached);
       return;
     }
     let cancelled = false;
     // 先占位空 src，避免首帧直接解码 2MB 原图；降采样完成后写入缓存。
     void downscaleDataUrl(dataUrl).then((thumb) => {
-      attachmentThumbCache.set(attachmentId, thumb);
-      if (!cancelled) setThumbSrc(thumb);
+      const entry = { source: dataUrl, thumbnail: thumb };
+      if (!cancelled) { attachmentThumbCache.set(attachmentId, entry); setThumb(entry); }
     });
     return () => {
       cancelled = true;
     };
   }, [attachmentId, dataUrl]);
 
+  if (decodeFailed) return <svg className="attachment-thumb" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"><path d="M4 4h16v16H4zM4 4l16 16" /></svg>;
   if (!thumbSrc) {
     return <span className="attachment-thumb attachment-thumb-pending" aria-hidden="true" />;
   }
@@ -340,6 +344,7 @@ const AttachmentThumb = memo(function AttachmentThumb({
   return (
     <img
       src={thumbSrc}
+      onError={() => { attachmentThumbCache.delete(attachmentId); setDecodeFailed(true); }}
       alt=""
       className="attachment-thumb"
       loading={loading}

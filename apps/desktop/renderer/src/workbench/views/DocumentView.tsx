@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useResourceActions, useResourceRead } from '../../ui/resources/useResourceState';
 import { clientApi } from '../../clientApi';
 import { DiffViewer } from '../file-preview/DiffViewer';
 import {
@@ -47,28 +48,6 @@ type GitDiffResult = Awaited<ReturnType<typeof clientApi.gitDiff>>;
 type DiffStatus = GitDiffResult['status'];
 type FileReadResult = Awaited<ReturnType<typeof clientApi.readFile>>;
 type ImageReadResult = Awaited<ReturnType<typeof clientApi.readImageDataUrl>>;
-
-interface DiffState {
-  readonly loading: boolean;
-  readonly result: GitDiffResult | null;
-  readonly error: string | null;
-}
-
-interface ContentState {
-  readonly loading: boolean;
-  readonly result: FileReadResult | null;
-  readonly error: string | null;
-}
-
-interface ImageState {
-  readonly loading: boolean;
-  readonly result: ImageReadResult | null;
-  readonly error: string | null;
-}
-
-const INITIAL_DIFF: DiffState = { loading: false, result: null, error: null };
-const INITIAL_CONTENT: ContentState = { loading: false, result: null, error: null };
-const INITIAL_IMAGE: ImageState = { loading: false, result: null, error: null };
 
 function statusLabel(status: DiffStatus, isZh: boolean): string {
   switch (status) {
@@ -234,9 +213,7 @@ export function DocumentView({
 
 function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }: DocumentPageProps) {
   const mode = fileTarget.mode;
-  const [diff, setDiff] = useState<DiffState>(INITIAL_DIFF);
-  const [content, setContent] = useState<ContentState>(INITIAL_CONTENT);
-  const [image, setImage] = useState<ImageState>(INITIAL_IMAGE);
+
 
   const kind = useMemo(
     () => detectFileKind(fileTarget.absPath),
@@ -244,74 +221,13 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
   );
   const isImage = kind === 'image';
 
-  useEffect(() => {
-    setDiff(INITIAL_DIFF);
-    setContent(INITIAL_CONTENT);
-    setImage(INITIAL_IMAGE);
-  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
-
-  const loadDiff = useCallback(async () => {
-    setDiff({ loading: true, result: null, error: null });
-    try {
-      const result = await clientApi.gitDiff(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath);
-      setDiff({ loading: false, result, error: null });
-    } catch (err) {
-      setDiff({
-        loading: false,
-        result: null,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
-
-  const loadContent = useCallback(async () => {
-    setContent({ loading: true, result: null, error: null });
-    try {
-      const result = await clientApi.readFile(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath);
-      setContent({ loading: false, result, error: null });
-    } catch (err) {
-      setContent({
-        loading: false,
-        result: null,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
-
-  const loadImage = useCallback(async () => {
-    setImage({ loading: true, result: null, error: null });
-    try {
-      const result = await clientApi.readImageDataUrl(
-        fileTarget.absPath,
-        fileTarget.workspaceRoot,
-        fileTarget.relPath,
-      );
-      setImage({ loading: false, result, error: null });
-    } catch (err) {
-      setImage({
-        loading: false,
-        result: null,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
-
-  useEffect(() => {
-    if (!active || mode !== 'diff' || diff.loading || diff.result || diff.error) return;
-    void loadDiff();
-  }, [active, mode, diff.loading, diff.result, diff.error, loadDiff]);
-
-  useEffect(() => {
-    if (!active || mode === 'diff' || isImage) return;
-    if (content.loading || content.result || content.error) return;
-    void loadContent();
-  }, [active, mode, isImage, content.loading, content.result, content.error, loadContent]);
-
-  useEffect(() => {
-    if (!active || mode === 'diff' || !isImage) return;
-    if (image.loading || image.result || image.error) return;
-    void loadImage();
-  }, [active, mode, isImage, image.loading, image.result, image.error, loadImage]);
+  const identity = JSON.stringify([fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
+  const diff = useResourceRead(`diff:${identity}`, () => clientApi.gitDiff(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath), active && mode === 'diff');
+  const content = useResourceRead(`content:${identity}`, () => clientApi.readFile(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath), active && mode !== 'diff' && !isImage);
+  const image = useResourceRead(`image:${identity}`, () => clientApi.readImageDataUrl(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath), active && mode !== 'diff' && isImage);
+  const actions = useResourceActions(identity);
+  const [decodeError, setDecodeError] = useState(false);
+  useEffect(() => setDecodeError(false), [identity, image.value]);
 
   const fileName = basename(fileTarget.absPath);
   const highlightLanguage = useMemo(
@@ -319,7 +235,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
     [fileTarget.absPath],
   );
   const statusBadge = mode === 'diff'
-    ? (diff.result?.ok ? statusLabel(diff.result.status, isZh) : '')
+    ? (diff.value?.ok ? statusLabel(diff.value.status, isZh) : '')
     : modeBadge(mode, kind, isZh);
 
   const [editors, setEditors] = useState<readonly InstalledEditor[]>([]);
@@ -345,47 +261,36 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
     [defaultEditorId, editors, isZh],
   );
 
+  const open = (options?: Parameters<typeof clientApi.openPath>[2]) => actions.run('open', async () => {
+    const result = await clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, options);
+    if (!result.ok) throw Error('OPEN_FAILED');
+  });
   const openInEditor = () => {
     const editorId = openTargetMenu.defaultEditorId;
-    void clientApi.openPath(
-      fileTarget.absPath,
-      fileTarget.workspaceRoot,
-      editorId ? { mode: 'editor', editorId } : undefined,
-    );
+    void open(editorId ? { mode: 'editor', editorId } : undefined);
   };
-
   const handleOpenTarget = (action: OpenTargetAction) => {
-    if (action.kind === 'reveal') {
-      void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, { mode: 'reveal' });
-      return;
-    }
-    if (action.kind === 'open-parent') {
-      void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, {
-        mode: 'editor',
-        target: 'parent',
-        editorId: action.editorId,
-      });
-      return;
-    }
-    void clientApi.setDefaultEditor(action.editorId).then((result) => {
-      if (result.ok) setDefaultEditorId(action.editorId);
-    });
-    void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, {
-      mode: 'editor',
-      editorId: action.editorId,
+    if (action.kind === 'reveal') { void open({ mode: 'reveal' }); return; }
+    if (action.kind === 'open-parent') { void open({ mode: 'editor', target: 'parent', editorId: action.editorId }); return; }
+    void actions.run('open', async () => {
+      const result = await clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, { mode: 'editor', editorId: action.editorId });
+      if (!result.ok) throw Error('OPEN_FAILED');
+      const saved = await clientApi.setDefaultEditor(action.editorId);
+      if (!saved.ok) throw Error('PREFERENCE_SAVE_FAILED');
+      setDefaultEditorId(action.editorId);
     });
   };
 
   const refresh = () => {
     if (mode === 'diff') {
-      void loadDiff();
+      void diff.reload();
       return;
     }
     if (isImage) {
-      void loadImage();
+      setDecodeError(false); void image.reload();
       return;
     }
-    void loadContent();
+    void content.reload();
   };
 
   const renderContentError = (result: FileReadResult) => (
@@ -401,25 +306,25 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
   );
 
   const renderImagePreview = () => {
-    if (image.loading) {
+    if (image.loading && !image.loaded) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
           {isZh ? '正在加载图片…' : 'Loading image…'}
         </div>
       );
     }
-    if (image.error) {
+    if ((image.error && !image.loaded) || decodeError) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
-          {isZh ? `加载失败：${image.error}` : `Failed to load: ${image.error}`}
+          {isZh ? '图片读取或解码失败，可刷新重试。' : 'Image reading or decoding failed; refresh to try again.'}
         </div>
       );
     }
-    if (!image.result) return null;
-    if (!image.result.ok) {
+    if (!image.value) return null;
+    if (!image.value.ok) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
-          <div>{imageErrorLabel(image.result.status, isZh)}</div>
+          <div>{imageErrorLabel(image.value.status, isZh)}</div>
           <div className="workbench-diff-path">{fileTarget.absPath}</div>
           <button type="button" className="workbench-diff-btn" onClick={openInEditor}>
             {isZh ? '在编辑器中打开' : 'Open in editor'}
@@ -429,40 +334,40 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
     }
     return (
       <div className="workbench-image-preview">
-        <img src={image.result.dataUrl} alt={fileName} />
+        <img src={image.value.dataUrl} alt={fileName} onError={() => setDecodeError(true)} />
       </div>
     );
   };
 
   const renderSource = () => {
     if (isImage) return renderImagePreview();
-    if (content.loading) {
+    if (content.loading && !content.loaded) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
           {isZh ? '正在加载文件内容…' : 'Loading file content…'}
         </div>
       );
     }
-    if (content.error) {
+    if (content.error && !content.loaded) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
-          {isZh ? `加载失败：${content.error}` : `Failed to load: ${content.error}`}
+          {isZh ? '文件读取失败，可刷新重试。' : 'File reading failed; refresh to try again.'}
         </div>
       );
     }
-    if (!content.result) return null;
-    if (!content.result.ok) return renderContentError(content.result);
+    if (!content.value) return null;
+    if (!content.value.ok) return renderContentError(content.value);
     return (
       <>
-        {content.result.resolvedFrom ? (
+        {content.value.resolvedFrom ? (
           <div className="workbench-diff-resolved">
             {isZh
-              ? `已在其他仓库找到该文件：${content.result.resolvedFrom}`
-              : `Found this file in another repository: ${content.result.resolvedFrom}`}
+              ? `已在其他仓库找到该文件：${content.value.resolvedFrom}`
+              : `Found this file in another repository: ${content.value.resolvedFrom}`}
           </div>
         ) : null}
         <SourceViewer
-          content={content.result.content}
+          content={content.value.content}
           language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
         />
@@ -472,28 +377,28 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
 
   const renderPreview = () => {
     if (isImage) return renderImagePreview();
-    if (content.loading) {
+    if (content.loading && !content.loaded) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
           {isZh ? '正在加载文件内容…' : 'Loading file content…'}
         </div>
       );
     }
-    if (content.error) {
+    if (content.error && !content.loaded) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
-          {isZh ? `加载失败：${content.error}` : `Failed to load: ${content.error}`}
+          {isZh ? '文件读取失败，可刷新重试。' : 'File reading failed; refresh to try again.'}
         </div>
       );
     }
-    if (!content.result) return null;
-    if (!content.result.ok) return renderContentError(content.result);
+    if (!content.value) return null;
+    if (!content.value.ok) return renderContentError(content.value);
 
-    const resolved = content.result.resolvedFrom ? (
+    const resolved = content.value.resolvedFrom ? (
       <div className="workbench-diff-resolved">
         {isZh
-          ? `已在其他仓库找到该文件：${content.result.resolvedFrom}`
-          : `Found this file in another repository: ${content.result.resolvedFrom}`}
+          ? `已在其他仓库找到该文件：${content.value.resolvedFrom}`
+          : `Found this file in another repository: ${content.value.resolvedFrom}`}
       </div>
     ) : null;
 
@@ -502,7 +407,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
         <>
           {resolved}
           <MarkdownDocument
-            content={content.result.content}
+            content={content.value.content}
             emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
             copyLabel={isZh ? '复制' : 'Copy'}
             copiedLabel={isZh ? '已复制' : 'Copied'}
@@ -518,7 +423,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
           <iframe
             className="workbench-html-preview"
             title={fileName}
-            srcDoc={content.result.content}
+            srcDoc={content.value.content}
             sandbox=""
             referrerPolicy="no-referrer"
           />
@@ -527,17 +432,17 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
     }
 
     if (kind === 'json') {
-      const formatted = formatJsonForPreview(content.result.content);
+      const formatted = formatJsonForPreview(content.value.content);
       return (
         <>
           {resolved}
           <SourceViewer
             className="workbench-json-preview"
-            content={formatted ?? content.result.content}
+            content={formatted ?? content.value.content}
             language={highlightLanguage}
             emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
           />
-          {!formatted && content.result.content !== '' ? (
+          {!formatted && content.value.content !== '' ? (
             <div className="workbench-diff-hint workbench-file-preview-hint">
               {isZh ? 'JSON 解析失败，已按源码显示。' : 'JSON parsing failed; showing source text.'}
             </div>
@@ -550,7 +455,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
       <>
         {resolved}
         <SourceViewer
-          content={content.result.content}
+          content={content.value.content}
           language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
         />
@@ -559,7 +464,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
   };
 
   const renderDiff = () => {
-    const result = diff.result;
+    const result = diff.value;
     if (result?.ok && result.resolvedFrom) {
       return (
         <>
@@ -576,17 +481,17 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
   };
 
   const renderDiffBody = (result: GitDiffResult | null) => {
-    if (diff.loading) {
+    if (diff.loading && !diff.loaded) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
           {isZh ? '正在加载 diff…' : 'Loading diff…'}
         </div>
       );
     }
-    if (diff.error) {
+    if (diff.error && !diff.loaded) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
-          {isZh ? `加载失败：${diff.error}` : `Failed to load: ${diff.error}`}
+          {isZh ? 'Diff 读取失败，可刷新重试。' : 'Diff reading failed; refresh to try again.'}
         </div>
       );
     }
@@ -687,6 +592,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
           <button
             type="button"
             className="workbench-diff-btn"
+            disabled={mode === 'diff' ? diff.loading : isImage ? image.loading : content.loading}
             onClick={refresh}
             title={isZh ? '刷新' : 'Refresh'}
           >
@@ -702,7 +608,9 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
         </div>
       </div>
 
-      <div className="workbench-diff-body">
+      {(mode === 'diff' ? diff.error : isImage ? image.error : content.error) ? <p role="alert">{isZh ? '刷新失败，保留上次预览。请重新读取；预览不代表最新文件或核验结果。' : 'Refresh failed. The previous preview is preserved. Read again; this preview is not proof of current file contents or verification.'}</p> : null}
+      {actions.get('open').error ? <p role="alert">{isZh ? '打开或默认编辑器保存未确认，请检查路径后重试。' : 'Opening or saving the default editor was not confirmed. Check the path and try again.'}</p> : null}
+      <div className="workbench-diff-body" aria-busy={mode === 'diff' ? diff.loading : isImage ? image.loading : content.loading}>
         {mode === 'diff' ? renderDiff() : mode === 'source' ? renderSource() : renderPreview()}
       </div>
     </div>

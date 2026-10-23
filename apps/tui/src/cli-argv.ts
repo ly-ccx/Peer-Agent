@@ -267,12 +267,13 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
     'Usage:',
     '  peer                 Open this project bot (or ask to bind it)',
     '  peer bots            Browse your bots',
-    '  peer --classic       Start the classic interactive TUI',
+    '  peer --classic       Open ordinary task mode, even when a bot is bound',
     '  peer --version       Print version',
     '  peer --help          Show this help',
     '  peer exec [options] [prompt]',
     '',
     'Use `peer exec --help` for headless flags.',
+    'Inside bot mode, press F2 or type /classic to switch to task mode.',
   ].join('\n');
 }
 

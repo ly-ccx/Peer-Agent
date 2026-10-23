@@ -5,7 +5,8 @@ import { useFocusScope } from '../../app/hooks/useFocusScope';
 import { Drawer } from '../../app/components/Drawer';
 import { InteractionLayerContext, useInteractionLayer } from '../../app/hooks/useInteractionLayer';
 import { interactionLayers } from '../../app/components/interactionLayers';
-import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
+import { useMotionAllowed } from '../../app/hooks/useMotionAllowed';
+import { watchVisualMotion } from '../../app/state/visualMotion';
 import { clientApi } from '../../clientApi';
 import { EvidenceView } from './EvidenceView';
 import { PeerIcon } from '../../ui/icons';
@@ -87,6 +88,7 @@ export function BotProfileDrawer({
   readonly taskContext: TaskConversationContext | null;
   readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
 }) {
+  const motionEnabled = useMotionAllowed();
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const [path, setPath] = useState('');
   const [memories, setMemories] = useState<readonly DrawerMemoryItem[]>([]);
@@ -143,7 +145,7 @@ export function BotProfileDrawer({
   useEffect(() => {
     if (layout !== 'push') return undefined;
     if (memory.open) {
-      if (prefersReducedMotion()) {
+      if (!motionEnabled) {
         setDockPhase('on');
         return undefined;
       }
@@ -153,17 +155,17 @@ export function BotProfileDrawer({
     }
     setDockPhase((current) => (current === 'off' ? 'off' : 'out'));
     return undefined;
-  }, [layout, memory.open]);
+  }, [layout, memory.open, motionEnabled]);
 
   useEffect(() => {
     if (dockPhase !== 'out') return undefined;
-    if (prefersReducedMotion()) {
+    if (!motionEnabled) {
       setDockPhase('off');
       return undefined;
     }
-    const timer = setTimeout(() => setDockPhase('off'), 360);
-    return () => clearTimeout(timer);
-  }, [dockPhase]);
+    const motion = watchVisualMotion([], () => setDockPhase('off'), { durationMs: 360 });
+    return motion.cancel;
+  }, [dockPhase, motionEnabled]);
 
 
   useEffect(() => {

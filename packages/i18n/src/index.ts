@@ -1,3 +1,4 @@
+import { resourcesZh, resourcesEn, type ResourcesTranslationKey } from './resources.ts';
 import { formsZh, formsEn, type FormsTranslationKey } from './forms.ts';
 import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
 import {remoteAccessZh,remoteAccessEn,type RemoteAccessTranslationKey} from './remote-access.ts';
@@ -10,6 +11,7 @@ export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly 
 
 export type TranslationKey =
   | RemoteAccessTranslationKey
+  | ResourcesTranslationKey
   | FormsTranslationKey
   | 'app.newTask'
   | 'searchChats.open'
@@ -1436,6 +1438,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}：分钟",
 
     ...remoteAccessZh,
+    ...resourcesZh,
     ...formsZh,
     'app.newTask': '新任务',
     'searchChats.open': '搜索任务',
@@ -2826,6 +2829,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}: minute",
 
     ...remoteAccessEn,
+    ...resourcesEn,
     ...formsEn,
     'app.newTask': 'New task',
     'searchChats.open': 'Search tasks',
