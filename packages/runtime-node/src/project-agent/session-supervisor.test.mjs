@@ -277,6 +277,12 @@ test('structured Git requirements survive plan storage and idempotent spawn repl
     const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
     assert.deepEqual(plan.successCriteria[0].requiredCapabilities, ['local.git.query']);
     assert.equal(plan.delegationOrigin.capabilityAdmission.inventoryKnown, true);
+    const reloaded = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() }).getPlan(plan.planId);
+    assert.deepEqual(reloaded.delegationOrigin.capabilityAdmission, plan.delegationOrigin.capabilityAdmission);
+    assert.deepEqual(reloaded.delegationOrigin.capabilityAdmission.required, ['local.git.query']);
+    assert.equal(reloaded.delegationOrigin.capabilityAdmission.requirementsDeclared, true);
+    assert.ok(reloaded.delegationOrigin.capabilityAdmission.inventoryHash);
+    assert.ok(Number.isFinite(Date.parse(reloaded.delegationOrigin.capabilityAdmission.checkedAt)));
     const again = await env.supervisor.spawn(input, contextOf(env));
     assert.equal(again.sessionId, opened.sessionId); assert.equal(again.replayed, true);
   } finally { await env.cleanup(); }
