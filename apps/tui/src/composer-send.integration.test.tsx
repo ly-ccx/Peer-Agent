@@ -34,10 +34,13 @@ for(const entry of ['direct','project-classic'])for(const key of ['RETURN','LINE
   const setup=await createTestRenderer({width:147,height:79});
   const rendererRoot=createRoot(setup.renderer);
   const classic=<App host={host} model={model} modelLabel="scripted" onQuit={()=>{}}/>;
+  // Composer input does not depend on the host OS appearance. Keep the live
+  // watcher out of React act(), and release no unrelated polling handles.
+  const themeStore=createTuiThemeStore({userDataPath:root,systemThemeWatch:false});
   try {
     await act(async()=>{
       rendererRoot.render(projectHost&&projectClient
-        ?<ProjectApp host={projectHost} client={projectClient} initialView="conversation" workspacePath={root} locale="zh-CN" themeStore={createTuiThemeStore({userDataPath:root})} onQuit={()=>{}} onClassic={async()=>{rendererRoot.unmount();projectClient.close();await projectHost.close();projectClosed=true;rendererRoot.render(classic);}}/>
+        ?<ProjectApp host={projectHost} client={projectClient} initialView="conversation" workspacePath={root} locale="zh-CN" themeStore={themeStore} onQuit={()=>{}} onClassic={async()=>{rendererRoot.unmount();projectClient.close();await projectHost.close();projectClosed=true;rendererRoot.render(classic);}}/>
         :classic);
       await Bun.sleep(20);
     });
