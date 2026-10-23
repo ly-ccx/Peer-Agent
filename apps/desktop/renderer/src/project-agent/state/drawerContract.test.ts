@@ -21,7 +21,8 @@ test('关闭抽屉时把焦点还给触发按钮', () => {
   assert.match(drawer, /useFocusScope\(bodyRef[\s\S]*restore: triggerRef/);
   assert.match(drawer, /restoreFocusRef=\{triggerRef\}/);
   assert.match(source('app/hooks/useFocusScope.ts'), /previous\?\.isConnected[\s\S]*previous\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(drawer, /Escape/);
+  assert.match(drawer, /useInteractionLayer[\s\S]*onClose: close/);
+  assert.match(source('app/hooks/useInteractionLayer.ts'), /event\.key === 'Escape'[\s\S]*latest\.current\.onClose\(\)/);
   assert.match(drawer, /from '\.\.\/\.\.\/app\/components\/Drawer'/);
 });
 
