@@ -5,6 +5,9 @@ import path from 'node:path';
 export async function checkEffortStability({ page, slider, strength, until, getBot, failNext, report, captureDirectory, highEffort, scope = 'settings' }) {
   const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
   const sample = async (key, collectionDelayMs = 0) => {
+    // Establish the baseline after entry motion, before starting a save.
+    await until(() => page.locator('.model-selection-popover').evaluate(node =>
+      node.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
     const baseline = await page.evaluate(selector => {
       const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height }; };
       return { trigger: box(selector), panel: box('.model-selection-panel') };
