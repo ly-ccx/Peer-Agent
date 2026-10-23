@@ -15,7 +15,7 @@ export function verifierEvidenceSnapshots(plan, records = []) {
     const owned = record?.planId ? record.planId === plan?.planId
       : plan?.conversationId && record?.conversationId === plan.conversationId;
     if (!refs.has(record?.evidenceRef) || !owned) continue;
-    if (!['file', 'command'].includes(record.bodyPreview?.kind) || typeof record.bodyPreview.text !== 'string') continue;
+    if (!['file', 'command', 'observation'].includes(record.bodyPreview?.kind) || typeof record.bodyPreview.text !== 'string') continue;
     indexed.set(record.evidenceRef, record);
   }
   let remaining = BODY_BUDGET;

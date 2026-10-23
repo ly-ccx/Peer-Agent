@@ -1,4 +1,4 @@
-import { createFailedClientToolResult, createPermissionGrant, evaluateProjectAgentTurn } from '@peer-agent/runtime-node';
+import { createFailedClientToolResult, createPermissionGrant, evaluateProjectAgentTurn, capabilityDenial } from '@peer-agent/runtime-node';
 
 /**
  * 桌面执行闸。判定只来自 mode-policy。
@@ -17,10 +17,7 @@ export function buildProjectAgentModeDenial({
   detail = null,
 }) {
   const reason = 'project_agent_capability_denied';
-  const zh = locale !== 'en-US';
-  const message = zh
-    ? `项目代理只能使用已允许的只读能力，已拒绝 ${toolName || capabilityId || '该工具'}。`
-    : `Project agent can only run allowed read capabilities. Denied ${toolName || capabilityId || 'this tool'}.`;
+  const { message, diagnostic } = capabilityDenial({ reason, capabilityId: capabilityId || call?.capabilityId, toolName, locale });
   const result = createFailedClientToolResult({
     call,
     locale,
@@ -28,6 +25,7 @@ export function buildProjectAgentModeDenial({
     status: 'denied',
     dataLevel: 'D1_internal',
   });
+  result.outputPreview = { ...result.outputPreview, message, diagnostic };
   return {
     success: false,
     error: message,
@@ -38,6 +36,7 @@ export function buildProjectAgentModeDenial({
       reason,
       detail: detail ?? undefined,
       message,
+      diagnostic,
     }),
     projectAgentDenied: true,
     execution: { call, grant: createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }), result },

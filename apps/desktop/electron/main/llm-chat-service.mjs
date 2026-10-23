@@ -2474,5 +2474,11 @@ export function createLlmChatService({
     listActiveStreams,
     getSelectionRuntimeState,
     resolveGoalRole,
+    readDelegationCapabilities({ readOnly = false } = {}) {
+      const { runtimeProjection } = buildRuntimeTools({ mcpRegistry, skillStore, providerType: 'openai', mode: 'goal',
+        readOnlyWorkSession: readOnly, excludeCapabilityPrefixes: ['local.web.control.'] });
+      return runtimeProjection.capabilities.filter(capability => ['available', 'needs_permission'].includes(capability.health))
+        .map(capability => capability.capabilityId);
+    },
   };
 }

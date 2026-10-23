@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { getDataHome } from '../data-store.mjs';
-import { evaluateWorkSessionWrite } from '@peer-agent/runtime-node';
+import { evaluateWorkSessionWrite, capabilityDenial } from '@peer-agent/runtime-node';
 import {
   buildGoalModeDenial,
   evaluateGoalModeGate,
@@ -74,6 +74,7 @@ export function resolveProjectedModelToolCall({
     return {
       ok: false,
       error: `Unknown tool: ${name}`,
+      reason: 'capability_not_projected',
     };
   }
 
@@ -81,10 +82,12 @@ export function resolveProjectedModelToolCall({
   const capability = (runtimeProjection?.capabilities ?? []).find(
     (candidate) => candidate.name === name && candidate.capabilityId === capabilityId,
   );
-  if (!capability) {
+  if (!capability || !['available', 'needs_permission'].includes(capability.health)) {
     return {
       ok: false,
       error: `Tool ${name} is not available in the current Runtime Projection.`,
+      reason: 'capability_not_projected',
+      capabilityId,
     };
   }
 
@@ -191,7 +194,11 @@ export async function executeProjectedModelTool({
     runtimeProjection,
   });
   if (!projection.ok) {
-    return { success: false, error: projection.error };
+    const reason = projection.reason || 'capability_not_projected';
+    const detail = capabilityDenial({ reason, capabilityId: projection.capabilityId, toolName: name, stage: 'projection', locale });
+    const call = { toolCallId: toolCallId || `projected-tool:${randomUUID()}`, capabilityId: projection.capabilityId || 'unknown.tool' };
+    return attachProjectAgentDenialEvidence({ success: false, error: detail.message,
+      output: JSON.stringify({ ok: false, error: reason, ...detail }) }, { call, locale, reason });
   }
 
   const dispatchPolicy = toolContext?.resolveAccessPolicy?.();
@@ -214,7 +221,8 @@ export async function executeProjectedModelTool({
   };
   const workSessionDenial = workSessionGate();
   if (workSessionDenial) return attachProjectAgentDenialEvidence({ success: false, error: workSessionDenial,
-    output: JSON.stringify({ ok: false, error: workSessionDenial }), projectionCapability: projection.capability,
+    output: JSON.stringify({ ok: false, error: workSessionDenial,
+      ...(workSessionDenial === 'read_only' ? capabilityDenial({ reason: workSessionDenial, capabilityId: projection.call.capabilityId, toolName: name, locale }) : {}) }), projectionCapability: projection.capability,
   }, { call: projection.call, locale, reason: workSessionDenial });
 
   const probeGate=evaluateObjectiveProbeCall({policy:toolContext?.permissionPolicy,call:projection.call,workspacePath});

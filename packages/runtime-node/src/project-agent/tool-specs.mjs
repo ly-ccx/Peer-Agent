@@ -5,6 +5,7 @@
 import { OBJECTIVE_TOOL_SPECS, validateObjectiveToolInput } from './objective-tool-specs.mjs';
 import { TOOL_LEVELS } from './digest.mjs';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
+import { validCapabilityRequirements } from './capability-admission.mjs';
 const SPAWN_INPUT_SCHEMA = {
     type: 'object',
     properties: {
@@ -28,10 +29,13 @@ const SPAWN_INPUT_SCHEMA = {
             command: { type: 'string', maxLength: 2000 },
             path: { type: 'string', maxLength: 1000 },
             expect: { type: 'string', maxLength: 2000 },
+            requiredCapabilities: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', maxLength: 160 } },
           }, required: ['kind', 'description'], additionalProperties: false },
       },
       kind: { type: 'string', enum: ['code', 'research', 'docs', 'ui', 'ops', 'other'] },
       readOnly: { type: 'boolean' },
+      requiredCapabilities: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', maxLength: 160 },
+        description: 'Capability IDs needed to deliver and verify this task. This declares requirements, never permission. Use local.git.query for read-only Git observations.' },
       modelPreference: {
         type: 'object',
         properties: {
@@ -46,7 +50,7 @@ const SPAWN_INPUT_SCHEMA = {
       objectiveId: { type: 'string', maxLength: 200 },
       isolation: { type: 'string', enum: ['auto', 'none', 'worktree'] },
     },
-    required: ['anchorMessageIds', 'title', 'brief', 'successCriteria', 'kind', 'readOnly'],
+    required: ['anchorMessageIds', 'title', 'brief', 'successCriteria', 'kind', 'readOnly', 'requiredCapabilities'],
     additionalProperties: false,
   };
 export const DELEGATION_TOOL_SPECS = Object.freeze([
@@ -282,6 +286,7 @@ function validateSpawn(input) {
   if (!successCriteria) return invalid('successCriteria must contain 1 to 8 items.');
   if (!kinds.has(input.kind)) return invalid('kind must be code, research, docs, ui, ops, or other.');
   if (typeof input.readOnly !== 'boolean') return invalid('readOnly must be a boolean.');
+  if (input.requiredCapabilities !== undefined && !validCapabilityRequirements(input.requiredCapabilities)) return invalid('requiredCapabilities must contain distinct capability IDs.');
   const value = {
     anchorMessageIds,
     title,
@@ -289,6 +294,7 @@ function validateSpawn(input) {
     successCriteria,
     kind: input.kind,
     readOnly: input.readOnly,
+    ...(input.requiredCapabilities !== undefined ? { requiredCapabilities: input.requiredCapabilities } : {}),
   };
   if (input.modelPreference !== undefined) {
     const preference = input.modelPreference;
@@ -342,11 +348,13 @@ function validatedCriteria(items) {
   const ids = new Set();
   for (const item of items) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
-    if (Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect'].includes(key))) return null;
+    if (Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect', 'requiredCapabilities'].includes(key))) return null;
+    if (item.requiredCapabilities !== undefined && !validCapabilityRequirements(item.requiredCapabilities)) return null;
     if (!['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'].includes(item.kind)) return null;
     const description = text(item.description, 500);
     if (!description) return null;
     const criterion = { kind: item.kind, description };
+    if (item.requiredCapabilities !== undefined) criterion.requiredCapabilities = item.requiredCapabilities;
     for (const [key, limit] of [['id', 200], ['command', 2000], ['path', 1000], ['expect', 2000]]) {
       if (item[key] === undefined) continue;
       const value = text(item[key], limit);

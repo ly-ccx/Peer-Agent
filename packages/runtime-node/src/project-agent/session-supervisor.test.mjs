@@ -171,6 +171,7 @@ async function harness({
   isolationPlanner = undefined,
   canManageWorkspace = undefined,
   autonomousCoordinationEnabled = undefined,
+  readDelegationCapabilities = () => ['local.file.read', 'local.git.query', 'local.shell.exec'],
   now = () => '2026-09-27T00:00:00.000Z',
 } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-'));
@@ -218,6 +219,7 @@ async function harness({
     goalPlanStore,
     goalRunner,
     autonomousCoordinationEnabled,
+    readDelegationCapabilities,
     objectives,
     catalog,
     routing: routing(),
@@ -249,6 +251,36 @@ async function harness({
     },
   };
 }
+
+test('capability admission rejects before creating a child or replacing existing work', async () => {
+  const env = await harness({ readDelegationCapabilities: ({ readOnly }) => readOnly ? ['local.file.read', 'local.git.query'] : ['local.file.read', 'local.shell.exec'] });
+  try {
+    const old = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const children = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length;
+    const oldStatus = env.supervisor.get({ sessionId: old.sessionId }).status;
+    const failed = await env.supervisor.spawn(spawnInput({ readOnly: true, supersedes: old.sessionId,
+      requiredCapabilities: ['local.git.query'], successCriteria: [{ id: 'command', kind: 'command', description: 'Git 状态', command: 'git status' }] }), contextOf(env));
+    assert.equal(failed.error, 'delegation_capability_unavailable');
+    assert.deepEqual(failed.diagnostic.missing, ['local.shell.exec']);
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, children);
+    assert.equal(env.supervisor.get({ sessionId: old.sessionId }).status, oldStatus);
+  } finally { await env.cleanup(); }
+});
+
+test('structured Git requirements survive plan storage and idempotent spawn replay', async () => {
+  const env = await harness({ readDelegationCapabilities: () => ['local.git.query'] });
+  try {
+    const input = spawnInput({ kind: 'research', readOnly: true, requiredCapabilities: ['local.git.query'],
+      successCriteria: [{ id: 'git', kind: 'model_review', description: '仓库身份与工作树核验', requiredCapabilities: ['local.git.query'] }] });
+    const opened = await env.supervisor.spawn(input, contextOf(env));
+    assert.equal(opened.error, undefined);
+    const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+    assert.deepEqual(plan.successCriteria[0].requiredCapabilities, ['local.git.query']);
+    assert.equal(plan.delegationOrigin.capabilityAdmission.inventoryKnown, true);
+    const again = await env.supervisor.spawn(input, contextOf(env));
+    assert.equal(again.sessionId, opened.sessionId); assert.equal(again.replayed, true);
+  } finally { await env.cleanup(); }
+});
 
 function spawnInput(extra = {}) {
   return {

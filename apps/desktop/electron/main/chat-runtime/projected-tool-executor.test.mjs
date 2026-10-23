@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -50,6 +51,25 @@ describe('projected model tool executor', () => {
     assert.equal(projection.call.toolCallId, 'tc_read');
     assert.equal(projection.call.capabilityId, 'local.file.read');
     assert.deepEqual(projection.call.arguments, { path: 'note.txt' });
+  });
+
+  it('main bot reads Git through its projected Provider and rejects unavailable shell before dispatch', async () => {
+    execFileSync('git', ['init', tmpDir]);
+    writeFileSync(path.join(tmpDir, 'untracked.txt'), 'retained');
+    const projection = createRuntimeProjectionFromToolRegistry(browserToolRegistry, { mode: 'project_agent' });
+    const input = { workspacePath: tmpDir, registry: browserToolRegistry, runtimeProjection: projection,
+      toolContext: { mode: 'project_agent', turnRole: 'project_agent' },
+      requestPermission: async request => { assert.equal(request.capabilityId, 'local.git.query'); return { granted: true }; } };
+    const observed = await executeProjectedModelTool({ ...input, name: 'git_query', args: { path: tmpDir }, toolCallId: 'git-main' });
+    assert.equal(observed.success, true);
+    assert.equal(observed.execution.result.outputPreview.status.untracked, 1);
+    assert.equal(observed.execution.result.evidence.toolCallId, 'git-main');
+    assert.equal(existsSync(observed.execution.result.outputPreview.artifactPath), true);
+    const denied = await executeProjectedModelTool({ ...input, name: 'bash', args: { command: 'touch MUST_NOT_RUN' }, toolCallId: 'main-shell' });
+    assert.equal(denied.success, false);
+    assert.equal(JSON.parse(denied.output).diagnostic.stage, 'projection');
+    assert.equal(denied.execution.result.status, 'denied');
+    assert.equal(existsSync(path.join(tmpDir, 'MUST_NOT_RUN')), false);
   });
 
   it('executes projected read_file through Local Tool Host and returns model-compatible output', async () => {

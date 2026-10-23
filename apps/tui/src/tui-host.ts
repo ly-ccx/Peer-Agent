@@ -26,6 +26,7 @@ import {
   resolvePermissionPrincipal,
   createBotAccessPolicyAuthority,
   createFailedClientToolResult,
+  capabilityDenial,
   toolResultEvidencePreview,
   createNodeRuntimeHostAdapter,
   createNodeResultFactory,
@@ -355,6 +356,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       mode,
       hookRunner,
       requestPermission,
+      git: { artifactRoot: path.join(userDataPath, 'artifacts') },
       executionGate: call => projectAuthorityReason(executionContext.getStore(), call.capabilityId),
       shell: {
         taskManager: shellTaskManager,
@@ -480,9 +482,14 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     const blocked = !gate.allowed ? gate.reason
       : projectAuthorityReason(context, capabilityId)
       || (mode === 'memory_curator' ? 'capability_not_projected' : null);
-    if (blocked) return { result: createFailedClientToolResult({
-      call: { toolCallId, capabilityId }, locale: 'zh-CN', reason: blocked, status: 'denied',
-    }) } as RuntimeSdkProviderExecution;
+    if (blocked) {
+      const result = createFailedClientToolResult({ call: { toolCallId, capabilityId }, locale: 'zh-CN', reason: blocked, status: 'denied' });
+      if (['read_only', 'project_agent_capability_denied', 'capability_not_projected'].includes(blocked)) {
+        result.outputPreview = { ...result.outputPreview, ...capabilityDenial({ reason: blocked, capabilityId,
+          toolName: undefined, locale: 'zh-CN', stage: blocked === 'capability_not_projected' ? 'projection' : 'role' }) };
+      }
+      return { result } as RuntimeSdkProviderExecution;
+    }
 
     const provider = resolvedOptions.providers?.find(item => item.manifests.some(manifest => manifest.capabilityId === capabilityId));
     if (provider && context) {

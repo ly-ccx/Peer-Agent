@@ -189,6 +189,7 @@ export function registerDesktopProjectAgent({
     executionScheduler,
     canManageWorkspace: ownsProject,
     deferRecovery: true,
+    readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
