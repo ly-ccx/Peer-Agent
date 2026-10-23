@@ -95,3 +95,11 @@ test('retry reapplies only the intended role and keeps newer unrelated roles and
   assert.deepEqual(next.overrides?.verifier, current.overrides?.verifier);
   assert.deepEqual(next.scope, current.scope);
 });
+
+test('a fresh retry baseline overrides an older renderer no-op comparison', async () => {
+  const f = fixture();
+  const saving = f.state.save(policy, next);
+  assert.equal(f.counts().writes, 1);
+  f.write.resolve({ ok: true, profile: profile(policy) });
+  assert.equal(await saving, true); f.state.stop();
+});

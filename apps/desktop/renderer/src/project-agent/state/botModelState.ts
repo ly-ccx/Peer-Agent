@@ -52,11 +52,11 @@ export function createBotModelState(ports: {
   });
   return {
     refresh: refresh.request,
-    async save(policy: ProjectModelPolicy) {
+    async save(policy: ProjectModelPolicy, baseline: ProjectModelPolicy | null = ports.policy() ?? null) {
       if (stopped || saving) return false;
       ports.onSaveError('');
-      if (botModelPolicyKey(policy) === botModelPolicyKey(ports.policy())) { ports.onPending?.(null); return true; }
-      revision++; ports.onPending?.(policy, ports.policy() ?? null);
+      if (botModelPolicyKey(policy) === botModelPolicyKey(baseline)) { ports.onPending?.(null); return true; }
+      revision++; ports.onPending?.(policy, baseline);
       saving = true; ports.onBusy(true);
       try {
         const result = await ports.write(policy);

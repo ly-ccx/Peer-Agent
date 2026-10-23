@@ -14,9 +14,11 @@ export function useBotModels(workspaceId: string | null, profile: BotProfile | n
   const [readError, setReadError] = useState('');
   const [saveError, setSaveError] = useState('');
   const stateRef = useRef<ReturnType<typeof createBotModelState> | null>(null);
+  const intent = useRef(0), retrying = useRef(false);
   const latest = useRef({ profile, onProfile });
   latest.current = { profile, onProfile };
   useEffect(() => {
+    intent.current++; retrying.current = false;
     setBusy(false); setReadError(''); setSaveError(''); setReading(Boolean(workspaceId));
     setPending(workspaceId ? pendingPolicies.get(workspaceId)?.policy ?? null : null);
     if (!workspaceId) return;
@@ -46,10 +48,23 @@ export function useBotModels(workspaceId: string | null, profile: BotProfile | n
       off?.(); window.removeEventListener('focus', focused);
     };
   }, [workspaceId]);
-  const save = useCallback((modelPolicy: ProjectModelPolicy) => stateRef.current?.save(modelPolicy) ?? Promise.resolve(false), []);
+  const save = useCallback((modelPolicy: ProjectModelPolicy) => { intent.current++; return stateRef.current?.save(modelPolicy) ?? Promise.resolve(false); }, []);
   const reload = useCallback(() => stateRef.current?.refresh(), []);
-  const retry = () => { const draft = workspaceId ? pendingPolicies.get(workspaceId) : null; return draft ? save(rebaseBotModelPolicy(draft.base, draft.policy, latest.current.profile?.modelPolicy)) : Promise.resolve(false); };
-  const discard = () => { if (busy) return; if (workspaceId) pendingPolicies.delete(workspaceId); setPending(null); setSaveError(''); };
+  const retry = async () => {
+    const draft = workspaceId ? pendingPolicies.get(workspaceId) : null, target = stateRef.current;
+    if (!workspaceId || !draft || !target || retrying.current) return false;
+    const ticket = ++intent.current;
+    retrying.current = true; setReading(true);
+    try {
+      const got = await clientApi.projectAgentGet({ workspaceId });
+      if (stateRef.current !== target || ticket !== intent.current) return false;
+      if (!got.ok || !got.profile) { setReadError(got.code || 'FAILED'); return false; }
+      setReadError(''); latest.current.onProfile(got.profile);
+      return await target.save(rebaseBotModelPolicy(draft.base, draft.policy, got.profile.modelPolicy), got.profile.modelPolicy ?? null);
+    } catch { if (stateRef.current === target) setReadError('FAILED'); return false; }
+    finally { if (stateRef.current === target) { retrying.current = false; setReading(false); } }
+  };
+  const discard = () => { if (busy) return; intent.current++; if (workspaceId) pendingPolicies.delete(workspaceId); setPending(null); setSaveError(''); };
   return { loaded: data.workspaceId === workspaceId, reading, readError, saveError, pending, retry, reload, discard, models: data.workspaceId === workspaceId ? data.models : [], views: data.workspaceId === workspaceId ? data.views : {} as BotModelViews, busy, error: saveError || readError, save };
 }
 
