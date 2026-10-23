@@ -10,7 +10,7 @@ process.env.PEER_AGENT_HOME = root;
 const { createConversationStore } = await import('@peer-agent/conversation-store');
 const { createGoalPlanStore, createMemoryStore,createObjectiveStore,mapObjectiveObservationEvent, resolveRoleRoute } = await import('@peer-agent/runtime-node');
 const { registerDesktopProjectAgent } = await import('./project-agent-host.mjs');
-const { projectTurnSystemContext } = await import('../llm-chat-service.mjs');
+const { projectTurnSystemContext, buildRuntimeTools } = await import('../llm-chat-service.mjs');
 const { createWorkCoordinationStore } = await import('../../../../../packages/runtime-node/src/project-agent/work-coordination-store.mjs');
 const { createAgentTurnExecutor } = await import('../agent-host/agent-turn-executor.mjs');
 const { executeProjectedModelTool } = await import('../chat-runtime/projected-tool-executor.mjs');
@@ -35,6 +35,11 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
   const calls = []; const routes = []; const starts = []; const events = [];
   let api;
   const executor = createAgentTurnExecutor({ llmChatService: {
+    readDelegationCapabilities({ readOnly = false } = {}) {
+      const { runtimeProjection } = buildRuntimeTools({ mode: 'goal', readOnlyWorkSession: readOnly,
+        excludeCapabilityPrefixes: ['local.web.control.'] });
+      return runtimeProjection.capabilities.filter(item => ['available', 'needs_permission'].includes(item.health)).map(item => item.capabilityId);
+    },
     resolveGoalRole(input) { routes.push(input); return resolveRoleRoute({ ...input, providers: configured ? [modelProvider] : [] }); },
     async sendMessage(input) { calls.push(input); return send ? send(input, { plans, conversations, api }) : { terminalStatus: 'done', text: 'hello' }; },
   } });
