@@ -168,7 +168,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       :<scrollbox flexGrow={1}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{records?.error?<ThemedText fg={COLOR.info}>{copy('recordsUnavailable')}</ThemedText>:null}{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'&&!records?.error?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}</scrollbox>}
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
     {snapshot.workspaceId?<InputRecoveryStatus state={inputDraft.state} locale={locale}/>:null}
-    {!['bind','bots','cards'].includes(view)?<box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
+    {!['bind','bots','cards'].includes(view)?<>
+      <box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
       <ThemedTextarea ref={editor} focused={!busy&&!cardFocus&&inputDraft.state.ready} height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{if(inputDraft.state.ready)inputDraft.changed();}} onKeyDown={event=>{
         if(busy||!inputDraft.state.ready){event.preventDefault();event.stopPropagation();return;}
         const action=composerEnterAction({keyName:event.name,shift:event.shift,eventType:event.eventType,isComposing:(event as {isComposing?:boolean}).isComposing});
@@ -177,9 +178,9 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
         const text=editor.current?.plainText??'';if(text.trim()){
           submit(text);
         }
-      }}/>
+      }}/></box>
       <ThemedText fg={COLOR.muted}>/help · {copy('switchHint')} · {earlier?copy('earlier'):copy('latest')}</ThemedText>
-      {cards.length?<ThemedText fg={COLOR.muted}>/cards · {copy('cardKeys')}</ThemedText>:null}
-    </box>:null}
+      {cards.length?<ThemedText fg={COLOR.muted}>/cards · {cardFocus?copy('cardKeysFocused'):copy('cardKeys')}</ThemedText>:null}
+    </>:null}
   </box>;
 }

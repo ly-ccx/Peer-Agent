@@ -1,5 +1,5 @@
 import {expect,test} from 'bun:test';
-import {parseProjectCommand,createCardNumbers,cardAction,projectEntry,terminalText} from './commands.ts';
+import {parseProjectCommand,createCardNumbers,cardAction,projectEntry,terminalText,replyEchoText} from './commands.ts';
 test('project commands keep text and multiword answers and reject ambiguous numbers',()=>{
   expect(parseProjectCommand('/answer 2 please try again')).toEqual({kind:'card',operation:'answer',number:2,text:'please try again'});
   expect(parseProjectCommand('/task 3')).toEqual({kind:'task',number:3});
@@ -29,3 +29,21 @@ test('conversation text cannot write terminal titles or execute ANSI controls',(
   expect(terminalText('hello\x1b]0;malicious\x07\x1b[31mworld\x1b[0m\x00')).toBe('helloworld');
   expect(terminalText('你好\nsecond\tline')).toBe('你好\nsecond\tline');
 });
+test('reply echo collapses the original message onto one line',()=>{
+  // terminalText 有意保留换行；回显必须自己折叠，否则多行原话会撑成多行混进正文。
+  expect(replyEchoText('第一行\n第二行\n第三行')).toBe('第一行 第二行 第三行');
+  expect(replyEchoText('一\t二   三')).toBe('一 二 三');
+  expect(replyEchoText('   \n\t ')).toBe('');
+  expect(replyEchoText(undefined)).toBe('');
+});
+test('reply echo truncates by display columns with an ellipsis',()=>{
+  // 60 列以内保持原样，不加省略号。
+  expect(replyEchoText('短问题')).toBe('短问题');
+  expect(replyEchoText('a'.repeat(56))).toBe('a'.repeat(56));
+  // 超出列宽必须带省略号，且不切断半个字符。
+  for(const echoed of [replyEchoText('a'.repeat(57)),replyEchoText('汉'.repeat(30)),replyEchoText('这是一段很长的用户原话'.repeat(10))]){
+    expect(echoed.endsWith('…')).toBe(true);
+    expect(echoed).not.toContain('\n');
+  }
+});
+

@@ -1,9 +1,9 @@
 import {useTerminalDimensions} from '@opentui/react';
-import {ThemedText} from '../themed-primitives.tsx';import {COLOR} from '../tui-theme.ts';
+import {ThemedText} from '../themed-primitives.tsx';import {COLOR,MARKDOWN_CHROME} from '../tui-theme.ts';
 import {MarkdownView} from '../markdown-view.tsx';
 import {CardLine} from './CardLine.tsx';import {projectCopy,projectStatus} from './project-copy.ts';
 import {cardSummary,isRecoveryCard} from './card-presentation.ts';
-import {terminalText,type NumberedCard} from './commands.ts';import type {TuiLocale} from '../tui-language.ts';
+import {replyEchoText,terminalText,type NumberedCard} from './commands.ts';import type {TuiLocale} from '../tui-language.ts';
 export function BotConversationView({messages,cards,locale,isHost,selectedCard,option,cardFocus}:{messages:readonly any[];cards:readonly NumberedCard[];locale:TuiLocale;isHost:boolean;selectedCard:number;option:number;cardFocus:boolean}) {
   const terminal=useTerminalDimensions();
   const byId=new Map(messages.map(row=>[row.id,row]));
@@ -19,7 +19,9 @@ export function BotConversationView({messages,cards,locale,isHost,selectedCard,o
     {!visible.length?<ThemedText fg={COLOR.muted}>{projectCopy(locale,'empty')}</ThemedText>:null}
     {visible.map(message=><box key={message.id} flexDirection="column" marginBottom={1} paddingX={1}>
       {message.kind!=='system_card'?<ThemedText fg={message.kind==='user_input'?COLOR.user:COLOR.accent}>{projectCopy(locale,message.kind==='user_input'?'you':'bot')}</ThemedText>:null}
-      {(message.replyTo??message.meta?.replyTo??[]).length?<ThemedText fg={COLOR.muted}>{projectCopy(locale,'replied')}: {(message.replyTo??message.meta.replyTo).map((id:string)=>terminalText(byId.get(id)?.content??id).slice(0,70)).join(' · ')}</ThemedText>:null}
+      {(()=>{const anchors:string[]=message.replyTo??message.meta?.replyTo??[];if(!anchors.length)return null;
+        const echo=anchors.map((id:string)=>replyEchoText(byId.get(id)?.content??id)).filter(Boolean).map((text:string)=>`${MARKDOWN_CHROME.quotePrefix}${text}`).join(' ');
+        return echo?<ThemedText fg={COLOR.textSoft}>{projectCopy(locale,'replied')}: {echo}</ThemedText>:null;})()}
       {message.content&&!(message.kind==='system_card'&&message.cards?.length)
         ?message.kind==='agent_reply'?<MarkdownView content={terminalText(message.content)} width={terminal.width-4}/>
           :<ThemedText selectable fg={COLOR.text}>{terminalText(message.content)}</ThemedText>

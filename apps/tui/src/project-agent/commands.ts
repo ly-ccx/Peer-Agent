@@ -59,6 +59,36 @@ export function terminalText(value: unknown): string {
     .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g,'');
 }
 
+/**
+ * 回复回显：把用户原话压成单行再按显示列宽截断。
+ *
+ * terminalText 有意保留换行（正文要按原样折行），所以回显必须自己折叠空白，
+ * 否则多行原话会把回显撑成多行、混进正文。列宽按 CJK 占 2 计，截断带省略号，
+ * 避免中文被切一半且看不出被省略。
+ */
+export function replyEchoText(content: unknown, maxColumns = 56): string {
+  const line = terminalText(content).replace(/\s+/g, ' ').trim();
+  if (!line) return '';
+  let columns = 0;
+  let cut = 0;
+  for (const char of line) {
+    const code = char.codePointAt(0) ?? 0;
+    const wide = code >= 0x1100 && (
+      code <= 0x115f || code === 0x2329 || code === 0x232a
+      || (code >= 0x2e80 && code <= 0x303e) || (code >= 0x3041 && code <= 0x33ff)
+      || (code >= 0x3400 && code <= 0x4dbf) || (code >= 0x4e00 && code <= 0x9fff)
+      || (code >= 0xa000 && code <= 0xa4cf) || (code >= 0xac00 && code <= 0xd7a3)
+      || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe10 && code <= 0xfe19)
+      || (code >= 0xfe30 && code <= 0xfe6f) || (code >= 0xff00 && code <= 0xff60)
+      || (code >= 0xffe0 && code <= 0xffe6)
+    );
+    if (columns + (wide ? 2 : 1) > maxColumns) return `${line.slice(0, cut).trimEnd()}…`;
+    columns += wide ? 2 : 1;
+    cut += char.length;
+  }
+  return line;
+}
+
 export function projectEntry(command: {classic?: boolean; bots?: boolean}, hasBot: boolean) {
   if (command.classic) return 'classic';
   if (command.bots) return 'bots';
