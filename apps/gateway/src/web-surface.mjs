@@ -48,7 +48,7 @@ const page = `<!doctype html>
  *   5. no pure black; near-white only on the environment layer
  *   6. state never by colour alone — the dot reinforces a full sentence
  *   7. shadows limited — no shadow is used here, boundaries are hairlines
- *   8. radius <= 16px — 12px cards, 6px controls
+ *   8. radius <= 16px — 16px panels, 12px controls, 8px compact controls
  *
  * The Desktop app themes via `[data-theme]`; a standalone page has no such
  * attribute, so the dark palette hangs off prefers-color-scheme instead.
@@ -82,9 +82,28 @@ const styles = `/* Critical: any author rule that sets \`display\` outranks the 
   --state-warn: #3B6FAB;
   --state-danger: #7A3E50;
 
-  --radius: 12px;
-  --radius-sm: 6px;
-  --focus: rgba(59, 127, 171, 0.32);
+  /* Standalone host adapter for the existing Frost roles; palette remains above. */
+  --ui-radius-panel: 16px;
+  --ui-radius-control: 12px;
+  --ui-radius-control-compact: 8px;
+  --ui-radius-row: 12px;
+  --ui-radius-message: 16px;
+  --ui-radius-composer: 16px;
+  --ui-control-height: 2.375rem;
+  --ui-control-height-compact: 2rem;
+  --ui-focus-width: 2px;
+  --ui-focus-offset: 3px;
+  --ui-focus-color: var(--seal);
+  --ui-font-meta: .75rem;
+  --ui-font-control: .8125rem;
+  --ui-font-body: .875rem;
+  --ui-font-body-lg: .9375rem;
+  --ui-font-heading-sm: 1rem;
+  --za-motion-fast: 120ms;
+  --za-ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --radius: var(--ui-radius-panel);
+  --radius-sm: var(--ui-radius-control-compact);
+  --focus: var(--ui-focus-color);
 
   --font-sans: "Inter", -apple-system, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
 }
@@ -110,7 +129,7 @@ const styles = `/* Critical: any author rule that sets \`display\` outranks the 
     --state-warn: #6B9FCB;
     --state-danger: #AA6E80;
 
-    --focus: rgba(93, 156, 191, 0.38);
+    --focus: var(--ui-focus-color);
   }
 }
 
@@ -122,7 +141,7 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--ui-font-body-lg);
   line-height: 1.6;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
@@ -165,21 +184,27 @@ h1 {
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 
 button {
+  min-block-size: var(--ui-control-height);
+  min-inline-size: var(--ui-control-height-compact);
+  overflow-wrap: anywhere;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   font-weight: 550;
   padding: 9px 16px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--hairline);
   background: var(--sheet);
   color: var(--ink);
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
-button:hover { background: var(--raised); border-color: var(--ink-mute); }
+button:hover:not(:disabled) { background: var(--raised); border-color: var(--ink-mute); }
 
-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button:active:not(:disabled) { background: var(--base); }
+:is(button, a, input, select, textarea, [tabindex]):focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
+@media (pointer: coarse) { button, input, select, textarea { min-block-size: 2.75rem; } }
+@media (forced-colors: active) { button, input, select, textarea { border-color: ButtonText; } :focus-visible { outline-color: Highlight; } }
 
 button:disabled { opacity: 0.5; cursor: default; }
 
@@ -191,7 +216,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   color: var(--canvas);
 }
 
-.btn-primary:hover { background: var(--ink-soft); border-color: var(--ink-soft); }
+.btn-primary:hover:not(:disabled) { background: var(--ink-soft); border-color: var(--ink-soft); }
 
 .btn-quiet { background: transparent; }
 
@@ -206,7 +231,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   border-radius: var(--radius-sm);
   background: var(--sheet);
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: var(--ui-font-control);
 }
 
 /* Tone is decoration on top of the sentence, never the message itself. */
@@ -244,7 +269,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   align-items: center;
   gap: 8px;
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: var(--ui-font-control);
 }
 
 /* Red line 6: the dot only reinforces the sentence next to it, so the state
@@ -279,34 +304,34 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .field { display: grid; gap: 5px; }
 
-.field label { font-size: 12.5px; font-weight: 550; color: var(--ink-soft); }
+.field label { font-size: var(--ui-font-meta); font-weight: 550; color: var(--ink-soft); }
 
 input {
   font: inherit;
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--canvas);
   color: var(--ink);
 }
 
-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+input { min-block-size: var(--ui-control-height); }
 
 /* Native select styled to match the text fields; the OS keeps the menu. */
 select {
   font: inherit;
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--canvas);
   color: var(--ink);
 }
 
-select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+select { min-block-size: var(--ui-control-height); }
 
 .pairing-status { margin: 0; color: var(--ink-soft); font-size: 13px; }
 

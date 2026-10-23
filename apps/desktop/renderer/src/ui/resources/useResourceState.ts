@@ -9,7 +9,7 @@ export function useResourceRead<T>(identity: unknown, read: () => Promise<T>, en
     if (enabled && !reader.snapshot().loaded && !reader.snapshot().error) void reader.reload();
     return () => reader.cancel();
   }, [reader, enabled]);
-  return { ...state, reload: reader.reload, accept: reader.accept };
+  return { ...state, reload: reader.reload, accept: reader.accept, snapshot: reader.snapshot };
 }
 
 export function useResourceActions(identity: unknown) {

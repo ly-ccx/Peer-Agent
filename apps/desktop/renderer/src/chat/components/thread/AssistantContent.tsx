@@ -1,6 +1,6 @@
 import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
-import { prefersReducedMotion } from '../../../app/hooks/useMotionPresence';
+import { useMotionAllowed } from '../../../app/hooks/useMotionAllowed';
 import {
   useConversationCompactionState,
   useConversationToolProgress,
@@ -305,6 +305,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
   readonly label: string;
   readonly isZh: boolean;
 }) {
+  const motionEnabled = useMotionAllowed();
   const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
   const [showAll, setShowAll] = useState(false);
   const processingWindow = useMemo(() => windowProcessingGroups(groups), [groups]);
@@ -326,7 +327,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
             state="weaving"
             size={20}
             aria-label={isZh ? '正在思考' : 'Thinking'}
-            paused={prefersReducedMotion()}
+            paused={!motionEnabled}
           />
         ) : null}
         <span className="thinking-label">{label}</span>

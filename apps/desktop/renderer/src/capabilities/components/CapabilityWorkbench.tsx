@@ -1,5 +1,7 @@
+import { useGuardedNavigation } from '../../ui/forms/UnsavedChanges';
 import type { CapabilityManifest } from '@peer-agent/protocol';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
+import { useResourceRead } from '../../ui/resources/useResourceState';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import {
@@ -29,6 +31,7 @@ export function CapabilityWorkbench({
 }: {
   readonly capabilities: readonly CapabilityManifest[];
 }) {
+  const navigate = useGuardedNavigation();
   const items = useMemo(() => buildCapabilityWorkbenchItems(capabilities), [capabilities]);
   const baseCounts = useMemo(() => countCapabilityWorkbenchItems(items), [items]);
   const tabsId = useId();
@@ -37,20 +40,21 @@ export function CapabilityWorkbench({
     firstItemForTab(items, 'skills'),
   );
   const [skillsUploadOpen, setSkillsUploadOpen] = useState(false);
-  const [skillsCount, setSkillsCount] = useState(0);
-  const [mcpCount, setMcpCount] = useState(0);
-  useEffect(() => {
-    void clientApi.mcpListInstalled().then((list) => setMcpCount(list.length)).catch(() => {});
-  }, []);
+  const installed = useResourceRead('capability-counts', async () => {
+    const workspace = await clientApi.workspaceList();
+    const [skills, mcp] = await Promise.all([clientApi.listSkills(workspace.workspaces.map(row => row.path)), clientApi.mcpListInstalled()]);
+    return { skills: skills.length, mcp: mcp.length };
+  });
+  const [skillsCount, setSkillsCount] = useState<number | null>(null);
+  const [mcpCount, setMcpCount] = useState<number | null>(null);
   const counts = useMemo(
-    () => ({ ...baseCounts, skills: skillsCount, mcp: mcpCount }),
-    [baseCounts, skillsCount, mcpCount],
+    () => ({ ...baseCounts, skills: skillsCount ?? installed.value?.skills ?? null, mcp: mcpCount ?? installed.value?.mcp ?? null }),
+    [baseCounts, skillsCount, mcpCount, installed.value],
   );
   const sections = useMemo(() => groupCapabilityItems(items, activeTab), [activeTab, items]);
 
   const changeTab = (tab: CapabilityWorkbenchTab) => {
-    setActiveTab(tab);
-    setSelectedItem(firstItemForTab(items, tab));
+    navigate(() => { setActiveTab(tab); setSelectedItem(firstItemForTab(items, tab)); });
   };
 
   return (
@@ -61,7 +65,7 @@ export function CapabilityWorkbench({
           {activeTab === 'skills' && (
             <button
               type="button"
-              className="skill-upload-btn"
+              className="ui-button is-compact skill-upload-btn"
               onClick={() => setSkillsUploadOpen(true)}
             >
               <PeerIcon name="plus" size={14} />
@@ -70,6 +74,7 @@ export function CapabilityWorkbench({
           )}
         </div>
 
+        {installed.error ? <p className="ui-form-feedback" role="status">数量暂未更新 <button type="button" className="ui-button is-compact" onClick={() => void installed.reload()}>重新读取</button></p> : null}
         <p className="capability-hero-copy">{TAB_DESCRIPTIONS[activeTab]}</p>
 
         <div className="capability-sections" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${activeTab}`} tabIndex={0}>

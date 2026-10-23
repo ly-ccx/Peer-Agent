@@ -826,7 +826,7 @@ export function LlmSettingsPanel({
     const tryScroll = (attempt: number) => {
       const el = document.querySelector(`[data-llm-group-id="${groupId}"]`);
       if (el instanceof HTMLElement) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
         return;
       }
       if (attempt < 12) {

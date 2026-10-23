@@ -1,3 +1,4 @@
+import { motionAllowed, subscribeMotionEnvironment } from '../../app/state/motionEnvironment.ts';
 import { useCallback, useEffect, useRef } from 'react';
 import { getStreamProfiler } from '../state/streamProfiler.ts';
 
@@ -9,7 +10,7 @@ import { getStreamProfiler } from '../state/streamProfiler.ts';
  * 让用户始终看到丝滑连续的文字流，而不是一坨一坨地跳。
  *
  * 设计要点：
- * - 接收与显示解耦：push() 只往 buffer 追加，绝不直接触发渲染。
+ * - 接收与显示解耦：前台普通偏好用 buffer；减少动效、后台或无帧 API 时立即交出已收到文本。
  * - 自适应速率：buffer 积压越多，每帧吐字越快，保证显示不会落后网络太久。
  * - 帧级批处理：一帧最多调用一次 onText，告别"每个 chunk 一次 setState"。
  * - flush()：流结束时立刻把剩余 buffer 全部吐出，避免末尾延迟。
@@ -226,12 +227,17 @@ export function useTypewriterStream(
   const push = useCallback((text: string) => {
     if (!text) return;
     bufferRef.current += text;
+    if (!motionAllowed() || typeof requestAnimationFrame !== 'function') {
+      stopLoop();
+      const received = bufferRef.current; bufferRef.current = ''; pacerRef.current.lastEmitAtMs = null;
+      onTextRef.current(received); return;
+    }
     // 观测：push 次数 = 前台 delta 到达速率（两个泵各自计数后汇总）。
     const profiler = getStreamProfiler();
     profiler.bump('typewriter.push');
     profiler.setGauge('typewriter.bufferChars', bufferRef.current.length);
     ensureRunning();
-  }, [ensureRunning]);
+  }, [ensureRunning, stopLoop]);
 
   /**
    * 顺序交接：把当前 buffer 立即写出，保证「先到的内容先落到状态」。
@@ -277,8 +283,11 @@ export function useTypewriterStream(
     bufferRef.current = '';
   }, [stopLoop]);
 
-  // 组件卸载时清理 rAF，防止泄漏。
-  useEffect(() => stopLoop, [stopLoop]);
+  // Hiding/reducing motion releases the existing buffer; it never creates new text or a new request.
+  useEffect(() => {
+    const stop = subscribeMotionEnvironment(() => { if (!motionAllowed()) flush(); });
+    return () => { stop(); stopLoop(); };
+  }, [flush, stopLoop]);
 
   return { push, flush, handoff, reset };
 }
