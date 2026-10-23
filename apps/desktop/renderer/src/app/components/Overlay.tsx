@@ -74,7 +74,7 @@ export function Overlay({
   const anchorRef = useRef<HTMLElement | null>(anchor ?? null); anchorRef.current = anchor ?? null;
   const layer = useInteractionLayer(true, { roots: [panelRef], trigger: restoreFocusRef ?? (anchor ? anchorRef : undefined), modal: !anchor, closeOnTriggerRemoval: Boolean(anchor), outside: closeOnBackdrop,
     onClose: onClose ? () => requestClose() : undefined, onEscape });
-  useFocusScope(panelRef, !anchor, { trap: true, restoreFocus: false, ownsScope: () => interactionLayers.topInteractive() === interactionLayers.layerFor(panelRef.current) });
+  useFocusScope(panelRef, !anchor, { trap: true, restoreFocus: false, ownsScope: () => Boolean(layer.current) && interactionLayers.topInteractive() === layer.current });
   const [placement, setPlacement] = useState<CSSProperties>({ visibility: 'hidden' });
 
   useLayoutEffect(() => {
