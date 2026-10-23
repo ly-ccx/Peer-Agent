@@ -56,7 +56,7 @@ function EffortRange({
       setDirty(false); edited.current = false;
       return;
     }
-    committing.current = true;
+    committing.current = true; edited.current = false;
     const settled = () => { committing.current = false; setDirty(false); edited.current = false; };
     // Keep the selected thumb while the owner waits for its actual save receipt.
     try { Promise.resolve(onChange(next)).then(settled, settled); }
