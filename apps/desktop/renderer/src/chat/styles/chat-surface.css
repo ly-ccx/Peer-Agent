@@ -4638,7 +4638,8 @@ button.chat-header-cap-item:focus-visible {
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.pa-cascading-trigger:disabled {
+.pa-cascading-trigger:disabled,
+.model-selection-trigger[aria-disabled=true] {
   cursor: default;
   opacity: 0.6;
 }

@@ -10,7 +10,6 @@ import {
   snapEffortValue,
 } from './effortSlider';
 import {
-  effortAfterModelSwitch,
   enabledModelCount,
   findSelectionModel,
   groupProviderModels,
@@ -30,7 +29,7 @@ function EffortRange({
   readonly levels: readonly EffortLevel[];
   readonly isZh: boolean;
   readonly disabled: boolean;
-  readonly onChange: (level: EffortLevel) => void;
+  readonly onChange: (level: EffortLevel) => void | Promise<unknown>;
 }) {
   const selectedIndex = effortIndexForLevel(effort, levels);
   const selectedValue = levels.length > 1 ? (selectedIndex / (levels.length - 1)) * 100 : 0;
@@ -54,11 +53,10 @@ function EffortRange({
       return;
     }
     committing.current = true;
-    try { onChange(next); }
-    finally {
-      committing.current = false;
-      setDirty(false);
-    }
+    const settled = () => { committing.current = false; setDirty(false); };
+    // Keep the selected thumb while the owner waits for its actual save receipt.
+    try { Promise.resolve(onChange(next)).then(settled, settled); }
+    catch { settled(); }
   };
 
   const effectiveValue = dirty ? dragValue : selectedValue;
@@ -179,15 +177,13 @@ export function ModelSelectionPanel({
   /** Changes when the panel is opened again, so browsing starts from the committed provider. */
   readonly resetToken?: number;
   readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
   readonly onDismiss?: () => void;
 }) {
   const selected = findSelectionModel(groups, selectedModelId);
-  const [modelId, setModelId] = useState(selectedModelId);
-  const [effortValue, setEffortValue] = useState(effort);
-  const [fast, setFast] = useState(fastMode);
+  const modelId = selectedModelId, effortValue = effort, fast = fastMode;
   const [browsedId, setBrowsedId] = useState(selected?.group.id ?? groups[0]?.id ?? '');
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const [menuBelow, setMenuBelow] = useState(embedded);
@@ -196,11 +192,8 @@ export function ModelSelectionPanel({
   const providerButtonRef = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
 
-  useEffect(() => { setEffortValue(effort); }, [effort, resetToken]);
-  useEffect(() => { setFast(fastMode); }, [fastMode, resetToken]);
   useEffect(() => {
     const match = findSelectionModel(groups, selectedModelId);
-    setModelId(selectedModelId);
     setBrowsedId(match?.group.id ?? groups.find((group) => !group.disabled)?.id ?? groups[0]?.id ?? '');
     setProviderMenuOpen(false);
     setActiveModelIndex(-1);
@@ -228,27 +221,16 @@ export function ModelSelectionPanel({
     if (group.disabled || disabled) return;
     setProviderMenuOpen(false);
     setActiveModelIndex(-1);
-    const current = group.models.find((item) => item.id === modelId && !item.disabled);
-    const first = group.models.find((item) => !item.disabled);
-    if (current) {
-      setBrowsedId(group.id);
-      providerButtonRef.current?.focus();
-      return;
-    }
-    if (first) chooseModel(first.id);
-    else setBrowsedId(group.id);
+    setBrowsedId(group.id);
+    providerButtonRef.current?.focus({ preventScroll: true });
   };
 
-  const chooseModel = (modelIdNext: string) => {
+  const chooseModel = (nextId: string) => {
     if (disabled) return;
-    const match = findSelectionModel(groups, modelIdNext);
-    if (!match || match.model.disabled) return;
-    const nextEffort = effortAfterModelSwitch(effortValue, match.model);
-    setModelId(modelIdNext);
-    setBrowsedId(match.group.id);
-    if (nextEffort !== effortValue) setEffortValue(nextEffort);
-    onSelectModel(modelIdNext);
-    if (nextEffort !== effortValue) onEffortChange(nextEffort);
+    const match = findSelectionModel(groups, nextId);
+    if (!match || match.model.disabled || match.group.disabled) return;
+    // The owner commits model + compatible effort together; browsing never writes.
+    onSelectModel(nextId);
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -384,8 +366,7 @@ export function ModelSelectionPanel({
               isZh={isZh}
               disabled={disabled}
               onChange={(level) => {
-                setEffortValue(level);
-                onEffortChange(level);
+                return onEffortChange(level);
               }}
             />
           ) : null}
@@ -395,7 +376,6 @@ export function ModelSelectionPanel({
               isZh={isZh}
               disabled={disabled}
               onChange={(enabled) => {
-                setFast(enabled);
                 onFastModeChange?.(enabled);
               }}
             />
@@ -431,7 +411,7 @@ export function AnchoredModelSelectionMenu({
   readonly title?: string;
   readonly className?: string;
   readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
 }) {
@@ -513,13 +493,14 @@ export function AnchoredModelSelectionMenu({
         ref={triggerRef}
         type="button"
         className={`pa-cascading-trigger model-selection-trigger${open ? ' open' : ''}`}
-        disabled={disabled}
+        aria-disabled={disabled || undefined}
         title={title}
         aria-label={title || label}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => {
+          if (disabled) return;
           setOpen((value) => {
             if (!value) setResetToken((token) => token + 1);
             return !value;
@@ -582,7 +563,7 @@ export function ComposerModelMenu({
   readonly disabled?: boolean;
   readonly title?: string;
   readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
 }) {

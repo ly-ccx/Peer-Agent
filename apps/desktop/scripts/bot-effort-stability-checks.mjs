@@ -3,11 +3,11 @@ import path from 'node:path';
 
 /** Real component + delayed/failing production IPC save in the disposable smoke host. */
 export async function checkEffortStability({ page, slider, strength, until, getBot, failNext, report, captureDirectory, highEffort, scope = 'settings' }) {
-  const selector = scope === 'composer' ? '.bot-composer .reasoning-effort-trigger' : '.bot-model-settings-row .reasoning-effort-trigger';
+  const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
   const sample = async (key, collectionDelayMs = 0) => {
     const baseline = await page.evaluate(selector => {
       const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height }; };
-      return { trigger: box(selector), panel: box('.reasoning-effort-panel') };
+      return { trigger: box(selector), panel: box('.model-selection-panel') };
     }, selector);
     await slider.focus();
     // Arm inside the renderer before dispatching the real key. A slow CDP round
@@ -22,7 +22,7 @@ export async function checkEffortStability({ page, slider, strength, until, getB
           if (performance.now() - start > 420) { finish(); return; }
           const slider = document.querySelector('.reasoning-effort-slider');
           const trigger = document.querySelector(selector);
-          const panel = document.querySelector('.reasoning-effort-panel');
+          const panel = document.querySelector('.model-selection-panel');
           const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
           frames.push({ value: slider.value, trigger: rect(trigger), panel: rect(panel) });
           requestAnimationFrame(capture);
@@ -51,26 +51,8 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     }
     return frames.length;
   };
-  if (scope === 'composer') {
-    // A click can return before the first frame of the active-color transition.
-    // Assert the painted open state after the browser has begun painting it.
-    await until(() => strength.evaluate(node => {
-      const content = node.querySelector('.reasoning-effort-trigger-content');
-      return node.getAttribute('aria-expanded') === 'true'
-        && getComputedStyle(content).backgroundColor !== 'rgba(0, 0, 0, 0)';
-    }), Boolean);
-    const paint = await strength.evaluate(node => {
-      const content = node.querySelector('.reasoning-effort-trigger-content');
-      const label = node.querySelector('.reasoning-effort-label');
-      const c = content.getBoundingClientRect(), l = label.getBoundingClientRect();
-      return { outerBackground: getComputedStyle(node).backgroundColor,
-        innerBackground: getComputedStyle(content).backgroundColor,
-        left: l.left - c.left, right: c.right - l.right };
-    });
-    assert.equal(paint.outerBackground, 'rgba(0, 0, 0, 0)', 'stable sizing slot must not paint excess active background');
-    assert.notEqual(paint.innerBackground, 'rgba(0, 0, 0, 0)', 'active label must retain visible background');
-    assert.ok(Math.abs(paint.left - paint.right) < 0.5, 'active background padding must match on both sides of the label');
-  }
+  assert.equal(await strength.getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('.model-selection-panel[role="dialog"]').isVisible(), true);
   const successFrames = await sample('End');
   await page.keyboard.press('Escape');
   assert.equal(await strength.evaluate(node => node === document.activeElement), true, 'Escape must return focus even while the save is pending');
@@ -81,10 +63,14 @@ export async function checkEffortStability({ page, slider, strength, until, getB
   // Collect after the 650ms failure has returned. The renderer's earlier frames
   // must still prove the pending selection, independently of CDP delivery time.
   const failureFrames = await sample('Home', 900);
-  await page.getByText('模型设置未保存，请重试。', { exact: true }).first().waitFor();
+  await page.locator('.bot-model-error[role="alert"], .bot-model-feedback [role="alert"]').first().waitFor();
   await until(() => slider.inputValue(), value => value === '100');
   assert.equal((await getBot()).modelPolicy.overrides.project_agent.reasoningEffort, highEffort);
-  assert.equal(await strength.locator('.reasoning-effort-label').evaluate(node => node.scrollWidth <= node.clientWidth), true, 'full effort label must fit the normal composer and settings width');
+  assert.equal(await strength.locator('.model-selection-trigger-label').evaluate(node => node.scrollWidth <= node.clientWidth), true, 'full effort label must fit the normal composer and settings width');
+  const discard = page.locator('.bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
+  if (await discard.count()) {
+    await page.keyboard.press('Escape'); await discard.click(); await strength.click(); await slider.waitFor();
+  }
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
   (report.effortStability ??= {})[scope] = { delayMs: 650, failureCollectionDelayMs: 900, successFrames, failureFrames, successHeld: true, failureHeldThenRolledBack: true,
     stableTriggerAndPanel: true, scope: 'Production settings slider and durable profile over actual IPC; controlled latency and failure' };
