@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { Overlay } from './Overlay';
 
 export function Drawer({
   onClose,
+  restoreFocusRef,
   closeOnBackdrop = true,
   ariaLabel,
   panelClassName,
@@ -10,6 +11,7 @@ export function Drawer({
   children,
 }: {
   readonly onClose?: () => void;
+  readonly restoreFocusRef?: RefObject<HTMLElement | null>;
   readonly closeOnBackdrop?: boolean;
   readonly ariaLabel?: string;
   readonly panelClassName?: string;
@@ -23,6 +25,7 @@ export function Drawer({
   return (
     <Overlay
       onClose={onClose}
+      restoreFocusRef={restoreFocusRef}
       closeOnBackdrop={closeOnBackdrop}
       ariaLabel={ariaLabel}
       panelClassName={panelClassName}

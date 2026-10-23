@@ -3,7 +3,8 @@ import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, useRef, type RefObject } from 'react';
 import { useFocusScope } from '../../app/hooks/useFocusScope';
 import { Drawer } from '../../app/components/Drawer';
-import { OVERLAY_SELECTOR } from '../../app/components/overlayStack';
+import { InteractionLayerContext, useInteractionLayer } from '../../app/hooks/useInteractionLayer';
+import { interactionLayers } from '../../app/components/interactionLayers';
 import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
 import { EvidenceView } from './EvidenceView';
@@ -113,7 +114,7 @@ export function BotProfileDrawer({
     }
     previousInspect.current = inspect;
   }, [inspect, memory.open]);
-  useFocusScope(bodyRef, layout === 'push' && memory.open && dockPhase !== 'off', { restore: triggerRef });
+  useFocusScope(bodyRef, layout === 'push' && memory.open && dockPhase !== 'off', { restore: triggerRef, ownsScope: () => interactionLayers.topInteractive() === interactionLayers.layerFor(bodyRef.current) });
   const close = () => {
     // A live reply can become a durable message while the drawer is open.
     // Restore its current footer, rather than a detached streaming button.
@@ -126,8 +127,8 @@ export function BotProfileDrawer({
       }
     }
     onMemory({ ...memory, open: false });
-    triggerRef.current?.focus({ preventScroll: true });
   };
+  const layer = useInteractionLayer(layout === 'push' && memory.open && dockPhase !== 'off', { roots: [bodyRef], trigger: triggerRef, restoreFocus: false, onClose: close });
   const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
   const reportRead = useTaskReport(workspaceId, memory.sessionId, memory.open, selected?.status, sessionsAvailable,
     `${selected?.sourceRevision || ''}:${selected?.observationRevision || ''}`);
@@ -164,17 +165,6 @@ export function BotProfileDrawer({
     return () => clearTimeout(timer);
   }, [dockPhase]);
 
-  useEffect(() => {
-    if (!memory.open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || layout === 'cover') return;
-      if (document.querySelector(OVERLAY_SELECTOR)) return;
-      event.preventDefault();
-      close();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [layout, memory, onMemory, triggerRef]);
 
   useEffect(() => {
     let cancelled = false;
@@ -338,6 +328,7 @@ export function BotProfileDrawer({
     return (
       <Drawer
         onClose={close}
+        restoreFocusRef={triggerRef}
         ariaLabel={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
         panelClassName="bot-drawer-panel"
       >
@@ -353,7 +344,7 @@ export function BotProfileDrawer({
       inert={!memory.open}
       aria-hidden={!memory.open}
     >
-      {body}
+      <InteractionLayerContext.Provider value={layer}>{body}</InteractionLayerContext.Provider>
     </aside>
   );
 }

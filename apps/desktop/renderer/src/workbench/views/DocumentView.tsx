@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { DiffViewer } from '../file-preview/DiffViewer';
 import {
@@ -10,7 +10,7 @@ import {
 } from '../file-preview/fileTypes';
 import { MarkdownDocument } from '../file-preview/MarkdownDocument';
 import { SourceViewer } from '../file-preview/SourceViewer';
-import { ResourceTabStrip } from '../ResourceTabStrip';
+import { ResourceTabStrip, resourceTabIds } from '../ResourceTabStrip';
 import { OpenTargetSplitButton } from '../OpenTargetSplitButton';
 import {
   buildOpenTargetMenu,
@@ -36,6 +36,7 @@ interface DocumentViewProps {
 }
 
 interface DocumentPageProps {
+  readonly idPrefix: string;
   readonly isZh: boolean;
   readonly tab: DocumentTabSession;
   readonly active: boolean;
@@ -170,6 +171,7 @@ export function DocumentView({
   onSessionChange,
   onBrowseFiles,
 }: DocumentViewProps) {
+  const tabsId = useId();
   const selectTab = useCallback((tabId: string) => {
     onSessionChange((current) => activateDocumentTab(current, tabId));
   }, [onSessionChange]);
@@ -190,7 +192,7 @@ export function DocumentView({
 
   return (
     <div className="document-view">
-      <ResourceTabStrip
+      <ResourceTabStrip idPrefix={tabsId}
         ariaLabel={isZh ? '文档标签' : 'Document tabs'}
         items={items}
         activeId={session.activeTabId}
@@ -217,7 +219,7 @@ export function DocumentView({
             </button>
           </div>
         ) : session.tabs.map((tab) => (
-          <DocumentPage
+          <DocumentPage idPrefix={tabsId}
             key={tab.id}
             isZh={isZh}
             tab={tab}
@@ -230,7 +232,7 @@ export function DocumentView({
   );
 }
 
-function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentPageProps) {
+function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }: DocumentPageProps) {
   const mode = fileTarget.mode;
   const [diff, setDiff] = useState<DiffState>(INITIAL_DIFF);
   const [content, setContent] = useState<ContentState>(INITIAL_CONTENT);
@@ -636,6 +638,8 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
   return (
     <div
       className="document-page workbench-diff workbench-file-preview"
+      id={resourceTabIds(idPrefix, fileTarget.id).panel} role="tabpanel" aria-labelledby={resourceTabIds(idPrefix, fileTarget.id).tab}
+      tabIndex={0} inert={!active}
       data-active={active}
       aria-hidden={!active}
     >

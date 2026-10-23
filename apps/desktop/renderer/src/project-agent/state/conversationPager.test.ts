@@ -115,3 +115,16 @@ test('latest decision stamp closes old question controls already retained in an 
   assert.equal(snapshot!.messages[0]!.cards[0]!.actions?.length, 0);
   assert.equal(snapshot!.messages[0]!.cards[1]!.actions?.length, 1, 'question retirement cannot resolve permissions');
 });
+
+
+test('restoring a reading checkpoint is bounded and can be continued without restarting at the newest page', async () => {
+  const history = Array.from({ length: 1000 }, (_, index) => ({ id: `m-${index}`, role: 'user', content: String(index), createdAt: '2026-10-23' }));
+  let reads = 0;
+  const pager = createConversationPager({ read: async params => {
+    reads++; const end = params.before ? Number(params.before) : history.length, start = Math.max(0, end - params.limit);
+    return { ok: true, messages: history.slice(start, end), nextCursor: start ? String(start) : null };
+  }, publish() {} });
+  await pager.refresh(); assert.equal(await pager.locate('m-650', 4), false); assert.equal(reads, 5);
+  assert.equal(await pager.locate('m-650', 4), true); assert.equal(reads, 7);
+  assert.equal(await pager.locate('m-100', 4, () => false), false); assert.equal(reads, 7);
+});

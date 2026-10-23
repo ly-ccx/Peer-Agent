@@ -19,7 +19,7 @@
   font-size: 0.68rem;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
-  pointer-events: none;
+  pointer-events: auto;
   white-space: normal;
   word-break: break-word;
   /* Reuse centralized motion primitives instead of a local @keyframes. */

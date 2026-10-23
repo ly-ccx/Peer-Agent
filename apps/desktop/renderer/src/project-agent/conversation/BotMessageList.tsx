@@ -35,6 +35,7 @@ export function BotMessageList({
   label,
   avatarMood,
   rows,
+  ready, locateMessage,
   hasOlder = false,
   olderError = false,
   onLoadOlder,
@@ -56,6 +57,8 @@ export function BotMessageList({
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
   readonly rows: readonly BotConversationViewRow[];
+  readonly ready: boolean;
+  readonly locateMessage: (id: string, pages: number, active: () => boolean) => Promise<boolean>;
   readonly followRequestId?: number;
   readonly onReload?: () => void;
   readonly hasOlder?: boolean;
@@ -75,17 +78,22 @@ export function BotMessageList({
 }) {
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const scroll = useConversationWindow(rows, highlightedId, highlightRequestId, followRequestId);
+  const scroll = useConversationWindow(rows, highlightedId, highlightRequestId, followRequestId, { identity: workspaceId, ready, hasOlder, locateMessage });
+  const focusedRequest = useRef<{ key: string; epoch: number; done: boolean } | null>(null);
+  const focusKey = focusTaskRequest?.messageId ? `${workspaceId}:${focusTaskRequest.id}:${focusTaskRequest.messageId}:${focusTaskRequest.cardId}` : null;
+  if (focusKey && focusedRequest.current?.key !== focusKey) focusedRequest.current = { key: focusKey, epoch: scroll.navigationEpoch, done: false };
   const taskMessageVisible = scroll.visibleRows.some(row => replyRowContains(row, focusTaskRequest?.messageId));
   useEffect(() => {
     if (!focusTaskRequest?.messageId || !taskMessageVisible) return;
+    const request = focusedRequest.current;
+    if (!request || request.done || request.epoch !== scroll.navigationEpoch) return;
     const root = scroll.scrollerRef.current;
     const message = root?.querySelector<HTMLElement>(`#${CSS.escape(`bot-msg-${focusTaskRequest.messageId}`)}`);
     const card = focusTaskRequest.cardId
       ? message?.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(focusTaskRequest.cardId)}"] button:not(:disabled)`)
       : null;
     const target = card ?? message;
-    if (target) { if (!card) target.tabIndex = -1; target.focus({ preventScroll: true }); }
+    if (target) { request.done = true; if (!card) target.tabIndex = -1; target.focus({ preventScroll: true }); }
   }, [focusTaskRequest, taskMessageVisible, scroll.scrollerRef]);
   const highlighted = useMessageHighlight(highlightedId, highlightRequestId, scroll.visibleRows.some(row => replyRowContains(row, highlightedId)));
   const references = replyReferencesForRows(rows);
@@ -108,21 +116,25 @@ export function BotMessageList({
 
   return (
     <div className="bot-thread-shell">
+    {scroll.restoreStatus !== 'none' ? <div className="bot-thread-feedback" role="status">
+      <p>{i18n.t(scroll.restoreStatus === 'loading' ? 'projectAgent.chat.restoringReading' : 'projectAgent.chat.readingUnavailable')}</p>
+      {scroll.restoreStatus !== 'loading' ? <button type="button" onClick={() => void scroll.restoreReading()}>{i18n.t('projectAgent.chat.restoreReading')}</button> : null}
+    </div> : null}
     <div
       className="bot-thread"
       data-single-system={rows.length === 1 && rows[0]?.type === 'message' && rows[0].message.kind === 'system_card'
         && !rows[0].message.cards.some(card => card.kind === 'familiarize') ? 'true' : undefined}
       ref={scroll.scrollerRef}
       role="log"
+      tabIndex={0}
       aria-live="polite"
       aria-busy={loadingOlder}
-      onWheel={scroll.interruptFollow}
-      onTouchStart={scroll.interruptFollow}
-      onKeyDown={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) scroll.interruptFollow(); }}
+      onWheel={scroll.onWheel} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}
+      onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown}
       onScroll={(event) => {
         const node = event.currentTarget;
         scroll.onScroll();
-        if (node.scrollTop < 48 && hasOlder && !olderError) {
+        if (scroll.wantsOlder() && node.scrollTop < 48 && hasOlder && !olderError) {
           void loadOlder();
         }
       }}

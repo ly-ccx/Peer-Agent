@@ -83,7 +83,7 @@ export function BotConversation({
     }
     lastReplyRef.current = lastId;
   }, [conversation.status, conversation.messages, onReplyArrived, workspaceId]);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(focusMessageId ?? null);
   const [highlightRequestId, setHighlightRequestId] = useState(0);
   useEffect(() => {
     if (highlightedId) void conversation.locateMessage(highlightedId);
@@ -164,7 +164,7 @@ export function BotConversation({
           <button type="button" onClick={conversation.reload}>{i18n.t('projectAgent.history.retry')}</button>
         </div>
       ) : (
-        <BotMessageList
+        <BotMessageList key={workspaceId} ready={conversation.status === 'ready'} locateMessage={conversation.locateMessage}
           workspaceId={workspaceId}
           avatar={avatar}
           label={label}

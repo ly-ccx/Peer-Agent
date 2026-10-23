@@ -273,17 +273,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     setLastProbe(null);
   }, []);
 
-  useEffect(() => {
-    if (!showAddForm) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) {
-        resetForm();
-        setShowAddForm(false);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showAddForm, busy, resetForm]);
+
 
   const updateArgRow = useCallback((index: number, value: string) => {
     setArgRows((rows) => rows.map((row, i) => (i === index ? value : row)));
@@ -607,6 +597,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
         <Overlay
           onClose={() => { resetForm(); setShowAddForm(false); }}
           closeOnBackdrop={!busy}
+          onEscape={() => busy}
           ariaLabel="新增本地 MCP server"
           panelClassName="mcp-modal-card"
         >

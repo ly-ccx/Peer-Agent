@@ -256,6 +256,9 @@ export type TranslationKey =
   | 'projectAgent.chat.stopped'
   | 'projectAgent.chat.stopFailed'
   | 'projectAgent.chat.latest'
+  | 'projectAgent.chat.restoringReading'
+  | 'projectAgent.chat.readingUnavailable'
+  | 'projectAgent.chat.restoreReading'
   | 'projectAgent.chat.received'
   | 'projectAgent.chat.loadOlder'
   | 'projectAgent.chat.loadingOlder'
@@ -1857,6 +1860,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': '生成已停止，以上内容未完成',
     'projectAgent.chat.stopFailed': '停止失败，请再试一次。',
     'projectAgent.chat.latest': '回到最新消息',
+    'projectAgent.chat.restoringReading': '正在恢复原阅读位置…',
+    'projectAgent.chat.readingUnavailable': '原阅读位置尚未找到或暂不可用；可继续分批查找，或回到最新消息。',
+    'projectAgent.chat.restoreReading': '继续恢复阅读位置',
     'projectAgent.chat.received': '已收到',
     'projectAgent.chat.loadOlder': '查看更早消息',
     'projectAgent.chat.loadingOlder': '正在加载更早消息',
@@ -3243,6 +3249,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': 'Generation stopped. The content above is incomplete.',
     'projectAgent.chat.stopFailed': 'Could not stop. Please try again.',
     'projectAgent.chat.latest': 'Jump to latest message',
+    'projectAgent.chat.restoringReading': 'Restoring your reading position…',
+    'projectAgent.chat.readingUnavailable': 'Your reading position is not loaded or is unavailable. Continue looking in batches, or jump to latest.',
+    'projectAgent.chat.restoreReading': 'Continue restoring reading position',
     'projectAgent.chat.received': 'Received',
     'projectAgent.chat.loadOlder': 'Earlier messages',
     'projectAgent.chat.loadingOlder': 'Loading earlier messages',

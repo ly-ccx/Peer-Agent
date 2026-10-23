@@ -1,5 +1,5 @@
 import type { CapabilityManifest } from '@peer-agent/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import {
@@ -31,6 +31,7 @@ export function CapabilityWorkbench({
 }) {
   const items = useMemo(() => buildCapabilityWorkbenchItems(capabilities), [capabilities]);
   const baseCounts = useMemo(() => countCapabilityWorkbenchItems(items), [items]);
+  const tabsId = useId();
   const [activeTab, setActiveTab] = useState<CapabilityWorkbenchTab>('skills');
   const [selectedItem, setSelectedItem] = useState<CapabilityWorkbenchItem | null>(() =>
     firstItemForTab(items, 'skills'),
@@ -56,7 +57,7 @@ export function CapabilityWorkbench({
     <section className={`capability-workbench ${activeTab === 'skills' || activeTab === 'mcp' ? 'skills-active' : ''} ${activeTab === 'skills' ? 'marketplace' : ''}`}>
       <main className="capability-workbench-main">
         <div className="capability-tabs-row">
-          <CapabilityTabs activeTab={activeTab} counts={counts} onChange={changeTab} />
+          <CapabilityTabs idPrefix={tabsId} activeTab={activeTab} counts={counts} onChange={changeTab} />
           {activeTab === 'skills' && (
             <button
               type="button"
@@ -71,7 +72,7 @@ export function CapabilityWorkbench({
 
         <p className="capability-hero-copy">{TAB_DESCRIPTIONS[activeTab]}</p>
 
-        <div className="capability-sections">
+        <div className="capability-sections" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${activeTab}`} tabIndex={0}>
           {activeTab === 'skills' ? (
             <SkillsPanel
               uploadOpen={skillsUploadOpen}

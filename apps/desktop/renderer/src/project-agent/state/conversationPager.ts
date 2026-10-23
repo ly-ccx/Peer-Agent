@@ -20,9 +20,9 @@ export function createConversationPager({ read, publish }: {
   let initialized = false;
   let stopped = false;
   let tail = Promise.resolve();
-  const serial = (job: () => Promise<void>) => {
-    const next = tail.then(async () => { if (!stopped) await job(); });
-    tail = next.catch(() => {});
+  const serial = <T>(job: () => Promise<T>) => {
+    const next = tail.then(async () => { if (!stopped) return await job(); });
+    tail = next.then(() => {}, () => {});
     return next;
   };
   const page = async (before?: string) => {
@@ -75,12 +75,14 @@ export function createConversationPager({ read, publish }: {
   return {
     refresh: () => serial(() => page()),
     older: () => serial(async () => { if (cursor) await page(cursor); }),
-    locate: (id: string) => serial(async () => {
-      while (!stopped && cursor && !messages.some(message => message.id === id)) {
+    locate: (id: string, maxPages = Infinity, isActive: () => boolean = () => true) => serial(async () => {
+      let pages = 0;
+      while (!stopped && isActive() && cursor && pages++ < maxPages && !messages.some(message => message.id === id)) {
         const before = cursor;
         await page(before);
         if (cursor === before) throw new Error('Conversation cursor did not advance');
       }
+      return !stopped && isActive() && messages.some(message => message.id === id);
     }),
     stop: () => { stopped = true; },
   };

@@ -77,7 +77,7 @@ export function useBotConversation(workspaceId: string) {
   const [activity, setActivity] = useState<ProjectAgentActivity | null>(null);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState(false);
-  const [followRequestId, setFollowRequestId] = useState(0);
+  const followRequestId = 0;
   const pagerRef = useRef<ReturnType<typeof createConversationPager> | null>(null);
   const generationRef = useRef(0);
   const activityEventRef = useRef(0);
@@ -174,10 +174,10 @@ export function useBotConversation(workspaceId: string) {
     try { await pager?.older(); }
     catch { if (pagerRef.current === pager) setOlderError(true); }
   }, []);
-  const locateMessage = useCallback(async (id: string) => {
+  const locateMessage = useCallback(async (id: string, maxPages?: number, isActive?: () => boolean) => {
     const pager = pagerRef.current;
-    try { await pager?.locate(id); }
-    catch { if (pagerRef.current === pager) setOlderError(true); }
+    try { return await pager?.locate(id, maxPages, isActive) ?? false; }
+    catch { if (pagerRef.current === pager) setOlderError(true); return false; }
   }, []);
 
   useEffect(() => {
@@ -198,13 +198,11 @@ export function useBotConversation(workspaceId: string) {
   }, [workspaceId]);
   const send = useCallback(async (_text?: string, quoteRefs: readonly string[] = []) => {
     const ticket = generationRef.current;
-    setFollowRequestId(value => value + 1);
     const answerTo = questionForInput(applyOptimistic(decorated, pending), quoteRefs);
     return received(await recovery.session.send({ quoteRefs, answerTo }), ticket);
   }, [recovery.session, decorated, pending, received]);
   const answer = useCallback(async (text: string, answerTo?: string) => {
     const ticket = generationRef.current;
-    setFollowRequestId(value => value + 1);
     return received(await recovery.session.send({ text, answerTo, useDraft: false }), ticket);
   }, [recovery.session, received]);
   const retry = useCallback(async (inputId: string) => {
