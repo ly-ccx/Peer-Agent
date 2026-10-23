@@ -1,3 +1,8 @@
+import { useFallbackVisionSetting } from '../hooks/useFallbackVisionSetting';
+import { useProviderCollection } from '../hooks/useProviderCollection';
+import { useProviderFormGuard } from '../hooks/useProviderFormGuard';
+import { FormFeedback } from '../../ui/forms/FormFeedback';
+import { useGuardedNavigation } from '../../ui/forms/UnsavedChanges';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type {
   LlmAuthMethod,
@@ -595,10 +600,12 @@ export function LlmSettingsPanel({
   readonly onBack?: () => void;
 }) {
   const confirm = useConfirm();
-  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [fallbackVisionProviderId, setFallbackVisionProviderId] = useState<string>('');
-  const [fallbackVisionSaving, setFallbackVisionSaving] = useState(false);
-  const fallbackVisionRevision = useRef(0);
+  const { providers, setProviders, refresh, loading: providersLoading, error: providersError } = useProviderCollection(list => {
+    setTestResults(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => !list.some(provider => provider.id === id && isOAuthMethod(provider.authMethod) && provider.oauthStatus?.status === 'connected'))));
+  });
+  const navigate = useGuardedNavigation();
+  const fallbackVision = useFallbackVisionSetting();
+  const fallbackVisionProviderId = fallbackVision.draft, fallbackVisionSaving = !fallbackVision.loaded || fallbackVision.saving;
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -612,6 +619,7 @@ export function LlmSettingsPanel({
   const [showAdvancedFields, setShowAdvancedFields] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [quotaResults, setQuotaResults] = useState<Record<string, LlmSubscriptionQuota>>({});
@@ -647,40 +655,6 @@ export function LlmSettingsPanel({
       delete next[id];
       return next;
     });
-  }, []);
-
-  const refresh = useCallback(async () => {
-    try {
-      const list = await clientApi.llmListProviderGroups();
-      setProviders(list);
-      setTestResults((prev) => {
-        let next: Record<string, LlmProviderTestResult> | null = null;
-        for (const provider of list) {
-          if (!isOAuthMethod(provider.authMethod) || provider.oauthStatus?.status !== 'connected' || !prev[provider.id]) continue;
-          next ??= { ...prev };
-          delete next[provider.id];
-        }
-        return next ?? prev;
-      });
-      return list;
-    } catch { /* silent */ }
-    return [];
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  useEffect(() => {
-    let active = true;
-    const revision = fallbackVisionRevision.current;
-    // initialSettings is a startup snapshot; revisit the host's persisted value on every mount.
-    void clientApi.getSettings().then(settings => {
-      if (!active || revision !== fallbackVisionRevision.current) return;
-      const raw = settings.fallbackVision;
-      setFallbackVisionProviderId(typeof raw === 'string' ? raw.trim()
-        : raw && typeof raw === 'object' && typeof (raw as { providerId?: unknown }).providerId === 'string'
-          ? String((raw as { providerId: string }).providerId).trim() : '');
-    }).catch(() => { /* Existing selection remains available when settings cannot be read. */ });
-    return () => { active = false; };
   }, []);
 
   // 与底部模型选择器一致：一级 provider（groupId），二级 vision 模型；未配 Key 的模型置灰。
@@ -725,22 +699,6 @@ export function LlmSettingsPanel({
     ];
   }, [providers, i18n]);
 
-  const handleFallbackVisionChange = async (nextId: string) => {
-    fallbackVisionRevision.current += 1;
-    const normalized = nextId === '__none__' ? '' : nextId;
-    const previous = fallbackVisionProviderId;
-    setFallbackVisionProviderId(normalized);
-    setFallbackVisionSaving(true);
-    try {
-      await clientApi.updateSettings({
-        fallbackVision: normalized ? { providerId: normalized } : null,
-      });
-    } catch {
-      setFallbackVisionProviderId(previous);
-    } finally {
-      setFallbackVisionSaving(false);
-    }
-  };
 
   useEffect(() => clientApi.onLlmOAuthPending((pending) => {
     setOauthPending(pending);
@@ -976,8 +934,16 @@ export function LlmSettingsPanel({
     setShowForm(true);
   };
 
+  const closeProviderForm = () => {
+    setShowForm(false); setEditingId(null); setAddModelGroupId(null);
+    setFormLockSource('manual'); setShowAdvancedFields(false); clearLocalCliFlow();
+    setForm(emptyForm(channels));
+  };
+  const guardProviderClose = useProviderFormGuard(form, showForm, saving || Boolean(oauthBusyId), closeProviderForm);
+
   const handleSave = async () => {
-    setSaving(true);
+    if (saveLock.current) return;
+    saveLock.current = true; setSaving(true);
     setFormError(null);
     try {
       const localCli = isLocalCliMethod(form.authMethod);
@@ -1172,7 +1138,7 @@ export function LlmSettingsPanel({
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Save failed');
     } finally {
-      setSaving(false);
+      saveLock.current = false; setSaving(false);
     }
   };
 
@@ -1281,6 +1247,12 @@ export function LlmSettingsPanel({
     const configuredModels = providers.filter(
       (provider) => (provider.groupId ?? provider.id) === groupId,
     );
+    if (sourceOverride === 'manual') {
+      for (const patch of patches) {
+        if (!configuredModels.some(model => model.model === patch.model)) await clientApi.llmAddModel({ groupId, name: target.name, ...patch });
+      }
+      return (await refresh()).filter(provider => (provider.groupId ?? provider.id) === groupId);
+    }
     const changes = calculateModelSelectionChanges(models, configuredModels);
     if (changes.additions.length === 0 && changes.removals.length === configuredModels.length) {
       throw new Error('provider_requires_at_least_one_model');
@@ -1466,13 +1438,14 @@ export function LlmSettingsPanel({
     <div className="llm-settings-panel">
       {onBack ? (
         <header className="llm-settings-header">
-          <button type="button" onClick={onBack} aria-label="Back">
+          <button type="button" onClick={() => navigate(onBack)} aria-label="Back">
             <PeerIcon name="back" size={18} />
           </button>
           <strong>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</strong>
         </header>
       ) : null}
 
+      <FormFeedback i18n={i18n} loading={providersLoading} readError={providersError} onReload={refresh} />
       <header className="frost-page-heading llm-page-heading">
         <div>
           <h1>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</h1>
@@ -1695,20 +1668,16 @@ export function LlmSettingsPanel({
         </section>
       )}
 
+      {!catalogOpen ? <FormFeedback i18n={i18n} {...fallbackVision} onReload={fallbackVision.reload} onRetry={fallbackVision.save} /> : null}
       {!catalogOpen ? <FallbackVisionSetting i18n={i18n} value={fallbackVisionProviderId}
         groups={fallbackVisionMenuGroups} saving={fallbackVisionSaving}
-        onChange={nextId => { void handleFallbackVisionChange(nextId); }} /> : null}
+        onChange={nextId => { void fallbackVision.change(nextId); }} /> : null}
 
 {showForm ? (
         <Overlay
-          onClose={() => {
-            setShowForm(false);
-            setEditingId(null);
-            setAddModelGroupId(null);
-            setFormLockSource('manual');
-            setShowAdvancedFields(false);
-            clearLocalCliFlow();
-          }}
+          onClose={closeProviderForm}
+          onRequestClose={guardProviderClose}
+          onEscape={() => saving || Boolean(oauthBusyId)}
           closeOnBackdrop={!saving && !oauthBusyId}
           ariaLabel={editingId
             ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
@@ -1755,7 +1724,7 @@ export function LlmSettingsPanel({
                 <PeerIcon name="close" size={14} />
               </button>
             </header>
-            <div className="llm-form llm-modal-body">
+            <fieldset className="llm-form llm-modal-body ui-form-fields" disabled={saving || Boolean(oauthBusyId)}>
 
           {!isAddModel && (
           <>
@@ -2082,15 +2051,15 @@ export function LlmSettingsPanel({
           </>
           ) : null}
 
-          {formError ? <p className="llm-form-error">{(isLocalCliAuth ? friendlyLocalCliError(formError, i18n.locale) : friendlyTestError(formError, i18n.locale))}</p> : null}
-            </div>
+          {formError ? <p className="llm-form-error" role="alert">{(isLocalCliAuth ? friendlyLocalCliError(formError, i18n.locale) : friendlyTestError(formError, i18n.locale))}</p> : null}
+            </fieldset>
             <div className="llm-modal-footer">
-            <button type="button" className="llm-modal-cancel" onClick={requestClose}>
+            <button type="button" className="llm-modal-cancel ui-button" onClick={requestClose}>
               {i18n.locale === 'zh-CN' ? '取消' : 'Cancel'}
             </button>
             <button
               type="button"
-              className="primary"
+              className="primary ui-button is-primary"
               onClick={() => {
                 if (formValidationError) {
                   setFormError(formValidationError);
@@ -2120,6 +2089,7 @@ export function LlmSettingsPanel({
 
       {pendingProviderDraft ? (
         <ModelCatalogDialog
+          pendingCreation
           i18n={i18n}
           providerName={pendingProviderDraft.name}
           channelId={pendingProviderDraft.channelId}

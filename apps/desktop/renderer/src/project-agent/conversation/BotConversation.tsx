@@ -1,3 +1,4 @@
+import { BotModelFeedback } from '../BotModelFeedback';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
@@ -195,7 +196,7 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
-      {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
+      <BotModelFeedback state={modelControls} i18n={i18n} />
       {background.count ? <details className="bot-background-work">
         <summary>
           <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span>

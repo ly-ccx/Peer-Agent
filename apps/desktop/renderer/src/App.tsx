@@ -1,3 +1,4 @@
+import { useSettingsAwarePage, requestSettingsNavigation } from './ui/forms/settingsNavigation';
 import { isImeKey } from './chat/state/compositionGuard';
 import { createI18n } from '@peer-agent/i18n';
 import type { AcceptanceCloseVerdict, LlmProviderConfigView } from '@peer-agent/protocol';
@@ -148,7 +149,7 @@ function MainApp() {
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [activePage, setActivePage] = useState<AppPage>('chat');
+  const [activePage, setActivePage] = useSettingsAwarePage<AppPage>('chat');
   /** 工作台数据范围：顶部入口=全部；下方工作区入口=当前区。 */
   const [homeScope, setHomeScope] = useState<'all' | 'workspace'>('all');
   const [collectionDrawer, setCollectionDrawer] = useState<CollectionDrawer>(null);
@@ -560,9 +561,9 @@ function MainApp() {
   }, []);
 
   const openSettings = useCallback((section: SettingsSection = 'general') => {
-    setCollectionDrawer(null);
-    setSettingsInitialSection(section);
-    setActivePage('settings');
+    requestSettingsNavigation(() => {
+      setCollectionDrawer(null); setSettingsInitialSection(section); setActivePage('settings');
+    });
   }, []);
   // setupModelAutoOpened used to auto-open Settings once. First-run now stays
   // on the empty chat path and no longer uses that preference to steal focus.

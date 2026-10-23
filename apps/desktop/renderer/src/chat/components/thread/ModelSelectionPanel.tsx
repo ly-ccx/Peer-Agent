@@ -1,5 +1,9 @@
+import './model-selection.css';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { InteractionLayerContext, useInteractionLayer } from '../../../app/hooks/useInteractionLayer';
+import { isImeKey } from '../../state/compositionGuard';
+import { selectionNavigation } from '../../../app/components/selectionNavigation';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { PeerIcon } from '../../../ui/icons/PeerIcon';
 import { effortLabel, effortShortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
@@ -10,7 +14,6 @@ import {
   snapEffortValue,
 } from './effortSlider';
 import {
-  effortAfterModelSwitch,
   enabledModelCount,
   findSelectionModel,
   groupProviderModels,
@@ -36,28 +39,28 @@ function EffortRange({
   const selectedValue = levels.length > 1 ? (selectedIndex / (levels.length - 1)) * 100 : 0;
   const [dragValue, setDragValue] = useState(selectedValue);
   const [dirty, setDirty] = useState(false);
-  const committing = useRef(false);
+  const committing = useRef(false), edited = useRef(false), cancelled = useRef(false);
 
   useEffect(() => {
     if (committing.current) return;
     setDragValue(selectedValue);
-    setDirty(false);
+    setDirty(false); edited.current = false; cancelled.current = false;
   }, [selectedValue]);
 
   const commit = (value: number) => {
-    if (!dirty || committing.current || disabled) return;
+    if (!edited.current || cancelled.current || committing.current || disabled) return;
     const snapped = snapEffortValue(value, levels.length);
     const next = levels[effortIndexFromValue(snapped, levels.length)];
     setDragValue(snapped);
     if (!next || next === effort) {
-      setDirty(false);
+      setDirty(false); edited.current = false;
       return;
     }
     committing.current = true;
     try { onChange(next); }
     finally {
       committing.current = false;
-      setDirty(false);
+      setDirty(false); edited.current = false;
     }
   };
 
@@ -107,15 +110,20 @@ function EffortRange({
           aria-valuetext={fullLabel}
           style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
           onInput={(event) => {
-            setDirty(true);
+            edited.current = true; cancelled.current = false; setDirty(true);
             setDragValue(Number(event.currentTarget.value));
           }}
           onChange={(event) => {
-            setDirty(true);
+            edited.current = true; cancelled.current = false; setDirty(true);
             setDragValue(Number(event.currentTarget.value));
           }}
           onPointerUp={(event) => { commit(Number(event.currentTarget.value)); }}
+          onPointerCancel={() => { cancelled.current = true; edited.current = false; setDirty(false); setDragValue(selectedValue); }}
+          onKeyDown={event => {
+            if (event.key === 'Escape' && !isImeKey(event) && edited.current) { event.preventDefault(); event.stopPropagation(); cancelled.current = true; edited.current = false; setDirty(false); setDragValue(selectedValue); }
+          }}
           onKeyUp={(event) => {
+            if (isImeKey(event) || event.defaultPrevented) return;
             if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
               commit(Number(event.currentTarget.value));
             }
@@ -141,11 +149,16 @@ function RequestChannelToggle({
   return (
     <div className="reasoning-request-channel">
       <span className="reasoning-request-channel-label">{isZh ? '请求通道' : 'Request channel'}</span>
-      <div className="reasoning-request-channel-options" role="group" aria-label={isZh ? '请求通道' : 'Request channel'}>
-        <button type="button" className={!fastMode ? 'is-active' : ''} aria-pressed={!fastMode} disabled={disabled} onClick={() => onChange(false)}>
+      <div className="reasoning-request-channel-options" role="radiogroup" onKeyDown={event => {
+        if (isImeKey(event) || event.defaultPrevented) return;
+        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button')];
+        const next = selectionNavigation(buttons.map(button => ({ disabled: button.disabled })), buttons.indexOf(event.target as HTMLButtonElement), event.key, 'horizontal', getComputedStyle(event.currentTarget).direction === 'rtl');
+        if (next !== null) { event.preventDefault(); buttons[next]?.focus(); }
+      }} aria-label={isZh ? '请求通道' : 'Request channel'}>
+        <button type="button" className={!fastMode ? 'is-active' : ''} role="radio" aria-checked={!fastMode} tabIndex={!fastMode ? 0 : -1} disabled={disabled} onClick={() => onChange(false)}>
           {isZh ? '正常' : 'Normal'}
         </button>
-        <button type="button" className={fastMode ? 'is-active is-fast' : 'is-fast'} aria-pressed={fastMode} disabled={disabled} onClick={() => onChange(true)}>
+        <button type="button" className={fastMode ? 'is-active is-fast' : 'is-fast'} role="radio" aria-checked={fastMode} tabIndex={fastMode ? 0 : -1} disabled={disabled} onClick={() => onChange(true)}>
           <PeerIcon name="bolt" size={12} fill="currentColor" stroke="none" />
           {isZh ? '快速' : 'Fast'}
         </button>
@@ -185,9 +198,7 @@ export function ModelSelectionPanel({
   readonly onDismiss?: () => void;
 }) {
   const selected = findSelectionModel(groups, selectedModelId);
-  const [modelId, setModelId] = useState(selectedModelId);
-  const [effortValue, setEffortValue] = useState(effort);
-  const [fast, setFast] = useState(fastMode);
+  const modelId = selectedModelId, effortValue = effort, fast = fastMode;
   const [browsedId, setBrowsedId] = useState(selected?.group.id ?? groups[0]?.id ?? '');
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const [menuBelow, setMenuBelow] = useState(embedded);
@@ -196,11 +207,8 @@ export function ModelSelectionPanel({
   const providerButtonRef = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
 
-  useEffect(() => { setEffortValue(effort); }, [effort, resetToken]);
-  useEffect(() => { setFast(fastMode); }, [fastMode, resetToken]);
   useEffect(() => {
     const match = findSelectionModel(groups, selectedModelId);
-    setModelId(selectedModelId);
     setBrowsedId(match?.group.id ?? groups.find((group) => !group.disabled)?.id ?? groups[0]?.id ?? '');
     setProviderMenuOpen(false);
     setActiveModelIndex(-1);
@@ -228,73 +236,43 @@ export function ModelSelectionPanel({
     if (group.disabled || disabled) return;
     setProviderMenuOpen(false);
     setActiveModelIndex(-1);
-    const current = group.models.find((item) => item.id === modelId && !item.disabled);
-    const first = group.models.find((item) => !item.disabled);
-    if (current) {
-      setBrowsedId(group.id);
-      providerButtonRef.current?.focus();
-      return;
-    }
-    if (first) chooseModel(first.id);
-    else setBrowsedId(group.id);
+    setBrowsedId(group.id);
+    providerButtonRef.current?.focus({ preventScroll: true });
   };
 
-  const chooseModel = (modelIdNext: string) => {
+  const chooseModel = (nextId: string) => {
     if (disabled) return;
-    const match = findSelectionModel(groups, modelIdNext);
-    if (!match || match.model.disabled) return;
-    const nextEffort = effortAfterModelSwitch(effortValue, match.model);
-    setModelId(modelIdNext);
-    setBrowsedId(match.group.id);
-    if (nextEffort !== effortValue) setEffortValue(nextEffort);
-    onSelectModel(modelIdNext);
-    if (nextEffort !== effortValue) onEffortChange(nextEffort);
+    const match = findSelectionModel(groups, nextId);
+    if (!match || match.model.disabled || match.group.disabled) return;
+    // The caller commits model + valid effort atomically; browsing is never a write.
+    onSelectModel(nextId);
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      if (providerMenuOpen) {
-        event.preventDefault();
-        event.stopPropagation();
-        setProviderMenuOpen(false);
-        providerButtonRef.current?.focus();
-        return;
-      }
-      onDismiss?.();
-      return;
+    if (event.defaultPrevented || isImeKey(event)) return;
+    if (event.key === 'Escape' && providerMenuOpen) {
+      event.preventDefault(); event.stopPropagation(); setProviderMenuOpen(false); providerButtonRef.current?.focus(); return;
     }
     if (disabled) return;
-    const target = event.target as HTMLElement | null;
-    if (target?.closest('input, .reasoning-request-channel')) return;
-    if (providerMenuOpen) {
-      const enabled = groups.filter((group) => !group.disabled);
-      if (!enabled.length || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter')) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('input, .reasoning-request-channel, .model-selection-manage')) return;
+    if (target === providerButtonRef.current && !providerMenuOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setProviderMenuOpen(true); }
+      return;
+    }
+    const items = providerMenuOpen ? groups : browsed?.models ?? [];
+    const current = providerMenuOpen ? groups.findIndex(group => group.id === browsedId) : activeModelIndex;
+    const index = selectionNavigation(items.map(item => ({ disabled: item.disabled || disabled })), current, event.key, 'vertical');
+    if (index !== null) {
       event.preventDefault();
-      if (event.key === 'Enter') {
-        const current = enabled.find((group) => group.id === browsedId) ?? enabled[0];
-        if (current) chooseProvider(current);
-        return;
+      if (providerMenuOpen) {
+        setBrowsedId(groups[index].id);
+        panelRef.current?.querySelector<HTMLElement>(`[data-provider-index="${index}"]`)?.focus({ preventScroll: true });
+      } else {
+        setActiveModelIndex(index);
+        panelRef.current?.querySelector<HTMLElement>(`[data-model-index="${index}"]`)?.focus({ preventScroll: true });
       }
-      const index = Math.max(0, enabled.findIndex((group) => group.id === browsedId));
-      const next = enabled[(index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length];
-      if (next) setBrowsedId(next.id);
-      return;
     }
-    const models = browsed?.models ?? [];
-    if (!models.length || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter')) return;
-    event.preventDefault();
-    if (event.key === 'Enter') {
-      const model = models[activeModelIndex];
-      if (model) chooseModel(model.id);
-      return;
-    }
-    const direction = event.key === 'ArrowDown' ? 1 : -1;
-    let index = activeModelIndex;
-    for (let step = 0; step < models.length; step += 1) {
-      index = (index + direction + models.length) % models.length;
-      if (!models[index]?.disabled) break;
-    }
-    setActiveModelIndex(index);
   };
 
   return (
@@ -312,7 +290,7 @@ export function ModelSelectionPanel({
         className="model-selection-provider"
         aria-haspopup="listbox"
         aria-expanded={providerMenuOpen}
-        aria-controls={listId}
+        aria-controls={providerMenuOpen ? listId : undefined}
         disabled={disabled || groups.length === 0}
         onClick={() => setProviderMenuOpen((open) => !open)}
       >
@@ -322,17 +300,19 @@ export function ModelSelectionPanel({
       {providerMenuOpen ? (
         <div
           id={listId}
-          className={`model-selection-provider-menu${menuBelow ? ' is-below' : ''}`}
+          className={`model-selection-provider-menu motion-enter-fade${menuBelow ? ' is-below' : ''}`}
           role="listbox"
           aria-label={isZh ? '提供商' : 'Provider'}
         >
-          {groups.map((group) => {
+          {groups.map((group, index) => {
             const selectedGroup = group.models.some((model) => model.id === modelId);
             return (
               <button
                 key={group.id}
                 type="button"
                 role="option"
+                data-provider-index={index}
+                tabIndex={group.id === browsedId ? 0 : -1}
                 aria-selected={selectedGroup}
                 className={`model-selection-provider-option${group.id === browsedId ? ' is-active' : ''}${selectedGroup ? ' is-selected' : ''}`}
                 disabled={group.disabled || disabled}
@@ -352,6 +332,7 @@ export function ModelSelectionPanel({
         </div>
       ) : null}
       <div className="model-selection-section-label">{isZh ? '模型' : 'Models'}</div>
+      {!browsed?.models.some(model => !model.disabled) ? <p className="ui-form-feedback">{isZh ? '当前没有可选模型，请检查服务连接与模型范围。' : 'No model is available. Check the service connection and model scope.'}</p> : null}
       <div className="model-selection-models" role="listbox" aria-label={isZh ? '模型' : 'Models'}>
         {(browsed?.models ?? []).map((model, index) => {
           const selectedRow = model.id === modelId;
@@ -360,6 +341,9 @@ export function ModelSelectionPanel({
               key={model.id}
               type="button"
               role="option"
+              data-model-index={index}
+              tabIndex={(activeModelIndex >= 0 ? index === activeModelIndex : selectedRow || !browsed?.models.some(item => item.id === modelId && !item.disabled) && index === browsed?.models.findIndex(item => !item.disabled)) ? 0 : -1}
+              onFocus={() => setActiveModelIndex(index)}
               aria-selected={selectedRow}
               className={`model-selection-model${selectedRow ? ' is-selected' : ''}${index === activeModelIndex ? ' is-active' : ''}`}
               disabled={model.disabled || disabled}
@@ -384,7 +368,6 @@ export function ModelSelectionPanel({
               isZh={isZh}
               disabled={disabled}
               onChange={(level) => {
-                setEffortValue(level);
                 onEffortChange(level);
               }}
             />
@@ -395,7 +378,6 @@ export function ModelSelectionPanel({
               isZh={isZh}
               disabled={disabled}
               onChange={(enabled) => {
-                setFast(enabled);
                 onFastModeChange?.(enabled);
               }}
             />
@@ -466,46 +448,27 @@ export function AnchoredModelSelectionMenu({
       setCoords((current) => current?.left === left && current.top === top ? current : { left, top });
     };
     updatePosition();
-    const observer = new ResizeObserver(updatePosition);
-    if (triggerRef.current) observer.observe(triggerRef.current);
-    if (panelRef.current) observer.observe(panelRef.current);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
+    if (triggerRef.current) observer?.observe(triggerRef.current);
+    if (panelRef.current) observer?.observe(panelRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const frame = requestAnimationFrame(() => {
-      panelRef.current?.querySelector<HTMLElement>('.model-selection-panel')?.focus({ preventScroll: true });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (panelRef.current?.querySelector('.model-selection-provider-menu')) return;
-      event.preventDefault();
-      setOpen(false);
-      triggerRef.current?.focus();
-    };
-    document.addEventListener('pointerdown', closeOnPointerDown);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnPointerDown);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [open]);
+  const layer = useInteractionLayer(open, { roots: [panelRef], trigger: triggerRef, outside: true, dismissOnTab: true, closeOnTriggerRemoval: true,
+    onClose: () => setOpen(false),
+    onEscape: () => {
+      const provider = panelRef.current?.querySelector<HTMLElement>('.model-selection-provider[aria-expanded="true"]');
+      if (!provider) return false;
+      provider.click(); provider.focus({ preventScroll: true }); return true;
+    },
+    onEnter: () => (panelRef.current?.querySelector<HTMLElement>('.model-selection-model[aria-selected="true"]:not(:disabled), .model-selection-provider') ?? panelRef.current)?.focus({ preventScroll: true }),
+  });
 
   return (
     <div ref={rootRef} className={className ?? 'model-selection-control composer-cascading-menu composer-model-dropdown'}>
@@ -536,7 +499,7 @@ export function AnchoredModelSelectionMenu({
         <PeerIcon name="chevronDown" size={12} className={`pa-cascading-caret${open ? ' is-open' : ''}`} />
       </button>
       {open ? createPortal(
-        <div id={panelId} ref={panelRef} className="model-selection-popover" style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}>
+        <InteractionLayerContext.Provider value={layer}><div id={panelId} ref={panelRef} className="model-selection-popover motion-enter-rise" style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}>
           <ModelSelectionPanel
             groups={groups}
             selectedModelId={selectedModelId}
@@ -551,10 +514,9 @@ export function AnchoredModelSelectionMenu({
             onManageModels={onManageModels ? () => { setOpen(false); onManageModels(); } : undefined}
             onDismiss={() => {
               setOpen(false);
-              triggerRef.current?.focus();
             }}
           />
-        </div>,
+        </div></InteractionLayerContext.Provider>,
         document.body,
       ) : null}
     </div>

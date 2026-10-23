@@ -603,7 +603,7 @@ export function BotListShell({
         onBind={() => {
           setErrorCode('');
           void list.createBind().then((result) => {
-            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
+            if (!result.ok && result.code !== 'CANCELLED' && result.code !== 'BUSY') setErrorCode(result.code || 'FAILED');
           });
         }}
         onCreate={() => {
@@ -614,8 +614,8 @@ export function BotListShell({
           }
           setErrorCode('');
           void list.createManaged(checked.name).then((result) => {
-            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
-            else setName('');
+            if (!result.ok && result.code !== 'CANCELLED' && result.code !== 'BUSY') setErrorCode(result.code || 'FAILED');
+            else if (result.ok) setName('');
           });
         }}
         onClose={() => {

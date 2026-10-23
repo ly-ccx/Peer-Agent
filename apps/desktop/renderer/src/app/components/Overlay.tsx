@@ -32,6 +32,7 @@ export function Overlay({
   anchor,
   id,
   onEscape,
+  onRequestClose,
   closeTarget,
   restoreFocusRef,
   children,
@@ -42,6 +43,8 @@ export function Overlay({
   readonly id?: string;
   /** Return true when an inner confirmation consumed Escape. */
   readonly onEscape?: () => boolean;
+  /** Return false to retain the live layer while its editor resolves unsaved work. */
+  readonly onRequestClose?: () => boolean;
   /** Optional destination for an action that continues in another visible control. */
   readonly closeTarget?: () => HTMLElement | null;
   readonly onClose?: () => void;
@@ -63,6 +66,7 @@ export function Overlay({
   const [closingStyle, setClosingStyle] = useState<CSSProperties>();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const requestGuard = useRef(onRequestClose); requestGuard.current = onRequestClose;
   const closeRef = useRef(onClose); closeRef.current = onClose;
   const closingRef = useRef(false), finished = useRef(false);
   const acceptedClose = useRef<(() => void) | null>(null);
@@ -106,7 +110,7 @@ export function Overlay({
 
   // 请求关闭：先进入退场态播动画，真正的 onClose 卸载交由 finishClose 收尾。
   const requestClose = useCallback(() => {
-    if (!closeRef.current || closingRef.current) return;
+    if (!closeRef.current || closingRef.current || requestGuard.current?.() === false) return;
     acceptedClose.current = closeRef.current; closingRef.current = true; setClosing(true);
   }, []);
 
