@@ -14,7 +14,9 @@ test('an overlay releases its focus trap before its layer restores the opener', 
     parentElement: Element | null = null;
     isConnected = true;
     tabIndex: number;
-    constructor(readonly tagName: string, children: unknown[] = []) {
+    readonly tagName: string;
+    constructor(tagName: string, children: unknown[] = []) {
+      this.tagName = tagName;
       this.tabIndex = tagName === 'BUTTON' ? 0 : -1;
       this.children = children.flat(Infinity).filter(item => item instanceof Element) as Element[];
       this.children.forEach(item => { item.parentElement = this; });
