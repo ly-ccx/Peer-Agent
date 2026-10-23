@@ -290,14 +290,19 @@ export function BotListShell({
 
   const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    const handle = event.currentTarget;
     const startX = event.clientX;
     const startWidth = list.width;
     document.body.style.cursor = 'col-resize';
+    // 拖拽全程保持高亮：:hover 在指针移出 6px 命中区（含快速外甩）时会丢掉，
+    // 只有 data-active 能让整段拖拽稳定显示强调色。与 SidebarResizer 同写法。
+    handle.setAttribute('data-active', 'true');
     const move = (ev: PointerEvent) => {
       list.setWidth(clampBotListWidth(startWidth + ev.clientX - startX));
     };
     const up = () => {
       document.body.style.cursor = '';
+      handle.removeAttribute('data-active');
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };

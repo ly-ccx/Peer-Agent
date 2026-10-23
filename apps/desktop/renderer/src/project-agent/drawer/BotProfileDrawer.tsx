@@ -14,11 +14,13 @@ import {
   drawerLayout,
   groupDrawerSessions,
   readMemoryItems,
+  resizeDrawer,
   type DrawerMemory,
   type DrawerMemoryItem,
   type DrawerSession,
   type DrawerTab,
 } from '../state/drawerState';
+import { BotDrawerResizer } from './BotDrawerResizer';
 import { HistorySheet, type HistoryConversation } from '../HistorySheet';
 import { AgentProcessView } from './AgentProcessView';
 import type { BotModelsControlState } from '../state/useBotModels';
@@ -149,9 +151,19 @@ export function BotProfileDrawer({
         setDockPhase('on');
         return undefined;
       }
+      // 入场必须先把「收起态」真正渲染出去，再加 is-open 触发 width 过渡。
+      // dock 是从 null 首次挂载的：setDockPhase('in') 与随后的终态更新若落在
+      // 同一批样式失效窗口内，过渡起点 width:0 从未被提交，浏览器直接画终态，
+      // 表现为面板瞬间蹦出。双 rAF 保证起始帧完成布局与绘制后再切终态。
       setDockPhase('in');
-      const frame = requestAnimationFrame(() => setDockPhase('on'));
-      return () => cancelAnimationFrame(frame);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setDockPhase('on'));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
     }
     setDockPhase((current) => (current === 'off' ? 'off' : 'out'));
     return undefined;
@@ -340,13 +352,21 @@ export function BotProfileDrawer({
   }
 
   return (
-    <aside
-      className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
-      aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
-      inert={!memory.open}
-      aria-hidden={!memory.open}
-    >
-      <InteractionLayerContext.Provider value={layer}>{body}</InteractionLayerContext.Provider>
-    </aside>
+    <div className={`bot-drawer-dock-frame${dockPhase === 'on' ? ' is-open' : ''}`} inert={!memory.open}>
+      <BotDrawerResizer
+        width={memory.width}
+        isZh={isZh}
+        onResize={(next) => onMemory(resizeDrawer(memory, next))}
+      />
+      <aside
+        className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
+        style={memory.width === undefined ? undefined : { ['--pa-drawer-width' as string]: `${memory.width}px` }}
+        aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
+        inert={!memory.open}
+        aria-hidden={!memory.open}
+      >
+        <InteractionLayerContext.Provider value={layer}>{body}</InteractionLayerContext.Provider>
+      </aside>
+    </div>
   );
 }

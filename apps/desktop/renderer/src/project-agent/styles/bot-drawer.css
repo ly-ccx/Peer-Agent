@@ -3,7 +3,21 @@
   --pa-drawer-width: 414px;
 }
 
+/* 拖拽条与其 dock 的公共外层：只为 resizer 提供不被裁切的定位基准。
+ * dock 必须 overflow:hidden（宽度过渡要裁掉 414px 宽的 body），
+ * 所以 resizer 不能放在 dock 里——负偏移会被整条裁掉，表现为看不见也拖不到。
+ * 收起态（dock 宽 0）整块外层也归零，避免毛玻璃下 dock 的 margin-left
+ * 在收起后仍留一条 10px 空白。 */
+.bot-drawer-dock-frame {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
 .bot-drawer-dock {
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
@@ -20,10 +34,68 @@
     border-color var(--za-motion-medium) var(--za-ease-standard);
 }
 
+/* 拖拽进行中：关掉 width 过渡，否则每帧都在 ease，面板跟不上指针。 */
+.bot-drawer-dock[data-resizing='true'] {
+  transition: none;
+}
+
 .bot-drawer-dock.is-open {
   width: var(--pa-drawer-width);
   border-left-color: var(--chrome-hairline);
   opacity: 1;
+}
+
+/* ── 抽屉拖拽条（两块面板之间的缝里，镜像 .bot-column-resizer）──
+ * 拖拽条属于「缝」，不属于任何一块面板；它渲染在 dock 之外、与 dock 同级，
+ * 定位基准是 .bot-drawer-dock-frame（不经 dock 的 overflow:hidden 裁切）。
+ * 常态不可见，鼠标移上去或拖拽中才浮现一条 2px 强调色指示条。 */
+.bot-drawer-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  /* 常态不显示：分界线由 dock 自身边框表达，避免缝里多一条固定细线。 */
+  opacity: 0;
+  transition: opacity var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-drawer-resizer:hover,
+.bot-drawer-resizer:focus-visible,
+.bot-drawer-resizer[data-active='true'] {
+  opacity: 1;
+}
+
+.bot-drawer-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  pointer-events: none;
+  background: transparent;
+  transition: background var(--za-motion-fast) var(--za-ease-standard);
+}
+
+/* 毛玻璃：dock 有 margin-left = --bot-float-gap，这条缝落在 frame 内部的开头
+ * [0, gap)。命中区要居中于缝，故 left = (gap - 6px)/2；gap=10px 时为 2px。 */
+html[data-vibrancy='true'] .bot-drawer-resizer {
+  left: 2px;
+}
+
+/* 非毛玻璃：没有缝，dock 紧贴 frame 左缘。命中区骑在交界线上，左右各分 3px。 */
+html:not([data-vibrancy='true']) .bot-drawer-resizer {
+  left: -3px;
+}
+
+.bot-drawer-resizer:hover::after,
+.bot-drawer-resizer:focus-visible::after,
+.bot-drawer-resizer[data-active='true']::after {
+  background: var(--za-accent, #4c8dff);
 }
 
 .bot-drawer-dock .bot-drawer-body {
@@ -1153,8 +1225,13 @@
 /* ── macOS 毛玻璃壳层：抽屉也是一块悬浮黑牌 ──
  * 与 .bot-main 同款纸面/描边/阴影（token 在 bot-list.css 的 vibrancy 段定义）。
  * 关闭态保持透明边框，宽度过渡期间不露实色描边。 */
+/* 玻璃缝改由外层 frame 的 padding-left 表达，而不是 dock 的 margin-left：
+ * margin 不参与 dock 的 width 过渡，收起后会残留一条 10px 空白。 */
+html[data-vibrancy='true'] .bot-drawer-dock-frame.is-open {
+  padding-left: var(--bot-float-gap);
+}
+
 html[data-vibrancy='true'] .bot-drawer-dock {
-  margin-left: var(--bot-float-gap);
   border: 1px solid transparent;
   border-radius: var(--ui-radius-panel);
 }

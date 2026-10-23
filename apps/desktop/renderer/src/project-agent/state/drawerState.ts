@@ -9,6 +9,17 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 export const DRAWER_WIDTH = 380;
 export const DRAWER_PUSH_MIN_WIDTH = 960;
 
+/** 档案抽屉可拖拽宽度的上下限。
+ *  下限保证设置/任务表单不被挤成两行；上限在 960 最小 push 窗口下仍给中间
+ *  会话区留下可用宽度（960 - 520 = 440px），不把会话压没。 */
+export const DRAWER_MIN_WIDTH = 320;
+export const DRAWER_MAX_WIDTH = 520;
+
+export function clampDrawerWidth(width: number): number {
+  if (!Number.isFinite(width)) return DRAWER_WIDTH;
+  return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, Math.round(width)));
+}
+
 export type DrawerTab = 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings';
 export type DrawerLayout = 'push' | 'cover';
 export type TaskGroup = 'needsYou' | 'running' | 'queued' | 'paused' | 'done';
@@ -18,6 +29,8 @@ export interface DrawerMemory {
   readonly tab: DrawerTab;
   readonly sessionId: string | null;
   readonly objectiveId?: string;
+  /** 用户拖拽后的面板宽度。缺省表示从未拖过，回落到 CSS 的 --pa-drawer-width。 */
+  readonly width?: number;
 }
 
 export interface DrawerStore {
@@ -127,6 +140,12 @@ export function selectDrawerTab(memory: DrawerMemory, tab: DrawerTab): DrawerMem
   return { ...memory, open: true, tab };
 }
 
+/** 拖拽落定宽度。只写合法值，避免把 NaN / 越界宽度带进持久化。 */
+export function resizeDrawer(memory: DrawerMemory, width: number): DrawerMemory {
+  if (!Number.isFinite(width)) return memory;
+  return { ...memory, width: clampDrawerWidth(width) };
+}
+
 /** 点「来源」时打开档案，停在任务页并选中这条任务。 */
 export function locateDrawerSession(memory: DrawerMemory, sessionId: string): DrawerMemory {
   const id = sessionId.trim();
@@ -142,7 +161,17 @@ export function readDrawerMemory(workspaceId: string, store: DrawerStore): Drawe
     const sessionId = typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
       ? parsed.sessionId.trim()
       : null;
-    return { open: parsed.open === true, tab, sessionId, ...(typeof parsed.objectiveId==='string'&&parsed.objectiveId ? {objectiveId:parsed.objectiveId} : {}) };
+    const rawWidth = (parsed as { width?: unknown }).width;
+    const width = typeof rawWidth === 'number' && Number.isFinite(rawWidth)
+      ? clampDrawerWidth(rawWidth)
+      : undefined;
+    return {
+      open: parsed.open === true,
+      tab,
+      sessionId,
+      ...(typeof parsed.objectiveId==='string'&&parsed.objectiveId ? {objectiveId:parsed.objectiveId} : {}),
+      ...(width === undefined ? {} : {width}),
+    };
   } catch {
     return closedDrawer();
   }
