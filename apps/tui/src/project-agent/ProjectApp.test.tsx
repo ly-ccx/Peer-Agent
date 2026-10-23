@@ -14,7 +14,7 @@ async function harness(initialView:'bind'|'bots'|'conversation'='bind') {
     host.lifecycle.ensureBot(entry.workspaceId);
     await client.select(entry.workspaceId);
   }
-  const setup=await testRender(<ProjectApp host={host} client={client} initialView={initialView} workspacePath={workspace} locale="en-US" themeStore={createTuiThemeStore({userDataPath:root})} onClassic={async()=>{classic++;}} onQuit={()=>{}}/>,{width:90,height:30});
+  const setup=await testRender(<ProjectApp host={host} client={client} initialView={initialView} workspacePath={workspace} locale="en-US" themeStore={createTuiThemeStore({userDataPath:root,systemThemeWatch:false})} onClassic={async()=>{classic++;}} onQuit={()=>{}}/>,{width:90,height:30});
   async function frame(){await act(async()=>{await Bun.sleep(25);});await setup.flush();await setup.renderOnce();return setup.captureCharFrame();}
   return {host,client,setup,frame,press:async(key:Parameters<typeof setup.mockInput.pressKey>[0])=>{await act(async()=>{setup.mockInput.pressKey(key);await Bun.sleep(20);});},type:async(text:string)=>{await act(async()=>{await setup.mockInput.typeText(text);});},classic:()=>classic,async close(){await act(async()=>{setup.renderer.destroy();});client.close();await host.close();rmSync(root,{recursive:true,force:true});}};
 }

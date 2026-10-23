@@ -17,7 +17,7 @@ async function harness() {
   const entry=host.registry.ensureForPath(workspace);
   host.lifecycle.ensureBot(entry.workspaceId);
   await client.select(entry.workspaceId);
-  const setup=await testRender(<ProjectApp host={host} client={client} initialView="conversation" workspacePath={workspace} locale="en-US" themeStore={createTuiThemeStore({userDataPath:root})} onClassic={async()=>{}} onQuit={()=>{}}/>,{width:90,height:30});
+  const setup=await testRender(<ProjectApp host={host} client={client} initialView="conversation" workspacePath={workspace} locale="en-US" themeStore={createTuiThemeStore({userDataPath:root,systemThemeWatch:false})} onClassic={async()=>{}} onQuit={()=>{}}/>,{width:90,height:30});
   async function frame(){await act(async()=>{await Bun.sleep(25);});await setup.flush();await setup.renderOnce();return setup.captureCharFrame();}
   return {
     host,client,setup,frame,
