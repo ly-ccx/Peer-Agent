@@ -50,6 +50,9 @@ jobs:
       - name: Require Node >= 24
         run: node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 24) { console.error('Node ' + process.versions.node + ' is below 24'); process.exit(1); }"
 
+      - name: Test Linux dependency bootstrap
+        run: node --test scripts/ci-install-linux-deps.test.mjs
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -60,7 +63,8 @@ jobs:
 
       - name: Install Linux credential-helper build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2t64
+        timeout-minutes: 12
+        run: bash scripts/ci-install-linux-deps.sh
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
