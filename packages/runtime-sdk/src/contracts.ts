@@ -22,6 +22,7 @@ export type RuntimeSdkEventType =
   | 'session.started'
   | 'message.delta'
   | 'reasoning.delta'
+  | 'stream.discard'
   | 'message.completed'
   | 'runtime.error'
   | 'tool.started'
@@ -144,6 +145,13 @@ export interface RuntimeSdkReasoningDeltaEvent extends RuntimeSdkEventBase {
  * Mid-turn / automatic compaction progress for host UI surfaces.
  * percent is 0-100; hosts should treat values below 100 as live progress.
  */
+export interface RuntimeSdkStreamDiscardEvent extends RuntimeSdkEventBase {
+  readonly type: 'stream.discard';
+  readonly streamId: string;
+  readonly textChars: number;
+  readonly reasoningChars: number;
+}
+
 export interface RuntimeSdkCompactionProgressEvent extends RuntimeSdkEventBase {
   readonly type: 'compaction.progress';
   readonly streamId: string;
@@ -217,6 +225,7 @@ export type RuntimeSdkEvent =
   | RuntimeSdkSessionStartedEvent
   | RuntimeSdkMessageDeltaEvent
   | RuntimeSdkReasoningDeltaEvent
+  | RuntimeSdkStreamDiscardEvent
   | RuntimeSdkCompactionProgressEvent
   | RuntimeSdkContextAccountingEvent
   | RuntimeSdkMessageCompletedEvent

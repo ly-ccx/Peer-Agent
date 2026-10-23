@@ -22,7 +22,7 @@ import type {
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
 import { encodeProviderToolResult, evaluateWorkSessionWrite, agentCommunicationExcludedPrefixes } from '@peer-agent/runtime-node';
-import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
+import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
 
 import type {
   ChatMessage,
@@ -40,7 +40,6 @@ import {
 } from './context-compact.ts';
 import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
 import {
-  DEFAULT_CONNECTION_RETRY_DELAYS_MS,
   describeConnectionFailure,
   isRecoverableConnectionFailure,
 } from './recovering-fetch.ts';
@@ -74,6 +73,9 @@ export interface CreateProviderChatModelOptions {
   readonly getReasoningEffort?: () => ModelReasoningEffort;
   readonly getFastMode?: () => boolean;
   readonly getContextWindow?: () => number | undefined;
+  /** Test seam. Production uses two short retries for a dropped model socket. */
+  readonly streamRetryDelaysMs?: readonly number[];
+  readonly streamRetryWait?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface ProviderSystemPromptContext {
@@ -159,8 +161,36 @@ function executionContent(execution: RuntimeSdkProviderExecution, conversationId
   }
 }
 
-/** One short whole-turn retry for recoverable connect/stream drops before any deltas. */
-const DEFAULT_STREAM_RETRY_DELAYS_MS = DEFAULT_CONNECTION_RETRY_DELAYS_MS;
+/**
+ * Replay one provider HTTP request when the socket drops.
+ * A dropped attempt has not executed tools yet, so the same request can be sent again.
+ * Deltas already shown for that attempt are discarded first, so the retry does not append a second copy.
+ * Aligned with desktop provider-request recovery, capped at two retries because each attempt regenerates.
+ */
+const DEFAULT_STREAM_RETRY_DELAYS_MS = [500, 1_500] as const;
+
+export const STREAM_CONNECTION_CLOSED = 'peer.connection_closed';
+
+export type StreamDraftDiscard = Pick<RuntimeSdkStreamDiscardEvent, 'type' | 'streamId' | 'textChars' | 'reasoningChars'>;
+
+export function streamDraftDiscardFrom(
+  event: { readonly type: string },
+): { readonly textChars: number; readonly reasoningChars: number } | null {
+  if (event.type !== 'stream.discard') return null;
+  const draft = event as { readonly textChars?: unknown; readonly reasoningChars?: unknown };
+  const textChars = typeof draft.textChars === 'number' && draft.textChars > 0 ? draft.textChars : 0;
+  const reasoningChars = typeof draft.reasoningChars === 'number' && draft.reasoningChars > 0
+    ? draft.reasoningChars
+    : 0;
+  return { textChars, reasoningChars };
+}
+
+function connectionClosedError(cause: unknown): Error {
+  const error = new Error(STREAM_CONNECTION_CLOSED) as Error & { code?: string; cause?: unknown };
+  error.code = STREAM_CONNECTION_CLOSED;
+  error.cause = cause;
+  return error;
+}
 
 async function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
   if (!(ms > 0)) return;
@@ -192,6 +222,7 @@ async function streamWithSafeRetry(
     readonly retryDelaysMs?: readonly number[];
     readonly waitImpl?: (ms: number, signal?: AbortSignal) => Promise<void>;
     readonly onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; reason: string }) => void;
+    readonly onDiscardDraft?: (draft: { readonly textChars: number; readonly reasoningChars: number }) => void;
   } = {},
 ): Promise<Awaited<ReturnType<ModelProvider['stream']>>> {
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_STREAM_RETRY_DELAYS_MS;
@@ -200,15 +231,15 @@ async function streamWithSafeRetry(
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    let progressEmitted = false;
+    let textChars = 0;
+    let reasoningChars = 0;
     const originalOnEvent = request.onEvent;
     try {
       return await provider.stream({
         ...request,
         onEvent(event) {
-          if (event.type === 'text.delta' || event.type === 'reasoning.delta') {
-            progressEmitted = true;
-          }
+          if (event.type === 'text.delta') textChars += event.content.length;
+          if (event.type === 'reasoning.delta') reasoningChars += event.content.length;
           originalOnEvent?.(event);
         },
       });
@@ -216,10 +247,17 @@ async function streamWithSafeRetry(
       lastError = error;
       const canRetry =
         attempt < maxRetries
-        && !progressEmitted
         && !request.signal?.aborted
         && isRecoverableConnectionFailure(error);
-      if (!canRetry) throw error;
+      if (!canRetry) {
+        if (!request.signal?.aborted && isRecoverableConnectionFailure(error)) {
+          throw connectionClosedError(error);
+        }
+        throw error;
+      }
+      if (textChars > 0 || reasoningChars > 0) {
+        options.onDiscardDraft?.({ textChars, reasoningChars });
+      }
       const delayMs = retryDelaysMs[attempt] ?? 0;
       options.onRetry?.({
         attempt: attempt + 1,
@@ -231,7 +269,7 @@ async function streamWithSafeRetry(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  throw lastError instanceof Error ? lastError : connectionClosedError(lastError);
 }
 
 
@@ -328,6 +366,13 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           if (event.type !== 'text.delta') return;
           streamedChars += event.content.length;
           // Shared Desktop/CLI progress: received/estimated summary chars.
+          reportLiveProgress();
+        },
+      }, {
+        retryDelaysMs: options.streamRetryDelaysMs,
+        waitImpl: options.streamRetryWait,
+        onDiscardDraft() {
+          streamedChars = 0;
           reportLiveProgress();
         },
       });
@@ -558,6 +603,13 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
               if (event.type === 'reasoning.delta') {
                 context.emit({ type: 'reasoning.delta', streamId, content: event.content });
               }
+            },
+          }, {
+            retryDelaysMs: options.streamRetryDelaysMs,
+            waitImpl: options.streamRetryWait,
+            onDiscardDraft(draft) {
+              if (draft.textChars <= 0 && draft.reasoningChars <= 0) return;
+              context.emit({ type: 'stream.discard', streamId, ...draft });
             },
           });
         },
