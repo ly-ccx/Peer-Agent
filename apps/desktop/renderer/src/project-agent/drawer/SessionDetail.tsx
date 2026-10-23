@@ -12,6 +12,7 @@ import type { TaskConversationContext, TaskConversationRequest } from '../state/
 import type { TaskReportState } from '../state/taskDetailState';
 import { TaskCancelButton } from '../state/TaskCancellation';
 import { CoordinationDetails } from './CoordinationDetails';
+import { EvidencePreview } from './EvidencePreview';
 import { TaskVerification } from './TaskVerification';
 import '../styles/bot-task-detail.css';
 
@@ -115,7 +116,7 @@ export function SessionDetail({
           <div><dt>{i18n.t('projectAgent.drawer.task.id')}</dt><dd><code>{session.sessionId}</code></dd></div>
           {session.anchorMessageId && <div><dt>{i18n.t('projectAgent.drawer.anchor')}</dt><dd><code>{session.anchorMessageId}</code></dd></div>}
           {session.evidenceRefs.length > 0 && <div><dt>{i18n.t('projectAgent.drawer.task.records', { count: session.evidenceRefs.length })}</dt>
-            <dd><ul>{session.evidenceRefs.map(ref => <li key={ref}><code>{ref}</code></li>)}</ul></dd></div>}
+            <dd><EvidencePreview refs={session.evidenceRefs} i18n={i18n} /></dd></div>}
         </dl>
         {session.conversationId && <button type="button" className="bot-task-scene" onClick={() => setSceneOpen(true)}>
           <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}

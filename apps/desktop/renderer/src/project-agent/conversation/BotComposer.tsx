@@ -14,6 +14,7 @@ export function BotComposer({
   draft, onDraftChange, ready,
   quote,
   quoteSource,
+  onQuoteLocate,
   onQuoteRemove,
   onSend,
   generating = false,
@@ -32,6 +33,7 @@ export function BotComposer({
   readonly ready: boolean;
   readonly quote: string;
   readonly quoteSource?: string | null;
+  readonly onQuoteLocate?: () => void;
   readonly onQuoteRemove: () => void;
   readonly onSend: () => void;
   readonly generating?: boolean;
@@ -114,7 +116,8 @@ export function BotComposer({
     >
       {quote ? (
         <QuoteChip text={quote} source={quoteSource || i18n.t('projectAgent.chat.quote')}
-          removeLabel={i18n.t('projectAgent.chat.quoteRemove')} onRemove={onQuoteRemove} />
+          removeLabel={i18n.t('projectAgent.chat.quoteRemove')} onRemove={() => { onQuoteRemove(); textareaRef.current?.focus({ preventScroll: true }); }}
+          locateLabel={i18n.t('resources.quoteSource')} onLocate={onQuoteLocate} />
       ) : null}
       <input ref={fileInput} type="file" multiple hidden onChange={event => {
         uploads.add(Array.from(event.target.files ?? []));

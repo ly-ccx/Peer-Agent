@@ -43,3 +43,5 @@
 .automation-field > .automation-select { font: inherit; color: inherit; }
 .automation-select > select { appearance: none; padding-right: 32px; }
 .automation-select > svg { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+
+.automation-editor-fields { min-width: 0; margin: 0; padding: 0; border: 0; }

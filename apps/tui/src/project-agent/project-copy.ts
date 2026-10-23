@@ -1,5 +1,6 @@
 import type {TuiLocale} from '../tui-language.ts';
 const english = {
+  recordsUnavailable:'Could not read these records. The previous snapshot is preserved; reopen /memory or /objectives to retry.',
   draftLoading:'Restoring draft…',sending:'Sending',unconfirmed:'Delivery unconfirmed; retry the same message ID',draftFailed:'Draft not saved. Its contents remain here; retry before leaving.',draftConflict:'Draft changed in another window. Preserve this text before reopening.',approved:'Approved',denied:'Denied',expired:'Expired',stale:'Needs a fresh decision',
   messageUnavailable:'Messages unavailable; /latest retries. Existing messages are preserved.', cardsUnavailable:'Task status unavailable; conversation remains readable.',
   bots:'Bots', conversation:'Conversation', tasks:'Tasks', memory:'Memory', objectives:'Objectives', cards:'Needs you',
@@ -17,6 +18,7 @@ const english = {
   active:'Active',forgotten:'Forgotten',conflicted:'Conflicted',stated:'Stated',verified:'Verified',inferred:'Inferred',
 };
 const chinese: Record<keyof typeof english,string> = {
+  recordsUnavailable:'记录读取失败，保留上次快照；重新输入 /memory 或 /objectives 可重试。',
   draftLoading:'正在恢复草稿…',sending:'正在发送',unconfirmed:'发送结果未确认，重试保留同一消息 ID',draftFailed:'草稿暂未保存，内容仍在此终端，请在离开前重试。',draftConflict:'另一窗口修改了草稿，请先复制保留当前内容再重新打开。',approved:'已批准',denied:'已拒绝',expired:'已失效',stale:'需要重新决定',
   messageUnavailable:'消息暂不可用，已保留当前对话；输入 /latest 重试。',cardsUnavailable:'任务状态暂不可用，对话仍可阅读。',
   bots:'机器人',conversation:'对话',tasks:'任务',memory:'记忆',objectives:'目标',cards:'待处理',

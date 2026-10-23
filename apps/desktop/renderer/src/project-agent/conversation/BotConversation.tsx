@@ -3,7 +3,6 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
 import { replyRowContains, replyRowMood, replyRowRunning } from '../state/botReplyContinuity';
@@ -87,9 +86,6 @@ export function BotConversation({
   const [highlightedId, setHighlightedId] = useState<string | null>(focusMessageId ?? null);
   const [highlightRequestId, setHighlightRequestId] = useState(0);
   useEffect(() => {
-    if (highlightedId) void conversation.locateMessage(highlightedId);
-  }, [highlightedId, conversation.locateMessage]);
-  useEffect(() => {
     if (focusMessageId) { setHighlightedId(focusMessageId); setHighlightRequestId(value => value + 1); }
   }, [focusMessageId, focusRequestId]);
   const quote = conversation.recovery.state.draft.quote;
@@ -132,15 +128,8 @@ export function BotConversation({
       [detailsKey]: { main: true, ...current[detailsKey], [key]: value },
     });
   } };
-  const openEvidence = (evidenceRef: string) => {
-    void clientApi.projectAgentReadEvidence({ evidenceRef }).then(result => onInspect?.({
-      replyId: replyDetailsId ?? undefined,
-      evidence: { ...result, ok: result?.ok === true, evidenceRef: result?.evidenceRef || evidenceRef,
-        kind: result?.kind || 'command', summary: result?.summary || '', truncated: result?.truncated === true, code: result?.code || '' },
-      rounds: null,
-    })).catch(() => onInspect?.({ replyId: replyDetailsId ?? undefined,
-      evidence: { ok: false, evidenceRef, kind: 'command', summary: '', truncated: false, availability: 'unavailable', code: 'READ_FAILED' }, rounds: null }));
-  };
+  const openEvidence = (evidenceRef: string) => onInspect?.({ replyId: replyDetailsId ?? undefined,
+    evidence: { ok: false, evidenceRef, kind: 'observation', summary: '', truncated: false, code: '' }, rounds: null });
 
   return (
     <BotInputContext.Provider value={conversation.answer}>
@@ -226,6 +215,7 @@ export function BotConversation({
           i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
         quote={quote?.text ?? ''}
         quoteSource={quoteSource}
+        onQuoteLocate={quote ? () => { setHighlightedId(quote.messageId); setHighlightRequestId(value => value + 1); } : undefined}
         generating={conversation.generating}
         stopping={conversation.stopping}
         onStop={() => void conversation.stop()}

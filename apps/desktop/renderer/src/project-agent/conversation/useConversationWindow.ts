@@ -25,6 +25,8 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   const gestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), touchY = useRef<number | null>(null);
   const [revision, setRevision] = useState(0), [top, setTop] = useState(initial.current?.top ?? 0), [height, setHeight] = useState(0);
   const [following, setFollowing] = useState(pinned.current), [restoreStatus, setRestoreStatus] = useState<'none' | 'loading' | 'more' | 'missing'>('none');
+  const [referenceStatus, setReferenceStatus] = useState<'none' | 'loading' | 'missing'>('none');
+  const referenceRequest = useRef(0);
   const latest = useRef(options); latest.current = options;
   const previousKeys = useRef<readonly string[]>([]), nextKeys = rows.map(conversationRowKey);
   if (nextKeys.length !== previousKeys.current.length || nextKeys.some((key, index) => key !== previousKeys.current[index])) previousKeys.current = nextKeys;
@@ -60,6 +62,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   const cancelRestore = () => { pendingRestore.current = null; restoration.current++; setRestoreStatus('none'); };
   const followLatest = () => {
     navigationEpoch.current++;
+    referenceRequest.current++; setReferenceStatus('none');
     located.current = highlightedId ? `${highlightRequestId}:${highlightedId}` : null;
     cancelRestore(); gesture.current.active = false; clearTimeout(gestureTimer.current);
     pinned.current = true; reading.current = null; setFollowing(true);
@@ -78,7 +81,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
       follow: () => schedulerCallbacks.current.follow(), refresh: () => schedulerCallbacks.current.refresh() });
     return () => { scheduler.current?.cancel(); scheduler.current = null; };
   }, []);
-  useEffect(() => () => { clearTimeout(gestureTimer.current); restoration.current++; }, []);
+  useEffect(() => () => { clearTimeout(gestureTimer.current); restoration.current++; referenceRequest.current++; }, []);
   const previousFollow = useRef(followRequestId);
   useLayoutEffect(() => {
     if (previousFollow.current === followRequestId) return;
@@ -134,6 +137,22 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   useEffect(() => {
     if (options.ready && pendingRestore.current && restoreStatus === 'none' && !highlightedId) void restoreReading();
   }, [options.ready, keys, highlightedId]);
+  const locateReference = async () => {
+    if (!highlightedId || !latest.current.ready) return;
+    const ticket = ++referenceRequest.current, intent = navigationEpoch.current;
+    located.current = null;
+    setReferenceStatus('loading');
+    const active = () => ticket === referenceRequest.current && intent === navigationEpoch.current;
+    try {
+      const found = await latest.current.locateMessage(highlightedId, 4, active);
+      if (active()) setReferenceStatus(found ? 'none' : 'missing');
+    } catch { if (active()) setReferenceStatus('missing'); }
+  };
+  useEffect(() => {
+    if (highlightedId && options.ready) void locateReference();
+    else setReferenceStatus('none');
+    return () => { referenceRequest.current++; };
+  }, [highlightedId, highlightRequestId, options.ready]);
   useLayoutEffect(() => {
     if (!highlightedId) { located.current = null; return; }
     const request = `${highlightRequestId}:${highlightedId}`;
@@ -145,17 +164,18 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     reading.current = { key: keys[index]!, messageId: sourceId(rows[index]), delta: Math.max(0, (node.clientHeight - (heights.current.get(keys[index]!) ?? 72)) / 2) };
     node.scrollTop = restoreConversationOffset(keys, offsets, reading.current, origin())!;
     updateTop(node.scrollTop); persist();
-  }, [highlightedId, highlightRequestId, keys, offsets]);
+  }, [highlightedId, highlightRequestId, keys, offsets, referenceStatus]);
 
   const userGesture = (direction: Direction) => {
     navigationEpoch.current++;
+    referenceRequest.current++; setReferenceStatus('none');
     located.current = highlightedId ? `${highlightRequestId}:${highlightedId}` : null;
     cancelRestore(); gesture.current = { active: true, direction };
     clearTimeout(gestureTimer.current);
     gestureTimer.current = setTimeout(() => { gesture.current.active = false; }, 120);
     if (direction !== 'down') { pinned.current = false; setFollowing(false); remember(); persist(); }
   };
-  return { scrollerRef, originRef, tailRef, view, visibleRows: rows.slice(view.start, view.end), following, followLatest, restoreStatus, restoreReading, navigationEpoch: navigationEpoch.current,
+  return { scrollerRef, originRef, tailRef, view, visibleRows: rows.slice(view.start, view.end), following, followLatest, restoreStatus, restoreReading, referenceStatus, locateReference, navigationEpoch: navigationEpoch.current,
     onWheel: (event: React.WheelEvent<HTMLElement>) => { if (event.deltaY) userGesture(event.deltaY < 0 ? 'up' : 'down'); },
     onTouchStart: (event: React.TouchEvent<HTMLElement>) => { touchY.current = event.touches[0]?.clientY ?? null; userGesture('unknown'); },
     onTouchMove: (event: React.TouchEvent<HTMLElement>) => { const y = event.touches[0]?.clientY; if (y !== undefined && touchY.current !== null) userGesture(y > touchY.current ? 'up' : 'down'); touchY.current = y ?? null; },

@@ -1,7 +1,8 @@
+import {createProjectReadState} from './projectReadState.ts';
 import { useProjectInputDraft } from './useProjectInputDraft.ts';
 import { InputRecoveryStatus } from './InputRecoveryStatus.tsx';
 import { composerEnterAction } from '../runtime-controls.ts';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {useKeyboard,useTerminalDimensions} from '@opentui/react';
 import type {TextareaRenderable} from '@opentui/core';
 import {ThemedText,ThemedTextarea} from '../themed-primitives.tsx';
@@ -107,10 +108,12 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       if(key.name==='enter'||key.name==='return')selectedCardAction();
     }
   });
-  const objectiveResult=view==='objectives'?host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any:null;
+  const recordReader=useMemo(()=>createProjectReadState(),[snapshot.workspaceId]);
+  const records=view==='objectives'?recordReader.read<any>('objectives',()=>host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any)
+    :view==='memory'?recordReader.read<any>('memory',()=>host.memory.list({workspaceId:snapshot.workspaceId})):null;
   const rows:string[]=view==='tasks'?snapshot.sessions.map((row,index)=>`${index+1}. ${terminalText(row.title)} · ${projectStatus(locale,row.status)} · /task ${index+1}`)
-    :view==='memory'?host.memory.list({workspaceId:snapshot.workspaceId}).map((row:any)=>`${projectStatus(locale,row.kind)} · ${projectStatus(locale,row.trust)} · ${projectStatus(locale,row.status)}\n${terminalText(row.text)}`)
-    :view==='objectives'?(objectiveResult?.items??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.description??row.brief??'')}`)
+    :view==='memory'?(records?.rows??[]).map((row:any)=>`${projectStatus(locale,row.kind)} · ${projectStatus(locale,row.trust)} · ${projectStatus(locale,row.status)}\n${terminalText(row.text)}`)
+    :view==='objectives'?(records?.rows??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.outcome??row.description??row.brief??'')}`)
     :view==='task'?[terminalText(detail?.title),projectStatus(locale,detail?.status??''),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).map(terminalText)]:[];
   const currentCard=cards[Math.min(cardIndex,cards.length-1)];
   return <box flexDirection="column" height={terminal.height} width={terminal.width} backgroundColor={COLOR.background} padding={1}>
@@ -124,7 +127,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height}/>
       :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={false}/>
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>
-      :<scrollbox flexGrow={1}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}</scrollbox>}
+      :<scrollbox flexGrow={1}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{records?.error?<ThemedText fg={COLOR.info}>{copy('recordsUnavailable')}</ThemedText>:null}{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'&&!records?.error?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}</scrollbox>}
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
     {snapshot.workspaceId?<InputRecoveryStatus state={inputDraft.state} locale={locale}/>:null}
     {!['bind','bots','cards'].includes(view)?<box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
