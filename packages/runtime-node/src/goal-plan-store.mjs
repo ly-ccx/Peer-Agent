@@ -1778,6 +1778,22 @@ function normalizeModelSelectionSnapshot(value) {
  * 任务来源。协议字段必填；workspaceId / sessionId / readOnly / phase 等是运行时回读所需。
  * memorySnapshotId 在 B2-10 之前允许为 null。非法形状整段丢弃，避免半截来源进入计划。
  */
+// A creation-time capability observation, never a permission grant.
+function normalizeCapabilityAdmission(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !Array.isArray(value.required) || !value.required.every(id => typeof id === 'string' && id.trim())
+    || typeof value.inventoryKnown !== 'boolean' || typeof value.requirementsDeclared !== 'boolean'
+    || !(value.inventoryHash === null || typeof value.inventoryHash === 'string' && value.inventoryHash.trim())
+    || !toIsoOrNull(value.checkedAt)) return null;
+  return {
+    required: [...new Set(value.required.map(id => id.trim()))],
+    inventoryHash: value.inventoryHash === null ? null : value.inventoryHash.trim(),
+    inventoryKnown: value.inventoryKnown,
+    requirementsDeclared: value.requirementsDeclared,
+    checkedAt: toIsoOrNull(value.checkedAt),
+  };
+}
+
 function normalizeDelegationOrigin(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const anchorMessageId = normalizeOptionalString(value.anchorMessageId);
@@ -1800,6 +1816,8 @@ function normalizeDelegationOrigin(value) {
     const text = normalizeOptionalString(value[key]);
     if (text) origin[key] = text;
   }
+  const capabilityAdmission = normalizeCapabilityAdmission(value.capabilityAdmission);
+  if (capabilityAdmission) origin.capabilityAdmission = capabilityAdmission;
   if (value.readOnly === true || value.readOnly === false) origin.readOnly = value.readOnly;
   if (value.verifying === true) origin.verifying = true;
   if (value.cancellation && typeof value.cancellation.operationId === 'string'
