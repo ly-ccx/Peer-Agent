@@ -37,6 +37,8 @@ type MarkdownBlock =
   | { type: 'table'; headers: string[]; rows: string[][]; alignments: TableAlignment[] };
 
 const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+/** 列表条目：无序 `- + *` 或有序 `1.` / `1)`。列表聚类和续接判定共用这一条定义。 */
+const LIST_ITEM_RE = /^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/;
 
 function splitTableRow(line: string): string[] {
   const trimmed = line.replace(/^\s*\|/, '').replace(/\|\s*$/, '');
@@ -116,17 +118,28 @@ export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
       continue;
     }
 
-    const listItem = line.match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/);
+    const listItem = line.match(LIST_ITEM_RE);
     if (listItem) {
       const ordered = Boolean(listItem[2]);
       const start = ordered ? Number.parseInt(listItem[2]!, 10) : 1;
       const items = [listItem[3]!];
       index += 1;
       while (index < lines.length) {
-        const next = (lines[index] ?? '').match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/);
+        const next = (lines[index] ?? '').match(LIST_ITEM_RE);
         if (!next || Boolean(next[2]) !== ordered) break;
         items.push(next[3]!);
         index += 1;
+      }
+      // 空行不结束列表：模型常用「空行 + 编号」写步骤，逐条拆开会在每条之间撑出空行。
+      // 只有紧邻的同类条目直接续接；空行之后必须仍是同类条目，才并入同一个列表。
+      while (index < lines.length) {
+        let probe = index;
+        while (probe < lines.length && !(lines[probe] ?? '').trim()) probe += 1;
+        if (probe === index || probe >= lines.length) break;
+        const continuation = (lines[probe] ?? '').match(LIST_ITEM_RE);
+        if (!continuation || Boolean(continuation[2]) !== ordered) break;
+        items.push(continuation[3]!);
+        index = probe + 1;
       }
       blocks.push({ type: 'list', ordered, start, items });
       continue;

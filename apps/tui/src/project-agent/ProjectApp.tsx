@@ -20,6 +20,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const terminal=useTerminalDimensions(), editor=useRef<TextareaRenderable|null>(null),numbers=useRef(createCardNumbers());
   const [snapshot,setSnapshot]=useState(()=>client.current()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
   const [cardIndex,setCardIndex]=useState(0),[option,setOption]=useState(0),[bindYes,setBindYes]=useState(true),[detail,setDetail]=useState<any>(null);
+  // 对话视图默认把键盘交给输入框；Tab 才把焦点交给卡片，Esc 交回输入框。
+  const [cardFocus,setCardFocus]=useState(false);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[earlier,setEarlier]=useState(false),[,setTheme]=useState(themeStore.getState());
   const copy=(key:Parameters<typeof projectCopy>[1])=>projectCopy(locale,key);
   const offer=snapshot.familiarizeOffer;
@@ -32,7 +34,9 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const refresh=()=>{void client.poll(true).then(setSnapshot).catch(()=>setNotice(copy('error')));};
   useEffect(()=>{let live=true;const read=()=>{void client.poll().then(next=>{if(live)setSnapshot(next);}).catch(()=>{if(live)setNotice(copy('error'));});};read();const timer=setInterval(read,1000);return()=>{live=false;clearInterval(timer);};},[client]);
   useEffect(()=>themeStore.subscribe(setTheme),[themeStore]);
-  useEffect(()=>{if(!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view]);
+  useEffect(()=>{if(!['bind','bots','cards'].includes(view)&&!cardFocus)queueMicrotask(()=>editor.current?.focus());},[view,cardFocus]);
+  // 离开对话视图时，卡片焦点必须失效，否则键位会落到不存在的卡片上。
+  useEffect(()=>{if(view!=='conversation')setCardFocus(false);},[view]);
   const lastId=snapshot.messages.filter(row=>['user_input','agent_reply','system_card'].includes(row.kind)).at(-1)?.id;
   useEffect(()=>{if(view==='conversation'&&!earlier&&snapshot.workspaceId)host.directory.markRead(snapshot.workspaceId);},[lastId,snapshot.workspaceId,view,earlier]);
   async function perform(run:()=>Promise<any>|any,success=copy('done')) {
@@ -68,13 +72,13 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   function selectedCardAction() {
     const row=cards[Math.min(cardIndex,cards.length-1)],action=row?.card.actions?.[option];
     if(!row||!action)return;
-    if(action.id==='answer'&&!action.payload?.text){setView('conversation');queueMicrotask(()=>editor.current?.setText(`/answer ${row.number} `));return;}
+    if(action.id==='answer'&&!action.payload?.text){setCardFocus(false);setView('conversation');queueMicrotask(()=>editor.current?.setText(`/answer ${row.number} `));return;}
     void perform(()=>runProjectCardAction(host,client,action));
   }
   useKeyboard(key=>{
     if(key.ctrl&&key.name==='c'){key.preventDefault();setNotice(copy('leaving'));onQuit();return;}
     if(busy)return;
-    if(key.name==='escape'){key.preventDefault();if(view==='bind')void perform(onClassic);else setView('conversation');return;}
+    if(key.name==='escape'){key.preventDefault();if(cardFocus){setCardFocus(false);return;}if(view==='bind')void perform(onClassic);else setView('conversation');return;}
     if(view==='bind'){
       if(['left','right','up','down','tab'].includes(key.name)){key.preventDefault();setBindYes(!bindYes);}
       if(['y','n','enter','return'].includes(key.name)){
@@ -88,6 +92,26 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(view==='bots'){
       if(key.name==='down'||key.name==='up'){key.preventDefault();setSelected(Math.max(0,Math.min(snapshot.bots.length-1,selected+(key.name==='down'?1:-1))));}
       if(key.name==='enter'||key.name==='return'){key.preventDefault();void openBot(selected);}return;
+    }
+    if(view==='conversation'){
+      // Tab 把焦点从输入框交给卡片；焦点内用方向键选卡片/选项，回车执行，Esc 交回输入框。
+      if(key.name==='tab'&&cards.length){key.preventDefault();setCardFocus(true);editor.current?.blur();return;}
+      if(cardFocus){
+        if(key.name==='escape'){key.preventDefault();setCardFocus(false);return;}
+        if(key.name==='down'||key.name==='up'){
+          key.preventDefault();
+          setCardIndex(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));setOption(0);return;
+        }
+        if(key.name==='left'||key.name==='right'){
+          key.preventDefault();
+          setOption(Math.max(0,Math.min((cards[cardIndex]?.card.actions?.length??1)-1,option+(key.name==='right'?1:-1))));return;
+        }
+        if(['enter','return'].includes(key.name)){key.preventDefault();selectedCardAction();return;}
+        // 其余按键视为想继续打字：焦点交回输入框，不吞掉这次输入。
+        if(!key.ctrl&&!key.meta&&key.name?.length===1){setCardFocus(false);return;}
+        return;
+      }
+      return;
     }
     if(key.name==='tab'&&cards.length){key.preventDefault();setView(view==='cards'?'conversation':'cards');return;}
     if(view==='cards'){
@@ -112,17 +136,21 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     {snapshot.cardsUnavailable?<ThemedText fg={COLOR.muted}>{copy('cardsUnavailable')}</ThemedText>:null}
     {view==='bind'?<box flexGrow={1} flexDirection="column" justifyContent="center"><ThemedText fg={COLOR.text}>{copy('bind')}</ThemedText><ThemedText fg={COLOR.muted}>{terminalText(workspacePath)}</ThemedText><ThemedText fg={bindYes?COLOR.accent:COLOR.muted}>{copy('yes')} [Y]</ThemedText><ThemedText fg={!bindYes?COLOR.accent:COLOR.muted}>{copy('no')} [N]</ThemedText></box>
       :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height}/>
-      :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={false}/>
+      :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={cardFocus}/>
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>
       :<scrollbox flexGrow={1}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}</scrollbox>}
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
-    {!['bind','bots','cards'].includes(view)?<box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
-      <ThemedTextarea ref={editor} focused={!busy} height={3} placeholder={copy('composer')} wrapMode="char" onKeyDown={event=>{
-        if(!['enter','return'].includes(event.name)||event.eventType!=='press')return;
-        event.preventDefault();event.stopPropagation();if(event.shift){editor.current?.newLine();return;}
-        const text=editor.current?.plainText??'';if(text.trim()){editor.current?.clear();submit(text);}
-      }}/>
-      <ThemedText fg={COLOR.muted}>/help · {earlier?copy('earlier'):copy('latest')} · {copy('cardKeys')}</ThemedText>
-    </box>:null}
+    {!['bind','bots','cards'].includes(view)?<>
+      <box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
+        <ThemedTextarea ref={editor} focused={!busy&&!cardFocus} height={3} placeholder={copy('composer')} wrapMode="char" onKeyDown={event=>{
+          if(!['enter','return'].includes(event.name)||event.eventType!=='press')return;
+          event.preventDefault();event.stopPropagation();if(event.shift){editor.current?.newLine();return;}
+          const text=editor.current?.plainText??'';if(text.trim()){editor.current?.clear();submit(text);}
+        }}/>
+      </box>
+      {/* 提示必须在输入框边框之外，否则会被画到边框行上并互相覆盖。 */}
+      <ThemedText fg={COLOR.muted}>/help · {earlier?copy('earlier'):copy('latest')}</ThemedText>
+      {cards.length?<ThemedText fg={COLOR.muted}>/cards · {cardFocus?copy('cardKeysFocused'):copy('cardKeys')}</ThemedText>:null}
+    </>:null}
   </box>;
 }
