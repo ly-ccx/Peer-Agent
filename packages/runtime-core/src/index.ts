@@ -7,6 +7,7 @@ export * from './capability-registry.ts';
 export * from './projection.ts';
 export * from './projection-materializers.ts';
 export * from './local-tool-contracts.ts';
+export * from './goal-tool-contracts.ts';
 export * from './context-compaction.ts';
 export * from './goal-keep-policy.ts';
 export * from './goal-checkpoint.ts';
