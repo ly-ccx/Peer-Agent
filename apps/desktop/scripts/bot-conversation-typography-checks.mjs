@@ -34,7 +34,7 @@ export async function checkConversationTypography({ page, until, report, capture
   assert.equal(await receipt.locator('pre').innerText(), command);
   await page.keyboard.press('Enter');
   assert.equal(await receipt.locator('details').evaluate(node => node.open), false);
-  assert.equal(await page.locator('.bot-approval-receipt-state').allTextContents().then(values => values.join(',')), '已授权,已拒绝,已超时');
+  assert.equal(await page.locator('.bot-approval-receipt-state').allTextContents().then(values => values.join(',')), '已授权,已拒绝,已失效');
   const viewport = page.viewportSize();
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const cases = [];

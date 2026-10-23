@@ -52,8 +52,13 @@ export async function checkBotImageLifecycle({ page, until, report, captureDirec
       const inherited = await until(() => read().findLast(row => row.scenario === scenario && row.stage === 'inherited'), Boolean);
       assert.equal(inherited.grantId, finished.grantId); assert.equal(inherited.pending, 0);
     }
-    const expectedCopy = { ALLOW: '已授权', TASK: '已授权', DENY: '已拒绝', CANCEL: '已取消', STOP: '已取消', TIMEOUT: '已超时' }[scenario];
-    await until(() => card.innerText(), text => text.includes(expectedCopy));
+    const expectedCopy = { ALLOW: '已授权', TASK: '已授权', DENY: '已拒绝', CANCEL: '已取消', STOP: '已取消', TIMEOUT: '已失效' }[scenario];
+    await until(() => card.locator('.bot-approval-receipt-state').innerText(), text => text === expectedCopy);
+    if (scenario === 'TIMEOUT') {
+      await card.locator('summary').focus(); await page.keyboard.press('Enter');
+      assert.match(await card.locator('.bot-approval-receipt-content').innerText(), /等待授权已超时，本次没有读取图片/);
+      await page.keyboard.press('Enter');
+    }
     assert.equal(await card.getByRole('button').count(), 0);
     const late = await page.evaluate(({ workspaceId, approvalId }) => window.peerAgent.projectAgentDecideApproval({ workspaceId, approvalId, decision: 'approve', duration: 'task' }), { workspaceId, approvalId });
     assert.equal(late.ok, true);
