@@ -56,6 +56,18 @@ function eventTypes(events: readonly RuntimeSdkEvent[]): string[] {
   return events.map((event) => event.type);
 }
 
+test('stream draft discard uses the same SDK event identity and ordering as its deltas', () => {
+  const sdk = createRuntimeSdk({ host: createHost(), now: () => '2026-10-24T00:00:00.000Z' });
+  const delta = sdk.emit({ type: 'message.delta', streamId: 'retry-stream', content: 'partial' });
+  const discarded = sdk.emit({ type: 'stream.discard', streamId: 'retry-stream', textChars: 7, reasoningChars: 0 });
+  const next = sdk.emit({ type: 'message.delta', streamId: 'retry-stream', content: 'recovered' });
+  assert.equal(discarded.protocolVersion, delta.protocolVersion);
+  assert.equal(discarded.sequence, delta.sequence + 1);
+  assert.equal(next.sequence, discarded.sequence + 1);
+  assert.notEqual(discarded.eventId, delta.eventId);
+  assert.equal(discarded.streamId, 'retry-stream');
+});
+
 test('Hook Evidence keeps host-only visual context without serializing it into events', async () => {
   const result = completedResult();
   const context = { visualObservations: [{ dataUrl: 'data:image/png;base64,PRIVATE_PIXELS' }] };
