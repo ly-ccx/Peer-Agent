@@ -73,7 +73,7 @@ export async function checkModelSwitch({ page, picker, first, second, getBot, fa
   assert.equal(await label(), second.label); assert.equal(await picker.isEnabled(), true);
   assert.deepEqual(await getBot(), committed, 'failed switch must retain the committed model and effort');
   // New recovery UI retains the failed draft; explicitly discard it in this disposable fixture.
-  const discard = page.locator('.bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
+  const discard = page.locator('.bot-settings-tab .bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
   if (await discard.count()) await discard.click();
   report.modelSwitch = { ...switched, repeatedMs: repeated.committedMs, rollbackVerified: true,
     scope: 'Unified model/effort panel and durable profile through actual IPC; 650ms controlled save, no model network' };
