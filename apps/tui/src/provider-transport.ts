@@ -159,8 +159,14 @@ export function createTuiProviderFetch(
     // proxy/no-proxy state after VPN or network recovery without restarting.
     const systemProxy = fixedSystemProxy ?? readSystemProxy();
     const proxy = proxyForUrl(url, env, systemProxy);
+    const headers = new Headers(init?.headers);
+    // Each model request uses its own socket. A reused keep-alive connection is
+    // often already closed by the provider or proxy, which surfaces as
+    // "socket connection was closed unexpectedly" on the next turn.
+    if (!headers.has('connection')) headers.set('connection', 'close');
     const requestInit = {
       ...init,
+      headers,
       proxy,
       tls: {
         ca,
