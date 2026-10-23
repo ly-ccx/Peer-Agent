@@ -42,3 +42,8 @@ textarea.ui-input { resize: vertical; min-block-size: 8lh; }
 .workbench-tree-draft-error { flex-basis: 100%; overflow-wrap: anywhere; }
 
 .ui-button[aria-disabled=true] { opacity: .55; cursor: default; }
+
+.ui-saved-value > summary { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--ui-control-height-compact); cursor: pointer; list-style: none; }
+.ui-saved-value > summary::-webkit-details-marker { display: none; }
+.ui-saved-value[open] > summary > svg { transform: rotate(90deg); }
+.ui-saved-value > summary:focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); border-radius: var(--ui-radius-control); }

@@ -169,7 +169,7 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
 
   if (view === 'editor') return <>{feedback}
     {staleEditor && currentDefinition ? <div className="automation-alert" role="status"><p>{i18n.t('resources.staleDraft')}</p>
-      <details><summary>{i18n.t('forms.savedValue')}</summary><pre>{JSON.stringify(draftFromDefinition(currentDefinition), null, 2)}</pre></details>
+      <details className="ui-saved-value"><summary><PeerIcon name="chevronRight" size={14} />{i18n.t('forms.savedValue')}</summary><pre>{JSON.stringify(draftFromDefinition(currentDefinition), null, 2)}</pre></details>
       <button type="button" className="ui-button" disabled={busy || bootstrap.loading || bootstrap.error} onClick={() => {
         setEditing(currentDefinition); automationEditorDrafts.retain(editorKey, draft, currentDefinition);
       }}>{i18n.t('resources.reviewedVersion')}</button></div> : null}
