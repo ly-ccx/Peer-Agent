@@ -32,6 +32,7 @@ export async function checkBotChoiceMotion({ page, ask, canonical, report, captu
               inputId: input?.dataset.inputId, opacity: style ? Number(style.opacity) : null,
               inputAnimation: Boolean(bubble?.getAnimations().some(animation => animation.playState === 'running')),
               cardAnimation: card.isConnected && card.getAnimations().some(animation => animation.playState === 'running'),
+              cardOwnsFocus: card.contains(document.activeElement), documentFocused: document.hasFocus(),
               scrollTop: thread.scrollTop });
             if (performance.now() - started < 650) requestAnimationFrame(sample);
             else window.rcChoiceFrames = { frames, continuous };
@@ -62,7 +63,12 @@ export async function checkBotChoiceMotion({ page, ask, canonical, report, captu
         assert.ok(Math.max(...deltas) < 80, `send must not jump by a large frame: ${Math.max(...deltas)}`);
         await page.screenshot({ path: path.join(captureDirectory, `choice-send-${width}-${appearance}-after.png`), animations: 'disabled' });
       }
-      assert.equal(await page.locator('.bot-composer textarea').evaluate(node => node === document.activeElement), true);
+      const focusReturn = await page.locator('.bot-composer textarea').evaluate(node => ({
+        composer: node === document.activeElement, tag: document.activeElement?.tagName,
+        className: document.activeElement?.className, documentFocused: document.hasFocus(), hidden: document.hidden,
+      }));
+      cases.at(-1).focusReturn = focusReturn;
+      assert.equal(focusReturn.composer, true, `question focus handoff: ${JSON.stringify(focusReturn)}`);
       cases.at(-1).oneReceipt = true;
     }
     report.choiceSendMotion = { cases, focusRestored: true };

@@ -118,7 +118,6 @@ export function BotProfileDrawer({
     }
     previousInspect.current = inspect;
   }, [inspect, memory.open]);
-  useFocusScope(bodyRef, layout === 'push' && memory.open && dockPhase !== 'off', { restore: triggerRef, ownsScope: () => interactionLayers.topInteractive() === interactionLayers.layerFor(bodyRef.current) });
   const close = () => {
     // A live reply can become a durable message while the drawer is open.
     // Restore its current footer, rather than a detached streaming button.
@@ -133,6 +132,9 @@ export function BotProfileDrawer({
     onMemory({ ...memory, open: false });
   };
   const layer = useInteractionLayer(layout === 'push' && memory.open && dockPhase !== 'off', { roots: [bodyRef], trigger: triggerRef, restoreFocus: false, onClose: close });
+  useFocusScope(bodyRef, layout === 'push' && memory.open && dockPhase !== 'off', {
+    restore: triggerRef, ownsScope: () => Boolean(layer.current) && interactionLayers.topInteractive() === layer.current,
+  });
   const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
   const reportRead = useTaskReport(workspaceId, memory.sessionId, memory.open, selected?.status, sessionsAvailable,
     `${selected?.sourceRevision || ''}:${selected?.observationRevision || ''}`);

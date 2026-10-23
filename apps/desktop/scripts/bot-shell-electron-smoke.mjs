@@ -241,6 +241,9 @@ const readSeam = 'const decorate = page => {\n      if (!page?.ok) return page;'
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
 let observedService = serviceText.replace('function readConversation(payload = {}) {', `function readConversation(payload = {}) {
     if(payload.workspaceId===globalThis.rcBotWorkWorkspace && (globalThis.rcInteractionReadMode==='all'||globalThis.rcInteractionReadMode==='cards'&&payload.view==='cards'))return {ok:false,code:'CONTROLLED_READ_FAILURE'};`).replace(readSeam, `${readSeam}\n  const result = page;
+  if (payload.view === 'cards' && globalThis.rcBotWorkWorkspace === payload.workspaceId) {
+    result.cards = [...(result.cards || []), ...(globalThis.rcBotWorkMessages || []).flatMap(message => message.cards || [])];
+  }
   if (payload.view !== 'cards' && !payload.processFor && globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
     result.messages = [...result.messages, ...globalThis.rcBotWorkMessages];
     // The injected task-note facts include their current decision, matching the production page contract.
@@ -272,7 +275,7 @@ if (process.argv.includes('--streaming')) {
     if (payload.text === 'RC_DETAIL_FAIL_ANSWER' && !globalThis.rcDetailFailedOnce) { globalThis.rcDetailFailedOnce = true; return {ok:false,code:'CONTROLLED_SUBMIT_FAILURE'}; }`);
 }
 if (process.argv.includes('--effort-stability') || workSurfaces) {
-  observedService = `import {readFileSync,writeFileSync} from 'node:fs';\n` + observedService;
+  observedService = `import {readFileSync,writeFileSync,renameSync} from 'node:fs';\n` + observedService;
 }
 if (process.argv.includes('--effort-stability')) {
   const updateSeam = 'async function updateProfile(payload = {}, sender = null) {';
@@ -300,9 +303,12 @@ if (workSurfaces) {
   observedService = observedService.replace(confirmationSeam, `${confirmationSeam}
     if (payload.sessionId === 'completion-fixture') {
       if (payload.stage !== 'manual_completion') return {ok:false,code:'session_not_completed'};
+      if (payload.reviewToken !== 'completion-fixture-token') return {ok:false,code:'stale_completion_review'};
       const file=${JSON.stringify(workCommand)}, state=JSON.parse(readFileSync(file,'utf8'));
-      writeFileSync(file,JSON.stringify({...state,confirmationPayload:payload}));
+      writeFileSync(file+'.next',JSON.stringify({...state,confirmationPayload:payload}));renameSync(file+'.next',file);
       if(state.failCompletionResume)return {ok:false,code:'completion_confirmation_failed'};
+      globalThis.rcBotWorkMessages=[];
+      queueChanged(payload.workspaceId);
       return {ok:true};
     }`);
   const workSeam = 'function listSessions(payload = {}) {';
@@ -417,12 +423,13 @@ let updaterSequence=0;
 const updaterTimer=setInterval(()=>{
   const command=JSON.parse(readFileSync(${JSON.stringify(updaterCommand)},'utf8'));
   if(command.seq<=updaterSequence)return;
+  if(command.afterDownloadCall && (globalThis.rcUpdateDownloadCalls||0)<command.afterDownloadCall)return;
   let receipt;
   try {
     const windows=BrowserWindow.getAllWindows();
     if(!windows.length)return;
     for(const window of windows)window.webContents.send('updater:event',command.event);
-    receipt={seq:command.seq,ok:true,windows:windows.length};
+    receipt={seq:command.seq,ok:true,windows:windows.length,downloadCalls:globalThis.rcUpdateDownloadCalls||0};
   }catch(error){receipt={seq:command.seq,ok:false,error:error.message};}
   updaterSequence=command.seq;
   const file=${JSON.stringify(updaterReceipt)};
@@ -465,13 +472,14 @@ const until = async (read, predicate, timeout = 30000) => {
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
 let updaterSequence = 0;
-const emitUpdaterEvent = async event => {
+const emitUpdaterEvent = async (event, { afterDownloadCall } = {}) => {
   const seq = ++updaterSequence;
-  writeFileSync(updaterCommand + '.next', JSON.stringify({ seq, event }));
+  writeFileSync(updaterCommand + '.next', JSON.stringify({ seq, event, ...(afterDownloadCall ? { afterDownloadCall } : {}) }));
   renameSync(updaterCommand + '.next', updaterCommand);
   const receipt = await until(() => JSON.parse(readFileSync(updaterReceipt, 'utf8')), value => value.seq === seq, 5000);
   assert.equal(receipt.ok, true, receipt.error || 'isolated main must acknowledge synthetic event delivery');
   (report.updaterReceipts ??= []).push({ ...receipt, type: event.type });
+  return receipt;
 };
 try {
   app = await _electron.launch({ args: [entry], env, cwd: isolation.launch.desktopDir, timeout: 30000 });

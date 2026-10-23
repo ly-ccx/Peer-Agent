@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
 
+/** Search results can retain the previous snapshot while the new query loads. */
+export async function selectBotByName(page, name) {
+  await page.locator('.bot-search').fill(name);
+  await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: name }) }).click();
+  await page.waitForFunction(name => document.querySelector('.bot-composer textarea')?.getAttribute('placeholder')?.includes(name), name);
+}
+
 export async function wheelBotConversation(page, deltaY) {
   const bounds = await page.locator('.bot-thread').boundingBox();
   assert.ok(bounds, 'conversation scroller must be visible');

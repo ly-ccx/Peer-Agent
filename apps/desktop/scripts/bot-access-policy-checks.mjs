@@ -66,11 +66,17 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
     // the new parent is visible. Inspect only the newly mounted scene.
     await page.waitForFunction(node => !node.isConnected, previousScene);
     await previousScene.dispose();
+    // Presence and responsive layout can finish in different commits. Decide
+    // whether to reopen only after finite transitions and the resulting DOM settle.
+    await page.waitForFunction(() => !document.getAnimations().some(animation => animation.playState === 'running'
+      && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility()));
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (!await scene.count()) {
       const information = page.locator('.bot-task-information');
       if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
       await page.locator('.bot-task-scene').click();
     }
+    await scene.waitFor({ state: 'visible' });
     await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
     await page.screenshot({ path: path.join(captureDirectory, `bot-access-child-${width}-${appearance}.png`), animations: 'disabled' });
   }

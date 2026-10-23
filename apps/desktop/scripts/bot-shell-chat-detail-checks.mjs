@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails, hoverBotReply } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, hoverBotReply, selectBotByName } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -186,8 +186,8 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   const chosen = await until(() => canonical().find(row => row.kind === 'user_input' && row.answerTo === `card:question:reply:${third.replyId}`), Boolean);
   assert.equal(chosen.content, '其它工具里的工作记录');
   await page.locator('.bot-thread').getByText('RC scripted reply: 其它工具里的工作记录', { exact: true }).waitFor();
-  await page.locator('.bot-search').fill('project-001'); await page.locator('.bot-row').first().click();
-  await page.locator('.bot-search').fill('project-000'); await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-001');
+  await selectBotByName(page, 'project-000');
   await page.locator('.bot-thread').getByText('RC scripted reply: 其它工具里的工作记录', { exact: true }).waitFor();
   assert.equal(await page.locator('.bot-question').count(), 0);
   checks.push('option click follows the same durable answer path; switching back does not restore answered choices');
