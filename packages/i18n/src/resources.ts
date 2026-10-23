@@ -1,5 +1,7 @@
 export const resourcesZh = {
   'resources.loading': '正在读取…',
+  'resources.catchUp': '新记录较多，尚未接上当前历史。现有消息已保留，可分批继续读取。',
+  'resources.continueRead': '继续读取新记录',
   'resources.cancelled': '已取消操作',
   'resources.triggerFiles': '文件变化',
   'resources.triggerGit': 'Git 来源',
@@ -45,6 +47,8 @@ export const resourcesZh = {
 export type ResourcesTranslationKey = keyof typeof resourcesZh;
 export const resourcesEn: Record<ResourcesTranslationKey, string> = {
   'resources.loading': 'Reading…',
+  'resources.catchUp': 'More records need to be joined to this history. Current messages are preserved; continue reading in batches.',
+  'resources.continueRead': 'Continue reading new records',
   'resources.cancelled': 'Operation cancelled',
   'resources.triggerFiles': 'File changes',
   'resources.triggerGit': 'Git source',

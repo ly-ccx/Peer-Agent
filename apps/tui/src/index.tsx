@@ -67,7 +67,10 @@ const root = createRoot(renderer);
 const shutdown = createAsyncTuiShutdown({
   unmount: () => root.unmount(),
   destroyRenderer: () => renderer.destroy(),
-  dispose: async () => { projectClient?.close(); await projectHost?.close(); await runtime?.dispose(); },
+  dispose: async () => {
+    try { await projectClient?.close(); }
+    finally { try { await projectHost?.close(); } finally { await runtime?.dispose(); } }
+  },
   onError: () => console.error('Peer could not finish stopping local execution.'),
   exitProcess: (code) => {
     flushTuiPerfSync();
@@ -75,11 +78,19 @@ const shutdown = createAsyncTuiShutdown({
   },
 });
 
-async function openClassic() {
+let classicFlight: Promise<void> | null = null;
+function openClassic(): Promise<void> {
+  if (classicFlight) return classicFlight;
+  classicFlight = enterClassic().finally(() => { classicFlight = null; });
+  return classicFlight;
+}
+async function enterClassic() {
+  // Save before detaching: a failed save keeps the live bot editor available.
+  await projectClient?.close();
   // OpenTUI's root.render creates a new React container on every call. Unmount
   // the bot surface first so its pending updates cannot reclaim input focus.
   root.unmount();
-  projectClient?.close(); await projectHost?.close(); projectHost = null; projectClient = null;
+  await projectHost?.close(); projectHost = null; projectClient = null;
   const classic = createTuiRuntime({ workspaceRoot, userDataPath, accessLevel: localAccessStore.getAccessLevel(),
     persistAccessLevel: accessLevel => localAccessStore.setAccessLevel(accessLevel) });
   runtime = classic;

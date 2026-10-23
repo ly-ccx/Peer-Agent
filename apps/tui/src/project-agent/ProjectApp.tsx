@@ -1,3 +1,4 @@
+import {cardFocusIntent} from './cardFocus.ts';
 import {createProjectReadState} from './projectReadState.ts';
 import { useProjectInputDraft } from './useProjectInputDraft.ts';
 import { InputRecoveryStatus } from './InputRecoveryStatus.tsx';
@@ -29,6 +30,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[earlier,setEarlier]=useState(false),[,setTheme]=useState(themeStore.getState());
   const inputDraft=useProjectInputDraft(client,snapshot.workspaceId,editor,view);
   const operationPending=useRef(false);
+  const [cardFocus,setCardFocus]=useState(false);
+  useEffect(()=>setCardFocus(false),[view,snapshot.workspaceId]);
   const copy=(key:Parameters<typeof projectCopy>[1])=>projectCopy(locale,key);
   const offer=snapshot.familiarizeOffer;
   const displayedMessages=offer?[...snapshot.messages,{id:`offer:${snapshot.workspaceId}`,kind:'system_card',cards:[{
@@ -36,13 +39,21 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     actions:[{id:'familiarize',channel:'project-agent:start-familiarize',payload:{}}],
   }]}]:snapshot.messages;
   const cards=numbers.current.project(snapshot.workspaceId,displayedMessages);
+  const focusedCard=useRef<string|null>(null);
+  useEffect(()=>{
+    if(!cardFocus){focusedCard.current=null;return;}
+    const id=focusedCard.current;
+    if(id){const index=cards.findIndex(row=>row.card.cardId===id);if(index<0){setCardFocus(false);return;}if(index!==cardIndex)setCardIndex(index);}
+    else focusedCard.current=cards[cardIndex]?.card.cardId??null;
+  },[cards,cardFocus]);
+  useEffect(()=>{if(cardFocus)focusedCard.current=cards[cardIndex]?.card.cardId??null;},[cardIndex,cardFocus]);
   const bot=snapshot.bots.find(row=>row.workspaceId===snapshot.workspaceId);
   const refresh=()=>{void client.poll(true).then(setSnapshot).catch(()=>setNotice(copy('error')));};
   useEffect(()=>{let live=true;const read=()=>{void client.poll().then(next=>{if(live)setSnapshot(next);}).catch(()=>{if(live)setNotice(copy('error'));});};read();const timer=setInterval(read,1000);return()=>{live=false;clearInterval(timer);};},[client]);
   useEffect(()=>themeStore.subscribe(setTheme),[themeStore]);
-  useEffect(()=>{if(inputDraft.state.ready&&!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view,inputDraft.state.ready,inputDraft.session]);
+  useEffect(()=>{if(inputDraft.state.ready&&!busy&&!cardFocus&&!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view,busy,cardFocus,inputDraft.state.ready,inputDraft.session]);
   const lastId=snapshot.messages.filter(row=>['user_input','agent_reply','system_card'].includes(row.kind)).at(-1)?.id;
-  useEffect(()=>{if(view==='conversation'&&!earlier&&snapshot.workspaceId)host.directory.markRead(snapshot.workspaceId);},[lastId,snapshot.workspaceId,view,earlier]);
+  useEffect(()=>{if(view==='conversation'&&!earlier&&snapshot.workspaceId&&snapshot.messageState==='ready')host.directory.markRead(snapshot.workspaceId);},[lastId,snapshot.workspaceId,snapshot.messageState,view,earlier]);
   async function perform(run:()=>Promise<any>|any,success=copy('done')) {
     if(operationPending.current)return {ok:false};
     operationPending.current=true;setBusy(true);
@@ -79,16 +90,17 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     });
   }
   function selectedCardAction() {
-    const row=cards[Math.min(cardIndex,cards.length-1)],action=row?.card.actions?.[option];
+    const row=cardFocus&&focusedCard.current?cards.find(row=>row.card.cardId===focusedCard.current):cards[Math.min(cardIndex,cards.length-1)],action=row?.card.actions?.[option];
     if(!row||!action)return;
-    if(action.id==='answer'&&!action.payload?.text){setView('conversation');inputDraft.session.edit({text:`/answer ${row.number} `});return;}
+    if(action.id==='answer'&&!action.payload?.text){setCardFocus(false);setView('conversation');inputDraft.session.edit({text:`/answer ${row.number} `});return;}
     void perform(()=>runProjectCardAction(host,client,action));
   }
   useKeyboard(key=>{
     if((key as {isComposing?:boolean}).isComposing)return;
-    if(key.ctrl&&key.name==='c'){key.preventDefault();setNotice(copy('leaving'));onQuit();return;}
+    if(key.ctrl&&key.name==='c'){key.preventDefault();editor.current?.blur();setBusy(true);setNotice(copy('leaving'));onQuit();return;}
     if(busy)return;
     if(key.name==='f2'){key.preventDefault();key.stopPropagation();openClassic();return;}
+    if(view==='conversation'&&cardFocus&&key.name==='escape'){key.preventDefault();key.stopPropagation();setCardFocus(false);return;}
     if(key.name==='escape'){key.preventDefault();if(view==='bind')void perform(onClassic);else setView('conversation');return;}
     if(view==='bind'){
       if(['left','right','up','down','tab'].includes(key.name)){key.preventDefault();setBindYes(!bindYes);}
@@ -103,6 +115,18 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(view==='bots'){
       if(key.name==='down'||key.name==='up'){key.preventDefault();setSelected(Math.max(0,Math.min(snapshot.bots.length-1,selected+(key.name==='down'?1:-1))));}
       if(isEnterKeyName(key.name)){key.preventDefault();void openBot(selected);}return;
+    }
+    if(view==='conversation') {
+      const intent=cardFocusIntent(key,cardFocus,cards.length>0);
+      if(intent==='enter'||intent==='leave'){key.preventDefault();key.stopPropagation();setCardFocus(intent==='enter');if(intent==='enter')editor.current?.blur();return;}
+      if(cardFocus){
+        key.preventDefault();key.stopPropagation();
+        if(intent==='card'){setCardIndex(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));setOption(0);}
+        if(intent==='option')setOption(Math.max(0,Math.min((cards[cardIndex]?.card.actions?.length??1)-1,option+(key.name==='right'?1:-1))));
+        if(intent==='act')selectedCardAction();
+        return;
+      }
+      return;
     }
     if(key.name==='tab'&&cards.length){key.preventDefault();setView(view==='cards'?'conversation':'cards');return;}
     if(view==='cards'){
@@ -131,14 +155,14 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     {snapshot.cardsUnavailable?<ThemedText fg={COLOR.muted}>{copy('cardsUnavailable')}</ThemedText>:null}
     {view==='bind'?<box flexGrow={1} flexDirection="column" justifyContent="center"><ThemedText fg={COLOR.text}>{copy('bind')}</ThemedText><ThemedText fg={COLOR.muted}>{terminalText(workspacePath)}</ThemedText><ThemedText fg={bindYes?COLOR.accent:COLOR.muted}>{copy('yes')} [Y]</ThemedText><ThemedText fg={!bindYes?COLOR.accent:COLOR.muted}>{copy('no')} [N]</ThemedText></box>
       :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height}/>
-      :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={false}/>
+      :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={cardFocus}/>
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>
       :<scrollbox flexGrow={1}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{records?.error?<ThemedText fg={COLOR.info}>{copy('recordsUnavailable')}</ThemedText>:null}{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'&&!records?.error?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}</scrollbox>}
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
     {snapshot.workspaceId?<InputRecoveryStatus state={inputDraft.state} locale={locale}/>:null}
     {!['bind','bots','cards'].includes(view)?<box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
-      <ThemedTextarea ref={editor} focused={!busy&&inputDraft.state.ready} height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{if(inputDraft.state.ready)inputDraft.changed();}} onKeyDown={event=>{
-        if(!inputDraft.state.ready){event.preventDefault();event.stopPropagation();return;}
+      <ThemedTextarea ref={editor} focused={!busy&&!cardFocus&&inputDraft.state.ready} height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{if(inputDraft.state.ready)inputDraft.changed();}} onKeyDown={event=>{
+        if(busy||!inputDraft.state.ready){event.preventDefault();event.stopPropagation();return;}
         const action=composerEnterAction({keyName:event.name,shift:event.shift,eventType:event.eventType,isComposing:(event as {isComposing?:boolean}).isComposing});
         if(action==='none')return;event.preventDefault();event.stopPropagation();
         if(action==='suppress')return;if(action==='newline'){editor.current?.newLine();return;}

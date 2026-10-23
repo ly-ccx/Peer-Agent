@@ -7,7 +7,7 @@ import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivi
 import { continuousReplyRows, type AwaitingBotInput } from './botReplyContinuity';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
-import { createConversationPager } from './conversationPager.ts';
+import { ConversationCatchUpRequired, createConversationPager } from './conversationPager.ts';
 import { mergeConversationCards, statusAfterRefreshFailure } from './conversationSections.ts';
 import {
   applyOptimistic,
@@ -71,6 +71,7 @@ export function useBotConversation(workspaceId: string) {
   const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
   const [cardsError, setCardsError] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
+  const [catchUpRequired, setCatchUpRequired] = useState(false);
   const [awaitingInputs, setAwaitingInputs] = useState<readonly AwaitingBotInput[]>([]);
   const [hasOlder, setHasOlder] = useState(false);
   const [olderError, setOlderError] = useState(false);
@@ -100,7 +101,7 @@ export function useBotConversation(workspaceId: string) {
     setHasOlder(false);
     setOlderError(false);
     setStatus('loading');
-    setCards([]); setCardsError(false); setRefreshError(false);
+    setCards([]); setCardsError(false); setRefreshError(false); setCatchUpRequired(false);
     setActivity(null); setStopping(false); setStopError(false);
     replyIdentitiesRef.current = new Map();
     const pager = createConversationPager({
@@ -132,27 +133,33 @@ export function useBotConversation(workspaceId: string) {
         setCards(result.cards ?? []); setCardsError(false);
       } catch { if (generationRef.current === ticket) setCardsError(true); }
     }, { delayMs: 80 });
+    let pausedCatchUp = false;
     const refresh = createConversationRefresh(async () => {
-      try { await pager.refresh(); }
-      catch { if (generationRef.current === ticket) { setStatus(statusAfterRefreshFailure); setRefreshError(true); } }
+      if (pausedCatchUp) return;
+      let updated = false;
+      try { await pager.refresh(); updated = true; }
+      catch (error) { if (generationRef.current === ticket) {
+        pausedCatchUp = error instanceof ConversationCatchUpRequired;
+        setCatchUpRequired(pausedCatchUp); setRefreshError(!pausedCatchUp); setStatus(statusAfterRefreshFailure);
+      } }
       if (generationRef.current === ticket) {
         void cardRefresh.request();
-        void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
+        if (updated) { setCatchUpRequired(false); void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {}); }
       }
     }, { delayMs: 80 });
     const onChange = (event: { workspaceIds?: readonly string[] }) => {
       const ids = event?.workspaceIds ?? [];
       if (ids.length > 0 && !ids.includes(workspaceId)) return;
-      void refresh.request();
+      if (pausedCatchUp) void cardRefresh.request(); else void refresh.request();
     };
-    refreshRef.current = () => { void refresh.request(); };
+    refreshRef.current = () => { pausedCatchUp = false; void refresh.request(); };
     const offMessages = clientApi.onProjectAgentConversationChanged(onChange);
     const offFacts = clientApi.onProjectAgentChanged(onChange);
     const offActivity = clientApi.onProjectAgentActivity(event => {
       if (generationRef.current !== ticket || event.workspaceId !== workspaceId) return;
       activityEventRef.current += 1;
       setActivity(current => mergeBotActivity(current, event, workspaceId));
-      if (['awaiting_permission', 'done', 'error', 'stopped', 'disposed'].includes(event.phase)) void refresh.request();
+      if (['awaiting_permission', 'done', 'error', 'stopped', 'disposed'].includes(event.phase)) onChange({ workspaceIds: [workspaceId] });
     });
     void refresh.request();
     return () => {
@@ -242,7 +249,7 @@ export function useBotConversation(workspaceId: string) {
     status,
     recovery,
     reload: () => refreshRef.current?.(),
-    cardsError, refreshError,
+    cardsError, refreshError, catchUpRequired,
     messages: shown,
     rows,
     viewRows,

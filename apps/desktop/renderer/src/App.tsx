@@ -35,7 +35,7 @@ import {
   shouldRefreshQuickChatConversationList,
 } from './app/state/quickChatSubmission';
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
-import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
+import { ResourceFeedback } from './ui/resources/ResourceFeedback';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { SelectionChatWorkspace } from './chat/components/SelectionChatWorkspace';
 import { BackgroundRunsProvider } from './workbench/GlobalBackgroundTasksButton';
@@ -141,11 +141,9 @@ export function App() {
 }
 
 function MainApp() {
-  const { availableLocales, initError, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
+  const { availableLocales, initError, loading: bootstrapLoading, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
   const botListShell = useBotListShell();
-  // LOGO 过渡页保留：bootstrap 再快也要播完品牌入场动画，再进入主界面。
-  const brandStartupHoldDone = useBrandStartupMinHold(!initError);
-  const showMainShell = Boolean(session) && brandStartupHoldDone;
+  const showMainShell = Boolean(session);
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1542,11 +1540,12 @@ function MainApp() {
         </>
       ) : (
         <section className="startup-surface">
-          {initError ? <p className="running-note">{initError}</p> : null}
+          <ResourceFeedback i18n={i18n} loading={bootstrapLoading} error={Boolean(initError)} onReload={refreshBootstrap} />
           {!initError ? <BrandStartupLoader /> : null}
         </section>
       )}
 
+      {showMainShell && initError ? <ResourceFeedback i18n={i18n} error loading={bootstrapLoading} onReload={refreshBootstrap} /> : null}
       {/* 开屏完全磁盘访问检测：暂存档关闭。
           等 Apple 开发者账号就绪、正式签名/公证链路可用后再打开。
           相关实现仍保留：FullDiskAccessStartupGate / startup-os-permissions / full-disk-access-drag-float

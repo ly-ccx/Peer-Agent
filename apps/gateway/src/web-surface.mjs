@@ -348,6 +348,13 @@ const taskSubmit = document.getElementById('task-submit');
 const taskResult = document.getElementById('task-result');
 let authenticated = false;
 let generation = 0;
+let taskGeneration = 0;
+let delegationEntries = [];
+function invalidateTaskRead() {
+  taskGeneration++;
+  if (taskSubmit.disabled) taskResult.textContent = '读取已中断，可重新读取。';
+  taskSubmit.disabled = false;
+}
 function setStatus(text, tone) {
   status.textContent = text;
   status.className = tone ? 'status status-' + tone : 'status';
@@ -355,14 +362,14 @@ function setStatus(text, tone) {
 async function load() {
   if (logout.disabled) return;
   const current = ++generation;
-  devices.replaceChildren();
+  invalidateTaskRead();
   setStatus('正在刷新…');
   try {
     const response = await fetch('/api/devices', { credentials: 'same-origin', cache: 'no-store' });
     if (current !== generation) return;
     if (response.status === 401) {
       authenticated = false; pairing.hidden = true; pairingKey.value = '';
-      taskForm.hidden = true; taskResult.textContent = '';
+      taskForm.hidden = true; taskResult.textContent = ''; devices.replaceChildren();
       login.hidden = false; logout.hidden = true;
       setStatus('请登录后查看设备。登录过期不会解除设备绑定。'); return;
     }
@@ -375,6 +382,7 @@ async function load() {
     void refreshTaskTargets();
     const empty = payload.devices.length === 0;
     setStatus(empty ? '尚未绑定电脑。请在目标电脑发起配对。' : '设备状态已更新', empty ? '' : 'ok');
+    devices.replaceChildren();
     for (const device of payload.devices) {
       const card = document.createElement('article');
       card.className = device.revoked ? 'device device-revoked' : 'device';
@@ -392,7 +400,7 @@ async function load() {
 }
 logout.addEventListener('click', async () => {
   if (logout.disabled) return;
-  ++generation; authenticated = false; pairing.hidden = true; pairingKey.value = '';
+  ++generation; invalidateTaskRead(); delegationEntries = []; authenticated = false; pairing.hidden = true; pairingKey.value = '';
   challenge.value = ''; pairingStatus.textContent = '';
   taskForm.hidden = true; taskResult.textContent = ''; taskId.value = '';
   devices.replaceChildren(); logout.disabled = true; refresh.disabled = true;
@@ -417,6 +425,7 @@ pairing.addEventListener('submit', async event => {
     if (current !== generation || !authenticated) return;
     if (response.status === 401) {
       authenticated = false; pairing.hidden = true; login.hidden = false; logout.hidden = true;
+      invalidateTaskRead(); delegationEntries = []; taskForm.hidden = true; taskResult.textContent = '';
       devices.replaceChildren(); setStatus('登录已过期，请重新登录。', 'alert'); return;
     }
     if (response.status !== 202) {
@@ -440,25 +449,43 @@ function toOptions(entries) {
   });
 }
 async function loadDelegations() {
-  try {
-    const response = await fetch('/api/delegations', { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) return [];
-    const payload = await response.json();
-    return Array.isArray(payload && payload.delegations) ? payload.delegations : [];
-  } catch { return []; }
+  const response = await fetch('/api/delegations', { credentials: 'same-origin', cache: 'no-store' });
+  if (response.status === 401) throw new Error('AUTH_REQUIRED');
+  if (!response.ok) throw new Error('delegations_unavailable');
+  const payload = await response.json();
+  if (!Array.isArray(payload && payload.delegations)) throw new Error('delegations_unavailable');
+  return payload.delegations;
+}
+function renderWorkspaces() {
+  const previous = taskWorkspace.value;
+  const entry = delegationEntries.find(entry => entry.deviceId === taskDevice.value);
+  const workspaces = Array.isArray(entry?.delegation?.workspaceIds) ? entry.delegation.workspaceIds : [];
+  taskWorkspace.replaceChildren(...toOptions(workspaces.map(value => ({ value, label: value }))));
+  taskWorkspace.value = workspaces.includes(previous) ? previous : workspaces[0] || '';
 }
 async function refreshTaskTargets() {
   // Same generation guard the rest of the page uses: a delegation reply that
   // lands after logout must not put the signed-in panels back on screen.
   const current = generation;
-  const entries = await loadDelegations();
-  if (current !== generation || !authenticated) return;
-  taskDevice.replaceChildren(...toOptions(entries.map(entry => ({ value: entry.deviceId, label: entry.name || entry.deviceId }))));
-  const first = entries[0];
-  const workspaces = first && first.delegation && Array.isArray(first.delegation.workspaceIds) ? first.delegation.workspaceIds : [];
-  taskWorkspace.replaceChildren(...toOptions(workspaces.map(value => ({ value, label: value }))));
-  taskForm.hidden = entries.length === 0;
+  try {
+    const entries = await loadDelegations();
+    if (current !== generation || !authenticated) return;
+    const previous = taskDevice.value;
+    delegationEntries = entries;
+    taskDevice.replaceChildren(...toOptions(entries.map(entry => ({ value: entry.deviceId, label: entry.name || entry.deviceId }))));
+    taskDevice.value = entries.some(entry => entry.deviceId === previous) ? previous : entries[0]?.deviceId || '';
+    renderWorkspaces(); taskForm.hidden = entries.length === 0;
+  } catch (error) {
+    if (current !== generation || !authenticated) return;
+    if (error.message === 'AUTH_REQUIRED') {
+      generation++; invalidateTaskRead(); authenticated = false; delegationEntries = [];
+      taskForm.hidden = true; pairing.hidden = true; pairingKey.value = ''; taskResult.textContent = ''; devices.replaceChildren();
+      login.hidden = false; logout.hidden = true; setStatus('登录已过期，请重新登录。', 'alert');
+    } else setStatus('授权列表读取未完成，保留上次选项；请刷新重试，读取权限仍由电脑核对。', 'alert');
+  }
 }
+taskDevice.addEventListener('change', () => { invalidateTaskRead(); taskResult.textContent = ''; renderWorkspaces(); });
+for (const field of [taskWorkspace, taskId]) field.addEventListener('input', () => { invalidateTaskRead(); taskResult.textContent = ''; });
 const TASK_ERROR_TEXT = {
   DEVICE_OFFLINE: '设备当前不在线。', DEVICE_UNAVAILABLE: '设备连接不可用。',
   DELEGATION_UNAVAILABLE: '本机尚未开放远程读取。', DELEGATION_EXPIRED: '本机委派已过期。',
@@ -470,6 +497,7 @@ taskForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!authenticated || taskSubmit.disabled) return;
   const current = generation;
+  const ticket = ++taskGeneration;
   const body = JSON.stringify({ deviceId: taskDevice.value, workspaceId: taskWorkspace.value, taskId: taskId.value.trim() });
   taskSubmit.disabled = true;
   taskResult.className = 'task-result';
@@ -477,10 +505,12 @@ taskForm.addEventListener('submit', async event => {
   try {
     const response = await fetch('/api/tasks/read', { method: 'POST', credentials: 'same-origin',
       headers: { 'content-type': 'application/json' }, body });
-    if (current !== generation || !authenticated) return;
+    if (current !== generation || ticket !== taskGeneration || !authenticated) return;
     const payload = await response.json().catch(() => null);
+    if (current !== generation || ticket !== taskGeneration || !authenticated) return;
     if (response.status === 401) {
       authenticated = false; taskForm.hidden = true; pairing.hidden = true;
+      taskResult.textContent = ''; delegationEntries = [];
       login.hidden = false; logout.hidden = true; devices.replaceChildren();
       setStatus('登录已过期，请重新登录。', 'alert'); return;
     }
@@ -492,11 +522,11 @@ taskForm.addEventListener('submit', async event => {
     taskResult.textContent = '任务状态：' + JSON.stringify(payload.result === undefined ? payload.status : payload.result);
     taskResult.className = 'task-result task-result-ok';
   } catch {
-    if (current === generation && authenticated) {
+    if (current === generation && ticket === taskGeneration && authenticated) {
       taskResult.textContent = '结果暂时不明确，请重试；重试会产生一次新的读取请求。';
       taskResult.className = 'task-result task-result-alert';
     }
-  } finally { taskSubmit.disabled = false; }
+  } finally { if (ticket === taskGeneration) taskSubmit.disabled = false; }
 });
 load();`;
 

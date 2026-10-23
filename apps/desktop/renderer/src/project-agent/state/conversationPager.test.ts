@@ -128,3 +128,25 @@ test('restoring a reading checkpoint is bounded and can be continued without res
   assert.equal(await pager.locate('m-650', 4), true); assert.equal(reads, 7);
   assert.equal(await pager.locate('m-100', 4, () => false), false); assert.equal(reads, 7);
 });
+
+test('a large refresh pauses at four pages, preserves the published window and resumes without a gap', async () => {
+  const { ConversationCatchUpRequired, CONVERSATION_REFRESH_PAGE_BUDGET } = await import('./conversationPager.ts');
+  const history = Array.from({ length: 100 }, (_, n) => ({ id: `m-${n}`, role: 'user', content: String(n), createdAt: '2026-10-24' }));
+  let reads = 0, snapshot: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0];
+  const pager = createConversationPager({ read: async params => {
+    reads++; const end = params.before ? Number(params.before) : history.length, start = Math.max(0, end - params.limit);
+    return { ok: true, messages: history.slice(start, end), nextCursor: start ? String(start) : null };
+  }, publish: value => { snapshot = value; } });
+  await pager.refresh();
+  history.push(...Array.from({ length: 300 }, (_, i) => ({ id: `m-${i + 100}`, role: 'user', content: String(i + 100), createdAt: '2026-10-24' })));
+  const before = reads;
+  await assert.rejects(pager.refresh(), ConversationCatchUpRequired);
+  assert.equal(reads - before, CONVERSATION_REFRESH_PAGE_BUDGET);
+  assert.equal(snapshot!.messages.at(-1)?.id, 'm-99');
+  const continued = reads;
+  await pager.refresh();
+  assert.ok(reads - continued <= CONVERSATION_REFRESH_PAGE_BUDGET);
+  assert.deepEqual(snapshot!.messages.map(row => row.id), history.slice(50).map(row => row.id));
+  await pager.older();
+  assert.deepEqual(snapshot!.messages.map(row => row.id), history.map(row => row.id));
+});

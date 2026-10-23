@@ -141,17 +141,18 @@ export function BotConversation({
         disclosure={detailsDisclosure}
         relatedTurns={relatedTurns} onOpenRelatedReply={id => onInspect?.({ replyId: id, evidence: null, rounds: null })}
         onOpenEvidence={openEvidence} onOpenWork={onLocateSession} />, replyDetailsTarget) : null}
-      {conversation.status === 'ready' && (conversation.cardsError || conversation.refreshError) ? <div className="bot-thread-feedback" role="status">
+      {conversation.status === 'ready' && (conversation.cardsError || conversation.refreshError || conversation.catchUpRequired) ? <div className="bot-thread-feedback" role="status">
         <div>
+          {conversation.catchUpRequired ? <p>{i18n.t('resources.catchUp')}</p> : null}
           {conversation.cardsError ? <p>{i18n.t('projectAgent.chat.cardsUnavailable')}</p> : null}
           {conversation.refreshError && conversation.status === 'ready' ? <p>{i18n.t('projectAgent.chat.refreshFailed')}</p> : null}
         </div>
-        <button type="button" onClick={conversation.reload}>{i18n.t('projectAgent.history.retry')}</button>
+        <button type="button" onClick={conversation.reload}>{i18n.t(conversation.catchUpRequired ? 'resources.continueRead' : 'projectAgent.history.retry')}</button>
       </div> : null}
       {conversation.status === 'error' ? (
         <div className="bot-thread-failed" role="status">
           <p className="bot-thread-error">{i18n.t('projectAgent.chat.loadFailed')}</p>
-          <button type="button" onClick={conversation.reload}>{i18n.t('projectAgent.history.retry')}</button>
+          <button type="button" onClick={conversation.reload}>{i18n.t(conversation.catchUpRequired ? 'resources.continueRead' : 'projectAgent.history.retry')}</button>
         </div>
       ) : (
         <BotMessageList key={workspaceId} ready={conversation.status === 'ready'} locateMessage={conversation.locateMessage}
