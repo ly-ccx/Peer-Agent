@@ -8,6 +8,7 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
   const previousTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   const nativeGlass = await page.evaluate(() => document.documentElement.dataset.vibrancy === 'true');
   const cases = [];
+  const settingsCases = [];
   const openAppearance = async () => {
     await page.locator('.bot-app-menu-button').click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -18,13 +19,42 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
     await page.locator('.settings-nav-header > button').click();
     await page.locator('.app-settings-page').waitFor({ state: 'detached' });
   };
-  const choose = async (theme, material) => {
+  const inspectSettings = async (theme, material, reduced = false) => {
+    const actual = await page.locator('.app-settings-page').evaluate(shell => {
+      const nav = shell.querySelector('.settings-nav'), content = shell.querySelector('.settings-content');
+      const n = nav.getBoundingClientRect(), c = content.getBoundingClientRect(), s = shell.getBoundingClientRect();
+      const probe = document.createElement('span'); probe.style.background = 'var(--window-chrome-fill)';
+      shell.append(probe); const expected = getComputedStyle(probe).backgroundColor; probe.remove();
+      return { viewportAligned: s.left === 0 && s.top === 0 && s.right === innerWidth && s.bottom === innerHeight && scrollX === 0,
+        navVisible: n.left >= 0 && n.right <= innerWidth,
+        background: getComputedStyle(shell).backgroundColor, expected,
+        sidebar: getComputedStyle(nav).backgroundColor, divider: getComputedStyle(nav).borderRightWidth,
+        radius: parseFloat(getComputedStyle(content).borderRadius), gap: c.left - n.right,
+        top: c.top - s.top, right: s.right - c.right, bottom: s.bottom - c.bottom,
+        fits: shell.scrollWidth <= shell.clientWidth && content.scrollWidth <= content.clientWidth };
+    });
+    assert.ok(actual.fits && actual.viewportAligned && actual.navVisible,
+      `settings and navigation remain inside the actual viewport: ${JSON.stringify(actual)}`);
+    if (nativeGlass) {
+      assert.equal(actual.background, actual.expected, 'settings and chat use the same window material decision');
+      assert.equal(actual.sidebar, 'rgba(0, 0, 0, 0)', 'settings navigation does not tint the window a second time');
+      assert.equal(actual.divider, '0px', 'settings navigation has no old vertical seam');
+      assert.ok(actual.gap >= 9 && actual.top >= 9 && actual.right >= 9 && actual.bottom >= 9 && actual.radius > 0,
+        'settings content is a separate floating panel in every material');
+    }
+    settingsCases.push({ width: page.viewportSize().width, theme, material, reduced, nativeGlass, ...actual });
+    const suffix = reduced ? 'reduced-760-light' : `${material}-${page.viewportSize().width}-${theme}`;
+    await page.locator('.settings-content').evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `settings-floating-${suffix}.png`) });
+  };
+  const choose = async (theme, material, inspect = false) => {
     await openAppearance();
     await page.getByRole('radio', { name: theme === 'dark' ? '深色' : '浅色', exact: true }).click();
     if (nativeGlass) await page.getByRole('group', { name: '窗口材质', exact: true }).getByRole('button', { name: material === 'glass' ? '毛玻璃' : '实色', exact: true }).click();
-    await closeAppearance();
     await until(() => page.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.windowMaterial]),
       state => state[0] === theme && (!nativeGlass || state[1] === material));
+    if (inspect) await inspectSettings(theme, material);
+    await closeAppearance();
   };
   try {
     await page.setViewportSize({ width: 1280, height: 860 });
@@ -43,7 +73,7 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
     for (const [width, theme] of [[1280, 'dark'], [760, 'light']]) {
       await page.setViewportSize({ width, height: 860 });
       for (const material of ['glass', 'solid']) {
-        await choose(theme, material);
+        await choose(theme, material, true);
         const actual = await page.locator('.bot-shell').evaluate((shell, material) => {
           const probe = document.createElement('span');
           const transparencyReduced = matchMedia('(prefers-reduced-transparency: reduce)').matches;
@@ -87,9 +117,12 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
         const expected = getComputedStyle(probe).backgroundColor; probe.remove();
         return getComputedStyle(shell).backgroundColor === expected && getComputedStyle(shell.querySelector('.bot-column')).backgroundColor === 'rgba(0, 0, 0, 0)';
       }), true, 'reduced transparency uses one solid base without changing floating layout');
+      await openAppearance();
+      await inspectSettings('light', 'glass', true);
+      await closeAppearance();
       await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'window-material-reduced-760-light.png') });
     } finally { await cdp.send('Emulation.setEmulatedMedia', { features: [] }); await cdp.detach(); }
-    report.windowMaterial = { passed: true, cases, settingsKeyboard: nativeGlass, settingsPersisted: nativeGlass,
+    report.windowMaterial = { passed: true, cases, settingsCases, settingsKeyboard: nativeGlass, settingsPersisted: nativeGlass,
       reducedTransparency: true, nativeGlass, scope: 'Production appearance IPC and renderer over an isolated home; native desktop blur compositing needs visual review' };
   } finally {
     if (!await page.locator('.app-settings-page').count()) await openAppearance();

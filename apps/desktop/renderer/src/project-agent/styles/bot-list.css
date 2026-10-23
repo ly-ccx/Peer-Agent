@@ -1169,7 +1169,7 @@
 html[data-vibrancy='true'] .bot-shell {
   --bot-float-gap: 10px;
   padding: var(--bot-float-gap);
-  background: var(--glass-chrome);
+  background: var(--window-chrome-fill);
 }
 
 /* 负 margin 抵消壳层 padding：左栏贴住窗口左缘与上下，玻璃直达边缘，
@@ -1187,13 +1187,4 @@ html[data-vibrancy='true'] .bot-main {
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   box-shadow: var(--glass-edge-highlight), var(--shadow-card);
-}
-
-/* Material is one appearance choice for the entire window. Native blur stays behind this tint. */
-html[data-vibrancy='true'][data-window-material='solid'] .bot-shell {
-  background: var(--chrome-raised);
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  html[data-vibrancy='true'] .bot-shell { background: var(--chrome-raised); }
 }
