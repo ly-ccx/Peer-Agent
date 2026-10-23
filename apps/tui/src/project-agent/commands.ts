@@ -1,6 +1,6 @@
 export type ProjectCommand =
   | { kind: 'text'; text: string }
-  | { kind: 'view'; view: 'bots'|'tasks'|'memory'|'objectives'|'cards' }
+  | { kind: 'view'; view: 'bots'|'tasks'|'memory'|'objectives'|'cards'|'diagnostics' }
   | { kind: 'task'; number: number }
   | { kind: 'card'; operation: 'approve'|'deny'|'answer'|'action'; number: number; text: string; option?: number }
   | { kind: 'takeover'|'classic'|'older'|'latest'|'help' }
@@ -10,7 +10,7 @@ export function parseProjectCommand(input: string): ProjectCommand {
   const text = input.trim();
   if (!text.startsWith('/')) return {kind:'text',text};
   const [name, ...args] = text.slice(1).split(/\s+/);
-  if (['bots','tasks','memory','objectives','cards'].includes(name!) && !args.length) return {kind:'view',view:name as any};
+  if (['bots','tasks','memory','objectives','cards','diagnostics'].includes(name!) && !args.length) return {kind:'view',view:name as any};
   if (['takeover','classic','older','latest','help'].includes(name!) && !args.length) return {kind:name as any};
   const number = Number(args[0]);
   if (!/^[1-9]\d{0,5}$/.test(args[0] ?? '')) return {kind:'invalid'};
