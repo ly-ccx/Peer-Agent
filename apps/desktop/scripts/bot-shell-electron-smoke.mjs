@@ -430,8 +430,9 @@ const updaterTimer=setInterval(()=>{
 },25);updaterTimer.unref();
 ${startupOnly ? `const register=ipcMain.handle.bind(ipcMain);
 ipcMain.handle=(channel,handler)=>register(channel,channel==='bootstrap:get'?async(...args)=>{
+  const result=await handler(...args);
   let state;while(!(state=JSON.parse(readFileSync(${JSON.stringify(startupCommand)},'utf8'))).release)await new Promise(resolve=>setTimeout(resolve,25));
-  if(state.error)throw Error('RC_STARTUP_UNAVAILABLE');return handler(...args);
+  if(state.error)throw Error('RC_STARTUP_UNAVAILABLE');return result;
 }:handler);` : ''}
 app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(error=>{console.error(error);app.exit(1)});
 `);
