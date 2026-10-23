@@ -1,0 +1,317 @@
+/**
+ * Shared Goal / Plan tool contracts (platform-neutral).
+ *
+ * Single source of truth for what the model sees about the goal toolchain: the
+ * tool description (prompt) and the JSON input schema. Desktop and TUI both
+ * project from here, so the model-visible contract cannot drift per surface.
+ *
+ * Deliberately NOT owned here (stays in each surface's Manifest):
+ *   - permissionPolicy / runtime adapter / availableInModes  (platform policy)
+ *   - execution logic and goal-plan-store wiring
+ *
+ * Note: `local-tool-contracts.ts` owns toolName + capabilityId only; input
+ * schemas stay with their capability module. This file is the goal capability's
+ * schema module.
+ */
+
+export const GOAL_CREATE_PLAN_PROMPT = [
+  'Create a persistent, trackable goal/plan. In Plan mode, call this before side-effecting work',
+  'so the user can review and approve the draft plan. In Goal mode, use it to establish',
+  'the objective, success criteria, boundaries, and trackable subtasks for autonomous execution;',
+  'Goal mode does not require a plan-approval gate before every side-effecting step.',
+  'Provide a clear goal and a complete list of ordered subtasks (each subtask: title, optional dependsOn).',
+  'Write every subtask title and the goal in plain language the user can skim: lead with what the step',
+  'is actually for, keep it to one action per subtask, and prefer everyday words over jargon.',
+  'Do not cram multiple points into one title with inline numbering like (1)(2)(3) or ①②③ — split them',
+  'into separate subtasks instead. Symbols, file paths, line numbers, function and field names may stay,',
+  'but as trailing detail in parentheses, never as the opening of the title. Avoid buzzwords such as',
+  '"byte-exact", "contract", "anchor", "invariant" when a plain phrase (e.g. "don\'t break the callers")',
+  'says the same thing. The reader should understand the point of each subtask from its first few words.',
+  'Always provide a short, human-readable title for the plan itself (a few words; verb + object) — it is required',
+  'and shown verbatim in the plan panel / home task card; do not leave it empty.',
+  'Never use the user raw message, confirmation phrases (e.g. 好/就这么做/认可/ok), command output, or file paths as the plan title.',
+  'After you analyze the user intent, set/refresh plan.title to that short intent title (verb + object).',
+  'Do not leave the first-utterance / placeholder title in place once the main intent is clear.',
+  'Keep the title stable afterward unless the goal itself materially changes; do not overwrite it with later chat turns.',
+  'After the tool succeeds, end the user-facing reply with the available next steps in plain language:',
+  'start execution, adjust the plan, or cancel the plan. The plan panel provides the same governed',
+  'actions as clickable controls; do not replace these choices with a vague confirmation-only reply.',
+  // 目标线（Goal Thread）派生路由 —— 验收后追问必须挂靠父计划，否则首页平铺成孤立卡片。
+  'If the user is following up on a recently completed plan in this conversation (same theme,',
+  'a refinement, a fix, or another round of the same goal), do NOT create a new top-level plan.',
+  'Pass parentPlanId (the completed plan\'s planId) AND sourceTaskId (a taskId that exists on that',
+  'parent plan — typically the last listed task). The store requires the pair and rejects a',
+  'sourceTaskId that is not on the parent. This makes the new plan the next derived round of the',
+  'same Goal Thread. Only omit both fields when the user is clearly starting a new, unrelated',
+  'request. If the conversation context lists a recently completed plan, use that planId and one',
+  'of its taskIds.',
+].join(' ');
+
+export const GOAL_UPDATE_TASK_PROMPT = [
+  'Record execution evidence for a goal/plan subtask (Plan and Goal modes).',
+  'Call this after you finish, fail, or get blocked on a subtask during execution.',
+  'In Plan mode this usually happens after the approved plan starts running; in Goal mode it',
+  'is the normal progress ledger for autonomous work. Mark a subtask "completed" only when',
+  'you can supply the evidenceRefs (artifact refs / tool-result refs) that prove it is done —',
+  'the store rejects a "completed" status without evidenceRefs. Progress is recomputed bottom-up',
+  'from leaf subtasks; do not hand-maintain progress.',
+].join(' ');
+
+export const GOAL_GET_PLAN_PROMPT = [
+  'Read back an existing goal/plan (Plan and Goal modes). Read-only and side-effect free.',
+  'Use this to recover the authoritative subtask taskId list and current statuses —',
+  'for example after a long conversation or context compaction when you are unsure of',
+  'the exact taskId to pass to goal_update_task. Pass planId to fetch one plan; omit',
+  'planId to list the active plans for the current conversation. Always trust the',
+  'taskId values returned here over any taskId you remember.',
+].join(' ');
+
+export const GOAL_REQUEST_EXPLORER_PROMPT = [
+  'Request a read-only Explorer sub-agent to investigate a focused question (Plan and Goal modes).',
+  'Use this during execution when you need to gather evidence in parallel without',
+  'spending your own turn budget — for example mapping where a symbol is used, confirming a',
+  'config value, or scanning a subtree. The Explorer is strictly read-only (no writes, shell',
+  'side effects, or MCP mutations) and returns findings with evidence refs. Provide a clear',
+  '"question" (what to find out) and a short "reason" (why it helps the goal); optionally',
+  'scope it with include/exclude path hints. Calling this only registers the request; the',
+  'Goal Runner dispatches and runs the Explorer after the turn. There is a hard cap on',
+  'concurrent explorers per run, so only request what materially advances the goal.',
+].join(' ');
+
+export const GOAL_CREATE_PLAN_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: {
+      type: 'string',
+      description:
+        'Short, human-readable plan title (a few words). Required — do not omit; '
+        + 'the plan panel and floating bar surface this verbatim.',
+    },
+    goal: {
+      type: 'string',
+      description: 'The concrete goal this plan aims to achieve, in one or two sentences.',
+    },
+    targetWorkspacePath: {
+      type: 'string',
+      description:
+        'Optional absolute path of the code repository this plan will modify, when it '
+        + 'differs from the current conversation workspace (e.g. a knowledge-base workspace '
+        + 'driving changes in a separate code repo). If the workspace AGENTS.md documents a '
+        + 'linked/associated repository path, extract and pass it here so explorers can locate '
+        + 'the target code across repositories. Omit when the goal targets the current workspace.',
+    },
+    parentPlanId: {
+      type: 'string',
+      description:
+        'Optional parent plan id when this is a follow-up / derived round of an existing Goal Thread. '
+        + 'Must be paired with sourceTaskId (a taskId that exists on that parent plan). '
+        + 'Omit both when the user is clearly starting an unrelated new request.',
+    },
+    sourceTaskId: {
+      type: 'string',
+      description:
+        'Required together with parentPlanId. Pass a taskId from the parent plan (typically the task '
+        + 'that triggered this follow-up). The store rejects either field without the other, and '
+        + 'rejects a sourceTaskId that is not on the parent plan.',
+    },
+    tasks: {
+      type: 'array',
+      description: 'Ordered list of subtasks that make up the plan.',
+      items: {
+        type: 'object',
+        properties: {
+          taskId: {
+            type: 'string',
+            description: 'Optional stable id for the subtask; generated if omitted.',
+          },
+          title: {
+            type: 'string',
+            description:
+              'What this subtask delivers, written in plain language. Lead with the point of the '
+              + 'step in everyday words, keep it to one action, and put any file paths, line '
+              + 'numbers, function or field names as trailing detail in parentheses rather than at '
+              + 'the start. Do not pack several points into one title with ①②③ / (1)(2)(3).',
+          },
+          dependsOn: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'taskIds this subtask depends on (must run after them).',
+          },
+        },
+        required: ['title'],
+        additionalProperties: false,
+      },
+    },
+    successCriteria: {
+      type: 'array',
+      description:
+        'Optional Definition-of-Done for the goal. Each item is a verifiable success '
+        + 'criterion. Prefer machine-verifiable kinds (command/test/file-contains/file-exists) '
+        + 'so the runtime can auto-verify after acting; use "manual" only when no automated '
+        + 'check exists. Plain strings are accepted for backward compatibility and treated as '
+        + 'manual criteria. When you can express the goal as executable checks, do so — the '
+        + 'completion gate requires non-manual criteria to have a passed verification result '
+        + 'with an evidence ref before the plan can complete.',
+      items: {
+        oneOf: [
+          { type: 'string' },
+          {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'Optional stable id for this criterion; generated if omitted.',
+              },
+              kind: {
+                type: 'string',
+                enum: ['command', 'test', 'file-contains', 'file-exists', 'manual'],
+                description:
+                  'How this criterion is verified. command: run a shell command (exit 0 = pass). '
+                  + 'test: run a test command. file-contains: a file must contain expect text. '
+                  + 'file-exists: a path must exist. manual: needs human confirmation.',
+              },
+              description: {
+                type: 'string',
+                description: 'Human-readable statement of what "done" means for this criterion.',
+              },
+              command: {
+                type: 'string',
+                description: 'Shell/test command to run (for kind=command/test).',
+              },
+              path: {
+                type: 'string',
+                description: 'Target file path (for kind=file-contains/file-exists).',
+              },
+              expect: {
+                type: 'string',
+                description: 'Expected substring the file must contain (for kind=file-contains).',
+              },
+            },
+            required: ['kind'],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+  },
+  required: ['title', 'goal', 'tasks'],
+  additionalProperties: false,
+} as const;
+
+export const GOAL_UPDATE_TASK_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    planId: {
+      type: 'string',
+      description: 'Target goal plan id (planId).',
+    },
+    taskId: {
+      type: 'string',
+      description: 'Target subtask id (taskId) within the plan. Must reference a leaf subtask when setting completion.',
+    },
+    status: {
+      type: 'string',
+      enum: ['pending', 'running', 'completed', 'failed', 'cancelled', 'waiting_user'],
+      description: 'New execution status for the subtask. Use "completed" only with evidenceRefs.',
+    },
+    evidenceRefs: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Artifact refs / tool-result refs that prove the subtask outcome. Required to mark completed.',
+    },
+    result: {
+      type: 'string',
+      description: 'Short factual summary of what was produced (optional).',
+    },
+    failureReason: {
+      type: 'string',
+      description: 'Why the subtask failed (when status=failed).',
+    },
+    blockedReason: {
+      type: 'string',
+      description: 'Why the subtask is blocked / waiting (when status=waiting_user).',
+    },
+    criterionResults: {
+      type: 'array',
+      description:
+        'Optional verification results for the plan\'s success criteria (DoD-as-Code). '
+        + 'After acting, run each auto-verifiable criterion\'s check (command/test/file) and '
+        + 'record the outcome here so the completion gate can pass. Each result references a '
+        + 'criterion id declared in the plan\'s successCriteria; unknown ids are ignored.',
+      items: {
+        type: 'object',
+        properties: {
+          criterionId: {
+            type: 'string',
+            description: 'The id of the success criterion this result verifies.',
+          },
+          passed: {
+            type: 'boolean',
+            description: 'Whether the criterion check passed.',
+          },
+          evidenceRef: {
+            type: 'string',
+            description:
+              'Artifact/tool-result ref proving the check outcome (e.g. the shell result ref).',
+          },
+          detail: {
+            type: 'string',
+            description: 'Short human-readable detail of what was checked / observed.',
+          },
+        },
+        required: ['criterionId', 'passed'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['planId', 'taskId'],
+  additionalProperties: false,
+} as const;
+
+export const GOAL_GET_PLAN_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    planId: {
+      type: 'string',
+      description:
+        'Target goal plan id (planId) to read back. Omit to list the active plans for the current conversation.',
+    },
+  },
+  required: [],
+  additionalProperties: false,
+} as const;
+
+export const GOAL_REQUEST_EXPLORER_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    question: {
+      type: 'string',
+      description:
+        'The focused, read-only question the Explorer should answer (what to find out).',
+    },
+    reason: {
+      type: 'string',
+      description: 'Why answering this question helps advance the current goal.',
+    },
+    scope: {
+      type: 'object',
+      description: 'Optional path hints to scope the read-only investigation.',
+      properties: {
+        include: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Path globs / directories the Explorer should focus on.',
+        },
+        exclude: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Path globs / directories the Explorer should avoid.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  required: ['question'],
+  additionalProperties: false,
+} as const;
+
