@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, wheelBotConversation } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
 import { checkReplyPresence } from '../apps/desktop/scripts/bot-reply-presence-checks.mjs';
 import { runYieldFeedbackFixture } from '../apps/desktop/scripts/bot-yield-feedback-checks.mjs';
 import assert from 'node:assert/strict';
@@ -387,7 +387,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     if (!(await delegated.evaluate(node => node.open))) await delegated.locator(':scope > summary').click();
   }
   // Reading history holds its position while the draft grows.
-  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = Math.max(1, node.scrollTop - 350); });
+  await wheelBotConversation(page, -350);
   await page.locator('.bot-thread-latest').waitFor();
   let readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 1.75);
@@ -425,12 +425,12 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   }
   await until(() => page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
   await page.locator('.bot-thread').evaluate(node => {
-    // Exercise a real DOM scroll whose event has not reached React when the delta arrives.
+    // Delay scroll delivery while preserving the actual wheel reading intent.
     const hold = event => event.stopImmediatePropagation();
     node.addEventListener('scroll', hold, true);
     globalThis.rcReleaseReadingScroll = () => node.removeEventListener('scroll', hold, true);
-    node.scrollTop = Math.max(1, node.scrollTop - 350);
   });
+  await wheelBotConversation(page, -350);
   readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 2.5);
   await until(() => live.textContent(), text => text.includes('项目概况看'));

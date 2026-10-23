@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 
+export async function wheelBotConversation(page, deltaY) {
+  const bounds = await page.locator('.bot-thread').boundingBox();
+  assert.ok(bounds, 'conversation scroller must be visible');
+  await page.mouse.move(bounds.x + Math.min(24, bounds.width / 2), bounds.y + bounds.height / 2);
+  await page.mouse.wheel(0, deltaY);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
 /** Reach an unmounted row through the real scroller; never disable virtualization. */
 export async function scrollToBotMessage(page, message) {
   if (!await message.count()) {
@@ -17,11 +25,8 @@ export async function scrollToBotMessage(page, message) {
       const direction = target === null ? 1 : !state.ids.length || target < Math.min(...state.ids) ? -1 : 1;
       // Programmatic scrollTop changes are layout, not reading intent. A real
       // wheel gesture releases follow-latest before virtual rows are measured.
-      const bounds = await thread.boundingBox();
-      assert.ok(bounds, 'conversation scroller must be visible');
-      await page.mouse.move(bounds.x + Math.min(24, bounds.width / 2), bounds.y + bounds.height / 2);
-      await page.mouse.wheel(0, direction * Math.max(80, bounds.height * 0.65));
-      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const height = await thread.evaluate(node => node.clientHeight);
+      await wheelBotConversation(page, direction * Math.max(80, height * 0.65));
       const moved = await thread.evaluate((node, before) => node.scrollTop !== before, state.top);
       if (!moved) {
         const older = page.locator('.bot-thread-older');

@@ -9,7 +9,7 @@ import { resolveThreadFollowAfterScroll } from '../../chat/state/threadScrollPol
 import { createStreamingScrollScheduler } from '../../chat/state/streamingScrollScheduler.ts';
 import { isImeKey } from '../../chat/state/compositionGuard.ts';
 
-test('mounting and leaving a conversation invoke frame APIs with their browser receiver', () => {
+function mountConversation(rows: unknown[] = []) {
   const effects: (() => void | (() => void))[] = [];
   const layoutEffects: (() => void | (() => void))[] = [];
   const frames = new Map<number, () => void>();
@@ -25,6 +25,7 @@ test('mounting and leaving a conversation invoke frame APIs with their browser r
     },
     addEventListener() {}, removeEventListener() {},
   };
+  const memory = createConversationReadingMemory();
   const modules: Record<string, unknown> = {
     react: {
       useRef: (current: unknown) => ({ current }),
@@ -35,7 +36,7 @@ test('mounting and leaving a conversation invoke frame APIs with their browser r
     },
     '../state/botReplyContinuity': { replyRowContains: () => false },
     '../state/conversationWindow': windowGeometry,
-    '../state/conversationReadingMemory': { conversationReadingMemory: createConversationReadingMemory() },
+    '../state/conversationReadingMemory': { conversationReadingMemory: memory },
     '../../chat/state/threadScrollPolicy': { resolveThreadFollowAfterScroll },
     '../../chat/state/streamingScrollScheduler': { createStreamingScrollScheduler },
     '../../chat/state/compositionGuard': { isImeKey },
@@ -47,15 +48,54 @@ test('mounting and leaving a conversation invoke frame APIs with their browser r
     cancelAnimationFrame: browser.cancelAnimationFrame, setTimeout, clearTimeout,
     require(id: string) { if (id in modules) return modules[id]; throw Error('Unexpected dependency: ' + id); },
   });
-  const view = exports.useConversationWindow([], null, 0, 0,
+  const view = exports.useConversationWindow(rows, null, 0, 0,
     { identity: 'clicked-bot', ready: true, hasOlder: false, locateMessage: async () => false });
-  const scroller = { scrollTop: 0, scrollHeight: 720, clientHeight: 320,
-    querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} };
+  let scrollTop = 0;
+  const scroller = {
+    get scrollTop() { return scrollTop; },
+    set scrollTop(value: number) { scrollTop = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)); },
+    scrollHeight: rows.length ? rows.length * 72 : 1040, clientHeight: 320,
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => rows.map((_row, index) => ({ dataset: { conversationRow: `m${index}` },
+      getBoundingClientRect: () => ({ top: index * 72 - scrollTop, bottom: (index + 1) * 72 - scrollTop, height: 72 }) })),
+    addEventListener() {}, removeEventListener() {},
+  };
   view.scrollerRef.current = scroller;
   const cleanups = [...layoutEffects, ...effects].map(effect => effect());
-  assert.equal(requested, 1);
-  assert.equal(scroller.scrollTop, 720, 'opening a following conversation still commits its initial position');
-  cleanups.reverse().forEach(cleanup => { if (typeof cleanup === 'function') cleanup(); });
-  assert.equal(cancelled, 1);
-  assert.equal(frames.size, 0, 'leaving the conversation releases the pending native frame');
+  return { view, scroller, memory, frames, layoutEffects, cleanups,
+    get requested() { return requested; }, get cancelled() { return cancelled; },
+    flush() { const pending = [...frames.values()]; frames.clear(); pending.forEach(frame => frame()); },
+    dispose() { cleanups.reverse().forEach(cleanup => { if (typeof cleanup === 'function') cleanup(); }); },
+  };
+}
+
+test('mounting and leaving a conversation invoke frame APIs with their browser receiver', () => {
+  const mounted = mountConversation();
+  assert.equal(mounted.requested, 1);
+  assert.equal(mounted.scroller.scrollTop, 720, 'opening a following conversation still commits its initial position');
+  mounted.dispose();
+  assert.equal(mounted.cancelled, 1);
+  assert.equal(mounted.frames.size, 0, 'leaving the conversation releases the pending native frame');
+});
+
+// Execute the hook against simulated DOM geometry, without delivering onScroll.
+test('wheel intent captures the applied browser position before delayed scroll delivery', () => {
+  const mounted = mountConversation(Array.from({ length: 50 }, (_, index) => ({
+    type: 'message', message: { id: `m${index}`, kind: 'user_input' },
+  })));
+  mounted.flush();
+  const before = mounted.scroller.scrollTop;
+  mounted.view.onWheel({ deltaY: -350 });
+  mounted.scroller.scrollTop -= 350; // The browser default action follows wheel dispatch.
+  mounted.flush();
+  const saved = mounted.memory.read('clicked-bot');
+  assert.equal(saved?.following, false);
+  assert.equal(saved?.top, before - 350);
+  assert.equal(saved?.anchor?.key, 'm40');
+  assert.equal(saved?.anchor?.delta, -50);
+  mounted.layoutEffects[3]!(); // A subsequent geometry commit must use the new reading anchor.
+  assert.equal(mounted.scroller.scrollTop, before - 350);
+  mounted.view.onWheel({ deltaY: -80 });
+  mounted.dispose();
+  assert.equal(mounted.frames.size, 0, 'leaving cancels pending reading capture as well as follow frames');
 });
