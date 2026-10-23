@@ -119,7 +119,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         onSelectModel={changeModel}
         onEffortChange={(value) => {
           if (!model || !view?.eligibleModelIds.includes(model.id)) return;
-          onChange(botFixedModelPolicy(policy, role, model, value, fastMode));
+          return onChange(botFixedModelPolicy(policy, role, model, value, fastMode));
         }}
         onFastModeChange={(enabled) => {
           if (!model || !view?.eligibleModelIds.includes(model.id)) return;

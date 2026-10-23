@@ -33,7 +33,7 @@ function EffortRange({
   readonly levels: readonly EffortLevel[];
   readonly isZh: boolean;
   readonly disabled: boolean;
-  readonly onChange: (level: EffortLevel) => void;
+  readonly onChange: (level: EffortLevel) => void | Promise<unknown>;
 }) {
   const selectedIndex = effortIndexForLevel(effort, levels);
   const selectedValue = levels.length > 1 ? (selectedIndex / (levels.length - 1)) * 100 : 0;
@@ -57,11 +57,10 @@ function EffortRange({
       return;
     }
     committing.current = true;
-    try { onChange(next); }
-    finally {
-      committing.current = false;
-      setDirty(false); edited.current = false;
-    }
+    const settled = () => { committing.current = false; setDirty(false); edited.current = false; };
+    // Keep the selected thumb while the owner waits for its actual save receipt.
+    try { Promise.resolve(onChange(next)).then(settled, settled); }
+    catch { settled(); }
   };
 
   const effectiveValue = dirty ? dragValue : selectedValue;
@@ -192,7 +191,7 @@ export function ModelSelectionPanel({
   /** Changes when the panel is opened again, so browsing starts from the committed provider. */
   readonly resetToken?: number;
   readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
   readonly onDismiss?: () => void;
@@ -244,7 +243,7 @@ export function ModelSelectionPanel({
     if (disabled) return;
     const match = findSelectionModel(groups, nextId);
     if (!match || match.model.disabled || match.group.disabled) return;
-    // The caller commits model + valid effort atomically; browsing is never a write.
+    // The owner commits model + compatible effort together; browsing never writes.
     onSelectModel(nextId);
   };
 
@@ -368,7 +367,7 @@ export function ModelSelectionPanel({
               isZh={isZh}
               disabled={disabled}
               onChange={(level) => {
-                onEffortChange(level);
+                return onEffortChange(level);
               }}
             />
           ) : null}
@@ -413,7 +412,7 @@ export function AnchoredModelSelectionMenu({
   readonly title?: string;
   readonly className?: string;
   readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
 }) {
@@ -476,13 +475,14 @@ export function AnchoredModelSelectionMenu({
         ref={triggerRef}
         type="button"
         className={`pa-cascading-trigger model-selection-trigger${open ? ' open' : ''}`}
-        disabled={disabled}
+        aria-disabled={disabled || undefined}
         title={title}
         aria-label={title || label}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => {
+          if (disabled) return;
           setOpen((value) => {
             if (!value) setResetToken((token) => token + 1);
             return !value;
@@ -544,7 +544,7 @@ export function ComposerModelMenu({
   readonly disabled?: boolean;
   readonly title?: string;
   readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
 }) {

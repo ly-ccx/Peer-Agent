@@ -1,69 +1,82 @@
 import assert from 'node:assert/strict';
 import { modelMenuChannelName } from '@peer-agent/protocol';
 
+/** Browse the unified panel without turning provider navigation into a write. */
+export async function openModelProvider({ page, picker, model }) {
+  if (await picker.getAttribute('aria-expanded') !== 'true') await picker.click();
+  const panel = page.locator('.model-selection-panel');
+  await panel.waitFor();
+  await panel.locator('.model-selection-provider').click();
+  const group = model ? modelMenuChannelName(model.providerName, model.model, model.authMethod, true) : '默认与档位';
+  await panel.locator('.model-selection-provider-menu').getByRole('option', { name: group, exact: true }).click();
+  return panel;
+}
+
+export async function chooseModelInPanel({ page, picker, model, close = true }) {
+  const panel = await openModelProvider({ page, picker, model });
+  await panel.locator('.model-selection-model').filter({ has: page.getByText(model?.label || '跟随全局', { exact: true }) }).click();
+  if (close) { await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' }); }
+}
+
 /** Real menu events and committed DOM, measured inside the disposable renderer. */
 export async function checkModelSwitch({ page, picker, first, second, getBot, failNext, until, report }) {
-  const select = async model => {
-    await picker.click();
-    await page.getByRole('menuitem', { name: modelMenuChannelName(model.providerName, model.model, model.authMethod, true), exact: true }).click();
-    await page.getByRole('menuitemradio', { name: model.label, exact: true }).click();
-  };
+  const label = () => picker.locator('.model-selection-trigger-label').textContent();
+  const select = model => chooseModelInPanel({ page, picker, model });
   const measure = async model => {
-    await picker.click();
-    await page.getByRole('menuitem', { name: modelMenuChannelName(model.providerName, model.model, model.authMethod, true), exact: true }).click();
+    const panel = await openModelProvider({ page, picker, model });
     await page.evaluate(label => {
       globalThis.rcModelSwitch = new Promise(resolve => {
         let deadline;
-        // The production menu selects on mousedown and removes its portal
-        // before click. Start at that actual selection event.
         const begin = event => {
-          const item = event.target.closest('[role="menuitemradio"]');
-          if (item?.textContent.trim() !== label) return;
-          document.removeEventListener('mousedown', begin, true);
-          clearTimeout(deadline);
-          const start = performance.now(); let last = start, closedMs = null, maxFrameGapMs = 0, frames = 0;
+          const item = event.target.closest('.model-selection-model');
+          if (item?.querySelector('.model-selection-model-label')?.textContent.trim() !== label) return;
+          document.removeEventListener('click', begin, true); clearTimeout(deadline);
+          const start = performance.now(); let last = start, maxFrameGapMs = 0, frames = 0;
           const frame = () => {
             const now = performance.now(); maxFrameGapMs = Math.max(maxFrameGapMs, now - last); last = now; frames++;
-            const picker = document.querySelector('.bot-model-settings-row .pa-cascading-trigger');
-            if (closedMs === null && !document.querySelector('[role="menuitemradio"]')) closedMs = now - start;
-            const committed = picker.textContent.trim() === label && !picker.disabled;
+            const picker = document.querySelector('.bot-model-settings-row .model-selection-trigger');
+            const committed = picker.querySelector('.model-selection-trigger-label').textContent.trim() === label
+              && picker.getAttribute('aria-disabled') !== 'true' && !picker.disabled;
             if (committed || now - start > 4000) {
-              resolve({ committed, committedMs: now - start, closedMs, maxFrameGapMs, frames }); return;
+              resolve({ committed, committedMs: now - start, maxFrameGapMs, frames,
+                panelRetained: Boolean(document.querySelector('.model-selection-panel')) }); return;
             }
             requestAnimationFrame(frame);
           };
           requestAnimationFrame(frame);
         };
-        deadline = setTimeout(() => { document.removeEventListener('mousedown', begin, true); resolve({ committed: false, eventMissing: true }); }, 15000);
-        document.addEventListener('mousedown', begin, true);
+        deadline = setTimeout(() => { document.removeEventListener('click', begin, true); resolve({ committed: false, eventMissing: true }); }, 15000);
+        document.addEventListener('click', begin, true);
       });
     }, model.label);
-    await page.getByRole('menuitemradio', { name: model.label, exact: true }).click();
-    return page.evaluate(async () => {
+    await panel.locator('.model-selection-model').filter({ has: page.getByText(model.label, { exact: true }) }).click();
+    const result = await page.evaluate(async () => {
       const result = await globalThis.rcModelSwitch; delete globalThis.rcModelSwitch; return result;
     });
+    await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' });
+    return result;
   };
   await select(first);
-  await until(() => picker.textContent(), value => value === first.label);
-  await until(() => picker.isEnabled(), Boolean);
+  await until(label, value => value === first.label); await until(() => picker.isEnabled(), Boolean);
   const switched = await measure(second);
-  report.modelSwitch = { ...switched, scope: 'Production menu, renderer and durable profile through actual IPC; 650ms controlled save, no model network' };
-  assert.equal(switched.committed, true, 'selected model must commit without waiting on redundant projection reads');
-  assert.ok(switched.closedMs < 250, `menu close ${switched.closedMs}ms`);
+  assert.equal(switched.committed, true, 'selected model must commit without redundant projection reads');
+  assert.equal(switched.panelRetained, true, 'model and effort remain together until explicit dismissal');
   assert.ok(switched.committedMs < 2000, `controlled 650ms save took ${switched.committedMs}ms`);
   assert.ok(switched.maxFrameGapMs < 400, `renderer stopped drawing for ${switched.maxFrameGapMs}ms`);
   const committed = await getBot();
-  assert.equal(committed.modelPolicy?.overrides?.project_agent?.modelProviderId, second.id, 'the displayed choice must be durably saved for this bot');
+  assert.equal(committed.modelPolicy?.overrides?.project_agent?.modelProviderId, second.id);
   const repeated = await measure(second);
   assert.ok(repeated.committedMs < 250, `unchanged model unnecessarily waited ${repeated.committedMs}ms`);
-  assert.deepEqual(await getBot(), committed, 'repeated model choice must not write the profile or its update timestamp');
+  assert.deepEqual(await getBot(), committed, 'repeated choice must not write the profile or timestamp');
   failNext(); await select(first);
-  await page.getByText('模型设置未保存，请重试。', { exact: true }).first().waitFor();
-  assert.equal(await picker.textContent(), second.label);
-  assert.equal(await picker.isEnabled(), true);
-  assert.deepEqual(await getBot(), committed, 'failed switch must retain the last committed model and effort');
+  await page.locator('.bot-model-error[role="alert"], .bot-model-feedback [role="alert"]').first().waitFor();
+  assert.equal(await label(), second.label); assert.equal(await picker.isEnabled(), true);
+  assert.deepEqual(await getBot(), committed, 'failed switch must retain the committed model and effort');
+  // New recovery UI retains the failed draft; explicitly discard it in this disposable fixture.
+  const discard = page.locator('.bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
+  if (await discard.count()) await discard.click();
   report.modelSwitch = { ...switched, repeatedMs: repeated.committedMs, rollbackVerified: true,
-    scope: 'Production menu, renderer and durable profile through actual IPC; 650ms controlled save, no model network' };
+    scope: 'Unified model/effort panel and durable profile through actual IPC; 650ms controlled save, no model network' };
 }
 
 export async function checkModelSwitchOnly({ page, fixture, until, report, failNext, captureDirectory }) {
