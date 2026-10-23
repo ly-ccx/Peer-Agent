@@ -96,7 +96,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   function selectedCardAction() {
     const row=cardFocus&&focusedCard.current?cards.find(row=>row.card.cardId===focusedCard.current):cards[Math.min(cardIndex,cards.length-1)],action=row?.card.actions?.[option];
     if(!row||!action)return;
-    if(action.id==='answer'&&!action.payload?.text){setCardFocus(false);setView('conversation');inputDraft.session.edit({text:`/answer ${row.number} `});return;}
+    if(action.id==='answer'&&!action.payload?.text){
+      const prefix=`/answer ${row.number} `,draft=inputDraft.session.getSnapshot().draft.text;
+      setCardFocus(false);setView('conversation');
+      inputDraft.session.edit({text:draft.startsWith(prefix)?draft:prefix+draft});return;
+    }
     void perform(()=>runProjectCardAction(host,client,action));
   }
   useKeyboard(key=>{
