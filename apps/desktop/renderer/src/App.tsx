@@ -1540,7 +1540,8 @@ function MainApp() {
         </>
       ) : (
         <section className="startup-surface">
-          {initError ? <p className="running-note">{initError}</p> : <BrandStartupLoader />}
+          {initError ? <p className="running-note">{initError}</p> : null}
+          {!initError ? <BrandStartupLoader /> : null}
         </section>
       )}
 
