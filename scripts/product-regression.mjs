@@ -25,7 +25,9 @@ const verificationShots = [[1280, 'dark'], [760, 'light']].flatMap(([width, them
   `verification-main-${width}-${theme}.png`,
   ...['passed', 'failed', 'partial', 'unverifiable'].map(outcome => `verification-task-${outcome}-${width}-${theme}.png`),
 ]);
-const requiredShots = [...verificationShots, 'window-material-drawer-1280-dark.png', 'window-material-settings-1280.png', 'window-material-reduced-760-light.png', ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => ['glass', 'solid'].map(material => `window-material-${material}-${width}-${theme}.png`)), 'conversation-cards-failed-dark.png','conversation-refresh-failed-dark.png','conversation-initial-failed-light.png','conversation-recovered-light.png','bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const startupShots = [1280, 760].flatMap(width => ['dark', 'light'].map(theme => `startup-${width}-${theme}.png`)).concat('startup-error-760-light.png');
+const settingsFloatingShots = [[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => ['glass', 'solid'].map(material => `settings-floating-${material}-${width}-${theme}.png`)).concat('settings-floating-reduced-760-light.png');
+const requiredShots = [...settingsFloatingShots, ...startupShots, ...verificationShots, 'window-material-drawer-1280-dark.png', 'window-material-settings-1280.png', 'window-material-reduced-760-light.png', ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => ['glass', 'solid'].map(material => `window-material-${material}-${width}-${theme}.png`)), 'conversation-cards-failed-dark.png','conversation-refresh-failed-dark.png','conversation-initial-failed-light.png','conversation-recovered-light.png','bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
@@ -57,6 +59,14 @@ const requiredShots = [...verificationShots, 'window-material-drawer-1280-dark.p
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress', 'child-running', 'historical', 'paused', 'cancelled', 'budget-unknown', 'budget-ready', 'budget-migrating', 'budget-reserved', 'budget-available'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
   'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png', 'attention-1280-dark.png', 'attention-760-light.png', 'attention-empty-light.png', 'attention-expired-light.png', 'attention-image-permission-dark.png', 'user-receipt-1280-dark.png', 'user-receipt-760-light.png'];
+export function continuousReplyPresencePassed(presence) {
+  const quietStates = ['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked'];
+  const states = [...quietStates, 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'];
+  return states.every(state => presence?.cases?.some(sample => sample.state === state
+    && sample.aligned && sample.fits && sample.unifiedActivity && sample.stableHeight && sample.singleAction
+    && (!quietStates.includes(state) || sample.quiet === true)));
+}
+
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   if (!['budget','question'].every(key => [[1280,'dark'],[760,'light']].every(([width,appearance]) =>
     machine.lifecycleGates?.cases?.some(row => row.key===key && row.width===width && row.appearance===appearance
@@ -86,6 +96,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !machine.imageFullAccess.noApprovalRecords) throw new Error('Full access image regression failed');
   if (!machine.imageApproval?.persisted || !machine.imageApproval?.unrelatedUnapproved || !machine.imageApproval?.keyboard || !machine.imageApproval?.narrowFits) throw new Error('Image approval scope regression failed');
   if (machine.autonomousCoordination?.cases?.length !== 8 || !machine.autonomousCoordination.cases.every(item=>item.truthful && item.humanQuestionAbsent)) throw new Error('Autonomous coordination projection failed');
+  if (!machine.startupSurface?.passed || machine.startupSurface.cases?.length !== 4 || !machine.startupSurface.entersBotShell || !machine.startupSurface.failureExplained || !machine.startupSurface.reducedMotion) throw new Error('Full-window startup regression failed');
+  if (machine.windowMaterial?.settingsCases?.length !== 5 || !machine.windowMaterial.settingsCases.every(row => row.fits && row.viewportAligned && row.navVisible)) throw new Error('Floating settings regression failed');
   if (!machine.windowMaterial?.passed || machine.windowMaterial.cases?.length !== 4 || !machine.windowMaterial.reducedTransparency) throw new Error('Window material regression failed');
   if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
     || !machine.sharedUiConventions?.rectangularPreviews || !machine.sharedUiConventions?.keyboardImagePreview
@@ -127,11 +139,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['singleReceipt', 'noTaskDuplicates', 'sourcesRetained', 'keyboard'].every(key => machine.userReceipt?.[key] === true)
     || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.userReceipt?.cases?.some(sample => sample.width === width && sample.appearance === appearance && sample.fits && sample.singleReceipt && sample.sourcesRetained && sample.keyboard))
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.leftAligned || !machine.replyDetailsEntry?.unifiedActivity || !machine.replyDetailsEntry?.collapsedHeight
-    || !['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked', 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'].every(state =>
-      machine.replyPresence?.cases?.some(sample => sample.state === state && sample.aligned && sample.fits && sample.unifiedActivity && sample.stableHeight && sample.singleAction))
-    || ![['first-paragraph', '正在整理回复'], ['preparing-read', '准备阅读 README.md'], ['reading-docked', '正在阅读 README.md']].every(([state, label]) =>
-      machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label
-        && sample.shimmer === false && sample.readableWithoutRepaintAnimation === true))
+    || !continuousReplyPresencePassed(machine.replyPresence)
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
     || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
     || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))
@@ -174,7 +182,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   const packet = { schemaVersion: 1, runId: randomUUID(), capturedAt: new Date().toISOString(),
     sourceFingerprint: sourceFingerprint(root), sourceHead: machine.sourceHead, platform: machine.platform,
     status: 'awaiting-ai-review', machineScope: machine.scope, screenshots,
-    checks: { conversationTypography: machine.conversationTypography, userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
+    checks: { startupSurface: machine.startupSurface, conversationTypography: machine.conversationTypography, userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces, windowMaterial: machine.windowMaterial,
       botAccessPolicy: machine.botAccessPolicy, chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
       backgroundWorkLayout: machine.backgroundWorkLayout, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
@@ -252,6 +260,7 @@ function main() {
     '--streaming', '--effort-stability', '--work-surfaces', '--output', path.join(output, 'machine.json')], path.join(output, 'capture.log'));
   // The long-history selection fixture has its own Electron data directory;
   // it must not change the baseline stream-following scenario's history.
+  command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--startup-only', '--output', path.join(output, 'startup-machine.json')], path.join(output, 'startup-capture.log'));
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--selection-quote-only',
     '--output', path.join(output, 'selection-machine.json')], path.join(output, 'selection-capture.log'));
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--agent-activity-only', '--output', path.join(output, 'agent-activity.json')], path.join(output, 'agent-activity-capture.log'));
@@ -274,6 +283,11 @@ function main() {
   const verificationLine = readFileSync(path.join(output, 'verification-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
   const verification = JSON.parse(verificationLine);
   if (!verification.ok || verification.pageErrors?.length || verification.mainAuthorizationErrors?.length) throw new Error('Task verification interaction failed');
+  const startup = JSON.parse(readFileSync(path.join(output, 'startup-machine.json'), 'utf8'));
+  if (!startup.ok || startup.pageErrors?.length || startup.mainAuthorizationErrors?.length) throw new Error('Startup interaction failed');
+  machine.startupSurface = startup.startupSurface;
+  const startupLine = readFileSync(path.join(output, 'startup-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
+  for (const file of startupShots) copyFileSync(path.join(JSON.parse(startupLine).root, file), path.join(artifactRoot, file));
   machine.taskVerification = verification.taskVerification;
   for (const file of verificationShots) copyFileSync(path.join(verification.root, file), path.join(artifactRoot, file));
   machine.agentActivity = agents.agentActivity;

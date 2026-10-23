@@ -1,6 +1,6 @@
 {
   "name": "peer-agent",
-  "version": "0.1.0-rc.25",
+  "version": "0.1.0-rc.26",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
@@ -29,7 +29,7 @@
     "runtime:pack-smoke": "node scripts/check-runtime-packages.mjs --smoke",
     "build:core": "cargo build --workspace",
     "build:core:release": "cargo build --workspace --release",
-    "pack": "pnpm build && pnpm --filter @peer-agent/desktop pack",
+    "pack": "pnpm build && pnpm --filter @peer-agent/desktop run pack",
     "dist": "pnpm build && pnpm --filter @peer-agent/desktop dist",
     "dist:mac": "pnpm build && pnpm --filter @peer-agent/desktop dist:mac",
     "dist:win": "pnpm build && pnpm --filter @peer-agent/desktop dist:win",

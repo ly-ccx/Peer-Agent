@@ -976,7 +976,7 @@ function MainApp() {
 
   return (
     <BackgroundRunsProvider isZh={isZh} sources={conversations} onSource={handleSelectConversation}>
-    <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
+    <main className={`app-shell${isFullscreen ? ' is-fullscreen' : ''}${!showMainShell ? ' is-starting' : ''}`}>
       <ClassicShellNotice
         open={classicShellNotice}
         i18n={i18n}
@@ -1539,11 +1539,9 @@ function MainApp() {
           ) : null}
         </>
       ) : (
-        <section className="main-panel">
-          <section className="thread">
-            {initError ? <p className="running-note">{initError}</p> : null}
-            {!initError ? <BrandStartupLoader /> : null}
-          </section>
+        <section className="startup-surface">
+          {initError ? <p className="running-note">{initError}</p> : null}
+          {!initError ? <BrandStartupLoader /> : null}
         </section>
       )}
 

@@ -149,3 +149,29 @@
 @media (forced-colors: active) {
   :is(.settings-content, .bot-drawer-body) :is(.pa-dropdown-trigger, .pa-cascading-trigger, .general-bot-time, .shortcut-recorder, input) { border-color: ButtonText; }
 }
+
+/* The app owns a viewport; only the settings content may scroll. The legacy
+   document min-width must not let focus scroll the entire narrow window. */
+body:has(.app-settings-page) { min-width: 0; }
+
+/* Settings shares the bot window's single material base and floating paper. */
+html[data-vibrancy='true'] .app-settings-page {
+  background: var(--window-chrome-fill);
+  border-radius: 0;
+}
+html[data-vibrancy='true'] .settings-page {
+  gap: 10px;
+  padding: 10px 10px 10px 0;
+  animation: none;
+}
+html[data-vibrancy='true'] .settings-nav {
+  background: transparent;
+  border-right: 0;
+  backdrop-filter: none;
+}
+html[data-vibrancy='true'] .settings-content {
+  background: var(--paper-sheet);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-panel);
+  box-shadow: var(--glass-edge-highlight), var(--shadow-card);
+}

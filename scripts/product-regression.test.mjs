@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sourceFingerprint, verifyReview } from './product-regression.mjs';
+import { sourceFingerprint, verifyReview, continuousReplyPresencePassed } from './product-regression.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-product-gate-'));
@@ -59,4 +59,22 @@ test('open or accepted blocking findings prevent product acceptance', t => {
   assert.throws(() => verifyReview(f), /findings/);
   f.review.findings[0].disposition = 'resolved';
   assert.equal(verifyReview(f).status, 'passed');
+});
+
+test('continuous reply acceptance requires quiet prose states and every reply layout state', () => {
+  const quietStates = ['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked'];
+  const states = [...quietStates, 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'];
+  const cases = states.map(state => ({ state, aligned: true, fits: true, unifiedActivity: true,
+    stableHeight: true, singleAction: true, quiet: quietStates.includes(state) }));
+  assert.equal(continuousReplyPresencePassed({ cases }), true);
+  for (const state of states) {
+    assert.equal(continuousReplyPresencePassed({ cases: cases.filter(row => row.state !== state) }), false);
+  }
+  for (const state of quietStates) {
+    assert.equal(continuousReplyPresencePassed({ cases: cases.map(row => row.state === state ? { ...row, quiet: false } : row) }), false);
+  }
+  for (const flag of ['aligned', 'fits', 'unifiedActivity', 'stableHeight', 'singleAction']) {
+    assert.equal(continuousReplyPresencePassed({ cases: cases.map(row => ({ ...row, [flag]: false })) }), false);
+  }
+  assert.equal(continuousReplyPresencePassed(), false);
 });

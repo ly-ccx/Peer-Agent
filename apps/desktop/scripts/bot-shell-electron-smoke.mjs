@@ -38,6 +38,7 @@ import { checkRetryRetirement } from './bot-retry-retirement-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
 // This proves shell/IPC/durable input behavior, not live-model latency. The image
 // lifecycle scenarios additionally execute the production view_image Provider.
+import { checkStartupSurface } from './startup-surface-checks.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, cpSync, existsSync } from 'node:fs';
 import os from 'node:os';
@@ -57,6 +58,9 @@ import { DEFAULT_WORK_BUDGET } from '../../../packages/runtime-node/src/project-
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
+const startupOnly = process.argv.includes('--startup-only');
+const startupCommand = path.join(root, 'startup-command.json');
+if (startupOnly) writeFileSync(startupCommand, JSON.stringify({ release: false }));
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
 const workSurfaces = process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
@@ -359,7 +363,7 @@ writeFileSync(quickCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(quickReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterReceipt, JSON.stringify({ seq: 0 }));
-writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu} from 'electron';
+writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu,ipcMain} from 'electron';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {installQuickChatNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/quick-chat-native-fixture.mjs')).href)};
 installQuickChatNativeFixture({BrowserWindow,Menu,commandFile:${JSON.stringify(quickCommand)},receiptFile:${JSON.stringify(quickReceipt)}});
@@ -424,6 +428,12 @@ const updaterTimer=setInterval(()=>{
   const file=${JSON.stringify(updaterReceipt)};
   writeFileSync(file+'.next',JSON.stringify(receipt));renameSync(file+'.next',file);
 },25);updaterTimer.unref();
+${startupOnly ? `const register=ipcMain.handle.bind(ipcMain);
+ipcMain.handle=(channel,handler)=>register(channel,channel==='bootstrap:get'?async(...args)=>{
+  const result=await handler(...args);
+  let state;while(!(state=JSON.parse(readFileSync(${JSON.stringify(startupCommand)},'utf8'))).release)await new Promise(resolve=>setTimeout(resolve,25));
+  if(state.error)throw Error('RC_STARTUP_UNAVAILABLE');return result;
+}:handler);` : ''}
 app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(error=>{console.error(error);app.exit(1)});
 `);
 const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1',
@@ -471,6 +481,9 @@ try {
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean, 120000);
   report.windowReadyMs = Date.now() - Date.parse(report.startedAt);
   page.setDefaultTimeout(15000); page.on('pageerror', error => report.pageErrors.push(error.message));
+  if (startupOnly) {
+    await checkStartupSurface({ page, until, report, captureDirectory: root, commandFile: startupCommand });
+  } else {
   await page.locator('.bot-shell').waitFor();
   await page.bringToFront();
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
@@ -802,6 +815,7 @@ try {
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
   if (!process.argv.includes('--verification-only') && !process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
+  }
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
   report.ok = true;
