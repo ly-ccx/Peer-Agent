@@ -58,6 +58,14 @@ const requiredShots = [...startupShots, ...verificationShots, 'window-material-d
   ...['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress', 'child-running', 'historical', 'paused', 'cancelled', 'budget-unknown', 'budget-ready', 'budget-migrating', 'budget-reserved', 'budget-available'].flatMap(state => [`recovery-${state}-dark.png`, `recovery-${state}-light.png`]),
   'work-verifying.png', 'work-repair-1280-dark.png', 'work-repair-760-light.png', 'reply-presence-progress-dark.png', 'reply-entry-idle-dark.png', 'reply-entry-hover-dark.png', 'reply-entry-idle-light.png', 'reply-entry-hover-light.png',
   'yield-feedback-1280-dark.png', 'yield-feedback-760-light.png', 'retry-history-1280-dark.png', 'retry-history-760-light.png', 'attention-1280-dark.png', 'attention-760-light.png', 'attention-empty-light.png', 'attention-expired-light.png', 'attention-image-permission-dark.png', 'user-receipt-1280-dark.png', 'user-receipt-760-light.png'];
+export function continuousReplyPresencePassed(presence) {
+  const quietStates = ['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked'];
+  const states = [...quietStates, 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'];
+  return states.every(state => presence?.cases?.some(sample => sample.state === state
+    && sample.aligned && sample.fits && sample.unifiedActivity && sample.stableHeight && sample.singleAction
+    && (!quietStates.includes(state) || sample.quiet === true)));
+}
+
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   if (!['budget','question'].every(key => [[1280,'dark'],[760,'light']].every(([width,appearance]) =>
     machine.lifecycleGates?.cases?.some(row => row.key===key && row.width===width && row.appearance===appearance
@@ -129,11 +137,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['singleReceipt', 'noTaskDuplicates', 'sourcesRetained', 'keyboard'].every(key => machine.userReceipt?.[key] === true)
     || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.userReceipt?.cases?.some(sample => sample.width === width && sample.appearance === appearance && sample.fits && sample.singleReceipt && sample.sourcesRetained && sample.keyboard))
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.leftAligned || !machine.replyDetailsEntry?.unifiedActivity || !machine.replyDetailsEntry?.collapsedHeight
-    || !['first-paragraph', 'latest-paragraph-dark', 'latest-paragraph-light', 'preparing-read', 'reading-docked', 'completed', 'short-question-dark', 'short-question-light', 'stopped', 'failed'].every(state =>
-      machine.replyPresence?.cases?.some(sample => sample.state === state && sample.aligned && sample.fits && sample.unifiedActivity && sample.stableHeight && sample.singleAction))
-    || ![['first-paragraph', '正在整理回复'], ['preparing-read', '准备阅读 README.md'], ['reading-docked', '正在阅读 README.md']].every(([state, label]) =>
-      machine.replyPresence?.labels?.some(sample => sample.state === state && sample.label === label
-        && sample.shimmer === false && sample.readableWithoutRepaintAnimation === true))
+    || !continuousReplyPresencePassed(machine.replyPresence)
     || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
     || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
     || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))

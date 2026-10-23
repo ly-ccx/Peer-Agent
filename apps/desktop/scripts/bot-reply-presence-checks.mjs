@@ -2,19 +2,11 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 /** Assert the actual rendered bubble edge, rather than the full-width article. */
-export async function checkReplyPresence({ page, reply, report, until, state, label, quiet = false, captureDirectory, shot }) {
-  const samples = report.replyPresence ??= { cases: [], labels: [] };
+export async function checkReplyPresence({ page, reply, report, until, state, quiet = false, captureDirectory, shot }) {
+  const samples = report.replyPresence ??= { cases: [] };
   const footer = reply.locator('.bot-reply-context');
-  if (label) {
-    await until(() => footer.locator('.bot-context-running').textContent(), text => text === label);
-    assert.equal(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).animationName), 'motion-shimmer');
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    assert.equal(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).animationName), 'none');
-    assert.notEqual(await footer.locator('.bot-context-running').evaluate(node => getComputedStyle(node).webkitTextFillColor), 'rgba(0, 0, 0, 0)');
-    await page.emulateMedia({ reducedMotion: 'no-preference' });
-    samples.labels.push({ state, label, shimmer: true, reducedMotionReadable: true });
-  }
   if (quiet) {
+    assert.equal(await footer.locator('.bot-context-running').count(), 0, 'public prose owns the reply; activity labels stay in details');
     assert.doesNotMatch(await footer.textContent(), /正在整理回复|准备阅读|正在阅读|正在准备下一步/);
   }
   const bounds = await until(() => reply.evaluate(node => {
@@ -35,7 +27,7 @@ export async function checkReplyPresence({ page, reply, report, until, state, la
   }), value => value?.aligned);
   assert.ok(bounds.fits, `${state}: footer remains inside the conversation`);
   assert.ok(bounds.unifiedActivity && bounds.stableHeight && bounds.singleAction, 'one stable, accessible activity/details action');
-  samples.cases.push({ state, ...bounds, width: page.viewportSize()?.width,
+  samples.cases.push({ state, quiet, ...bounds, width: page.viewportSize()?.width,
     theme: await page.evaluate(() => document.documentElement.dataset.theme) });
   if (shot) {
     await reply.hover();
