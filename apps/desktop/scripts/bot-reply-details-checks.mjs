@@ -44,7 +44,7 @@ export async function openReplyDetails(page, message) {
     assert.equal(await page.locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
     return;
   }
-  const button = message.locator('.bot-reply-context > button');
+  const button = message.locator('.bot-reply-context > button').first();
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
   await page.locator('.bot-composer textarea').focus();
   await page.mouse.move(1, 1);
@@ -62,7 +62,7 @@ export async function openReplyDetails(page, message) {
   const placement = await button.evaluate(node => {
     const action = node.getBoundingClientRect(), footer = node.parentElement.getBoundingClientRect();
     const bubbles = [...node.closest('.bot-reply, .bot-system').querySelectorAll(
-      ':scope > .bot-reply-body, :scope > .bot-narration .markdown-content > *, '
+      ':scope > .bot-reply-body, :scope > .bot-continuous-paragraphs > .bot-reply-body, :scope > .bot-narration:not(.bot-continuous-paragraphs) .markdown-content > *, '
       + ':scope > .bot-cards > .bot-stopped-reply > .bot-reply-body, '
       + ':scope > .bot-cards > .bot-unavailable-reply > .bot-reply-body')];
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
@@ -73,44 +73,7 @@ export async function openReplyDetails(page, message) {
   });
   assert.ok(placement.left <= 2 && placement.height >= 32, 'details icon aligns left with its footer and keeps a usable hit target');
   if (placement.bubbleLeft !== null) assert.ok(placement.bubbleLeft <= 2, 'details starts on the current bubble text column');
-  // Move the pointer over the visible reply. Locator.hover() would first center
-  // the whole element with scrollIntoView, scrolling the document at narrow widths.
-  const visibleHoverPoint = () => message.evaluate(node => {
-    const thread = node.closest('.bot-thread').getBoundingClientRect();
-    // The floating "latest reply" control may cover the center of a short reply.
-    const areas = [...node.querySelectorAll('.bot-reply-body'), node];
-    for (const area of areas) {
-      const rect = area.getBoundingClientRect();
-      const left = Math.max(rect.left, 0), right = Math.min(rect.right, innerWidth);
-      const top = Math.max(rect.top, thread.top, 0), bottom = Math.min(rect.bottom, thread.bottom, innerHeight);
-      if (right <= left || bottom <= top) continue;
-      const inset = Math.min(12, (right - left) / 4, (bottom - top) / 4);
-      for (const [x, y] of [[(left + right) / 2, (top + bottom) / 2], [left + inset, top + inset], [right - inset, top + inset]]) {
-        if (node.contains(document.elementFromPoint(x, y))) return { x, y, visible: true };
-      }
-    }
-    return { visible: false };
-  });
-  // Virtual row measurements may still move a reply after its CSS animations
-  // finish. Recompute real pointer coordinates until Chromium confirms :hover;
-  // do not retry the scenario or force the details button visible.
-  const deadline = Date.now() + 15000;
-  let revealed = false;
-  while (!revealed && Date.now() < deadline) {
-    const point = await visibleHoverPoint();
-    assert.equal(point.visible, true, 'the reply is visible before a real pointer hovers it');
-    await page.mouse.move(1, 1);
-    await page.mouse.move(point.x, point.y, { steps: 2 });
-    // Keep the actual pointer still while its opacity transition finishes.
-    // Moving out every 50ms repeatedly restarted the 120ms transition on Linux.
-    await page.waitForFunction(node => node.getAnimations().every(animation => animation.playState !== 'running'
-      || !Number.isFinite(animation.effect?.getComputedTiming().endTime)), await button.elementHandle(), { timeout: 15000 });
-    revealed = await button.evaluate(node => getComputedStyle(node).opacity === '1'
-      && node.closest('.bot-reply, .bot-system').matches(':hover'));
-    if (!revealed) await page.waitForTimeout(50);
-  }
-  assert.equal(revealed, true, 'a real pointer over the current reply reveals its details');
-  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'hovering the reply reveals its details');
+  await hoverBotReply(page, message, button);
   await page.mouse.move(1, 1);
   await button.focus(); await button.press('Enter');
   const details = page.locator('.bot-reply-details');
@@ -136,4 +99,49 @@ export async function closeReplyDetails(page) {
     return focused?.matches('.bot-reply-context > button, .bot-recovery-history-body > button')
       || !mounted && focused?.matches('.bot-thread');
   }, mountedTrigger), true, 'close restores the current details button, or the thread when its original reply was virtualized away');
+}
+
+/** Reveal through real pointer movement after virtual-row and footer measurement. */
+export async function hoverBotReply(page, message, button = message.locator('.bot-reply-context > button').first()) {
+  // Move the pointer over the visible reply. Locator.hover() would first center
+  // the whole element with scrollIntoView, scrolling the document at narrow widths.
+  const visibleHoverPoint = () => message.evaluate(node => {
+    const thread = node.closest('.bot-thread').getBoundingClientRect();
+    // The floating "latest reply" control may cover the center of a short reply.
+    const areas = [...node.querySelectorAll('.bot-reply-body'), node];
+    for (const area of areas) {
+      const rect = area.getBoundingClientRect();
+      const left = Math.max(rect.left, 0), right = Math.min(rect.right, innerWidth);
+      const top = Math.max(rect.top, thread.top, 0), bottom = Math.min(rect.bottom, thread.bottom, innerHeight);
+      if (right <= left || bottom <= top) continue;
+      const inset = Math.min(12, (right - left) / 4, (bottom - top) / 4);
+      for (const [x, y] of [[(left + right) / 2, (top + bottom) / 2], [left + inset, top + inset], [right - inset, top + inset]]) {
+        if (node.contains(document.elementFromPoint(x, y))) return { x, y, visible: true };
+      }
+    }
+    return { visible: false };
+  });
+  // Virtual row measurements may still move a reply after its CSS animations
+  // finish. Recompute real pointer coordinates until Chromium confirms :hover;
+  // do not retry the scenario or force the details button visible.
+  const deadline = Date.now() + 15000;
+  let revealed = false;
+  let pointer;
+  while (!revealed && Date.now() < deadline) {
+    const point = await visibleHoverPoint();
+    pointer = point;
+    assert.equal(point.visible, true, 'the reply is visible before a real pointer hovers it');
+    await page.mouse.move(1, 1);
+    await page.mouse.move(point.x, point.y, { steps: 2 });
+    // Keep the actual pointer still while its opacity transition finishes.
+    // Moving out every 50ms repeatedly restarted the 120ms transition on Linux.
+    await page.waitForFunction(node => node.getAnimations().every(animation => animation.playState !== 'running'
+      || !Number.isFinite(animation.effect?.getComputedTiming().endTime)), await button.elementHandle(), { timeout: 15000 });
+    revealed = await button.evaluate(node => getComputedStyle(node).opacity === '1'
+      && node.closest('.bot-reply, .bot-system').matches(':hover'));
+    if (!revealed) await page.waitForTimeout(50);
+  }
+  assert.equal(revealed, true, 'a real pointer over the current reply reveals its details');
+  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1', 'hovering the reply reveals its details');
+  return pointer;
 }

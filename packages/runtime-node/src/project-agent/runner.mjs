@@ -482,7 +482,7 @@ export function createProjectAgentRunner({
     if (job.workId) plan.turnProfile.workId = job.workId;
     if (model.selection) plan.turnProfile.modelSelection = model.selection;
     if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
-    activity.begin({ turnId, modelSelection: model.selection, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
+    activity.begin({ turnId, workId: job.workId, modelSelection: model.selection, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
       startedAt: stamp(), visible: job.kind === 'user' || job.interactive === true });
     const silentWait = coordination?.silentWaitFor(job, readSlot(resolveRoster, job.kind));
     if (silentWait) return { turnId, plan, rounds: [], silentWait, memoryIds: [] };

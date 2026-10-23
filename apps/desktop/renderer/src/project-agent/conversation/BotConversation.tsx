@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
+import { replyRowContains, replyRowMood, replyRowRunning } from '../state/botReplyContinuity';
 import { quoteRefsFor } from '../state/botConversationState';
 import { replyDetailsRow } from '../state/botActivityState';
 import { useReplyDetailsRow } from '../state/useReplyDetailsRow';
@@ -34,6 +35,7 @@ export function BotConversation({
   avatarMood,
   i18n,
   onReplyArrived,
+  onReplyPresenceChange,
   onLocateSession,
   onInspect,
   focusMessageId = null,
@@ -53,6 +55,7 @@ export function BotConversation({
   readonly avatarMood: BotAvatarMood;
   readonly i18n: I18nRuntime;
   readonly onReplyArrived?: (workspaceId: string) => void;
+  readonly onReplyPresenceChange?: (workspaceId: string, mood: BotAvatarMood | null) => void;
   readonly onLocateSession: (sessionId: string) => void;
   readonly onInspect?: (inspect: BotInspect) => void;
   readonly focusMessageId?: string | null;
@@ -64,6 +67,11 @@ export function BotConversation({
   readonly replyDetailsTarget?: HTMLElement | null;
 }) {
   const conversation = useBotConversation(workspaceId);
+  const activeReply = [...conversation.viewRows].reverse().find(row => row.type === 'reply' && replyRowRunning(row));
+  const replyMood = activeReply?.type === 'reply' ? replyRowMood(activeReply) : 'idle';
+  useEffect(() => {
+    onReplyPresenceChange?.(workspaceId, replyMood !== 'idle' || conversation.status === 'ready' ? replyMood : null);
+  }, [workspaceId, conversation.status, replyMood, onReplyPresenceChange]);
   const lastReplyRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (conversation.status !== 'ready') return;
@@ -110,6 +118,10 @@ export function BotConversation({
   const details = useReplyDetailsRow(workspaceId, replyDetailsId, detailsRow);
   const detailsKey = detailsRow?.type === 'activity' ? detailsRow.activity.turnId
     : detailsRow?.type === 'message' ? detailsRow.message.turnId ?? detailsRow.message.id : replyDetailsId ?? '';
+  const relatedReply = conversation.viewRows.find(row => row.type === 'reply' && replyRowContains(row, replyDetailsId));
+  const relatedTurns = relatedReply?.type === 'reply' ? [...new Set([
+    ...relatedReply.messages.map(message => message.turnId || message.id), ...(relatedReply.activity ? [relatedReply.activity.turnId] : []),
+  ])].filter(id => id !== detailsKey) : [];
   const [detailsOpen, setDetailsOpen] = useState<Record<string, Record<string, boolean>>>({});
   const detailsDisclosure = { open: detailsOpen[detailsKey] ?? { main: true }, toggle: (key: string, value: boolean) => {
     setDetailsOpen(current => current[detailsKey]?.[key] === value ? current : {
@@ -135,6 +147,7 @@ export function BotConversation({
       {replyDetailsId && replyDetailsTarget ? createPortal(<ReplyDetails key={replyDetailsId} row={details.row} loading={details.loading}
         workspaceId={workspaceId} botName={label} workIndex={workIndex} i18n={i18n}
         disclosure={detailsDisclosure}
+        relatedTurns={relatedTurns} onOpenRelatedReply={id => onInspect?.({ replyId: id, evidence: null, rounds: null })}
         onOpenEvidence={openEvidence} onOpenWork={onLocateSession} />, replyDetailsTarget) : null}
       {conversation.status === 'ready' && (conversation.cardsError || conversation.refreshError) ? <div className="bot-thread-feedback" role="status">
         <div>
@@ -154,9 +167,9 @@ export function BotConversation({
           avatar={avatar}
           label={label}
           avatarMood={avatarMood}
-          rows={conversation.rows}
+          rows={conversation.viewRows}
           followRequestId={conversation.followRequestId}
-          waiting={conversation.thinking}
+          onReload={conversation.reload}
           hasOlder={conversation.hasOlder}
           olderError={conversation.olderError}
           onLoadOlder={conversation.loadOlder}

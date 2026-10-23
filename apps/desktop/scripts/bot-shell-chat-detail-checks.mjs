@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, hoverBotReply } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -58,19 +58,8 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
         animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime));
       await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
     });
-    const pointer = await firstReply.evaluate(node => {
-      const body = node.querySelector('.bot-reply-body').getBoundingClientRect();
-      const thread = node.closest('.bot-thread').getBoundingClientRect();
-      const left = Math.max(body.left, 0), right = Math.min(body.right, innerWidth);
-      const top = Math.max(body.top, thread.top, 0), bottom = Math.min(body.bottom, thread.bottom, innerHeight);
-      for (const [x, y] of [[(left + right) / 2, (top + bottom) / 2], [left + 12, top + 12]]) {
-        if (right > left && bottom > top && node.contains(document.elementFromPoint(x, y))) return { x, y };
-      }
-      throw Error('reply body must be visible before hover capture');
-    });
-    await page.mouse.move(pointer.x, pointer.y);
     await checkReplyPresence({ page, reply: firstReply, report, until, state: `short-question-${theme}` });
-    await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
+    const pointer = await hoverBotReply(page, firstReply, button);
     assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '1');
     const beforeCapture = await firstReply.evaluate(node => ({ hovered: node.matches(':hover'),
       opacity: getComputedStyle(node.querySelector('.bot-reply-context > button')).opacity,

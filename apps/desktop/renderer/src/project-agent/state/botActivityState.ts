@@ -18,7 +18,8 @@ export function mergeBotActivity(current: ProjectAgentActivity | null, incoming:
 
 export function visibleBotActivity(activity: ProjectAgentActivity | null, messages: readonly BotChatMessage[]): ProjectAgentActivity | null {
   if (!activity || activity.phase === 'disposed') return null;
-  if (messages.some(message => message.turnId === activity.turnId && ['agent_reply', 'system_card'].includes(message.kind))) return null;
+  if (messages.some(message => message.turnId === activity.turnId && (message.kind === 'agent_reply'
+    || message.kind === 'system_card' && message.cards.some(card => ['agent_stopped', 'agent_unavailable'].includes(card.kind))))) return null;
   if (TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
   return activity;
 }
@@ -47,10 +48,15 @@ export function replyDetailsFromPage(id: string, page: { readonly ok: boolean; r
 
 /** Durable receipt, internal slices and unrelated wakes cannot answer a user input. */
 export function hasReplyForInput(messages: readonly BotChatMessage[], inputId: string): boolean {
-  const target = `input-${inputId}`;
-  const turns = new Set(messages.filter(message => message.kind === 'agent_turn' && message.replyTo.includes(target)).map(message => message.id));
-  return messages.some(message => ['agent_reply', 'system_card'].includes(message.kind)
-    && (message.replyTo.includes(target) || Boolean(message.turnId && turns.has(message.turnId))));
+  return answeredInputIds(messages).has(`input-${inputId}`);
+}
+
+/** Explicit answer anchors take precedence over the full batch admitted to a turn. */
+export function answeredInputIds(messages: readonly BotChatMessage[]): ReadonlySet<string> {
+  const turns = new Map(messages.filter(message => message.kind === 'agent_turn').map(message => [message.id, message.replyTo]));
+  return new Set(messages.filter(message => message.kind === 'agent_reply' || message.kind === 'system_card'
+    && message.cards.some(card => ['question', 'agent_stopped', 'agent_unavailable'].includes(card.kind)))
+    .flatMap(message => message.replyTo.length ? message.replyTo : !message.proactive && message.turnId ? turns.get(message.turnId) ?? [] : []));
 }
 
 /** Linear handoff projection: streaming updates must not scan history once per reply. */

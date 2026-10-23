@@ -9,13 +9,13 @@ export async function checkRetryRetirement({ page, until, report, captureDirecto
   writeStreamingCommand(commandFile, scenario, 3);
   const composer = page.locator('.bot-composer textarea');
   await composer.fill(scenario); await composer.press('Enter');
-  const failed = page.locator('.bot-system').filter({ has: page.locator('.bot-unavailable-reply:not(.is-resolved)') }).last();
+  const failed = page.locator('.bot-system, .bot-continuous-reply').filter({ has: page.locator('.bot-unavailable-reply:not(.is-resolved)') }).last();
   await failed.waitFor();
   const firstId = await failed.getAttribute('id');
   const first = page.locator(`#${firstId}`);
   await first.getByRole('button', { name: '继续尝试', exact: true }).click();
   await until(() => readFixtureTurns().filter(turn => turn.kind === 'repeated-failure-ended' && turn.scenario === scenario).length, count => count === 1);
-  const latest = page.locator('.bot-system').filter({ has: page.locator('.bot-unavailable-reply:not(.is-resolved)') }).last();
+  const latest = page.locator('.bot-system, .bot-continuous-reply').filter({ has: page.locator('.bot-unavailable-reply:not(.is-resolved)') }).last();
   await latest.getByRole('button', { name: '继续尝试', exact: true }).waitFor();
   await until(() => first.locator('.bot-recovery-history, .bot-card[aria-busy="false"].is-resolved').count(), count => count > 0);
   assert.equal(await first.getByRole('alert').count(), 0, 'failed receipt cannot outlive its superseded interruption');

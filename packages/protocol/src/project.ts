@@ -137,6 +137,8 @@ export interface ProjectAgentActivity {
   readonly workspaceId: string;
   readonly conversationId: string;
   readonly turnId: string;
+  /** Existing coordination identity; several execution attempts may serve one reply. */
+  readonly workId?: string;
   readonly revision: number;
   readonly startedAt: string;
   readonly finishedAt?: string;
@@ -144,6 +146,8 @@ export interface ProjectAgentActivity {
   readonly replyTo: readonly string[];
   readonly phase: 'waiting' | 'thinking' | 'responding' | 'tool' | 'awaiting_permission' | 'settling' | 'done' | 'error' | 'stopped' | 'disposed';
   readonly replyText: string;
+  /** A factual recovery event, cleared when the next provider event arrives. */
+  readonly recovery?: 'connection' | 'provider';
   readonly segments: readonly (
     | ({ readonly kind: 'text' } & ProjectAgentPublicUpdate)
     | ProjectAgentToolActivity

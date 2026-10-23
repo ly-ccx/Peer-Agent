@@ -216,6 +216,15 @@ export type TranslationKey =
   | 'projectAgent.chat.thinking'
   | 'projectAgent.chat.waiting'
   | 'projectAgent.chat.generating'
+  | 'projectAgent.chat.reply.reconnecting'
+  | 'projectAgent.chat.reply.unconfirmed'
+  | 'projectAgent.chat.reply.interrupted'
+  | 'projectAgent.chat.reply.synchronizing'
+  | 'projectAgent.chat.reply.slow'
+  | 'projectAgent.chat.reply.refresh'
+  | 'projectAgent.chat.reply.related'
+  | 'projectAgent.chat.reply.relatedTurn'
+  | 'projectAgent.chat.reply.deliveryIssue'
   | 'projectAgent.chat.activity.preparing'
   | 'projectAgent.chat.activity.thinking'
   | 'projectAgent.chat.activity.responding'
@@ -1799,6 +1808,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.thinking': '正在思考中',
     'projectAgent.chat.waiting': '等待回复…',
     'projectAgent.chat.generating': '正在回复',
+    'projectAgent.chat.reply.reconnecting': '正在恢复这次回复',
+    'projectAgent.chat.reply.unconfirmed': '尚未确认这条消息的回复状态',
+    'projectAgent.chat.reply.interrupted': '这次回复已中断',
+    'projectAgent.chat.reply.synchronizing': '正在同步回复',
+    'projectAgent.chat.reply.slow': '这次回复耗时较久',
+    'projectAgent.chat.reply.refresh': '刷新状态',
+    'projectAgent.chat.reply.related': '这次回复的其他过程（{count}）',
+    'projectAgent.chat.reply.relatedTurn': '查看过程 {number}',
+    'projectAgent.chat.reply.deliveryIssue': '消息已保存，后续处理尚未完成',
     'projectAgent.chat.activity.preparing': '正在准备下一步',
     'projectAgent.chat.activity.thinking': '正在整理思路',
     'projectAgent.chat.activity.responding': '正在整理回复',
@@ -3167,6 +3185,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.thinking': 'Thinking',
     'projectAgent.chat.waiting': 'Waiting for a response…',
     'projectAgent.chat.generating': 'Replying',
+    'projectAgent.chat.reply.reconnecting': 'Resuming this reply',
+    'projectAgent.chat.reply.unconfirmed': 'The reply status has not been confirmed',
+    'projectAgent.chat.reply.interrupted': 'This reply was interrupted',
+    'projectAgent.chat.reply.synchronizing': 'Synchronizing the reply',
+    'projectAgent.chat.reply.slow': 'This reply is taking longer',
+    'projectAgent.chat.reply.refresh': 'Refresh status',
+    'projectAgent.chat.reply.related': 'Other parts of this reply ({count})',
+    'projectAgent.chat.reply.relatedTurn': 'View part {number}',
+    'projectAgent.chat.reply.deliveryIssue': 'The message was saved, but follow-up processing did not finish',
     'projectAgent.chat.activity.preparing': 'Getting ready for the next step',
     'projectAgent.chat.activity.thinking': 'Thinking it through',
     'projectAgent.chat.activity.responding': 'Putting the reply together',
