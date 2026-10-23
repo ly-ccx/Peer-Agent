@@ -120,6 +120,18 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
           segment.startedAt = eventTime(payload.startedAtMs, segment.startedAt);
           segment.finishedAt = eventTime(payload.endedAtMs, now()); segment.result = preview(payload.result ?? null, 4000); changed();
         }
+      } else if (channel === 'chat:stream:discard') {
+        const textChars = Number(payload.textChars) || 0;
+        const segment = state.segments.find(item => item.kind === 'text' && item.id === textSegmentId);
+        if (segment && textChars > 0) {
+          segment.text = segment.text.slice(0, Math.max(0, segment.text.length - textChars));
+          if (!segment.text) {
+            state.segments = state.segments.filter(item => item !== segment);
+            textSegmentId = null;
+          }
+        }
+        state.phase = 'waiting';
+        changed();
       } else if (channel === 'chat:stream:provider-recovery' || channel === 'chat:stream:connection-recovery') {
         if (channel === 'chat:stream:provider-recovery' && payload.toProviderId) state.modelSelection = { modelProviderId: payload.toProviderId };
         pendingPermissions.clear(); state.replyText = ''; state.segments = []; textSegmentId = null; previewChars = 0; state.phase = 'waiting';

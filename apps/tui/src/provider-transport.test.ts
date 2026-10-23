@@ -239,6 +239,7 @@ describe('TUI provider transport', () => {
     ]);
     for (const init of attempts) {
       expect(init.method).toBe('POST');
+      expect(new Headers(init.headers).get('connection')).toBe('close');
       expect((init as RequestInit & { proxy?: string }).proxy).toBe('http://proxy.example:8443');
       expect((init as RequestInit & { tls?: { rejectUnauthorized?: boolean } }).tls?.rejectUnauthorized)
         .toBe(true);

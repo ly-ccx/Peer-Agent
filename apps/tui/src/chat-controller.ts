@@ -53,6 +53,8 @@ import {
   type ToolPresentation,
 } from './tool-result-summary.ts';
 import { recordTuiPerf, tuiPerfNow } from './tui-perf.ts';
+import { presentChatError, type TuiLocale } from './tui-language.ts';
+import { streamDraftDiscardFrom } from './provider-chat-model.ts';
 
 /** Desktop agent-loop default: no turn cap unless send() / `peer exec --max-turns` sets one. */
 const DEFAULT_CHAT_MAX_TURNS = Number.POSITIVE_INFINITY;
@@ -349,6 +351,64 @@ function textContentFromSegments(segments: readonly AssistantSegment[] | undefin
     .join('');
 }
 
+function peelStreamSuffix(
+  segments: readonly AssistantSegment[],
+  type: 'text' | 'thinking',
+  chars: number,
+): AssistantSegment[] {
+  if (chars <= 0) return [...segments];
+  let left = chars;
+  const next = [...segments];
+  for (let index = next.length - 1; index >= 0 && left > 0; index -= 1) {
+    const segment = next[index];
+    if (!segment || segment.type === 'tool-call') break;
+    if (segment.type !== type) continue;
+    if (segment.content.length <= left) {
+      left -= segment.content.length;
+      next.splice(index, 1);
+      continue;
+    }
+    next[index] = { ...segment, content: segment.content.slice(0, segment.content.length - left) };
+    left = 0;
+  }
+  return next;
+}
+
+/** Drop text and thinking from a failed model attempt. Completed tool rows stay. */
+export function discardPendingStreamDraft(
+  messages: readonly ChatMessage[],
+  draft: { readonly textChars: number; readonly reasoningChars: number },
+): ChatMessage[] {
+  if (draft.textChars <= 0 && draft.reasoningChars <= 0) return [...messages];
+  const next = [...messages];
+  let index = -1;
+  for (let cursor = next.length - 1; cursor >= 0; cursor -= 1) {
+    const message = next[cursor];
+    if (message?.role === 'assistant' && message.pending) {
+      index = cursor;
+      break;
+    }
+    if (message?.role === 'assistant' || message?.role === 'user' || message?.role === 'system') break;
+  }
+  if (index < 0) return next;
+  const target = next[index];
+  if (!target) return next;
+  let segments = [...(target.segments ?? [])];
+  if (segments.length === 0) {
+    if (target.thinkingContent) segments.push({ type: 'thinking', content: target.thinkingContent });
+    if (target.content) segments.push({ type: 'text', content: target.content });
+  }
+  segments = peelStreamSuffix(segments, 'text', draft.textChars);
+  segments = peelStreamSuffix(segments, 'thinking', draft.reasoningChars);
+  const hasTool = segments.some((segment) => segment.type === 'tool-call');
+  if (segments.length === 0 && !hasTool) {
+    next.splice(index, 1);
+    return next;
+  }
+  next[index] = withDerivedAssistantFields({ ...target, content: '' }, segments);
+  return next;
+}
+
 function withDerivedAssistantFields(message: ChatMessage, segments: readonly AssistantSegment[]): ChatMessage {
   const tools = segments
     .filter((segment): segment is Extract<AssistantSegment, { type: 'tool-call' }> => segment.type === 'tool-call')
@@ -538,6 +598,7 @@ export function createChatController(options: {
   /** Optional live context-window resolver for auto-compact thresholds / pressure. */
   readonly getContextWindow?: () => number | undefined;
   readonly getModelKey?: () => string;
+  readonly getLocale?: () => TuiLocale;
 }): ChatController {
   const listeners = new Set<(snapshot: ChatSnapshot) => void>();
   const sessionId = options.sessionId ?? 'tui-chat';
@@ -554,6 +615,7 @@ export function createChatController(options: {
     readonly explorers: TuiExplorerRequest[];
     toolCallCount: number;
   } | null = null;
+  const explainFailure = (message: string) => presentChatError(options.getLocale?.() ?? 'en-US', message);
   const sessions = options.sessionController ?? createRuntimeSessionController();
   const goalWorkers = createTuiGoalWorkerAdapter({
     model: options.model,
@@ -949,6 +1011,14 @@ export function createChatController(options: {
     },
     events: {
       emit(event) {
+        const discard = streamDraftDiscardFrom(event as { readonly type: string });
+        if (discard && (discard.textChars > 0 || discard.reasoningChars > 0)) {
+          publish({
+            ...snapshot,
+            messages: discardPendingStreamDraft(snapshot.messages, discard),
+          });
+          return null;
+        }
         if (event.type === 'message.delta' || event.type === 'reasoning.delta') {
           applyStreamDelta(event);
           return null;
@@ -1245,7 +1315,7 @@ export function createChatController(options: {
         const failureDetail = result.status === 'exhausted'
           ? 'The model exhausted its turn limit.'
           : result.status === 'failed'
-            ? (result.reason || 'provider_stream_error')
+            ? explainFailure(result.reason || 'provider_stream_error')
             : undefined;
         const completedAccounting =
           result.state?.contextAccounting
@@ -1277,7 +1347,7 @@ export function createChatController(options: {
         };
       } catch (error) {
         const wasCancelled = turn.signal.aborted;
-        const detail = errorMessage(error);
+        const detail = explainFailure(errorMessage(error));
         if (wasCancelled) turn.cancel(detail);
         else turn.fail(detail);
         // Keep already-executed tool results and any partial assistant text.

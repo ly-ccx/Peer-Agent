@@ -54,6 +54,9 @@ test('tool boundaries split public updates, token deltas append, failure keeps u
   assert.doesNotMatch(JSON.stringify(a.snapshot()), /PRIVATE_THINKING/);
   a.begin({ turnId: 'r', visible: true }); a.round();
   a.accept('chat:stream:delta', { streamId: 'r', content: '废弃尝试' });
+  a.accept('chat:stream:discard', { streamId: 'r', textChars: '废弃尝试'.length });
+  assert.deepEqual(a.snapshot().segments.filter(segment => segment.kind === 'text'), []);
+  a.accept('chat:stream:delta', { streamId: 'r', content: '废弃尝试' });
   a.accept('chat:stream:provider-recovery', { streamId: 'r', toProviderId: 'new' });
   a.accept('chat:stream:delta', { streamId: 'r', content: '重试后的公开说明' });
   assert.deepEqual(a.snapshot().segments.filter(segment => segment.kind === 'text').map(segment => segment.text), ['重试后的公开说明']);

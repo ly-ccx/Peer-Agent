@@ -1256,6 +1256,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           ? contextAccountingModelKey(selection.providerId, selection.modelId)
           : contextAccountingModelKey('unknown', modelLabel);
       },
+      getLocale: () => languageStore?.getLocale() ?? 'zh-CN',
     }),
     [host, model, planCoordinator, modelSelection, persistence],
   );

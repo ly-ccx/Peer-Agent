@@ -10,6 +10,7 @@ import {
 import { createRuntimePipeline, type RuntimeSdkProviderExecution, type RuntimePipelineToolExecution } from '@peer-agent/runtime-sdk';
 import { collectToolEvidenceRefs, projectConversationHistory } from '@peer-agent/runtime-core';
 import type { ChatModelInput, ChatModelState, ChatModelToolCall } from '../chat-controller.ts';
+import { streamDraftDiscardFrom } from '../provider-chat-model.ts';
 import type { TuiRuntimeMode } from '../tui-mode.ts';
 import { createTuiRuntime, type TuiRuntime } from '../tui-runtime.ts';
 import { resolvePersistedModelSelection } from '../tui-model-selection.ts';
@@ -127,6 +128,12 @@ export function createTuiTurnExecutor(options: {
     const pipeline = createRuntimePipeline<ChatModelInput, ChatModelState, ChatModelToolCall, RuntimeSdkProviderExecution, string>({
       model, defaultMaxTurns: input.limits?.maxRounds ?? Number.POSITIVE_INFINITY,
       events: { emit(event) {
+        const discard = streamDraftDiscardFrom(event as { readonly type: string });
+        if (discard) {
+          if (discard.textChars > 0) streamedText = streamedText.slice(0, Math.max(0, streamedText.length - discard.textChars));
+          input.sink.send('chat:stream:discard', { streamId, ...discard });
+          return null;
+        }
         if (event.type === 'message.delta') { streamedText += event.content; input.sink.send('chat:stream:delta', { streamId, content: event.content }); }
         return null;
       } },
