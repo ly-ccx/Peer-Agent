@@ -33,7 +33,7 @@ test('tabs move focus without activating an expensive page; radio arrows update 
   const target = { parentElement: { querySelectorAll: () => nodes } };
   const tabs: El = ChoiceStrip({ value: 'a', options, label: 'Pages', onChange: (value: string) => changes.push(value) });
   tabs.props.children[0].props.onKeyDown(event('ArrowRight', target));
-  assert.equal(focused, 2); assert.deepEqual(changes, []);
+  assert.equal(focused, 2); assert.equal(changes.length, 0);
   tabs.props.children[2].props.onClick(); assert.deepEqual(changes, ['b']);
   const radio: El = ChoiceStrip({ value: 'a', options, label: 'Local mode', kind: 'radio', onChange: (value: string) => changes.push(value) });
   radio.props.children[0].props.onKeyDown(event('ArrowRight', target)); assert.deepEqual(changes, ['b', 'b']);

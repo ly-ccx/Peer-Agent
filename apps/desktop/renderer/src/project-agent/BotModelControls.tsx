@@ -127,7 +127,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         }}
       />
     </div>
-    {activeSelection ? <p className="bot-model-source">{i18n.t('projectAgent.model.runningReply')}: {models.find(item => item.id === activeSelection.modelProviderId)?.label ?? activeSelection.modelId} · {i18n.t('projectAgent.model.nextReply')}</p> : null}
+    {activeSelection ? <p className="bot-model-source">{i18n.t('projectAgent.model.runningReply')}: {models.find(item => item.id === activeSelection.modelProviderId)?.label ?? i18n.t('projectAgent.model.unavailable')} · {i18n.t('projectAgent.model.nextReply')}</p> : null}
     {!compact ? <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
       {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p> : null}
   </div>;

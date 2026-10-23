@@ -12,7 +12,7 @@ function fixture(allowed = true) {
     fire() { const next = timers.entries().next().value!; timers.delete(next[0]); next[1].fn(); } };
 }
 function animation() {
-  let resolve!: () => void, reject!: () => void, ready!: () => void, cancelled = 0;
+  let resolve!: () => void, reject!: (reason?: unknown) => void, ready!: () => void, cancelled = 0;
   const value = { finished: new Promise<void>((yes, no) => { resolve = yes; reject = no; }), ready: new Promise<void>(yes => { ready = yes; }),
     cancel() { cancelled++; }, currentTime: 0, playbackRate: 1, effect: { getComputedTiming: () => ({ endTime: 200 }) } };
   return { value: value as unknown as Animation, resolve, reject, ready, cancelled: () => cancelled };
