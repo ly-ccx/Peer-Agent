@@ -81,6 +81,17 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     },
   };
   const scheduler = useRef<ReturnType<typeof createStreamingScrollScheduler> | null>(null);
+  const followFrame = useRef<number | null>(null);
+  const requestFollow = () => {
+    scheduler.current?.scheduleFollow();
+    // The leading commit can see the loading shell before another commit changes
+    // its geometry in the same frame. Reconcile once after the scheduler resets,
+    // using current ownership; reading gestures must never resume following.
+    if (followFrame.current === null) followFrame.current = window.requestAnimationFrame(() => {
+      followFrame.current = null;
+      if (pinned.current) scheduler.current?.scheduleFollow();
+    });
+  };
   useLayoutEffect(() => {
     const node = scrollerRef.current;
     // Read the applied native position before delayed delegated scroll handlers.
@@ -89,7 +100,11 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     node?.addEventListener('scroll', capture, { capture: true, passive: true });
     scheduler.current = createStreamingScrollScheduler({ scheduler: { request: callback => window.requestAnimationFrame(callback), cancel: frameId => window.cancelAnimationFrame(frameId) },
       follow: () => schedulerCallbacks.current.follow(), refresh: () => schedulerCallbacks.current.refresh() });
-    return () => { node?.removeEventListener('scroll', capture, true); scheduler.current?.cancel(); scheduler.current = null; };
+    return () => {
+      node?.removeEventListener('scroll', capture, true);
+      if (followFrame.current !== null) window.cancelAnimationFrame(followFrame.current);
+      followFrame.current = null; scheduler.current?.cancel(); scheduler.current = null;
+    };
   }, []);
   useEffect(() => () => {
     clearTimeout(gestureTimer.current); restoration.current++; referenceRequest.current++;
@@ -103,7 +118,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   useLayoutEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
-    if (pinned.current) scheduler.current?.scheduleFollow();
+    if (pinned.current) requestFollow();
     else if (reading.current) {
       const anchor = pendingRestore.current;
       if (anchor && !keys.includes(anchor.key) && anchor.messageId) {
@@ -205,7 +220,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
       const decision = resolveThreadFollowAfterScroll({ currentlyFollowing: pinned.current, atBottom: node.scrollHeight - node.scrollTop - node.clientHeight < 80,
         userInitiated: gesture.current.active, direction: gesture.current.direction });
       pinned.current = decision.nextFollowing; setFollowing(decision.nextFollowing);
-      if (decision.shouldReaffirmBottom) scheduler.current?.scheduleFollow();
+      if (decision.shouldReaffirmBottom) requestFollow();
       else { if (!pinned.current) remember(); scheduler.current?.scheduleRefresh(); }
       persist();
     } };

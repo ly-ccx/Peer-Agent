@@ -75,11 +75,39 @@ function mountConversation(rows: unknown[] = []) {
 
 test('mounting and leaving a conversation invoke frame APIs with their browser receiver', () => {
   const mounted = mountConversation();
-  assert.equal(mounted.requested, 1);
+  assert.equal(mounted.requested, 2);
   assert.equal(mounted.scroller.scrollTop, 720, 'opening a following conversation still commits its initial position');
   mounted.dispose();
-  assert.equal(mounted.cancelled, 1);
+  assert.equal(mounted.cancelled, 2);
   assert.equal(mounted.frames.size, 0, 'leaving the conversation releases the pending native frame');
+});
+
+test('a same-frame geometry commit reconciles the final bottom once, then becomes idle', () => {
+  const mounted = mountConversation();
+  assert.equal(mounted.scroller.scrollTop, 720);
+  mounted.scroller.scrollHeight = 1720;
+  mounted.layoutEffects[3]!(); // The scheduler already used this frame on the loading geometry.
+  assert.equal(mounted.scroller.scrollTop, 720, 'same-frame work stays coalesced');
+  assert.equal(mounted.frames.size, 2, 'one reset and one reconciliation stay bounded');
+  mounted.flush();
+  assert.equal(mounted.scroller.scrollTop, 1400, 'the next frame observes final geometry');
+  mounted.flush();
+  assert.equal(mounted.frames.size, 0, 'idle conversations do not keep requesting frames');
+  mounted.dispose();
+});
+
+test('a reading gesture before reconciliation keeps its position and cancels on leave', () => {
+  const mounted = mountConversation(Array.from({ length: 50 }, (_, index) => ({
+    type: 'message', message: { id: `m${index}`, kind: 'user_input' },
+  })));
+  const before = mounted.scroller.scrollTop;
+  mounted.view.onWheel({ deltaY: -350 });
+  mounted.scroller.scrollTop -= 350;
+  mounted.nativeScroll.forEach(capture => capture());
+  mounted.flush();
+  assert.equal(mounted.scroller.scrollTop, before - 350, 'queued follow cannot take back reading intent');
+  mounted.dispose();
+  assert.equal(mounted.frames.size, 0);
 });
 
 // Execute the hook against simulated DOM geometry, without delivering onScroll.
