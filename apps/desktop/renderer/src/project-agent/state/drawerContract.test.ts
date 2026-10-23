@@ -52,6 +52,6 @@ test('设置项只经 IPC 写入', () => {
   assert.equal(settings.includes('modelRoutingUpdate'), false);
 });
 
-test('ChatSurface 行数不变', () => {
-  assert.equal(lineCount('chat/components/ChatSurface.tsx'), 3306);
+test('ChatSurface 不超过原模块预算', () => {
+  assert.ok(lineCount('chat/components/ChatSurface.tsx') <= 3306, '抽离逻辑可以减行，新增职责仍须放到独立模块');
 });
