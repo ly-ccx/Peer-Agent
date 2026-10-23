@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { TaskConversationRequest } from '../state/taskConversationState';
 import {
   formatConversationStamp,
@@ -14,6 +14,7 @@ import type { BotAvatarMood } from '../state/botAvatarState';
 import { CardView } from './CardView';
 import { ReplyBubble } from './ReplyBubble';
 import { UserBubble } from './UserBubble';
+import { ConversationRow as ConversationRowView } from './ConversationRow';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
 import { ContinuousReply } from './ContinuousReply';
 import { replyRowContains, replyRowRunning, replyRowMood, type BotConversationViewRow } from '../state/botReplyContinuity';
@@ -78,6 +79,9 @@ export function BotMessageList({
 }) {
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const previousRows = useRef({ keys: new Set(rows.map(conversationRowKey)), followRequestId });
+  const followingNewInput = previousRows.current.followRequestId !== followRequestId;
+  useLayoutEffect(() => { previousRows.current = { keys: new Set(rows.map(conversationRowKey)), followRequestId }; }, [rows, followRequestId]);
   const scroll = useConversationWindow(rows, highlightedId, highlightRequestId, followRequestId, { identity: workspaceId, ready, hasOlder, locateMessage });
   const focusedRequest = useRef<{ key: string; epoch: number; done: boolean } | null>(null);
   const focusKey = focusTaskRequest?.messageId ? `${workspaceId}:${focusTaskRequest.id}:${focusTaskRequest.messageId}:${focusTaskRequest.cardId}` : null;
@@ -157,7 +161,11 @@ export function BotMessageList({
       ) : null}
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
-        <div key={conversationRowKey(row)} className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`} data-conversation-row={conversationRowKey(row)}>
+        <ConversationRowView key={conversationRowKey(row)} rowKey={conversationRowKey(row)}
+          entering={!previousRows.current.keys.has(conversationRowKey(row)) && (row.type === 'reply'
+            ? Boolean(row.pending && !row.pending.restored && !row.pending.deliveryIssue)
+            : row.type === 'message' && row.message.kind === 'user_input' && (['sending', 'received'].includes(row.message.pending ?? '') || followingNewInput))}
+          className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`}>
         {row.type === 'reply' || row.type === 'message' && (['agent_reply', 'agent_turn'].includes(row.message.kind)
           || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')
             && (!isRetiredRecovery(row.message.cards) || Boolean(row.narration?.length))) ? (
@@ -221,7 +229,7 @@ export function BotMessageList({
             onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined}
           />
         )}
-        </div>
+        </ConversationRowView>
       ))}
       {scroll.view.after > 0 ? (
         <div className="bot-thread-spacer" style={{ height: scroll.view.after }} />

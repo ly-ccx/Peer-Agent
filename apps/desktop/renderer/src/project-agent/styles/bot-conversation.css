@@ -78,9 +78,10 @@
 }
 
 .bot-thread-row {
+  --motion-layout-space: var(--space-4, 16px);
   display: flex;
   flex-direction: column;
-  padding-bottom: var(--space-4, 16px);
+  padding-bottom: var(--motion-layout-space);
 }
 
 /* A one-line status follows the message it belongs to. It does not take a full paragraph gap. */
@@ -89,6 +90,7 @@
 .bot-thread-row:has(> .bot-reply > .bot-reply-context:only-child),
 .bot-thread-row:has(+ .bot-thread-row > .bot-agent-activity),
 .bot-thread-row:has(+ .bot-thread-row > .bot-reply > .bot-reply-context:only-child) {
+  --motion-layout-space: 4px;
   padding-bottom: 4px;
 }
 
@@ -97,6 +99,7 @@
 ):has(
   + .bot-thread-row > .bot-system > .bot-cards > .bot-approval-receipt:only-child
 ) {
+  --motion-layout-space: 4px;
   padding-bottom: 4px;
 }
 

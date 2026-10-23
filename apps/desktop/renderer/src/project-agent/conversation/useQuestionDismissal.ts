@@ -11,7 +11,7 @@ export function useQuestionDismissal(resolved: boolean, onClosed?: () => void,
   const hadFocus = useRef(false), settled = useRef(false);
   if (resolved && present && ref.current?.contains(document.activeElement)) hadFocus.current = true;
   useLayoutEffect(() => {
-    if (!resolved) { hadFocus.current = false; settled.current = false; setPresent(true); return; }
+    if (!resolved) { if (ref.current) ref.current.style.display = ''; hadFocus.current = false; settled.current = false; setPresent(true); return; }
     if (!present || settled.current) return;
     const node = ref.current;
     if (node && hadFocus.current && (node.contains(document.activeElement) || document.activeElement === document.body)) {
@@ -19,7 +19,13 @@ export function useQuestionDismissal(resolved: boolean, onClosed?: () => void,
       if (destination?.isConnected && !destination.closest('[inert]')) destination.focus({ preventScroll: true });
     }
     hadFocus.current = false;
-    const finish = () => { if (settled.current) return; settled.current = true; setPresent(false); closed.current?.(); };
+    const finish = () => {
+      if (settled.current) return;
+      settled.current = true;
+      // WAAPI cancellation removes its fill before React commits removal.
+      if (node) node.style.display = 'none';
+      setPresent(false); closed.current?.();
+    };
     if (!node) { finish(); return; }
     let motion: ReturnType<typeof animateVisual>;
     try {
