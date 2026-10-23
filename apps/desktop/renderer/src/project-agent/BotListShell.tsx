@@ -59,7 +59,6 @@ export interface BotListShellProps {
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
   readonly onOpenConversation: (conversationId: string | number) => void;
-  readonly onCreateAutomation: () => void;
   readonly onClosePage: () => void;
   readonly notificationFocus?: {
     readonly workspaceId: string;
@@ -90,7 +89,6 @@ export function BotListShell({
   onOpenAutomations,
   onOpenCapabilities,
   onOpenConversation,
-  onCreateAutomation,
   onClosePage,
   notificationFocus = null,
 }: BotListShellProps) {
@@ -430,7 +428,6 @@ export function BotListShell({
                 defaultWorkspace={workspacePath}
                 initialRunTarget={automationRunTarget}
                 onOpenConversation={onOpenConversation}
-                onCreateNew={onCreateAutomation}
               />
             ) : (
               <CapabilitiesPanel />

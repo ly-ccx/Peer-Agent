@@ -1018,7 +1018,6 @@ function MainApp() {
                     setCollectionDrawer(null);
                     setActivePage('chat');
                   }}
-                  onCreateAutomation={handleCreateAutomation}
                   onClosePage={() => {
                     setCollectionDrawer(null);
                     setActivePage('chat');

@@ -155,7 +155,7 @@ export function BotConversation({
           <button type="button" onClick={conversation.reload}>{i18n.t(conversation.catchUpRequired ? 'resources.continueRead' : 'projectAgent.history.retry')}</button>
         </div>
       ) : (
-        <BotMessageList key={workspaceId} ready={conversation.status === 'ready'} locateMessage={conversation.locateMessage}
+        <BotMessageList key={`thread:${workspaceId}`} ready={conversation.status === 'ready'} locateMessage={conversation.locateMessage}
           workspaceId={workspaceId}
           avatar={avatar}
           label={label}
@@ -199,7 +199,7 @@ export function BotConversation({
         draft={conversation.recovery.state.draft}
         onDraftChange={conversation.recovery.session.edit}
         ready={conversation.recovery.state.ready}
-        key={workspaceId}
+        key={`composer:${workspaceId}`}
         i18n={i18n}
         botName={label}
         permissionControls={onSavingChange => <BotAccessControl key={workspaceId} workspaceId={workspaceId} i18n={i18n} onSavingChange={onSavingChange} />}
