@@ -56,6 +56,7 @@ export function createAgentTurnExecutor({ llmChatService, executionScheduler = c
     }
     const effort = turnProfile?.modelSelection?.reasoningEffort ?? sendMessageArgs.effort;
     if (effort !== undefined) sendMessageArgs.effort = effort;
+    if (turnProfile?.modelSelection?.fastMode === true) sendMessageArgs.fastMode = true;
     const projectAgent = turnProfile?.role === 'project_agent' || sendMessageArgs.mode === 'project_agent';
     if (budgetGuard) {
       const inner = sendMessageArgs.executionBudget?.guard;

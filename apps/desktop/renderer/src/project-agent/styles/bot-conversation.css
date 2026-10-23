@@ -28,7 +28,7 @@
   gap: 0;
   min-height: 0;
   overflow: auto;
-  padding: 20px 0 28px;
+  padding: 20px 0 8px;
 }
 
 .bot-thread-shell {
@@ -1004,6 +1004,17 @@
 }
 
 .bot-thread-tail { display: flex; flex-direction: column; width: 100%; flex: none; }
+
+.bot-convo > .bot-background-work {
+  flex: none;
+  align-self: center;
+  width: var(--bot-column-width);
+  margin: 0 0 4px;
+}
+
+.bot-convo > .bot-background-work + .bot-composer {
+  margin-top: 0;
+}
 
 .bot-thread-tail > .bot-background-work {
   align-self: flex-start;

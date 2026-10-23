@@ -3,6 +3,15 @@
 .bot-model-picker { flex: 1; min-width: 0; }
 .bot-model-picker > button { width: 100%; min-width: 0; font-size: 12px; }
 .bot-model-picker > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-model-picker > button > .pa-cascading-value { display: inline-flex; align-items: center; gap: 4px; text-overflow: clip; }
+.bot-model-picker .model-selection-trigger-label { color: var(--graphite-base); font-weight: 560; }
+.bot-model-picker .model-selection-trigger-effort {
+  flex: none;
+  color: color-mix(in srgb, var(--graphite-mute) 92%, transparent);
+  font-size: 0.84em;
+  font-weight: 420;
+  letter-spacing: 0.02em;
+}
 .bot-model-source { margin: 5px 0 0; color: var(--graphite-soft); font-size: 11px; line-height: 1.5; }
 .bot-model-control .reasoning-effort-trigger { color: var(--graphite-soft); font-size: 12px; flex-shrink: 0; }
 .bot-model-control:not(.is-compact) .bot-model-picker > button { max-width: none; justify-content: space-between; border: 1px solid var(--ui-border-subtle, var(--za-line)); border-radius: var(--ui-radius-control); padding: 9px 10px; background: var(--paper-sheet); }
