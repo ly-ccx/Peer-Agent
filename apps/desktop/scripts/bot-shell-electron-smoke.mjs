@@ -224,7 +224,7 @@ const mainText = readFileSync(main, 'utf8');
 const seam = 'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });';
 assert.equal(mainText.split(seam).length, 2, 'exact production executor assembly seam required');
 let isolatedMain = mainText.replace(seam,
-  'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: globalThis.rcBotShellService });');
+  'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: { ...globalThis.rcBotShellService, readDelegationCapabilities: input => llmChatService.readDelegationCapabilities(input) } });');
 if (botModelFixtures.length) {
   const catalogueSeam = 'listModels: () => llmConfigStore.listProviders(),';
   assert.equal(isolatedMain.split(catalogueSeam).length, 2, 'exact production catalogue assembly seam required');
