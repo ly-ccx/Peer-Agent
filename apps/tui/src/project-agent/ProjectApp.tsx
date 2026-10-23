@@ -46,7 +46,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(id){const index=cards.findIndex(row=>row.card.cardId===id);if(index<0){setCardFocus(false);return;}if(index!==cardIndex)setCardIndex(index);}
     else focusedCard.current=cards[cardIndex]?.card.cardId??null;
   },[cards,cardFocus]);
-  useEffect(()=>{if(cardFocus)focusedCard.current=cards[cardIndex]?.card.cardId??null;},[cardIndex,cardFocus]);
+  function selectFocusedCard(index:number) {
+    // User navigation owns the ID; refreshes only realign its display index.
+    focusedCard.current=cards[index]?.card.cardId??null;
+    setCardIndex(index);setOption(0);
+  }
   const bot=snapshot.bots.find(row=>row.workspaceId===snapshot.workspaceId);
   const refresh=()=>{void client.poll(true).then(setSnapshot).catch(()=>setNotice(copy('error')));};
   useEffect(()=>{let live=true;const read=()=>{void client.poll().then(next=>{if(live)setSnapshot(next);}).catch(()=>{if(live)setNotice(copy('error'));});};read();const timer=setInterval(read,1000);return()=>{live=false;clearInterval(timer);};},[client]);
@@ -118,10 +122,10 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     }
     if(view==='conversation') {
       const intent=cardFocusIntent(key,cardFocus,cards.length>0);
-      if(intent==='enter'||intent==='leave'){key.preventDefault();key.stopPropagation();setCardFocus(intent==='enter');if(intent==='enter')editor.current?.blur();return;}
+      if(intent==='enter'||intent==='leave'){key.preventDefault();key.stopPropagation();if(intent==='enter'){selectFocusedCard(Math.min(cardIndex,cards.length-1));editor.current?.blur();}setCardFocus(intent==='enter');return;}
       if(cardFocus){
         key.preventDefault();key.stopPropagation();
-        if(intent==='card'){setCardIndex(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));setOption(0);}
+        if(intent==='card')selectFocusedCard(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));
         if(intent==='option')setOption(Math.max(0,Math.min((cards[cardIndex]?.card.actions?.length??1)-1,option+(key.name==='right'?1:-1))));
         if(intent==='act')selectedCardAction();
         return;
