@@ -1,3 +1,4 @@
+import { isImeKey } from '../../chat/state/compositionGuard';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useFocusScope } from '../hooks/useFocusScope';
 import { positionAnchoredOverlay } from './anchoredOverlay';
@@ -116,7 +117,7 @@ export function Overlay({
   useEffect(() => {
     if (!onClose) return undefined;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isImeKey(event)) return;
       const overlays = Array.from(document.querySelectorAll(OVERLAY_SELECTOR));
       if (!isTopmostOverlay(overlayRef.current, overlays)) return;
       event.stopImmediatePropagation();

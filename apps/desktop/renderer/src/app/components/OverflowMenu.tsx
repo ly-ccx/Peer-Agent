@@ -1,3 +1,4 @@
+import { isImeKey } from '../../chat/state/compositionGuard';
 import { PeerIcon } from '../../ui/icons';
 import { useEffect, useId, useRef, useState } from 'react';
 
@@ -21,6 +22,7 @@ export function OverflowMenu({ items, zh, label }: { items: readonly OverflowMen
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isImeKey(event)) return;
       if (event.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);

@@ -28,7 +28,7 @@ export function TaskVerification({ detail, i18n }: { readonly detail: SessionVer
       <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.task.verificationHistory')}</summary>
       <p className="bot-task-hint">{i18n.t('projectAgent.drawer.task.verificationHistorical')}</p>
       {detail.reviewAttempts.map(attempt => <section key={attempt.verifierRunId}>
-        <p>{i18n.t(attempt.status === 'passed' ? 'projectAgent.drawer.task.verificationPassed' : 'projectAgent.drawer.task.verificationFailed')}</p>
+        <p>{i18n.t(attempt.status === 'passed' ? 'projectAgent.drawer.task.verificationPassed' : attempt.status === 'failed' ? 'projectAgent.drawer.task.verificationFailed' : 'projectAgent.chat.verificationPending')}</p>
         <p>{attempt.failureReason}</p>
         {[...attempt.failedCriteria, ...attempt.missingEvidence].map((item, index) => <p key={index}>{item.reason}</p>)}
       </section>)}

@@ -20,7 +20,7 @@ export function ApprovalReceipt({ card, i18n, notice }: {
       <summary>
         <PeerIcon name="history" size={14} />
         <span className="bot-approval-receipt-copy">
-          <strong>{i18n.t('projectAgent.chat.approvalReceipt.title')}</strong>
+          <strong>{i18n.t(card.kind === 'plan_approval' ? 'projectAgent.chat.planDecisionRecord' : 'projectAgent.chat.approvalReceipt.title')}</strong>
           <span className="bot-approval-receipt-excerpt">{card.content}</span>
         </span>
         <span className="bot-approval-receipt-state">{i18n.t(state)}</span>

@@ -20,3 +20,4 @@ export * from './context-accounting-lifecycle.ts';
 export * from './context-usage-breakdown.ts';
 export * from './conversation-history-projector.ts';
 export * from './runtime-usage-accounting.ts';
+export * from './project-input-recovery.ts';

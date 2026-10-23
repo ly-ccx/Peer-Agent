@@ -65,3 +65,11 @@ test('a later active attempt retires the old failure display but preserves its d
   assert.equal(result.message, undefined); assert.ok(result.messages.includes(failed)); assert.equal(JSON.stringify(failed), before);
   assert.equal(replyRowRunning(result), true);
 });
+
+
+test('an unknown local input has no invented reply or active execution placeholder', () => {
+  const unknown = { ...user, pending: 'unknown' as const };
+  const pending = [{ inputId: 'u', text: 'pending', quoteRefs: [], attachments: [], createdAt: at, state: 'unknown' as const }];
+  const result = continuousReplyRows([row(unknown)], [unknown], [{ inputId: 'u', createdAt: at }], pending);
+  assert.equal(replies(result).length, 0);
+});

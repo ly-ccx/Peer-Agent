@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import type { ProjectAgentActivity, ProjectInputAttachment } from '@peer-agent/protocol';
+import { useInputRecovery } from './useInputRecovery';
+import { projectInputWasReceived, type ProjectAgentSubmitInputResult } from '@peer-agent/protocol';
+import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
 import { continuousReplyRows, type AwaitingBotInput } from './botReplyContinuity';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
@@ -8,10 +10,8 @@ import { createConversationRefresh } from './conversationRefresh.ts';
 import { createConversationPager } from './conversationPager.ts';
 import { mergeConversationCards, statusAfterRefreshFailure } from './conversationSections.ts';
 import {
-  acknowledgeInput,
   applyOptimistic,
   conversationRows,
-  optimisticInputMessageId,
   type BotChatMessage,
   type ConversationDisplayRow,
   type PendingBotInput,
@@ -65,7 +65,8 @@ function familiarizeMessage(offer: FamiliarizeOffer, createdAt: string): BotChat
 export function useBotConversation(workspaceId: string) {
   const [messages, setMessages] = useState<readonly BotChatMessage[]>([]);
   const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
-  const [pending, setPending] = useState<readonly PendingBotInput[]>([]);
+  const recovery = useInputRecovery(workspaceId);
+  const pending = useMemo<readonly PendingBotInput[]>(() => [...recovery.state.pending.map(item => ({ ...item, state: recovery.state.sending.includes(item.inputId) ? 'sending' as const : 'unknown' as const })), ...recovery.state.received.map(item => ({ ...item, state: 'received' as const }))], [recovery.state.pending, recovery.state.received, recovery.state.sending]);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
   const [cardsError, setCardsError] = useState(false);
@@ -84,17 +85,17 @@ export function useBotConversation(workspaceId: string) {
   const refreshRef = useRef<(() => void) | null>(null);
 
   const dropEchoed = useCallback((next: readonly BotChatMessage[]) => {
-    setPending((current) => current.filter((item) => !next.some((message) => (
-      message.inputId === item.inputId || message.id === optimisticInputMessageId(item.inputId)
-    ))));
-  }, []);
+    recovery.session.observeReceived(next.filter(message => message.kind === 'user_input').flatMap(message =>
+      message.inputId ? [message.inputId] : message.id.startsWith('input-') ? [message.id.slice(6)] : []));
+  }, [recovery.session]);
+
+  useEffect(() => { if (recovery.state.ready) dropEchoed(messages); }, [dropEchoed, messages, recovery.state.ready]);
 
   useEffect(() => {
     const ticket = generationRef.current + 1;
     generationRef.current = ticket;
     setMessages([]);
     setFamiliarizeOffer(null);
-    setPending([]);
     setAwaitingInputs([]);
     setHasOlder(false);
     setOlderError(false);
@@ -185,70 +186,31 @@ export function useBotConversation(workspaceId: string) {
       ? current.filter(input => !answered.has(`input-${input.inputId}`)) : current);
   }, [messages]);
 
-  const submit = useCallback(async (inputId: string, text: string, quoteRefs: readonly string[], createdAt: string, answerTo?: string, attachments: readonly ProjectInputAttachment[] = []) => {
-    const ticket = generationRef.current;
-    setAwaitingInputs(current => [...current.filter(input => input.inputId !== inputId), { inputId, createdAt }]);
-    setPending((current) => {
-      const rest = current.filter((item) => item.inputId !== inputId);
-      return [...rest, { inputId, text, quoteRefs, attachments, createdAt, state: 'sending', ...(answerTo ? { answerTo } : {}) }];
-    });
-    try {
-      const result = await clientApi.projectAgentSubmitInput({
-        workspaceId,
-        inputId,
-        text,
-        surface: 'desktop',
-        ...(attachments.length ? { attachments } : {}),
-        ...(quoteRefs.length > 0 ? { quoteRefs } : {}),
-        ...(answerTo ? { answerTo } : {}),
-      });
-      if (generationRef.current !== ticket) return { ok: false, code: 'STALE_INPUT' };
-      if (!result?.ok) {
-        if (result?.input?.inputId === inputId) {
-          setPending(current => acknowledgeInput(current, inputId));
-          setAwaitingInputs(current => current.map(input => input.inputId === inputId ? { ...input, deliveryIssue: true } : input));
-          return result;
-        }
-        setAwaitingInputs(current => current.filter(input => input.inputId !== inputId));
-        setPending((current) => current.map((item) => (
-          item.inputId === inputId ? { ...item, state: 'failed' } : item
-        )));
-        return result;
-      }
-      setPending(current => acknowledgeInput(current, inputId));
-      return result;
-    } catch {
-      if (generationRef.current !== ticket) return { ok: false, code: 'STALE_INPUT' };
-      setAwaitingInputs(current => current.filter(input => input.inputId !== inputId));
-      setPending((current) => current.map((item) => (
-        item.inputId === inputId ? { ...item, state: 'failed' } : item
-      )));
-      return { ok: false, code: 'SEND_FAILED' };
-    }
-  }, [workspaceId]);
-
   const decorated = useMemo(() => mergeConversationCards(messages, cardsError ? [] : cards), [messages, cards, cardsError]);
-  const send = useCallback(async (text: string, quoteRefs: readonly string[] = [], attachments: readonly ProjectInputAttachment[] = []) => {
-    const trimmed = text.trim();
-    if (!trimmed && !attachments.length) return;
-    const inputId = crypto.randomUUID();
+  const received = useCallback((result: ProjectAgentSubmitInputResult, ticket: number) => {
+    const input = result.input;
+    if (generationRef.current === ticket && input && projectInputWasReceived(result, workspaceId, input.inputId)) {
+      setAwaitingInputs(current => [...current.filter(item => item.inputId !== input.inputId), {
+        inputId: input.inputId, createdAt: input.createdAt, ...(!result.ok ? { deliveryIssue: true } : {}),
+      }]);
+    }
+    return result;
+  }, [workspaceId]);
+  const send = useCallback(async (_text?: string, quoteRefs: readonly string[] = []) => {
+    const ticket = generationRef.current;
     setFollowRequestId(value => value + 1);
     const answerTo = questionForInput(applyOptimistic(decorated, pending), quoteRefs);
-    await submit(inputId, trimmed, quoteRefs, new Date().toISOString(), answerTo, attachments);
-  }, [submit, decorated, pending]);
-
+    return received(await recovery.session.send({ quoteRefs, answerTo }), ticket);
+  }, [recovery.session, decorated, pending, received]);
   const answer = useCallback(async (text: string, answerTo?: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return { ok: false, code: 'INVALID_INPUT' };
+    const ticket = generationRef.current;
     setFollowRequestId(value => value + 1);
-    return submit(crypto.randomUUID(), trimmed, [], new Date().toISOString(), answerTo);
-  }, [submit]);
-
+    return received(await recovery.session.send({ text, answerTo, useDraft: false }), ticket);
+  }, [recovery.session, received]);
   const retry = useCallback(async (inputId: string) => {
-    const item = pending.find((entry) => entry.inputId === inputId);
-    if (!item) return;
-    await submit(item.inputId, item.text, item.quoteRefs, item.createdAt, item.answerTo, item.attachments);
-  }, [pending, submit]);
+    const ticket = generationRef.current;
+    return received(await recovery.session.retry(inputId), ticket);
+  }, [recovery.session, received]);
 
   useEffect(() => { if (!isActivityRunning(activity)) setStopping(false); }, [activity]);
 
@@ -280,6 +242,7 @@ export function useBotConversation(workspaceId: string) {
 
   return {
     status,
+    recovery,
     reload: () => refreshRef.current?.(),
     cardsError, refreshError,
     messages: shown,

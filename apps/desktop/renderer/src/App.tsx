@@ -1,3 +1,4 @@
+import { isImeKey } from './chat/state/compositionGuard';
 import { createI18n } from '@peer-agent/i18n';
 import type { AcceptanceCloseVerdict, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -849,7 +850,7 @@ function MainApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing) return;
+      if (isImeKey(event)) return;
       const key = event.key.toLowerCase();
       // ⌘K / Ctrl+K toggles Search Chats palette.
       if ((event.metaKey && key === 'k') || (event.ctrlKey && key === 'k')) {

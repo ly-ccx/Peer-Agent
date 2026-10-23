@@ -70,6 +70,7 @@ export const DATA_STORE_ENTRIES = {
   // bot-access.sqlite and bot-access-imported.json bind policies and safe import provenance to this device.
   // these retain local work/delivery receipts and must never enter portable exports.
   // Includes per-project circuit-breaker/recovery state, memory-maintenance checkpoints, objective watch-state/probe-evidence reservations and delivery/execution cursors (device only).
+  // input-drafts/<surface>.json and input-draft-blobs/<digest>.json retain device-local UI intent only; never model context or execution truth.
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
 };
 

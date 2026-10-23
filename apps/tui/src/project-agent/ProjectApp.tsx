@@ -1,3 +1,6 @@
+import { useProjectInputDraft } from './useProjectInputDraft.ts';
+import { InputRecoveryStatus } from './InputRecoveryStatus.tsx';
+import { composerEnterAction } from '../runtime-controls.ts';
 import {useEffect,useRef,useState} from 'react';
 import {useKeyboard,useTerminalDimensions} from '@opentui/react';
 import type {TextareaRenderable} from '@opentui/core';
@@ -21,6 +24,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const [snapshot,setSnapshot]=useState(()=>client.current()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
   const [cardIndex,setCardIndex]=useState(0),[option,setOption]=useState(0),[bindYes,setBindYes]=useState(true),[detail,setDetail]=useState<any>(null);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[earlier,setEarlier]=useState(false),[,setTheme]=useState(themeStore.getState());
+  const inputDraft=useProjectInputDraft(client,snapshot.workspaceId,editor,view);
+  const operationPending=useRef(false);
   const copy=(key:Parameters<typeof projectCopy>[1])=>projectCopy(locale,key);
   const offer=snapshot.familiarizeOffer;
   const displayedMessages=offer?[...snapshot.messages,{id:`offer:${snapshot.workspaceId}`,kind:'system_card',cards:[{
@@ -32,15 +37,15 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const refresh=()=>{void client.poll(true).then(setSnapshot).catch(()=>setNotice(copy('error')));};
   useEffect(()=>{let live=true;const read=()=>{void client.poll().then(next=>{if(live)setSnapshot(next);}).catch(()=>{if(live)setNotice(copy('error'));});};read();const timer=setInterval(read,1000);return()=>{live=false;clearInterval(timer);};},[client]);
   useEffect(()=>themeStore.subscribe(setTheme),[themeStore]);
-  useEffect(()=>{if(!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view]);
+  useEffect(()=>{if(inputDraft.state.ready&&!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view,inputDraft.state.ready,inputDraft.session]);
   const lastId=snapshot.messages.filter(row=>['user_input','agent_reply','system_card'].includes(row.kind)).at(-1)?.id;
   useEffect(()=>{if(view==='conversation'&&!earlier&&snapshot.workspaceId)host.directory.markRead(snapshot.workspaceId);},[lastId,snapshot.workspaceId,view,earlier]);
   async function perform(run:()=>Promise<any>|any,success=copy('done')) {
-    if(busy)return;
-    setBusy(true);
-    try {const result=await run();if(result?.ok===false){setNotice(result.error==='desktop_approval_required'?copy('desktop'):`${copy('error')}: ${terminalText(result.error??result.code??'')}`);}else setNotice(success);refresh();}
+    if(operationPending.current)return {ok:false};
+    operationPending.current=true;setBusy(true);
+    try {const result=await run();if(result?.ok===false){setNotice(result.error==='desktop_approval_required'?copy('desktop'):`${copy('error')}: ${terminalText(result.error??result.code??'')}`);}else setNotice(result?.approval ? projectStatus(locale,result.approval.state) : success);refresh();return result;}
     catch {setNotice(copy('error'));}
-    finally {setBusy(false);}
+    finally {operationPending.current=false;setBusy(false);}
   }
   async function openBot(index:number) {
     const selectedBot=snapshot.bots[index];if(!selectedBot)return;
@@ -48,30 +53,35 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   }
   function submit(text:string) {
     const command=parseProjectCommand(text);
-    if(command.kind==='text'){if(command.text)perform(()=>{void client.latest().catch(()=>{});client.submit(command.text);setEarlier(false);setView('conversation');return {ok:true};},copy('received'));return;}
+    if(command.kind==='text'){if(command.text)void perform(async()=>{void client.latest().catch(()=>{});setEarlier(false);setView('conversation');return inputDraft.session.send({text:command.text});},copy('received'));return;}
+    if(command.kind==='retry_input'){void perform(()=>inputDraft.session.retry(command.inputId),copy('received')).then(result=>{if((result?.ok||result?.input)&&inputDraft.session.getSnapshot().draft.text===text)inputDraft.session.edit({text:''});});return;}
+    if(command.kind==='save_draft'){void (inputDraft.state.ready?inputDraft.session.flush():inputDraft.session.load());return;}
     if(command.kind==='invalid'){setNotice(copy('invalid'));return;}
-    if(command.kind==='view'){setView(command.view);setSelected(0);setCardIndex(0);setOption(0);return;}
+    if(command.kind==='view'){inputDraft.session.edit({text:''});setView(command.view);setSelected(0);setCardIndex(0);setOption(0);return;}
     if(command.kind==='classic'){setNotice(copy('leaving'));void perform(onClassic);return;}
     if(command.kind==='takeover'){void perform(()=>host.takeover(),copy('takeover'));return;}
-    if(command.kind==='older'){void client.earlier().then(setSnapshot);setEarlier(true);setView('conversation');return;}
-    if(command.kind==='latest'){void client.latest().then(setSnapshot);setEarlier(false);setView('conversation');return;}
-    if(command.kind==='help'){setView('help');return;}
+    if(command.kind==='older'){inputDraft.session.edit({text:''});void client.earlier().then(setSnapshot);setEarlier(true);setView('conversation');return;}
+    if(command.kind==='latest'){inputDraft.session.edit({text:''});void client.latest().then(setSnapshot);setEarlier(false);setView('conversation');return;}
+    if(command.kind==='help'){inputDraft.session.edit({text:''});setView('help');return;}
     if(command.kind==='task'){
       const session=snapshot.sessions[command.number-1];if(!session){setNotice(copy('invalid'));return;}
-      setDetail(host.supervisor.get({sessionId:session.sessionId,detail:'report'}));setView('task');return;
+      inputDraft.session.edit({text:''});setDetail(host.supervisor.get({sessionId:session.sessionId,detail:'report'}));setView('task');return;
     }
     if(command.kind!=='card')return;
     const action=cardAction(command,cards);
     if(!action){setNotice(copy('invalid'));return;}
-    void perform(()=>runProjectCardAction(host,client,action));
+    void perform(()=>runProjectCardAction(host,client,action)).then(result=>{
+      if((result?.ok || result?.inputReceived) && inputDraft.session.getSnapshot().draft.text===text) inputDraft.session.edit({text:''});
+    });
   }
   function selectedCardAction() {
     const row=cards[Math.min(cardIndex,cards.length-1)],action=row?.card.actions?.[option];
     if(!row||!action)return;
-    if(action.id==='answer'&&!action.payload?.text){setView('conversation');queueMicrotask(()=>editor.current?.setText(`/answer ${row.number} `));return;}
+    if(action.id==='answer'&&!action.payload?.text){setView('conversation');inputDraft.session.edit({text:`/answer ${row.number} `});return;}
     void perform(()=>runProjectCardAction(host,client,action));
   }
   useKeyboard(key=>{
+    if((key as {isComposing?:boolean}).isComposing)return;
     if(key.ctrl&&key.name==='c'){key.preventDefault();setNotice(copy('leaving'));onQuit();return;}
     if(busy)return;
     if(key.name==='escape'){key.preventDefault();if(view==='bind')void perform(onClassic);else setView('conversation');return;}
@@ -116,11 +126,16 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>
       :<scrollbox flexGrow={1}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}</scrollbox>}
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
+    {snapshot.workspaceId?<InputRecoveryStatus state={inputDraft.state} locale={locale}/>:null}
     {!['bind','bots','cards'].includes(view)?<box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
-      <ThemedTextarea ref={editor} focused={!busy} height={3} placeholder={copy('composer')} wrapMode="char" onKeyDown={event=>{
-        if(!['enter','return'].includes(event.name)||event.eventType!=='press')return;
-        event.preventDefault();event.stopPropagation();if(event.shift){editor.current?.newLine();return;}
-        const text=editor.current?.plainText??'';if(text.trim()){editor.current?.clear();submit(text);}
+      <ThemedTextarea ref={editor} focused={!busy&&inputDraft.state.ready} height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{if(inputDraft.state.ready)inputDraft.changed();}} onKeyDown={event=>{
+        if(!inputDraft.state.ready){event.preventDefault();event.stopPropagation();return;}
+        const action=composerEnterAction({keyName:event.name,shift:event.shift,eventType:event.eventType,isComposing:(event as {isComposing?:boolean}).isComposing});
+        if(action==='none')return;event.preventDefault();event.stopPropagation();
+        if(action==='suppress')return;if(action==='newline'){editor.current?.newLine();return;}
+        const text=editor.current?.plainText??'';if(text.trim()){
+          submit(text);
+        }
       }}/>
       <ThemedText fg={COLOR.muted}>/help · {earlier?copy('earlier'):copy('latest')} · {copy('cardKeys')}</ThemedText>
     </box>:null}

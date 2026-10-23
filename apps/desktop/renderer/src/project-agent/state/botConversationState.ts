@@ -50,7 +50,7 @@ export interface BotChatCard {
   readonly completionReview?: import('@peer-agent/protocol').SessionCompletionReview;
   readonly resolvedState?: 'open' | 'resolved';
   readonly actions?: readonly BotChatCardAction[];
-  readonly refs?: { readonly sessionId?: string; readonly capabilityId?: string; readonly decisionReason?: string; readonly deadlineAt?: string };
+  readonly refs?: { readonly approvalId?: string; readonly sessionId?: string; readonly capabilityId?: string; readonly decisionReason?: string; readonly deadlineAt?: string };
   readonly resolution?: { readonly state: string };
   readonly recovery?: ProjectWorkRecovery;
   readonly recoveryWorkState?: ProjectWorkState;
@@ -115,7 +115,7 @@ export interface BotChatMessage {
   readonly cards: readonly BotChatCard[];
   readonly quoteRefs: readonly string[];
   readonly separatorLabel: string;
-  readonly pending?: 'sending' | 'received' | 'failed';
+  readonly pending?: 'sending' | 'received' | 'failed' | 'unknown';
   readonly attachments?: readonly ChatAttachment[];
   readonly images?: readonly { readonly id: string; readonly name: string; readonly dataUrl: string }[];
 }
@@ -126,7 +126,7 @@ export interface PendingBotInput {
   readonly text: string;
   readonly quoteRefs: readonly string[];
   readonly createdAt: string;
-  readonly state: 'sending' | 'received' | 'failed';
+  readonly state: 'sending' | 'received' | 'failed' | 'unknown';
   readonly answerTo?: string;
 }
 
@@ -156,7 +156,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
   const kind = explicitKind || (role === 'user' ? 'user_input' : '');
   const agentActivity = readAgentActivity(raw.agentActivity);
   if (kind === 'agent_activity' && agentActivity && ['verifying', 'verified'].includes(agentActivity.state)) return null;
-  const cards = readCards(raw.cards);
+  const cards = readBotCards(raw.cards);
   if (kind === 'system_card' && cards.length && cards.every(card => card.kind === 'verdict')) return null;
   const meta = readMeta(raw.meta);
   const replyTo = readStringList(raw.replyTo).length > 0 ? readStringList(raw.replyTo) : (meta.replyTo ?? []);
@@ -537,7 +537,7 @@ export function showAgentThinking(
   pending: readonly PendingBotInput[],
   awaitingReply: boolean,
 ): boolean {
-  if (pending.some((item) => item.state === 'sending' || item.state === 'failed')) return false;
+  if (pending.some((item) => item.state === 'sending' || item.state === 'failed' || item.state === 'unknown')) return false;
   return awaitingReply;
 }
 
@@ -600,7 +600,7 @@ function readMarks(value: unknown): BotChatMark[] {
   return marks;
 }
 
-function readCards(value: unknown): BotChatCard[] {
+export function readBotCards(value: unknown): BotChatCard[] {
   if (!Array.isArray(value)) return [];
   const cards: BotChatCard[] = [];
   for (const item of value) {
@@ -623,6 +623,7 @@ function readCards(value: unknown): BotChatCard[] {
       ...(readReplyRecoveryAction(record.recoveryAction) ? { recoveryAction: readReplyRecoveryAction(record.recoveryAction)! } : {}),
       actions: readActions(record.actions),
       ...(record.refs && typeof record.refs === 'object' ? { refs: {
+        ...(readString((record.refs as Record<string, unknown>).approvalId) ? { approvalId: readString((record.refs as Record<string, unknown>).approvalId) } : {}),
         sessionId: readString((record.refs as Record<string, unknown>).sessionId),
         capabilityId: readString((record.refs as Record<string, unknown>).capabilityId),
         decisionReason: readString((record.refs as Record<string, unknown>).decisionReason),

@@ -18,6 +18,7 @@ import type { BotModelsControlState } from '../state/useBotModels';
 import { DelegatedWork } from './DelegatedWork';
 import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
 import { BotComposer } from './BotComposer';
+import { InputRecoveryNotice } from './InputRecoveryNotice';
 import { BotMessageList } from './BotMessageList';
 import { botAvatarDisplayColor } from '../BotAvatar';
 import { BotInputContext } from './BotInputContext';
@@ -90,7 +91,8 @@ export function BotConversation({
   useEffect(() => {
     if (focusMessageId) { setHighlightedId(focusMessageId); setHighlightRequestId(value => value + 1); }
   }, [focusMessageId, focusRequestId]);
-  const [quote, setQuote] = useState<{ messageId: string; text: string } | null>(null);
+  const quote = conversation.recovery.state.draft.quote;
+  const setQuote = (quote: typeof conversation.recovery.state.draft.quote) => conversation.recovery.session.edit({ quote });
   const quotedMessage = quote ? conversation.messages.find(message => message.id === quote.messageId) : undefined;
   const quoteSource = quotedMessage ? replyAnchorsForMessages([quotedMessage], {
     user: i18n.t('projectAgent.chat.you'), bot: label,
@@ -197,7 +199,11 @@ export function BotConversation({
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
       {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
+      <InputRecoveryNotice state={conversation.recovery.state} session={conversation.recovery.session} i18n={i18n} />
       <BotComposer
+        draft={conversation.recovery.state.draft}
+        onDraftChange={conversation.recovery.session.edit}
+        ready={conversation.recovery.state.ready}
         key={workspaceId}
         i18n={i18n}
         botName={label}
@@ -219,10 +225,9 @@ export function BotConversation({
         stopping={conversation.stopping}
         onStop={() => void conversation.stop()}
         onQuoteRemove={() => setQuote(null)}
-        onSend={(text, attachments) => {
+        onSend={() => {
           const refs = quote ? quoteRefsFor(quote.messageId, quote.text) : [];
-          setQuote(null);
-          void conversation.send(text, refs, attachments);
+          void conversation.send(undefined, refs);
         }}
       />
     </div>

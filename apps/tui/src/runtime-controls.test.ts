@@ -112,3 +112,14 @@ describe('runtime controls', () => {
     })).toBe('none');
   });
 });
+
+
+test('Enter aliases submit once and composition never submits', () => {
+  for (const keyName of ['enter','return','linefeed','kpenter']) {
+    expect(composerEnterAction({keyName,shift:false,eventType:'press'})).toBe('submit');
+    expect(composerEnterAction({keyName,shift:false,eventType:'repeat'})).toBe('suppress');
+    expect(composerEnterAction({keyName,shift:false,eventType:'release'})).toBe('suppress');
+    expect(composerEnterAction({keyName,shift:true,eventType:'press'})).toBe('newline');
+    expect(composerEnterAction({keyName,shift:false,eventType:'press',isComposing:true})).toBe('none');
+  }
+});

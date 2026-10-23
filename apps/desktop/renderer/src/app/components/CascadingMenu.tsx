@@ -1,3 +1,4 @@
+import { isImeKey } from '../../chat/state/compositionGuard';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -267,6 +268,7 @@ export function CascadingMenu({
   }, [activeItemIndex, open, submenuCoords, activeGroupIndex, updateSubmenuScrollState]);
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (isImeKey(event.nativeEvent)) return;
     if (disabled) return;
     if (!open) {
       if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {

@@ -52,7 +52,7 @@ export function UserBubble({
       </div>
       <div className="bot-user-marks">
         {receipt.labelKey ? <span>{i18n.t(receipt.labelKey)}</span> : null}
-        {receipt.retryInputId ? <button type="button" onClick={() => onRetry(receipt.retryInputId!)}>{i18n.t('projectAgent.chat.retry')}</button> : null}
+        {receipt.retryInputId ? <button type="button" onClick={() => onRetry(receipt.retryInputId!)}>{i18n.t(message.pending === 'unknown' ? 'projectAgent.chat.retrySameInput' : 'projectAgent.chat.retry')}</button> : null}
         {receipt.taskMarks.map((item, index) => (
           item.sessionIds.length > 0
             ? item.sessionIds.map((sessionId) => (

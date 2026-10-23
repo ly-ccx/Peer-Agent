@@ -197,6 +197,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentUpdateProfile: (params) => ipcRenderer.invoke('project-agent:update-profile', params),
   projectAgentDelete: (params) => ipcRenderer.invoke('project-agent:delete', params),
   projectAgentSubmitInput: (params) => ipcRenderer.invoke('project-agent:submit-input', params),
+  projectAgentReadInputDraft: (params) => ipcRenderer.invoke('project-agent:read-input-draft', params),
+  projectAgentWriteInputDraft: (params) => ipcRenderer.invoke('project-agent:write-input-draft', params),
   projectAgentReadConversation: (params) => ipcRenderer.invoke('project-agent:read-conversation', params),
   projectAgentReadEvidence: (params) => ipcRenderer.invoke('project-agent:read-evidence', params),
   projectAgentListSessions: (params) => ipcRenderer.invoke('project-agent:list-sessions', params),

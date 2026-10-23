@@ -1,3 +1,5 @@
+import { createProjectInputRecovery, type ProjectInputRecovery } from '@peer-agent/runtime-core';
+import { createProjectInputDraftStore } from '@peer-agent/runtime-node';
 import path from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +17,25 @@ export function createTuiProjectClient(options: {
   autoStart?: boolean;
 }) {
   const { host, dataHome } = options;
+  const drafts = createProjectInputDraftStore({ rootDir: path.join(dataHome, 'project-runtime') });
+  const recoverySessions = new Map<string, ProjectInputRecovery>();
+  function recovery(workspaceId = host.workspaceId()) {
+    let session = recoverySessions.get(workspaceId);
+    if (!session) {
+      session = createProjectInputRecovery({ workspaceId, surface: 'tui', createId: randomUUID, port: {
+        read: async request => host.directory.get(request.workspaceId)?.ok ? drafts.read(request) : { ok: false, code: 'NOT_FOUND' },
+        write: async request => host.directory.get(request.workspaceId)?.ok ? drafts.write(request) : { ok: false, code: 'NOT_FOUND' },
+        submit: async request => {
+          if (!host.directory.get(request.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
+          const input = host.inputs.submitInput(request);
+          void host.tick().catch(() => {}); void poll(true).catch(() => {});
+          return { ok: true, input };
+        },
+      } });
+      recoverySessions.set(workspaceId, session);
+    }
+    return session;
+  }
   let stamp = '', snapshot: ProjectSnapshot = emptySnapshot(), closed = false, generation = 0;
   let pageBefore: string | null = null;
   let pageSourceVersion: string | undefined;
@@ -85,6 +106,7 @@ export function createTuiProjectClient(options: {
         messageState: unavailable ? 'unavailable' : 'ready', cardsUnavailable,
       };
       if (closed || ticket !== generation) return snapshot;
+      recoverySessions.get(workspaceId)?.observeReceived(messages.filter((row: any) => row.kind === 'user_input').flatMap((row: any) => typeof row.inputId === 'string' ? [row.inputId] : row.id?.startsWith('input-') ? [row.id.slice(6)] : []));
       pageSourceVersion = conversation?.ok ? conversation.sourceVersion : undefined;
       stamp = fingerprint();
       if (JSON.stringify(snapshot) === JSON.stringify(result)) return snapshot;
@@ -97,7 +119,7 @@ export function createTuiProjectClient(options: {
   const timer = options.autoStart === false ? null : setInterval(() => { void poll().catch(() => {}); }, 1000);
   timer?.unref();
   return {
-    poll, current: () => snapshot,
+    poll, recovery, current: () => snapshot,
     latest() { pageBefore = null; return poll(true); },
     earlier() { if (snapshot.nextCursor) pageBefore = snapshot.nextCursor; return poll(true); },
     async select(workspaceId: string) { pageBefore = null; await host.selectWorkspace(workspaceId); return poll(true); },
@@ -108,11 +130,11 @@ export function createTuiProjectClient(options: {
         surface: 'tui', ...(input.answerTo ? { answerTo: input.answerTo } : {}) });
       void host.tick().catch(() => {}); void poll(true).catch(() => {}); return receipt;
     },
-    async decide(approvalId: string, decision: 'approve' | 'deny', duration: 'once'|'task' = 'once') {
+    async decide(approvalId: string, decision: 'approve' | 'deny' | 'cancel', duration: 'once'|'task' = 'once') {
       if (!host.holdsLease(host.workspaceId())) return { ok: false, error: 'desktop_approval_required' };
       const result = await host.decideApproval(approvalId, decision, duration); await poll(true); return result;
     },
-    close() { closed = true; generation++; if (timer) clearInterval(timer); },
+    close() { for (const session of recoverySessions.values()) void session.flush(); closed = true; generation++; if (timer) clearInterval(timer); },
   };
 }
 

@@ -637,3 +637,4 @@ export { createImageReadAuthority, resolvePermissionPrincipal, permissionOperati
 export { createBotAccessPolicyAuthority } from './project-agent/bot-access-policy.mjs';
 
 export { parseSseDataPayload, createSseAbortError, createSseIdleTimeoutError, throwIfSseReaderAborted, readSseChunk, cancelSseReader } from './provider-adapters/sse-line.mjs';
+export * from './project-agent/input-draft-store.mjs';

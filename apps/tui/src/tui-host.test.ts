@@ -460,6 +460,23 @@ describe('TUI Runtime host', () => {
     expect(await Bun.file(path.join(workspaceRoot, 'full-shell.txt')).exists()).toBe(true);
   });
 
+  test('cancelling an approval never grants or executes the capability', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createHost(workspaceRoot);
+    const unsubscribe = host.subscribeApproval(approval => approval?.resolve('cancel'));
+    const execution = await host.executeShell('touch cancelled.txt', sessionContext('cancelled-approval'));
+    unsubscribe();
+    expect(execution.result.status).toBe('denied');
+    expect((execution.result.permissionGrant as {decision?: string} | undefined)?.decision).toBe('deny');
+    expect(await Bun.file(path.join(workspaceRoot,'cancelled.txt')).exists()).toBe(false);
+    // The persisted approval is cancellation; runtime denial means no execution, not a user rejection.
+    const { createApprovalStore } = await import('@peer-agent/runtime-node');
+    const approvalStore = createApprovalStore({rootDir:path.join(workspaceRoot,'.peer-agent-test/project-runtime')});
+    const saved = approvalStore.list({}).filter((row: any) => row.conversationId === 'cancelled-approval');
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.state).toBe('cancelled');
+  });
+
   test('denies a requested shell capability without executing it', async () => {
     const workspaceRoot = await createWorkspace();
     const host = createHost(workspaceRoot);

@@ -1,3 +1,4 @@
+import { isImeKey } from '../../chat/state/compositionGuard';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -221,6 +222,7 @@ export function Dropdown({
   }, [footerAction, footerDisabled, query]);
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (isImeKey(event.nativeEvent)) return;
     switch (event.key) {
       case 'Escape':
         event.preventDefault();
@@ -254,6 +256,7 @@ export function Dropdown({
   };
 
   const onTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (isImeKey(event.nativeEvent)) return;
     if (disabled) return;
     if (!open) {
       if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {

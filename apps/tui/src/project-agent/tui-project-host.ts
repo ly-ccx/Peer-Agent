@@ -204,25 +204,25 @@ export function createTuiProjectHost(options: {
     workspaceId:()=>selectedId, holdsLease:holds, tick,
     async selectWorkspace(id: string) {if(id===selectedId)return;admissionClosed=true;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;admissionClosed=false;await host.restart(id);changed();},
     async takeover() {if(!selectedId)return {requested:false};const request=leases.requestTakeover(selectedId);if(request.reason==='free')leases.acquire(selectedId);await tick();return request;},
-    async decideApproval(approvalId: string, decision: 'approve'|'deny', duration: 'once'|'task' = 'once') {
+    async decideApproval(approvalId: string, decision: 'approve'|'deny'|'cancel', duration: 'once'|'task' = 'once') {
       if(!holds(selectedId))return {ok:false,error:'desktop_approval_required'};
       const record=approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId);
       if(!record)return {ok:false,error:'not_found'};
       const planApproval=record.capabilityId==='goal.plan' || record.approvalId.startsWith('plan:');
       const live=[...liveApprovals.values()].find(row=>row.toolCallId===approvalId);
-      if(record.state==='open'&&live){live.resolve(decision==='approve'?duration==='task'?'allow-session':'allow-once':'deny');return {ok:true};}
+      if(record.state==='open'&&live){live.resolve(decision==='approve'?duration==='task'?'allow-session':'allow-once':decision==='cancel'?'cancel':'deny');return {ok:true,approval:approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId)};}
       if(!['open','stale'].includes(record.state)){
         const session=decision==='approve' && record.state==='approved' && planApproval && record.sessionId ? supervisor.get({sessionId:record.sessionId}) : null;
         if((session?.origin as {phase?: string} | undefined)?.phase==='awaiting_approval'){
           const resumed=await supervisor.resumeFromApproval(record) as unknown as {ok: boolean; reason?: string};
           changed();return resumed.ok ? {ok:true} : {ok:false,error:resumed.reason};
         }
-        return {ok:true,replayed:true};
+        return {ok:true,replayed:true,approval:record};
       }
       let saved: typeof record | null = null;
       if(decision==='approve'){
         const session=record.sessionId ? supervisor.get({sessionId:record.sessionId}) : null;
-        if(session && ['paused','superseded'].includes(session.status))return {ok:false,error:'session_paused'};
+        if(session && ['paused','superseded','cancelled'].includes(session.status))return {ok:false,error:'session_paused'};
         if(record.state==='open' && !planApproval)return {ok:false,error:'approval_not_live'};
         if(!planApproval)oneTimeApprovals.remember({...record,at:Date.now()});
         if(planApproval){
@@ -234,7 +234,7 @@ export function createTuiProjectHost(options: {
         if(!resumed.ok)return {ok:false,error:resumed.reason};
       }
       else if(planApproval)await supervisor.cancel({sessionId:record.sessionId,reason:'plan_approval_denied'});
-      if(!saved)approvals.append({...record,state:decision==='approve'?'approved':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui'});changed();return {ok:true};
+      if(!saved){saved=approvals.append({...record,state:decision==='approve'?'approved':decision==='cancel'?'cancelled':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui',...(decision==='cancel'?{decisionReason:'permission_cancelled'}:{})});if(!saved)return {ok:false,error:'approval_store_failed'};}changed();return {ok:true,approval:approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId)};
     },
     async close() {admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
   };

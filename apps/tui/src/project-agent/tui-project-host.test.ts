@@ -313,3 +313,15 @@ test('terminal public messages survive optional card failure and a failed refres
     expect(refreshFailed.messages).toEqual(cardsFailed.messages);
   }finally{host.directory.readConversation=read;host.directory.readInteractions=interactions;}
 });
+
+
+test('terminal cancellation keeps its own durable state and cannot replay as an approval', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' })); await host.tick();
+  let resumed = 0; (host.supervisor as any).resumeFromApproval = async () => { resumed++; return { ok: true }; };
+  host.approvals.append({ approvalId: 'image-cancel', workspaceId: f.workspaceId, sessionId: 's', state: 'stale', capabilityId: 'local.image.read' });
+  const cancelled = await host.decideApproval('image-cancel', 'cancel');
+  expect(cancelled.ok).toBe(true); expect((cancelled as any).approval.state).toBe('cancelled');
+  expect((cancelled as any).approval.decisionReason).toBe('permission_cancelled');
+  const replay = await host.decideApproval('image-cancel', 'approve');
+  expect((replay as any).approval.state).toBe('cancelled'); expect(resumed).toBe(0);
+});
