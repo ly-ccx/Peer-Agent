@@ -637,3 +637,8 @@ export { createImageReadAuthority, resolvePermissionPrincipal, permissionOperati
 export { createBotAccessPolicyAuthority } from './project-agent/bot-access-policy.mjs';
 
 export { parseSseDataPayload, createSseAbortError, createSseIdleTimeoutError, throwIfSseReaderAborted, readSseChunk, cancelSseReader } from './provider-adapters/sse-line.mjs';
+export { createLocalGitProvider } from './local-git-provider.mjs';
+export { LOCAL_GIT_TOOL_DEFINITIONS } from './local-git-tools.mjs';
+export { createNodeGitProvider, NODE_GIT_CAPABILITY_MANIFESTS } from './git-provider.ts';
+export { evaluateDelegationCapabilities, delegationCapabilityRequirements } from './project-agent/capability-admission.mjs';
+export { capabilityDenial } from './project-agent/capability-denial.mjs';

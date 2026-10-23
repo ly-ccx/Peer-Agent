@@ -1,8 +1,11 @@
 import { fileEvidencePreview } from './file-evidence-preview.mjs';
+import { gitEvidencePreview } from './git-evidence-preview.mjs';
 import { redactShellOutput } from './output-redaction.mjs';
 
 /** Admit only Provider execution facts; assistant text and goal wrappers are excluded. */
 export function toolResultEvidencePreview(execution) {
+  const git = gitEvidencePreview(execution);
+  if (git) return git;
   const file = fileEvidencePreview(execution);
   if (file) return file;
   const call = execution?.call;

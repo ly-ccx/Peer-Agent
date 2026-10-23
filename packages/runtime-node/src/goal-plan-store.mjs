@@ -1000,6 +1000,7 @@ function normalizeSuccessCriterion(value, index = 0) {
     description = command || targetPath || '(unnamed criterion)';
   }
   const criterion = { id, kind, description };
+  if (Array.isArray(value.requiredCapabilities)) criterion.requiredCapabilities = value.requiredCapabilities.filter(id => typeof id === 'string');
   if (command) criterion.command = command;
   if (targetPath) criterion.path = targetPath;
   if (expect) criterion.expect = expect;

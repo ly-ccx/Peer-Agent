@@ -55,6 +55,7 @@ export interface GoalToolReplayDecision {
 const READ_ONLY_TOOLS = new Set([
   'read_file',
   'view_image',
+  'git_query',
   'list_files',
   'search_files',
   'batch_search',

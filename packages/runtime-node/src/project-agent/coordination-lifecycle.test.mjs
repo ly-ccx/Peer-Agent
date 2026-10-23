@@ -79,6 +79,19 @@ test('query discovers an owned legacy session without a revision, mutation, mand
   assert.equal((await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy' }, f.context('', 'q', { scopedSessionIds: ['unrelated'] }))).error, 'out_of_scope');
 });
 
+test('capability failure precedes replacement revision and cancellation of existing work', async t => {
+  const f = fixture(t);
+  const original = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
+  const before = f.store.read();
+  const diagnostic = { stage: 'delegation_admission', reason: 'delegation_capability_unavailable', missing: ['local.shell.exec'], retryable: false, userActionRequired: false };
+  const checked = createCoordinationLifecycle({ ...f.ports, admitTask: async () => ({ ok: false, error: 'delegation_capability_unavailable', diagnostic }) });
+  const result = await checked.coordinate({ action: 'replace', reason: 'cannot execute', sessionId: original.sessionId,
+    expectedRevision: 1, task: f.task('u2') }, f.context('u2', 'blocked-replacement'));
+  assert.equal(result.error, 'delegation_capability_unavailable'); assert.deepEqual(result.diagnostic, diagnostic);
+  assert.deepEqual(f.store.read(), before); assert.deepEqual(f.cancellations, []); assert.equal(f.spawns.length, 1);
+  assert.equal(f.sessions.get(original.sessionId).status, 'running');
+});
+
 test('replacement replay and consecutive corrections follow durable lineage without duplicate tasks', async t => {
   const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const replace={action:'replace',reason:'correct direction',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')};
