@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { Overlay } from '../app/components/Overlay';
+import { PeerIcon } from '../ui/icons';
 import { validateManagedBotName } from './state/botListState';
 
 interface NewBotSheetProps {
@@ -53,23 +54,25 @@ export function NewBotSheet({
   return (
     <Overlay
       ariaLabel={i18n.t('projectAgent.list.newSheetTitle')}
-      panelClassName="bot-sheet"
+      panelClassName="bot-sheet bot-new-sheet"
       closeOnBackdrop={!busy}
       onEscape={() => busy}
       onClose={onClose}
     >
       {({ requestClose }) => (
         <>
-          <div className="bot-sheet-head">
+          <header className="bot-sheet-head">
             <h2 id={titleId}>{i18n.t('projectAgent.list.newSheetTitle')}</h2>
-            <button type="button" className="bot-sheet-close" onClick={requestClose} disabled={busy}>
-              {i18n.t('projectAgent.list.close')}
+            <button
+              type="button"
+              className="bot-sheet-close"
+              aria-label={i18n.t('projectAgent.list.close')}
+              onClick={requestClose}
+              disabled={busy}
+            >
+              <PeerIcon name="close" size={18} />
             </button>
-          </div>
-          <button type="button" className="bot-sheet-choice" disabled={busy} onClick={onBind}>
-            <strong>{i18n.t('projectAgent.list.bindFolder')}</strong>
-            <span>{i18n.t('projectAgent.list.bindFolderHint')}</span>
-          </button>
+          </header>
           <form
             className="bot-sheet-blank"
             onSubmit={(event) => {
@@ -77,8 +80,8 @@ export function NewBotSheet({
               if (!busy) onCreate();
             }}
           >
-            <strong>{i18n.t('projectAgent.list.blankBot')}</strong>
-            <span>{i18n.t('projectAgent.list.blankBotHint')}</span>
+            <span className="bot-sheet-label">{i18n.t('projectAgent.list.blankBot')}</span>
+            <span className="bot-sheet-copy">{i18n.t('projectAgent.list.blankBotHint')}</span>
             <input
               ref={nameRef}
               className="bot-sheet-name"
@@ -94,6 +97,10 @@ export function NewBotSheet({
               {busy ? i18n.t('projectAgent.list.creating') : i18n.t('projectAgent.list.create')}
             </button>
           </form>
+          <button type="button" className="bot-sheet-choice" disabled={busy} onClick={onBind}>
+            <span className="bot-sheet-label">{i18n.t('projectAgent.list.bindFolder')}</span>
+            <span className="bot-sheet-copy">{i18n.t('projectAgent.list.bindFolderHint')}</span>
+          </button>
         </>
       )}
     </Overlay>
