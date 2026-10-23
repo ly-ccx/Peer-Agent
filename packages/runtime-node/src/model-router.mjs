@@ -208,7 +208,7 @@ function idsFromSetting(setting, routing) {
   return [text(binding.primary), ...(binding.fallbacks || []).map(text).filter(Boolean)];
 }
 
-function eligibleIds(ids, input, routing, workerModel) {
+function eligibleIds(ids, input, routing, workerModel, reasoningEffort) {
   const scopeOnly = input.projectPolicy?.scope ? { scope: input.projectPolicy.scope } : null;
   const eligible = [];
   for (const id of ids) {
@@ -217,7 +217,8 @@ function eligibleIds(ids, input, routing, workerModel) {
       catalog: input.catalog,
       routing: {
         tiers: routing.tiers,
-        roles: { [input.role]: { mode: 'fixed', modelProviderId: id } },
+        roles: { [input.role]: { mode: 'fixed', modelProviderId: id,
+          ...(reasoningEffort !== undefined ? { reasoningEffort } : {}) } },
         verifierPreferDifferentFamily: false,
       },
       projectPolicy: scopeOnly,
@@ -300,7 +301,7 @@ export function resolveRoleRoute(input = {}) {
   }
   const setting = winningSetting(input, routing, resolution.source);
   const ids = idsFromSetting(setting, routing);
-  const eligible = eligibleIds(ids, { ...input, catalog }, routing, workerModel);
+  const eligible = eligibleIds(ids, { ...input, catalog }, routing, workerModel, setting?.reasoningEffort);
   const chosen = resolution.selection.modelProviderId;
   const candidateIds = [chosen, ...eligible.filter((id) => id !== chosen)];
   return {
