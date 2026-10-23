@@ -2,7 +2,7 @@
 
 All notable changes to Peer Agent are tracked here.
 
-## 0.1.0-rc.26 - 2026-10-22
+## 0.1.0-rc.26 - 2026-10-23
 
 ### 修复与优化
 
