@@ -22,7 +22,7 @@ export function useSettingsAwarePage<T extends string>(initial: T) {
   const change = useCallback((action: SetStateAction<T>) => {
     const next = typeof action === 'function' ? action(current.current) : action;
     const commit = () => { current.current = next; setPage(next); };
-    if (current.current === 'settings' && next !== 'settings') requestSettingsNavigation(commit);
+    if ((current.current === 'settings' || current.current === 'tools') && next !== current.current) requestSettingsNavigation(commit);
     else commit();
   }, []);
   return [page, change] as const;
