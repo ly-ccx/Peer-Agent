@@ -2,6 +2,7 @@ import path from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { createTuiProjectHost } from './tui-project-host.ts';
+import { projectConversationCards } from './conversation-cards.ts';
 
 type ProjectHost = ReturnType<typeof createTuiProjectHost>;
 const emptySnapshot = (): ProjectSnapshot => ({ workspaceId: '', isHost: false, bots: [], messages: [], nextCursor: null,
@@ -60,16 +61,7 @@ export function createTuiProjectClient(options: {
         try {
           const cards = host.directory.readConversation(workspaceId, { view: 'cards' } as never) as any;
           if (cards.ok) {
-            const byReply = new Map<string, any[]>();
-            for (const card of cards.cards || []) if (card.refs?.replyMessageId) byReply.set(card.refs.replyMessageId, [...(byReply.get(card.refs.replyMessageId) || []), card]);
-            const attached = new Set<string>();
-            messages = messages.map((message: any) => {
-              const rows = byReply.get(message.id);
-              for (const card of rows || []) attached.add(card.cardId);
-              return rows ? { ...message, cards: rows } : message;
-            });
-            for (const card of cards.cards || []) if (!card.refs?.replyMessageId && !attached.has(card.cardId) && card.resolvedState !== 'resolved')
-              messages = [...messages, { id: card.cardId, role: 'assistant', kind: 'system_card', content: '', cards: [card] }];
+            messages = projectConversationCards(messages, cards.cards ?? []);
           } else cardsUnavailable = true;
         } catch { cardsUnavailable = true; }
       }

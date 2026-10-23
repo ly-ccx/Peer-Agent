@@ -4,7 +4,7 @@ test('project commands keep text and multiword answers and reject ambiguous numb
   expect(parseProjectCommand('/answer 2 please try again')).toEqual({kind:'card',operation:'answer',number:2,text:'please try again'});
   expect(parseProjectCommand('/task 3')).toEqual({kind:'task',number:3});
   for(const text of ['/approve 0','/deny -1','/task 2.5','/action 1','/answer 1','/takeover extra','/unknown'])expect(parseProjectCommand(text).kind).toBe('invalid');
-  for(const view of ['bots','tasks','memory','objectives','cards'] as const)expect(parseProjectCommand('/'+view)).toEqual({kind:'view',view});
+  for(const view of ['bots','tasks','memory','objectives','cards','diagnostics'] as const)expect(parseProjectCommand('/'+view)).toEqual({kind:'view',view});
   for(const kind of ['takeover','classic','older','latest','help'] as const)expect(parseProjectCommand('/'+kind)).toEqual({kind});
   expect(parseProjectCommand('hello')).toEqual({kind:'text',text:'hello'});
 });

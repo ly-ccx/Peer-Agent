@@ -12,10 +12,11 @@ import {CardLine} from './CardLine.tsx';
 import {cardAction,createCardNumbers,parseProjectCommand,terminalText} from './commands.ts';
 import {runProjectCardAction} from './card-actions.ts';
 import {projectCopy,projectStatus} from './project-copy.ts';
+import {isRecoveryCard} from './card-presentation.ts';
 
 type Host=ReturnType<typeof createTuiProjectHost>;
 type Client=ReturnType<typeof createTuiProjectClient>;
-type View='bind'|'bots'|'conversation'|'tasks'|'task'|'memory'|'objectives'|'cards'|'help';
+type View='bind'|'bots'|'conversation'|'tasks'|'task'|'memory'|'objectives'|'cards'|'diagnostics'|'help';
 export function ProjectApp({host,client,initialView,workspacePath,locale,themeStore,onClassic,onQuit}:{host:Host;client:Client;initialView:'bind'|'bots'|'conversation';workspacePath:string;locale:TuiLocale;themeStore:TuiThemeStore;onClassic():Promise<void>;onQuit():void}) {
   const terminal=useTerminalDimensions(), editor=useRef<TextareaRenderable|null>(null),numbers=useRef(createCardNumbers());
   const [snapshot,setSnapshot]=useState(()=>client.current()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
@@ -46,12 +47,13 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     const selectedBot=snapshot.bots[index];if(!selectedBot)return;
     await perform(async()=>{setSnapshot(await client.select(selectedBot.workspaceId));setView('conversation');setEarlier(false);});
   }
+  function openClassic() {setNotice(copy('leaving'));void perform(onClassic);}
   function submit(text:string) {
     const command=parseProjectCommand(text);
     if(command.kind==='text'){if(command.text)perform(()=>{void client.latest().catch(()=>{});client.submit(command.text);setEarlier(false);setView('conversation');return {ok:true};},copy('received'));return;}
     if(command.kind==='invalid'){setNotice(copy('invalid'));return;}
     if(command.kind==='view'){setView(command.view);setSelected(0);setCardIndex(0);setOption(0);return;}
-    if(command.kind==='classic'){setNotice(copy('leaving'));void perform(onClassic);return;}
+    if(command.kind==='classic'){openClassic();return;}
     if(command.kind==='takeover'){void perform(()=>host.takeover(),copy('takeover'));return;}
     if(command.kind==='older'){void client.earlier().then(setSnapshot);setEarlier(true);setView('conversation');return;}
     if(command.kind==='latest'){void client.latest().then(setSnapshot);setEarlier(false);setView('conversation');return;}
@@ -74,6 +76,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   useKeyboard(key=>{
     if(key.ctrl&&key.name==='c'){key.preventDefault();setNotice(copy('leaving'));onQuit();return;}
     if(busy)return;
+    if(key.name==='f2'){key.preventDefault();key.stopPropagation();openClassic();return;}
     if(key.name==='escape'){key.preventDefault();if(view==='bind')void perform(onClassic);else setView('conversation');return;}
     if(view==='bind'){
       if(['left','right','up','down','tab'].includes(key.name)){key.preventDefault();setBindYes(!bindYes);}
@@ -99,13 +102,15 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   });
   const objectiveResult=view==='objectives'?host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any:null;
   const rows:string[]=view==='tasks'?snapshot.sessions.map((row,index)=>`${index+1}. ${terminalText(row.title)} · ${projectStatus(locale,row.status)} · /task ${index+1}`)
+    :view==='diagnostics'?snapshot.messages.flatMap(message=>(message.cards??[]).filter(isRecoveryCard).map((card:any)=>`${terminalText(card.cardId)}\n${terminalText(card.content)}`))
     :view==='memory'?host.memory.list({workspaceId:snapshot.workspaceId}).map((row:any)=>`${projectStatus(locale,row.kind)} · ${projectStatus(locale,row.trust)} · ${projectStatus(locale,row.status)}\n${terminalText(row.text)}`)
     :view==='objectives'?(objectiveResult?.items??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.description??row.brief??'')}`)
     :view==='task'?[terminalText(detail?.title),projectStatus(locale,detail?.status??''),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).map(terminalText)]:[];
   const currentCard=cards[Math.min(cardIndex,cards.length-1)];
   return <box flexDirection="column" height={terminal.height} width={terminal.width} backgroundColor={COLOR.background} padding={1}>
     <box flexDirection="row" justifyContent="space-between" marginBottom={1}>
-      <ThemedText fg={COLOR.accent}>Peer · {terminalText(bot?.profile.displayName??copy('bots'))}</ThemedText>
+      <ThemedText fg={COLOR.accent}>Peer · {terminalText(bot?.profile.displayName??copy('bots'))} · {copy('botMode')}</ThemedText>
+      <ThemedText fg={COLOR.link} onMouseDown={openClassic}>{copy('switchClassic')}</ThemedText>
       <ThemedText fg={COLOR.muted}>{snapshot.workspaceId?snapshot.isHost?copy('host'):copy('client'):''}</ThemedText>
     </box>
     {snapshot.messageState==='unavailable'?<ThemedText fg={COLOR.info}>{copy('messageUnavailable')}</ThemedText>:null}
@@ -122,7 +127,8 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
         event.preventDefault();event.stopPropagation();if(event.shift){editor.current?.newLine();return;}
         const text=editor.current?.plainText??'';if(text.trim()){editor.current?.clear();submit(text);}
       }}/>
-      <ThemedText fg={COLOR.muted}>/help · {earlier?copy('earlier'):copy('latest')} · {copy('cardKeys')}</ThemedText>
+      <ThemedText fg={COLOR.muted}>/help · {copy('switchHint')} · {earlier?copy('earlier'):copy('latest')}</ThemedText>
+      {cards.length?<ThemedText fg={COLOR.muted}>/cards · {copy('cardKeys')}</ThemedText>:null}
     </box>:null}
   </box>;
 }
