@@ -61,6 +61,7 @@ All future product design and implementation must follow Peer’s own experience
 - `peer-knowledge/knowledge/specifications/peer-product-experience-standard.md` — the current Frost visual and component baseline.
 - `peer-knowledge/knowledge/specifications/peer-human-agent-interaction-contract.md` — the human/agent interaction contract.
 - `peer-knowledge/knowledge/specifications/motion-system.md` — motion semantics, shared primitives, interruption and reduced-motion behavior.
+- `peer-knowledge/knowledge/specifications/transition-system.md` — continuity of identity, drafts, focus, reading position and recovery across pages, layers and objects.
 - `peer-knowledge/playbook/product-experience-development.md` — implementation and review workflow.
 
 The product north star and architecture governance retain their respective authority. These standards supersede conflicting experience rules in older design documents; historical demos and source research are references, not competing standards. `peer-knowledge/design/product/open-claude-ui-study.md` records the upstream study and adoption decisions.
@@ -74,6 +75,8 @@ Implementation rules:
 - Treat motion as presentation: short, interruptible, semantically useful, and complete without animation. Preserve static end states and recovery when motion/transparency is reduced or APIs are unavailable.
 - Record the user goal, relevant states, fact source, controls and recovery for the changed flow. Migrate touched paths within scope; do not turn a small change into an unsolicited product rewrite.
 - Follow Validation Scope below: ordinary work receives content/diff review; tests and screenshot/interaction regression are deferred to release unless explicitly requested. This standard does not create a daily validation gate.
+
+Current surface/component coverage lives in `peer-knowledge/design/product/peer-interaction-standardization-matrix.md`; UI, motion and transition coverage lives in `peer-knowledge/design/product/peer-ui-motion-transition-matrix.md`. Follow `peer-knowledge/design/product/peer-product-renovation-plan.md` for scoped work packages. Update the relevant matrix entries when adding or changing pages, components or states; static implementation is not release acceptance.
 
 These are development instructions. They do not add runtime capabilities, change permission or acceptance policy, or authorize a new System Context injection path. Any such boundary change still requires A/B-level handling.
 
