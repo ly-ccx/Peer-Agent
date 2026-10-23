@@ -7,11 +7,24 @@
  */
 import {
   SHARED_LOCAL_TOOL_CONTRACTS,
+  GOAL_CREATE_PLAN_PROMPT,
+  GOAL_UPDATE_TASK_PROMPT,
+  GOAL_GET_PLAN_PROMPT,
+  GOAL_REQUEST_EXPLORER_PROMPT,
+  GOAL_CREATE_PLAN_INPUT_SCHEMA,
+  GOAL_UPDATE_TASK_INPUT_SCHEMA,
+  GOAL_GET_PLAN_INPUT_SCHEMA,
+  GOAL_REQUEST_EXPLORER_INPUT_SCHEMA,
   canonicalizeLocalCapabilityId,
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution, RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
-import { createGoalPlanStore, pathOf } from '@peer-agent/runtime-node';
+import {
+  createGoalPlanStore,
+  pathOf,
+  pickRecentCompletedPlan,
+  resolveDerivedPlanRelation,
+} from '@peer-agent/runtime-node';
 
 import type { TuiMode } from './tui-mode.ts';
 
@@ -296,88 +309,29 @@ export function createTuiGoalBridge(options?: {
       name: GOAL_TOOL_NAMES.createPlan,
       capabilityId: GOAL_CAPABILITY_IDS.create,
       modeScopes: [...GOAL_PLAN_TOOL_MODE_SCOPES],
-      description:
-        'Create a persistent, trackable goal/plan. In Goal mode, establish the objective and subtasks before side-effecting work.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          goal: { type: 'string' },
-          targetWorkspacePath: { type: 'string' },
-          tasks: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                taskId: { type: 'string' },
-                title: { type: 'string' },
-                dependsOn: { type: 'array', items: { type: 'string' } },
-              },
-              required: ['title'],
-            },
-          },
-          successCriteria: { type: 'array' },
-        },
-        required: ['goal', 'tasks'],
-      },
+      description: GOAL_CREATE_PLAN_PROMPT,
+      inputSchema: GOAL_CREATE_PLAN_INPUT_SCHEMA,
     } as RuntimeToolDefinition,
     {
       name: GOAL_TOOL_NAMES.updateTask,
       capabilityId: GOAL_CAPABILITY_IDS.update,
       modeScopes: [...GOAL_PLAN_TOOL_MODE_SCOPES],
-      description: 'Record execution evidence for a goal/plan subtask.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          planId: { type: 'string' },
-          taskId: { type: 'string' },
-          status: {
-            type: 'string',
-            enum: ['pending', 'running', 'completed', 'failed', 'cancelled', 'waiting_user'],
-          },
-          evidenceRefs: { type: 'array', items: { type: 'string' } },
-          result: { type: 'string' },
-          failureReason: { type: 'string' },
-          blockedReason: { type: 'string' },
-          criterionResults: { type: 'array' },
-        },
-        required: ['planId', 'taskId'],
-      },
+      description: GOAL_UPDATE_TASK_PROMPT,
+      inputSchema: GOAL_UPDATE_TASK_INPUT_SCHEMA,
     } as RuntimeToolDefinition,
     {
       name: GOAL_TOOL_NAMES.getPlan,
       capabilityId: GOAL_CAPABILITY_IDS.read,
       modeScopes: [...GOAL_PLAN_TOOL_MODE_SCOPES],
-      description: 'Read back an existing goal/plan or list active plans for the conversation.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          planId: { type: 'string' },
-        },
-        required: [],
-      },
+      description: GOAL_GET_PLAN_PROMPT,
+      inputSchema: GOAL_GET_PLAN_INPUT_SCHEMA,
     } as RuntimeToolDefinition,
     {
       name: GOAL_TOOL_NAMES.requestExplorer,
       capabilityId: GOAL_CAPABILITY_IDS.explore,
       modeScopes: [...GOAL_EXPLORER_TOOL_MODE_SCOPES],
-      description: 'Register a focused read-only Explorer request for the Goal Runner to execute after this turn.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          question: { type: 'string' },
-          reason: { type: 'string' },
-          scope: {
-            type: 'object',
-            properties: {
-              include: { type: 'array', items: { type: 'string' } },
-              exclude: { type: 'array', items: { type: 'string' } },
-            },
-            required: ['include', 'exclude'],
-          },
-        },
-        required: ['question', 'reason'],
-      },
+      description: GOAL_REQUEST_EXPLORER_PROMPT,
+      inputSchema: GOAL_REQUEST_EXPLORER_INPUT_SCHEMA,
     } as RuntimeToolDefinition,
   ];
 
@@ -461,15 +415,30 @@ export function createTuiGoalBridge(options?: {
         if (!goal || tasks.length === 0) {
           return failedExecution(call, 'goal_create_plan failed', 'goal_create_plan requires goal and at least one task');
         }
+        const title = deriveTitle(options.args.title, goal);
+        // 关系字段与 Desktop 走同一份派生实现（@peer-agent/runtime-node）：
+        // 显式传入优先，只补缺失的一侧，明确新需求不挂父计划。
+        const recentCompleted = conversationId && typeof store.listPlanDetailsByConversation === 'function'
+          ? pickRecentCompletedPlan(store.listPlanDetailsByConversation(conversationId))
+          : null;
+        const relation = resolveDerivedPlanRelation({
+          parentPlanId: options.args.parentPlanId,
+          sourceTaskId: options.args.sourceTaskId,
+          title,
+          goal,
+          recentCompleted,
+        });
         const draft = {
           conversationId,
-          title: deriveTitle(options.args.title, goal),
+          title,
           goal,
           originWorkspacePath: workspaceRoot,
           targetWorkspacePath: asString(options.args.targetWorkspacePath) || workspaceRoot,
           tasks,
           successCriteria: options.args.successCriteria,
           createdBy: 'agent',
+          ...(relation.parentPlanId ? { parentPlanId: relation.parentPlanId } : {}),
+          ...(relation.sourceTaskId ? { sourceTaskId: relation.sourceTaskId } : {}),
         };
 
         let plan: any;
@@ -488,7 +457,9 @@ export function createTuiGoalBridge(options?: {
           plan = store.createPlan({
             ...draft,
             status: mode === 'plan' ? 'awaiting_approval' : 'accepted',
-            workflowKind: mode === 'goal' ? 'goal_self_driven' : 'plan',
+            // store 只认 plan_approval / goal_self_driven；此前传 'plan' 属于非法枚举，
+            // 靠 normalizeWorkflowKind 兜底才恰好正确。
+            workflowKind: mode === 'goal' ? 'goal_self_driven' : 'plan_approval',
           });
         } else {
           return failedExecution(call, 'goal store unavailable', 'goal-plan-store createPlan is not available');
