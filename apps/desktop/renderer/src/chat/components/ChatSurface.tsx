@@ -49,6 +49,7 @@ import {
   type EffortLevel,
   type ChatMode,
 } from '../state/preferences';
+import { useStableCallback } from '../hooks/useStableCallback';
 import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
@@ -212,14 +213,6 @@ const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
 const EMPTY_EFFORT_LEVELS: readonly EffortLevel[] = [];
 /** 无 WorkbenchProvider 时的降级空操作（会话抽屉等 Provider 之外场景）。 */
 const NOOP = () => {};
-
-function useStableCallback<T extends (...args: never[]) => unknown>(callback: T): T {
-  const callbackRef = useRef(callback);
-  useLayoutEffect(() => {
-    callbackRef.current = callback;
-  }, [callback]);
-  return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
-}
 
 // 重试倒计时文案：归零后说「正在重连」，避免本地倒计时钳在 0 时
 // 长时间显示「约 0s 后重试」让用户误以为卡死。
