@@ -3,6 +3,7 @@ import path from 'node:path';
 
 /** Real component + delayed/failing production IPC save in the disposable smoke host. */
 export async function checkEffortStability({ page, slider, strength, until, getBot, failNext, report, captureDirectory, highEffort, scope = 'settings' }) {
+  const feedback = page.locator(scope === 'settings' ? '.bot-settings-tab' : '.bot-convo');
   const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
   const sample = async (key, collectionDelayMs = 0) => {
     // Establish the baseline after entry motion, before starting a save.
@@ -66,11 +67,11 @@ export async function checkEffortStability({ page, slider, strength, until, getB
   // Collect after the 650ms failure has returned. The renderer's earlier frames
   // must still prove the pending selection, independently of CDP delivery time.
   const failureFrames = await sample('Home', 900);
-  await page.locator('.bot-model-error[role="alert"], .bot-model-feedback [role="alert"]').first().waitFor();
+  await feedback.locator('.bot-model-error[role="alert"], .bot-model-feedback [role="alert"]').first().waitFor();
   await until(() => slider.inputValue(), value => value === '100');
   assert.equal((await getBot()).modelPolicy.overrides.project_agent.reasoningEffort, highEffort);
   assert.equal(await strength.locator('.model-selection-trigger-label').evaluate(node => node.scrollWidth <= node.clientWidth), true, 'full effort label must fit the normal composer and settings width');
-  const discard = page.locator('.bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
+  const discard = feedback.locator('.bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
   if (await discard.count()) {
     await page.keyboard.press('Escape'); await discard.click(); await strength.click(); await slider.waitFor();
   }
