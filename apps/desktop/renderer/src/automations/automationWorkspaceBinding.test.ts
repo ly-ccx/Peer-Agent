@@ -23,9 +23,10 @@ test('empty or whitespace-only workspace bindings are rejected', () => {
 
 test('Automation editor displays workspace binding without an editable path control', async () => {
   const center = await readFile(new URL('./AutomationCenter.tsx', import.meta.url), 'utf8');
+  const state = await readFile(new URL('./automationEditorState.ts', import.meta.url), 'utf8');
 
-  assert.match(center, /workspacePath: workspaceForNewAutomation\(defaultWorkspace\)/);
-  assert.match(center, /workspacePath: workspaceForExistingAutomation\(value\.workspacePath\)/);
+  assert.match(state, /workspacePath: workspaceForNewAutomation\(defaultWorkspace\)/);
+  assert.match(state, /workspacePath: workspaceForExistingAutomation\(value\.workspacePath\)/);
   assert.match(center, /className="automation-bound-workspace top-meta"/);
   assert.match(center, /<strong>\{draft\.workspacePath \|\| '—'\}<\/strong>/);
   assert.equal(center.includes('automation-bound-workspace compact'), false);

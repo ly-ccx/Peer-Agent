@@ -23,7 +23,9 @@ test('ChatSurface 不超过原模块预算', () => {
 test('卡片动作只调用约定的 IPC', () => {
   const card = source('project-agent/conversation/CardView.tsx');
   assert.match(card, /projectAgentDecideApproval/);
-  assert.match(card, /projectAgentSubmitInput/);
+  assert.match(card, /inputRecoveryFor\(workspaceId\)\.send\(\{ text, answerTo, useDraft: false \}\)/);
+  const input = source('project-agent/state/useInputRecovery.ts');
+  assert.match(input, /submit: request => clientApi\.projectAgentSubmitInput\(request\)/);
   assert.equal(card.includes('projectAgentDelete'), false);
   assert.equal(card.includes('projectAgentCreate'), false);
   assert.equal(card.includes('projectAgentUpdateProfile'), false);
@@ -31,9 +33,9 @@ test('卡片动作只调用约定的 IPC', () => {
   assert.equal(card.includes('conversationStore'), false);
   const calls = [...card.matchAll(/clientApi\.(\w+)/g)].map((match) => match[1]);
   assert.deepEqual(calls, [
+    'projectAgentReadConversation',
     'projectMemoryRestore',
     'projectAgentDecideApproval',
-    'projectAgentSubmitInput',
     'projectAgentStartFamiliarize',
     'projectAgentConfirmResult',
     'projectAgentAcceptReadme',

@@ -18,7 +18,7 @@ test('Automation create path is prompt-first with generated plan after detection
   assert.match(center, /buildAutomationDetectionPrompt/);
   assert.match(center, /parseLlmAutomationDetectionText/);
   assert.match(center, /applyDetectionPatch/);
-  assert.match(center, /return applyInference\(prompt, force\)/);
+  assert.match(center, /return active\(\) \? applyInference\(prompt, force\) : null/);
   assert.match(center, /setConfirmOpen\(true\)/);
   assert.match(center, /onBlur=\{onPromptBlur\}/);
   assert.match(center, /detected \|\| editing/);

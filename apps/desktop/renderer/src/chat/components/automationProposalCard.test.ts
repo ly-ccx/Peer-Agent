@@ -23,7 +23,7 @@ test('proposal actions use the governed action port with stale-card identity', (
   assert.match(projectionSource, /fingerprint: proposal\.fingerprint/);
   assert.match(cardSource, /act\('cancel'\)/);
   assert.match(cardSource, /act\('confirm'\)/);
-  assert.match(cardSource, /if \(pendingAction\) return/);
+  assert.match(cardSource, /if \(actionLock\.current \|\| !canAct\) return/);
   assert.equal(cardSource.match(/disabled=\{Boolean\(pendingAction\)\}/g)?.length, 2);
 });
 

@@ -154,5 +154,5 @@ test('model routing copy exists in both locales', () => {
 test('LlmSettingsPanel.tsx keeps its smaller extracted baseline', () => {
   const source = readFileSync(new URL('../LlmSettingsPanel.tsx', import.meta.url), 'utf8');
   const lines = source.endsWith('\n') ? source.split('\n').length - 1 : source.split('\n').length;
-  assert.equal(lines, 2214);
+  assert.ok(lines <= 2214, 'extraction may shrink the module without increasing its budget');
 });

@@ -18,7 +18,9 @@ function lineCount(relativePath: string): number {
 
 test('关闭抽屉时把焦点还给触发按钮', () => {
   const drawer = source('project-agent/drawer/BotProfileDrawer.tsx');
-  assert.match(drawer, /triggerRef\.current\?\.focus\(/);
+  assert.match(drawer, /useFocusScope\(bodyRef[\s\S]*restore: triggerRef/);
+  assert.match(drawer, /restoreFocusRef=\{triggerRef\}/);
+  assert.match(source('app/hooks/useFocusScope.ts'), /previous\?\.isConnected[\s\S]*previous\.focus\(\{ preventScroll: true \}\)/);
   assert.match(drawer, /Escape/);
   assert.match(drawer, /from '\.\.\/\.\.\/app\/components\/Drawer'/);
 });
@@ -27,6 +29,8 @@ test('记忆页动作和回复芯片都经记忆 IPC', () => {
   const page = source('project-agent/drawer/MemoryTab.tsx');
   const calls = [...page.matchAll(/clientApi\.(\w+)/g)].map((match) => match[1]);
   assert.deepEqual([...new Set(calls)].sort(), [
+    'onProjectAgentChanged',
+    'openPath',
     'projectMemoryEdit',
     'projectMemoryExport',
     'projectMemoryForget',

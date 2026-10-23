@@ -128,7 +128,7 @@ test('Fast mode is a ChatGPT/Grok subscription composer control and follows both
 
   assert.match(selection, /authMethod === 'oauth_chatgpt' \|\| authMethod === 'oauth_grok'/);
   assert.match(panel, /isZh \? '快速' : 'Fast'/);
-  assert.match(panel, /aria-pressed=\{fastMode\}/);
+  assert.match(panel, /role="radio" aria-checked=\{fastMode\}/);
   assert.match(display, /ComposerModelMenu/);
   assert.match(surface, /chatStartTask\(\{[\s\S]*fastMode/);
   assert.match(surface, /chatSend\(\{[^}]*fastMode/);

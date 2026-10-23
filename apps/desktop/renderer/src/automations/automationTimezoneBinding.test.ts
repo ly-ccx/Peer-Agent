@@ -22,9 +22,10 @@ test('editing an automation preserves its existing timezone', () => {
 
 test('Automation editor displays the bound timezone without a text input', async () => {
   const center = await readFile(new URL('./AutomationCenter.tsx', import.meta.url), 'utf8');
+  const state = await readFile(new URL('./automationEditorState.ts', import.meta.url), 'utf8');
 
-  assert.match(center, /timezone: systemAutomationTimezone\(\)/);
-  assert.match(center, /timezone: timezoneForExistingAutomation\(value\.schedule\.timezone\)/);
+  assert.match(state, /timezone: systemAutomationTimezone\(\)/);
+  assert.match(state, /timezone: timezoneForExistingAutomation\(value\.schedule\.timezone\)/);
   assert.match(center, /className="automation-bound-timezone"/);
   assert.match(center, /<strong>\{draft\.timezone\}<\/strong>/);
   assert.equal(center.includes("update('timezone'"), false);
@@ -33,7 +34,9 @@ test('Automation editor displays the bound timezone without a text input', async
 
 test('Automation save contract continues to carry the bound timezone', async () => {
   const center = await readFile(new URL('./AutomationCenter.tsx', import.meta.url), 'utf8');
+  const state = await readFile(new URL('./automationEditorState.ts', import.meta.url), 'utf8');
 
-  assert.match(center, /const schedule = \{\s*kind: draft\.scheduleKind, timezone: draft\.timezone,/);
-  assert.match(center, /workspacePath: draft\.workspacePath\.trim\(\), schedule,/);
+  assert.match(center, /inputFromDraft\(draft\)/);
+  assert.match(state, /const schedule = \{\s*kind: draft\.scheduleKind, timezone: draft\.timezone,/);
+  assert.match(state, /workspacePath: draft\.workspacePath\.trim\(\), schedule,/);
 });
