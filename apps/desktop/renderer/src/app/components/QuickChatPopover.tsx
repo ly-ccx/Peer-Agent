@@ -117,7 +117,7 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
   return (
     <main
       ref={shellRef}
-      className={`quick-chat-popover-shell${layout === 'host' ? ' is-host' : ''}`}
+      className={`quick-chat-popover-shell motion-enter-fade${layout === 'host' ? ' is-host' : ''}`}
       style={shellStyle}
       tabIndex={-1}
       onKeyDown={(event) => {

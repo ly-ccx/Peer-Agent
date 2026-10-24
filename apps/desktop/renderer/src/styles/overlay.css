@@ -113,10 +113,12 @@
   /* 退场态：onClose 时先播退场动画，动画结束后才真正卸载（详见 Overlay.tsx 状态机）。
      退场比入场更利落（fast 档），位移与入场对称（下移淡出）。 */
   .pa-overlay-backdrop.is-closing {
+    opacity: 0;
     animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 
   .pa-overlay-panel.is-closing {
+    opacity: 0;
     animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 
@@ -145,7 +147,7 @@
     align-self: stretch;
     border-radius: 0;
     /* 抽屉布局；磨砂仍由 ::before 提供，避免面板自身 overflow 废掉 blur。 */
-    border-left: 1px solid var(--chrome-hairline);
+    border-inline-start: 1px solid var(--chrome-hairline);
     box-shadow: var(--shadow-drag), var(--glass-edge-highlight);
     display: flex;
     flex-direction: column;
@@ -156,6 +158,11 @@
 
   .pa-overlay-backdrop--drawer .pa-overlay-panel.is-closing {
     animation: motion-exit-slide-inline var(--za-motion-fast) var(--za-ease-accelerate) both;
+  }
+
+  .pa-overlay-backdrop--drawer:dir(rtl) .pa-overlay-panel {
+    --motion-enter-inline-from: calc(-1 * var(--za-motion-shift-lg));
+    --motion-exit-inline-to: calc(-1 * var(--za-motion-shift-lg));
   }
 
   .mcp-drawer-body {

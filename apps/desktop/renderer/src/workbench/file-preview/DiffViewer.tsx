@@ -1,3 +1,5 @@
+import { MotionSurface } from '../../app/components/MotionSurface';
+import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -63,21 +65,24 @@ function DiffFilePreviewPortal({
   onHide,
   onDismiss,
 }: {
-  readonly active: ActiveDiffPreview;
+  readonly active: ActiveDiffPreview | null;
   readonly isZh: boolean;
   readonly onKeep: () => void;
   readonly onHide: () => void;
   readonly onDismiss: () => void;
 }) {
   const previewRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLElement | null>(null); anchorRef.current = active?.anchor ?? null;
+  useInteractionLayer(Boolean(active), { roots: [previewRef], trigger: anchorRef, identity: active?.anchor, passive: true, restoreFocus: false,
+    closeOnTriggerRemoval: true, onClose: onDismiss });
   const [position, setPosition] = useState<{ left: number; top: number; placement: 'above' | 'below' } | null>(null);
-  const stats = countDiffLineStats(active.file.lines);
-  const previewLines = active.file.lines.length > PREVIEW_LINE_LIMIT
-    ? active.file.lines.slice(0, PREVIEW_LINE_LIMIT)
-    : active.file.lines;
-  const hiddenCount = active.file.lines.length - previewLines.length;
+  const lines = active?.file.lines ?? [];
+  const stats = countDiffLineStats(lines);
+  const previewLines = lines.length > PREVIEW_LINE_LIMIT ? lines.slice(0, PREVIEW_LINE_LIMIT) : lines;
+  const hiddenCount = lines.length - previewLines.length;
 
   useLayoutEffect(() => {
+    if (!active) return;
     const previewElement = previewRef.current;
     if (!previewElement || !active.anchor.isConnected) return;
     const triggerRect = active.anchor.getBoundingClientRect();
@@ -90,6 +95,7 @@ function DiffFilePreviewPortal({
   }, [active]);
 
   useEffect(() => {
+    if (!active) return;
     const hideIfOuter = (event: Event) => {
       const target = event.target;
       if (target instanceof Node && previewRef.current?.contains(target)) return;
@@ -101,10 +107,10 @@ function DiffFilePreviewPortal({
       window.removeEventListener('resize', onDismiss);
       window.removeEventListener('scroll', hideIfOuter, true);
     };
-  }, [onDismiss]);
+  }, [active, onDismiss]);
 
   return createPortal(
-    <div
+    <MotionSurface kind="fade">{active ? (<div
       ref={previewRef}
       className={`diff-file-preview-portal is-${position?.placement ?? 'below'}`}
       style={{
@@ -136,7 +142,7 @@ function DiffFilePreviewPortal({
           </div>
         ) : null}
       </div>
-    </div>,
+    </div>) : null}</MotionSurface>,
     document.body,
   );
 }
@@ -238,15 +244,13 @@ function DiffFileIndex({
           );
         })}
       </ul>
-      {active ? (
-        <DiffFilePreviewPortal
+      <DiffFilePreviewPortal
           active={active}
           isZh={isZh}
           onKeep={keepPreview}
           onHide={hidePreview}
           onDismiss={dismissPreview}
         />
-      ) : null}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { MotionDetails } from './MotionDetails';
 import { PeerIcon } from '../../ui/icons';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView, LlmProviderTestResult } from '@peer-agent/protocol';
@@ -65,7 +66,7 @@ export function ConfiguredModelRow({
   ];
 
   return (
-    <details className={`llm-configured-model-row ${model.isDefault ? 'is-default' : ''}`}>
+    <MotionDetails className={`llm-configured-model-row ${model.isDefault ? 'is-default' : ''}`}>
       <summary className="llm-configured-model-summary">
         <LlmBrandIcon
           className="llm-brand-icon-model"
@@ -143,6 +144,6 @@ export function ConfiguredModelRow({
           <button type="button" className="danger" onClick={onDelete} disabled={duplicating}>{zh ? '删除' : 'Delete'}</button>
         </div>
       </div>
-    </details>
+    </MotionDetails>
   );
 }

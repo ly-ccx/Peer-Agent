@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../app/components/MotionSurface';
 import { useCompositionGuard } from '../../app/hooks/useCompositionGuard';
 import { PeerIcon } from '../../ui/icons';
 import type React from 'react';
@@ -518,7 +519,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
 
   return (
     <>
-      {showSlashCommands ? (
+      <MotionSurface>{showSlashCommands ? (
         <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
           {slashCommands.map((command, index) => (
             <button
@@ -537,8 +538,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
             </button>
           ))}
         </div>
-      ) : null}
-      {showContextMentions ? (
+      ) : null}</MotionSurface>
+      <MotionSurface>{showContextMentions ? (
         <div ref={mentionMenuRef} className="slash-command-menu session-mention-menu" role="listbox" aria-label={isZh ? '引用文件或会话' : 'Mention files or chats'}>
           {mentionHits.map((hit, index) => {
               const key = hit.type === 'file'
@@ -599,7 +600,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
             </div>
           ) : null}
         </div>
-      ) : null}
+      ) : null}</MotionSurface>
       {quotes.length > 0 ? (
         <div className="composer-quote-flow" ref={quoteFlowRef} style={quoteFlow ? { top: quoteFlow.top, left: quoteFlow.left, fontSize: quoteFlow.fontSize, lineHeight: quoteFlow.lineHeight } : undefined}>
           {quotes.map((quote) => (

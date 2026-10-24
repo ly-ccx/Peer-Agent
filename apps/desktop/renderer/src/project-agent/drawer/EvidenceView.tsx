@@ -1,3 +1,4 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../../clientApi';
 import { useResourceRead } from '../../ui/resources/useResourceState';
@@ -48,8 +49,8 @@ export function EvidenceView({ evidence: target, i18n }: { readonly evidence: Pi
       <div><h4>{i18n.t(message)}</h4><p>{i18n.t(state === 'unavailable' ? 'projectAgent.evidence.tryLater' : 'projectAgent.evidence.cannotVerify')}</p></div></div> : null}
     {resource.loaded && !evidence.ok && !resource.error ? <button type="button" className="ui-button" disabled={resource.loading} onClick={() => void resource.reload()}>{i18n.t('resources.retryRead')}</button> : null}
     {evidence.truncated ? <p className="bot-evidence-help">{i18n.t('projectAgent.process.truncated')}</p> : null}
-    <details className="bot-inspect-technical"><summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.process.technical')}</summary>
+    <MotionDetails className="bot-inspect-technical"><summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.process.technical')}</summary>
       <code>{target.evidenceRef}</code>{evidence.code ? <p>{evidence.code}</p> : null}
-    </details>
+    </MotionDetails>
   </section>;
 }

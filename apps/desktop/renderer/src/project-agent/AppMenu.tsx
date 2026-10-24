@@ -1,7 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../ui/icons';
-import { watchVisualMotion } from '../app/state/visualMotion';
+import { MotionSurface } from '../app/components/MotionSurface';
 
 interface AppMenuProps {
   readonly open: boolean;
@@ -30,18 +30,7 @@ export function AppMenu({
   const triggerId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [present, setPresent] = useState(open);
   const returnFocus = useRef<'trigger' | 'metadata' | null>(null);
-
-  useLayoutEffect(() => {
-    if (open) { setPresent(true); return; }
-    if (!present) return;
-    let animations: Animation[] = [];
-    try { animations = menuRef.current?.getAnimations?.() ?? []; } catch { /* Static exit when animation inspection is unavailable. */ }
-    const motion = watchVisualMotion(animations, () => setPresent(false));
-    return motion.cancel;
-  }, [open, present]);
 
   useLayoutEffect(() => {
     if (open || !returnFocus.current) return;
@@ -98,9 +87,9 @@ export function AppMenu({
 
   return (
     <div className="bot-app-menu" ref={rootRef}>
-      {open || present ? (
-        <div ref={menuRef} className={`bot-app-menu-menu ${open ? 'motion-enter-rise' : 'motion-exit-fade'}`}
-          id={menuId} role="menu" aria-labelledby={triggerId} aria-hidden={!open || undefined} inert={!open}
+      <MotionSurface>{open ? (
+        <div className="bot-app-menu-menu"
+          id={menuId} role="menu" aria-labelledby={triggerId}
           onKeyDown={navigateMenu}>
           <button type="button" role="menuitem" tabIndex={-1} onClick={onOpenSettings}>
             <PeerIcon name="settings" size={16} />
@@ -122,7 +111,7 @@ export function AppMenu({
             </span>
           </button>
         </div>
-      ) : null}
+      ) : null}</MotionSurface>
       <div className="bot-app-menu-details">
         <button
           type="button"

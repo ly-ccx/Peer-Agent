@@ -1,3 +1,4 @@
+import { MotionSurface } from './MotionSurface';
 import { selectionNavigation } from './selectionNavigation';
 import { useInteractionLayer } from '../hooks/useInteractionLayer';
 import { isImeKey } from '../../chat/state/compositionGuard';
@@ -365,9 +366,7 @@ export function CascadingMenu({
       }
     : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' };
 
-  const rootPanel = open
-    ? createPortal(
-        <div
+  const rootPanel = createPortal(<MotionSurface kind="fade">{open ? (<div
           ref={menuRef}
           className={`pa-cascading-menu-panel ${className ?? ''} ${coords?.placement === 'up' ? 'is-up' : 'is-down'}`}
           role="menu"
@@ -420,14 +419,9 @@ export function CascadingMenu({
               </button>
             );
           })}
-        </div>,
-        document.body,
-      )
-    : null;
+        </div>) : null}</MotionSurface>, document.body);
 
-  const submenuPanel = open && activeGroup
-    ? createPortal(
-        <div
+  const submenuPanel = createPortal(<MotionSurface kind="fade">{open && activeGroup ? (<div
           ref={submenuRef}
           className={[
             'pa-cascading-submenu-panel',
@@ -494,10 +488,7 @@ export function CascadingMenu({
               </button>
             );
           })}
-        </div>,
-        document.body,
-      )
-    : null;
+        </div>) : null}</MotionSurface>, document.body);
 
   return (
     <div className={rootClassName} ref={rootRef} title={title}>

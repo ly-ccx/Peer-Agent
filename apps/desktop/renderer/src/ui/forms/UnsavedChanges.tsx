@@ -53,11 +53,12 @@ export function UnsavedChangesProvider({ i18n, children }: { i18n: I18nRuntime; 
   return <UnsavedContext.Provider value={context.current}>
     {children}
     {open ? <Overlay ariaLabel={i18n.t('forms.unsavedTitle')} onClose={cancel} closeOnBackdrop={!busy} onEscape={() => busy} panelClassName="ui-leave-dialog">
+      {({ requestClose }) => <>
       <h2>{i18n.t('forms.unsavedTitle')}</h2>
       <p>{i18n.t(busy ? 'forms.waitForSave' : 'forms.unsavedHint')}</p>
       {failed ? <p role="alert">{i18n.t('forms.saveFailed')}</p> : null}
       <div className="ui-form-actions">
-        <button type="button" className="ui-button" data-stay data-overlay-autofocus disabled={saving} onClick={cancel}>{i18n.t('forms.stay')}</button>
+        <button type="button" className="ui-button" data-stay data-overlay-autofocus disabled={saving} onClick={requestClose}>{i18n.t('forms.stay')}</button>
         <button type="button" className="ui-button" disabled={busy} onClick={() => { current.forEach(item => item.discard()); finish(); }}>{i18n.t('forms.discard')}</button>
         {saveable ? <button type="button" className="ui-button is-primary" disabled={busy} onClick={async () => {
           setSaving(true); setFailed(false);
@@ -70,6 +71,7 @@ export function UnsavedChangesProvider({ i18n, children }: { i18n: I18nRuntime; 
           } catch { setFailed(true); } finally { setSaving(false); }
         }}>{i18n.t(saving ? 'forms.saving' : 'forms.saveAndLeave')}</button> : null}
       </div>
+      </>}
     </Overlay> : null}
   </UnsavedContext.Provider>;
 }

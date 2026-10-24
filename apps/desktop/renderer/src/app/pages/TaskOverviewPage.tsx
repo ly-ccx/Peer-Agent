@@ -1,3 +1,5 @@
+import { MotionSurface } from '../components/MotionSurface';
+import { useInteractionLayer } from '../hooks/useInteractionLayer';
 import { watchVisualMotion } from '../state/visualMotion';
 import { createI18n } from '@peer-agent/i18n';
 import type { TaskOverviewArtifact, TaskOverviewItem } from '@peer-agent/protocol';
@@ -1097,11 +1099,15 @@ interface ActiveArtifactPreview {
   readonly anchor: HTMLElement;
 }
 
-function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPreview }) {
+function ArtifactPreviewPortal({ active, onDismiss }: { readonly active: ActiveArtifactPreview | null; readonly onDismiss: () => void }) {
   const previewRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLElement | null>(null); anchorRef.current = active?.anchor ?? null;
+  useInteractionLayer(Boolean(active), { roots: [previewRef], trigger: anchorRef, identity: active?.anchor, passive: true, restoreFocus: false,
+    closeOnTriggerRemoval: true, onClose: onDismiss });
   const [position, setPosition] = useState<{ left: number; top: number; placement: 'above' | 'below' } | null>(null);
 
   useLayoutEffect(() => {
+    if (!active) return;
     const updatePosition = () => {
       const previewElement = previewRef.current;
       if (!previewElement || !active.anchor.isConnected) return;
@@ -1114,16 +1120,19 @@ function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPrev
       ));
     };
     updatePosition();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
+    if (previewRef.current) observer?.observe(previewRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
   }, [active]);
 
   return createPortal(
-    <div
+    <MotionSurface kind="fade">{active ? (<div
       ref={previewRef}
       id={`artifact-preview-${encodeURIComponent(active.artifact.ref)}`}
       className={`task-artifact-preview-portal task-artifact-preview-portal--${active.artifact.preview?.kind ?? 'code'} is-${position?.placement ?? 'below'}`}
@@ -1137,7 +1146,7 @@ function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPrev
       }}
     >
       <ArtifactHoverPreview artifact={active.artifact} />
-    </div>,
+    </div>) : null}</MotionSurface>,
     document.body,
   );
 }
@@ -1218,7 +1227,7 @@ function ArtifactList({ item }: { readonly item: TaskOverviewItem }) {
         ) : null}
       </div>
     </details>
-    {activePreview ? <ArtifactPreviewPortal active={activePreview} /> : null}
+    <ArtifactPreviewPortal active={activePreview} onDismiss={() => setActivePreview(null)} />
     </>
   );
 }

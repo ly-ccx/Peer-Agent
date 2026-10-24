@@ -1,3 +1,4 @@
+import { MotionSurface } from './MotionSurface';
 import { selectionNavigation } from './selectionNavigation';
 import { useInteractionLayer } from '../hooks/useInteractionLayer';
 import { isImeKey } from '../../chat/state/compositionGuard';
@@ -314,9 +315,7 @@ export function Dropdown({
 
   // 菜单已被 portal 移出 root，需把消费方 className 透传到菜单上，
   // 使原先依赖祖先关系的样式(如 .composer-dropdown .pa-dropdown-menu)改写为复合选择器后仍生效。
-  const menu = open
-    ? createPortal(
-        <div
+  const menu = createPortal(<MotionSurface>{open ? (<div
           ref={menuRef}
           className={`pa-dropdown-menu ${className ?? ''} ${searchable ? 'is-searchable' : ''} ${coords?.placement === 'up' ? 'is-up' : 'is-down'}`.trim()}
           onKeyDown={onListKeyDown}
@@ -381,10 +380,7 @@ export function Dropdown({
               {footerLabel}
             </button>
           ) : null}
-        </div>,
-        document.body,
-      )
-    : null;
+        </div>) : null}</MotionSurface>, document.body);
 
   return (
     <div className={rootClassName} ref={rootRef} title={title}>

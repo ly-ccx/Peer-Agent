@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../app/components/MotionSurface';
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { PeerIcon } from '../../ui/icons';
@@ -90,7 +91,7 @@ export function BotSelectionQuote({ root, label, onQuote }: {
     };
   }, [selected, root]);
 
-  return selected ? createPortal(<button ref={toolbar} type="button" className="bot-quote-action bot-selection-quote"
+  return createPortal(<MotionSurface kind="fade">{selected ? (<button ref={toolbar} type="button" className="bot-quote-action bot-selection-quote"
     style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}
     onMouseDown={event => event.preventDefault()}
     onClick={() => {
@@ -99,5 +100,5 @@ export function BotSelectionQuote({ root, label, onQuote }: {
       root.current?.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea')?.focus({ preventScroll: true });
     }}>
     <PeerIcon name="back" size={14} />{label}
-  </button>, document.body) : null;
+  </button>) : null}</MotionSurface>, document.body);
 }

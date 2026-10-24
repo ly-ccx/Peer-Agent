@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../../app/components/MotionSurface';
 import './model-selection.css';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -298,7 +299,7 @@ export function ModelSelectionPanel({
         <span className="model-selection-provider-name">{browsed?.label || (isZh ? '选择提供商' : 'Choose a provider')}</span>
         <PeerIcon name="chevronRight" size={14} className="model-selection-provider-chevron" />
       </button>
-      {providerMenuOpen ? (
+      <MotionSurface kind="fade">{providerMenuOpen ? (
         <div
           id={listId}
           className={`model-selection-provider-menu motion-enter-fade${menuBelow ? ' is-below' : ''}`}
@@ -331,7 +332,7 @@ export function ModelSelectionPanel({
             </button>
           ) : null}
         </div>
-      ) : null}
+      ) : null}</MotionSurface>
       <div className="model-selection-section-label">{isZh ? '模型' : 'Models'}</div>
       {!browsed?.models.some(model => !model.disabled) ? <p className="ui-form-feedback">{isZh ? '当前没有可选模型，请检查服务连接与模型范围。' : 'No model is available. Check the service connection and model scope.'}</p> : null}
       <div className="model-selection-models" role="listbox" aria-label={isZh ? '模型' : 'Models'}>
@@ -518,8 +519,7 @@ export function AnchoredModelSelectionMenu({
           ? <PeerIcon name="warning" size={12} className="pa-cascading-caret" />
           : <PeerIcon name="chevronDown" size={12} className={`pa-cascading-caret${open ? ' is-open' : ''}`} />}
       </button>
-      {open ? createPortal(
-        <InteractionLayerContext.Provider value={layer}><div id={panelId} ref={panelRef} className="model-selection-popover motion-enter-rise" style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}>
+      {createPortal(<InteractionLayerContext.Provider value={layer}><MotionSurface>{open ? (<div id={panelId} ref={panelRef} className="model-selection-popover" style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}>
           <ModelSelectionPanel
             groups={groups}
             selectedModelId={selectedModelId}
@@ -537,9 +537,7 @@ export function AnchoredModelSelectionMenu({
               setOpen(false);
             }}
           />
-        </div></InteractionLayerContext.Provider>,
-        document.body,
-      ) : null}
+        </div>) : null}</MotionSurface></InteractionLayerContext.Provider>, document.body)}
     </div>
   );
 }
