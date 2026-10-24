@@ -3,7 +3,7 @@ import path from 'node:path';
 
 /** Real component + delayed/failing production IPC save in the disposable smoke host. */
 export async function checkEffortStability({ page, slider, strength, until, getBot, failNext, report, captureDirectory, highEffort, scope = 'settings' }) {
-  const feedback = page.locator(scope === 'settings' ? '.bot-settings-tab' : '.bot-convo');
+  const feedback = page.locator(scope === 'settings' ? '.bot-settings-tab' : '.model-selection-popover');
   const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
   const sample = async (key, collectionDelayMs = 0) => {
     // Establish the baseline after entry motion, before starting a save.
@@ -92,7 +92,10 @@ export async function checkEffortStability({ page, slider, strength, until, getB
   assert.equal(await strength.locator('.model-selection-trigger-label').evaluate(node => node.scrollWidth <= node.clientWidth), true, 'full effort label must fit the normal composer and settings width');
   const discard = feedback.locator('.bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
   if (await discard.count()) {
-    await page.keyboard.press('Escape'); await discard.click(); await strength.click(); await slider.waitFor();
+    if (scope === 'settings') await page.keyboard.press('Escape');
+    await discard.click();
+    if (await strength.getAttribute('aria-expanded') !== 'true') await strength.click();
+    await slider.waitFor();
   }
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
   (report.effortStability ??= {})[scope] = { delayMs: 650, failureCollectionDelayMs: 900, successFrames, failureFrames, successHeld: true, failureHeldThenRolledBack: true,

@@ -19,6 +19,7 @@ import { checkBotTaskCancellation } from './bot-task-cancel-checks.mjs';
 import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } from './bot-history-motion-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
+import { checkSurfaceMotion } from './bot-surface-motion-checks.mjs';
 import { checkBotCoordination } from './bot-coordination-checks.mjs';
 import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
 import { checkBotAgentActivity } from './bot-agent-activity-checks.mjs';
@@ -497,7 +498,11 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--window-material-only')) {
+  if (process.argv.includes('--surface-motion-only')) {
+    assert.ok(process.argv.includes('--effort-stability'), '--surface-motion-only requires controlled save latency/failure');
+    await checkSurfaceMotion({ page, fixture, until, report, captureDirectory: root,
+      failNext: () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) });
+  } else if (process.argv.includes('--window-material-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotWindowMaterial({ page, until, report, captureDirectory: root });
