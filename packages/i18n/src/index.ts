@@ -96,6 +96,7 @@ export type TranslationKey =
   | 'projectAgent.host.requested'
   | 'projectAgent.host.ready'
   | 'projectAgent.host.failed'
+  | 'projectAgent.host.notOwnerAction'
   | 'developer.projectAgent.nav'
   | 'developer.projectAgent.title'
   | 'developer.projectAgent.description'
@@ -1707,6 +1708,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.probeFailed': '云端合约探测失败',
     'developer.ipcUnavailable': '开发者模式主进程通道未注册。请完全退出并重启客户端，确保 Electron main 已更新后再重试。',
     'projectAgent.host.title': "执行宿主",
+    'projectAgent.host.notOwnerAction': '当前桌面未持有这个机器人的执行权。请在机器人设置的「运行与全局设置」中接管，再继续尝试。',
     'projectAgent.host.hint': "桌面和终端共享同一机器人。接管会先停止旧宿主，再由桌面继续任务。",
     'projectAgent.host.action': "在桌面接管",
     'projectAgent.host.requested': "已请求接管，旧宿主停止后会继续任务。",
@@ -1842,7 +1844,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.synchronizing': '正在同步回复',
     'projectAgent.chat.reply.received': '消息已收到，等待处理进展',
     'projectAgent.chat.reply.waitingModel': '等待模型响应',
-    'projectAgent.chat.recoveryReasoning': '这次回复的模型不支持所选思考强度。请在输入框的模型菜单里检查设置后再试。',
+    'projectAgent.chat.recoveryReasoning': '本地模型配置校验未通过，尚未发起本次请求。请查看回复详情，核对模型与思考强度。',
     'projectAgent.chat.reply.refresh': '刷新状态',
     'projectAgent.chat.reply.related': '这次回复的其他过程（{count}）',
     'projectAgent.chat.reply.relatedTurn': '查看过程 {number}',
@@ -3104,6 +3106,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.probeFailed': 'Cloud contract probe failed',
     'developer.ipcUnavailable': 'Developer mode IPC is not registered in the main process. Fully quit and restart the desktop client so the updated Electron main process is running.',
     'projectAgent.host.title': "Execution host",
+    'projectAgent.host.notOwnerAction': 'This desktop does not hold execution ownership for this bot. Take over under Runtime and global settings in the bot settings, then try again.',
     'projectAgent.host.hint': "Desktop and terminal share this bot. Takeover stops the old host before desktop continues its tasks.",
     'projectAgent.host.action': "Take over on desktop",
     'projectAgent.host.requested': "Takeover requested. Tasks continue after the old host stops.",
@@ -3239,7 +3242,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.synchronizing': 'Synchronizing the reply',
     'projectAgent.chat.reply.received': 'Message received; waiting for progress',
     'projectAgent.chat.reply.waitingModel': 'Waiting for the model',
-    'projectAgent.chat.recoveryReasoning': 'The model for this reply did not support the selected reasoning effort. Check the model settings in the composer menu, then try again.',
+    'projectAgent.chat.recoveryReasoning': 'Local model validation blocked this request before dispatch. Check the reply details and the model and reasoning effort settings.',
     'projectAgent.chat.reply.refresh': 'Refresh status',
     'projectAgent.chat.reply.related': 'Other parts of this reply ({count})',
     'projectAgent.chat.reply.relatedTurn': 'View part {number}',
