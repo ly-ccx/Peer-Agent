@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../app/components/MotionSurface';
 import { PeerIcon } from '../../ui/icons';
 import {
   useCallback,
@@ -710,7 +711,7 @@ export function BrowserView({
           >
             <IconMore />
           </button>
-          {menuOpen ? (
+          <MotionSurface>{menuOpen ? (
             <div className="browser-overflow-menu" role="menu" aria-label={t.menu}>
               {overflowMenu.map((item, index) =>
                 item.kind === 'separator' ? (
@@ -729,7 +730,7 @@ export function BrowserView({
                 ),
               )}
             </div>
-          ) : null}
+          ) : null}</MotionSurface>
         </div>
       </div>
 

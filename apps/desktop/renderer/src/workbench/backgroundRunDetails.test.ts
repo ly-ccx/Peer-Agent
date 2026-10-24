@@ -28,6 +28,7 @@ for (const isZh of [true, false]) for (const output of [false, true]) {
         react: { useRef: () => ({ current: null }), useState: (v: any) => [v, () => {}], useEffect: (fn: () => void) => effects.push(fn) },
         'react/jsx-runtime': { jsx, jsxs: jsx },
         '../ui/icons': { PeerIcon: 'svg-icon' },
+        '../app/components/MotionDetails': { MotionDetails: 'details' },
         './backgroundTaskPresentation': presentation,
         './backgroundRuntimeState': runtime,
       };

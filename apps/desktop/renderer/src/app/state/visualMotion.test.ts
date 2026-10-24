@@ -50,3 +50,20 @@ test('computed time parsing accepts seconds, zero and invalid fallback without i
   assert.equal(motionDurationMs('0.2s'), 200); assert.equal(motionDurationMs('0ms'), 0);
   assert.equal(motionDurationMs('-2ms', 120), 120); assert.equal(motionDurationMs('infinite', 320), 320);
 });
+
+test('CSS exits retain terminal geometry until native end or the final frame, with the original hard bound', async () => {
+  const f = fixture(), a = animation(), frames = new Map<number, () => void>(); let count = 0;
+  const options = { ...f, preserveFinalFrame: true,
+    requestFrame(fn: () => void) { frames.set(1, fn); return 1; }, cancelFrame(id: number) { frames.delete(id); } };
+  const motion = watchVisualMotion([a.value], () => count++, options);
+  a.ready(); await flush(); assert.equal([...f.timers.values()][0]!.ms, 2000);
+  a.resolve(); await flush(); assert.equal(count, 0); assert.equal(a.cancelled(), 0);
+  assert.equal(frames.size, 1);
+  motion.finish(); assert.equal(count, 1); assert.equal(frames.size, 0); assert.equal(a.cancelled(), 1);
+  const b = animation(); const reversed = watchVisualMotion([b.value], () => count++, options);
+  b.resolve(); await flush(); reversed.cancel(); assert.equal(frames.size, 0); assert.equal(count, 1);
+  const c = animation(); watchVisualMotion([c.value], () => count++, options);
+  c.reject(Error('cancelled')); await flush(); assert.equal(count, 2); assert.equal(frames.size, 0);
+  const d = animation(); watchVisualMotion([d.value], () => count++, options);
+  f.fire(); assert.equal(count, 3, 'missing end and a stuck frame still finish at the existing hard bound');
+});

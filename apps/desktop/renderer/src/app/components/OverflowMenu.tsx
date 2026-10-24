@@ -1,3 +1,4 @@
+import { MotionSurface } from './MotionSurface';
 import { isImeKey } from '../../chat/state/compositionGuard';
 import { PeerIcon } from '../../ui/icons';
 import { useId, useRef, useState } from 'react';
@@ -25,7 +26,7 @@ export function OverflowMenu({ items, zh, label }: { items: readonly OverflowMen
         if (isImeKey(event.nativeEvent) || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
         event.preventDefault(); setActive(selectionNavigation(items, -1, event.key, 'vertical') ?? 0); setOpen(true);
       }} onClick={() => { setActive(items.findIndex(item => !item.disabled)); setOpen(value => !value); }}><PeerIcon name="ellipsis" size={16} /></button>
-    {open ? <div ref={menu} className="pa-overflow-menu" role="menu" id={menuId} tabIndex={-1}
+    <MotionSurface>{open ? <div ref={menu} className="pa-overflow-menu" role="menu" id={menuId} tabIndex={-1}
       onKeyDown={event => {
         if (event.defaultPrevented || isImeKey(event.nativeEvent)) return;
         const next = selectionNavigation(items, active, event.key, 'vertical');
@@ -36,6 +37,6 @@ export function OverflowMenu({ items, zh, label }: { items: readonly OverflowMen
       {items.map((item, index) => <button key={item.key} type="button" role="menuitem" data-menu-index={index}
         tabIndex={index === active ? 0 : -1} className={item.danger ? 'danger' : undefined} disabled={item.disabled}
         onFocus={() => setActive(index)} onClick={() => { setOpen(false); item.onSelect(); }}>{item.label}</button>)}
-    </div> : null}
+    </div> : null}</MotionSurface>
   </div>;
 }

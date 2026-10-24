@@ -2541,47 +2541,9 @@
   flex-direction: column;
   gap: 16px;
   padding: 4px 2px 24px;
-  animation: motion-enter-rise var(--za-motion-medium, 220ms) var(--za-ease-decelerate, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
-.llm-service-catalog-header,
-.llm-service-catalog-search,
-.llm-service-catalog-group {
-  animation: motion-enter-rise var(--za-motion-fast, 140ms) var(--za-ease-out, ease) both;
-}
-
-.llm-service-catalog-search {
-  animation-delay: 40ms;
-}
-
-.llm-service-catalog-group:nth-child(1) { animation-delay: 60ms; }
-.llm-service-catalog-group:nth-child(2) { animation-delay: 100ms; }
-.llm-service-catalog-group:nth-child(3) { animation-delay: 140ms; }
-.llm-service-catalog-group:nth-child(4) { animation-delay: 180ms; }
-.llm-service-catalog-group:nth-child(5) { animation-delay: 220ms; }
-.llm-service-catalog-group:nth-child(6) { animation-delay: 260ms; }
-
-.llm-service-template-card {
-  animation: motion-enter-pop var(--za-motion-fast, 140ms) var(--za-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
-}
-
-.llm-service-template-card:nth-child(1) { animation-delay: 60ms; }
-.llm-service-template-card:nth-child(2) { animation-delay: 90ms; }
-.llm-service-template-card:nth-child(3) { animation-delay: 120ms; }
-.llm-service-template-card:nth-child(4) { animation-delay: 150ms; }
-.llm-service-template-card:nth-child(5) { animation-delay: 180ms; }
-.llm-service-template-card:nth-child(n+6) { animation-delay: 210ms; }
-
-/* 退场：点击「返回」时整体下沉淡出，与 enter-rise 对称 */
-.llm-service-catalog.is-closing,
-.llm-service-catalog.is-closing .llm-service-catalog-header,
-.llm-service-catalog.is-closing .llm-service-catalog-search,
-.llm-service-catalog.is-closing .llm-service-catalog-group,
-.llm-service-catalog.is-closing .llm-service-template-card {
-  animation: motion-exit-sink var(--za-motion-fast, 140ms) var(--za-ease-accelerate, cubic-bezier(0.55, 0, 0.68, 0.2)) both;
-  animation-delay: 0ms;
-}
-
+/* The catalog switches as one surface; filtering never replays a card cascade. */
 .llm-service-catalog-header {
   display: flex;
   align-items: flex-start;

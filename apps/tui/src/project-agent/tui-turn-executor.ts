@@ -76,6 +76,8 @@ export function createTuiTurnExecutor(options: {
       id: model.entryId ?? model.credentialId, groupId: model.credentialId, model: model.model,
       providerType: model.providerId, apiKeyConfigured: model.credentialStored, supportsTools: model.supportsTools,
       supportsVision: model.supportsVision, supportsStructured: model.supportsStructured, contextWindow: model.contextWindow,
+      supportsReasoning: model.supportsReasoning, reasoningEffortLevels: model.supportedReasoningEfforts,
+      defaultEffort: model.defaultReasoningEffort,
     }));
     return resolveRoleRoute({ providers, routing: settings.modelRouting, ...input });
   }

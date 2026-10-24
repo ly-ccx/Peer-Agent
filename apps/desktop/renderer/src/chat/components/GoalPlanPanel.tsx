@@ -1,3 +1,4 @@
+import { motionDurationMs, watchVisualMotion } from '../../app/state/visualMotion';
 import { PeerIcon } from '../../ui/icons';
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -1943,11 +1944,6 @@ const PlanCard = memo(function PlanCard({
   );
 });
 
-// 重档过渡的卸载延迟（毫秒），必须与 CSS token --za-motion-medium 对齐（见
-// chat-surface.css 的 .chat-side-panel 过渡时长）。收起时 body 先随收缩动画播完
-// 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
-const GOAL_PANEL_MOTION_MS = 200;
-
 export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus, onActiveDeliveryChange, onActiveGoalRunnerStatusChange }: GoalPlanPanelProps): ReactElement | null {
   const confirm = useConfirm();
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
@@ -1975,6 +1971,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
 
   // 重档过渡：bodyMounted 控制右栏 body 是否仍挂载（收起时延迟卸载，让收缩动画播完）；
   // closing 标记正处于收起动画中，用于给 body 加退场样式、给右栏容器加 data-closing 提前收宽。
+  const bodyRef = useRef<HTMLDivElement>(null);
   const [bodyMounted, setBodyMounted] = useState(false);
   const [closing, setClosing] = useState(false);
   // 本轮助手输出（streaming）期间，禁用「批准并执行 / 驳回」这两个治理事实写操作：
@@ -2278,8 +2275,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         ? false
         : !manualCollapsed;
 
-  // 重档过渡（延迟卸载）：展开 → 立即挂载 body 并清除 closing；收起 → 先标记 closing
-  // 触发收缩动画，GOAL_PANEL_MOTION_MS 后再真正卸载 body。
+  // 只保留视觉退场；时长来自共享 token，反向、静态偏好与卸载取消旧收尾。
   // 注意：此 effect 必须在任何 early-return 之前，保证 Hook 调用顺序稳定（React Hooks 规则）。
   useEffect(() => {
     if (expanded) {
@@ -2289,11 +2285,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     }
     if (!bodyMounted) return undefined;
     setClosing(true);
-    const timer = window.setTimeout(() => {
-      setBodyMounted(false);
-      setClosing(false);
-    }, GOAL_PANEL_MOTION_MS);
-    return () => window.clearTimeout(timer);
+    const duration = bodyRef.current ? motionDurationMs(getComputedStyle(bodyRef.current).getPropertyValue('--za-motion-medium')) : 0;
+    const motion = watchVisualMotion([], () => { setBodyMounted(false); setClosing(false); }, { durationMs: duration });
+    return motion.cancel;
   }, [expanded, bodyMounted]);
 
   // 把 closing 状态写到右栏容器（portal 宿主）上，让它在 body 卸载前就开始收宽，
@@ -2305,7 +2299,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     } else {
       sidePanelContainer.removeAttribute('data-closing');
     }
-    return undefined;
+    return () => sidePanelContainer.removeAttribute('data-closing');
   }, [closing, sidePanelContainer]);
 
   const planViewModel = useMemo(() => {
@@ -2470,7 +2464,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       })()}
       {!bodyMounted ? null : (() => {
         const body = (
-      <div className={`goal-panel-body${closing ? ' goal-panel-body--closing' : ''}`}>
+      <div ref={bodyRef} inert={!expanded} aria-hidden={!expanded} className={`goal-panel-body${closing ? ' goal-panel-body--closing' : ''}`}>
       {effectiveError ? <div className="goal-panel-error">{effectiveError}</div> : null}
       {/* 主卡 = mainPlan（仅待批准 / 执行中）才置顶强制展开。
           没有进行中的计划时 mainPlan 为 null，不钉主卡，全部计划进入下方折叠清单。 */}

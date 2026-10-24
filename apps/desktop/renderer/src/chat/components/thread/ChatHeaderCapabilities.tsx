@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../../app/components/MotionSurface';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type {
   CapabilityManifest,
@@ -357,7 +358,7 @@ export function ChatHeaderCapabilities({
         </svg>
         <span className="chat-header-cap-count">{total}</span>
       </button>
-      {open ? (
+      <MotionSurface>{open ? (
         <div className="chat-header-cap-popover" role="menu">
           <div className="chat-header-cap-popover-title">
             {i18n.t('header.capabilities.title')}
@@ -524,7 +525,7 @@ export function ChatHeaderCapabilities({
             </button>
           ) : null}
         </div>
-      ) : null}
+      ) : null}</MotionSurface>
       {selectedSkill ? (
         <SkillDetailDialog
           skill={selectedSkill}

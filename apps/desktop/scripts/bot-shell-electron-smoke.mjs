@@ -242,10 +242,20 @@ assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read sea
 let observedService = serviceText.replace('function readConversation(payload = {}) {', `function readConversation(payload = {}) {
     if(payload.workspaceId===globalThis.rcBotWorkWorkspace && (globalThis.rcInteractionReadMode==='all'||globalThis.rcInteractionReadMode==='cards'&&payload.view==='cards'))return {ok:false,code:'CONTROLLED_READ_FAILURE'};`).replace(readSeam, `${readSeam}\n  const result = page;
   if (payload.view === 'cards' && globalThis.rcBotWorkWorkspace === payload.workspaceId) {
-    result.cards = [...(result.cards || []), ...(globalThis.rcBotWorkMessages || []).flatMap(message => message.cards || [])];
+    const knownCards = new Set((result.cards || []).map(card => card.cardId));
+    result.cards = [...(result.cards || []), ...(globalThis.rcBotWorkMessages || []).flatMap(message => message.cards || []).filter(card => {
+      if (knownCards.has(card.cardId)) return false;
+      knownCards.add(card.cardId); return true;
+    })];
   }
   if (payload.view !== 'cards' && !payload.processFor && globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
-    result.messages = [...result.messages, ...globalThis.rcBotWorkMessages];
+    // Production already projects stored approvals. Fixture-only messages must
+    // not duplicate those factual rows or replace their current state.
+    const knownMessages = new Set(result.messages.map(message => message.id));
+    result.messages = [...result.messages, ...globalThis.rcBotWorkMessages.filter(message => {
+      if (knownMessages.has(message.id)) return false;
+      knownMessages.add(message.id); return true;
+    })];
     // The injected task-note facts include their current decision, matching the production page contract.
     const currentQuestion=globalThis.rcBotWorkMessages.flatMap(message=>(message.cards||[])
       .filter(card=>card.kind==='question'&&card.resolvedState!=='resolved'&&card.actions?.length)
@@ -497,7 +507,12 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--window-material-only')) {
+  if (process.argv.includes('--quick-chat-bots-only')) {
+    await quickNative('open');
+    const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
+    await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
+      failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
+  } else if (process.argv.includes('--window-material-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotWindowMaterial({ page, until, report, captureDirectory: root });

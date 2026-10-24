@@ -5,6 +5,8 @@ import { AnchoredModelSelectionMenu } from '../chat/components/thread/ModelSelec
 import { isEffortLevel, type EffortLevel } from '../chat/state/preferences';
 import type { SelectionProviderGroup } from '../chat/components/thread/modelSelection';
 import { botConfiguredModelSelection, botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './state/botModelControls';
+import type { BotModelsControlState } from './state/useBotModels';
+import { BotModelFeedback } from './BotModelFeedback';
 import '../chat/styles/chat-surface.css';
 import './styles/bot-model-controls.css';
 
@@ -58,7 +60,7 @@ function botPanelGroups(
   ];
 }
 
-export function BotModelControls({ role, policy, models, view, busy, compact = false, activeSelection, i18n, onChange }: {
+export function BotModelControls({ role, policy, models, view, busy, compact = false, activeSelection, feedback, i18n, onChange }: {
   readonly role: ModelRole;
   readonly policy?: ProjectModelPolicy | null;
   readonly models: readonly ModelRoutingMenuOption[];
@@ -66,6 +68,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   readonly busy: boolean;
   readonly compact?: boolean;
   readonly activeSelection?: ProjectAgentActivity['modelSelection'];
+  readonly feedback?: BotModelsControlState;
   readonly i18n: I18nRuntime;
   readonly onChange: (policy: ProjectModelPolicy) => void | Promise<unknown>;
 }) {
@@ -85,13 +88,13 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
     (tier) => i18n.t(`modelRouting.tier.${tier}`),
   ), [i18n, isZh, models, view]);
   const changeModel = (id: string) => {
-    if (id === 'inherit') onChange(botInheritModelPolicy(policy, role));
-    else if (id.startsWith('tier:')) onChange({ ...policy, overrides: { ...policy?.overrides,
+    if (id === 'inherit') return onChange(botInheritModelPolicy(policy, role));
+    else if (id.startsWith('tier:')) return onChange({ ...policy, overrides: { ...policy?.overrides,
       [role]: { mode: 'tier', tier: id.slice(5) as 'strong' | 'fast' | 'economy' | 'vision' } } });
     else {
       const next = models.find(item => item.id === id);
       if (next && view?.eligibleModelIds.includes(id)) {
-        onChange(botFixedModelPolicy(policy, role, next, effort, setting?.mode === 'fixed' && setting.fastMode === true));
+        return onChange(botFixedModelPolicy(policy, role, next, effort, setting?.mode === 'fixed' && setting.fastMode === true));
       }
     }
   };
@@ -104,6 +107,10 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
     : (model?.label ?? i18n.t('projectAgent.model.unavailable'));
   const effortLevel: EffortLevel = isEffortLevel(effort) ? effort : 'default';
   const fastMode = setting?.mode === 'fixed' && setting.fastMode === true;
+  const updating = Boolean(feedback?.busy || feedback && !feedback.loaded && feedback.reading);
+  const feedbackKey = feedback?.saveError ? 'forms.saveFailed' : feedback?.readError ? 'forms.loadFailed'
+    : feedback?.pending && !feedback.busy ? 'forms.pendingSelection'
+      : feedback?.loaded && !feedback.models.length ? 'forms.noModels' : null;
   return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''}>
     <div className="bot-model-control-row">
       <AnchoredModelSelectionMenu
@@ -113,7 +120,11 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         effort={effortLevel}
         fastMode={fastMode}
         isZh={isZh}
-        disabled={busy || !view}
+        disabled={!feedback && (busy || !view)}
+        selectionDisabled={busy || !view}
+        busy={updating}
+        statusLabel={feedbackKey ? i18n.t(feedbackKey) : updating ? i18n.t(feedback?.busy ? 'forms.saving' : 'forms.loading') : undefined}
+        feedback={feedback ? <BotModelFeedback state={feedback} i18n={i18n} showLoading={false} showSaving={false} /> : undefined}
         label={label}
         title={`${label} · ${source} · ${i18n.t('projectAgent.model.nextReply')}`}
         onSelectModel={changeModel}
@@ -123,7 +134,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         }}
         onFastModeChange={(enabled) => {
           if (!model || !view?.eligibleModelIds.includes(model.id)) return;
-          onChange(botFixedModelPolicy(policy, role, model, effort, enabled));
+          return onChange(botFixedModelPolicy(policy, role, model, effort, enabled));
         }}
       />
     </div>

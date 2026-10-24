@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { createInteractionLayers } from './interactionLayers.ts';
 import { focusBoundary } from '../hooks/focusScope.ts';
+import { createClosePreparation } from '../state/closePreparation.ts';
 
 test('an overlay releases its focus trap before its layer restores the opener', () => {
   const effects: (() => void | (() => void))[] = [];
@@ -66,6 +67,8 @@ test('an overlay releases its focus trap before its layer restores the opener', 
     '../components/interactionLayers': { interactionLayers: layers, synchronizeModalBoundary() {}, ownsLayerPointer: () => true },
     './focusScope': { collectFocusable: focusable, focusBoundary },
     '../../chat/state/compositionGuard': { isImeKey: () => false },
+    '../state/closePreparation': { createClosePreparation },
+    '../hooks/useMotionSettled': { useMotionSettled: () => true },
     './anchoredOverlay': {}, './overlayCloseTarget': {}, '../state/visualMotion': {},
   };
   function load(name: string, relative: string) {

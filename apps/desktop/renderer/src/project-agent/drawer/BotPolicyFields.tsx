@@ -1,4 +1,6 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { ReactNode } from 'react';
 import type { BotModelViews, BotProfile, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy } from '@peer-agent/protocol';
 import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotModelControls } from '../BotModelControls';
@@ -34,9 +36,10 @@ export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps
 }
 
 /** Controlled project policy form. All writes and validation belong to update-profile. */
-export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }: PolicyProps & {
+export function BotPolicyFields({ profile, models, views, busy, feedback, i18n, onChange }: PolicyProps & {
   models: readonly ModelRoutingMenuOption[];
   views: BotModelViews;
+  feedback?: ReactNode;
 }) {
   const policy = profile.modelPolicy || {};
   const scopeIds = policy.scope?.modelProviderIds;
@@ -49,7 +52,7 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
   </div>;
   return <SettingsGroup className="bot-settings-section bot-policy-fields" title={i18n.t('projectAgent.policy.models')} description={i18n.t('projectAgent.policy.modelsHint')}>
     {ROLES.slice(0, 3).map(roleField)}
-    <details className="bot-settings-disclosure bot-model-advanced">
+    <MotionDetails className="bot-settings-disclosure bot-model-advanced">
       <summary>{i18n.t('projectAgent.drawer.settings.advancedModels')}<PeerIcon name="chevronDown" size={14} /></summary>
       <div className="bot-settings-disclosure-body">
         {ROLES.slice(3).map(roleField)}
@@ -78,6 +81,7 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
             onCheckedChange={value => setPolicy({ ...policy, scope: { ...policy.scope, localOnly: value } })} />
         </div>
       </div>
-    </details>
+    </MotionDetails>
+    {feedback}
   </SettingsGroup>;
 }

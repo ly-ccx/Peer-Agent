@@ -104,6 +104,7 @@ export function BotProfileDrawer({
   const layout = drawerLayout(width);
   const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(memory.open ? 'in' : 'off');
   const bodyRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLElement>(null);
   const previousInspect = useRef(inspect);
   useEffect(() => {
     if (memory.open && previousInspect.current !== inspect) {
@@ -177,7 +178,9 @@ export function BotProfileDrawer({
       setDockPhase('off');
       return undefined;
     }
-    const motion = watchVisualMotion([], () => setDockPhase('off'), { durationMs: 360 });
+    let animations: Animation[] = [];
+    try { animations = dockRef.current?.getAnimations?.() ?? []; } catch { /* Static close. */ }
+    const motion = watchVisualMotion(animations, () => setDockPhase('off'));
     return motion.cancel;
   }, [dockPhase, motionEnabled]);
 
@@ -221,14 +224,14 @@ export function BotProfileDrawer({
 
   if (layout === 'cover' ? !memory.open : dockPhase === 'off') return null;
 
-  const body = (
+  const body = (requestClose = close) => (
     <div className="bot-drawer-body" ref={bodyRef}>
       <div className="bot-drawer-chrome">
         <header className="bot-drawer-head">
           <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
           <button
             type="button"
-            onClick={close}
+            onClick={requestClose}
           >
             {i18n.t('projectAgent.drawer.close')}
           </button>
@@ -348,7 +351,7 @@ export function BotProfileDrawer({
         ariaLabel={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
         panelClassName="bot-drawer-panel"
       >
-        {body}
+        {({ requestClose }) => body(requestClose)}
       </Drawer>
     );
   }
@@ -361,14 +364,14 @@ export function BotProfileDrawer({
         isZh={isZh}
         onResize={(next) => onMemory(resizeDrawer(memory, next))}
       />
-      <aside
+      <aside ref={dockRef}
         className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
         style={memory.width === undefined ? undefined : { ['--pa-drawer-width' as string]: `${memory.width}px` }}
         aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
         inert={!memory.open}
         aria-hidden={!memory.open}
       >
-        <InteractionLayerContext.Provider value={layer}>{body}</InteractionLayerContext.Provider>
+        <InteractionLayerContext.Provider value={layer}>{body()}</InteractionLayerContext.Provider>
       </aside>
     </div>
   );

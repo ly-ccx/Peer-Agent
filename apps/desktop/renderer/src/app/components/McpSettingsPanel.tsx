@@ -617,6 +617,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
           ariaLabel="新增本地 MCP server"
           panelClassName="mcp-modal-card"
         >
+          {({ requestClose }) => <>
             <header className="mcp-modal-header">
               <div>
                 <h3>新增本地 MCP server</h3>
@@ -626,7 +627,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 type="button"
                 className="ui-button is-icon is-compact mcp-modal-close"
                 aria-label="关闭"
-                onClick={() => { if (requestFormClose()) closeForm(); }}
+                onClick={requestClose}
                 disabled={busy}
               >
                 <PeerIcon name="close" size={12} />
@@ -811,9 +812,10 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
             </fieldset>
             <div className="mcp-modal-footer">
               {status ? <p className="ui-form-feedback" role="status">{status}</p> : null}
-              <button type="button" className="ui-button mcp-modal-cancel" onClick={() => { if (requestFormClose()) closeForm(); }} disabled={busy}>取消</button>
+              <button type="button" className="ui-button mcp-modal-cancel" onClick={requestClose} disabled={busy}>取消</button>
               <button type="button" className="ui-button mcp-modal-confirm" onClick={() => void handleSave()} disabled={busy || !canSave}>{showAdvancedSettings ? '保存连接' : '连接'}</button>
             </div>
+          </>}
         </Overlay>
       ) : null}
 

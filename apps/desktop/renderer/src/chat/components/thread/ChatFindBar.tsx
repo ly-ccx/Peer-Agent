@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../../app/components/MotionSurface';
 import { useInteractionLayer } from '../../../app/hooks/useInteractionLayer';
 import { isImeKey } from '../../state/compositionGuard';
 import type React from 'react';
@@ -19,6 +20,7 @@ interface ChatFindBarProps {
   /** 搜索范围容器(消息滚动区)。 */
   containerRef: React.RefObject<HTMLElement | null>;
   isZh: boolean;
+  open?: boolean;
   onClose: () => void;
   onNavigate?: () => void;
   /**
@@ -74,11 +76,11 @@ function collectRanges(root: HTMLElement, query: string): Range[] {
   return ranges;
 }
 
-export function ChatFindBar({ containerRef, isZh, onClose, onNavigate, recomputeKey }: ChatFindBarProps) {
+export function ChatFindBar({ containerRef, isZh, open = true, onClose, onNavigate, recomputeKey }: ChatFindBarProps) {
   const inputRef = useRef<HTMLInputElement>(null), rootRef = useRef<HTMLDivElement>(null);
   const navigate = useRef(onNavigate); navigate.current = onNavigate;
   const [navigationRevision, setNavigationRevision] = useState(0), lastNavigation = useRef(0);
-  useInteractionLayer(true, { roots: [rootRef], onClose, onEnter: () => inputRef.current?.focus({ preventScroll: true }) });
+  useInteractionLayer(open, { roots: [rootRef], onClose, onEnter: () => inputRef.current?.focus({ preventScroll: true }) });
   const rangesRef = useRef<Range[]>([]);
   const [query, setQuery] = useState('');
   const [matchCount, setMatchCount] = useState(0);
@@ -92,11 +94,21 @@ export function ChatFindBar({ containerRef, isZh, onClose, onNavigate, recompute
     api.registry.delete(HIGHLIGHT_ACTIVE);
   }, []);
 
-  // 卸载时清除全部高亮,避免残留。
-  useEffect(() => clearHighlights, [clearHighlights]);
+  const wasOpen = useRef(open);
+  // Hidden instances must not clear another live conversation’s highlights.
+  useEffect(() => () => { if (wasOpen.current) clearHighlights(); }, [clearHighlights]);
+
+  useEffect(() => {
+    const previous = wasOpen.current; wasOpen.current = open;
+    if (open || !previous) return;
+    clearHighlights(); rangesRef.current = [];
+    setQuery(''); setMatchCount(0); setActiveIndex(-1); setUnsupported(false);
+    lastNavigation.current = navigationRevision;
+  }, [open, clearHighlights, navigationRevision]);
 
   // 计算匹配并高亮全部命中。
   useEffect(() => {
+    if (!open) return;
     const api = getHighlightApi();
     if (!api) {
       setUnsupported(true);
@@ -116,10 +128,11 @@ export function ChatFindBar({ containerRef, isZh, onClose, onNavigate, recompute
       api.registry.delete(HIGHLIGHT_ALL);
       api.registry.delete(HIGHLIGHT_ACTIVE);
     }
-  }, [query, recomputeKey, containerRef]);
+  }, [open, query, recomputeKey, containerRef]);
 
   // 高亮当前命中并滚动到可见区。
   useEffect(() => {
+    if (!open) return;
     const api = getHighlightApi();
     if (!api) return;
     const range = rangesRef.current[activeIndex];
@@ -134,7 +147,7 @@ export function ChatFindBar({ containerRef, isZh, onClose, onNavigate, recompute
       lastNavigation.current = navigationRevision; navigate.current?.();
       range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'auto' });
     }
-  }, [activeIndex, navigationRevision, query, recomputeKey]);
+  }, [open, activeIndex, navigationRevision, query, recomputeKey]);
 
   const goNext = useCallback(() => {
     const count = rangesRef.current.length; if (!count) return;
@@ -173,7 +186,7 @@ export function ChatFindBar({ containerRef, isZh, onClose, onNavigate, recompute
         : '';
 
   return (
-    <div ref={rootRef} className="chat-find-bar" role="search">
+    <MotionSurface kind="fade">{open ? <div ref={rootRef} className="chat-find-bar" role="search">
       <input
         ref={inputRef}
         type="text"
@@ -217,6 +230,6 @@ export function ChatFindBar({ containerRef, isZh, onClose, onNavigate, recompute
       >
         <PeerIcon name="close" size={14} />
       </button>
-    </div>
+    </div> : null}</MotionSurface>
   );
 }

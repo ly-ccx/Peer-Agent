@@ -1,3 +1,4 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import { useEditableResource } from '../../ui/forms/useEditableResource';
 import { FormFeedback } from '../../ui/forms/FormFeedback';
 import { useSettingsAction } from '../../ui/forms/useSettingsAction';
@@ -114,8 +115,8 @@ export function BotSettingsTab({
   return (
     <div className="bot-drawer-tab bot-settings-tab">
       <BotPolicyFields profile={profile} models={modelControls.models} views={modelControls.views} busy={busy || modelControls.busy} i18n={i18n}
+        feedback={<BotModelFeedback state={modelControls} i18n={i18n} />}
         onChange={patch => patch.modelPolicy ? modelControls.save(patch.modelPolicy) : undefined} />
-      <BotModelFeedback state={modelControls} i18n={i18n} />
       <SettingsGroup className="bot-settings-section bot-settings-identity" title={i18n.t('projectAgent.drawer.settings.appearance')}>
       <div className="bot-settings-field">
         <label htmlFor={nameId}>{i18n.t('projectAgent.drawer.settings.name')}</label>
@@ -180,7 +181,7 @@ export function BotSettingsTab({
       </div>
       <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
       </SettingsGroup>
-      <details className="bot-settings-disclosure bot-runtime-settings">
+      <MotionDetails className="bot-settings-disclosure bot-runtime-settings">
         <summary>{i18n.t('projectAgent.drawer.settings.runtime')}<PeerIcon name="chevronDown" size={14} /></summary>
         <div className="bot-settings-disclosure-body">
           <BotHostControl workspaceId={workspaceId} i18n={i18n} />
@@ -197,7 +198,7 @@ export function BotSettingsTab({
             <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.concurrencyHint')}</p>
           </div>
         </div>
-      </details>
+      </MotionDetails>
       <FormFeedback i18n={i18n} saving={action.busy} saveError={action.error} committed={action.committed} onRetry={action.retry} />
       <div className="bot-settings-danger">
       <button type="button" className="ui-button" disabled={busy} onClick={() => { void remove(); }}>

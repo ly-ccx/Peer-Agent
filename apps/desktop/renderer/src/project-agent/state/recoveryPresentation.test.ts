@@ -29,3 +29,11 @@ test('folded history distinguishes actual recovery from a superseded reply', () 
   assert.equal(agentFailurePresentation({ ...base, failureStatus: status }).messageKey, 'projectAgent.chat.recoveryEnded');
   assert.equal(agentFailurePresentation({ ...base, failureStatus: { ...status, phase: 'superseded' } }).messageKey, 'projectAgent.chat.recoveryEarlierReply');
 });
+
+test('a known host effort rejection names the configuration problem without exposing arbitrary diagnostics', () => {
+  const card = { cardId: 'failure', kind: 'agent_unavailable', content: '代理暂时不可用：所选模型不支持该推理强度' };
+  assert.equal(agentFailurePresentation(card).messageKey, 'projectAgent.chat.recoveryReasoning');
+  assert.equal(agentFailurePresentation({ ...card, recoveryAction: { canContinue: false } }).retryAllowed, false);
+  assert.equal(agentFailurePresentation({ ...card, resolvedState: 'resolved' }).messageKey, 'projectAgent.chat.recoveryEarlierReply');
+  assert.equal(agentFailurePresentation({ ...card, content: 'PRIVATE_DIAGNOSTIC 所选模型不支持该推理强度' }).messageKey, 'projectAgent.chat.unavailable');
+});

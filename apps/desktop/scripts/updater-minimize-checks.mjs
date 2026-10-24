@@ -79,7 +79,10 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
           panel.addEventListener('animationstart', inspectMidpoint, { capture: true });
           const sample = () => {
             sampleFrame('raf');
-            if (performance.now() - started < 850) requestAnimationFrame(sample);
+            // Native animationend is sampled before React commits its close.
+            // Under a stalled frame, observe that following commit as well;
+            // the real midpoint/endpoint assertions below remain mandatory.
+            if (performance.now() - started < 850 || panel.isConnected && performance.now() - started < 2000) requestAnimationFrame(sample);
             else {
               panel.removeEventListener('animationend', completed, { capture: true });
               panel.removeEventListener('animationstart', inspectMidpoint, { capture: true });

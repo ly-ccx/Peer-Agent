@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../app/components/MotionSurface';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -870,7 +871,7 @@ export function Sidebar({
                     {renderWorkspaceTaskMore(ws.path, workspaceTasks.length, canShowMore)}
                   </div>
                 </div>
-                {projectPopoverPath === ws.path ? (
+                <MotionSurface>{projectPopoverPath === ws.path ? (
                   <div ref={projectPopoverRef} className="sidebar-project-popover" role="dialog" aria-label={isZh ? '项目文件夹' : 'Project folders'}>
                     <div className="sidebar-project-popover-title">{ws.name}</div>
                     <div className="sidebar-project-popover-folders">
@@ -896,7 +897,7 @@ export function Sidebar({
                       {isZh ? '编辑项目' : 'Edit project'}
                     </button>
                   </div>
-                ) : null}
+                ) : null}</MotionSurface>
               </div>
             );
           })}
@@ -981,9 +982,7 @@ export function Sidebar({
       </div>
 
 
-      {contextMenu && contextWorkspace
-        ? createPortal(
-            <div
+      {createPortal(<MotionSurface kind="fade">{contextMenu && contextWorkspace ? (<div
               ref={contextMenuRef}
               className="sidebar-context-menu"
               role="menu"
@@ -1040,14 +1039,7 @@ export function Sidebar({
               >
                 <span>{isZh ? '移除' : 'Remove'}</span>
               </button>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {contextMenu && contextConv
-        ? createPortal(
-            <div
+            </div>) : contextMenu && contextConv ? (<div
               ref={contextMenuRef}
               className="sidebar-context-menu"
               role="menu"
@@ -1114,10 +1106,7 @@ export function Sidebar({
                   <span>{isZh ? '归档会话' : 'Archive chat'}</span>
                 </button>
               )}
-            </div>,
-            document.body,
-          )
-        : null}
+            </div>) : null}</MotionSurface>, document.body)}
 
       <div className="sidebar-bottom">
         <button type="button" className={`sidebar-nav-btn ${activePage === 'settings' ? 'active' : ''}`} onClick={onOpenSettings}>

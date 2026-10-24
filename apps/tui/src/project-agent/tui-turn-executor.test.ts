@@ -174,6 +174,25 @@ test('role routing uses the shared desktop model catalog and its capability flag
   expect(env.executor.resolveGoalRole({role:'visual_verifier',taskRequiresVision:true})).toMatchObject({ok:true,selection:{modelProviderId:'vision-model',modelId:'vision'}});
 });
 
+test('role routing retains declared effort levels and defaults across the TUI metadata adapter', () => {
+  const env = harness({ async stream() { return { content: '', toolCalls: [] }; } });
+  writeFileSync(path.join(env.home, 'llm-providers.json'), JSON.stringify([
+    { id: 'reasoning-model', groupId: 'channel', provider: 'openai', model: 'reasoning', enabled: true,
+      isDefault: true, apiKeyConfigured: true, supportsTools: true, supportsReasoning: true,
+      reasoningEffortLevels: ['low', 'high', 'max'], reasoningDefaultEffort: 'high' },
+  ]));
+  expect(env.executor.resolveGoalRole({ role: 'project_agent' })).toMatchObject({ ok: true,
+    selection: { modelProviderId: 'reasoning-model', reasoningEffort: 'high' } });
+  for (const role of ['project_agent', 'session_worker', 'verifier']) {
+    expect(env.executor.resolveGoalRole({ role, projectPolicy: { overrides: {
+      [role]: { mode: 'fixed', modelProviderId: 'reasoning-model', reasoningEffort: 'max' },
+    } } })).toMatchObject({ ok: true, selection: { modelProviderId: 'reasoning-model', reasoningEffort: 'max' } });
+  }
+  expect(env.executor.resolveGoalRole({ role: 'project_agent', projectPolicy: { overrides: {
+    project_agent: { mode: 'fixed', modelProviderId: 'reasoning-model', reasoningEffort: 'xhigh' },
+  } } })).toMatchObject({ ok: false, reason: 'reasoning' });
+});
+
 test('successful project replies terminate the actual TUI pipeline with Grant and Evidence', async () => {
   for (const suppressed of [false, true]) {
     let posts = 0;

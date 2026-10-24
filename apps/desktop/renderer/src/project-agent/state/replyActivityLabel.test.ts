@@ -47,7 +47,7 @@ test('terminal turns have no running message even with stale active tools', () =
   assert.equal(replyActivityLabel(undefined, zh), null);
 });
 test('phase fallbacks do not manufacture execution and translations remain natural', () => {
-  assert.equal(label([], 'waiting'), '正在准备下一步');
+  assert.equal(label([], 'waiting'), '等待模型响应');
   assert.equal(label([], 'thinking'), '正在整理思路');
   assert.equal(label([], 'responding'), '正在整理回复');
   assert.equal(label([], 'settling'), '正在整理结果');

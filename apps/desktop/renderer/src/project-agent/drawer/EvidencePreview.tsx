@@ -11,8 +11,10 @@ export function EvidencePreview({ refs, i18n }: { readonly refs: readonly string
   return <>
     <EvidenceList refs={refs} i18n={i18n} onOpen={setSelected} />
     {selected ? <Drawer ariaLabel={i18n.t('resources.evidence')} onClose={() => setSelected(null)} panelClassName="bot-evidence-preview">
-      <button type="button" className="ui-button" onClick={() => setSelected(null)}>{i18n.t('resources.close')}</button>
+      {({ requestClose }) => <>
+      <button type="button" className="ui-button" onClick={requestClose}>{i18n.t('resources.close')}</button>
       <EvidenceView key={selected} evidence={{ evidenceRef: selected }} i18n={i18n} />
+      </>}
     </Drawer> : null}
   </>;
 }

@@ -351,7 +351,8 @@ export function TaskMonitorRailView({
     <aside
       className={`task-monitor-rail ${exiting ? 'motion-exit-slide-inline' : 'motion-enter-slide-inline'}`}
       aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}
-      aria-hidden={exiting}
+      aria-hidden={!visible}
+      inert={!visible}
       onAnimationEnd={(event) => {
         if (event.target === event.currentTarget && event.animationName === 'motion-exit-slide-inline') onAnimationEnd();
       }}
