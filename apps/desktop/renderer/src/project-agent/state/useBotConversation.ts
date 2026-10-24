@@ -3,7 +3,7 @@ import { clientApi } from '../../clientApi';
 import { useInputRecovery } from './useInputRecovery';
 import { projectInputWasReceived, type ProjectAgentSubmitInputResult } from '@peer-agent/protocol';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity } from './botActivityState';
+import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity, activityFromConversationSnapshot } from './botActivityState';
 import { continuousReplyRows, type AwaitingBotInput } from './botReplyContinuity';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
@@ -108,15 +108,14 @@ export function useBotConversation(workspaceId: string) {
       read: async params => {
         const revision = activityEventRef.current;
         const result = await clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true, view: 'interactions' });
-        // A fresh host snapshot can prove an old stream is gone. A late read cannot erase a newer push.
-        if (!params.before && result?.ok && result.activity === null && generationRef.current === ticket
-          && activityEventRef.current === revision) setActivity(null);
-        return result;
+        // Carry the read fence to publication; never clear live state before its messages.
+        return { ...result, activityRevision: revision };
       },
       publish: snapshot => {
         if (generationRef.current !== ticket) return;
         setMessages(snapshot.messages);
-        setActivity(current => mergeBotActivity(current, snapshot.activity, workspaceId));
+        setActivity(current => activityFromConversationSnapshot(current, snapshot.activity, workspaceId,
+          snapshot.activityRevision, activityEventRef.current));
         dropEchoed(snapshot.messages);
         setHasOlder(snapshot.hasOlder);
         if ('familiarizeOffer' in snapshot) setFamiliarizeOffer(readFamiliarizeOffer(snapshot.familiarizeOffer));

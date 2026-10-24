@@ -8,6 +8,8 @@ interface Page extends Partial<DecisionSnapshot> {
   readonly nextCursor?: string | null;
   readonly familiarizeOffer?: unknown;
   readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity | null;
+  /** Renderer read/push fence, never a host activity revision or durable field. */
+  readonly activityRevision?: number;
 }
 
 export const CONVERSATION_REFRESH_PAGE_BUDGET = 4;
@@ -18,7 +20,7 @@ export class ConversationCatchUpRequired extends Error {
 /** Recent reads and older reads share one cursor owner; stopping drops late results. */
 export function createConversationPager({ read, publish }: {
   readonly read: (params: { latest: true; limit: number; before?: string }) => Promise<Page>;
-  readonly publish: (snapshot: { messages: readonly BotChatMessage[]; hasOlder: boolean; familiarizeOffer?: unknown; activity?: import('@peer-agent/protocol').ProjectAgentActivity | null }) => void;
+  readonly publish: (snapshot: { messages: readonly BotChatMessage[]; hasOlder: boolean; familiarizeOffer?: unknown; activity?: import('@peer-agent/protocol').ProjectAgentActivity | null; activityRevision?: number }) => void;
 }) {
   let messages: BotChatMessage[] = [];
   let cursor: string | null = null;
@@ -87,7 +89,7 @@ export function createConversationPager({ read, publish }: {
     if (nextMessages.length !== messages.length || nextMessages.some((message, index) => message !== messages[index])) messages = nextMessages;
     if (before || !initialized || !known.size) cursor = first!.nextCursor ?? null;
     initialized = true;
-    publish({ messages, hasOlder: cursor !== null, ...(!before && !resumed ? { familiarizeOffer: first!.familiarizeOffer, activity: first!.activity } : {}) });
+    publish({ messages, hasOlder: cursor !== null, ...(!before && !resumed ? { familiarizeOffer: first!.familiarizeOffer, activity: first!.activity, activityRevision: first!.activityRevision } : {}) });
   };
   return {
     refresh: () => serial(() => page()),
