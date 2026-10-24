@@ -6,6 +6,7 @@ import { isEffortLevel, type EffortLevel } from '../chat/state/preferences';
 import type { SelectionProviderGroup } from '../chat/components/thread/modelSelection';
 import { botConfiguredModelSelection, botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './state/botModelControls';
 import type { BotModelsControlState } from './state/useBotModels';
+import { botModelPolicyKey } from './state/botModelState';
 import { BotModelFeedback } from './BotModelFeedback';
 import '../chat/styles/chat-surface.css';
 import './styles/bot-model-controls.css';
@@ -107,11 +108,15 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
     : (model?.label ?? i18n.t('projectAgent.model.unavailable'));
   const effortLevel: EffortLevel = isEffortLevel(effort) ? effort : 'default';
   const fastMode = setting?.mode === 'fixed' && setting.fastMode === true;
-  const updating = Boolean(feedback?.busy || feedback && !feedback.loaded && feedback.reading);
-  const feedbackKey = feedback?.saveError ? 'forms.saveFailed' : feedback?.readError ? 'forms.loadFailed'
-    : feedback?.pending && !feedback.busy ? 'forms.pendingSelection'
+  const pendingRole = Boolean(feedback?.pending
+    && botModelPolicyKey({ overrides: { [role]: feedback.pending.overrides?.[role] } })
+      !== botModelPolicyKey({ overrides: { [role]: policy?.overrides?.[role] } }));
+  const saving = Boolean(feedback?.busy && pendingRole);
+  const updating = saving || Boolean(feedback && !feedback.loaded && feedback.reading);
+  const feedbackKey = feedback?.saveError && pendingRole ? 'forms.saveFailed' : feedback?.readError ? 'forms.loadFailed'
+    : pendingRole && !feedback?.busy ? 'forms.pendingSelection'
       : feedback?.loaded && !feedback.models.length ? 'forms.noModels' : null;
-  return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={busy}>
+  return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={updating}>
     <div className="bot-model-control-row">
       <AnchoredModelSelectionMenu
         className="bot-model-picker"
@@ -123,8 +128,9 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         disabled={!feedback && (busy || !view)}
         selectionDisabled={busy || !view}
         busy={updating}
-        statusLabel={feedbackKey ? i18n.t(feedbackKey) : updating ? i18n.t(feedback?.busy ? 'forms.saving' : 'forms.loading') : undefined}
-        feedback={feedback ? <BotModelFeedback state={feedback} i18n={i18n} showLoading={false} showSaving={false} /> : undefined}
+        statusLabel={feedbackKey ? i18n.t(feedbackKey) : updating ? i18n.t(saving ? 'forms.saving' : 'forms.loading') : undefined}
+        feedback={feedback && (pendingRole || feedback.readError || !feedback.loaded || !feedback.models.length)
+          ? <BotModelFeedback state={feedback} i18n={i18n} showLoading={false} showSaving={false} /> : undefined}
         label={label}
         title={`${label} · ${source} · ${i18n.t('projectAgent.model.nextReply')}`}
         onSelectModel={changeModel}

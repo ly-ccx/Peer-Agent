@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { BotModelViews, BotProfile, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy } from '@peer-agent/protocol';
 import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotModelControls } from '../BotModelControls';
+import type { BotModelsControlState } from '../state/useBotModels';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
 import { PeerIcon } from '../../ui/icons/PeerIcon';
@@ -36,10 +37,11 @@ export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps
 }
 
 /** Controlled project policy form. All writes and validation belong to update-profile. */
-export function BotPolicyFields({ profile, models, views, busy, feedback, i18n, onChange }: PolicyProps & {
+export function BotPolicyFields({ profile, models, views, busy, feedback, modelFeedback, i18n, onChange }: PolicyProps & {
   models: readonly ModelRoutingMenuOption[];
   views: BotModelViews;
   feedback?: ReactNode;
+  modelFeedback?: BotModelsControlState;
 }) {
   const policy = profile.modelPolicy || {};
   const scopeIds = policy.scope?.modelProviderIds;
@@ -47,7 +49,7 @@ export function BotPolicyFields({ profile, models, views, busy, feedback, i18n, 
   const roleLabel = (role: ModelRole) => i18n.t(role === 'project_agent' ? 'projectAgent.drawer.model' : `modelRouting.role.${role}`);
   const roleField = (role: ModelRole) => <div className="bot-settings-row bot-model-settings-row" key={role}>
     <span>{roleLabel(role)}</span>
-    <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} i18n={i18n}
+    <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} feedback={modelFeedback} i18n={i18n}
       onChange={setPolicy} />
   </div>;
   return <SettingsGroup className="bot-settings-section bot-policy-fields" title={i18n.t('projectAgent.policy.models')} description={i18n.t('projectAgent.policy.modelsHint')}>

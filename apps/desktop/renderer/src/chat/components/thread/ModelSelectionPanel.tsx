@@ -182,6 +182,7 @@ export function ModelSelectionPanel({
   fastMode,
   isZh,
   disabled = false,
+  selectionDisabled = false,
   embedded = false,
   resetToken = 0,
   feedback,
@@ -197,6 +198,8 @@ export function ModelSelectionPanel({
   readonly fastMode: boolean;
   readonly isZh: boolean;
   readonly disabled?: boolean;
+  /** Lock writes while preserving the current list and provider browsing. */
+  readonly selectionDisabled?: boolean;
   readonly embedded?: boolean;
   /** Changes when the panel is opened again, so browsing starts from the committed provider. */
   readonly resetToken?: number;
@@ -251,7 +254,7 @@ export function ModelSelectionPanel({
   };
 
   const chooseModel = (nextId: string) => {
-    if (disabled) return;
+    if (disabled || selectionDisabled) return;
     const match = findSelectionModel(groups, nextId);
     if (!match || match.model.disabled || match.group.disabled) return;
     // The owner commits model + compatible effort together; browsing never writes.
@@ -291,6 +294,7 @@ export function ModelSelectionPanel({
       className={`model-selection-panel${embedded ? ' is-embedded' : ''}${providerMenuOpen ? ' is-provider-open' : ''}`}
       role="dialog"
       aria-label={isZh ? '选择模型' : 'Choose model'}
+      aria-busy={selectionDisabled || undefined}
       tabIndex={-1}
       onKeyDown={onKeyDown}
     >
@@ -355,6 +359,7 @@ export function ModelSelectionPanel({
               tabIndex={(activeModelIndex >= 0 ? index === activeModelIndex : selectedRow || !browsed?.models.some(item => item.id === modelId && !item.disabled) && index === browsed?.models.findIndex(item => !item.disabled)) ? 0 : -1}
               onFocus={() => setActiveModelIndex(index)}
               aria-selected={selectedRow}
+              aria-disabled={selectionDisabled || undefined}
               className={`model-selection-model${selectedRow ? ' is-selected' : ''}${index === activeModelIndex ? ' is-active' : ''}`}
               disabled={model.disabled || disabled}
               onMouseEnter={() => { if (!model.disabled) setActiveModelIndex(index); }}
@@ -376,7 +381,7 @@ export function ModelSelectionPanel({
               effort={effortLevels.includes(effortValue) ? effortValue : effortLevels[0] ?? effortValue}
               levels={effortLevels}
               isZh={isZh}
-              disabled={disabled}
+              disabled={disabled || selectionDisabled}
               onChange={(level) => {
                 return onEffortChange(level);
               }}
@@ -386,7 +391,7 @@ export function ModelSelectionPanel({
             <RequestChannelToggle
               fastMode={fast}
               isZh={isZh}
-              disabled={disabled}
+              disabled={disabled || selectionDisabled}
               onChange={(enabled) => {
                 onFastModeChange?.(enabled);
               }}
@@ -534,7 +539,8 @@ export function AnchoredModelSelectionMenu({
             effort={isEffortLevel(effort) ? effort : 'default'}
             fastMode={fastMode}
             isZh={isZh}
-            disabled={disabled || selectionDisabled || busy}
+            disabled={disabled}
+            selectionDisabled={selectionDisabled || busy}
             feedback={feedback}
             resetToken={resetToken}
             onSelectModel={onSelectModel}
