@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails, hoverBotReply, selectBotByName } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, hoverBotReply, selectBotByName, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -205,23 +205,30 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `question-pending-${appearance}.png`) });
   }
   // Quoting an older reply must not bind the new topic as an answer to the latest question.
-  const oldReply = page.locator(`[id="bot-msg-${first.replyId}"] .bot-reply-text`);
+  const oldReply = page.locator(`[id="bot-msg-${third.replyId}"] .bot-reply-text`);
+  await wheelBotConversation(page, -300);
   await oldReply.scrollIntoViewIfNeeded();
   await oldReply.evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
-  await page.getByRole('button', { name: '引用', exact: true }).click();
+  const quoteAction = page.getByRole('button', { name: '引用', exact: true });
+  await quoteAction.waitFor({ state: 'visible' });
+  await until(() => quoteAction.getAttribute('data-surface-settled'), value => value === 'true');
+  await page.keyboard.press('Tab');
+  assert.equal(await quoteAction.evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  await page.locator('.bot-quote-chip').waitFor();
   await composer.fill('这两个都先不选，我想继续问别的问题'); await composer.press('Enter');
   await skipped.card.waitFor({ state: 'detached' });
   await until(() => botRow.locator('.bot-badge').count(), count => count === 0);
   const followup = await until(() => canonical().slice(beforeMovingOn).find(row => row.kind === 'user_input'), Boolean);
   assert.equal(followup.answerTo, undefined, 'moving on must not fabricate an answer or select an option');
-  assert.ok(followup.quoteRefs.includes(first.replyId));
+  assert.ok(followup.quoteRefs.includes(third.replyId));
   await page.locator('.bot-thread').getByText('RC scripted reply: 这两个都先不选，我想继续问别的问题', { exact: true }).waitFor();
-  await page.locator('.bot-search').fill('project-001'); await page.locator('.bot-row').first().click();
-  await page.locator('.bot-search').fill('project-000'); await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-001');
+  await selectBotByName(page, 'project-000');
   await page.locator(`[id="bot-msg-${skipped.replyId}"]`).waitFor();
   assert.equal(await page.locator('.bot-question').count(), 0);
   assert.equal(canonical().find(row => row.id === skipped.replyId).question.options.length, 2, 'historical question remains intact');
