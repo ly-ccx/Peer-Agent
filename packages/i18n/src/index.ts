@@ -895,6 +895,13 @@ export type TranslationKey =
   | 'modelRouting.tiers'
   | 'modelRouting.roles'
   | 'modelRouting.primary'
+  | 'modelRouting.modeLabel'
+  | 'modelRouting.targetLabel'
+  | 'modelRouting.chooseModel'
+  | 'modelRouting.modelUnavailable'
+  | 'modelRouting.followingTier'
+  | 'modelRouting.checkTier'
+  | 'modelRouting.checkFixed'
   | 'modelRouting.fallbacks'
   | 'modelRouting.addFallback'
   | 'modelRouting.moveUp'
@@ -1605,6 +1612,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.tiers': '档位',
     'modelRouting.roles': '角色',
     'modelRouting.primary': '主模型',
+    'modelRouting.modeLabel': '选择方式',
+    'modelRouting.targetLabel': '档位 / 模型',
+    'modelRouting.chooseModel': '请选择模型',
+    'modelRouting.modelUnavailable': '原模型已不可用，请重新选择',
+    'modelRouting.followingTier': '跟随“{tier}”档位',
+    'modelRouting.checkTier': '该档位暂无符合要求的模型，请检查上方档位配置',
+    'modelRouting.checkFixed': '所选模型不可用或不满足角色要求，请重新选择',
     'modelRouting.fallbacks': '备选',
     'modelRouting.addFallback': '添加备选',
     'modelRouting.moveUp': '上移',
@@ -3002,6 +3016,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.tiers': 'Tiers',
     'modelRouting.roles': 'Roles',
     'modelRouting.primary': 'Primary',
+    'modelRouting.modeLabel': 'Selection mode',
+    'modelRouting.targetLabel': 'Tier / model',
+    'modelRouting.chooseModel': 'Choose a model',
+    'modelRouting.modelUnavailable': 'Previous model unavailable. Choose again.',
+    'modelRouting.followingTier': 'Following the {tier} tier',
+    'modelRouting.checkTier': 'No eligible model in this tier. Check its configuration above.',
+    'modelRouting.checkFixed': 'The selected model is unavailable or ineligible. Choose again.',
     'modelRouting.fallbacks': 'Fallbacks',
     'modelRouting.addFallback': 'Add fallback',
     'modelRouting.moveUp': 'Move up',

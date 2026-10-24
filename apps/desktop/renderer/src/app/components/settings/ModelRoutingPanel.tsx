@@ -9,6 +9,7 @@ import { useEffect, useId, useState } from 'react';
 import { clientApi } from '../../../clientApi';
 import type {
   ModelRoutingPatch,
+  ModelRoutingPreview,
   ModelRoutingPreviewRow,
   ModelRoutingProviderOption,
 } from '../../../preload/contracts/bootstrapPreloadApi';
@@ -72,7 +73,7 @@ function rolePatch(role: ModelRoleName, setting: NonNullable<ModelRoutingPatch['
 
 
 export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
-  const [resolutions, setResolutions] = useState<readonly ModelRoutingPreviewRow[]>([]);
+  const [preview, setPreview] = useState<ModelRoutingPreview | null>(null);
   const [error, setError] = useState(''), [previewError, setPreviewError] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const preferLabelId = useId();
@@ -86,8 +87,9 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   useUnsavedChanges({ dirty: form.dirty, busy: form.saving, save: form.save, discard: form.reset });
   useEffect(() => {
     let live = true;
-    setResolutions([]);
-    void clientApi.modelRoutingPreview().then(preview => { if (live) { setResolutions(preview.resolutions); setPreviewError(false); } }).catch(() => { if (live) setPreviewError(true); });
+    setPreview(null);
+    setPreviewError(false);
+    void clientApi.modelRoutingPreview().then(result => { if (live) { setPreview(result); setPreviewError(false); } }).catch(() => { if (live) setPreviewError(true); });
     return () => { live = false; };
   }, [form.saved, previewVersion]);
   const view = form.draft ? { ...form.draft.view, providers: form.saved?.view.providers ?? form.draft.view.providers } : null;
@@ -112,7 +114,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
 
   const options = asOptions(view.providers);
   const readOnly = form.saving || isRoutingReadOnly(options.length);
-  const resolutionFor = (role: string) => resolutions.find((row) => row.role === role);
+  const resolutionFor = (role: string) => preview?.resolutions.find((row) => row.role === role);
 
   return (
     <div className="settings-panel model-routing-panel">
@@ -152,37 +154,40 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                   onChange={(id) => save(tierPatch(tier, id, withoutId(fallbacks, id)))}
                 />
                 <div className="model-routing-fallbacks">
-                  {fallbacks.map((id, index) => (
-                    <span className="model-routing-chip" key={id}>
-                      <span className="model-routing-chip__label">{options.find((option) => option.id === id)?.label || id}</span>
-                      <span className="model-routing-chip__actions">
-                        <button
-                          type="button"
-                          disabled={readOnly || index === 0}
-                          aria-label={i18n.t('modelRouting.moveUp')}
-                          onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, -1)))}
-                        >
-                          <Chevron direction="up" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly || index === fallbacks.length - 1}
-                          aria-label={i18n.t('modelRouting.moveDown')}
-                          onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, 1)))}
-                        >
-                          <Chevron direction="down" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          aria-label={i18n.t('modelRouting.remove')}
-                          onClick={() => save(tierPatch(tier, binding.primary, withoutId(fallbacks, id)))}
-                        >
-                          <RemoveIcon />
-                        </button>
+                  {fallbacks.map((id, index) => {
+                    const label = options.find((option) => option.id === id)?.label || i18n.t('modelRouting.modelUnavailable');
+                    return (
+                      <span className="model-routing-chip" key={id}>
+                        <span className="model-routing-chip__label" title={label}>{label}</span>
+                        <span className="model-routing-chip__actions">
+                          <button
+                            type="button"
+                            disabled={readOnly || index === 0}
+                            aria-label={i18n.t('modelRouting.moveUp')}
+                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, -1)))}
+                          >
+                            <Chevron direction="up" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={readOnly || index === fallbacks.length - 1}
+                            aria-label={i18n.t('modelRouting.moveDown')}
+                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, 1)))}
+                          >
+                            <Chevron direction="down" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={readOnly}
+                            aria-label={i18n.t('modelRouting.remove')}
+                            onClick={() => save(tierPatch(tier, binding.primary, withoutId(fallbacks, id)))}
+                          >
+                            <RemoveIcon />
+                          </button>
+                        </span>
                       </span>
-                    </span>
-                  ))}
+                    );
+                  })}
                   <ModelDropdown
                     value=""
                     options={addable}
@@ -211,9 +216,9 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
           />
         </div>
         <div className="model-routing-head model-routing-role" aria-hidden="true">
-          <span />
-          <span />
-          <span />
+          <span>{i18n.t('modelRouting.roles')}</span>
+          <span>{i18n.t('modelRouting.modeLabel')}</span>
+          <span>{i18n.t('modelRouting.targetLabel')}</span>
           <span>{i18n.t('modelRouting.reasoning')}</span>
           <span>{i18n.t('modelRouting.resolved')} · {i18n.t('forms.savedValue')}</span>
           <span>{i18n.t('modelRouting.spendCap')}</span>
@@ -223,93 +228,100 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             const setting: RoleSetting = view.routing.roles[role] || { mode: 'tier', tier: 'economy' };
             const resolved = resolutionFor(role);
             const roleLabel = i18n.t(roleTranslationKey(role) || 'modelRouting.unresolved');
-            const resolvedLabel = resolutionText(resolved, role, i18n);
+            // Preview describes the saved route; a pending draft must not relabel it.
+            const savedRouting = preview?.routing ?? form.saved?.view.routing ?? view.routing;
+            const savedSetting = savedRouting.roles[role] ?? { mode: 'tier' as const, tier: 'economy' as const };
+            const resolvedLabel = resolutionText(resolved, role, i18n, savedSetting, previewError);
             const levels = routingReasoningLevels(setting, view.routing.tiers, options, role);
             const invalidEffort = setting.reasoningEffort !== undefined && !levels.includes(setting.reasoningEffort);
             return (
               <div className={`model-routing-row model-routing-role${setting.mode === 'auto' ? ' is-auto' : ''}`} key={role}>
                 <div className="model-routing-name">{roleLabel}</div>
-                <Dropdown
-                  value={setting.mode}
-                  disabled={readOnly}
-                  ariaLabel={roleLabel}
-                  options={[
-                    { value: 'tier', label: i18n.t('modelRouting.mode.tier') },
-                    { value: 'fixed', label: i18n.t('modelRouting.mode.fixed') },
-                    { value: 'auto', label: i18n.t('modelRouting.mode.auto') },
-                  ]}
-                  onChange={(mode) => {
-                    if (mode === 'tier') {
-                      void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', reasoningEffort: setting.reasoningEffort }));
-                    } else if (mode === 'fixed') {
-                      const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
-                      if (!capable) {
-                        setError(i18n.t('modelRouting.poolInvalid'));
-                        return;
-                      }
-                      void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, reasoningEffort: setting.reasoningEffort }));
-                    } else {
-                      const capable = options.filter((option) => !optionRejectReason(option, { kind: 'role', role }));
-                      const pool = capable.slice(0, 1).map((option) => option.id);
-                      const check = validateAutoPool(pool, options, role);
-                      if (!check.ok) {
-                        setError(i18n.t('modelRouting.poolInvalid'));
-                        return;
-                      }
-                      void save(rolePatch(role, { mode: 'auto', pool, reasoningEffort: setting.reasoningEffort }));
-                    }
-                  }}
-                />
-                {setting.mode === 'tier' ? (
+                <div className="model-routing-field" data-label={i18n.t('modelRouting.modeLabel')}>
                   <Dropdown
-                    value={setting.tier}
+                    value={setting.mode}
                     disabled={readOnly}
-                    ariaLabel={`${roleLabel} ${i18n.t('modelRouting.tiers')}`}
-                    options={MODEL_TIERS.map((tierName) => ({
-                      value: tierName,
-                      label: i18n.t(tierTranslationKey(tierName)),
-                    }))}
-                    onChange={(tierName) => save(rolePatch(role, { ...setting, tier: tierName as ModelTierName }))}
+                    ariaLabel={`${roleLabel} ${i18n.t('modelRouting.modeLabel')}`}
+                    options={[
+                      { value: 'tier', label: i18n.t('modelRouting.mode.tier') },
+                      { value: 'fixed', label: i18n.t('modelRouting.mode.fixed') },
+                      { value: 'auto', label: i18n.t('modelRouting.mode.auto') },
+                    ]}
+                    onChange={(mode) => {
+                      if (mode === 'tier') {
+                        void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', reasoningEffort: setting.reasoningEffort }));
+                      } else if (mode === 'fixed') {
+                        const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
+                        if (!capable) {
+                          setError(i18n.t('modelRouting.poolInvalid'));
+                          return;
+                        }
+                        void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, reasoningEffort: setting.reasoningEffort }));
+                      } else {
+                        const capable = options.filter((option) => !optionRejectReason(option, { kind: 'role', role }));
+                        const pool = capable.slice(0, 1).map((option) => option.id);
+                        const check = validateAutoPool(pool, options, role);
+                        if (!check.ok) {
+                          setError(i18n.t('modelRouting.poolInvalid'));
+                          return;
+                        }
+                        void save(rolePatch(role, { mode: 'auto', pool, reasoningEffort: setting.reasoningEffort }));
+                      }
+                    }}
                   />
-                ) : null}
-                {setting.mode === 'fixed' ? (
-                  <ModelDropdown
-                    value={setting.modelProviderId}
-                    options={options}
-                    target={{ kind: 'role', role }}
-                    disabled={readOnly}
-                    ariaLabel={roleLabel}
-                    i18n={i18n}
-                    onChange={(id) => save(rolePatch(role, { ...setting, modelProviderId: id }))}
-                  />
-                ) : null}
-                {setting.mode === 'auto' ? (
-                  <div className="model-routing-pool">
-                    {options.map((option) => {
-                      const reason = optionRejectReason(option, { kind: 'role', role });
-                      const checked = (setting.pool || []).includes(option.id);
-                      return (
-                        <label className="model-routing-pool-item" key={option.id}>
-                          <Checkbox
-                            checked={checked}
-                            disabled={readOnly || Boolean(reason)}
-                            onChange={() => {
-                              const pool = checked ? withoutId(setting.pool || [], option.id) : [...(setting.pool || []), option.id];
-                              const check = validateAutoPool(pool, options, role);
-                              if (!check.ok) {
-                                setError(i18n.t('modelRouting.poolInvalid'));
-                                return;
-                              }
-                              setError('');
-                              void save(rolePatch(role, { ...setting, pool }));
-                            }}
-                          />
-                          {optionLabel(option, reason, i18n)}
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : null}
+                </div>
+                <div className="model-routing-field" data-label={i18n.t('modelRouting.targetLabel')}>
+                  {setting.mode === 'tier' ? (
+                    <Dropdown
+                      value={setting.tier}
+                      disabled={readOnly}
+                      ariaLabel={`${roleLabel} ${i18n.t('modelRouting.tiers')}`}
+                      options={MODEL_TIERS.map((tierName) => ({
+                        value: tierName,
+                        label: i18n.t(tierTranslationKey(tierName)),
+                      }))}
+                      onChange={(tierName) => save(rolePatch(role, { ...setting, tier: tierName as ModelTierName }))}
+                    />
+                  ) : null}
+                  {setting.mode === 'fixed' ? (
+                    <ModelDropdown
+                      value={setting.modelProviderId}
+                      options={options}
+                      target={{ kind: 'role', role }}
+                      disabled={readOnly}
+                      ariaLabel={roleLabel}
+                      i18n={i18n}
+                      onChange={(id) => save(rolePatch(role, { ...setting, modelProviderId: id }))}
+                    />
+                  ) : null}
+                  {setting.mode === 'auto' ? (
+                    <div className="model-routing-pool">
+                      {options.map((option) => {
+                        const reason = optionRejectReason(option, { kind: 'role', role });
+                        const checked = (setting.pool || []).includes(option.id);
+                        return (
+                          <label className="model-routing-pool-item" key={option.id}>
+                            <Checkbox
+                              checked={checked}
+                              disabled={readOnly || Boolean(reason)}
+                              onChange={() => {
+                                const pool = checked ? withoutId(setting.pool || [], option.id) : [...(setting.pool || []), option.id];
+                                const check = validateAutoPool(pool, options, role);
+                                if (!check.ok) {
+                                  setError(i18n.t('modelRouting.poolInvalid'));
+                                  return;
+                                }
+                                setError('');
+                                void save(rolePatch(role, { ...setting, pool }));
+                              }}
+                            />
+                            {optionLabel(option, reason, i18n)}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
                 <div className="model-routing-reasoning" data-label={i18n.t('modelRouting.reasoning')}>
                   <Dropdown
                     value={setting.reasoningEffort ?? 'model-default'}
@@ -326,7 +338,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                       }
                     }}
                   />
-                  {!levels.length ? <p className="model-routing-reasoning-note">{i18n.t(setting.mode === 'fixed' ? 'projectAgent.model.noEffort' : 'modelRouting.reasoningNoCommon')}</p> : null}
+                  {!levels.length && resolved?.ok ? <p className="model-routing-reasoning-note">{i18n.t(setting.mode === 'fixed' ? 'projectAgent.model.noEffort' : 'modelRouting.reasoningNoCommon')}</p> : null}
                 </div>
                 <div className="model-routing-resolved" data-label={i18n.t('modelRouting.resolved')} title={resolvedLabel}>
                   {resolvedLabel}
@@ -355,16 +367,19 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   );
 }
 
-function resolutionText(row: ModelRoutingPreviewRow | undefined, role: ModelRoleName, i18n: I18nRuntime) {
-  if (!row) return i18n.t('modelRouting.unresolved');
+function resolutionText(row: ModelRoutingPreviewRow | undefined, role: ModelRoleName, i18n: I18nRuntime, setting: RoleSetting, previewError: boolean) {
+  if (!row) return i18n.t(previewError ? 'forms.previewFailed' : 'settings.usage.loading');
+  const relation = setting.mode === 'tier'
+    ? `${i18n.t('modelRouting.followingTier', { tier: i18n.t(tierTranslationKey(setting.tier)) })}\n` : '';
   const label = row.ok ? `${row.label} · ${isModelReasoningEffort(row.reasoningEffort)
     ? effortLabel(row.reasoningEffort, i18n.locale.startsWith('zh')) : i18n.t('modelRouting.reasoningDefault')}` : row.label;
-  if (row.spendExceeded && isEssentialRole(role)) {
-    return `${label} · ${i18n.t('modelRouting.essentialSpend')}`;
+  if (row.ok && row.spendExceeded && isEssentialRole(role)) {
+    return `${relation}${label} · ${i18n.t('modelRouting.essentialSpend')}`;
   }
-  if (!row.ok && row.reason === 'spend_cap_reached') return i18n.t('modelRouting.spendExceeded');
-  if (!row.ok) return i18n.t('modelRouting.unresolved');
-  return label;
+  if (!row.ok && row.reason === 'spend_cap_reached') return `${relation}${i18n.t('modelRouting.spendExceeded')}`;
+  if (!row.ok && row.reason === 'reasoning') return `${relation}${i18n.t('modelRouting.reasoningInvalid')}`;
+  if (!row.ok) return `${relation}${i18n.t(setting.mode === 'tier' ? 'modelRouting.checkTier' : setting.mode === 'fixed' ? 'modelRouting.checkFixed' : 'modelRouting.poolInvalid')}`;
+  return `${relation}${label}`;
 }
 
 function ModelDropdown({
@@ -392,14 +407,17 @@ function ModelDropdown({
     i18n.locale === 'zh-CN',
     (reason) => i18n.t(reasonTranslationKey(reason)),
   );
+  const missing = Boolean(value) && !options.some(option => option.id === value);
   return (
     <CascadingMenu
       className="model-routing-model-menu"
       value={value}
       groups={groups}
       disabled={disabled}
-      placeholder={placeholder}
-      ariaLabel={ariaLabel}
+      placeholder={placeholder ?? i18n.t('modelRouting.chooseModel')}
+      triggerLabel={missing ? i18n.t('modelRouting.modelUnavailable') : undefined}
+      title={missing ? i18n.t('modelRouting.modelUnavailable') : undefined}
+      ariaLabel={missing ? `${ariaLabel}: ${i18n.t('modelRouting.modelUnavailable')}` : ariaLabel}
       onChange={onChange}
     />
   );
