@@ -6,6 +6,8 @@ import { interactionLayers } from './interactionLayers';
 import { InteractionLayerContext, useInteractionLayer } from '../hooks/useInteractionLayer';
 import { overlayCloseTarget } from './overlayCloseTarget';
 import { watchVisualMotion } from '../state/visualMotion';
+import { createClosePreparation } from '../state/closePreparation';
+import { useMotionSettled } from '../hooks/useMotionSettled';
 
 /**
  * Overlay —— 统一浮层基座（默认模态；anchor 为非模态，均仅负责表达）。
@@ -45,7 +47,7 @@ export function Overlay({
   /** Return true when an inner confirmation consumed Escape. */
   readonly onEscape?: () => boolean;
   /** Return false to retain the live layer while its editor resolves unsaved work. */
-  readonly onRequestClose?: () => boolean;
+  readonly onRequestClose?: () => boolean | Promise<boolean>;
   /** Optional destination for an action that continues in another visible control. */
   readonly closeTarget?: () => HTMLElement | null;
   readonly onClose?: () => void;
@@ -67,10 +69,13 @@ export function Overlay({
   const [closingStyle, setClosingStyle] = useState<CSSProperties>();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const entrySettled = useMotionSettled(panelRef, !closing);
   const requestGuard = useRef(onRequestClose); requestGuard.current = onRequestClose;
   const closeRef = useRef(onClose); closeRef.current = onClose;
   const closingRef = useRef(false), finished = useRef(false);
+  const closePreparation = useRef(createClosePreparation()).current;
   const acceptedClose = useRef<(() => void) | null>(null);
+  useEffect(() => () => closePreparation.cancel(), [closePreparation]);
   const anchorRef = useRef<HTMLElement | null>(anchor ?? null); anchorRef.current = anchor ?? null;
   const layer = useInteractionLayer(true, { roots: [panelRef], trigger: restoreFocusRef ?? (anchor ? anchorRef : undefined), modal: !anchor, closeOnTriggerRemoval: Boolean(anchor), outside: closeOnBackdrop,
     onClose: onClose ? () => requestClose() : undefined, onEscape });
@@ -107,9 +112,13 @@ export function Overlay({
     };
   }, [anchor]);
   const requestClose = useCallback(() => {
-    if (!closeRef.current || closingRef.current || requestGuard.current?.() === false) return;
-    acceptedClose.current = closeRef.current; closingRef.current = true; setClosing(true);
-  }, []);
+    if (!closeRef.current || closingRef.current) return;
+    const close = closeRef.current;
+    closePreparation.request(() => requestGuard.current?.() ?? true, () => {
+      if (closingRef.current) return;
+      acceptedClose.current = close; closingRef.current = true; setClosing(true);
+    });
+  }, [closePreparation]);
   const finishClose = useCallback(() => {
     if (!closingRef.current || finished.current) return;
     finished.current = true;
@@ -126,8 +135,8 @@ export function Overlay({
     return () => { panel?.removeEventListener('animationcancel', cancel); motion.cancel(); };
   }, [closing, closingStyle, finishClose]);
 
-  const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : 'pa-overlay-backdrop';
-  const panelBase = closing ? `pa-overlay-panel is-closing${closingStyle ? ' is-minimizing' : ''}` : 'pa-overlay-panel';
+  const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : `pa-overlay-backdrop${entrySettled ? ' is-settled' : ''}`;
+  const panelBase = closing ? `pa-overlay-panel is-closing${closingStyle ? ' is-minimizing' : ''}` : `pa-overlay-panel${entrySettled ? ' is-settled' : ''}`;
 
   const overlay = (
     <div
@@ -147,6 +156,7 @@ export function Overlay({
         role="dialog"
         aria-modal={anchor ? undefined : true}
         aria-label={ariaLabel}
+        inert={closing}
         onClick={(event) => event.stopPropagation()}
         onAnimationEnd={closing ? event => { if (event.target === event.currentTarget) finishClose(); } : undefined}
       >

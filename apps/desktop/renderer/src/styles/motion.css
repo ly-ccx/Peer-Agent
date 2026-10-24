@@ -391,6 +391,50 @@
   animation: motion-spin var(--za-motion-slow) linear infinite;
 }
 
+/* Controlled menus/popovers share mount, exit and static end states. */
+.motion-surface {
+  --motion-enter-from: var(--za-motion-shift-sm);
+}
+.motion-surface[data-surface-state='open'][data-surface-kind] {
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+}
+.motion-surface[data-surface-state='open'][data-surface-kind='fade'] {
+  animation-name: motion-enter-fade;
+}
+.motion-surface[data-surface-state='open'][data-surface-settled='true'] {
+  animation: none;
+}
+.motion-surface[data-surface-state='closed'][data-surface-kind] {
+  opacity: 0;
+  pointer-events: none;
+  animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
+}
+
+/* Native disclosures retain their own keyboard/focus semantics and static fallback. */
+@supports (interpolate-size: allow-keywords) and selector(details::details-content) {
+  .motion-details {
+    interpolate-size: allow-keywords;
+  }
+  .motion-details::details-content {
+    height: 0;
+    opacity: 0;
+    overflow: clip;
+    transition: height var(--za-motion-medium) var(--za-ease-standard),
+      opacity var(--za-motion-fast) var(--za-ease-out),
+      content-visibility var(--za-motion-medium) allow-discrete;
+  }
+  .motion-details[open]::details-content {
+    height: auto;
+    opacity: 1;
+  }
+  .motion-details[open][data-motion-settled='true']::details-content { overflow: visible; }
+  @media (prefers-reduced-motion: reduce) {
+    .motion-details::details-content {
+      transition: none;
+    }
+  }
+}
+
 .motion-dots {
   animation: motion-dots var(--za-motion-slow) var(--za-ease-standard) infinite;
 }

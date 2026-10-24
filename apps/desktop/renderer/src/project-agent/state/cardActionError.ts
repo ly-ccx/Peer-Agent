@@ -1,6 +1,7 @@
 import type { TranslationKey } from '@peer-agent/i18n';
 
 export function cardActionErrorKey(code?: string): TranslationKey {
+  if (code === 'HOST_OFFLINE') return 'projectAgent.host.notOwnerAction';
   if (code === 'INPUT_OUTCOME_UNKNOWN' || code === 'INPUT_PENDING_ANSWER') return 'projectAgent.chat.inputUnconfirmed';
   if (code === 'HANDOFF_FAILED') return 'projectAgent.chat.inputDeliveryIssue';
   if (code?.startsWith('DRAFT_')) return 'projectAgent.chat.draftSaveFailed';

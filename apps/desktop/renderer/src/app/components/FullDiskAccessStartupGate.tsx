@@ -229,6 +229,7 @@ export function FullDiskAccessStartupGate({
       ariaLabel={isZh ? 'Agent 必需权限' : 'Required permissions for Agent'}
       panelClassName="fda-startup-gate"
     >
+      {({ requestClose }) => <>
         <div className="fda-startup-gate-body">
           <h2 className="fda-startup-gate-title">
             {isZh ? '需要授予 Agent 必需权限' : 'Required permissions for Agent'}
@@ -360,11 +361,12 @@ export function FullDiskAccessStartupGate({
                 ? (isZh ? '检测中…' : 'Checking…')
                 : (isZh ? '我已授权，重新检测' : 'I’ve granted access — re-check')}
             </button>
-            <button type="button" className="updater-btn ghost" onClick={() => setOpen(false)}>
+            <button type="button" className="updater-btn ghost" onClick={requestClose}>
               {isZh ? '稍后' : 'Later'}
             </button>
           </div>
         </div>
+      </>}
     </Overlay>
   );
 }

@@ -25,6 +25,9 @@ export function agentFailurePresentation(card: BotChatCard): { messageKey: Trans
   const recovering = failure.retryable && card.recoveryWorkState === 'retry_wait'
     && Boolean(card.recovery?.reservationId && card.recovery.retryAt);
   if (recovering) return { messageKey: 'projectAgent.chat.recoveryScheduled', recovering: true, retryAllowed: false };
+  if (failure.kind === 'fatal' && card.content.trim().replace(/^代理暂时不可用：\s*/, '') === '所选模型不支持该推理强度') {
+    return { messageKey: 'projectAgent.chat.recoveryReasoning', recovering: false, retryAllowed: card.recoveryAction?.canContinue !== false };
+  }
   if (failure.kind === 'fatal' && /\bcontinuity_model_changed\b/.test(card.content)) return { messageKey: 'projectAgent.chat.recoveryModelChanged', recovering: false, retryAllowed: false };
   if (failure.kind === 'fatal' && /\bempty_model_response\b/.test(card.content)) return { messageKey: 'projectAgent.chat.recoveryEmptyResponse', recovering: false, retryAllowed: card.recoveryAction?.canContinue !== false };
   if (failure.kind === 'fatal' && /^代理暂时不可用：\s*agent_no_progress$/.test(card.content)) {

@@ -66,6 +66,12 @@
 }
 
 .bot-model-feedback { padding: var(--space-2); }
+.model-selection-panel > .bot-model-feedback {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--ui-border-subtle);
+}
 .bot-model-control .bot-model-source { overflow-wrap: anywhere; }
 
 @media (max-width: 420px) { .bot-settings-row.bot-model-settings-row { grid-template-columns: minmax(0, 1fr); } }

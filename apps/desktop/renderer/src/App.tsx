@@ -1483,6 +1483,7 @@ function MainApp() {
               panelClassName="conversation-result-drawer conversation-chat-drawer conversation-chat-drawer--nested"
               softBackdrop
             >
+              {({ requestClose }) => <>
               <WorkbenchProvider
                 conversationId={activeConversationId}
                 isPageActive={conversationDrawerOpen}
@@ -1512,7 +1513,7 @@ function MainApp() {
                       onRenameConversation={handleRenameConversation}
                       onArchiveConversation={handleArchiveConversation}
                       onOpenAutomationRun={openAutomationRun}
-                      onClose={() => setConversationDrawerOpen(false)}
+                      onClose={requestClose}
                       workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                       workspaces={workspaces}
                       onWorkspaceChange={async (workspacePath) => {
@@ -1534,6 +1535,7 @@ function MainApp() {
                   <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
                 </div>
               </WorkbenchProvider>
+              </>}
             </Drawer>
           ) : null}
         </>

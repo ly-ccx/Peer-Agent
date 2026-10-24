@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../../app/components/MotionSurface';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { effortLabel, type EffortLevel } from '../../state/preferences';
@@ -130,9 +131,7 @@ export function ReasoningEffortSlider({
   const displayedLevel = effortLevelForDisplay(effort, effortLevels, effectiveValue, dirty);
   const displayLabel = effortLabel(displayedLevel, isZh);
   const label = displayLabel;
-  const panel = open
-    ? createPortal(
-        <div
+  const panel = createPortal(<MotionSurface>{open ? (<div
           ref={panelRef}
           id={panelId}
           className="reasoning-effort-panel"
@@ -244,10 +243,7 @@ export function ReasoningEffortSlider({
               </div>
             </div>
           ) : null}
-        </div>,
-        document.body,
-      )
-    : null;
+        </div>) : null}</MotionSurface>, document.body);
 
   return (
     <div ref={rootRef} className="reasoning-effort-control" data-fast-available={fastAvailable}>

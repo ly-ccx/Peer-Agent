@@ -1,3 +1,4 @@
+import { MotionSurface } from './MotionSurface';
 import { useInteractionLayer } from '../hooks/useInteractionLayer';
 import {
   cloneElement,
@@ -152,9 +153,7 @@ export function Tooltip({
   } as Record<string, unknown>);
 
   const overlay =
-    open && hasContent
-      ? createPortal(
-          <div
+    createPortal(<MotionSurface kind="fade">{open && hasContent ? (<div
             ref={tooltipRef}
             id={tooltipId}
             role="tooltip"
@@ -171,10 +170,7 @@ export function Tooltip({
                   </span>
                 ))}
             <span className="app-tooltip__arrow" aria-hidden />
-          </div>,
-          document.body,
-        )
-      : null;
+          </div>) : null}</MotionSurface>, document.body);
 
   return (
     <>

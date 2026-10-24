@@ -1,3 +1,4 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ObjectiveAutonomy, ProjectObjectiveView, ProjectObjectiveUpdateRequest } from '@peer-agent/protocol';
@@ -127,7 +128,7 @@ function ObjectiveCard({ item, workspaceId, i18n, selected, locked: readLocked, 
         {item.watches.some(w=>w.unavailableReason) && <p role="status">{[...new Set(item.watches.filter(w=>w.unavailableReason).map(w=>i18n.t(objectiveWatchReasonKey(w.unavailableReason))))].join('; ')}</p>}
         {item.usage && <p className="bot-objective-observation">{i18n.t('projectAgent.drawer.objective.autoUsage',{used:item.usage.autoSessions,limit:item.budget.maxAutoSessionsPerDay})}</p>}
         {item.usage && <p className="bot-objective-observation">{i18n.t('projectAgent.drawer.objective.usage',{used:item.usage.probes,limit:item.budget.maxProbeRunsPerDay})}</p>}
-        <details><summary><PeerIcon name="chevronRight" size={13} />{i18n.t('resources.triggerScope')}</summary>
+        <MotionDetails><summary><PeerIcon name="chevronRight" size={13} />{i18n.t('resources.triggerScope')}</summary>
           <p><code>{item.workspaceId}</code> · <code>{item.originMessageId}</code></p>
           {item.watches.map(watch => <section key={watch.watchId}><p>{watch.kind === 'schedule' ? i18n.t('resources.scheduleTrigger') : i18n.t('resources.eventTrigger')}</p>
             <p>{watch.kind === 'schedule' ? scheduleLabel(watch.schedule, i18n.locale.startsWith('zh') ? 'zh' : 'en')
@@ -136,7 +137,7 @@ function ObjectiveCard({ item, workspaceId, i18n, selected, locked: readLocked, 
                   : `${i18n.t('resources.triggerTasks')}: ${i18n.t(watch.source.filter === 'failed' ? 'resources.taskFailed' : watch.source.filter === 'verified' ? 'resources.taskVerified' : 'resources.taskEnded')}`}</p>
             <p>{i18n.t(watch.notificationPolicy === 'failure_only' ? 'resources.failureOnly' : 'resources.changesOnly')}</p>
           </section>)}
-        </details>
+        </MotionDetails>
         {item.lastObservation?.evidenceRefs.length ? <EvidencePreview refs={item.lastObservation.evidenceRefs} i18n={i18n} /> : null}
         <div className="bot-objective-controls">
           <label><span>{i18n.t('projectAgent.drawer.objective.autoAccept')}</span><Switch checked={item.autoAccept===true} disabled={locked||closed||editing} aria-label={i18n.t('projectAgent.drawer.objective.autoAccept')} onCheckedChange={value=>{void command('update',{autoAccept:value});}}/></label>

@@ -341,12 +341,13 @@ export function SessionImportWizard({
       backdropClassName="session-import-overlay"
       panelClassName="session-import-modal"
     >
+      {({ requestClose }) => <>
         <header className="session-import-header">
           <div>
             <h2 className="session-import-title">{t.title}</h2>
             <p className="session-import-sub">{t.subtitle}</p>
           </div>
-          <button type="button" className="session-import-close" onClick={onClose}>
+          <button type="button" className="session-import-close" onClick={requestClose}>
             {t.close}
           </button>
         </header>
@@ -566,12 +567,13 @@ export function SessionImportWizard({
           <section className="session-import-body">
             <p className="session-import-hint">{resultSummary}</p>
             <footer className="session-import-footer">
-              <button type="button" className="session-import-btn session-import-btn--primary" onClick={onClose}>
+              <button type="button" className="session-import-btn session-import-btn--primary" onClick={requestClose}>
                 {t.close}
               </button>
             </footer>
           </section>
         ) : null}
+      </>}
     </Overlay>
   );
 }

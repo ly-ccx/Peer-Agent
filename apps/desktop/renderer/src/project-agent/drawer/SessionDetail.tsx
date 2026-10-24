@@ -1,3 +1,4 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES, type LlmProviderConfigView } from '@peer-agent/protocol';
 import { useEffect, useState } from 'react';
@@ -100,7 +101,7 @@ export function SessionDetail({
           {i18n.t('projectAgent.drawer.task.viewUpdate')}<PeerIcon name="arrowUpRight" size={13} />
         </button>
       </section> : null}
-      <details className="bot-task-information" key={session.sessionId}>
+      <MotionDetails className="bot-task-information" key={session.sessionId}>
         <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.task.information')}</summary>
         <CoordinationDetails session={session} i18n={i18n} onSelect={onSelect} />
         <div className="bot-task-report-read" aria-busy={reportState === 'loading'}>
@@ -121,7 +122,7 @@ export function SessionDetail({
         {session.conversationId && <button type="button" className="bot-task-scene" onClick={() => setSceneOpen(true)}>
           <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}
         </button>}
-      </details>
+      </MotionDetails>
       {sceneOpen && session.conversationId ? (
         <ConversationSceneDrawer
           workspaceId={workspaceId}
@@ -184,6 +185,7 @@ export function ConversationSceneDrawer({
       panelClassName="conversation-result-drawer conversation-chat-drawer conversation-chat-drawer--nested"
       softBackdrop
     >
+      {({ requestClose }) => <>
       <WorkbenchProvider conversationId={conversationId} isPageActive layoutHost="local">
         <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
           <div className="conversation-chat-drawer__body">
@@ -203,12 +205,13 @@ export function ConversationSceneDrawer({
               workspacePath={workspacePath}
               workspaces={workspacePath ? [{ path: workspacePath, name: title }] : []}
               isPageActive
-              onClose={onClose}
+              onClose={requestClose}
             />
           </div>
           <WorkbenchPanel isZh={isZh} workspacePath={workspacePath} />
         </div>
       </WorkbenchProvider>
+      </>}
     </Drawer>
   );
 }

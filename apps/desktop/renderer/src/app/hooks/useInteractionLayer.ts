@@ -10,6 +10,8 @@ export function useInteractionLayer(active: boolean, options: {
   roots: readonly RefObject<HTMLElement | null>[]; trigger?: RefObject<HTMLElement | null>;
   modal?: boolean; passive?: boolean; outside?: boolean; dismissOnTab?: boolean;
   restoreFocus?: boolean; closeOnTriggerRemoval?: boolean;
+  /** A new anchor is a new layer identity; ordinary data refreshes leave focus alone. */
+  identity?: unknown;
   onClose?: () => void; onEscape?: () => boolean; onEnter?: () => void;
 }) {
   const parent = useContext(InteractionLayerContext), ownLayer = useRef<InteractionLayer | null>(null);
@@ -79,6 +81,6 @@ export function useInteractionLayer(active: boolean, options: {
         (parent ? collectFocusable(parent)[0] ?? parent : neighbor)?.focus({ preventScroll: true });
       }
     };
-  }, [active]);
+  }, [active, options.identity]);
   return ownLayer;
 }

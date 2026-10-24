@@ -1,3 +1,4 @@
+import { MotionDetails } from '../app/components/MotionDetails';
 import type {
   AutomationDefinition,
   AutomationRun,
@@ -169,7 +170,7 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
 
   if (view === 'editor') return <>{feedback}
     {staleEditor && currentDefinition ? <div className="automation-alert" role="status"><p>{i18n.t('resources.staleDraft')}</p>
-      <details className="ui-saved-value"><summary><PeerIcon name="chevronRight" size={14} />{i18n.t('forms.savedValue')}</summary><pre>{JSON.stringify(draftFromDefinition(currentDefinition), null, 2)}</pre></details>
+      <MotionDetails className="ui-saved-value"><summary><PeerIcon name="chevronRight" size={14} />{i18n.t('forms.savedValue')}</summary><pre>{JSON.stringify(draftFromDefinition(currentDefinition), null, 2)}</pre></MotionDetails>
       <button type="button" className="ui-button" disabled={busy || bootstrap.loading || bootstrap.error} onClick={() => {
         setEditing(currentDefinition); automationEditorDrafts.retain(editorKey, draft, currentDefinition);
       }}>{i18n.t('resources.reviewedVersion')}</button></div> : null}
@@ -735,7 +736,7 @@ function RunReceipt({ copy, locale, run, busy, onBack, onRetry, onCancel, onConv
     </header>
     {runNeedsAttention(run) ? <div className="automation-alert attention"><strong>{copy.needsAttention}</strong><span>{receipt?.error ?? run.failureReason ?? run.blockedReason ?? copy.openToContinue}</span></div> : null}
     <div className="automation-receipt-grid"><div className="automation-panel wide"><h2>{copy.summary}</h2><p className="automation-receipt-summary">{receipt?.summary ?? receipt?.error ?? run.failureReason ?? copy.noSummary}</p></div>
-      {receipt?.previousSummary ? <div className="automation-panel wide automation-comparison"><div className="automation-latest-result-heading"><h2>{copy.comparison}</h2><span className={`automation-pill ${receipt.resultChanged ? 'attention' : ''}`}>{receipt.resultChanged ? copy.resultChanged : copy.resultUnchanged}</span></div><p>{receipt.comparisonSummary}</p><details><summary><PeerIcon name="chevronRight" size={14} />{copy.previousResult}</summary><p className="automation-receipt-summary">{receipt.previousSummary}</p></details></div> : null}
+      {receipt?.previousSummary ? <div className="automation-panel wide automation-comparison"><div className="automation-latest-result-heading"><h2>{copy.comparison}</h2><span className={`automation-pill ${receipt.resultChanged ? 'attention' : ''}`}>{receipt.resultChanged ? copy.resultChanged : copy.resultUnchanged}</span></div><p>{receipt.comparisonSummary}</p><MotionDetails><summary><PeerIcon name="chevronRight" size={14} />{copy.previousResult}</summary><p className="automation-receipt-summary">{receipt.previousSummary}</p></MotionDetails></div> : null}
       <div className="automation-panel"><h2>{copy.runFacts}</h2><Review label={copy.trigger} value={run.triggerSource} /><Review label={copy.scheduled} value={formatDateTime(run.scheduledAt, locale)} /><Review label={copy.started} value={formatDateTime(run.startedAt, locale)} /><Review label={copy.finished} value={formatDateTime(run.finishedAt, locale)} /><Review label={copy.definitionVersion} value={String(run.snapshot.definitionVersion)} /></div>
       <div className="automation-panel"><h2>{copy.usage}</h2><Review label={copy.inputTokens} value={String(receipt?.inputTokens ?? '—')} /><Review label={copy.outputTokens} value={String(receipt?.outputTokens ?? '—')} /><Review label={copy.cost} value={receipt?.costUsd == null ? '—' : `${receipt.costUsd.toFixed(4)}`} /><Review label={copy.duration} value={receipt?.durationMs == null ? '—' : copy.seconds(Math.round(receipt.durationMs / 1000))} /></div>
       <div className="automation-panel wide"><h2>{copy.changes}</h2>{receipt?.changes ? <><Review label={copy.branch} value={receipt.changes.branch ?? '—'} /><Review label={copy.worktree} value={receipt.changes.worktreePath ?? '—'} /><Review label={copy.files} value={receipt.changes.changedFiles.length ? receipt.changes.changedFiles.join(', ') : copy.noFilesChanged} /><Review label={copy.diff} value={`+${receipt.changes.additions ?? 0} −${receipt.changes.deletions ?? 0}`} /><Review label={copy.retention} value={receipt.changes.retained ? copy.retainedReview : copy.cleanedUp} /></> : <p>{copy.noWorkspaceChanges}</p>}</div>

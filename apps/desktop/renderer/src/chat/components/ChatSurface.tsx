@@ -2850,15 +2850,14 @@ export function ChatSurface({
         taskMonitorOpen={taskMonitorOpen}
         onToggleTaskMonitor={toggleTaskMonitor}
       />
-      {findOpen ? (
-        <ChatFindBar
-          containerRef={threadRef}
-          onNavigate={() => { pendingThreadScrollRestoreRef.current = null; messageNavigationRequestRef.current++; shouldAutoScrollRef.current = false; setIsThreadAtBottom(false); }}
-          isZh={isZh}
-          onClose={() => setFindOpen(false)}
-          recomputeKey={messages.length}
-        />
-      ) : null}
+      <ChatFindBar
+        open={findOpen}
+        containerRef={threadRef}
+        onNavigate={() => { pendingThreadScrollRestoreRef.current = null; messageNavigationRequestRef.current++; shouldAutoScrollRef.current = false; setIsThreadAtBottom(false); }}
+        isZh={isZh}
+        onClose={() => setFindOpen(false)}
+        recomputeKey={messages.length}
+      />
       {banner ? <div className="selection-child-banner">{banner}</div> : null}
       {currentTurnContext ? (
         <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>

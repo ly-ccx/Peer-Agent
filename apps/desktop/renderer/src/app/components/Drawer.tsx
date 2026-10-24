@@ -5,6 +5,7 @@ export function Drawer({
   onClose,
   restoreFocusRef,
   closeOnBackdrop = true,
+  onRequestClose,
   ariaLabel,
   panelClassName,
   softBackdrop = false,
@@ -13,6 +14,7 @@ export function Drawer({
   readonly onClose?: () => void;
   readonly restoreFocusRef?: RefObject<HTMLElement | null>;
   readonly closeOnBackdrop?: boolean;
+  readonly onRequestClose?: () => boolean | Promise<boolean>;
   readonly ariaLabel?: string;
   readonly panelClassName?: string;
   readonly softBackdrop?: boolean;
@@ -27,6 +29,7 @@ export function Drawer({
       onClose={onClose}
       restoreFocusRef={restoreFocusRef}
       closeOnBackdrop={closeOnBackdrop}
+      onRequestClose={onRequestClose}
       ariaLabel={ariaLabel}
       panelClassName={panelClassName}
       backdropClassName={backdropClassName}

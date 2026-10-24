@@ -120,7 +120,7 @@ export function BotListShell({
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const drawerEntered = useRef(false);
   const replayDrawerEntrance = drawerMemory.open && !drawerEntered.current;
-  drawerEntered.current = drawerMemory.open;
+  useEffect(() => { drawerEntered.current = drawerMemory.open; }, [drawerMemory.open]);
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {

@@ -9,6 +9,8 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     // Establish the baseline after entry motion, before starting a save.
     await until(() => page.locator('.model-selection-popover').evaluate(node =>
       node.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
+    await until(() => page.locator('.bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel').evaluateAll(nodes =>
+      nodes.every(node => node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState)))), Boolean);
     const baseline = await page.evaluate(selector => {
       const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height }; };
       return { trigger: box(selector), panel: box('.model-selection-panel') };
@@ -20,15 +22,24 @@ export async function checkEffortStability({ page, slider, strength, until, getB
       globalThis.rcEffortFrames = new Promise(resolve => {
         const frames = [];
         const slider = document.querySelector('.reasoning-effort-slider');
+        const popover = document.querySelector('.model-selection-popover');
+        const drawerSelector = '.bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel';
+        const drawer = document.querySelector(drawerSelector);
         let start = 0;
         const finish = () => { clearTimeout(deadline); slider.removeEventListener('keyup', begin); resolve(frames); };
         const capture = () => {
-          if (performance.now() - start > 420) { finish(); return; }
+          if (performance.now() - start > 1100) { finish(); return; }
           const slider = document.querySelector('.reasoning-effort-slider');
           const trigger = document.querySelector(selector);
           const panel = document.querySelector('.model-selection-panel');
           const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
-          frames.push({ value: slider.value, trigger: rect(trigger), panel: rect(panel) });
+          const currentDrawer = document.querySelector(drawerSelector);
+          frames.push({ timeMs: performance.now() - start, value: slider.value, trigger: rect(trigger), panel: rect(panel),
+            popoverRetained: document.querySelector('.model-selection-popover') === popover,
+            popoverOpacity: Number(getComputedStyle(popover).opacity),
+            drawerRetained: currentDrawer === drawer,
+            drawerOpacity: drawer ? Number(getComputedStyle(drawer).opacity) : 1,
+            drawer: drawer ? rect(drawer) : null });
           requestAnimationFrame(capture);
         };
         const begin = event => {
@@ -49,7 +60,15 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     });
   const expected = key === 'End' ? '100' : '0';
     assert.ok(frames.length >= 5);
-    assert.ok(frames.every(frame => frame.value === expected), 'selected effort must stay put throughout the delayed save');
+    const pendingFrames = frames.filter(frame => frame.timeMs < 420);
+    assert.ok(pendingFrames.length >= 5);
+    assert.ok(pendingFrames.every(frame => frame.value === expected), 'selected effort must stay put throughout the delayed save');
+    assert.ok(frames.at(-1).timeMs > 950, 'observe the actual 650ms receipt and the following entrance window');
+    assert.ok(frames.every(frame => frame.popoverRetained && frame.drawerRetained && frame.popoverOpacity >= 0.99 && frame.drawerOpacity >= 0.99),
+      'saving effort must not remount or fade the model popover or open profile drawer');
+    if (frames[0].drawer) for (const frame of frames) for (const axis of ['x', 'y', 'width', 'height']) {
+      assert.ok(Math.abs(frame.drawer[axis] - frames[0].drawer[axis]) < 0.5, `drawer.${axis} moved during save or its receipt`);
+    }
     for (const frame of frames) for (const node of ['trigger', 'panel']) for (const axis of ['x', 'y', 'width', 'height']) {
       assert.ok(Math.abs(frame[node][axis] - baseline[node][axis]) < 0.5, `${node}.${axis} moved during save`);
     }
@@ -77,5 +96,5 @@ export async function checkEffortStability({ page, slider, strength, until, getB
   }
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
   (report.effortStability ??= {})[scope] = { delayMs: 650, failureCollectionDelayMs: 900, successFrames, failureFrames, successHeld: true, failureHeldThenRolledBack: true,
-    stableTriggerAndPanel: true, scope: 'Production settings slider and durable profile over actual IPC; controlled latency and failure' };
+    stableTriggerAndPanel: true, stableDrawerAndPopoverAfterReceipt: true, observationMs: 1100, scope: 'Production settings slider and durable profile over actual IPC; controlled latency and failure' };
 }

@@ -1,3 +1,4 @@
+import { useMotionSettled } from '../../app/hooks/useMotionSettled';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, useRef, type RefObject } from 'react';
@@ -90,7 +91,6 @@ export function BotProfileDrawer({
   readonly onOpenAutomations?: () => void;
   readonly taskContext: TaskConversationContext | null;
   readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
-  /** False when this drawer is replacing an already-open one, so it must not play the entrance again. */
   readonly replayEntrance?: boolean;
 }) {
   const motionEnabled = useMotionAllowed();
@@ -105,18 +105,11 @@ export function BotProfileDrawer({
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
   const layout = drawerLayout(width);
-  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(
-    !memory.open ? 'off' : replayEntrance ? 'in' : 'on',
-  );
-  // 已经展开的抽屉换一页数据时不能从宽度 0 再播一遍。入场只在真正打开时发生。
-  const [dockSettled, setDockSettled] = useState(!replayEntrance && memory.open);
-  const [shownTab, setShownTab] = useState(memory.tab);
-  const [paneEnter, setPaneEnter] = useState(false);
-  if (shownTab !== memory.tab) {
-    setShownTab(memory.tab);
-    setPaneEnter(!prefersReducedMotion());
-  }
+  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(!memory.open ? 'off' : replayEntrance ? 'in' : 'on');
   const bodyRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLElement>(null), paneRef = useRef<HTMLDivElement>(null);
+  const dockSettled = useMotionSettled(dockRef, layout === 'push' && memory.open && dockPhase === 'on');
+  const paneSettled = useMotionSettled(paneRef, memory.open && !inspect, memory.tab);
   const previousInspect = useRef(inspect);
   useEffect(() => {
     if (memory.open && previousInspect.current !== inspect) {
@@ -160,26 +153,17 @@ export function BotProfileDrawer({
   }, []);
 
   useEffect(() => {
-    if (layout !== 'push') {
-      if (!memory.open) {
-        setDockPhase('off');
-        setDockSettled(false);
-        return undefined;
-      }
-      setDockPhase('on');
-      if (prefersReducedMotion()) setDockSettled(true);
-      return undefined;
-    }
+    if (layout !== 'push') return undefined;
     if (memory.open) {
       if (!motionEnabled) {
         setDockPhase('on');
-        setDockSettled(true);
         return undefined;
       }
-      // 首次打开先提交收起态，再经双 rAF 切到展开，否则过渡起点不会被画出来。
-      // 已经展开时停在 on。思考强度保存会让父组件重绘；若这里再设成 in，
-      // width/opacity 会从 0 再播一遍，整块档案闪一下。
-      setDockPhase((current) => (current === 'on' ? 'on' : 'in'));
+      // 入场必须先把「收起态」真正渲染出去，再加 is-open 触发 width 过渡。
+      // dock 是从 null 首次挂载的：setDockPhase('in') 与随后的终态更新若落在
+      // 同一批样式失效窗口内，过渡起点 width:0 从未被提交，浏览器直接画终态，
+      // 表现为面板瞬间蹦出。双 rAF 保证起始帧完成布局与绘制后再切终态。
+      setDockPhase(current => current === 'on' ? 'on' : 'in');
       let inner = 0;
       const outer = requestAnimationFrame(() => {
         inner = requestAnimationFrame(() => setDockPhase('on'));
@@ -190,22 +174,8 @@ export function BotProfileDrawer({
       };
     }
     setDockPhase((current) => (current === 'off' ? 'off' : 'out'));
-    setDockSettled(false);
     return undefined;
   }, [layout, memory.open, motionEnabled]);
-
-  useEffect(() => {
-    if (dockPhase !== 'on' || dockSettled) return undefined;
-    // 宽度过渡是 320ms。结束后拿掉 width/opacity 过渡，避免子节点更新把入场再播一遍。
-    const timer = window.setTimeout(() => setDockSettled(true), 400);
-    return () => window.clearTimeout(timer);
-  }, [dockPhase, dockSettled]);
-
-  useEffect(() => {
-    if (!paneEnter) return undefined;
-    const timer = window.setTimeout(() => setPaneEnter(false), 280);
-    return () => window.clearTimeout(timer);
-  }, [paneEnter, memory.tab]);
 
   useEffect(() => {
     if (dockPhase !== 'out') return undefined;
@@ -213,7 +183,9 @@ export function BotProfileDrawer({
       setDockPhase('off');
       return undefined;
     }
-    const motion = watchVisualMotion([], () => setDockPhase('off'), { durationMs: 360 });
+    let animations: Animation[] = [];
+    try { animations = dockRef.current?.getAnimations?.() ?? []; } catch { /* Static close. */ }
+    const motion = watchVisualMotion(animations, () => setDockPhase('off'));
     return motion.cancel;
   }, [dockPhase, motionEnabled]);
 
@@ -257,14 +229,14 @@ export function BotProfileDrawer({
 
   if (layout === 'cover' ? !memory.open : dockPhase === 'off') return null;
 
-  const body = (
+  const body = (requestClose = close) => (
     <div className="bot-drawer-body" ref={bodyRef}>
       <div className="bot-drawer-chrome">
         <header className="bot-drawer-head">
           <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
           <button
             type="button"
-            onClick={close}
+            onClick={requestClose}
           >
             {i18n.t('projectAgent.drawer.close')}
           </button>
@@ -276,7 +248,7 @@ export function BotProfileDrawer({
       {inspect?.evidence ? <EvidenceView evidence={inspect.evidence} i18n={i18n} /> : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
       {inspect?.replyId ? <div className="bot-reply-details-slot" hidden={Boolean(inspect.evidence)} ref={onReplyDetailsTarget} /> : null}
-      {!inspect ? <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className={paneEnter ? 'bot-drawer-pane motion-enter-fade' : 'bot-drawer-pane'} onAnimationEnd={(event) => { if (event.target === event.currentTarget) setPaneEnter(false); }}>
+      {!inspect ? <div ref={paneRef} key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className={`bot-drawer-pane${paneSettled ? '' : ' motion-enter-fade'}`}>
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}
@@ -382,34 +354,29 @@ export function BotProfileDrawer({
         onClose={close}
         restoreFocusRef={triggerRef}
         ariaLabel={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
-        panelClassName={dockSettled ? 'bot-drawer-panel is-settled' : 'bot-drawer-panel'}
+        panelClassName="bot-drawer-panel"
       >
-        {body}
+        {({ requestClose }) => body(requestClose)}
       </Drawer>
     );
   }
 
-  const dockOpen = dockPhase === 'on';
   return (
-    <div className={`bot-drawer-dock-frame${dockOpen ? ' is-open' : ''}`} inert={!memory.open}>
+    <div className={`bot-drawer-dock-frame${dockPhase === 'on' ? ' is-open' : ''}`} inert={!memory.open}>
       <BotDrawerResizer
         enabled={memory.open && dockPhase === 'on'}
         width={memory.width}
         isZh={isZh}
         onResize={(next) => onMemory(resizeDrawer(memory, next))}
       />
-      <aside
-        className={`bot-drawer-dock${dockOpen ? ' is-open' : ''}${dockOpen && dockSettled ? ' is-settled' : ''}`}
+      <aside ref={dockRef}
+        className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}${dockSettled ? ' is-settled' : ''}`}
         style={memory.width === undefined ? undefined : { ['--pa-drawer-width' as string]: `${memory.width}px` }}
-        onTransitionEnd={(event) => {
-          if (event.target !== event.currentTarget || event.propertyName !== 'width' || dockPhase !== 'on') return;
-          setDockSettled(true);
-        }}
         aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
         inert={!memory.open}
         aria-hidden={!memory.open}
       >
-        <InteractionLayerContext.Provider value={layer}>{body}</InteractionLayerContext.Provider>
+        <InteractionLayerContext.Provider value={layer}>{body()}</InteractionLayerContext.Provider>
       </aside>
     </div>
   );

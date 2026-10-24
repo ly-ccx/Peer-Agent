@@ -1,3 +1,4 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
@@ -180,10 +181,10 @@ function MemoryScope({
                   ) : (
                     <p>{item.text}</p>
                   )}
-                  <details className="bot-memory-provenance"><summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.drawer.memory.details')}</summary>
+                  <MotionDetails className="bot-memory-provenance"><summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.drawer.memory.details')}</summary>
                     <p>{memoryLabel(i18n, item.trust, TRUSTS)}</p>
                     {item.sourceRefs?.length ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.sources')}: <code>{item.sourceRefs.join(' · ')}</code></p> : null}
-                  </details>
+                  </MotionDetails>
                   <ResourceFeedback i18n={i18n} action={actions.get(item.id)} onReload={reload} />
                   <div className="bot-memory-item-actions" aria-busy={actions.get(item.id).pending}>
                     {item.status === 'conflicted' ? <button type="button" disabled={locked || actions.get(item.id).pending || editingId === item.id} onClick={() => {
@@ -262,7 +263,7 @@ function MemoryScope({
           const result = await clientApi.openPath(exported, undefined, { mode: 'reveal' }); if (!result.ok) throw Error('OPEN_FAILED');
         })}>{i18n.t('resources.openFile')}</button><ResourceFeedback i18n={i18n} action={actions.get('openExport')} /></div> : null}
       <ResourceFeedback i18n={i18n} action={actions.get('switches')} onReload={reload} />
-      <details className="bot-memory-controls">
+      <MotionDetails className="bot-memory-controls">
         <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.memory.controls')}</summary>
         <div className="bot-memory-settings-card" hidden={!switches}>
           <div className="bot-memory-setting-group">
@@ -300,7 +301,7 @@ function MemoryScope({
             <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.learnLater')}</p>
           </div>
         </div>
-      </details>
+      </MotionDetails>
     </div>
   );
 }

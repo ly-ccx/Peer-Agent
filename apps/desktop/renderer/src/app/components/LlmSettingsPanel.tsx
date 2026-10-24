@@ -1,3 +1,4 @@
+import { MotionSurface } from './MotionSurface';
 import { useFallbackVisionSetting } from '../hooks/useFallbackVisionSetting';
 import { useProviderCollection } from '../hooks/useProviderCollection';
 import { useProviderFormGuard } from '../hooks/useProviderFormGuard';
@@ -609,8 +610,6 @@ export function LlmSettingsPanel({
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [catalogClosing, setCatalogClosing] = useState(false);
-  const catalogCloseTimer = useRef<number | null>(null);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -786,27 +785,8 @@ export function LlmSettingsPanel({
     }));
   };
 
-  const openAdd = () => {
-    if (catalogCloseTimer.current !== null) {
-      window.clearTimeout(catalogCloseTimer.current);
-      catalogCloseTimer.current = null;
-    }
-    setCatalogQuery('');
-    setCatalogClosing(false);
-    setCatalogOpen(true);
-  };
-
-  const closeCatalog = () => {
-    setCatalogClosing(true);
-    if (catalogCloseTimer.current !== null) {
-      window.clearTimeout(catalogCloseTimer.current);
-    }
-    catalogCloseTimer.current = window.setTimeout(() => {
-      catalogCloseTimer.current = null;
-      setCatalogOpen(false);
-      setCatalogClosing(false);
-    }, 170);
-  };
+  const openAdd = () => { setCatalogQuery(''); setCatalogOpen(true); };
+  const closeCatalog = () => setCatalogOpen(false);
 
   const clearLocalCliFlow = useCallback(() => {
     setLocalCliDetectSteps([]);
@@ -1457,9 +1437,9 @@ export function LlmSettingsPanel({
         </button> : null}
       </header>
 
-            {catalogOpen ? (
+            <MotionSurface kind="fade">{catalogOpen ? (
 
-        <div className={`llm-service-catalog${catalogClosing ? ' is-closing' : ''}`} role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
+        <div className="llm-service-catalog" role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
           <div className="llm-service-catalog-header">
             <div>
               <strong>{i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}</strong>
@@ -1666,7 +1646,7 @@ export function LlmSettingsPanel({
         })}
           </div>
         </section>
-      )}
+      )}</MotionSurface>
 
       {!catalogOpen ? <FormFeedback i18n={i18n} {...fallbackVision} onReload={fallbackVision.reload} onRetry={fallbackVision.save} /> : null}
       {!catalogOpen ? <FallbackVisionSetting i18n={i18n} value={fallbackVisionProviderId}
@@ -2149,7 +2129,6 @@ export function LlmSettingsPanel({
 
       {oauthPending ? (
         <Overlay
-          onClose={() => undefined}
           closeOnBackdrop={false}
           ariaLabel={i18n.locale === 'zh-CN' ? 'Grok 登录授权码' : 'Grok sign-in authorization code'}
           panelClassName="llm-oauth-code-dialog"
