@@ -497,7 +497,12 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--window-material-only')) {
+  if (process.argv.includes('--quick-chat-bots-only')) {
+    await quickNative('open');
+    const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
+    await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
+      failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
+  } else if (process.argv.includes('--window-material-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotWindowMaterial({ page, until, report, captureDirectory: root });

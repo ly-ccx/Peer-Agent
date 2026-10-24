@@ -30,8 +30,15 @@ export async function checkQuickChatBots({ app, quick, native, fixture, until, r
   };
   const selectModel = async label => {
     await focusQuick();
+    const selected = await model.textContent();
     await model.click();
     const pop = await until(() => app.windows().find(page => new URL(page.url()).searchParams.get('window') === 'quick-chat-popover'), Boolean);
+    // Hidden native windows retain their DOM. Wait for the actual reopened
+    // window and its current selection, rather than clicking the previous frame.
+    await until(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(win =>
+      new URL(win.webContents.getURL()).searchParams.get('window') === 'quick-chat-popover' && win.isVisible())), Boolean);
+    await until(() => pop.locator('.quick-chat-popover-option.is-selected strong').textContent(), value => value === selected);
+    await pop.bringToFront();
     await pop.getByRole('button', { name: label, exact: true }).click();
     await focusQuick();
     await until(() => model.isEnabled(), Boolean);
