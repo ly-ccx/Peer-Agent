@@ -2050,6 +2050,10 @@
   animation: model-selection-pop-in 180ms ease;
 }
 
+.model-selection-popover.is-settled {
+  animation: none;
+}
+
 @keyframes model-selection-pop-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }

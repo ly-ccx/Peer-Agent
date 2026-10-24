@@ -63,6 +63,7 @@ export function BotProfileDrawer({
   onOpenAutomations,
   taskContext,
   onTaskConversation,
+  replayEntrance = true,
 }: {
   readonly workspaceId: string;
   readonly profile: BotProfile;
@@ -85,6 +86,8 @@ export function BotProfileDrawer({
   readonly onOpenAutomations?: () => void;
   readonly taskContext: TaskConversationContext | null;
   readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
+  /** False when this drawer is replacing an already-open one, so it must not play the entrance again. */
+  readonly replayEntrance?: boolean;
 }) {
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const [path, setPath] = useState('');
@@ -97,7 +100,17 @@ export function BotProfileDrawer({
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
   const layout = drawerLayout(width);
-  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(memory.open ? 'in' : 'off');
+  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(
+    !memory.open ? 'off' : replayEntrance ? 'in' : 'on',
+  );
+  // 已经展开的抽屉换一页数据时不能从宽度 0 再播一遍。入场只在真正打开时发生。
+  const [dockSettled, setDockSettled] = useState(!replayEntrance && memory.open);
+  const [shownTab, setShownTab] = useState(memory.tab);
+  const [paneEnter, setPaneEnter] = useState(false);
+  if (shownTab !== memory.tab) {
+    setShownTab(memory.tab);
+    setPaneEnter(!prefersReducedMotion());
+  }
   const bodyRef = useRef<HTMLDivElement>(null);
   const previousInspect = useRef(inspect);
   useEffect(() => {
@@ -140,19 +153,51 @@ export function BotProfileDrawer({
   }, []);
 
   useEffect(() => {
-    if (layout !== 'push') return undefined;
+    if (layout !== 'push') {
+      if (!memory.open) {
+        setDockPhase('off');
+        setDockSettled(false);
+        return undefined;
+      }
+      setDockPhase('on');
+      if (prefersReducedMotion()) setDockSettled(true);
+      return undefined;
+    }
     if (memory.open) {
       if (prefersReducedMotion()) {
         setDockPhase('on');
+        setDockSettled(true);
         return undefined;
       }
-      setDockPhase('in');
-      const frame = requestAnimationFrame(() => setDockPhase('on'));
-      return () => cancelAnimationFrame(frame);
+      // 已经展开时停在 on。思考强度保存会让父组件重绘；若这里再设成 in，
+      // width/opacity 会从 0 再播一遍，整块档案闪一下。
+      setDockPhase((current) => (current === 'on' ? 'on' : 'in'));
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setDockPhase('on'));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
     }
     setDockPhase((current) => (current === 'off' ? 'off' : 'out'));
+    setDockSettled(false);
     return undefined;
   }, [layout, memory.open]);
+
+  useEffect(() => {
+    if (dockPhase !== 'on' || dockSettled) return undefined;
+    // 宽度过渡是 320ms。结束后拿掉 width/opacity 过渡，避免子节点更新把入场再播一遍。
+    const timer = window.setTimeout(() => setDockSettled(true), 400);
+    return () => window.clearTimeout(timer);
+  }, [dockPhase, dockSettled]);
+
+  useEffect(() => {
+    if (!paneEnter) return undefined;
+    const timer = window.setTimeout(() => setPaneEnter(false), 280);
+    return () => window.clearTimeout(timer);
+  }, [paneEnter, memory.tab]);
 
   useEffect(() => {
     if (dockPhase !== 'out') return undefined;
@@ -234,7 +279,7 @@ export function BotProfileDrawer({
       {inspect?.evidence ? <EvidenceView evidence={inspect.evidence} i18n={i18n} /> : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
       {inspect?.replyId ? <div className="bot-reply-details-slot" hidden={Boolean(inspect.evidence)} ref={onReplyDetailsTarget} /> : null}
-      {!inspect ? <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className="bot-drawer-pane motion-enter-fade">
+      {!inspect ? <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className={paneEnter ? 'bot-drawer-pane motion-enter-fade' : 'bot-drawer-pane'} onAnimationEnd={(event) => { if (event.target === event.currentTarget) setPaneEnter(false); }}>
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}
@@ -339,16 +384,21 @@ export function BotProfileDrawer({
       <Drawer
         onClose={close}
         ariaLabel={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
-        panelClassName="bot-drawer-panel"
+        panelClassName={dockSettled ? 'bot-drawer-panel is-settled' : 'bot-drawer-panel'}
       >
         {body}
       </Drawer>
     );
   }
 
+  const dockOpen = dockPhase === 'on';
   return (
     <aside
-      className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
+      className={`bot-drawer-dock${dockOpen ? ' is-open' : ''}${dockOpen && dockSettled ? ' is-settled' : ''}`}
+      onTransitionEnd={(event) => {
+        if (event.target !== event.currentTarget || event.propertyName !== 'width' || dockPhase !== 'on') return;
+        setDockSettled(true);
+      }}
       aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
       inert={!memory.open}
       aria-hidden={!memory.open}

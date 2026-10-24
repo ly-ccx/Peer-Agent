@@ -26,6 +26,17 @@
   opacity: 1;
 }
 
+/* 展开落定后不再过渡 width/opacity。模型策略保存会重绘抽屉里的文字，
+ * WebKit 会把仍挂在元素上的 width/opacity 过渡从 0 再播一遍，整块档案闪一下。 */
+.bot-drawer-dock.is-open.is-settled {
+  transition: none;
+}
+
+/* 窄屏覆盖层的入场动画写在 .pa-overlay-panel 上。落定后去掉，避免档案内容更新时整层再淡入。 */
+.pa-overlay-panel.bot-drawer-panel.is-settled {
+  animation: none;
+}
+
 .bot-drawer-dock .bot-drawer-body {
   min-width: var(--pa-drawer-width);
 }

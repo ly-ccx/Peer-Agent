@@ -78,19 +78,16 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle', animate =
   const imageKey = avatar.kind === 'image' ? `${workspaceId}:${avatar.ref}` : '';
   const dataUrl = imageData?.key === imageKey ? imageData.dataUrl : null;
   useEffect(() => {
-    if (avatar.kind !== 'image') {
-      setImageData(null);
-      return undefined;
-    }
+    if (!imageKey) return undefined;
     let cancelled = false;
-    setImageData(null);
+    // 档案对象每次保存都会换新引用。键没变就不要先清空，否则照片会闪成生成头像再载回来。
     void clientApi.projectAgentReadAvatar({ workspaceId }).then((result) => {
-      if (!cancelled) setImageData(result.ok ? { key: imageKey, dataUrl: result.dataUrl } : null);
+      if (!cancelled && result.ok) setImageData({ key: imageKey, dataUrl: result.dataUrl });
     }).catch(() => {
       if (!cancelled) setImageData(null);
     });
     return () => { cancelled = true; };
-  }, [avatar, imageKey, workspaceId]);
+  }, [imageKey, workspaceId]);
 
   if (avatar.kind === 'image' && dataUrl) {
     return (

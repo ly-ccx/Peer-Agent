@@ -19,7 +19,14 @@ export function useBotModels(workspaceId: string | null, profile: BotProfile | n
       read: () => readBotDetails(workspaceId),
       write: modelPolicy => clientApi.projectAgentUpdateProfile({ workspaceId, modelPolicy }),
       policy: () => latest.current.profile?.modelPolicy,
-      onData: result => setData({ workspaceId, models: result.modelOptions ?? [], views: result.modelViews ?? {} }),
+      onData: result => {
+        const models = result.modelOptions ?? [];
+        const views = result.modelViews ?? {};
+        setData((current) => current.workspaceId === workspaceId
+          && JSON.stringify(current.models) === JSON.stringify(models)
+          && JSON.stringify(current.views) === JSON.stringify(views)
+          ? current : { workspaceId, models, views });
+      },
       onProfile: profile => latest.current.onProfile(profile),
       onBusy: setBusy, onReadError: setReadError, onSaveError: setSaveError,
     });

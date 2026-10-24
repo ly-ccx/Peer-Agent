@@ -79,6 +79,8 @@ export function useBotList() {
 
   const replaceCatalog = useCallback((next: readonly BotListItem[]) => {
     const sorted = sortReadyCatalog(next);
+    // 思考强度保存后目录会再读一遍。事实没变就不要换列表引用，否则右侧档案会整棵重绘。
+    if (JSON.stringify(catalogRef.current) === JSON.stringify(sorted)) return;
     catalogRef.current = sorted;
     setCatalog(sorted);
     setOpenedId((current) => retainSelectedId(current, sorted));

@@ -118,6 +118,9 @@ export function BotListShell({
   const focusTarget = resolveBotMessageFocus(notificationFocus, attentionFocus);
   const [meHistoryOpen, setMeHistoryOpen] = useState(false);
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
+  const drawerEntered = useRef(false);
+  const replayDrawerEntrance = drawerMemory.open && !drawerEntered.current;
+  drawerEntered.current = drawerMemory.open;
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
@@ -534,8 +537,10 @@ export function BotListShell({
       </section>
       {opened && !pageOverride ? (
         <BotProfileDrawer
+          key={opened.workspaceId}
           workspaceId={opened.workspaceId}
           profile={opened.profile}
+          replayEntrance={replayDrawerEntrance}
           modelControls={modelControls}
           memory={drawerMemory}
           locateSessionId={locateSessionId}

@@ -106,7 +106,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
     : (model?.label ?? i18n.t('projectAgent.model.unavailable'));
   const effortLevel: EffortLevel = isEffortLevel(effort) ? effort : 'default';
   const fastMode = setting?.mode === 'fixed' && setting.fastMode === true;
-  return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''}>
+  return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={busy}>
     <div className="bot-model-control-row">
       <AnchoredModelSelectionMenu
         className="bot-model-picker"
@@ -115,7 +115,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         effort={effortLevel}
         fastMode={fastMode}
         isZh={isZh}
-        disabled={busy || models.length === 0}
+        disabled={models.length === 0}
         label={label}
         title={`${label} · ${source} · ${i18n.t(activeSelection ? 'projectAgent.model.runningReply' : 'projectAgent.model.nextReply')}`}
         onSelectModel={changeModel}
