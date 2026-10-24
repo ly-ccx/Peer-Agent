@@ -10,7 +10,10 @@ export function questionForInput(messages: readonly BotChatMessage[], quoteRefs:
 
 /** Hide the controls after a durable receipt; host card resolution remains authoritative. */
 export function hideAcknowledgedQuestions(messages: readonly BotChatMessage[]): BotChatMessage[] {
-  const answered = new Set(messages.filter(message => message.kind === 'user_input'
-    && message.pending !== 'failed' && message.pending !== 'sending' && message.answerTo).map(message => message.answerTo));
-  return messages.map(message => ({ ...message, cards: message.cards.filter(card => card.kind !== 'question' || !answered.has(card.cardId)) }));
+  const acknowledged = messages.filter(message => message.kind === 'user_input'
+    && message.pending !== 'failed' && message.pending !== 'sending');
+  const answered = new Set(acknowledged.map(message => message.answerTo).filter(Boolean));
+  const lastInput = messages.indexOf(acknowledged.at(-1)!);
+  return messages.map((message, index) => ({ ...message, cards: message.cards.filter(card => card.kind !== 'question'
+    || !(answered.has(card.cardId) || index < lastInput && card.cardId.startsWith('card:question:reply:'))) }));
 }

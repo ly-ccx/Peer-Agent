@@ -15,19 +15,14 @@ const CARD_ID_MAX = 500;
 const TEXT_MAX = 240;
 const CLOSED_APPROVAL = new Set(['approved', 'denied', 'expired']);
 
-/** Conversational choices only. Legacy freeform answers do not approve task or permission cards. */
+/** Retire conversational choices when the user moves on; this never selects an option or grants approval. */
 export function replyQuestionAnswered(messages, reply) {
   if (reply?.question?.answered === true) return true;
   const index = messages.indexOf(reply);
   if (index < 0 || !reply?.id) return false;
-  const cardId = `card:question:reply:${reply.id}`;
-  const later = messages.slice(index + 1);
-  const isUser = message => message?.kind === 'user_input' || (!message?.kind && message?.role === 'user');
-  if (later.some(message => isUser(message) && message.answerTo === cardId)) return true;
-  const next = later.find(message => isUser(message) || message?.kind === 'agent_reply'
-    || (!message?.kind && message?.role === 'assistant'));
-  return Boolean(next && isUser(next) && !next.answerTo
-    && (!Array.isArray(next.quoteRefs) || next.quoteRefs.length === 0 || next.quoteRefs.includes(reply.id)));
+  return messages.slice(index + 1).some(message => (message?.kind === 'user_input'
+    || (!message?.kind && message?.role === 'user'))
+    && message.pending !== 'failed' && message.pending !== 'sending');
 }
 
 /**
