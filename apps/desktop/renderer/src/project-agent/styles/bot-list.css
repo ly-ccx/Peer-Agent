@@ -734,6 +734,7 @@
 }
 
 .bot-app-menu-menu {
+  --motion-enter-from: var(--za-motion-shift-sm);
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
@@ -747,6 +748,8 @@
   border-radius: var(--ui-radius-modal);
   box-shadow: var(--shadow-popover);
 }
+
+.bot-app-menu-menu[aria-hidden='true'] { opacity: 0; pointer-events: none; }
 
 @supports (corner-shape: superellipse(1.4)) {
   .bot-app-menu-menu { corner-shape: var(--control-corner); }
