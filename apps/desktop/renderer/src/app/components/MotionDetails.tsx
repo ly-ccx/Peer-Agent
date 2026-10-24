@@ -11,7 +11,8 @@ export const MotionDetails = forwardRef<HTMLDetailsElement, ComponentPropsWithou
   const ref = useCallback((node: HTMLDetailsElement | null) => {
     root.current = node;
     if (typeof forwardedRef === 'function') {
-      const cleanup = forwardedRef(node);
+      // ForwardedRef still types callbacks as void; React may return a ref cleanup.
+      const cleanup: unknown = forwardedRef(node);
       if (typeof cleanup === 'function') return () => { root.current = null; cleanup(); };
     } else if (forwardedRef) forwardedRef.current = node;
   }, [forwardedRef]);
