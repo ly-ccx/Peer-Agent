@@ -1,4 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { ReactNode } from 'react';
 import type { BotModelViews, BotProfile, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy } from '@peer-agent/protocol';
 import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotModelControls } from '../BotModelControls';
@@ -34,9 +35,10 @@ export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps
 }
 
 /** Controlled project policy form. All writes and validation belong to update-profile. */
-export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }: PolicyProps & {
+export function BotPolicyFields({ profile, models, views, busy, feedback, i18n, onChange }: PolicyProps & {
   models: readonly ModelRoutingMenuOption[];
   views: BotModelViews;
+  feedback?: ReactNode;
 }) {
   const policy = profile.modelPolicy || {};
   const scopeIds = policy.scope?.modelProviderIds;
@@ -79,5 +81,6 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
         </div>
       </div>
     </details>
+    {feedback}
   </SettingsGroup>;
 }

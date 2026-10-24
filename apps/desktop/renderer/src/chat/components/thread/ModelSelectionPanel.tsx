@@ -1,5 +1,5 @@
 import './model-selection.css';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { InteractionLayerContext, useInteractionLayer } from '../../../app/hooks/useInteractionLayer';
 import { isImeKey } from '../../state/compositionGuard';
@@ -175,6 +175,7 @@ export function ModelSelectionPanel({
   disabled = false,
   embedded = false,
   resetToken = 0,
+  feedback,
   onSelectModel,
   onEffortChange,
   onFastModeChange,
@@ -190,6 +191,7 @@ export function ModelSelectionPanel({
   readonly embedded?: boolean;
   /** Changes when the panel is opened again, so browsing starts from the committed provider. */
   readonly resetToken?: number;
+  readonly feedback?: ReactNode;
   readonly onSelectModel: (modelId: string) => void;
   readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
@@ -383,6 +385,7 @@ export function ModelSelectionPanel({
           ) : null}
         </div>
       ) : null}
+      {feedback}
     </div>
   );
 }
@@ -394,6 +397,10 @@ export function AnchoredModelSelectionMenu({
   fastMode = false,
   isZh,
   disabled = false,
+  selectionDisabled = false,
+  busy = false,
+  statusLabel,
+  feedback,
   label,
   title,
   className,
@@ -408,6 +415,11 @@ export function AnchoredModelSelectionMenu({
   readonly fastMode?: boolean;
   readonly isZh: boolean;
   readonly disabled?: boolean;
+  /** Keep the menu available for status/recovery while selection is locked. */
+  readonly selectionDisabled?: boolean;
+  readonly busy?: boolean;
+  readonly statusLabel?: string;
+  readonly feedback?: ReactNode;
   readonly label: string;
   readonly title?: string;
   readonly className?: string;
@@ -466,7 +478,12 @@ export function AnchoredModelSelectionMenu({
       if (!provider) return false;
       provider.click(); provider.focus({ preventScroll: true }); return true;
     },
-    onEnter: () => (panelRef.current?.querySelector<HTMLElement>('.model-selection-model[aria-selected="true"]:not(:disabled), .model-selection-provider') ?? panelRef.current)?.focus({ preventScroll: true }),
+    onEnter: () => {
+      const panel = panelRef.current;
+      (panel?.querySelector<HTMLElement>('.model-selection-model[aria-selected="true"]:not(:disabled)')
+        ?? panel?.querySelector<HTMLElement>('button:not(:disabled)')
+        ?? panel?.querySelector<HTMLElement>('.model-selection-panel'))?.focus({ preventScroll: true });
+    },
   });
 
   return (
@@ -476,8 +493,9 @@ export function AnchoredModelSelectionMenu({
         type="button"
         className={`pa-cascading-trigger model-selection-trigger${open ? ' open' : ''}`}
         aria-disabled={disabled || undefined}
-        title={title}
-        aria-label={title || label}
+        aria-busy={busy || undefined}
+        title={statusLabel ? `${title || label} · ${statusLabel}` : title}
+        aria-label={[title || label, statusLabel].filter(Boolean).join(' · ')}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={panelId}
@@ -496,7 +514,9 @@ export function AnchoredModelSelectionMenu({
           <span className="model-selection-trigger-label">{label}</span>
           {shortEffort ? <span className="model-selection-trigger-effort">{shortEffort}</span> : null}
         </span>
-        <PeerIcon name="chevronDown" size={12} className={`pa-cascading-caret${open ? ' is-open' : ''}`} />
+        {busy ? <PeerIcon name="loader" size={12} className="pa-cascading-caret motion-spin" /> : statusLabel
+          ? <PeerIcon name="warning" size={12} className="pa-cascading-caret" />
+          : <PeerIcon name="chevronDown" size={12} className={`pa-cascading-caret${open ? ' is-open' : ''}`} />}
       </button>
       {open ? createPortal(
         <InteractionLayerContext.Provider value={layer}><div id={panelId} ref={panelRef} className="model-selection-popover motion-enter-rise" style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}>
@@ -506,7 +526,8 @@ export function AnchoredModelSelectionMenu({
             effort={isEffortLevel(effort) ? effort : 'default'}
             fastMode={fastMode}
             isZh={isZh}
-            disabled={disabled}
+            disabled={disabled || selectionDisabled || busy}
+            feedback={feedback}
             resetToken={resetToken}
             onSelectModel={onSelectModel}
             onEffortChange={onEffortChange}

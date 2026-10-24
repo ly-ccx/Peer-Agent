@@ -1,4 +1,3 @@
-import { BotModelFeedback } from '../BotModelFeedback';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
@@ -186,7 +185,6 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
-      <BotModelFeedback state={modelControls} i18n={i18n} showLoading={false} />
       {background.count ? <details className="bot-background-work">
         <summary>
           <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span>
@@ -213,7 +211,7 @@ export function BotConversation({
         modelControls={<div className="bot-model-toolbar" aria-busy={!modelControls.loaded && modelControls.reading}><BotModelControls role="project_agent" compact
           policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
           activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
-          i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
+          feedback={modelControls} i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
         quote={quote?.text ?? ''}
         quoteSource={quoteSource}
         onQuoteLocate={quote ? () => { setHighlightedId(quote.messageId); setHighlightRequestId(value => value + 1); } : undefined}
