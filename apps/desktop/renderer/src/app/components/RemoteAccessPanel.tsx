@@ -7,6 +7,8 @@ import { Switch } from '../../ui/boolean-controls/Switch';
 import { connectionSummary, describeFailure } from './remoteAccessPresentation';
 import { changeProjectGrant, createRemoteAccessPanelState } from './remoteAccessPanelState';
 import { RemoteAccessPairing } from './RemoteAccessPairing';
+import { MotionDetails } from './MotionDetails';
+import { PeerIcon } from '../../ui/icons';
 import './remote-access.css';
 
 export function RemoteAccessPanel({ i18n }: { i18n: I18nRuntime }) {
@@ -53,7 +55,7 @@ export function RemoteAccessPanel({ i18n }: { i18n: I18nRuntime }) {
       </section>
       {status.pairing && <RemoteAccessPairing pairing={status.pairing} i18n={i18n} />}
       <section className="remote-access-card">
-        <div className="remote-access-section-title"><h3>{t('remoteAccess.grants')}</h3><span>{t('remoteAccess.version', { version: settings.delegationVersion })}</span></div>
+        <div className="remote-access-section-title"><h3>{t('remoteAccess.grants')}</h3></div>
         <p>{t('remoteAccess.grantsHint')}</p>
         {listFailed ? <p role="alert">{t('remoteAccess.listFailed')}</p> : !bots.length ? <p>{t('remoteAccess.empty')}</p> :
           <table className="remote-access-grants"><thead><tr><th scope="col">{t('remoteAccess.bot')}</th><th scope="col">{t('remoteAccess.read')}</th><th scope="col">{t('remoteAccess.message')}</th></tr></thead>
@@ -72,6 +74,10 @@ export function RemoteAccessPanel({ i18n }: { i18n: I18nRuntime }) {
         {access ? <div><span>{t(`remoteAccess.operation.${access.operation}`)}{accessedBot ? ` · ${accessedBot.profile.displayName}` : ''}</span>
           <time dateTime={new Date(access.at).toISOString()}>{new Date(access.at).toLocaleString(i18n.locale)}</time></div> : <p>{t('remoteAccess.noAccess')}</p>}
       </section>
+      <MotionDetails className="remote-access-card remote-access-diagnostics">
+        <summary><span>{t('remoteAccess.diagnostics')}</span><PeerIcon name="chevronDown" size={16} /></summary>
+        <p>{t('remoteAccess.version', { version: settings.delegationVersion })}</p>
+      </MotionDetails>
     </>}
   </section>;
 }
