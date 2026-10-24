@@ -1,4 +1,4 @@
-import { openReplyDetails, closeReplyDetails, hoverBotReply, selectBotByName } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, hoverBotReply, selectBotByName, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -193,5 +193,53 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   await page.locator('.bot-thread').getByText('RC scripted reply: 其它工具里的工作记录', { exact: true }).waitFor();
   assert.equal(await page.locator('.bot-question').count(), 0);
   checks.push('option click follows the same durable answer path; switching back does not restore answered choices');
+
+  const skipped = await ask();
+  const botRow = page.locator('.bot-row.is-open');
+  await until(() => botRow.locator('.bot-badge').count(), count => count === 1);
+  const beforeMovingOn = canonical().length;
+  for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
+    await page.setViewportSize({ width, height: 780 });
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+    await skipped.card.scrollIntoViewIfNeeded();
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `question-pending-${appearance}.png`) });
+  }
+  // Quoting an older reply must not bind the new topic as an answer to the latest question.
+  const oldReply = page.locator(`[id="bot-msg-${third.replyId}"] .bot-reply-text`);
+  await wheelBotConversation(page, -300);
+  await oldReply.scrollIntoViewIfNeeded();
+  await oldReply.evaluate(node => {
+    const range = document.createRange(); range.selectNodeContents(node);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  const quoteAction = page.getByRole('button', { name: '引用', exact: true });
+  await quoteAction.waitFor({ state: 'visible' });
+  await until(() => quoteAction.getAttribute('data-surface-settled'), value => value === 'true');
+  await page.keyboard.press('Tab');
+  assert.equal(await quoteAction.evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  await page.locator('.bot-quote-chip').waitFor();
+  await composer.fill('这两个都先不选，我想继续问别的问题'); await composer.press('Enter');
+  await skipped.card.waitFor({ state: 'detached' });
+  await until(() => botRow.locator('.bot-badge').count(), count => count === 0);
+  const followup = await until(() => canonical().slice(beforeMovingOn).find(row => row.kind === 'user_input'), Boolean);
+  assert.equal(followup.answerTo, undefined, 'moving on must not fabricate an answer or select an option');
+  assert.ok(followup.quoteRefs.includes(third.replyId));
+  await page.locator('.bot-thread').getByText('RC scripted reply: 这两个都先不选，我想继续问别的问题', { exact: true }).waitFor();
+  await selectBotByName(page, 'project-001');
+  await selectBotByName(page, 'project-000');
+  await page.locator(`[id="bot-msg-${skipped.replyId}"]`).waitFor();
+  assert.equal(await page.locator('.bot-question').count(), 0);
+  assert.equal(canonical().find(row => row.id === skipped.replyId).question.options.length, 2, 'historical question remains intact');
+  for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
+    await page.setViewportSize({ width, height: 780 });
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+    await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `question-retired-${appearance}.png`) });
+  }
+  await page.setViewportSize(viewport);
+  await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+  report.questionRetirement = { noImplicitAnswer: true, choicesRetired: true, badgeCleared: true, historyRetained: true, retainedAfterSwitch: true };
+  checks.push('a new topic quoting an older reply retires the pending question and needs-you badge without an answer; switching back preserves history without controls');
   await checkBotChoiceMotion({ page, ask, canonical, report, captureDirectory });
 }

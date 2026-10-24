@@ -33,3 +33,23 @@ test('收到回答后收起对应选择；发送失败保留选择，重发绑�
   assert.equal(unknown[1]?.answerTo, input.answerTo);
   assert.equal(failed[1]?.answerTo, input.answerTo);
 });
+
+test('继续提问在持久回执后收起旧对话选项，失败或发送中保留；任务问题不自动关闭', () => {
+  const task = normalizeBotMessage({ id: 'task', kind: 'system_card', cards: [
+    { cardId: 'card:question:task:q', kind: 'question', resolvedState: 'open' },
+    { cardId: 'card:approval:a', kind: 'approval', resolvedState: 'open' },
+    { cardId: 'card:confirm_result:s', kind: 'confirm_result', resolvedState: 'open' },
+  ] })!;
+  const later = normalizeBotMessage({ id: 'later', kind: 'agent_reply', content: '补充说明' })!;
+  const input = { inputId: 'followup', text: '先问另一个问题', quoteRefs: ['other'], createdAt: 'now', state: 'received' as const };
+  for (const state of ['sending', 'failed', 'unknown', 'received'] as const) {
+    const shown = hideAcknowledgedQuestions(applyOptimistic([question(), task, later], [{ ...input, state }]));
+    assert.equal(shown[0]?.cards[0]?.resolvedState, state === 'received' ? 'resolved' : 'open');
+    assert.equal(shown[1]?.cards.length, 3);
+    assert.equal(shown[0]?.content, question().content);
+  }
+  const newQuestion = question('new');
+  const shown = hideAcknowledgedQuestions([...applyOptimistic([question()], [input]), newQuestion]);
+  assert.equal(shown[0]?.cards[0]?.resolvedState, 'resolved');
+  assert.equal(shown.at(-1)?.cards[0]?.resolvedState, 'open');
+});

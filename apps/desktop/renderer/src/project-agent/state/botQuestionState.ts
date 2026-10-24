@@ -10,8 +10,12 @@ export function questionForInput(messages: readonly BotChatMessage[], quoteRefs:
 
 /** Close controls after a durable receipt, retaining their identity for the exit transition. */
 export function hideAcknowledgedQuestions(messages: readonly BotChatMessage[]): BotChatMessage[] {
-  const answered = new Set(messages.filter(message => message.kind === 'user_input'
-    && (message.pending === undefined || message.pending === 'received') && message.answerTo).map(message => message.answerTo));
-  return messages.map(message => ({ ...message, cards: message.cards.map(card => card.kind === 'question' && answered.has(card.cardId)
+  const acknowledged = (message: BotChatMessage) => message.kind === 'user_input'
+    && (message.pending === undefined || message.pending === 'received');
+  const answered = new Set(messages.filter(acknowledged).map(message => message.answerTo).filter(Boolean));
+  const lastAcknowledged = messages.filter(acknowledged).at(-1);
+  const lastInput = lastAcknowledged ? messages.indexOf(lastAcknowledged) : -1;
+  return messages.map((message, index) => ({ ...message, cards: message.cards.map(card => card.kind === 'question'
+    && (answered.has(card.cardId) || index < lastInput && card.cardId.startsWith('card:question:reply:'))
     ? { ...card, resolvedState: 'resolved' as const } : card) }));
 }

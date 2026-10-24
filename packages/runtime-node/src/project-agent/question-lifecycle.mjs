@@ -9,8 +9,12 @@ export function projectReplyQuestions(messages = [], now = Date.now()) {
     const user = message?.kind === 'user_input' || (!message?.kind && message?.role === 'user');
     const reply = message?.kind === 'agent_reply' || (!message?.kind && message?.role === 'assistant');
     if (user) {
-      if (current && (message.answerTo === `card:question:reply:${current.id}`
-        || !message.answerTo && (!message.quoteRefs?.length || message.quoteRefs.includes(current.id)))) close('answered');
+      if (message.pending !== undefined && message.pending !== 'received') continue;
+      if (current) {
+        const answered = message.answerTo === `card:question:reply:${current.id}`
+          || !message.answerTo && (!message.quoteRefs?.length || message.quoteRefs.includes(current.id));
+        close(answered ? 'answered' : 'superseded');
+      }
       continue;
     }
     if (!reply) continue;

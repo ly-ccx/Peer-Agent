@@ -58,7 +58,7 @@ test('running and blocked tasks never get a result-signoff card; manual review h
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('RC5 已保存的手输回答关闭对话选择，而引用其它消息和任务批准不会被推断', () => {
+test('继续对话关闭旧选择，但不推断选项、任务批准或改写历史', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-reply-question-'));
   const messages = [{ id: 'r', kind: 'agent_reply', question: { options: ['A', 'B'] } }];
   try {
@@ -69,7 +69,9 @@ test('RC5 已保存的手输回答关闭对话选择，而引用其它消息和�
     const question = () => facts.cards('w').find(card => card.cardId === 'card:question:reply:r');
     assert.equal(question().resolvedState, 'open');
     messages.push({ kind: 'user_input', content: '手输答案', quoteRefs: ['other', '其它消息'] });
-    assert.equal(question().resolvedState, 'open');
+    assert.equal(question().resolvedState, 'resolved');
+    assert.deepEqual(question().actions, []);
+    assert.equal(messages[0].question.answered, undefined);
     messages.pop(); messages.push({ kind: 'user_input', content: '手输答案' });
     assert.equal(question().resolvedState, 'resolved');
     assert.equal(facts.cards('w').find(card => card.kind === 'approval').resolvedState, 'open');
