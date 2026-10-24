@@ -299,8 +299,11 @@
 .model-routing-parameters { display: grid; gap: var(--space-3); min-width: 0; }
 .model-routing-tier > .model-routing-parameters {
   grid-column: 2 / -1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   margin-top: var(--space-3);
+}
+.model-routing-tier > .model-routing-parameters.has-channel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .model-routing-parameter { min-width: 0; }
 .model-routing-parameter-label {
@@ -311,5 +314,5 @@
   line-height: 1.4;
 }
 @container model-routing (max-width: 430px) {
-  .model-routing-tier > .model-routing-parameters { grid-template-columns: minmax(0, 1fr); }
+  .model-routing-tier > .model-routing-parameters.has-channel { grid-template-columns: minmax(0, 1fr); }
 }

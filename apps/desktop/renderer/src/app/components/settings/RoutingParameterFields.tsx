@@ -27,7 +27,7 @@ export function RoutingParameterFields({ value, candidates, inherit, disabled, l
   const hint = !candidates.length ? i18n.t('modelRouting.chooseCandidates') : !levels.length
     ? i18n.t('modelRouting.noSharedEffort') : invalidEffort ? i18n.t('modelRouting.reasoningInvalid') : '';
   return (
-    <div className="model-routing-parameters">
+    <div className={`model-routing-parameters${supportsFast ? ' has-channel' : ''}`}>
       <div className="model-routing-parameter">
         <span className="model-routing-parameter-label">{i18n.t('modelRouting.reasoning')}</span>
         <Dropdown
@@ -48,7 +48,7 @@ export function RoutingParameterFields({ value, candidates, inherit, disabled, l
         />
         {hint ? <p className="model-routing-reasoning-note">{hint}</p> : null}
       </div>
-      <div className="model-routing-parameter">
+      {supportsFast ? <div className="model-routing-parameter">
         <span className="model-routing-parameter-label">{i18n.t('modelRouting.channel')}</span>
         <Dropdown
           value={channel}
@@ -57,12 +57,11 @@ export function RoutingParameterFields({ value, candidates, inherit, disabled, l
           options={[
             ...(inherit ? [{ value: 'inherit', label: inherited(channelName(inherit.fastMode)) }] : []),
             { value: 'normal', label: channelName(false) },
-            { value: 'fast', label: supportsFast ? channelName(true) : `${channelName(true)} · ${i18n.t('modelRouting.channelUnavailable')}`, disabled: !supportsFast },
+            { value: 'fast', label: channelName(true) },
           ]}
           onChange={next => { if (next === 'inherit') onChannel(undefined); else if (next === 'normal') onChannel(false); else if (next === 'fast' && supportsFast) onChannel(true); }}
         />
-        {!supportsFast ? <p className="model-routing-reasoning-note">{i18n.t(candidates.length ? 'modelRouting.fastUnsupported' : 'modelRouting.chooseCandidates')}</p> : null}
-      </div>
+      </div> : null}
     </div>
   );
 }
