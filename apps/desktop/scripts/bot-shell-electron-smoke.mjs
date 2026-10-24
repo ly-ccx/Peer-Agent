@@ -502,6 +502,11 @@ try {
     assert.ok(process.argv.includes('--effort-stability'), '--surface-motion-only requires controlled save latency/failure');
     await checkSurfaceMotion({ page, fixture, until, report, captureDirectory: root,
       failNext: () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) });
+  } else if (process.argv.includes('--quick-chat-bots-only')) {
+    await quickNative('open');
+    const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
+    await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
+      failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
   } else if (process.argv.includes('--window-material-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
