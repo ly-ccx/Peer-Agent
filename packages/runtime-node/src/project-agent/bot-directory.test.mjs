@@ -43,6 +43,24 @@ test('legacy freeform replies remove conversational needs-you while approval and
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('moving on after another bot reply clears stale choices across list, search and restart', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    conversationStore.appendMessage(conversationId, { id: 'extra', kind: 'agent_reply', role: 'assistant', content: '补充说明' });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    conversationStore.appendMessage(conversationId, { id: 'new-topic', kind: 'user_input', role: 'user',
+      content: '先讨论别的问题', quoteRefs: ['user-1'] });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    assert.equal(directory.list()[0].state.needsYou, 2);
+    assert.equal(directory.query('').catalog[0].state.needsYou, 2);
+    const reopened = createBotDirectory({ rootDir: root,
+      readMessages: id => createConversationStore({ storeDir: path.join(root, 'conversations') }).getPersistedConversationHistory(id)?.messages || [] });
+    assert.equal(reopened.get(entry.workspaceId).item.state.needsYou, 0);
+    assert.equal(conversationStore.getPersistedConversationHistory(conversationId).messages.find(message => message.id === 'reply-1').question.answered, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('回复选择卡跟随所属消息与历史页，不追加到最新消息末尾', () => {
   const root = tempRoot();
   try {

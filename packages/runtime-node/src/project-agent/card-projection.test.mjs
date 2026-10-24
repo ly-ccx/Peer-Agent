@@ -5,16 +5,21 @@ import path from 'node:path';
 import test from 'node:test';
 import { createCardProjection, projectCards, replyQuestionAnswered } from './card-projection.mjs';
 
-test('reply choices close on answers and replacement by a later formal reply', () => {
+test('reply choices close on answers, new topics and replacement by a later formal reply', () => {
   const reply = { id: 'r', kind: 'agent_reply', question: { options: ['A', 'B'] } };
   const user = { id: 'u', kind: 'user_input', content: '我的回答' };
   assert.equal(replyQuestionAnswered([reply, { kind: 'agent_turn' }, user], reply), true);
   assert.equal(replyQuestionAnswered([reply, { ...user, quoteRefs: ['r'] }], reply), true);
-  assert.equal(replyQuestionAnswered([reply, { ...user, quoteRefs: ['other'] }], reply), false);
-  assert.equal(replyQuestionAnswered([reply, { ...user, answerTo: 'card:question:task:q' }], reply), false);
+  assert.equal(replyQuestionAnswered([reply, { ...user, quoteRefs: ['other'] }], reply), true);
+  assert.equal(replyQuestionAnswered([reply, { ...user, answerTo: 'card:question:task:q' }], reply), true);
   assert.equal(replyQuestionAnswered([reply, { id: 'later', kind: 'agent_reply' }, user], reply), true);
   assert.equal(replyQuestionAnswered([reply, { id: 'later', kind: 'agent_reply' }, { ...user, answerTo: 'card:question:reply:r' }], reply), true);
   assert.equal(replyQuestionAnswered([{ ...user, answerTo: 'card:question:reply:r' }, reply], reply), false);
+  assert.equal(replyQuestionAnswered([reply, { role: 'user', content: '先问别的' }], reply), true);
+  assert.equal(replyQuestionAnswered([reply, { role: 'user', kind: 'tool_result' }], reply), false);
+  for (const pending of ['failed', 'sending', 'unknown']) {
+    assert.equal(replyQuestionAnswered([reply, { ...user, pending }], reply), false);
+  }
 });
 
 function tempRoot() {

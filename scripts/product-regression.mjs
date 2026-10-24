@@ -44,6 +44,7 @@ const requiredShots = [...settingsFloatingShots, ...startupShots, ...verificatio
   'composer-empty-1280-dark.png', 'composer-empty-1280-light.png', 'composer-empty-760-dark.png',
   'composer-multiline-760-light.png', 'composer-attachment-1280-dark.png',
   'reply-dark.png', 'reply-light.png', 'reply-narrow-quote.png', 'reply-narrow-sent.png',
+  'question-pending-dark.png', 'question-pending-light.png', 'question-retired-dark.png', 'question-retired-light.png',
   ...['purple', 'pink', 'green'].flatMap(color => [`bot-message-${color}-dark.png`, `bot-message-${color}-light.png`]),
   'quote-sent-1280-dark.png', 'quote-sent-1280-light.png',
   'quote-reply-1280-dark.png', 'quote-reply-1280-light.png', 'quote-reply-760-dark.png', 'quote-reply-760-light.png',
@@ -189,7 +190,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processEmptyLayout: machine.processEmptyLayout, processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
-      selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote, retryRetirement: machine.retryRetirement },
+      selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote, retryRetirement: machine.retryRetirement, questionRetirement: machine.questionRetirement },
     supplementalCoverage: {sharedUiConventions:machine.sharedUiConventions,lifecycleGates:machine.lifecycleGates},
     reviewCriteria: [
       '默认内容能回答任务目标、当前进展和下一步；动作写明去向，主机器人负责对用户传达。',

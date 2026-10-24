@@ -30,12 +30,27 @@ test('screenshot history: three old questions and a waiting child produce zero a
   assert.deepEqual(project({ messages, sessions }).map(i => i.messageId), ['now']);
   assert.equal(project({ messages: structuredClone(messages), sessions: structuredClone(sessions) }).length, 1);
 });
-test('internal turns, public activity and unrelated quoted input preserve the current decision', () => {
+test('moving on retires conversational attention without granting permission or choosing an option', () => {
   const q = question('q');
-  const messages = [q, { kind: 'agent_turn' }, { kind: 'agent_activity' }, { kind: 'user_input', quoteRefs: ['other'] }];
+  const messages = [q, { kind: 'agent_turn' }, { kind: 'agent_activity' }];
   assert.equal(project({ messages }).length, 1);
-  assert.equal(project({ messages: [...messages, { kind: 'user_input', answerTo: 'card:question:task:q' }] }).length, 1);
+  for (const input of [
+    { kind: 'user_input', quoteRefs: ['other'] },
+    { kind: 'user_input', answerTo: 'card:question:task:q' },
+    { role: 'user', content: 'my new topic', quoteRefs: ['other'] },
+  ]) {
+    const continued = [...messages, input];
+    assert.equal(project({ messages: continued }).length, 0);
+    assert.equal(projectReplyQuestions(continued).get('q').state, 'superseded');
+    assert.equal(q.question.answered, undefined);
+    assert.equal(project({ messages: continued, approvals: [{ approvalId: 'p', state: 'open' }] })[0].kind, 'approval');
+  }
+  for (const pending of ['sending', 'failed', 'unknown']) {
+    assert.equal(project({ messages: [...messages, { kind: 'user_input', quoteRefs: ['other'], pending }] }).length, 1);
+    assert.equal(project({ messages: [...messages, { ...answer('q'), pending }] }).length, 1);
+  }
   assert.equal(project({ messages: [...messages, answer('q')] }).length, 0);
+  assert.equal(projectReplyQuestions([...messages, answer('q')]).get('q').state, 'answered');
   assert.equal(project({ messages: [q, { kind: 'user_input', content: 'my answer' }] }).length, 0);
 });
 test('replacement and explicit deadline are reconstructible and do not revive older prompts', () => {
