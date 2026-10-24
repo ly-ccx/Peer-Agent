@@ -1,5 +1,6 @@
-import { cloneElement, useCallback, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactElement, type Ref } from 'react';
+import { cloneElement, useCallback, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes, type ReactElement, type Ref } from 'react';
 import { watchVisualMotion } from '../state/visualMotion';
+import { useMotionSettled } from '../hooks/useMotionSettled';
 
 type SurfaceProps = HTMLAttributes<HTMLElement> & { ref?: Ref<HTMLElement> };
 
@@ -18,6 +19,8 @@ export function MotionSurface({ children, kind = 'rise' }: {
   const [retained, setRetained] = useState(visible);
   useLayoutEffect(() => { if (children) previous.current = children; }, [children]);
   const child = (children || previous.current) as ReactElement<SurfaceProps> | null;
+  const entryIdentity = useMemo(() => ({}), [child?.type, child?.key]);
+  const settled = useMotionSettled(root, visible, entryIdentity);
   const targetRef = child?.props.ref;
   const mergedRef = useCallback((node: HTMLElement | null) => {
     const previousNode = root.current;
@@ -46,6 +49,7 @@ export function MotionSurface({ children, kind = 'rise' }: {
     className: `${child.props.className ?? ''} motion-surface`,
     'data-surface-state': visible ? 'open' : 'closed',
     'data-surface-kind': kind,
+    'data-surface-settled': settled,
     inert: !visible || child.props.inert,
     'aria-hidden': !visible || child.props['aria-hidden'],
   } as SurfaceProps);

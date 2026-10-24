@@ -45,6 +45,11 @@
   opacity: 1;
 }
 
+/* Release opening-only transitions once the dock has settled. */
+.bot-drawer-dock.is-open.is-settled {
+  transition: none;
+}
+
 /* ── 抽屉拖拽条（两块面板之间的缝里，镜像 .bot-column-resizer）──
  * 拖拽条属于「缝」，不属于任何一块面板；它渲染在 dock 之外、与 dock 同级，
  * 定位基准是 .bot-drawer-dock-frame（不经 dock 的 overflow:hidden 裁切）。

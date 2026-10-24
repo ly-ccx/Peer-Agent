@@ -27,7 +27,12 @@ export function useBotModels(workspaceId: string | null, profile: BotProfile | n
       write: modelPolicy => clientApi.projectAgentUpdateProfile({ workspaceId, modelPolicy }),
       policy: () => latest.current.profile?.modelPolicy,
       onData: result => {
-        setData({ workspaceId, models: result.modelOptions ?? [], views: result.modelViews ?? {} });
+        const models = result.modelOptions ?? [];
+        const views = result.modelViews ?? {};
+        setData((current) => current.workspaceId === workspaceId
+          && JSON.stringify(current.models) === JSON.stringify(models)
+          && JSON.stringify(current.views) === JSON.stringify(views)
+          ? current : { workspaceId, models, views });
         const draft = pendingPolicies.get(workspaceId);
         if (draft && result.profile && botModelPolicyKey(draft.policy) === botModelPolicyKey(result.profile.modelPolicy)) { pendingPolicies.delete(workspaceId); setPending(null); setSaveError(''); }
       },

@@ -401,6 +401,9 @@
 .motion-surface[data-surface-state='open'][data-surface-kind='fade'] {
   animation-name: motion-enter-fade;
 }
+.motion-surface[data-surface-state='open'][data-surface-settled='true'] {
+  animation: none;
+}
 .motion-surface[data-surface-state='closed'][data-surface-kind] {
   opacity: 0;
   pointer-events: none;

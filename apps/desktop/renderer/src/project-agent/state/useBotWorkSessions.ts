@@ -17,7 +17,9 @@ export function useBotWorkSessions(workspaceId: string | null) {
         const result = await clientApi.projectAgentListSessions({ workspaceId });
         if (cancelled) return;
         if (!result?.ok) throw Error('Session facts unavailable');
-        setSnapshot({ workspaceId, sessions: (result.sessions ?? []).map(readDrawerSession).filter((session): session is DrawerSession => session !== null), available: true });
+        const sessions = (result.sessions ?? []).map(readDrawerSession).filter((session): session is DrawerSession => session !== null);
+        setSnapshot((current) => current.workspaceId === workspaceId && current.available && JSON.stringify(current.sessions) === JSON.stringify(sessions)
+          ? current : { workspaceId, sessions, available: true });
       } catch {
         if (!cancelled) setSnapshot(current => ({ workspaceId, sessions: current.workspaceId === workspaceId ? current.sessions : [], available: false }));
       }

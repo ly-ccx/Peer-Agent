@@ -1,3 +1,4 @@
+import { useMotionSettled } from '../../app/hooks/useMotionSettled';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, useRef, type RefObject } from 'react';
@@ -67,6 +68,7 @@ export function BotProfileDrawer({
   onOpenAutomations,
   taskContext,
   onTaskConversation,
+  replayEntrance = true,
 }: {
   readonly workspaceId: string;
   readonly profile: BotProfile;
@@ -89,6 +91,7 @@ export function BotProfileDrawer({
   readonly onOpenAutomations?: () => void;
   readonly taskContext: TaskConversationContext | null;
   readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
+  readonly replayEntrance?: boolean;
 }) {
   const motionEnabled = useMotionAllowed();
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
@@ -102,9 +105,11 @@ export function BotProfileDrawer({
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
   const layout = drawerLayout(width);
-  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(memory.open ? 'in' : 'off');
+  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(!memory.open ? 'off' : replayEntrance ? 'in' : 'on');
   const bodyRef = useRef<HTMLDivElement>(null);
-  const dockRef = useRef<HTMLElement>(null);
+  const dockRef = useRef<HTMLElement>(null), paneRef = useRef<HTMLDivElement>(null);
+  const dockSettled = useMotionSettled(dockRef, layout === 'push' && memory.open && dockPhase === 'on');
+  const paneSettled = useMotionSettled(paneRef, memory.open && !inspect, memory.tab);
   const previousInspect = useRef(inspect);
   useEffect(() => {
     if (memory.open && previousInspect.current !== inspect) {
@@ -158,7 +163,7 @@ export function BotProfileDrawer({
       // dock 是从 null 首次挂载的：setDockPhase('in') 与随后的终态更新若落在
       // 同一批样式失效窗口内，过渡起点 width:0 从未被提交，浏览器直接画终态，
       // 表现为面板瞬间蹦出。双 rAF 保证起始帧完成布局与绘制后再切终态。
-      setDockPhase('in');
+      setDockPhase(current => current === 'on' ? 'on' : 'in');
       let inner = 0;
       const outer = requestAnimationFrame(() => {
         inner = requestAnimationFrame(() => setDockPhase('on'));
@@ -243,7 +248,7 @@ export function BotProfileDrawer({
       {inspect?.evidence ? <EvidenceView evidence={inspect.evidence} i18n={i18n} /> : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
       {inspect?.replyId ? <div className="bot-reply-details-slot" hidden={Boolean(inspect.evidence)} ref={onReplyDetailsTarget} /> : null}
-      {!inspect ? <div key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className="bot-drawer-pane motion-enter-fade">
+      {!inspect ? <div ref={paneRef} key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className={`bot-drawer-pane${paneSettled ? '' : ' motion-enter-fade'}`}>
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}
@@ -365,7 +370,7 @@ export function BotProfileDrawer({
         onResize={(next) => onMemory(resizeDrawer(memory, next))}
       />
       <aside ref={dockRef}
-        className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
+        className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}${dockSettled ? ' is-settled' : ''}`}
         style={memory.width === undefined ? undefined : { ['--pa-drawer-width' as string]: `${memory.width}px` }}
         aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
         inert={!memory.open}

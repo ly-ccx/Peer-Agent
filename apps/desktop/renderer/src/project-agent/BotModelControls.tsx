@@ -111,7 +111,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   const feedbackKey = feedback?.saveError ? 'forms.saveFailed' : feedback?.readError ? 'forms.loadFailed'
     : feedback?.pending && !feedback.busy ? 'forms.pendingSelection'
       : feedback?.loaded && !feedback.models.length ? 'forms.noModels' : null;
-  return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''}>
+  return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={busy}>
     <div className="bot-model-control-row">
       <AnchoredModelSelectionMenu
         className="bot-model-picker"

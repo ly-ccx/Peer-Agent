@@ -112,6 +112,11 @@
 
   /* 退场态：onClose 时先播退场动画，动画结束后才真正卸载（详见 Overlay.tsx 状态机）。
      退场比入场更利落（fast 档），位移与入场对称（下移淡出）。 */
+  .pa-overlay-backdrop.is-settled:not(.is-closing),
+  .pa-overlay-panel.is-settled:not(.is-closing) {
+    animation: none;
+  }
+
   .pa-overlay-backdrop.is-closing {
     opacity: 0;
     animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;

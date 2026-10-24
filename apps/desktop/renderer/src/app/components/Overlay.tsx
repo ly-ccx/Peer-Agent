@@ -7,6 +7,7 @@ import { InteractionLayerContext, useInteractionLayer } from '../hooks/useIntera
 import { overlayCloseTarget } from './overlayCloseTarget';
 import { watchVisualMotion } from '../state/visualMotion';
 import { createClosePreparation } from '../state/closePreparation';
+import { useMotionSettled } from '../hooks/useMotionSettled';
 
 /**
  * Overlay —— 统一浮层基座（默认模态；anchor 为非模态，均仅负责表达）。
@@ -68,6 +69,7 @@ export function Overlay({
   const [closingStyle, setClosingStyle] = useState<CSSProperties>();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const entrySettled = useMotionSettled(panelRef, !closing);
   const requestGuard = useRef(onRequestClose); requestGuard.current = onRequestClose;
   const closeRef = useRef(onClose); closeRef.current = onClose;
   const closingRef = useRef(false), finished = useRef(false);
@@ -133,8 +135,8 @@ export function Overlay({
     return () => { panel?.removeEventListener('animationcancel', cancel); motion.cancel(); };
   }, [closing, closingStyle, finishClose]);
 
-  const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : 'pa-overlay-backdrop';
-  const panelBase = closing ? `pa-overlay-panel is-closing${closingStyle ? ' is-minimizing' : ''}` : 'pa-overlay-panel';
+  const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : `pa-overlay-backdrop${entrySettled ? ' is-settled' : ''}`;
+  const panelBase = closing ? `pa-overlay-panel is-closing${closingStyle ? ' is-minimizing' : ''}` : `pa-overlay-panel${entrySettled ? ' is-settled' : ''}`;
 
   const overlay = (
     <div

@@ -1,6 +1,6 @@
 import { MotionSurface } from '../../../app/components/MotionSurface';
 import './model-selection.css';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { InteractionLayerContext, useInteractionLayer } from '../../../app/hooks/useInteractionLayer';
 import { isImeKey } from '../../state/compositionGuard';
@@ -41,12 +41,20 @@ function EffortRange({
   const [dragValue, setDragValue] = useState(selectedValue);
   const [dirty, setDirty] = useState(false);
   const committing = useRef(false), edited = useRef(false), cancelled = useRef(false);
+  const sliderRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (committing.current) return;
     setDragValue(selectedValue);
     setDirty(false); edited.current = false; cancelled.current = false;
   }, [selectedValue]);
+
+  useLayoutEffect(() => {
+    const node = sliderRef.current;
+    if (!node || dirty) return;
+    const next = String(selectedValue);
+    if (node.value !== next) node.value = next;
+  }, [dirty, selectedValue]);
 
   const commit = (value: number) => {
     if (!edited.current || cancelled.current || committing.current || disabled) return;
@@ -99,16 +107,16 @@ function EffortRange({
           );
         })}
         <input
+          ref={sliderRef}
           className="reasoning-effort-slider"
           type="range"
           min="0"
           max="100"
           step="1"
           disabled={disabled}
-          value={effectiveValue}
+          defaultValue={selectedValue}
           aria-label={isZh ? '思考强度' : 'Reasoning effort'}
           aria-valuetext={fullLabel}
-          style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
           onInput={(event) => {
             edited.current = true; cancelled.current = false; setDirty(true);
             setDragValue(Number(event.currentTarget.value));
