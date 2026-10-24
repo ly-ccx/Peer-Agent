@@ -5,7 +5,7 @@ import path from 'node:path';
 export async function checkEffortStability({ page, slider, strength, until, getBot, failNext, report, captureDirectory, highEffort, scope = 'settings' }) {
   const feedback = page.locator(scope === 'settings' ? '.bot-settings-tab' : '.model-selection-popover');
   const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
-  const sample = async (key, collectionDelayMs = 0) => {
+  const sample = async (key, collectionDelayMs = 0, errorReceipt = false) => {
     // Establish the baseline after entry motion, before starting a save.
     await until(() => page.locator('.model-selection-popover').evaluate(node =>
       node.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
@@ -69,7 +69,8 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     if (frames[0].drawer) for (const frame of frames) for (const axis of ['x', 'y', 'width', 'height']) {
       assert.ok(Math.abs(frame.drawer[axis] - frames[0].drawer[axis]) < 0.5, `drawer.${axis} moved during save or its receipt`);
     }
-    for (const frame of frames) for (const node of ['trigger', 'panel']) for (const axis of ['x', 'y', 'width', 'height']) {
+    // A real error adds recovery content after the receipt; pending geometry stays fixed.
+    for (const frame of (errorReceipt ? pendingFrames : frames)) for (const node of ['trigger', 'panel']) for (const axis of ['x', 'y', 'width', 'height']) {
       assert.ok(Math.abs(frame[node][axis] - baseline[node][axis]) < 0.5, `${node}.${axis} moved during save`);
     }
     return frames.length;
@@ -85,7 +86,7 @@ export async function checkEffortStability({ page, slider, strength, until, getB
   failNext();
   // Collect after the 650ms failure has returned. The renderer's earlier frames
   // must still prove the pending selection, independently of CDP delivery time.
-  const failureFrames = await sample('Home', 900);
+  const failureFrames = await sample('Home', 900, true);
   await feedback.locator('.bot-model-error[role="alert"], .bot-model-feedback [role="alert"]').first().waitFor();
   await until(() => slider.inputValue(), value => value === '100');
   assert.equal((await getBot()).modelPolicy.overrides.project_agent.reasoningEffort, highEffort);

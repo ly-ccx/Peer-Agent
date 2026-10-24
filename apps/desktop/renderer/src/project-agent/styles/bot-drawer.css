@@ -45,8 +45,7 @@
   opacity: 1;
 }
 
-/* 展开落定后不再过渡 width/opacity。模型策略保存会重绘抽屉里的文字，
- * WebKit 会把仍挂在元素上的 width/opacity 过渡从 0 再播一遍，整块档案闪一下。 */
+/* Release opening-only transitions once the dock has settled. */
 .bot-drawer-dock.is-open.is-settled {
   transition: none;
 }
