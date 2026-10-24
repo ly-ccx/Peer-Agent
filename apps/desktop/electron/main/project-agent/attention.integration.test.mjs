@@ -69,10 +69,16 @@ test('canonical child request appears in count/detail and its queued answer clea
   assert.equal(directory.list()[0].state.needsYou, 2);
   const child = service.listAttention().items.find(item => item.sessionId === 'child');
   assert.equal(child.card.actions[0].payload.text, 'CSV');
+  assert.equal((await service.submitInput({ workspaceId: 'w', inputId: 'new-topic', text: '先问另一个问题', quoteRefs: ['old'] })).ok, true);
+  f.queue.consume('w');
+  assert.equal(directory.list()[0].state.needsYou, 1, 'moving on retires only the conversational choice');
+  assert.equal(directory.questionState('w', 'current'), 'superseded');
+  assert.equal(service.listAttention().items[0].sessionId, 'child', 'the task question still needs an explicit answer');
+  assert.equal((await service.submitInput({ workspaceId: 'w', inputId: 'late-parent', text: 'A', answerTo: 'card:question:reply:current' })).code, 'QUESTION_CLOSED');
   assert.equal((await service.submitInput({ workspaceId: 'w', inputId: 'child-answer', ...child.card.actions[0].payload })).ok, true);
   f.queue.consume('w');
   assert.equal(service.listAttention().items.some(item => item.sessionId === 'child'), false);
-  assert.equal(directory.list()[0].state.needsYou, 1, 'parent question remains open');
+  assert.equal(directory.list()[0].state.needsYou, 0, 'the explicit child answer clears the remaining attention');
   assert.equal(session.status, 'waiting_user', 'a reply receipt is not a task terminal');
 });
 
