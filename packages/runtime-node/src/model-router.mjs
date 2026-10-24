@@ -4,7 +4,7 @@
  * Defaults are computed on read. This module does not persist settings.
  */
 
-import { resolveRoleModel, isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort } from '@peer-agent/protocol';
+import { resolveRoleModel, isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort, modelSupportsFastMode, routingParameters } from '@peer-agent/protocol';
 
 const ROLE_TIERS = {
   project_agent: 'fast',
@@ -64,6 +64,7 @@ export function catalogFromProviders(providers = []) {
       contextTokens: contextTokens(provider),
       local: provider.local === true,
       reasoningEffortLevels: modelReasoningLevels(provider),
+      supportsFastMode: modelSupportsFastMode(provider),
       ...(reasoningEffort ? { reasoningEffort } : {}),
     };
   });
@@ -102,19 +103,22 @@ function cleanTier(value) {
   const fallbacks = Array.isArray(value.fallbacks)
     ? value.fallbacks.map(text).filter(Boolean)
     : [];
-  return { primary: text(value.primary), ...(fallbacks.length ? { fallbacks } : { fallbacks: [] }) };
+  return { primary: text(value.primary), fallbacks,
+    ...(value.reasoningEffort !== undefined ? { reasoningEffort: value.reasoningEffort } : {}),
+    ...(typeof value.fastMode === 'boolean' ? { fastMode: value.fastMode } : {}) };
 }
 
 function cleanRole(value) {
   if (!isRecord(value)) return null;
-  const effort = isModelReasoningEffort(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {};
-  if (value.mode === 'tier' && TIERS.includes(value.tier)) return { mode: 'tier', tier: value.tier, ...effort };
+  const effort = value.reasoningEffort === null || isModelReasoningEffort(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {};
+  const channel = typeof value.fastMode === 'boolean' ? { fastMode: value.fastMode } : {};
+  if (value.mode === 'tier' && TIERS.includes(value.tier)) return { mode: 'tier', tier: value.tier, ...effort, ...channel };
   if (value.mode === 'fixed' && text(value.modelProviderId)) {
     return { mode: 'fixed', modelProviderId: text(value.modelProviderId),
-      ...effort };
+      ...effort, ...channel };
   }
   if (value.mode === 'auto' && Array.isArray(value.pool)) {
-    return { mode: 'auto', pool: value.pool.map(text).filter(Boolean), ...effort };
+    return { mode: 'auto', pool: value.pool.map(text).filter(Boolean), ...effort, ...channel };
   }
   return null;
 }
@@ -208,7 +212,7 @@ function idsFromSetting(setting, routing) {
   return [text(binding.primary), ...(binding.fallbacks || []).map(text).filter(Boolean)];
 }
 
-function eligibleIds(ids, input, routing, workerModel, reasoningEffort) {
+function eligibleIds(ids, input, routing, workerModel, parameters) {
   const scopeOnly = input.projectPolicy?.scope ? { scope: input.projectPolicy.scope } : null;
   const eligible = [];
   for (const id of ids) {
@@ -218,7 +222,7 @@ function eligibleIds(ids, input, routing, workerModel, reasoningEffort) {
       routing: {
         tiers: routing.tiers,
         roles: { [input.role]: { mode: 'fixed', modelProviderId: id,
-          ...(reasoningEffort !== undefined ? { reasoningEffort } : {}) } },
+          ...parameters } },
         verifierPreferDifferentFamily: false,
       },
       projectPolicy: scopeOnly,
@@ -301,7 +305,7 @@ export function resolveRoleRoute(input = {}) {
   }
   const setting = winningSetting(input, routing, resolution.source);
   const ids = idsFromSetting(setting, routing);
-  const eligible = eligibleIds(ids, { ...input, catalog }, routing, workerModel, setting?.reasoningEffort);
+  const eligible = eligibleIds(ids, { ...input, catalog }, routing, workerModel, setting ? routingParameters(setting, routing.tiers) : {});
   const chosen = resolution.selection.modelProviderId;
   const candidateIds = [chosen, ...eligible.filter((id) => id !== chosen)];
   return {

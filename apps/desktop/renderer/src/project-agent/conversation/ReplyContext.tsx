@@ -21,10 +21,11 @@ const SURFACING = {
 } as const;
 
 /** Reply metadata stays discoverable without competing with the answer or pending work. */
-export function ReplyContext({ i18n, onOpenDetails, activity, statusLabel, busy = false, onRefresh, avatar, workspaceId, botLabel }: {
+export function ReplyContext({ i18n, onOpenDetails, activity, statusLabel, busy = false, replying = false, onRefresh, avatar, workspaceId, botLabel }: {
   readonly i18n: I18nRuntime; readonly onOpenDetails?: () => void; readonly activity?: ProjectAgentActivity;
   readonly avatar?: BotAvatarModel; readonly workspaceId?: string; readonly botLabel?: string;
   readonly statusLabel?: string | null; readonly busy?: boolean; readonly onRefresh?: () => void;
+  readonly replying?: boolean;
 }) {
   const ref = useReplyFooterBounds();
   const label = statusLabel === undefined ? replyActivityLabel(activity, i18n) : statusLabel;
@@ -33,10 +34,10 @@ export function ReplyContext({ i18n, onOpenDetails, activity, statusLabel, busy 
     <button type="button" disabled={!onOpenDetails} aria-label={label ? `${label} · ${i18n.t('projectAgent.chat.context.details')}` : i18n.t('projectAgent.chat.context.details')} title={i18n.t('projectAgent.chat.context.details')} onClick={event => {
       event.currentTarget.focus({ preventScroll: true });
       onOpenDetails?.();
-    }}>{thinking && avatar && workspaceId && botLabel
+    }}>{replying ? <PeerIcon name="ellipsis" size={20} className={`bot-reply-typing-dots${busy ? ' is-active' : ''}`} /> : thinking && avatar && workspaceId && botLabel
       ? <BotAvatar avatar={avatar} label={botLabel} workspaceId={workspaceId} mood="thinking" animate />
       : <PeerIcon name={label ? busy ? 'loader' : 'info' : 'panelRight'} size={14} className={busy ? 'bot-reply-loading-icon' : undefined} />}{label
-      ? <span className={thinking ? 'bot-context-running bot-thinking-status-label' : 'bot-context-running'} role="status">{label}</span>
+      ? <span className={thinking && !replying ? 'bot-context-running bot-thinking-status-label' : 'bot-context-running'} role="status">{label}</span>
       : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
     {onRefresh ? <button type="button" onClick={onRefresh}>{i18n.t('projectAgent.chat.reply.refresh')}</button> : null}
   </div>;

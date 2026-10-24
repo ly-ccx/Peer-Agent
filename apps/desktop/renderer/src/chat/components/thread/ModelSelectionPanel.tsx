@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { InteractionLayerContext, useInteractionLayer } from '../../../app/hooks/useInteractionLayer';
 import { isImeKey } from '../../state/compositionGuard';
 import { selectionNavigation } from '../../../app/components/selectionNavigation';
+import { useModelSelectionPosition } from './useModelSelectionPosition';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { PeerIcon } from '../../../ui/icons/PeerIcon';
 import { effortLabel, effortShortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
@@ -345,6 +346,7 @@ export function ModelSelectionPanel({
           ) : null}
         </div>
       ) : null}</MotionSurface>
+      <div className="model-selection-body">
       <div className="model-selection-section-label">{isZh ? '模型' : 'Models'}</div>
       {!browsed?.models.some(model => !model.disabled) ? <p className="ui-form-feedback">{isZh ? '当前没有可选模型，请检查服务连接与模型范围。' : 'No model is available. Check the service connection and model scope.'}</p> : null}
       <div className="model-selection-models" role="listbox" aria-label={isZh ? '模型' : 'Models'}>
@@ -399,6 +401,7 @@ export function ModelSelectionPanel({
           ) : null}
         </div>
       ) : null}
+      </div>
       {feedback}
     </div>
   );
@@ -450,40 +453,11 @@ export function AnchoredModelSelectionMenu({
     : '';
   const [open, setOpen] = useState(false);
   const [resetToken, setResetToken] = useState(0);
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const panelId = useId();
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const updatePosition = () => {
-      const trigger = triggerRef.current;
-      const panel = panelRef.current;
-      if (!trigger || !panel) return;
-      const rect = trigger.getBoundingClientRect();
-      const gap = 6;
-      const margin = 8;
-      const width = panel.offsetWidth;
-      const height = panel.offsetHeight;
-      let top = rect.top - height - gap;
-      if (top < margin) top = Math.min(rect.bottom + gap, window.innerHeight - height - margin);
-      const left = Math.max(margin, Math.min(rect.right - width, window.innerWidth - width - margin));
-      setCoords((current) => current?.left === left && current.top === top ? current : { left, top });
-    };
-    updatePosition();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
-    if (triggerRef.current) observer?.observe(triggerRef.current);
-    if (panelRef.current) observer?.observe(panelRef.current);
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
-  }, [open]);
+  const panelStyle = useModelSelectionPosition(open, triggerRef, panelRef);
 
   const layer = useInteractionLayer(open, { roots: [panelRef], trigger: triggerRef, outside: true, dismissOnTab: true, closeOnTriggerRemoval: true,
     onClose: () => setOpen(false),
@@ -532,7 +506,7 @@ export function AnchoredModelSelectionMenu({
           ? <PeerIcon name="warning" size={12} className="pa-cascading-caret" />
           : <PeerIcon name="chevronDown" size={12} className={`pa-cascading-caret${open ? ' is-open' : ''}`} />}
       </button>
-      {createPortal(<InteractionLayerContext.Provider value={layer}><MotionSurface>{open ? (<div id={panelId} ref={panelRef} className="model-selection-popover" style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}>
+      {createPortal(<InteractionLayerContext.Provider value={layer}><MotionSurface>{open ? (<div id={panelId} ref={panelRef} className="model-selection-popover" style={panelStyle}>
           <ModelSelectionPanel
             groups={groups}
             selectedModelId={selectedModelId}

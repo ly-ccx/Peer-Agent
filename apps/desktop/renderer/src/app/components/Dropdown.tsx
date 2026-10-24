@@ -68,6 +68,7 @@ export function Dropdown({
   title,
   prefix,
   triggerLabel: triggerLabelOverride,
+  menuLabel,
   menuPlacement = 'down',
   searchable = false,
   searchPlaceholder,
@@ -87,6 +88,8 @@ export function Dropdown({
   readonly prefix?: ReactNode;
   /** Closed trigger text. Menu items still use each option's own label. */
   readonly triggerLabel?: string;
+  /** Optional visible heading above the choices. */
+  readonly menuLabel?: string;
   readonly menuPlacement?: 'down' | 'up';
   readonly searchable?: boolean;
   readonly searchPlaceholder?: string;
@@ -292,6 +295,8 @@ export function Dropdown({
           role="option"
           tabIndex={-1}
           aria-selected={opt.value === value}
+          aria-label={opt.description ? opt.label : undefined}
+          aria-describedby={opt.description ? `${listId}-description-${index}` : undefined}
           aria-disabled={opt.disabled || undefined}
           disabled={opt.disabled === true}
           className={`pa-dropdown-item ${index === activeIndex && !opt.disabled ? 'active' : ''} ${opt.value === value ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''} ${opt.disabled ? 'is-disabled' : ''}`}
@@ -306,7 +311,9 @@ export function Dropdown({
               <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
             </svg> : null}
           </span>
+          {opt.icon ? <span className="pa-dropdown-item-icon" aria-hidden>{opt.icon}</span> : null}
           <span className="pa-dropdown-item-label">{opt.label}</span>
+          {opt.description ? <span className="pa-dropdown-item-description" id={`${listId}-description-${index}`}>{opt.description}</span> : null}
           {opt.hint ? <span className="pa-dropdown-item-hint">{opt.hint}</span> : null}
         </button>
       </div>
@@ -322,6 +329,7 @@ export function Dropdown({
           aria-label={ariaLabel}
           style={menuStyle}
         >
+          {menuLabel ? <div className="pa-dropdown-heading">{menuLabel}</div> : null}
           {searchable ? (
             <div className="pa-dropdown-search">
               <input

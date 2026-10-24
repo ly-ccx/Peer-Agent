@@ -1,0 +1,21 @@
+.pa-overlay-panel.bot-document-preview {
+  display: flex; flex-direction: column; width: min(880px, calc(100vw - 32px));
+  height: min(900px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px);
+  padding: var(--space-6); gap: var(--space-3); overflow: hidden;
+  border-radius: var(--ui-radius-panel); background: var(--paper-sheet); color: var(--graphite-base);
+}
+/* A large reading drawer uses the existing spatial handoff rhythm. Keep the
+   settled state animation-free; refreshes and nested links do not replay it. */
+.pa-overlay-backdrop--drawer .bot-document-preview:not(.is-settled):not(.is-closing) {
+  animation: motion-enter-slide-inline var(--za-motion-slow) var(--za-ease-decelerate) both;
+}
+.pa-overlay-backdrop--drawer .bot-document-preview.is-closing {
+  animation: motion-exit-slide-inline var(--za-motion-medium) var(--za-ease-accelerate) both;
+}
+.bot-document-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.bot-document-head h2 { margin: 0; font-size: var(--ui-font-heading-sm); }
+.bot-document-path { margin: 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); overflow-wrap: anywhere; }
+.bot-document-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.bot-document-actions [aria-pressed="true"] { background: var(--control-fill-active); }
+.bot-document-body { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; }
+.bot-document-body pre { max-width: 100%; overflow: auto; }

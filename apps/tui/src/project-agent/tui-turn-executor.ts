@@ -74,7 +74,7 @@ export function createTuiTurnExecutor(options: {
     const settings = options.getSettings();
     const providers = loadSharedModelMetadataList({ userDataPath: options.dataHome }).map(model => ({
       id: model.entryId ?? model.credentialId, groupId: model.credentialId, model: model.model,
-      providerType: model.providerId, apiKeyConfigured: model.credentialStored, supportsTools: model.supportsTools,
+      providerType: model.providerId, authMethod: model.authMethod, apiKeyConfigured: model.credentialStored, supportsTools: model.supportsTools,
       supportsVision: model.supportsVision, supportsStructured: model.supportsStructured, contextWindow: model.contextWindow,
       supportsReasoning: model.supportsReasoning, reasoningEffortLevels: model.supportedReasoningEfforts,
       defaultEffort: model.defaultReasoningEffort,
@@ -91,6 +91,7 @@ export function createTuiTurnExecutor(options: {
     const runtime: TuiRuntime = runtimeFactory({ workspaceRoot: workspacePath, userDataPath: options.dataHome,
       accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals });
     const selectedId = input.modelProviderId || profile.modelSelection?.modelProviderId;
+    runtime.setSessionFastMode(profile.modelSelection?.fastMode === true);
     if (selectedId) {
       const selected = resolvePersistedModelSelection(runtime.modelSelection, {
         providerId: selectedId, modelId: profile.modelSelection?.modelId ?? '', reasoningEffort: profile.modelSelection?.reasoningEffort ?? 'default',

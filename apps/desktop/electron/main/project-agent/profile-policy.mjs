@@ -1,4 +1,4 @@
-import { isModelReasoningEffort, modelReasoningLevels } from '@peer-agent/protocol';
+import { isModelReasoningEffort, modelReasoningLevels, modelSupportsFastMode } from '@peer-agent/protocol';
 const ROLES = new Set(['project_agent', 'session_worker', 'explorer', 'verifier', 'visual_verifier', 'memory_curator', 'objective_probe', 'compactor']);
 const TIERS = new Set(['strong', 'fast', 'economy', 'vision']);
 
@@ -39,14 +39,14 @@ export function profilePolicyPatch(payload, models = []) {
           const valid = setting.mode === 'tier' && TIERS.has(setting.tier)
             || setting.mode === 'fixed' && allowed.has(setting.modelProviderId)
             || setting.mode === 'auto' && ids(setting.pool) && setting.pool.length > 0;
-          if (setting.reasoningEffort !== undefined && (!isModelReasoningEffort(setting.reasoningEffort)
+          if (setting.reasoningEffort != null && (!isModelReasoningEffort(setting.reasoningEffort)
             || setting.mode === 'fixed' && !modelReasoningLevels(models.find(model => model.id === setting.modelProviderId) || {}).includes(setting.reasoningEffort))) {
             return { ok: false, code: 'INVALID_REASONING_EFFORT' };
           }
           if (setting.fastMode !== undefined) {
             const chosen = models.find(model => model.id === setting.modelProviderId);
-            const subscription = chosen?.authMethod === 'oauth_chatgpt' || chosen?.authMethod === 'oauth_grok';
-            if (typeof setting.fastMode !== 'boolean' || setting.mode !== 'fixed' || (setting.fastMode === true && !subscription)) {
+            const subscription = chosen && modelSupportsFastMode(chosen);
+            if (typeof setting.fastMode !== 'boolean' || (setting.fastMode === true && setting.mode === 'fixed' && !subscription)) {
               return { ok: false, code: 'INVALID_FAST_MODE' };
             }
           }

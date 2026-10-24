@@ -15,3 +15,14 @@
 /* Rotate the glyph inside its stable SVG viewport; its layout edge stays on the text column. */
 .bot-reply-loading-icon > * { animation: motion-spin 1s linear infinite; transform-box: view-box; transform-origin: center; }
 @media (prefers-reduced-motion: reduce) { .bot-reply-loading-icon > * { animation: none; } }
+.bot-reply-typing-dots > circle {
+  fill: currentColor;
+}
+.bot-reply-typing-dots.is-active > circle {
+  animation: motion-dots calc(var(--za-motion-slow) * 3) var(--za-ease-standard) infinite;
+}
+.bot-reply-typing-dots > circle:nth-child(2) { animation-delay: calc(var(--za-motion-slow) * -2); }
+.bot-reply-typing-dots > circle:nth-child(3) { animation-delay: calc(var(--za-motion-slow) * -1); }
+@media (prefers-reduced-motion: reduce) {
+  .bot-reply-typing-dots.is-active > circle { animation: none; opacity: 1; transform: none; }
+}

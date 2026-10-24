@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   gitListBranches: (params) => ipcRenderer.invoke('git:list-branches', params),
   gitCreateBranch: (params) => ipcRenderer.invoke('git:create-branch', params),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
-  readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
+  readFile: (absPath, workspaceRoot, relPath, documentReference) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}) }),
   readImageDataUrl: (absPath, workspaceRoot, relPath) =>
     ipcRenderer.invoke('file:read-image-data-url', { absPath, workspaceRoot, relPath }),
   writeFile: (absPath, workspaceRoot, relPath, content) => ipcRenderer.invoke('file:write', { absPath, workspaceRoot, relPath, content }),
