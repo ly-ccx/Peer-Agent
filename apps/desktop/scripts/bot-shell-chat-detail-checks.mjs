@@ -130,7 +130,9 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   const technical = process.locator('details').first();
   await technical.locator('summary').focus(); await technical.locator('summary').press('Enter');
   assert.equal(await technical.getAttribute('open'), '');
-  assert.match(await technical.innerText(), /post_reply/);
+  // Native details is open before its content-visibility transition finishes.
+  // Keep the visible raw-detail assertion, waiting for the real revealed text.
+  assert.match(await until(() => technical.innerText(), text => /post_reply/.test(text)), /post_reply/);
   await technical.locator('summary').press('Enter');
   // A dock's body has its final width while the opening transition is still running.
   await until(() => process.evaluate(node => {
