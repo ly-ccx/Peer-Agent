@@ -98,7 +98,11 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     if (await strength.getAttribute('aria-expanded') !== 'true') await strength.click();
     await slider.waitFor();
   }
-  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
+  if (captureDirectory) {
+    await until(() => page.locator('.model-selection-popover').evaluate(node =>
+      node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState))), Boolean);
+    await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
+  }
   (report.effortStability ??= {})[scope] = { delayMs: 650, failureCollectionDelayMs: 900, successFrames, failureFrames, successHeld: true, failureHeldThenRolledBack: true,
     stableTriggerAndPanel: true, stableDrawerAndPopoverAfterReceipt: true, observationMs: 1100, scope: 'Production settings slider and durable profile over actual IPC; controlled latency and failure' };
 }

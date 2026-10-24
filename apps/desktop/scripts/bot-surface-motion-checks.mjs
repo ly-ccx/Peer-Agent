@@ -58,6 +58,7 @@ export async function checkSurfaceMotion({ page, fixture, until, report, capture
     report, captureDirectory, highEffort: model.reasoningEffortLevels.at(-1), scope: 'composer' });
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.bot-settings-tab').isVisible(), true);
+  await page.locator('.model-selection-popover').waitFor({ state: 'detached' });
   await page.screenshot({ path: path.join(captureDirectory, 'surface-drawer-effort-wide.png') });
   await page.locator('.bot-drawer-head button').click();
   await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
