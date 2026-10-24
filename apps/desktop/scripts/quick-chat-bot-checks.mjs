@@ -40,6 +40,7 @@ export async function checkQuickChatBots({ app, quick, native, fixture, until, r
     await until(() => pop.locator('.quick-chat-popover-option.is-selected strong').textContent(), value => value === selected);
     await pop.bringToFront();
     await pop.getByRole('button', { name: label, exact: true }).click();
+    await until(() => pop.locator('.quick-chat-popover-shell').count(), count => count === 0);
     await focusQuick();
     await until(() => model.isEnabled(), Boolean);
   };
@@ -92,7 +93,7 @@ export async function checkQuickChatBots({ app, quick, native, fixture, until, r
     }
     await quick.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
     report.quickChatBots = { compactControls: true, persistedModel: true, persistedEffort: true, perBot: true,
-      failedSaveRetained: Boolean(failNext), keyboardTrigger: true, aligned: true,
+      failedSaveRetained: Boolean(failNext), keyboardTrigger: true, aligned: true, nativeContentRetired: true,
       scope: 'Actual window and durable Bot profile IPC; native popup callbacks controlled, scripted model only' };
   } finally {
     await native('restoreMenu');
