@@ -447,7 +447,7 @@ export function BotListShell({
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
                 data-session-id={locateSessionId ?? currentDrawerMemory.sessionId ?? undefined}
-                aria-expanded={currentDrawerMemory.open && currentDrawerMemory.tab === 'settings' && !inspect}
+                aria-expanded={currentDrawerMemory.open && !inspect}
                 onClick={() => {
                   drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
