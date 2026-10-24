@@ -13,15 +13,22 @@ export function watchVisualMotion(animations: readonly Animation[], onFinish: ()
   environment?: typeof browserMotionEnvironment;
   schedule?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clear?: (timer: ReturnType<typeof setTimeout>) => void;
+  /** Let CSS deliver its terminal geometry/end event before cancelling its fill. */
+  preserveFinalFrame?: boolean;
+  requestFrame?: (callback: () => void) => number;
+  cancelFrame?: (frame: number) => void;
 } = {}) {
   const environment = options.environment ?? browserMotionEnvironment;
   const schedule = options.schedule ?? setTimeout, clear = options.clear ?? clearTimeout;
   const duration = Math.max(0, options.durationMs ?? 0);
-  let live = true, timer: ReturnType<typeof setTimeout> | null = null, unsubscribe = () => {};
+  let live = true, timer: ReturnType<typeof setTimeout> | null = null, frame: number | null = null, unsubscribe = () => {};
+  const requestFrame = options.requestFrame ?? (typeof globalThis.requestAnimationFrame === 'function' ? (fn: () => void) => globalThis.requestAnimationFrame(fn) : undefined);
+  const cancelFrame = options.cancelFrame ?? ((id: number) => globalThis.cancelAnimationFrame?.(id));
   const stop = (notify: boolean) => {
     if (!live) return;
     live = false;
     if (timer !== null) clear(timer);
+    if (frame !== null) cancelFrame(frame);
     unsubscribe();
     for (const animation of animations) { try { animation.cancel(); } catch { /* Detached/unsupported animation. */ } }
     if (notify) onFinish();
@@ -38,9 +45,17 @@ export function watchVisualMotion(animations: readonly Animation[], onFinish: ()
   // A pending start cannot hold a disappearing layer indefinitely.
   arm(2000);
   try {
-    void Promise.allSettled(animations.map(animation => animation.finished)).then(finish);
+    void Promise.allSettled(animations.map(animation => animation.finished)).then(results => {
+      if (!live) return;
+      if (options.preserveFinalFrame && requestFrame && results.every(result => result.status === 'fulfilled')) {
+        try { frame = requestFrame(() => { frame = null; finish(); }); } catch { finish(); }
+      } else finish();
+    });
     void Promise.allSettled(animations.map(animation => animation.ready)).then(() => {
       if (!live) return;
+      // A delayed rendering task can outlast endTime + padding. Keep the existing
+      // hard bound while CSS gets its real terminal frame and native end event.
+      if (options.preserveFinalFrame) return;
       try {
         const remaining = animations.map(animation => {
           const end = animation.effect?.getComputedTiming().endTime;
