@@ -313,7 +313,7 @@
   align-items: center;
   padding: 9px 8px;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-row);
+  border-radius: var(--ui-radius-panel);
   cursor: pointer;
   transition:
     background var(--za-motion-fast) var(--za-ease-standard),
@@ -331,6 +331,10 @@
   background: var(--chrome-canvas);
   border-color: var(--chrome-hairline);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--graphite-base) 6%, transparent);
+}
+
+[data-theme="dark"] .bot-row.is-open {
+  background: var(--chrome-active);
 }
 
 .bot-row-copy {
@@ -917,7 +921,7 @@
   padding: 6px 10px;
   border-radius: var(--ui-radius-control-compact);
   border-color: transparent;
-  background: var(--control-fill);
+  background: transparent;
   font-weight: 500;
   line-height: 18px;
   box-shadow: none;
@@ -994,7 +998,7 @@
   text-align: left;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-row);
+  border-radius: var(--ui-radius-panel);
   cursor: pointer;
   transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }

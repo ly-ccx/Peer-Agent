@@ -158,18 +158,14 @@ export function readDrawerMemory(workspaceId: string, store: DrawerStore): Drawe
   try {
     const parsed = JSON.parse(raw) as Partial<DrawerMemory>;
     const tab = TABS.has(parsed.tab as DrawerTab) ? parsed.tab as DrawerTab : 'overview';
-    const sessionId = typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
-      ? parsed.sessionId.trim()
-      : null;
     const rawWidth = (parsed as { width?: unknown }).width;
     const width = typeof rawWidth === 'number' && Number.isFinite(rawWidth)
       ? clampDrawerWidth(rawWidth)
       : undefined;
     return {
-      open: parsed.open === true,
+      open: false,
       tab,
-      sessionId,
-      ...(typeof parsed.objectiveId==='string'&&parsed.objectiveId ? {objectiveId:parsed.objectiveId} : {}),
+      sessionId: null,
       ...(width === undefined ? {} : {width}),
     };
   } catch {
@@ -178,7 +174,11 @@ export function readDrawerMemory(workspaceId: string, store: DrawerStore): Drawe
 }
 
 export function writeDrawerMemory(workspaceId: string, memory: DrawerMemory, store: DrawerStore): void {
-  store.set(drawerStorageKey(workspaceId), JSON.stringify(memory));
+  // Opening and task/objective navigation belong to the current interaction.
+  store.set(drawerStorageKey(workspaceId), JSON.stringify({
+    tab: memory.tab,
+    ...(memory.width === undefined ? {} : { width: memory.width }),
+  }));
 }
 
 export function taskGroup(status: string): TaskGroup {

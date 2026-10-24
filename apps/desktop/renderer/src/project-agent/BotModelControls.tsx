@@ -116,6 +116,10 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   const feedbackKey = feedback?.saveError && pendingRole ? 'forms.saveFailed' : feedback?.readError ? 'forms.loadFailed'
     : pendingRole && !feedback?.busy ? 'forms.pendingSelection'
       : feedback?.loaded && !feedback.models.length ? 'forms.noModels' : null;
+  const runningModel = activeSelection
+    ? models.find(item => item.id === activeSelection.modelProviderId)?.label ?? i18n.t('projectAgent.model.unavailable') : null;
+  const modelTitle = [label, source, runningModel ? `${i18n.t('projectAgent.model.runningReply')}: ${runningModel}` : null,
+    i18n.t('projectAgent.model.nextReply')].filter(Boolean).join(' · ');
   return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={updating}>
     <div className="bot-model-control-row">
       <AnchoredModelSelectionMenu
@@ -132,7 +136,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         feedback={feedback && (pendingRole || feedback.readError || !feedback.loaded || !feedback.models.length)
           ? <BotModelFeedback state={feedback} i18n={i18n} showLoading={false} showSaving={false} /> : undefined}
         label={label}
-        title={`${label} · ${source} · ${i18n.t('projectAgent.model.nextReply')}`}
+        title={modelTitle}
         onSelectModel={changeModel}
         onEffortChange={(value) => {
           if (!model || !view?.eligibleModelIds.includes(model.id)) return;
@@ -144,7 +148,6 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         }}
       />
     </div>
-    {activeSelection ? <p className="bot-model-source">{i18n.t('projectAgent.model.runningReply')}: {models.find(item => item.id === activeSelection.modelProviderId)?.label ?? i18n.t('projectAgent.model.unavailable')} · {i18n.t('projectAgent.model.nextReply')}</p> : null}
     {!compact ? <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
       {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p> : null}
   </div>;
