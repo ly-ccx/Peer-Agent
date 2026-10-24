@@ -6,11 +6,9 @@ export async function checkReplyPresence({ page, reply, report, until, state, qu
   const samples = report.replyPresence ??= { cases: [] };
   const footer = reply.locator('.bot-reply-context');
   if (quiet) {
-    // A slow controlled stream can cross the production 15s reassurance threshold.
-    // That user-facing fact is allowed; internal thinking/preparing/tool labels are not.
+    // Public prose carries routine progress; elapsed time must not add a warning.
     const labels = await footer.locator('.bot-context-running').allTextContents();
-    assert.ok(labels.every(label => ['这次回复耗时较久', 'This reply is taking longer'].includes(label)),
-      'public prose may show elapsed-time reassurance, never internal execution labels');
+    assert.deepEqual(labels, [], 'public prose does not compete with routine status or elapsed-time warnings');
     assert.doesNotMatch(await footer.textContent(), /正在整理回复|准备阅读|正在阅读|正在准备下一步/);
   }
   const bounds = await until(() => reply.evaluate(node => {

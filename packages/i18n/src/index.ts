@@ -224,7 +224,9 @@ export type TranslationKey =
   | 'projectAgent.chat.reply.unconfirmed'
   | 'projectAgent.chat.reply.interrupted'
   | 'projectAgent.chat.reply.synchronizing'
-  | 'projectAgent.chat.reply.slow'
+  | 'projectAgent.chat.reply.received'
+  | 'projectAgent.chat.reply.waitingModel'
+  | 'projectAgent.chat.recoveryReasoning'
   | 'projectAgent.chat.reply.refresh'
   | 'projectAgent.chat.reply.related'
   | 'projectAgent.chat.reply.relatedTurn'
@@ -1838,7 +1840,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.unconfirmed': '尚未确认这条消息的回复状态',
     'projectAgent.chat.reply.interrupted': '这次回复已中断',
     'projectAgent.chat.reply.synchronizing': '正在同步回复',
-    'projectAgent.chat.reply.slow': '这次回复耗时较久',
+    'projectAgent.chat.reply.received': '消息已收到，等待处理进展',
+    'projectAgent.chat.reply.waitingModel': '等待模型响应',
+    'projectAgent.chat.recoveryReasoning': '模型不支持当前思考强度。请在输入框的模型菜单里调整强度或切换模型，再继续尝试。',
     'projectAgent.chat.reply.refresh': '刷新状态',
     'projectAgent.chat.reply.related': '这次回复的其他过程（{count}）',
     'projectAgent.chat.reply.relatedTurn': '查看过程 {number}',
@@ -3233,7 +3237,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.unconfirmed': 'The reply status has not been confirmed',
     'projectAgent.chat.reply.interrupted': 'This reply was interrupted',
     'projectAgent.chat.reply.synchronizing': 'Synchronizing the reply',
-    'projectAgent.chat.reply.slow': 'This reply is taking longer',
+    'projectAgent.chat.reply.received': 'Message received; waiting for progress',
+    'projectAgent.chat.reply.waitingModel': 'Waiting for the model',
+    'projectAgent.chat.recoveryReasoning': 'The model does not support the selected reasoning effort. Adjust the effort or choose another model in the composer menu, then try again.',
     'projectAgent.chat.reply.refresh': 'Refresh status',
     'projectAgent.chat.reply.related': 'Other parts of this reply ({count})',
     'projectAgent.chat.reply.relatedTurn': 'View part {number}',

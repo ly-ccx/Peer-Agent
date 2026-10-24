@@ -186,7 +186,7 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
-      <BotModelFeedback state={modelControls} i18n={i18n} />
+      <BotModelFeedback state={modelControls} i18n={i18n} showLoading={false} />
       {background.count ? <details className="bot-background-work">
         <summary>
           <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span>
@@ -210,7 +210,7 @@ export function BotConversation({
             setQuote({ messageId: taskRequest.messageId, text: taskRequest.taskTitle });
           }
         }}
-        modelControls={<div className="bot-model-toolbar"><BotModelControls role="project_agent" compact
+        modelControls={<div className="bot-model-toolbar" aria-busy={!modelControls.loaded && modelControls.reading}><BotModelControls role="project_agent" compact
           policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
           activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
           i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
