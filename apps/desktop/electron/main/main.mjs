@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -207,6 +207,7 @@ import { createConversationApplicationService } from './conversation-application
 import { createConversationReadProjection } from './conversation-read-projection.mjs';
 import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
+import { createBotDocumentResolver } from './bot-document-reference.mjs';
 import { createGoalApplicationService } from './goal-application-service.mjs';
 import { createOpenPathApplicationService } from './open-path-application-service.mjs';
 import { createEditorLaunchService } from './editor-launch-service.mjs';
@@ -1647,6 +1648,21 @@ const workspaceApplicationService = createWorkspaceApplicationService({
 });
 
 const fileAccessApplicationService = createFileAccessApplicationService({
+  resolveBotDocument: createBotDocumentResolver({
+    getWorkspace: workspaceId => projectAgentDirectory.projectAccess?.directory?.get(workspaceId),
+    getKnownRoots: () => {
+      const settings = settingsStore.getAll();
+      return [...(settings.workspaces || []).map(item => typeof item === 'string' ? item : item?.path), settings.activeWorkspace]
+        .filter(value => typeof value === 'string' && path.isAbsolute(value));
+    },
+    readGitOrigin: async root => {
+      const [location, remote] = await Promise.all([
+        execFileAsync('git', ['-C', root, 'rev-parse', '--show-toplevel']),
+        execFileAsync('git', ['-C', root, 'config', '--local', '--get', 'remote.origin.url']),
+      ]);
+      return realpathSync(location.stdout.trim()) === root ? remote.stdout : '';
+    },
+  }),
   getSettings: () => settingsStore.getAll(),
   pathExists: (candidate) => existsSync(candidate),
   statPath: (candidate) => statSync(candidate),

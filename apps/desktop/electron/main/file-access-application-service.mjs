@@ -576,8 +576,14 @@ export function createFileAccessApplicationService(options = {}) {
     return { ok: true, watching: [...current.keys()] };
   }
 
-  async function readFile({ absPath, workspaceRoot, relPath } = {}) {
+  async function readFile({ absPath, workspaceRoot, relPath, documentReference } = {}) {
     try {
+      if (documentReference !== undefined) {
+        const resolved = await options.resolveBotDocument?.(documentReference);
+        if (!resolved?.ok) return resolved ?? { ok: false, status: 'workspace_unavailable', content: '' };
+        const result = await readFile({ absPath: resolved.target, workspaceRoot: resolved.root });
+        return { ...result, resolvedPath: resolved.target, resolvedFrom: resolved.root };
+      }
       if (!absPath || typeof absPath !== 'string') {
         return { ok: false, status: 'invalid_path', content: '', error: 'invalid_path' };
       }
@@ -593,8 +599,8 @@ export function createFileAccessApplicationService(options = {}) {
       let stat;
       try {
         stat = statPath(target);
-      } catch {
-        return { ok: false, status: 'not_found', content: '', error: 'stat_failed' };
+      } catch (error) {
+        return { ok: false, status: ['EACCES', 'EPERM'].includes(error?.code) ? 'permission_denied' : 'not_found', content: '', error: 'stat_failed' };
       }
       if (!stat.isFile()) {
         return {
@@ -639,7 +645,7 @@ export function createFileAccessApplicationService(options = {}) {
     } catch (error) {
       return {
         ok: false,
-        status: 'error',
+        status: ['EACCES', 'EPERM'].includes(error?.code) ? 'permission_denied' : 'error',
         content: '',
         error: error?.message || 'read_failed',
       };

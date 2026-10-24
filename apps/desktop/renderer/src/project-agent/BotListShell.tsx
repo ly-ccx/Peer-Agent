@@ -17,6 +17,7 @@ import { useBotWorkSessions } from './state/useBotWorkSessions';
 import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
+import { BotDocumentPreview } from './conversation/BotDocumentPreview';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
 import type { TaskConversationContext, TaskConversationRequest } from './state/taskConversationState';
@@ -461,6 +462,7 @@ export function BotListShell({
                 <span>{i18n.t('projectAgent.list.profile')}</span>
               </button>
             </header>
+            <BotDocumentPreview key={opened.workspaceId} workspaceId={opened.workspaceId} i18n={i18n}>
             <BotConversation
               workIndex={work.index}
               key={opened.workspaceId}
@@ -488,6 +490,7 @@ export function BotListShell({
               focusMessageId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.messageId : null}
               focusRequestId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.requestId : 0}
             />
+            </BotDocumentPreview>
           </div>
         ) : onboarding ? (
           <BotOnboarding

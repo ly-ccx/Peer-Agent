@@ -51,6 +51,23 @@ test('computed time parsing accepts seconds, zero and invalid fallback without i
   assert.equal(motionDurationMs('-2ms', 120), 120); assert.equal(motionDurationMs('infinite', 320), 320);
 });
 
+test('CSS observer replay retains the live entrance but releases listeners and stale completion', async () => {
+  const f = fixture(), a = animation(); let stale = 0, completed = 0;
+  const options = { ...f, preserveAnimationOnCancel: true };
+  const first = watchVisualMotion([a.value], () => stale++, options);
+  first.cancel();
+  assert.equal(a.cancelled(), 0); assert.equal(f.timers.size, 0);
+  const replay = watchVisualMotion([a.value], () => completed++, options);
+  a.ready(); a.resolve(); await flush();
+  assert.equal(stale, 0); assert.equal(completed, 1); assert.equal(a.cancelled(), 1);
+  assert.equal(f.timers.size, 0); replay.finish(); assert.equal(completed, 1);
+
+  const b = animation(); watchVisualMotion([b.value], () => completed++, options);
+  f.change(false);
+  assert.equal(completed, 2); assert.equal(b.cancelled(), 1);
+  assert.equal(f.timers.size, 0, 'reduced motion still settles immediately');
+});
+
 test('CSS exits retain terminal geometry until native end or the final frame, with the original hard bound', async () => {
   const f = fixture(), a = animation(), frames = new Map<number, () => void>(); let count = 0;
   const options = { ...f, preserveFinalFrame: true,
