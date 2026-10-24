@@ -126,7 +126,7 @@ export function Overlay({
     if (!closing) return;
     let animations: Animation[] = [];
     try { animations = panelRef.current?.getAnimations?.() ?? []; } catch { /* Static close. */ }
-    const motion = watchVisualMotion(animations, finishClose, { durationMs: animations.length ? 240 : 0 });
+    const motion = watchVisualMotion(animations, finishClose, { durationMs: animations.length ? 240 : 0, preserveFinalFrame: true });
     const panel = panelRef.current;
     const cancel = (event: AnimationEvent) => { if (event.target === panel) motion.finish(); };
     panel?.addEventListener('animationcancel', cancel);
