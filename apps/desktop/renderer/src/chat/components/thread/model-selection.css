@@ -4,6 +4,10 @@
   visibility: hidden;
 }
 
+.model-selection-popover.is-settled {
+  animation: none;
+}
+
 
 .model-selection-panel {
   position: relative;

@@ -113,7 +113,7 @@ export function BotSettingsTab({
 
   return (
     <div className="bot-drawer-tab bot-settings-tab">
-      <BotPolicyFields profile={profile} models={modelControls.models} views={modelControls.views} busy={busy || modelControls.busy} i18n={i18n}
+      <BotPolicyFields profile={profile} models={modelControls.models} views={modelControls.views} busy={busy} i18n={i18n}
         onChange={patch => patch.modelPolicy ? modelControls.save(patch.modelPolicy) : undefined} />
       <BotModelFeedback state={modelControls} i18n={i18n} />
       <SettingsGroup className="bot-settings-section bot-settings-identity" title={i18n.t('projectAgent.drawer.settings.appearance')}>

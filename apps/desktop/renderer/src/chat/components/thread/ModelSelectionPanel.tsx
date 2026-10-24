@@ -1,5 +1,5 @@
 import './model-selection.css';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { InteractionLayerContext, useInteractionLayer } from '../../../app/hooks/useInteractionLayer';
 import { isImeKey } from '../../state/compositionGuard';
@@ -40,12 +40,22 @@ function EffortRange({
   const [dragValue, setDragValue] = useState(selectedValue);
   const [dirty, setDirty] = useState(false);
   const committing = useRef(false), edited = useRef(false), cancelled = useRef(false);
+  const sliderRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (committing.current) return;
     setDragValue(selectedValue);
     setDirty(false); edited.current = false; cancelled.current = false;
   }, [selectedValue]);
+
+  // Keep the native thumb stable. A controlled `value` is written on every
+  // parent render, and WebKit rebuilds the range thumb when that happens.
+  useLayoutEffect(() => {
+    const node = sliderRef.current;
+    if (!node || dirty) return;
+    const next = String(selectedValue);
+    if (node.value !== next) node.value = next;
+  }, [dirty, selectedValue]);
 
   const commit = (value: number) => {
     if (!edited.current || cancelled.current || committing.current || disabled) return;
@@ -98,16 +108,16 @@ function EffortRange({
           );
         })}
         <input
+          ref={sliderRef}
           className="reasoning-effort-slider"
           type="range"
           min="0"
           max="100"
           step="1"
           disabled={disabled}
-          value={effectiveValue}
+          defaultValue={selectedValue}
           aria-label={isZh ? '思考强度' : 'Reasoning effort'}
           aria-valuetext={fullLabel}
-          style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
           onInput={(event) => {
             edited.current = true; cancelled.current = false; setDirty(true);
             setDragValue(Number(event.currentTarget.value));
@@ -424,6 +434,7 @@ export function AnchoredModelSelectionMenu({
     : '';
   const [open, setOpen] = useState(false);
   const [resetToken, setResetToken] = useState(0);
+  const [entered, setEntered] = useState(false);
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -447,8 +458,10 @@ export function AnchoredModelSelectionMenu({
       setCoords((current) => current?.left === left && current.top === top ? current : { left, top });
     };
     updatePosition();
+    // Only the panel's own size and the viewport move this popover.
+    // The trigger grows when Fast is toggled; following that resize rewrites
+    // the popover style and replays the entrance animation, which remounts the slider thumb.
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
-    if (triggerRef.current) observer?.observe(triggerRef.current);
     if (panelRef.current) observer?.observe(panelRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
@@ -468,6 +481,10 @@ export function AnchoredModelSelectionMenu({
     },
     onEnter: () => (panelRef.current?.querySelector<HTMLElement>('.model-selection-model[aria-selected="true"]:not(:disabled), .model-selection-provider') ?? panelRef.current)?.focus({ preventScroll: true }),
   });
+
+  useEffect(() => {
+    if (!open) setEntered(false);
+  }, [open]);
 
   return (
     <div ref={rootRef} className={className ?? 'model-selection-control composer-cascading-menu composer-model-dropdown'}>
@@ -499,7 +516,15 @@ export function AnchoredModelSelectionMenu({
         <PeerIcon name="chevronDown" size={12} className={`pa-cascading-caret${open ? ' is-open' : ''}`} />
       </button>
       {open ? createPortal(
-        <InteractionLayerContext.Provider value={layer}><div id={panelId} ref={panelRef} className="model-selection-popover motion-enter-rise" style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}>
+        <InteractionLayerContext.Provider value={layer}><div
+          id={panelId}
+          ref={panelRef}
+          className={`model-selection-popover motion-enter-rise${entered ? ' is-settled' : ''}`}
+          style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}
+          onAnimationEnd={(event) => {
+            if (event.target === event.currentTarget) setEntered(true);
+          }}
+        >
           <ModelSelectionPanel
             groups={groups}
             selectedModelId={selectedModelId}
