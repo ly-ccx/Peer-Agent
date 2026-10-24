@@ -1825,7 +1825,7 @@
   flex-wrap: wrap;
 }
 
-.llm-configured-model-actions button,
+.llm-configured-model-actions > button,
 .llm-catalog-toolbar button,
 .llm-catalog-summary button,
 .llm-catalog-manual button,
@@ -1841,7 +1841,7 @@
   cursor: pointer;
 }
 
-.llm-configured-model-actions button:hover:not(:disabled),
+.llm-configured-model-actions > button:hover:not(:disabled),
 .llm-catalog-toolbar button:hover:not(:disabled),
 .llm-catalog-summary button:hover:not(:disabled),
 .llm-catalog-manual button:hover:not(:disabled),
@@ -1850,11 +1850,11 @@
   background: var(--chrome-hover);
 }
 
-.llm-configured-model-actions button.danger:hover:not(:disabled) {
+.llm-configured-model-actions > button.danger:hover:not(:disabled) {
   color: var(--state-danger);
 }
 
-.llm-configured-model-actions button:disabled,
+.llm-configured-model-actions > button:disabled,
 .llm-catalog-toolbar button:disabled,
 .llm-catalog-summary button:disabled,
 .llm-catalog-manual button:disabled,
