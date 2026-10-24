@@ -730,7 +730,6 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.save'
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
-  | 'projectAgent.drawer.settings.avatarUpload'
   | 'projectAgent.drawer.settings.avatarColor'
   | 'projectAgent.drawer.settings.avatarColorImageHint'
   | 'projectAgent.drawer.settings.avatarColor.0'
@@ -2347,7 +2346,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
     'projectAgent.drawer.settings.avatarNew': '重新生成',
-    'projectAgent.drawer.settings.avatarUpload': '上传自己的图片',
     'projectAgent.drawer.settings.avatarColor': '颜色',
     'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
     'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
@@ -3745,7 +3743,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
     'projectAgent.drawer.settings.avatarNew': 'Generate another',
-    'projectAgent.drawer.settings.avatarUpload': 'Upload an image',
     'projectAgent.drawer.settings.avatarColor': 'Color',
     'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
     'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',
