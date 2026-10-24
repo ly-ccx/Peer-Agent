@@ -1743,6 +1743,7 @@ function normalizeRuntimeModelSelection(value) {
   const selection = { providerId, modelId, modelProviderId, family };
   const reasoningEffort = normalizeOptionalString(value.reasoningEffort);
   if (reasoningEffort) selection.reasoningEffort = reasoningEffort;
+  if (typeof value.fastMode === 'boolean') selection.fastMode = value.fastMode;
   return selection;
 }
 

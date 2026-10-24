@@ -27,6 +27,7 @@ function frozenSelection(slot) {
     ...(text(slot.modelId) ? { modelId: text(slot.modelId) } : {}),
     ...(text(slot.family) ? { family: text(slot.family) } : {}),
     ...(text(slot.reasoningEffort) ? { reasoningEffort: text(slot.reasoningEffort) } : {}),
+    ...(typeof slot.fastMode === 'boolean' ? { fastMode: slot.fastMode } : {}),
     ...(typeof slot.sameFamilyAsWorker === 'boolean'
       ? { sameFamilyAsWorker: slot.sameFamilyAsWorker }
       : {}),

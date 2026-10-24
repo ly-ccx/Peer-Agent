@@ -325,6 +325,7 @@ export interface ModelRoutingPreviewRow {
   readonly ok: boolean;
   readonly modelProviderId: string | null;
   readonly reasoningEffort?: string | null;
+  readonly fastMode?: boolean | null;
   readonly label: string;
   readonly source: string | null;
   readonly missing: string | null;

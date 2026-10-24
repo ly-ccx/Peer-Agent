@@ -107,7 +107,7 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
     ? i18n.t(`modelRouting.tier.${setting.tier}`)
     : (model?.label ?? i18n.t('projectAgent.model.unavailable'));
   const effortLevel: EffortLevel = isEffortLevel(effort) ? effort : 'default';
-  const fastMode = setting?.mode === 'fixed' && setting.fastMode === true;
+  const fastMode = setting?.fastMode ?? (view?.resolution.ok ? view.resolution.selection.fastMode === true : false);
   const pendingRole = Boolean(feedback?.pending
     && botModelPolicyKey({ overrides: { [role]: feedback.pending.overrides?.[role] } })
       !== botModelPolicyKey({ overrides: { [role]: policy?.overrides?.[role] } }));

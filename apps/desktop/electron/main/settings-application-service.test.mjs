@@ -294,3 +294,22 @@ test('global concurrency is persisted through existing settings and unrelated pr
   assert.equal(getSettings().projectAgent.concurrency,8);
   assert.equal(service.update({projectAgent:{concurrency:9}}).projectAgent.concurrency,4);
 });
+
+test('routing parameter updates preserve bindings and reject unsupported channels before persistence', () => {
+  const oauth = { id: 'grok', model: 'grok', authMethod: 'oauth_grok', apiKeyConfigured: true,
+    supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' };
+  const api = { ...oauth, id: 'api', authMethod: 'api_key' };
+  const host = createHarness({ settings: { modelRouting: { tiers: {
+    fast: { primary: 'grok', fallbacks: [], reasoningEffort: 'high', fastMode: true },
+    economy: { primary: 'removed', fallbacks: [], reasoningEffort: 'max' },
+  } } } });
+  host.service.updateModelRouting({ roles: { project_agent: { mode: 'tier', tier: 'fast', reasoningEffort: null, fastMode: false } } }, [oauth, api]);
+  const row = host.service.previewModelRouting([oauth, api]).resolutions.find(item => item.role === 'project_agent');
+  assert.equal(row.ok, true);
+  assert.equal(row.reasoningEffort, 'low');
+  assert.equal(row.fastMode, false);
+  const before = JSON.stringify(host.getSettings());
+  assert.throws(() => host.service.updateModelRouting({ tiers: { fast: { primary: 'api', fallbacks: [], fastMode: true } } }, [oauth, api]), /INVALID_FAST_MODE/);
+  assert.equal(JSON.stringify(host.getSettings()), before);
+  assert.equal(host.getSettings().modelRouting.tiers.economy.primary, 'removed');
+});

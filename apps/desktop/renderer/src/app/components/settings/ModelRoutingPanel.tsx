@@ -3,7 +3,7 @@ import { useUnsavedChanges } from '../../../ui/forms/UnsavedChanges';
 import { FormFeedback } from '../../../ui/forms/FormFeedback';
 import { readRoutingDraft, editRoutingDraft, routingDraftPatch, type RoutingDraft } from './routingDraft';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { isModelReasoningEffort, type RoleSetting } from '@peer-agent/protocol';
+import { isModelReasoningEffort, routingParameters, type ModelTierBinding, type RoleSetting } from '@peer-agent/protocol';
 import { effortLabel } from '../../../chat/state/preferences';
 import { useEffect, useId, useState } from 'react';
 import { clientApi } from '../../../clientApi';
@@ -18,6 +18,7 @@ import { SettingsGroup } from '../../../ui/settings/SettingsGroup';
 import { CascadingMenu } from '../CascadingMenu';
 import { Dropdown } from '../Dropdown';
 import './model-routing.css';
+import { RoutingParameterFields } from './RoutingParameterFields';
 import {
   MODEL_ROLES,
   MODEL_TIERS,
@@ -28,7 +29,7 @@ import {
   reasonTranslationKey,
   roleTranslationKey,
   routingMenuGroups,
-  routingReasoningLevels,
+  routingParameterCandidates,
   setRoutingReasoning,
   tierTranslationKey,
   validateAutoPool,
@@ -59,9 +60,9 @@ function optionLabel(option: RoutingModelOption, reason: ReturnType<typeof optio
   return reason ? `${option.label} — ${i18n.t(reasonTranslationKey(reason))}` : option.label;
 }
 
-function tierPatch(tier: ModelTierName, primary: string, fallbacks: readonly string[]): ModelRoutingPatch {
+function tierPatch(tier: ModelTierName, primary: string, fallbacks: readonly string[], previous: ModelTierBinding): ModelRoutingPatch {
   const tiers: NonNullable<ModelRoutingPatch['tiers']> = {};
-  tiers[tier] = { primary, fallbacks };
+  tiers[tier] = { ...previous, primary, fallbacks };
   return { tiers };
 }
 
@@ -81,7 +82,14 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
     read: async () => readRoutingDraft(await clientApi.modelRoutingGet()),
     write: async (draft, saved) => {
       if (!draft || !saved) throw Error('NOT_LOADED');
-      return readRoutingDraft(await clientApi.modelRoutingUpdate(routingDraftPatch(draft, saved)));
+      try {
+        return readRoutingDraft(await clientApi.modelRoutingUpdate(routingDraftPatch(draft, saved)));
+      } catch (failure) {
+        const message = String(failure);
+        if (message.includes('INVALID_FAST_MODE')) setError(i18n.t('modelRouting.fastUnsupported'));
+        else if (message.includes('INVALID_REASONING_EFFORT')) setError(i18n.t('modelRouting.reasoningInvalid'));
+        throw failure;
+      }
     },
   });
   useUnsavedChanges({ dirty: form.dirty, busy: form.saving, save: form.save, discard: form.reset });
@@ -151,7 +159,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                   disabled={readOnly}
                   ariaLabel={tierLabel}
                   i18n={i18n}
-                  onChange={(id) => save(tierPatch(tier, id, withoutId(fallbacks, id)))}
+                  onChange={(id) => save(tierPatch(tier, id, withoutId(fallbacks, id), binding))}
                 />
                 <div className="model-routing-fallbacks">
                   {fallbacks.map((id, index) => {
@@ -164,7 +172,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                             type="button"
                             disabled={readOnly || index === 0}
                             aria-label={i18n.t('modelRouting.moveUp')}
-                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, -1)))}
+                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, -1), binding))}
                           >
                             <Chevron direction="up" />
                           </button>
@@ -172,7 +180,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                             type="button"
                             disabled={readOnly || index === fallbacks.length - 1}
                             aria-label={i18n.t('modelRouting.moveDown')}
-                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, 1)))}
+                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, 1), binding))}
                           >
                             <Chevron direction="down" />
                           </button>
@@ -180,7 +188,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                             type="button"
                             disabled={readOnly}
                             aria-label={i18n.t('modelRouting.remove')}
-                            onClick={() => save(tierPatch(tier, binding.primary, withoutId(fallbacks, id)))}
+                            onClick={() => save(tierPatch(tier, binding.primary, withoutId(fallbacks, id), binding))}
                           >
                             <RemoveIcon />
                           </button>
@@ -196,9 +204,19 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     placeholder={i18n.t('modelRouting.addFallback')}
                     ariaLabel={i18n.t('modelRouting.addFallback')}
                     i18n={i18n}
-                    onChange={(id) => save(tierPatch(tier, binding.primary, [...fallbacks, id]))}
+                    onChange={(id) => save(tierPatch(tier, binding.primary, [...fallbacks, id], binding))}
                   />
                 </div>
+                <RoutingParameterFields
+                  value={binding}
+                  candidates={routingParameterCandidates({ mode: 'tier', tier }, view.routing.tiers, options, { kind: 'tier', tier })}
+                  disabled={readOnly} label={tierLabel} i18n={i18n}
+                  onEffort={effort => {
+                    const { reasoningEffort: _old, ...rest } = binding;
+                    void save({ tiers: { [tier]: { ...rest, ...(effort != null ? { reasoningEffort: effort } : {}) } } });
+                  }}
+                  onChannel={fastMode => { void save({ tiers: { [tier]: { ...binding, fastMode } } }); }}
+                />
               </div>
             );
           })}
@@ -219,7 +237,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
           <span>{i18n.t('modelRouting.roles')}</span>
           <span>{i18n.t('modelRouting.modeLabel')}</span>
           <span>{i18n.t('modelRouting.targetLabel')}</span>
-          <span>{i18n.t('modelRouting.reasoning')}</span>
+          <span>{i18n.t('modelRouting.parameters')}</span>
           <span>{i18n.t('modelRouting.resolved')} · {i18n.t('forms.savedValue')}</span>
           <span>{i18n.t('modelRouting.spendCap')}</span>
         </div>
@@ -232,8 +250,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             const savedRouting = preview?.routing ?? form.saved?.view.routing ?? view.routing;
             const savedSetting = savedRouting.roles[role] ?? { mode: 'tier' as const, tier: 'economy' as const };
             const resolvedLabel = resolutionText(resolved, role, i18n, savedSetting, previewError);
-            const levels = routingReasoningLevels(setting, view.routing.tiers, options, role);
-            const invalidEffort = setting.reasoningEffort !== undefined && !levels.includes(setting.reasoningEffort);
+            const parameters = { reasoningEffort: setting.reasoningEffort, fastMode: setting.fastMode };
             return (
               <div className={`model-routing-row model-routing-role${setting.mode === 'auto' ? ' is-auto' : ''}`} key={role}>
                 <div className="model-routing-name">{roleLabel}</div>
@@ -249,14 +266,14 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     ]}
                     onChange={(mode) => {
                       if (mode === 'tier') {
-                        void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', reasoningEffort: setting.reasoningEffort }));
+                        void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', ...parameters }));
                       } else if (mode === 'fixed') {
                         const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
                         if (!capable) {
                           setError(i18n.t('modelRouting.poolInvalid'));
                           return;
                         }
-                        void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, reasoningEffort: setting.reasoningEffort }));
+                        void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, ...parameters }));
                       } else {
                         const capable = options.filter((option) => !optionRejectReason(option, { kind: 'role', role }));
                         const pool = capable.slice(0, 1).map((option) => option.id);
@@ -265,7 +282,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                           setError(i18n.t('modelRouting.poolInvalid'));
                           return;
                         }
-                        void save(rolePatch(role, { mode: 'auto', pool, reasoningEffort: setting.reasoningEffort }));
+                        void save(rolePatch(role, { mode: 'auto', pool, ...parameters }));
                       }
                     }}
                   />
@@ -322,24 +339,17 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     </div>
                   ) : null}
                 </div>
-                <div className="model-routing-reasoning" data-label={i18n.t('modelRouting.reasoning')}>
-                  <Dropdown
-                    value={setting.reasoningEffort ?? 'model-default'}
-                    disabled={readOnly || (!levels.length && !invalidEffort)}
-                    ariaLabel={`${roleLabel} ${i18n.t('modelRouting.reasoning')}`}
-                    options={[
-                      { value: 'model-default', label: i18n.t('modelRouting.reasoningDefault') },
-                      ...levels.map(level => ({ value: level, label: effortLabel(level, i18n.locale.startsWith('zh')) })),
-                      ...(invalidEffort ? [{ value: setting.reasoningEffort!, label: `${effortLabel(setting.reasoningEffort!, i18n.locale.startsWith('zh'))} · ${i18n.t('modelRouting.reasoningInvalid')}`, disabled: true }] : []),
-                    ]}
-                    onChange={value => {
-                      if (value === 'model-default' || isModelReasoningEffort(value) && levels.includes(value)) {
-                        void save(rolePatch(role, setRoutingReasoning(setting, isModelReasoningEffort(value) ? value : undefined)));
-                      }
-                    }}
-                  />
-                  {!levels.length && resolved?.ok ? <p className="model-routing-reasoning-note">{i18n.t(setting.mode === 'fixed' ? 'projectAgent.model.noEffort' : 'modelRouting.reasoningNoCommon')}</p> : null}
-                </div>
+                <RoutingParameterFields
+                  value={setting}
+                  candidates={routingParameterCandidates(setting, view.routing.tiers, options, { kind: 'role', role })}
+                  inherit={setting.mode === 'tier' ? routingParameters({ mode: 'tier', tier: setting.tier }, view.routing.tiers) : undefined}
+                  disabled={readOnly} label={roleLabel} i18n={i18n}
+                  onEffort={effort => { void save(rolePatch(role, setRoutingReasoning(setting, effort))); }}
+                  onChannel={fast => {
+                    const { fastMode: _old, ...rest } = setting;
+                    void save(rolePatch(role, { ...rest, ...(fast !== undefined ? { fastMode: fast } : {}) }));
+                  }}
+                />
                 <div className="model-routing-resolved" data-label={i18n.t('modelRouting.resolved')} title={resolvedLabel}>
                   {resolvedLabel}
                 </div>
@@ -372,11 +382,12 @@ function resolutionText(row: ModelRoutingPreviewRow | undefined, role: ModelRole
   const relation = setting.mode === 'tier'
     ? `${i18n.t('modelRouting.followingTier', { tier: i18n.t(tierTranslationKey(setting.tier)) })}\n` : '';
   const label = row.ok ? `${row.label} · ${isModelReasoningEffort(row.reasoningEffort)
-    ? effortLabel(row.reasoningEffort, i18n.locale.startsWith('zh')) : i18n.t('modelRouting.reasoningDefault')}` : row.label;
+    ? effortLabel(row.reasoningEffort, i18n.locale.startsWith('zh')) : i18n.t('modelRouting.reasoningDefault')} · ${i18n.t(row.fastMode ? 'modelRouting.channelFast' : 'modelRouting.channelNormal')}` : row.label;
   if (row.ok && row.spendExceeded && isEssentialRole(role)) {
     return `${relation}${label} · ${i18n.t('modelRouting.essentialSpend')}`;
   }
   if (!row.ok && row.reason === 'spend_cap_reached') return `${relation}${i18n.t('modelRouting.spendExceeded')}`;
+  if (!row.ok && row.reason === 'fast_mode') return `${relation}${i18n.t('modelRouting.fastUnsupported')}`;
   if (!row.ok && row.reason === 'reasoning') return `${relation}${i18n.t('modelRouting.reasoningInvalid')}`;
   if (!row.ok) return `${relation}${i18n.t(setting.mode === 'tier' ? 'modelRouting.checkTier' : setting.mode === 'fixed' ? 'modelRouting.checkFixed' : 'modelRouting.poolInvalid')}`;
   return `${relation}${label}`;

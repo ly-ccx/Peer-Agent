@@ -282,3 +282,13 @@ test('pending approval records keep the task workspace, session, and plan', asyn
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('work-session frozen parameters keep both explicit normal and fast channels', () => {
+  for (const fastMode of [false, true]) {
+    const plan = taskPlan({ worker: { ...selection('worker'), reasoningEffort: 'high', fastMode } });
+    const profile = resolveWorkSessionProfile({ plan, kind: 'worker' });
+    assert.equal(profile.modelSelection.fastMode, fastMode);
+    assert.equal(profile.modelSelection.reasoningEffort, 'high');
+    assert.equal(profile.modelSelection.source, 'task');
+  }
+});
