@@ -48,7 +48,8 @@ export async function checkBotEvidence({ page, until, report, captureDirectory, 
   await restore(); await open(4);
   assert.equal(await view.locator('.bot-evidence-content').innerText(),'回归通过：5 项检查完成。');
   await view.locator('summary').click();
-  assert.match(await view.innerText(),/rc-evidence-4/);
+  // Opening the native disclosure precedes its content-visibility commit.
+  assert.match(await until(()=>view.innerText(),text=>/rc-evidence-4/.test(text)),/rc-evidence-4/);
   await restore();
   report.evidenceSources={namedSources:true,savedFile:true,exactHistory:true,missingBodyExplained:true,
     unknownRefDistinct:true,diagnosticsCollapsed:true,commandReadable:true,narrowFits:fits};
