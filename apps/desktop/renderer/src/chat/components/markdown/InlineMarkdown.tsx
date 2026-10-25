@@ -8,7 +8,7 @@ import {
 } from '../../state/localImagePreview';
 import { findMarkdownImage, findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
 import { DocumentPreviewContext } from './DocumentPreviewContext';
-import { documentReferencePath, documentReferencesInText } from './documentReference';
+import { documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -165,6 +165,8 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
     </code>;
   }
 
+  if (preview) return <code>{content}</code>;
+
   if (!parsed || !absPath) {
     return <code>{content}</code>;
   }
@@ -257,7 +259,7 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
 
 function MarkdownFileLink({ destination, children }: { readonly destination: string; readonly children: ReactNode }) {
   const preview = useContext(DocumentPreviewContext);
-  return parseFilePathToken(destination) || preview && documentReferencePath(destination)
+  return (preview ? documentReferencePath(destination) : parseFilePathToken(destination))
     ? <FilePathCode raw={destination}>{children}</FilePathCode> : <span>{children}</span>;
 }
 
@@ -401,7 +403,8 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
     const content = text.slice(contentStart, contentEnd);
     const key = `${keyPrefix}-inline-${tokenIndex}`;
     if (next.type === 'code') {
-      nodes.push(autoDocuments ? <FilePathCode key={key} raw={content} /> : <code key={key}>{content}</code>);
+      nodes.push(autoDocuments && !isGitReferenceContext(text.slice(0, next.start))
+        ? <FilePathCode key={key} raw={content} /> : <code key={key}>{content}</code>);
     } else if (next.type === 'strong') {
       nodes.push(<strong key={key}>{renderInlineMarkdown(content, key, offsets?.slice(contentStart, contentEnd + 1), autoDocuments)}</strong>);
     } else {

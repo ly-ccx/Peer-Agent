@@ -18,6 +18,7 @@ function errorLabel(status: LocalDocumentReadResult['status'] | undefined, zh: b
     scope_denied: ['此路径超出已确认的项目范围，无法预览。', 'This path is outside the confirmed project scope.'],
     workspace_unavailable: ['项目或知识库位置不可用，无法解析此路径。', 'The project or knowledge repository location is unavailable.'],
     ambiguous_path: ['存在多个同名仓库，请使用明确的文件路径。', 'Several repositories match. Use an unambiguous file path.'],
+    relative_base_required: ['当前项目中未找到这个相对路径。请选择文件所在的位置。', 'This relative path was not found in the current project. Choose its location.'],
     not_file: ['此路径是目录，无法作为文档预览。', 'This path is a directory, not a document.'],
     too_large: ['文件过大，无法在此预览。', 'This file is too large to preview.'],
     binary: ['此文件不是可预览的文本文档。', 'This file is not a text document.'],
@@ -33,6 +34,7 @@ export function BotDocumentPreview({ workspaceId, i18n, children }: {
 }) {
   const zh = i18n.locale.startsWith('zh');
   const trigger = useRef<HTMLElement | null>(null);
+  const heading = useRef<HTMLHeadingElement | null>(null);
   const [reference, setReference] = useState<BotDocumentReference | null>(null);
   const [source, setSource] = useState(false);
   const read = useResourceRead(JSON.stringify(reference), () => clientApi.readFile('', undefined, undefined, reference!), Boolean(reference));
@@ -54,7 +56,7 @@ export function BotDocumentPreview({ workspaceId, i18n, children }: {
     {children}
     {reference ? <Drawer onClose={close} restoreFocusRef={trigger} ariaLabel={title} panelClassName="bot-document-preview" softBackdrop>
       {({ requestClose }) => <>
-        <header className="bot-document-head"><h2>{title}</h2>
+        <header className="bot-document-head"><h2 ref={heading} tabIndex={-1}>{title}</h2>
           <button type="button" className="ui-button" aria-label={zh ? '关闭预览' : 'Close preview'} onClick={requestClose}><PeerIcon name="close" size={18} /></button>
         </header>
         <p className="bot-document-path">{name}</p>
@@ -68,7 +70,18 @@ export function BotDocumentPreview({ workspaceId, i18n, children }: {
         {read.error && ready ? <p role="alert">{zh ? '重新读取失败，保留上次预览。' : 'The refresh failed. The previous preview is preserved.'}</p> : null}
         <div className="bot-document-body" aria-busy={read.loading}>
           {!read.loaded && !read.error || read.loading && !read.value ? <p role="status">{zh ? '正在读取文档…' : 'Reading document…'}</p> : !ready
-            ? <p role="alert">{errorLabel(read.value?.status, zh)}</p>
+            ? <>
+              <p role={read.value?.status === 'relative_base_required' ? 'status' : 'alert'}>{errorLabel(read.value?.status, zh)}</p>
+              {read.value?.status === 'relative_base_required' ? <div className="bot-document-candidates">
+                {read.value.candidates?.map(candidate => <button key={candidate.path} type="button" className="ui-button"
+                  onClick={() => {
+                    heading.current?.focus({ preventScroll: true });
+                    setSource(false); setReference({ workspaceId, path: candidate.path });
+                  }}>
+                  {candidate.path}
+                </button>)}
+              </div> : null}
+            </>
             : <DocumentPreviewContext.Provider value={nestedAdapter}>
               {markdown && !source ? <MarkdownDocument content={read.value!.content} emptyLabel={zh ? '文档为空。' : 'The document is empty.'}
                 copyLabel={zh ? '复制' : 'Copy'} copiedLabel={zh ? '已复制' : 'Copied'} />

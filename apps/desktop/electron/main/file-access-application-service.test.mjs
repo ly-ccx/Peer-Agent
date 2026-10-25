@@ -749,3 +749,11 @@ test('scoped Bot references reuse the bounded text reader and fail closed before
   assert.deepEqual(denied, { ok: false, status: 'scope_denied', content: '' });
   assert.equal(h.written.length, 0);
 });
+
+test('source selection is returned without reading a legacy fallback file or losing the confirmed candidates', async () => {
+  const choice = { ok: false, status: 'relative_base_required', content: '',
+    candidates: [{ path: '/ws-b/report.md', root: '/ws-b' }] };
+  const h = createHarness({ nodes: [['/ws-a/report.md', file('must not read')]], resolveBotDocument: async () => choice });
+  const result = await h.service.readFile({ absPath: '/ws-a/report.md', documentReference: { workspaceId: 'bot', path: 'report.md' } });
+  assert.deepEqual(result, choice); assert.equal(result.content, ''); assert.equal(h.written.length, 0);
+});
