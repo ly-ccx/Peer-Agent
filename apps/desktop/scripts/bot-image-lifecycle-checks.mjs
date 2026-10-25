@@ -7,6 +7,17 @@ import path from 'node:path';
 export async function checkBotImageLifecycle({ page, until, report, captureDirectory, receiptFile, workspaceId }) {
   await setFixtureBotAccess(page, workspaceId, 'ask_before_local');
   const read = () => JSON.parse(readFileSync(receiptFile, 'utf8'));
+  // Virtual rows may remount while Playwright waits for layout stability,
+  // including after the late-decision IPC refresh. Reacquire the same card ID.
+  const scrollCard = card => until(async () => {
+    try {
+      await card.scrollIntoViewIfNeeded({ timeout: 1000 });
+      return true;
+    } catch (error) {
+      if (!error.message.includes('Element is not attached to the DOM')) throw error;
+      return false;
+    }
+  }, Boolean, 5000);
   const cases = [];
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
@@ -18,7 +29,7 @@ export async function checkBotImageLifecycle({ page, until, report, captureDirec
     const started = await until(() => read().findLast(row => row.scenario === scenario && row.stage === 'started'), Boolean);
     const approvalId = `chat-permission:${started.toolCallId}`;
     const card = page.locator(`[data-card-id="card:approval:${approvalId}"]`);
-    await card.waitFor(); await card.scrollIntoViewIfNeeded();
+    await card.waitFor(); await scrollCard(card);
     assert.match(await card.innerText(), /交给当前模型[\s\S]*permission-check-[\s\S]*等待授权最多 5 分钟/);
     assert.equal(await card.getByRole('button').count(), 4);
     await until(() => page.locator('.bot-live-reply[data-phase="awaiting_permission"]').count(), value => value === 1);
@@ -68,7 +79,8 @@ export async function checkBotImageLifecycle({ page, until, report, captureDirec
     const late = await page.evaluate(({ workspaceId, approvalId }) => window.peerAgent.projectAgentDecideApproval({ workspaceId, approvalId, decision: 'approve', duration: 'task' }), { workspaceId, approvalId });
     assert.equal(late.ok, true);
     assert.equal(late.approval.state, { success: 'approved', denied: 'denied', cancelled: 'cancelled', timeout: 'expired' }[expected]);
-    await receipt.scrollIntoViewIfNeeded();
+    await scrollCard(receipt);
+    assert.equal(await receipt.locator('.bot-approval-receipt-state').innerText(), expectedCopy);
     if (scenario !== 'TASK') await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `image-live-${scenario.toLowerCase()}-1280-dark.png`) });
     cases.push({ scenario, realProjection: true, nativeDecode: expected === 'success', pixels: finished.pixels,
       evidence: finished.evidence, ended: true, lateGrantRejected: expected !== 'success', cardAutomatic: true, fits: true });
