@@ -376,6 +376,11 @@
   color: var(--graphite-soft);
 }
 
+[data-theme="dark"] .bot-row.is-open .bot-row-preview,
+[data-theme="dark"] .bot-row.is-open .bot-row-time {
+  color: var(--graphite-base);
+}
+
 [data-palette="catppuccin"][data-theme="light"] .bot-row-preview,
 [data-palette="catppuccin"][data-theme="light"] .bot-row-time {
   color: var(--graphite-base);

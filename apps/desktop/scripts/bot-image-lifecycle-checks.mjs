@@ -52,22 +52,26 @@ export async function checkBotImageLifecycle({ page, until, report, captureDirec
       const inherited = await until(() => read().findLast(row => row.scenario === scenario && row.stage === 'inherited'), Boolean);
       assert.equal(inherited.grantId, finished.grantId); assert.equal(inherited.pending, 0);
     }
+    // Provider completion precedes the stream-to-history DOM handoff. Inspect
+    // the durable receipt only after the turn has settled, not its retiring card.
+    await until(() => page.getByRole('button', { name: '停止生成', exact: true }).count(), value => value === 0);
+    const receipt = page.locator(`[id^="bot-msg-"] [data-card-id="card:approval:${approvalId}"]`);
+    await receipt.waitFor();
     const expectedCopy = { ALLOW: '已授权', TASK: '已授权', DENY: '已拒绝', CANCEL: '已取消', STOP: '已取消', TIMEOUT: '已失效' }[scenario];
-    await until(() => card.locator('.bot-approval-receipt-state').innerText(), text => text === expectedCopy);
+    await until(() => receipt.locator('.bot-approval-receipt-state').innerText(), text => text === expectedCopy);
     if (scenario === 'TIMEOUT') {
-      await card.locator('summary').focus(); await page.keyboard.press('Enter');
-      assert.match(await card.locator('.bot-approval-receipt-content').innerText(), /等待授权已超时，本次没有读取图片/);
+      await receipt.locator('summary').focus(); await page.keyboard.press('Enter');
+      assert.match(await receipt.locator('.bot-approval-receipt-content').innerText(), /等待授权已超时，本次没有读取图片/);
       await page.keyboard.press('Enter');
     }
-    assert.equal(await card.getByRole('button').count(), 0);
+    assert.equal(await receipt.getByRole('button').count(), 0);
     const late = await page.evaluate(({ workspaceId, approvalId }) => window.peerAgent.projectAgentDecideApproval({ workspaceId, approvalId, decision: 'approve', duration: 'task' }), { workspaceId, approvalId });
     assert.equal(late.ok, true);
     assert.equal(late.approval.state, { success: 'approved', denied: 'denied', cancelled: 'cancelled', timeout: 'expired' }[expected]);
-    await card.scrollIntoViewIfNeeded();
+    await receipt.scrollIntoViewIfNeeded();
     if (scenario !== 'TASK') await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `image-live-${scenario.toLowerCase()}-1280-dark.png`) });
     cases.push({ scenario, realProjection: true, nativeDecode: expected === 'success', pixels: finished.pixels,
       evidence: finished.evidence, ended: true, lateGrantRejected: expected !== 'success', cardAutomatic: true, fits: true });
-    await until(() => page.getByRole('button', { name: '停止生成', exact: true }).count(), value => value === 0);
   }
   await page.setViewportSize(viewport); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
   report.imagePermissionLifecycle = { cases, realCalls: true, attentionApproved: true, keyboard: true, controlledCognition: true };
