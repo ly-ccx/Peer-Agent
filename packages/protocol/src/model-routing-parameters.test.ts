@@ -17,8 +17,7 @@ test('tier parameters are inherited and explicit null/false override independent
     const config = routing({ mode: 'tier', tier: 'strong', ...override });
     const before = JSON.stringify(config);
     const result = resolveRoleModel({ role: 'session_worker', catalog, routing: config });
-    assert.equal(result.ok, true);
-    if (!result.ok) throw Error(result.missing);
+    if (!result.ok) assert.fail(result.missing);
     assert.equal(result.selection.reasoningEffort, effort);
     assert.equal(result.selection.fastMode, fast);
     assert.equal(JSON.stringify(config), before);
