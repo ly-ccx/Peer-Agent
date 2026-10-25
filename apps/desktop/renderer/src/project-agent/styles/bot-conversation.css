@@ -953,9 +953,7 @@
   animation: bot-thinking-hop 1.05s ease-in-out infinite;
 }
 
-.bot-agent-activity[data-agent-state='queued'] .bot-agent-marker,
-.bot-agent-activity[data-agent-state='started'] .bot-agent-marker,
-.bot-agent-activity[data-agent-state='verifying'] .bot-agent-marker {
+.bot-agent-activity[data-agent-running='true'] .bot-agent-marker {
   animation: bot-thinking-hop 1.05s ease-in-out infinite;
 }
 

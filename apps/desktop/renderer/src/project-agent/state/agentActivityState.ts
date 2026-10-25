@@ -1,5 +1,6 @@
 import type { AgentActivity } from '@peer-agent/protocol';
 import type { PeerIconName } from '../../ui/icons';
+import type { BotWorkIndex } from './botWorkState';
 
 const states = new Set(['queued', 'started', 'update', 'question', 'answer', 'reported', 'verifying', 'verified', 'ended', 'cancelled', 'blocked']);
 export function readAgentActivity(value: unknown): AgentActivity | undefined {
@@ -22,6 +23,14 @@ export function agentIdentity(sessionId: string) {
   let hash = 0;
   for (const char of sessionId) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0;
   return { tone: (['violet', 'cyan', 'amber', 'rose'] as const)[hash % 4]!, icon: icons[((hash >>> 3) ^ hash) & 7]! };
+}
+
+/** History describes what happened; only current host facts can animate it. */
+export function agentActivityRunning(activity: AgentActivity, work: BotWorkIndex): boolean {
+  if (!work.available || !['queued', 'started', 'verifying'].includes(activity.state)) return false;
+  const session = work.byId.get(activity.sessionId);
+  return !!session && session.coordination?.phase !== 'stopping'
+    && ['starting', 'running', 'verifying'].includes(session.status);
 }
 
 /** Old publishers mapped two facts in one observation to the same visible report. */
