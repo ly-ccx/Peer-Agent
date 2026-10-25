@@ -26,7 +26,7 @@ export function useQuickChatBotModel(workspaceId: string | null) {
       write: modelPolicy => {
         const choice = modelPolicy.overrides?.project_agent;
         return choice?.mode === 'fixed'
-          ? clientApi.projectAgentUpdateModelSelection({ workspaceId, modelProviderId: choice.modelProviderId, reasoningEffort: choice.reasoningEffort })
+          ? clientApi.projectAgentUpdateModelSelection({ workspaceId, modelProviderId: choice.modelProviderId, reasoningEffort: choice.reasoningEffort ?? undefined })
           : Promise.resolve({ ok: false, code: 'INVALID_INPUT' });
       },
       policy: () => latest.current?.workspaceId === workspaceId ? latest.current.details.profile?.modelPolicy : undefined,
