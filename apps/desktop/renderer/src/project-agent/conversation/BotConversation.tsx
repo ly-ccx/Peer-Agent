@@ -156,6 +156,7 @@ export function BotConversation({
       ) : (
         <BotMessageList key={`thread:${workspaceId}`} ready={conversation.status === 'ready'} locateMessage={conversation.locateMessage}
           workspaceId={workspaceId}
+          workIndex={workIndex}
           avatar={avatar}
           label={label}
           avatarMood={avatarMood}

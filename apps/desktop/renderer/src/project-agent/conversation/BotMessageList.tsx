@@ -27,11 +27,13 @@ import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyContext } from './ReplyContext';
 import { AgentActivityRow } from './AgentActivityRow';
+import type { BotWorkIndex } from '../state/botWorkState';
 import { RecoveryHistory } from './RecoveryHistory';
 import { isRetiredRecovery, agentFailurePresentation } from '../state/recoveryPresentation';
 
 export function BotMessageList({
   workspaceId,
+  workIndex,
   avatar,
   label,
   avatarMood,
@@ -54,6 +56,7 @@ export function BotMessageList({
   trailing = null,
 }: {
   readonly workspaceId: string;
+  readonly workIndex: BotWorkIndex;
   readonly avatar: BotAvatarModel;
   readonly label: string;
   readonly avatarMood: BotAvatarMood;
@@ -194,7 +197,7 @@ export function BotMessageList({
             <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined} />
           </article>
         ) : row.message.kind === 'agent_activity' ? (
-          row.message.agentActivity ? <AgentActivityRow messageId={row.message.id} activity={row.message.agentActivity} i18n={i18n} onOpen={onLocateSession} /> : null
+          row.message.agentActivity ? <AgentActivityRow messageId={row.message.id} activity={row.message.agentActivity} workIndex={workIndex} i18n={i18n} onOpen={onLocateSession} /> : null
         ) : row.message.kind === 'system_card' ? (
           <SystemCard
             key={row.message.id}
