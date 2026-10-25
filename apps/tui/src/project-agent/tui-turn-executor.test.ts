@@ -11,15 +11,17 @@ import { createTuiTurnExecutor } from './tui-turn-executor.ts';
 import type { TuiRuntime } from '../tui-runtime.ts';
 import type { TuiTurnRequest } from './tui-turn-executor.ts';
 import { createProjectToolProvider } from './project-tool-provider.ts';
+import { createTurnTestRuntime, drainTestCleanup, waitForTestStart, type TestCleanup } from './turn-test-support.ts';
 
-const cleanup: (() => unknown | Promise<unknown>)[] = [];
-afterEach(async () => { while (cleanup.length) await cleanup.pop()!(); });
+const cleanup: TestCleanup[] = [];
+afterEach(() => drainTestCleanup(cleanup));
 function harness(provider: ModelProvider, extra: Partial<Parameters<typeof createTuiTurnExecutor>[0]> = {}) {
   const home = mkdtempSync(path.join(os.tmpdir(), 'peer-tui-turn-'));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   mkdirSync(path.join(home, 'projects', 'workspace'), { recursive: true });
   writeFileSync(path.join(home, 'projects', 'workspace', 'profile.json'), JSON.stringify({ workspaceId: 'workspace', agentConversationId: 'conversation', status: 'active', displayName: 'Test Bot', avatar: { kind: 'generated' } }));
   const requests: any[] = [], hosts: TuiHost[] = [], persisted: any[] = [];
+  const runtimes: TuiRuntime[] = [], runtimeCleanup: TestCleanup[] = [];
   const scheduler = createExecutionScheduler();
   const executor = createTuiTurnExecutor({ dataHome: home, getSettings: () => ({}),
     holdsLease: () => true, resolveWorkspacePath: () => home, readMessages: () => [],
@@ -27,18 +29,21 @@ function harness(provider: ModelProvider, extra: Partial<Parameters<typeof creat
     persistTurn: (_input, output) => persisted.push(output),
     createRuntime(options) {
       const host = createTuiHost({ ...options, accessLevel: 'restricted_local' }); hosts.push(host);
-      return { host, modelSelection: createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'}),
+      const runtime = createTurnTestRuntime({ host, modelSelection: createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'}),
         model: createProviderChatModel({ provider: { stream(request) { requests.push(request); return provider.stream(request); } },
           model:'test-model', toolDefinitionsForMode: mode => host.toolDefinitionsForMode!(mode),
           getSystemPrompt: context => buildTuiSystemPrompt({}, { ...context.systemContextInput, mode: context.mode }),
-        }), dispose: () => host.dispose(),
-      } as unknown as TuiRuntime;
+        }),
+      }, runtimeCleanup);
+      runtimes.push(runtime);
+      return runtime;
     }, ...extra });
+  cleanup.push(() => drainTestCleanup(runtimeCleanup));
   cleanup.push(() => executor.stop());
   const input: TuiTurnRequest = {conversationId:'conversation',streamId:'turn',workspaceId:'workspace',
     mode:'project_agent', messages:[{role:'user',content:'read README'}],turnProfile:{role:'project_agent',workspaceId:'workspace'},
     sink:{send(){}},ephemeral:true};
-  return {home,executor,input,requests,hosts,persisted,scheduler};
+  return {home,executor,input,requests,hosts,persisted,scheduler,runtimes};
 }
 
 test('the turn pipeline executes a real readonly provider and returns its Grant and Evidence', async () => {
@@ -113,7 +118,7 @@ test('scheduler cancellation aborts a running provider and waits for the old str
     request.signal?.addEventListener('abort',()=>{stopped=true;reject(new DOMException('Aborted','AbortError'));},{once:true});
   });}});
   const pending=env.executor.runTurn({...env.input,turnProfile:{role:'project_agent',workspaceId:'workspace',planId:'plan'}});
-  await started;env.scheduler.cancelPlan('plan');
+  await waitForTestStart(started, pending, 'scheduled provider');env.scheduler.cancelPlan('plan');
   const outcome=await pending;
   expect(stopped).toBe(true);expect(outcome.terminalStatus).toBe('aborted');
 });
@@ -124,11 +129,50 @@ test('a delegated readonly verifier releases its slot when an unresponsive provi
   const env = harness({ stream() { started(); return new Promise(() => {}); } });
   const pending = env.executor.runTurn({ ...env.input, mode: 'explorer',
     turnProfile: { role: 'work_session', agentKind: 'verifier', planId: 'review', workspaceId: 'workspace' } });
-  await ready;
+  await waitForTestStart(ready, pending, 'readonly verifier provider');
   env.scheduler.cancelPlan('review');
   expect((await pending).terminalStatus).toBe('aborted');
   expect(env.requests[0].signal.aborted).toBe(true);
   expect(env.scheduler.stats().active).toBe(0);
+});
+
+test('frozen normal and fast channels are applied to checked test runtimes', async () => {
+  const env = harness({ async stream() { return { content: 'done', toolCalls: [] }; } });
+  for (const fastMode of [true, false]) {
+    await env.executor.runTurn({ ...env.input, turnProfile: { ...env.input.turnProfile, modelSelection: { fastMode } } });
+    expect(env.runtimes.at(-1)!.getSessionFastMode()).toBe(fastMode);
+  }
+});
+
+test('provider startup failure rejects the entry wait and releases the scheduled turn', async () => {
+  const failure = new Error('controlled runtime initialization failure');
+  let entered = false;
+  const env = harness({ async stream() { entered = true; return { content: '', toolCalls: [] }; } },
+    { createRuntime() { throw failure; } });
+  const pending = env.executor.runTurn(env.input);
+  await expect(waitForTestStart(new Promise(() => {}), pending, 'failed provider')).rejects.toBe(failure);
+  expect(entered).toBe(false);
+  expect(env.scheduler.stats().active).toBe(0);
+});
+
+test('entry waits reject early completion and a missing entry within their own bound', async () => {
+  await expect(waitForTestStart(new Promise(() => {}), Promise.resolve(), 'early turn')).rejects.toThrow('finished before entering');
+  await expect(waitForTestStart(new Promise(() => {}), new Promise(() => {}), 'missing entry', 20)).rejects.toThrow('Timed out waiting');
+});
+
+test('cleanup drains remaining owners after rejection and a stalled disposer', async () => {
+  const disposed: string[] = [];
+  const stack: TestCleanup[] = [() => { disposed.push('directory'); },
+    () => new Promise(() => {}), () => { disposed.push('failed owner'); throw new Error('controlled disposal failure'); }];
+  try {
+    await drainTestCleanup(stack, 20);
+    throw new Error('Expected cleanup failures');
+  } catch (error) {
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toHaveLength(2);
+  }
+  expect(disposed).toEqual(['failed owner', 'directory']);
+  expect(stack).toHaveLength(0);
 });
 
 test('delegated TUI turns receive their current plan admission and keep readonly capability gates', async () => {

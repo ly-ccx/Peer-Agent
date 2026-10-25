@@ -10,12 +10,12 @@ import { createTuiHost } from '../tui-host.ts';
 import { createProviderChatModel } from '../provider-chat-model.ts';
 import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
 import { buildTuiSystemPrompt } from '../tui-language.ts';
-import type { TuiRuntime } from '../tui-runtime.ts';
+import { createTurnTestRuntime, drainTestCleanup, waitForTestStart, type TestCleanup } from './turn-test-support.ts';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-const cleanups: (() => unknown | Promise<unknown>)[] = [];
-afterEach(async () => { while (cleanups.length) await cleanups.pop()!(); });
+const cleanups: TestCleanup[] = [];
+afterEach(() => drainTestCleanup(cleanups));
 const provider = { id: 'configured', provider: 'openai', model: 'test-model', enabled: true,
   apiKeyConfigured: true, supportsTools: true, supportsStructured: true, isDefault: true };
 function fixture() {
@@ -93,11 +93,12 @@ test('closing a terminal host blocks new input while its old turn drains', async
   const host = start(f, async () => { calls++; entered(); await gate; return { ok: true, text: 'done' }; });
   host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'before-close', surface: 'tui', text: 'first' });
   const first = host.tick();
-  await started;
-  const closing = host.close();
-  host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'during-close', surface: 'tui', text: 'second' });
-  const late = host.tick();
+  let closing: Promise<unknown> | undefined, late: Promise<unknown> | undefined;
   try {
+    await waitForTestStart(started, first, 'terminal host turn');
+    closing = host.close();
+    host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'during-close', surface: 'tui', text: 'second' });
+    late = host.tick();
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(calls).toBe(1);
     expect(host.holdsLease(f.workspaceId)).toBe(false);
@@ -127,17 +128,19 @@ test('terminal composition consumes a durable input once and projects its shared
 
 test('terminal model context keeps legacy public interactions and excludes private process records', async () => {
   const f=fixture(), requests:(readonly any[])[]=[];
+  const runtimeCleanup: TestCleanup[] = [];
   const host=createTuiProjectHost({...f,autoStart:false,
     getSettings:()=>({providers:[provider],projectAgent:{concurrency:1},memory:{enabled:false}}),
     createRuntime(options){
       const toolHost=createTuiHost(options);
-      return {host:toolHost,
+      return createTurnTestRuntime({host:toolHost,
         modelSelection:createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'}),
         model:createProviderChatModel({model:'test-model',toolDefinitionsForMode:mode=>toolHost.toolDefinitionsForMode!(mode),
           getSystemPrompt:context=>buildTuiSystemPrompt({}, {...context.systemContextInput,mode:context.mode}),
           provider:{async stream(request){requests.push(request.messages);return {content:'Public reply',toolCalls:[]};}}}),
-        dispose:()=>toolHost.dispose()} as unknown as TuiRuntime;
+      }, runtimeCleanup);
     }});
+  cleanups.push(()=>drainTestCleanup(runtimeCleanup));
   cleanups.push(()=>host.close());
   host.conversations.appendMessage(f.conversationId,{id:'legacy-public-user',role:'user',content:'KEEP_LEGACY_USER_BOUNDARY'});
   host.conversations.appendMessage(f.conversationId,{id:'legacy-public-assistant',role:'assistant',content:'KEEP_LEGACY_PUBLIC_REPLY'});
@@ -236,6 +239,7 @@ test('two terminal compositions start only one project turn and takeover preserv
 
 test('shared terminal composition completes delegation, real file evidence, independent verification and a governed reply',async()=>{
   const f=fixture();writeFileSync(path.join(f.workspacePath,'README.md'),'verified terminal fixture');
+  const runtimeCleanup: TestCleanup[] = [];
   let host:ReturnType<typeof createTuiProjectHost>;
   let sequence=0, verified=false;
   const call=(name:string,args:object)=>({content:'',toolCalls:[{id:`chain-${++sequence}`,name,arguments:JSON.stringify(args)}]});
@@ -279,8 +283,9 @@ test('shared terminal composition completes delegation, real file evidence, inde
           if(lastTool.name==='read_file')return call('goal_update_task',{planId:plan!.planId,taskId:plan!.tasks[0].taskId,status:'completed',result:'README read',evidenceRefs:[`tool-result://${lastTool.toolCallId}`],criterionResults:[{criterionId:'c1',passed:true,evidenceRef:`tool-result://${lastTool.toolCallId}`,detail:'Real read confirms README exists'}]});
           return {content:'worker finished',toolCalls:[]};
         }}});
-      return {host:toolHost,model,modelSelection:createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'}),dispose:()=>toolHost.dispose()} as unknown as TuiRuntime;
+      return createTurnTestRuntime({host:toolHost,model,modelSelection:createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'})}, runtimeCleanup);
     }});
+  cleanups.push(()=>drainTestCleanup(runtimeCleanup));
   cleanups.push(()=>host.close());
   const client=createTuiProjectClient({dataHome:f.dataHome,host,autoStart:false});cleanups.push(()=>client.close());
   client.submit('Read README and verify it',{inputId:'chain'});await host.tick();

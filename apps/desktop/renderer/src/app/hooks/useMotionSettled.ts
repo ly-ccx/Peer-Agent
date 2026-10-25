@@ -9,7 +9,9 @@ export function useMotionSettled(root: RefObject<HTMLElement | null>, active: bo
     if (!active) return;
     let animations: Animation[] = [];
     try { animations = root.current?.getAnimations?.() ?? []; } catch { /* Static entrance. */ }
-    const motion = watchVisualMotion(animations, () => setSettled(generation));
+    // CSS owns the entrance. StrictMode may detach/reinstall this observer on
+    // the same DOM node; cancelling its animation here would skip the entrance.
+    const motion = watchVisualMotion(animations, () => setSettled(generation), { preserveAnimationOnCancel: true });
     return motion.cancel;
   }, [root, active, generation]);
   return active && settled === generation;

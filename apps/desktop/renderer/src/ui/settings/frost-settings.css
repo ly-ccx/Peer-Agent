@@ -106,7 +106,6 @@
 .settings-content .model-routing-head { font-size: .75rem; font-weight: 400; padding-block: 10px; }
 .settings-content .model-routing-name { font-size: .875rem; }
 .settings-content .model-routing-row { padding-block: 10px; }
-.settings-content .model-routing-role { grid-template-columns: minmax(96px, 1fr) 130px 140px minmax(100px, 1fr) 120px; }
 .settings-content .remote-access-card { padding: 0 var(--settings-group-inset) 10px; }
 .settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: var(--settings-heading-padding); margin: 0 calc(-1 * var(--settings-group-inset)) 12px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; }
 .settings-content .remote-access-card h3 { font-size: .9375rem; font-weight: 400; }
@@ -115,13 +114,6 @@
 .settings-content .llm-fallback-vision { padding: var(--settings-row-padding); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); }
 .settings-content .llm-fallback-vision-copy strong { font-size: .875rem; font-weight: 500; }
 .settings-content .llm-fallback-vision-copy p { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
-@container settings (max-width: 920px) {
-  .settings-content .model-routing-role { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .settings-content .model-routing-head.model-routing-role { display: none; }
-  .settings-content .model-routing-role .model-routing-name { grid-column: 1 / -1; }
-  .settings-content .model-routing-resolved { line-height: 1.4; }
-  .settings-content :is(.model-routing-resolved, .model-routing-spend)::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--graphite-soft); font-size: .75rem; }
-}
 @container settings (max-width: 760px) {
   .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) { padding: 24px 20px; }
   .settings-content .general-setting-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }

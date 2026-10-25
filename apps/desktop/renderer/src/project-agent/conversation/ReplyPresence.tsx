@@ -11,5 +11,6 @@ export function ReplyPresence({ reply, i18n, onReload, onOpenDetails }: {
 }) {
   const state = replyPresenceState(reply, i18n);
   return <ReplyContext i18n={i18n} statusLabel={state.label} busy={state.busy}
+    replying={state.replying}
     onOpenDetails={onOpenDetails} onRefresh={state.refresh ? onReload : undefined} />;
 }

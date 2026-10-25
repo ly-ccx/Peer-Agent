@@ -1102,6 +1102,7 @@ export * from './task-overview.ts';
 export * from './skill-marketplace.ts';
 export * from './delegation.ts';
 export * from './model-routing.ts';
+export * from './document-reference.ts';
 export * from './project.ts';
 export * from './objectives.ts';
 export * from './remote-access-settings.ts';

@@ -36,18 +36,23 @@ export interface RoutingModelOption {
 /** A role override must be usable by every eligible candidate without changing its routing mode. */
 export function routingReasoningLevels(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
   options: readonly RoutingModelOption[], role: ModelRoleName): readonly ModelReasoningEffort[] {
-  const binding = setting.mode === 'tier' ? tiers[setting.tier] : undefined;
-  const ids = setting.mode === 'fixed' ? [setting.modelProviderId] : setting.mode === 'auto' ? setting.pool
-    : binding ? [binding.primary, ...(binding.fallbacks ?? [])] : [];
-  const candidates = ids.flatMap(id => {
-    const option = options.find(item => item.id === id);
-    return option && !optionRejectReason(option, { kind: 'role', role }) ? [option] : [];
-  });
+  const candidates = routingParameterCandidates(setting, tiers, options, { kind: 'role', role });
   if (!candidates.length) return [];
   return modelReasoningLevels(candidates[0]!).filter(level => candidates.every(option => modelReasoningLevels(option).includes(level)));
 }
 
-export function setRoutingReasoning(setting: RoleSetting, effort?: ModelReasoningEffort): RoleSetting {
+export function routingParameterCandidates(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
+  options: readonly RoutingModelOption[], target: Parameters<typeof optionRejectReason>[1]): readonly RoutingModelOption[] {
+  const binding = setting.mode === 'tier' ? tiers[setting.tier] : undefined;
+  const ids = setting.mode === 'fixed' ? [setting.modelProviderId] : setting.mode === 'auto' ? setting.pool
+    : binding ? [binding.primary, ...(binding.fallbacks ?? [])] : [];
+  return ids.flatMap(id => {
+    const option = options.find(item => item.id === id);
+    return option && !optionRejectReason(option, target) ? [option] : [];
+  });
+}
+
+export function setRoutingReasoning(setting: RoleSetting, effort?: ModelReasoningEffort | null): RoleSetting {
   const { reasoningEffort: _previous, ...route } = setting;
   return { ...route, ...(effort !== undefined ? { reasoningEffort: effort } : {}) };
 }

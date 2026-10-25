@@ -78,7 +78,7 @@ test('缺失前置任务没有 blocker 行时仍显示需要重新安排的原�
     queuedBehind: [{ sessionId: 'dep', title: '修改' }] }), i18n), '等待 修改');
 });
 
-test('打开、定位，并按机器人记住抽屉', () => {
+test('打开与任务定位只作用于当前界面，重新进入机器人只恢复页签', () => {
   const closed: DrawerMemory = { open: false, tab: 'overview', sessionId: null };
   const opened = openDrawer(closed, 'memory');
   assert.deepEqual(opened, { open: true, tab: 'memory', sessionId: null });
@@ -86,11 +86,22 @@ test('打开、定位，并按机器人记住抽屉', () => {
   assert.deepEqual(located, { open: true, tab: 'tasks', sessionId: 'sess-1' });
   const store = memoryStore();
   writeDrawerMemory('ws-1', located, store);
-  assert.deepEqual(readDrawerMemory('ws-1', store), located);
+  assert.deepEqual(readDrawerMemory('ws-1', store), { open: false, tab: 'tasks', sessionId: null });
+  assert.deepEqual(JSON.parse(store.get(drawerStorageKey('ws-1'))!), { tab: 'tasks' });
   assert.deepEqual(readDrawerMemory('ws-2', store), closed);
   writeDrawerMemory('ws-1', closeDrawer(located), store);
   assert.equal(readDrawerMemory('ws-1', store).open, false);
-  assert.equal(readDrawerMemory('ws-1', store).sessionId, 'sess-1');
+  assert.equal(readDrawerMemory('ws-1', store).sessionId, null);
+});
+
+test('旧版展开与定位记录不会自动打开设置，页签和宽度仍保留', () => {
+  const store = memoryStore();
+  store.set(drawerStorageKey('ws-legacy'), JSON.stringify({
+    open: true, tab: 'settings', width: 460, sessionId: 'old-session', objectiveId: 'old-objective',
+  }));
+  const restored = readDrawerMemory('ws-legacy', store);
+  assert.deepEqual(restored, { open: false, tab: 'settings', sessionId: null, width: 460 });
+  assert.deepEqual(openDrawer(restored), { open: true, tab: 'settings', sessionId: null, width: 460 });
 });
 
 test('宽窗口推开对话，窄窗口覆盖', () => {
@@ -219,10 +230,11 @@ test('memory page retains maintenance state and sources while overview only uses
   assert.equal(filterMemoryRecords(records,{kind:'',trust:'',status:'conflicted'}).length,1);
 });
 
-test('task origin and persisted drawer state retain objective navigation',()=>{
+test('task origin retains objective navigation while drawer preferences do not persist the active target',()=>{
   assert.equal(readDrawerSession({sessionId:'s',status:'running',origin:{objectiveId:'objective-x'}})?.objectiveId,'objective-x');
   const store=memoryStore();writeDrawerMemory('w',{open:true,tab:'objectives',sessionId:null,objectiveId:'objective-x'},store);
-  assert.equal(readDrawerMemory('w',store).objectiveId,'objective-x');
+  assert.equal(readDrawerMemory('w',store).objectiveId,undefined);
+  assert.equal(readDrawerMemory('w',store).tab,'objectives');
 });
 
 test('drawer width clamps to its bounds and rejects non-finite input', () => {

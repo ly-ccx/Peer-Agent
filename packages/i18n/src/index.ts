@@ -730,7 +730,6 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.save'
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
-  | 'projectAgent.drawer.settings.avatarUpload'
   | 'projectAgent.drawer.settings.avatarColor'
   | 'projectAgent.drawer.settings.avatarColorImageHint'
   | 'projectAgent.drawer.settings.avatarColor.0'
@@ -896,6 +895,22 @@ export type TranslationKey =
   | 'modelRouting.tiers'
   | 'modelRouting.roles'
   | 'modelRouting.primary'
+  | 'modelRouting.modeLabel'
+  | 'modelRouting.targetLabel'
+  | 'modelRouting.chooseModel'
+  | 'modelRouting.modelUnavailable'
+  | 'modelRouting.followingTier'
+  | 'modelRouting.checkTier'
+  | 'modelRouting.checkFixed'
+  | 'modelRouting.parameters'
+  | 'modelRouting.channel'
+  | 'modelRouting.channelFast'
+  | 'modelRouting.channelNormal'
+  | 'modelRouting.channelUnavailable'
+  | 'modelRouting.inheritedValue'
+  | 'modelRouting.chooseCandidates'
+  | 'modelRouting.noSharedEffort'
+  | 'modelRouting.fastUnsupported'
   | 'modelRouting.fallbacks'
   | 'modelRouting.addFallback'
   | 'modelRouting.moveUp'
@@ -1606,6 +1621,22 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.tiers': '档位',
     'modelRouting.roles': '角色',
     'modelRouting.primary': '主模型',
+    'modelRouting.modeLabel': '选择方式',
+    'modelRouting.targetLabel': '档位 / 模型',
+    'modelRouting.chooseModel': '请选择模型',
+    'modelRouting.modelUnavailable': '原模型已不可用，请重新选择',
+    'modelRouting.followingTier': '跟随“{tier}”档位',
+    'modelRouting.checkTier': '该档位暂无符合要求的模型，请检查上方档位配置',
+    'modelRouting.checkFixed': '所选模型不可用或不满足角色要求，请重新选择',
+    'modelRouting.parameters': '思考强度 / 通道',
+    'modelRouting.channel': '请求通道',
+    'modelRouting.channelFast': '快速',
+    'modelRouting.channelNormal': '正常',
+    'modelRouting.channelUnavailable': '不可用',
+    'modelRouting.inheritedValue': '跟随档位 · {value}',
+    'modelRouting.chooseCandidates': '请先选择可用模型。',
+    'modelRouting.noSharedEffort': '所选模型未声明思考强度，或候选之间没有共同支持的强度。',
+    'modelRouting.fastUnsupported': '快速仅适用于支持的 ChatGPT / Grok 订阅连接；所选候选中有不支持的连接。',
     'modelRouting.fallbacks': '备选',
     'modelRouting.addFallback': '添加备选',
     'modelRouting.moveUp': '上移',
@@ -2347,7 +2378,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
     'projectAgent.drawer.settings.avatarNew': '重新生成',
-    'projectAgent.drawer.settings.avatarUpload': '上传自己的图片',
     'projectAgent.drawer.settings.avatarColor': '颜色',
     'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
     'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
@@ -3004,6 +3034,22 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.tiers': 'Tiers',
     'modelRouting.roles': 'Roles',
     'modelRouting.primary': 'Primary',
+    'modelRouting.modeLabel': 'Selection mode',
+    'modelRouting.targetLabel': 'Tier / model',
+    'modelRouting.chooseModel': 'Choose a model',
+    'modelRouting.modelUnavailable': 'Previous model unavailable. Choose again.',
+    'modelRouting.followingTier': 'Following the {tier} tier',
+    'modelRouting.checkTier': 'No eligible model in this tier. Check its configuration above.',
+    'modelRouting.checkFixed': 'The selected model is unavailable or ineligible. Choose again.',
+    'modelRouting.parameters': 'Reasoning / channel',
+    'modelRouting.channel': 'Request channel',
+    'modelRouting.channelFast': 'Fast',
+    'modelRouting.channelNormal': 'Normal',
+    'modelRouting.channelUnavailable': 'Unavailable',
+    'modelRouting.inheritedValue': 'Follow tier · {value}',
+    'modelRouting.chooseCandidates': 'Choose an available model first.',
+    'modelRouting.noSharedEffort': 'Selected models declare no shared reasoning effort.',
+    'modelRouting.fastUnsupported': 'Fast requires a supported ChatGPT / Grok subscription connection. Some selected candidates do not support it.',
     'modelRouting.fallbacks': 'Fallbacks',
     'modelRouting.addFallback': 'Add fallback',
     'modelRouting.moveUp': 'Move up',
@@ -3745,7 +3791,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
     'projectAgent.drawer.settings.avatarNew': 'Generate another',
-    'projectAgent.drawer.settings.avatarUpload': 'Upload an image',
     'projectAgent.drawer.settings.avatarColor': 'Color',
     'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
     'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',

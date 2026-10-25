@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import { attachBotProcesses, hasReplyForInput, mergeBotActivity, visibleBotActivity, isActivityRunning } from './botActivityState.ts';
+import { attachBotProcesses, hasReplyForInput, mergeBotActivity, visibleBotActivity, isActivityRunning, activityFromConversationSnapshot } from './botActivityState.ts';
 import { normalizeBotMessage, roundsForReply, conversationRows } from './botConversationState.ts';
 const activity: ProjectAgentActivity = { workspaceId: 'w', conversationId: 'c', turnId: 't', revision: 3,
   startedAt: '2026-10-04T01:00:00Z', phase: 'responding', replyTo: ['u'], segments: [], replyText: 'draft' };
@@ -93,7 +93,17 @@ test('a canonical reply or stopped card replaces the preview without a duplicate
   const reply = normalizeBotMessage({ id: 'r', kind: 'agent_reply', turnId: 't', content: 'final' })!;
   assert.equal(visibleBotActivity(activity, [turn]), activity);
   assert.equal(visibleBotActivity(activity, [turn, reply]), null);
-  assert.equal(visibleBotActivity({ ...activity, phase: 'done' }, [turn]), null);
+  const done = { ...activity, phase: 'done' as const };
+  assert.equal(visibleBotActivity(done, [turn]), done);
+  assert.equal(visibleBotActivity(done, [turn, reply]), null);
+  assert.equal(visibleBotActivity({ ...done, replyText: '' }, [turn]), null);
+});
+
+test('conversation snapshots retire activity only at publication under the same read/push fence', () => {
+  assert.equal(activityFromConversationSnapshot(activity, null, 'w', 7, 7), null);
+  assert.equal(activityFromConversationSnapshot(activity, null, 'w', 7, 8), activity);
+  assert.equal(activityFromConversationSnapshot(activity, undefined, 'w', undefined, 7), activity);
+  assert.equal(activityFromConversationSnapshot(activity, { ...activity, revision: 2 }, 'w', 7, 7), activity);
 });
 
 test('stopped process reads only its exact canonical turn, even beside a newer round', () => {

@@ -150,3 +150,22 @@ test('a large refresh pauses at four pages, preserves the published window and r
   await pager.older();
   assert.deepEqual(snapshot!.messages.map(row => row.id), history.map(row => row.id));
 });
+
+test('read fences and an inactive snapshot publish together with the canonical reply', async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const snapshots: Parameters<Parameters<typeof createConversationPager>[0]['publish']>[0][] = [];
+  const pager = createConversationPager({ read: async () => {
+    await gate;
+    return { ok: true, activity: null, activityRevision: 4,
+      messages: [{ id: 'final', kind: 'agent_reply', content: '正式回复' }] };
+  }, publish: snapshot => snapshots.push(snapshot) });
+  const pending = pager.refresh();
+  await Promise.resolve();
+  assert.equal(snapshots.length, 0, 'the read must not publish activity separately');
+  finish(); await pending;
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]!.activity, null);
+  assert.equal(snapshots[0]!.activityRevision, 4);
+  assert.equal(snapshots[0]!.messages[0]!.content, '正式回复');
+});

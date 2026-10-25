@@ -18,13 +18,33 @@ export type ModelRole =
 
 export type RoleSetting = (
   | { readonly mode: 'tier'; readonly tier: ModelTier }
-  | { readonly mode: 'fixed'; readonly modelProviderId: string; readonly fastMode?: boolean }
+  | { readonly mode: 'fixed'; readonly modelProviderId: string }
   | { readonly mode: 'auto'; readonly pool: readonly string[] }
-) & { readonly reasoningEffort?: ModelReasoningEffort };
+) & {
+  /** Undefined inherits the tier; null explicitly uses the model default. */
+  readonly reasoningEffort?: ModelReasoningEffort | null;
+  /** Undefined inherits the tier; false explicitly selects the normal channel. */
+  readonly fastMode?: boolean;
+};
 
 export interface ModelTierBinding {
   readonly primary: string;
   readonly fallbacks?: readonly string[];
+  readonly reasoningEffort?: ModelReasoningEffort;
+  readonly fastMode?: boolean;
+}
+
+/** Admission matches the existing priority request encoders, never a model-name guess. */
+export function modelSupportsFastMode(provider: { readonly authMethod?: unknown }): boolean {
+  return provider.authMethod === 'oauth_chatgpt' || provider.authMethod === 'oauth_grok';
+}
+
+export function routingParameters(setting: RoleSetting, tiers: Partial<Record<ModelTier, ModelTierBinding>>) {
+  const tier = setting.mode === 'tier' ? tiers[setting.tier] : undefined;
+  return {
+    reasoningEffort: (setting.reasoningEffort === undefined ? tier?.reasoningEffort : setting.reasoningEffort) ?? undefined,
+    fastMode: setting.fastMode ?? tier?.fastMode ?? false,
+  };
 }
 
 export interface ModelRoutingSettings {
@@ -154,6 +174,7 @@ export interface CatalogModel {
   readonly local?: boolean;
   readonly reasoningEffort?: string;
   readonly reasoningEffortLevels?: readonly ModelReasoningEffort[];
+  readonly supportsFastMode?: boolean;
 }
 
 export type ModelResolution =
@@ -165,7 +186,7 @@ export type ModelResolution =
     }
   | {
       readonly ok: false;
-      readonly reason: 'capability' | 'scope' | 'auto_pool' | 'empty' | 'reasoning';
+      readonly reason: 'capability' | 'scope' | 'auto_pool' | 'empty' | 'reasoning' | 'fast_mode';
       readonly missing: string;
     };
 
@@ -227,6 +248,7 @@ function inScope(model: CatalogModel, policy: ProjectModelPolicy | null | undefi
 }
 
 function missingText(input: RoleModelRequest, reason: Extract<ModelResolution, { ok: false }>['reason']): string {
+  if (reason === 'fast_mode') return '所选连接不支持快速通道，请选择正常通道或支持的连接';
   if (reason === 'reasoning') return '所选模型不支持该推理强度';
   if (reason === 'auto_pool') return '所选模型不在自动池内';
   const localOnly = input.projectPolicy?.scope?.localOnly === true;
@@ -325,7 +347,7 @@ function layersOf(input: RoleModelRequest): Layer[] {
   return layers;
 }
 
-function fail(input: RoleModelRequest, reason: 'capability' | 'scope' | 'auto_pool' | 'empty' | 'reasoning'): ModelResolution {
+function fail(input: RoleModelRequest, reason: Extract<ModelResolution, { ok: false }>['reason']): ModelResolution {
   return { ok: false, reason, missing: missingText(input, reason) };
 }
 
@@ -372,16 +394,17 @@ export function resolveRoleModel(input: RoleModelRequest): ModelResolution {
     const ordered = orderCandidates(eligible, input);
     const chosen = ordered[0];
     if (!chosen) return fail(input, 'empty');
-    const requestedEffort = layer.setting.reasoningEffort;
+    const parameters = routingParameters(layer.setting, input.routing.tiers);
+    const requestedEffort = parameters.reasoningEffort;
     if (requestedEffort !== undefined && !chosen.reasoningEffortLevels?.includes(requestedEffort)) return fail(input, 'reasoning');
-    const requestedFast = layer.setting.mode === 'fixed' && layer.setting.fastMode === true;
+    if (parameters.fastMode && chosen.supportsFastMode !== true) return fail(input, 'fast_mode');
     const source: ModelSelectionSource = layer.setting.mode === 'auto' ? 'auto' : layer.source;
     return {
       ok: true,
       selection: {
         ...toSelection(chosen),
         ...(requestedEffort !== undefined ? { reasoningEffort: requestedEffort } : {}),
-        ...(requestedFast ? { fastMode: true } : {}),
+        fastMode: parameters.fastMode,
       },
       source,
       ...(input.role === 'verifier'

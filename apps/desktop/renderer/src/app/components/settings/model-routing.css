@@ -37,6 +37,10 @@
   background: var(--pa-surface-card);
 }
 
+.model-routing-card > .frost-group-content {
+  container: model-routing / inline-size;
+}
+
 .model-routing-card h3 {
   margin: 0;
   font-size: 0.98rem;
@@ -73,7 +77,8 @@
 }
 
 .model-routing-role {
-  grid-template-columns: minmax(80px, 104px) 124px minmax(120px, 168px) minmax(112px, 144px) minmax(72px, 1fr) 128px;
+  grid-template-columns: minmax(72px, .75fr) minmax(90px, 1fr) minmax(100px, 1.1fr) minmax(116px, 1.2fr) minmax(130px, 1.4fr) minmax(96px, .9fr);
+  align-items: start;
   column-gap: var(--space-3);
 }
 
@@ -87,7 +92,7 @@
 }
 
 .model-routing-row.model-routing-tier,
-.model-routing-role.is-auto {
+.model-routing-row.model-routing-role {
   align-items: start;
 }
 
@@ -192,15 +197,16 @@
 
 .model-routing-resolved {
   min-width: 0;
-  overflow: hidden;
   color: var(--graphite-soft);
   font-size: 0.82rem;
-  line-height: 32px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
-.model-routing-reasoning { min-width: 0; }
+.model-routing-field,
+.model-routing-reasoning,
+.model-routing-spend { min-width: 0; }
 .model-routing-reasoning-note {
   margin: 4px 0 0;
   color: var(--graphite-soft);
@@ -209,6 +215,7 @@
 }
 
 .model-routing-spend input {
+  box-sizing: border-box;
   width: 100%;
   min-height: 32px;
   padding: var(--space-2) var(--space-3);
@@ -251,13 +258,13 @@
   font-size: 0.78rem;
 }
 
-@media (max-width: 1100px) {
+@container model-routing (max-width: 740px) {
   .model-routing-head.model-routing-role {
     display: none;
   }
 
   .model-routing-role {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     row-gap: var(--space-2);
     align-items: start;
   }
@@ -270,6 +277,7 @@
     line-height: 1.4;
   }
 
+  .model-routing-field::before,
   .model-routing-resolved::before,
   .model-routing-reasoning::before,
   .model-routing-spend::before {
@@ -281,4 +289,30 @@
     font-weight: 600;
     line-height: 1.35;
   }
+}
+
+@container model-routing (max-width: 430px) {
+  .model-routing-role { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Tier parameters share the model/fallback width; roles keep their existing six columns. */
+.model-routing-parameters { display: grid; gap: var(--space-3); min-width: 0; }
+.model-routing-tier > .model-routing-parameters {
+  grid-column: 2 / -1;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: var(--space-3);
+}
+.model-routing-tier > .model-routing-parameters.has-channel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.model-routing-parameter { min-width: 0; }
+.model-routing-parameter-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-caption, 12px);
+  line-height: 1.4;
+}
+@container model-routing (max-width: 430px) {
+  .model-routing-tier > .model-routing-parameters.has-channel { grid-template-columns: minmax(0, 1fr); }
 }

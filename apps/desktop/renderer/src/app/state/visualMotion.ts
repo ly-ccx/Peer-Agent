@@ -15,6 +15,8 @@ export function watchVisualMotion(animations: readonly Animation[], onFinish: ()
   clear?: (timer: ReturnType<typeof setTimeout>) => void;
   /** Let CSS deliver its terminal geometry/end event before cancelling its fill. */
   preserveFinalFrame?: boolean;
+  /** A CSS observer can detach during effect replay without owning the DOM animation. */
+  preserveAnimationOnCancel?: boolean;
   requestFrame?: (callback: () => void) => number;
   cancelFrame?: (frame: number) => void;
 } = {}) {
@@ -30,7 +32,9 @@ export function watchVisualMotion(animations: readonly Animation[], onFinish: ()
     if (timer !== null) clear(timer);
     if (frame !== null) cancelFrame(frame);
     unsubscribe();
-    for (const animation of animations) { try { animation.cancel(); } catch { /* Detached/unsupported animation. */ } }
+    if (notify || !options.preserveAnimationOnCancel) {
+      for (const animation of animations) { try { animation.cancel(); } catch { /* Detached/unsupported animation. */ } }
+    }
     if (notify) onFinish();
   };
   const finish = () => stop(true), cancel = () => stop(false);

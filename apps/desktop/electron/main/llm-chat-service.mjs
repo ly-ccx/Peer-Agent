@@ -140,6 +140,10 @@ function normalizeTurnProfile(value) {
         ...(typeof value.modelSelection.family === 'string' && value.modelSelection.family.trim()
           ? { family: value.modelSelection.family.trim() }
           : {}),
+        ...(typeof value.modelSelection.reasoningEffort === 'string'
+          ? { reasoningEffort: value.modelSelection.reasoningEffort } : {}),
+        ...(typeof value.modelSelection.fastMode === 'boolean'
+          ? { fastMode: value.modelSelection.fastMode } : {}),
         ...(typeof value.modelSelection.source === 'string' && value.modelSelection.source.trim()
           ? { source: value.modelSelection.source.trim() }
           : {}),

@@ -1,4 +1,4 @@
-import { isModelReasoningEffort, projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import { isModelReasoningEffort, modelReasoningLevels, modelSupportsFastMode, projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import {
   isRoutableProvider,
   normalizeProjectAgentSettings,
@@ -166,12 +166,24 @@ export function createSettingsApplicationService({
       if (Object.keys(caps).length) next.roleSpendCaps = caps;
       else delete next.roleSpendCaps;
     }
-    for (const [role, setting] of Object.entries(next.roles || {})) {
-      if (setting?.reasoningEffort === undefined) continue;
-      if (!isModelReasoningEffort(setting.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+    for (const binding of Object.values(nextPartial.tiers || {})) {
+      if (!isRecord(binding)) throw new Error('INVALID_MODEL_ROUTING');
+      if (binding.reasoningEffort !== undefined && !isModelReasoningEffort(binding.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+      if (binding.fastMode !== undefined && typeof binding.fastMode !== 'boolean') throw new Error('INVALID_FAST_MODE');
+      for (const id of [binding.primary, ...(binding.fallbacks || [])]) {
+        const provider = providers?.find(item => item.id === id && isRoutableProvider(item));
+        if (!provider) continue; // Retain stale references; do not silently replace them.
+        if (binding.reasoningEffort !== undefined && !modelReasoningLevels(provider).includes(binding.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+        if (binding.fastMode === true && !modelSupportsFastMode(provider)) throw new Error('INVALID_FAST_MODE');
+      }
+    }
+    for (const [role, setting] of Object.entries(nextPartial.roles || {})) {
+      if (setting?.reasoningEffort != null && !isModelReasoningEffort(setting.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+      if (setting?.fastMode !== undefined && typeof setting.fastMode !== 'boolean') throw new Error('INVALID_FAST_MODE');
       if (Array.isArray(providers)) {
         const resolved = resolveRoleRoute({ role, providers, routing: next, spentUsd: Number.NaN });
         if (!resolved.ok && resolved.reason === 'reasoning') throw new Error('INVALID_REASONING_EFFORT');
+        if (!resolved.ok && resolved.reason === 'fast_mode') throw new Error('INVALID_FAST_MODE');
       }
     }
     if (JSON.stringify(next) === JSON.stringify(current)) return current;
@@ -223,6 +235,7 @@ export function createSettingsApplicationService({
         ok: resolved.ok === true,
         modelProviderId: chosenId || null,
         reasoningEffort: resolved.ok ? (resolved.selection.reasoningEffort ?? null) : null,
+        fastMode: resolved.ok ? resolved.selection.fastMode === true : null,
         label: chosen?.label || chosenId || '',
         source: resolved.ok ? (resolved.source || null) : null,
         missing: resolved.ok ? null : (resolved.missing || null),

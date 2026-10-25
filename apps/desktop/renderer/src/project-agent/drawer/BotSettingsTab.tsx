@@ -85,11 +85,10 @@ export function BotSettingsTab({
       onProfile(result.profile);
     });
   }
-  async function changeAvatar(kind: 'regenerate' | 'upload') {
+  async function regenerateAvatar() {
     if (busy) return;
     await action.run(async () => {
-      const result = await clientApi.projectAgentUpdateProfile(kind === 'regenerate' ? { workspaceId, regenerateAvatar: true } : { workspaceId, chooseAvatar: true });
-      if (result.code === 'CANCELLED') return false;
+      const result = await clientApi.projectAgentUpdateProfile({ workspaceId, regenerateAvatar: true });
       if (!result.ok || !result.profile) throw Error(result.code || 'FAILED');
       onProfile(result.profile);
     });
@@ -134,10 +133,7 @@ export function BotSettingsTab({
         <div className="bot-avatar-settings">
           <BotAvatar avatar={profile.avatar} label={profile.displayName} workspaceId={workspaceId} />
           <div className="bot-avatar-settings-actions">
-            <button type="button" className="ui-button" disabled={busy} onClick={() => { void changeAvatar('upload'); }}>
-              {i18n.t('projectAgent.drawer.settings.avatarUpload')}
-            </button>
-            <button type="button" className="ui-button" disabled={busy} onClick={() => { void changeAvatar('regenerate'); }}>
+            <button type="button" className="ui-button" disabled={busy} onClick={() => { void regenerateAvatar(); }}>
               {i18n.t('projectAgent.drawer.settings.avatarNew')}
             </button>
           </div>

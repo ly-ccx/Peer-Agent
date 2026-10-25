@@ -236,3 +236,25 @@ test('stored fixed effort survives normalization and role resolution', () => {
   const defaultRoute = resolveRoleRoute({ role: 'project_agent', providers: [model] });
   assert.equal(defaultRoute.selection.reasoningEffort, 'low');
 });
+
+test('tier parameters survive reads, role clearing and constrained recovery without rewriting storage', () => {
+  const primary = provider({ id: 'priority', authMethod: 'oauth_grok', supportsReasoning: true,
+    reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' });
+  const normal = provider({ ...primary, id: 'normal', authMethod: 'api_key' });
+  const stored = { tiers: { strong: { primary: primary.id, fallbacks: [normal.id], reasoningEffort: 'high', fastMode: true } } };
+  const before = JSON.stringify(stored);
+  const route = resolveRoleRoute({ role: 'session_worker', providers: [primary, normal], routing: stored });
+  assert.equal(route.ok, true);
+  assert.equal(route.selection.reasoningEffort, 'high');
+  assert.equal(route.selection.fastMode, true);
+  assert.deepEqual(route.candidateIds, [primary.id]);
+  const override = { ...stored, roles: { session_worker: { mode: 'tier', tier: 'strong', reasoningEffort: null, fastMode: false } } };
+  const read = resolveStoredModelRouting(override, [primary, normal]);
+  assert.equal(read.roles.session_worker.reasoningEffort, null);
+  assert.equal(read.roles.session_worker.fastMode, false);
+  const cleared = resolveRoleRoute({ role: 'session_worker', providers: [primary, normal], routing: read });
+  assert.equal(cleared.selection.reasoningEffort, 'low');
+  assert.equal(cleared.selection.fastMode, false);
+  assert.deepEqual(cleared.candidateIds, [primary.id, normal.id]);
+  assert.equal(JSON.stringify(stored), before);
+});

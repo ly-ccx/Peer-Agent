@@ -17,6 +17,7 @@ import { useBotWorkSessions } from './state/useBotWorkSessions';
 import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
+import { BotDocumentPreview } from './conversation/BotDocumentPreview';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
 import type { TaskConversationContext, TaskConversationRequest } from './state/taskConversationState';
@@ -99,7 +100,7 @@ export function BotListShell({
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
   const [replyDetailsTarget, setReplyDetailsTarget] = useState<HTMLDivElement | null>(null);
-  const drawerLoadedFor = useRef<string | null>(null);
+  const [drawerLoadedFor, setDrawerLoadedFor] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
@@ -123,6 +124,7 @@ export function BotListShell({
   useEffect(() => { drawerEntered.current = drawerMemory.open; }, [drawerMemory.open]);
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  const currentDrawerMemory = drawerLoadedFor === opened?.workspaceId ? drawerMemory : closeDrawer(drawerMemory);
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
     const mood = botAvatarMood(item.state, replyFlash === item.workspaceId);
     return [item.workspaceId, replyFlash !== item.workspaceId && mood !== 'needs_you' && (mood !== 'error' || replyPresence?.mood !== 'idle') && item.workspaceId === opened?.workspaceId
@@ -148,7 +150,7 @@ export function BotListShell({
     setTaskContext(null);
     setTaskRequest(null);
     setReplyFlash(null);
-    drawerLoadedFor.current = null;
+    setDrawerLoadedFor(null);
   }, [opened?.workspaceId]);
 
   useEffect(() => () => {
@@ -168,17 +170,17 @@ export function BotListShell({
       get: (key) => localStorage.getItem(key),
       set: (key, value) => localStorage.setItem(key, value),
     }));
-    drawerLoadedFor.current = workspaceId;
+    setDrawerLoadedFor(workspaceId);
   }, [opened?.workspaceId]);
 
   useEffect(() => {
     const workspaceId = opened?.workspaceId;
-    if (!workspaceId || drawerLoadedFor.current !== workspaceId) return;
+    if (!workspaceId || drawerLoadedFor !== workspaceId) return;
     writeDrawerMemory(workspaceId, drawerMemory, {
       get: (key) => localStorage.getItem(key),
       set: (key, value) => localStorage.setItem(key, value),
     });
-  }, [drawerMemory, opened?.workspaceId]);
+  }, [drawerMemory, drawerLoadedFor, opened?.workspaceId]);
 
   useEffect(() => {
     const workspaceId = notificationFocus?.workspaceId
@@ -445,8 +447,8 @@ export function BotListShell({
                 className="bot-profile"
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
-                data-session-id={locateSessionId ?? drawerMemory.sessionId ?? undefined}
-                aria-expanded={drawerMemory.open && drawerMemory.tab === 'settings' && !inspect}
+                data-session-id={locateSessionId ?? currentDrawerMemory.sessionId ?? undefined}
+                aria-expanded={currentDrawerMemory.open && !inspect}
                 onClick={() => {
                   drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
@@ -460,6 +462,7 @@ export function BotListShell({
                 <span>{i18n.t('projectAgent.list.profile')}</span>
               </button>
             </header>
+            <BotDocumentPreview key={opened.workspaceId} workspaceId={opened.workspaceId} i18n={i18n}>
             <BotConversation
               workIndex={work.index}
               key={opened.workspaceId}
@@ -473,7 +476,7 @@ export function BotListShell({
               onReplyArrived={announceReply}
               onReplyPresenceChange={updateReplyPresence}
               onLocateSession={setLocateSessionId}
-              contextSessionId={drawerMemory.open && drawerMemory.tab === 'tasks' ? drawerMemory.sessionId : null}
+              contextSessionId={currentDrawerMemory.open && currentDrawerMemory.tab === 'tasks' ? currentDrawerMemory.sessionId : null}
               onTaskContext={setTaskContext}
               taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}
               replyDetailsId={inspect?.replyId ?? null}
@@ -487,6 +490,7 @@ export function BotListShell({
               focusMessageId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.messageId : null}
               focusRequestId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.requestId : 0}
             />
+            </BotDocumentPreview>
           </div>
         ) : onboarding ? (
           <BotOnboarding
@@ -536,7 +540,7 @@ export function BotListShell({
           profile={opened.profile}
           replayEntrance={replayDrawerEntrance}
           modelControls={modelControls}
-          memory={drawerMemory}
+          memory={currentDrawerMemory}
           locateSessionId={locateSessionId}
           inspect={inspect}
           onReplyDetailsTarget={setReplyDetailsTarget}
