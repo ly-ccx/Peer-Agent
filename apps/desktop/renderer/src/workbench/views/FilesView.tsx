@@ -15,6 +15,7 @@ import { getFileVisualKind, type FileVisualKind } from './filesTreePresentation'
 import { filterVisibleEntries, sanitizeNewEntryName } from './filesTreeFilter';
 
 interface FilesViewProps {
+  readonly botWorkspaceId?: string;
   readonly isZh: boolean;
   readonly workspacePath: string | null;
 }
@@ -289,7 +290,7 @@ function TreeNode({
   );
 }
 
-export function FilesView({ isZh, workspacePath }: FilesViewProps) {
+export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProps) {
   const surfaceRef = useRef<HTMLDivElement>(null), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { openFile: openWorkbenchFile, filesTarget } = useWorkbench();
@@ -302,6 +303,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   const [selectedIsDir, setSelectedIsDir] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
+  const [directoryNotices, setDirectoryNotices] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<CreateDraft | null>(null);
 
   // 用 ref 镜像最新树状态，供 watch 回调读取，避免 effect 依赖整棵树。
@@ -353,8 +355,13 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         return next;
       });
       try {
-        const result = await clientApi.readDir(absPath, workspacePath ?? undefined);
+        const result = await clientApi.readDir(botWorkspaceId ? '' : absPath, botWorkspaceId ? undefined : workspacePath ?? undefined, undefined,
+          botWorkspaceId ? { workspaceId: botWorkspaceId, path: absPath, kind: 'directory' } : undefined);
         if (!result.ok) {
+          if (botWorkspaceId) {
+            setDirectoryNotices(current => ({ ...current, [absPath]: result.status }));
+            return childrenRef.current.get(absPath) ?? [];
+          }
           if (options?.force) applyReloadResult(absPath, []);
           else {
             setChildren((prev) => {
@@ -366,6 +373,11 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
           }
           return [];
         }
+        if (botWorkspaceId) setDirectoryNotices(current => {
+          const next = { ...current };
+          if (result.truncated) next[absPath] = 'truncated'; else delete next[absPath];
+          return next;
+        });
         if (options?.force) {
           applyReloadResult(absPath, result.entries);
         } else {
@@ -378,6 +390,10 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         }
         return result.entries;
       } catch {
+        if (botWorkspaceId) {
+          setDirectoryNotices(current => ({ ...current, [absPath]: 'read_failed' }));
+          return childrenRef.current.get(absPath) ?? [];
+        }
         if (options?.force) applyReloadResult(absPath, []);
         else {
           setChildren((prev) => {
@@ -396,7 +412,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         });
       }
     },
-    [workspacePath, applyReloadResult],
+    [workspacePath, botWorkspaceId, applyReloadResult],
   );
 
   const refreshDirs = useCallback(async (dirPaths: readonly string[]) => {
@@ -479,9 +495,10 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         workspacePath
           ? toForward(entry.absPath).replace(`${toForward(stripTrailingSep(workspacePath))}/`, '')
           : entry.name,
+        botWorkspaceId ? { reference: { workspaceId: botWorkspaceId, path: entry.absPath } } : undefined,
       );
     },
-    [openWorkbenchFile, workspacePath],
+    [openWorkbenchFile, workspacePath, botWorkspaceId],
   );
 
   const resolveCreateParent = useCallback((): string | null => {
@@ -495,6 +512,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   }, [rootPath]);
 
   const beginCreate = useCallback((kind: DraftKind) => {
+    if (botWorkspaceId) return;
     if (!rootPath || draftRef.current?.busy) return;
     if (draftRef.current) { surfaceRef.current?.querySelector<HTMLInputElement>('.workbench-tree-draft-input')?.focus({ preventScroll: true }); return; }
     const parentPath = resolveCreateParent() ?? rootPath;
@@ -513,7 +531,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
       busy: false,
       error: null,
     });
-  }, [rootPath, resolveCreateParent, loadDir, isZh]);
+  }, [rootPath, resolveCreateParent, loadDir, isZh, botWorkspaceId]);
 
   const cancelDraft = useCallback(() => {
     const current = draftRef.current;
@@ -642,19 +660,21 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     };
   }, [filesTarget, rootPath, loadDir]);
 
-  // 同步 watch 集合：根 + 已展开目录；main 侧按 diff 增删 fs.watch。
+  // Scoped Bot browsing is refresh-only until the watch contract carries a Bot reference.
+  // Legacy file watchers keep their original lifecycle.
   useEffect(() => {
+    if (botWorkspaceId) return;
     if (!rootPath) {
       void clientApi.watchDirs?.([], workspacePath ?? undefined).catch(() => {});
       return;
     }
     const paths = collectWatchDirPaths(rootPath, expanded);
     void clientApi.watchDirs?.(paths, workspacePath ?? undefined).catch(() => {});
-  }, [rootPath, workspacePath, expanded]);
+  }, [rootPath, workspacePath, botWorkspaceId, expanded]);
 
   // 订阅目录变更事件，防抖后 force 重载。
   useEffect(() => {
-    if (!rootPath || !clientApi.onFsDirChanged) return undefined;
+    if (botWorkspaceId || !rootPath || !clientApi.onFsDirChanged) return undefined;
     const unsubscribe = clientApi.onFsDirChanged((payload) => {
       const dirPath = typeof payload?.dirPath === 'string' ? payload.dirPath : rootPath;
       scheduleDirRefresh(dirPath || rootPath);
@@ -666,14 +686,14 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         debounceTimerRef.current = null;
       }
     };
-  }, [rootPath, scheduleDirRefresh]);
+  }, [rootPath, botWorkspaceId, scheduleDirRefresh]);
 
   // 卸载时清空 main 侧 watchers
   useEffect(() => {
     return () => {
-      void clientApi.watchDirs?.([], workspacePath ?? undefined).catch(() => {});
+      if (!botWorkspaceId) void clientApi.watchDirs?.([], workspacePath ?? undefined).catch(() => {});
     };
-  }, [workspacePath]);
+  }, [workspacePath, botWorkspaceId]);
 
   if (!rootPath) {
     return (
@@ -706,18 +726,20 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         <button
           type="button"
           className="workbench-files-toolbar-btn"
+          disabled={!!botWorkspaceId}
           onClick={() => beginCreate('file')}
           aria-label={isZh ? '新建文件' : 'New file'}
-          title={isZh ? '新建文件' : 'New file'}
+          title={botWorkspaceId ? (isZh ? '此处当前只提供读取与导航。' : 'This view currently supports reading and navigation.') : (isZh ? '新建文件' : 'New file')}
         >
           <NewFileIcon />
         </button>
         <button
           type="button"
           className="workbench-files-toolbar-btn"
+          disabled={!!botWorkspaceId}
           onClick={() => beginCreate('dir')}
           aria-label={isZh ? '新建文件夹' : 'New folder'}
-          title={isZh ? '新建文件夹' : 'New folder'}
+          title={botWorkspaceId ? (isZh ? '此处当前只提供读取与导航。' : 'This view currently supports reading and navigation.') : (isZh ? '新建文件夹' : 'New folder')}
         >
           <NewFolderIcon />
         </button>
@@ -732,6 +754,10 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
           <RefreshIcon />
         </button>
       </div>
+      {botWorkspaceId && Object.entries(directoryNotices).map(([path, status]) => <p className="resource-source-label" key={path} role={status === 'truncated' ? 'status' : 'alert'}>
+        {path}: {status === 'truncated' ? (isZh ? '仅显示前 1000 项。' : 'Showing the first 1000 entries.')
+          : (isZh ? '读取未完成；保留上次目录，可刷新重试。' : 'Reading failed; the previous tree is retained. Refresh to retry.')} {status}
+      </p>)}
       <label className="workbench-files-filter">
         <SearchIcon />
         <input

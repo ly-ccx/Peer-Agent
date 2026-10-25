@@ -93,6 +93,7 @@ export interface BotDispositionMark {
 }
 
 export interface BotChatMessage {
+  readonly resourceReferences?: readonly import('@peer-agent/protocol').BotResourceReferenceHint[];
   readonly agentActivity?: import('@peer-agent/protocol').AgentActivity;
   readonly id: string;
   readonly kind: string;
@@ -178,6 +179,8 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     marks: readMarks(raw.marks),
     dispositions: [],
     rounds: readRounds(raw.rounds),
+    ...(Array.isArray(raw.resourceReferences) ? { resourceReferences: raw.resourceReferences.filter(item => item && typeof item.path === 'string'
+      && item.path.length < 8192 && ['read_file', 'write_file', 'edit_file'].includes(item.tool)).slice(0, 256) } : {}),
     ...(Array.isArray(raw.dispositionCalls) ? { dispositionCalls: readRounds([{ toolCalls: raw.dispositionCalls }])[0]?.toolCalls ?? [] } : {}),
     meta,
     proactive: raw.proactive === true || meta.surfacing === 'digest',

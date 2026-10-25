@@ -37,12 +37,13 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
     return optional && !configured && !hinted ? null : failure('workspace_unavailable');
   }
 
-  function checkedFile(target, scope) {
+  function checkedFile(target, scope, kind = 'file') {
     if (!scope || !inside(scope, target)) return failure('scope_denied');
     try {
       const canonical = realpath(target);
       if (!inside(scope, canonical)) return failure('scope_denied');
-      if (!stat(canonical).isFile()) return failure('not_file');
+      const info = stat(canonical);
+      if (kind === 'directory' ? !info.isDirectory() : !info.isFile()) return failure('not_file');
       return { ok: true, target: canonical, root: scope };
     } catch (error) {
       return failure(permission(error) ? 'permission_denied' : ['ENOENT', 'ENOTDIR'].includes(error?.code) ? 'not_found' : 'invalid_path');
@@ -69,6 +70,8 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
   return async function resolve(reference) {
     if (!reference || typeof reference.workspaceId !== 'string' || typeof reference.path !== 'string'
       || !reference.path.trim() || reference.path.length > 8192 || /[\u0000-\u001f]/.test(reference.path)
+      || (reference.kind !== undefined && !['file', 'directory'].includes(reference.kind))
+      || (reference.metadataOnly !== undefined && typeof reference.metadataOnly !== 'boolean')
       || /^[a-z][\w+.-]*:\/\//i.test(reference.path)) return failure('invalid_path');
     const workspace = getWorkspace(reference.workspaceId);
     if (!workspace?.ok || !workspace.path) return failure('workspace_unavailable');
@@ -89,7 +92,17 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
         if (companion.ok) known.push(companion.root);
       }
       let candidates, scope, bareRelative = false;
-      if (path.isAbsolute(raw)) { candidates = [raw]; scope = known.find(base => inside(base, raw)); }
+      if (path.isAbsolute(raw)) {
+        scope = known.find(base => inside(base, raw));
+        let target = raw;
+        if (!scope) {
+          // Native tools may retain a physical root's OS alias (e.g. /var vs /private/var).
+          // Resolve this exact target only; aliases never add an allowed root.
+          try { target = realpath(raw); } catch { return failure('scope_denied'); }
+          scope = known.find(base => inside(base, target));
+        }
+        candidates = [target];
+      }
       else if (qualifiedKnowledge) { candidates = [path.resolve(companion.root, ...parts.slice(1))]; scope = companion.root; }
       else {
         const named = known.filter(base => path.basename(base).toLowerCase() === parts[0].toLowerCase());
@@ -110,8 +123,8 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
       }
       const target = candidates[0];
       // Keep a qualified reference inside its own root, including its lexical traversal.
-      const checked = checkedFile(target, scope);
-      if (checked.status === 'not_found' && bareRelative) return await otherRelativeLocations(raw, root, known);
+      const checked = checkedFile(target, scope, reference.kind);
+      if (checked.status === 'not_found' && bareRelative && reference.kind !== 'directory') return await otherRelativeLocations(raw, root, known);
       return checked;
     } catch (error) {
       return failure(permission(error) ? 'permission_denied' : ['ENOENT', 'ENOTDIR'].includes(error?.code) ? 'not_found' : 'invalid_path');

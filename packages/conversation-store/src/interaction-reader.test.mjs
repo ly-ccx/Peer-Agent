@@ -105,3 +105,31 @@ test('selected process reads only its linked canonical records and survives a lo
     assert.deepEqual((await store.readInteractionContext(c.id)).messages.map(m => m.id), ['u','r']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('resource references survive the actual paged interaction index without private payloads or canonical writes', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-interaction-resource-'));
+  try {
+    const store = createConversationStore({ storeDir: path.join(root, 'conversations') });
+    const c = store.createConversation({ role: 'project_agent', workspacePath: root });
+    const append = row => store.appendMessage(c.id, row, { returnMessages: false });
+    append({ id: 'u', kind: 'user_input', role: 'user', content: 'Open a file' });
+    // Reply may precede its durable turn record; association must use turnId, not order.
+    append({ id: 'r', kind: 'agent_reply', role: 'assistant', turnId: 't', content: '`file.md`' });
+    append({ id: 't', kind: 'agent_turn', role: 'assistant', userInputs: [{ inputId: 'u' }], rounds: [{ toolCalls: [{ name: 'read_file', result: JSON.stringify({ kind: 'local_file_ref', tool: 'read_file', path: '/allowed/docs/file.md', preview: 'PRIVATE_BODY' }) }] }] });
+    const file = path.join(root, 'conversations', c.id + '.jsonl');
+    const before = readFileSync(file);
+    for (const warm of [false, true]) {
+      const page = await store.readInteractionPage(c.id, { limit: 1 });
+      const reply = page.messages.find(row => row.id === 'r');
+      assert.deepEqual(reply.resourceReferences, [{ path: '/allowed/docs/file.md', tool: 'read_file' }]);
+      assert.ok(!JSON.stringify(page).includes('PRIVATE_BODY'));
+      assert.ok(!page.messages.some(row => row.rounds));
+      assert.deepEqual(readFileSync(file), before, `canonical history remains unchanged, warm=${warm}`);
+    }
+    append({ id: 'r2', kind: 'agent_reply', role: 'assistant', turnId: 'unrelated', content: '`file.md`', resourceReferences: [{ path: '/forged' }] });
+    const next = await store.readInteractionPage(c.id, { limit: 1 });
+    assert.equal(next.messages.find(row => row.id === 'r2').resourceReferences, undefined);
+    const prior = await store.readInteractionPage(c.id, { limit: 1, before: next.nextCursor });
+    assert.equal(prior.messages.find(row => row.id === 'r').resourceReferences[0].path, '/allowed/docs/file.md');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

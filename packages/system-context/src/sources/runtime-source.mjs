@@ -16,7 +16,7 @@ export function renderRuntimeContext(workspacePath, options = {}) {
   const lines = [];
   if (workspacePath) {
     lines.push(`Current workspace: ${workspacePath}`);
-    lines.push('Prefer workspace-relative paths in user-facing answers when the path is inside this workspace.');
+    lines.push('For user-facing local file references, preserve the actual complete path and source that were read or written. Use an absolute file target (including the correct repository/worktree); a short display label is allowed only when the complete target is preserved in the link. Do not present a branch, symbol or guessed basename as a file link. A file reference is navigation, not proof that a write, verification or acceptance succeeded.');
   }
   const linkedFolders = normalizeLinkedFolders(options.linkedFolders)
     .filter((path) => path !== workspacePath);

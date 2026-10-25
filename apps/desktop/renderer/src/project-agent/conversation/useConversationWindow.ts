@@ -19,6 +19,8 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   const heights = useRef(new Map(initial.current?.heights)), tailHeight = useRef(0);
   const pinned = useRef(!highlightedId && (initial.current?.following ?? true));
   const reading = useRef<ReadingAnchor | null>(highlightedId ? null : initial.current?.anchor ?? null);
+  const resizePoint = useRef<{ row: HTMLElement; element: HTMLElement; delta: number } | null>(null);
+  const measuredWidth = useRef(0);
   const pendingRestore = useRef<ReadingAnchor | null>(!pinned.current ? reading.current : null);
   const located = useRef<string | null>(null), restoration = useRef(0), navigationEpoch = useRef(0);
   const gesture = useRef<{ active: boolean; direction: Direction }>({ active: false, direction: 'unknown' });
@@ -58,8 +60,14 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     if (index < 0 || !keys[index]) return;
     reading.current = { key: keys[index]!, delta: visible ? visible.getBoundingClientRect().top - viewportTop : origin() + offsets[index]! - node.scrollTop,
       messageId: sourceId(rows[index]) ?? sourceId(rows[index + 1]) };
+    const blocks = visible?.querySelectorAll?.<HTMLElement>('p, li, pre, h1, h2, h3, h4, table') ?? [];
+    const point = [...blocks].find(block => {
+      const rect = block.getBoundingClientRect();
+      return rect.bottom > viewportTop && rect.top < viewportTop + node.clientHeight;
+    }) ?? visible;
+    resizePoint.current = visible && point ? { row: visible, element: point, delta: point.getBoundingClientRect().top - viewportTop } : null;
   };
-  const cancelRestore = () => { pendingRestore.current = null; restoration.current++; setRestoreStatus('none'); };
+  const cancelRestore = () => { resizePoint.current = null; pendingRestore.current = null; restoration.current++; setRestoreStatus('none'); };
   const followLatest = () => {
     navigationEpoch.current++;
     referenceRequest.current++; setReferenceStatus('none');
@@ -128,6 +136,8 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
       const target = restoreConversationOffset(keys, offsets, reading.current, origin());
       if (target !== null) { node.scrollTop = target; pendingRestore.current = null; setRestoreStatus('none'); }
     }
+    if (!pinned.current && !pendingRestore.current && (!resizePoint.current || resizePoint.current.element.isConnected === false
+      || resizePoint.current.row.dataset.conversationRow !== reading.current?.key)) remember();
     updateTop(node.scrollTop); persist();
   }, [keys, offsets, height]);
 
@@ -135,6 +145,21 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     const node = scrollerRef.current;
     if (!node) return;
     const measure = () => {
+      const width = node.clientWidth;
+      if (width === 0 || node.isConnected === false) return;
+      const widthChanged = typeof width === 'number' && width > 0 && measuredWidth.current > 0 && width !== measuredWidth.current;
+      if (typeof width === 'number' && width > 0) measuredWidth.current = width;
+      const point = resizePoint.current;
+      const anchor = reading.current;
+      // Keep the visible paragraph stable through line wrapping. This only
+      // reconciles reading geometry; it never resumes following or wins a gesture.
+      if (widthChanged && !pinned.current && !pendingRestore.current && !gesture.current.active && point && anchor
+        && point.row.isConnected !== false && point.element.isConnected !== false && point.row.dataset.conversationRow === anchor.key) {
+        const viewportTop = node.getBoundingClientRect().top;
+        node.scrollTop += point.element.getBoundingClientRect().top - viewportTop - point.delta;
+        reading.current = { ...anchor, delta: point.row.getBoundingClientRect().top - viewportTop };
+        updateTop(node.scrollTop);
+      }
       setHeight(current => current === node.clientHeight ? current : node.clientHeight);
       const tail = tailRef.current?.getBoundingClientRect().height ?? 0;
       let changed = Math.abs(tailHeight.current - tail) > 0.5; tailHeight.current = tail;

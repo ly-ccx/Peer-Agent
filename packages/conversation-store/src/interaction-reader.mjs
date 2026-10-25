@@ -1,3 +1,4 @@
+import { botResourceReferences } from '@peer-agent/protocol';
 import { DatabaseSync } from './sqlite-runtime.generated.mjs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { mkdirSync, statSync, existsSync, openSync, closeSync, readSync, readFileSync, renameSync } from 'node:fs';
@@ -14,7 +15,7 @@ const object = value => { if (typeof value === 'string') { try { return object(J
 const pick = (value, keys) => value ? Object.fromEntries(keys.filter(key => value[key] !== undefined).map(key => [key, value[key]])) : null;
 
 function project(message) {
-  const { rounds, segments, ...row } = message;
+  const { rounds, segments, resourceReferences, ...row } = message;
   if (row.kind === 'agent_activity' && ['verifying', 'verified'].includes(row.agentActivity?.state)) return null;
   if (row.kind === 'system_card' && Array.isArray(row.cards) && row.cards.some(card => card?.kind === 'verdict')) {
     row.cards = row.cards.filter(card => card?.kind !== 'verdict');
@@ -22,7 +23,7 @@ function project(message) {
   }
   if (row.kind === 'agent_turn') return { id: row.id, role: row.role, kind: row.kind, turnId: row.turnId, turnKind: row.turnKind,
     content: '', createdAt: row.createdAt, replyTo: row.replyTo, userInputs: row.userInputs?.map(input => ({ inputId: input.inputId })),
-    publicUpdates: row.publicUpdates, meta: pick(row.meta, ['workId', 'replyTo']), dispositionCalls: (rounds || []).flatMap(round => (round.toolCalls || []).flatMap(call => {
+    publicUpdates: row.publicUpdates, resourceReferences: botResourceReferences(rounds), meta: pick(row.meta, ['workId', 'replyTo']), dispositionCalls: (rounds || []).flatMap(round => (round.toolCalls || []).flatMap(call => {
       if (!dispositionTools.has(call.name)) return [];
       const input = object(call.input), result = object(call.result), output = object(result?.output);
       return [{ name: call.name, input: pick(input, ['sessionId', 'intent', 'reason', 'supersedes', 'dependsOn', 'title']),
@@ -61,7 +62,7 @@ function rebuild({ file, target, expected, appendOnly = false }) {
   try {
     if (actual !== expected) throw fail('BACKGROUND_VERSION_CHANGED');
     const size = existsSync(file) ? statSync(file).size : 0, oldSize = Number(meta(db, 'size') || 0), previous = meta(db, 'source');
-    const append = meta(db, 'schema') === '3' && meta(db, 'terminated') === 'true' && previous && size > oldSize && previous.split(':').slice(0, 2).join(':') === actual.split(':').slice(0, 2).join(':') && prefix(file, oldSize) === meta(db, 'anchor');
+    const append = meta(db, 'schema') === '4' && meta(db, 'terminated') === 'true' && previous && size > oldSize && previous.split(':').slice(0, 2).join(':') === actual.split(':').slice(0, 2).join(':') && prefix(file, oldSize) === meta(db, 'anchor');
     if (appendOnly && (!append || size - oldSize > 128 * 1024)) throw fail('BACKGROUND_VERSION_CHANGED');
     db.exec('BEGIN IMMEDIATE');
     if (!append) db.exec('DELETE FROM messages; DELETE FROM identities; DELETE FROM links; DELETE FROM records;');
@@ -92,7 +93,7 @@ function rebuild({ file, target, expected, appendOnly = false }) {
       } finally { closeSync(fd); }
     }
     if (version(file) !== actual) throw fail('BACKGROUND_VERSION_CHANGED');
-    put(db, 'terminated', terminated); put(db, 'schema', 3); put(db, 'source', actual); put(db, 'size', size); put(db, 'seq', seq); put(db, 'anchor', prefix(file, size)); db.exec('COMMIT');
+    put(db, 'terminated', terminated); put(db, 'schema', 4); put(db, 'source', actual); put(db, 'size', size); put(db, 'seq', seq); put(db, 'anchor', prefix(file, size)); db.exec('COMMIT');
   } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
   finally { db.close(); }
 }
@@ -118,10 +119,10 @@ export function createInteractionReader({ storeDir, readMeta }) {
         for (const suffix of ['-wal', '-shm']) if (existsSync(target + suffix)) renameSync(target + suffix, backup + suffix);
         db = connect(target);
       }
-      if (meta(db, 'schema') !== '3' || meta(db, 'source') !== expected) {
+      if (meta(db, 'schema') !== '4' || meta(db, 'source') !== expected) {
         const oldSize = Number(meta(db, 'size') || 0), previous = meta(db, 'source');
         const size = expected === 'missing' ? 0 : statSync(file).size;
-        const smallTail = !flights.has(id) && meta(db, 'schema') === '3' && meta(db, 'terminated') === 'true' && previous
+        const smallTail = !flights.has(id) && meta(db, 'schema') === '4' && meta(db, 'terminated') === 'true' && previous
           && size > oldSize && size - oldSize <= 128 * 1024 && previous.split(':').slice(0, 2).join(':') === expected.split(':').slice(0, 2).join(':')
           && prefix(file, oldSize) === meta(db, 'anchor');
         db.close();
@@ -197,8 +198,14 @@ export function createInteractionReader({ storeDir, readMeta }) {
           if (linked) rows.set(linked.seq, linked);
         }
         if (version(file) !== expected || version(sidecarFile) !== sidecarVersion) continue;
+        const projected = [...rows].sort((a, b) => a[0] - b[0]).map(([, row]) => JSON.parse(row.body));
+        const turnReferences = new Map(projected.filter(row => row.kind === 'agent_turn').map(row => [row.id, row.resourceReferences]));
+        const messages = projected.map(row => {
+          const refs = row.kind === 'agent_reply' && typeof row.turnId === 'string' ? turnReferences.get(row.turnId) : null;
+          return refs?.length ? { ...row, resourceReferences: refs } : row;
+        });
         return { conversationId: id, contentRevision: readMeta(id)?.contentRevision ?? description.contentRevision,
-          sourceVersion: expected, messages: [...rows].sort((a, b) => a[0] - b[0]).map(([, row]) => JSON.parse(row.body)),
+          sourceVersion: expected, messages,
           nextCursor: hasOlder ? page[0]?.id ?? null : null, excludedFromMessageId: excluded, requiresRuntimeCheck: true };
       } finally { db.close(); }
     }

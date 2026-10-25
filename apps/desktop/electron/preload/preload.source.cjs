@@ -79,18 +79,17 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot, ...(options || {}) }),
   listEditors: () => ipcRenderer.invoke('shell:editors:list'),
   setDefaultEditor: (editorId) => ipcRenderer.invoke('shell:editors:set-default', { editorId }),
-  gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
+  gitDiff: (absPath, workspaceRoot, relPath, documentReference, comparison) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}), ...(comparison ? { comparison } : {}) }),
   gitDiffRange: (params) => ipcRenderer.invoke('git:diff-range', params),
   gitListBranches: (params) => ipcRenderer.invoke('git:list-branches', params),
   gitCreateBranch: (params) => ipcRenderer.invoke('git:create-branch', params),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath, documentReference) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}) }),
-  readImageDataUrl: (absPath, workspaceRoot, relPath) =>
-    ipcRenderer.invoke('file:read-image-data-url', { absPath, workspaceRoot, relPath }),
+  readImageDataUrl: (absPath, workspaceRoot, relPath, documentReference) => ipcRenderer.invoke('file:read-image-data-url', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}) }),
   writeFile: (absPath, workspaceRoot, relPath, content) => ipcRenderer.invoke('file:write', { absPath, workspaceRoot, relPath, content }),
   mkdir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:mkdir', { absPath, workspaceRoot, relPath }),
-  readDir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath }),
-  searchWorkspaceFiles: (workspacePath, query, limit) => ipcRenderer.invoke('workspace:search-files', { workspacePath, query, limit }),
+  readDir: (absPath, workspaceRoot, relPath, documentReference) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}) }),
+  searchWorkspaceFiles: (workspacePath, query, limit, documentReference) => ipcRenderer.invoke('workspace:search-files', { workspacePath, query, limit, documentReference }),
   /** 同步 Workbench 文件树要监听的目录集合（根 + 已展开）；传空数组清空。 */
   watchDirs: (paths, workspaceRoot) => ipcRenderer.invoke('fs:watch-dirs', { paths, workspaceRoot }),
   /** 订阅目录变更；返回 unsubscribe。payload: { dirPath } */

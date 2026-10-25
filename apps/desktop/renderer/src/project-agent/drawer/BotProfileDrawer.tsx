@@ -108,7 +108,6 @@ export function BotProfileDrawer({
   const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(!memory.open ? 'off' : replayEntrance ? 'in' : 'on');
   const bodyRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLElement>(null), paneRef = useRef<HTMLDivElement>(null);
-  const dockSettled = useMotionSettled(dockRef, layout === 'push' && memory.open && dockPhase === 'on');
   const paneSettled = useMotionSettled(paneRef, memory.open && !inspect, memory.tab);
   const previousInspect = useRef(inspect);
   useEffect(() => {
@@ -370,7 +369,7 @@ export function BotProfileDrawer({
         onResize={(next) => onMemory(resizeDrawer(memory, next))}
       />
       <aside ref={dockRef}
-        className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}${dockSettled ? ' is-settled' : ''}`}
+        className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
         style={memory.width === undefined ? undefined : { ['--pa-drawer-width' as string]: `${memory.width}px` }}
         aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
         inert={!memory.open}

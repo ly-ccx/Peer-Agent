@@ -9,6 +9,7 @@ import {
 import { findMarkdownImage, findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
 import { DocumentPreviewContext } from './DocumentPreviewContext';
 import { documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
+import { PeerIcon } from '../../../ui/icons';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -104,7 +105,8 @@ function resolveAbsolutePath(
 
 function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; children?: ReactNode }) {
   const preview = useContext(DocumentPreviewContext);
-  const reference = preview ? documentReferencePath(raw) : null;
+  const candidate = preview ? documentReferencePath(raw) : null;
+  const reference = candidate && preview?.resolve ? preview.resolve(candidate) : candidate;
   const workspacePath = useContext(WorkspacePathContext);
   const workbench = useWorkbenchOptional();
   const parsed = parseFilePathToken(raw);
@@ -165,7 +167,9 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
     </code>;
   }
 
-  if (preview) return <code>{content}</code>;
+  if (preview) return <><code>{content}</code>{candidate && preview.locate ? <button type="button" className="markdown-file-locate"
+    title={`${preview.locateLabel ?? 'Find file location'}: ${candidate}`} aria-label={`${preview.locateLabel ?? 'Find file location'}: ${candidate}`}
+    onClick={() => { if (window.getSelection()?.type !== 'Range') preview.locate?.(candidate); }}><PeerIcon name="search" size={12} /></button> : null}</>;
 
   if (!parsed || !absPath) {
     return <code>{content}</code>;
@@ -255,6 +259,15 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
       {content}
     </code>
   );
+}
+
+function MarkdownExternalLink({ href, children }: { readonly href: string; readonly children: ReactNode }) {
+  const preview = useContext(DocumentPreviewContext);
+  return <a href={href} target="_blank" rel="noreferrer noopener" onClick={event => {
+    if (preview?.openUrl && /^https?:\/\//i.test(href) && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
+      event.preventDefault(); preview.openUrl(href);
+    }
+  }}>{children}</a>;
 }
 
 function MarkdownFileLink({ destination, children }: { readonly destination: string; readonly children: ReactNode }) {
@@ -364,9 +377,9 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
       const externalHref = safeExternalHref(next.destination);
       if (externalHref) {
         nodes.push(
-          <a key={key} href={externalHref} target="_blank" rel="noreferrer noopener">
+          <MarkdownExternalLink key={key} href={externalHref}>
             {label}
-          </a>,
+          </MarkdownExternalLink>,
         );
       } else {
         nodes.push(<MarkdownFileLink key={key} destination={next.destination}>{label}</MarkdownFileLink>);

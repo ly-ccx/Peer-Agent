@@ -933,6 +933,13 @@
   user-select: none;
 }
 
+.bot-profile.is-icon {
+  width: var(--space-8, 32px);
+  min-width: var(--space-8, 32px);
+  height: var(--space-8, 32px);
+  padding: 0;
+}
+
 .bot-profile:hover {
   background: var(--control-fill-hover);
 }
@@ -1303,8 +1310,11 @@
  * 各自成悬浮纸面（黑牌），四周留出玻璃缝。纸面/描边/阴影全部取自
  * 主题 token（--paper-sheet / --chrome-hairline / --shadow-card），
  * 深浅主题与自定义色板自动跟随。非 macOS 无标记，保持原平铺实色布局。 */
-html[data-vibrancy='true'] .bot-shell {
+html[data-vibrancy='true'] {
   --bot-float-gap: 10px;
+}
+
+html[data-vibrancy='true'] .bot-shell {
   padding: var(--bot-float-gap);
   background: var(--window-chrome-fill);
 }
@@ -1320,6 +1330,11 @@ html[data-vibrancy='true'] .bot-column {
 /* 主面板：悬浮黑牌。实色纸面沿用 .bot-main 的 --paper-sheet。 */
 html[data-vibrancy='true'] .bot-main {
   margin-left: var(--bot-float-gap);
+}
+
+/* Conversation and resource views are peers in the same floating shell. */
+html[data-vibrancy='true'] :is(.bot-main, .resource-workspace) {
+  background: var(--paper-sheet);
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);

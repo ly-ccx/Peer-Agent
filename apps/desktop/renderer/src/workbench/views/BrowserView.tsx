@@ -62,6 +62,9 @@ declare global {
 }
 
 interface BrowserViewProps {
+  readonly hideTabStrip?: boolean;
+  readonly suspendBlank?: boolean;
+  readonly lazyTabs?: boolean;
   readonly isZh: boolean;
   readonly conversationId: string | null;
   readonly session: BrowserSessionState;
@@ -376,8 +379,17 @@ export function BrowserView({
   session,
   onSessionChange,
   claimForeground = true,
+  hideTabStrip = false,
+  suspendBlank = false,
+  lazyTabs = false,
 }: BrowserViewProps) {
   const tabsId = useId();
+  const mountedTabs = useRef(new Set<string>());
+  const availableIds = new Set(session.tabs.map(tab => tab.id));
+  for (const id of mountedTabs.current) if (!availableIds.has(id)) mountedTabs.current.delete(id);
+  const selected = session.tabs.find(tab => tab.id === session.activeTabId);
+  if (selected && !(suspendBlank && selected.url === 'about:blank' && !selected.title)) mountedTabs.current.add(selected.id);
+  const renderedTabs = lazyTabs ? session.tabs.filter(tab => mountedTabs.current.has(tab.id)) : session.tabs;
   const handlesRef = useRef(new Map<string, WebviewElement>());
   const sessionTabsRef = useRef(session.tabs);
   sessionTabsRef.current = session.tabs;
@@ -607,7 +619,7 @@ export function BrowserView({
 
   return (
     <div className="browser-view">
-      <ResourceTabStrip idPrefix={tabsId}
+      <ResourceTabStrip hidden={hideTabStrip} idPrefix={tabsId}
         ariaLabel={isZh ? '网页标签' : 'Browser tabs'}
         items={tabItems}
         activeId={session.activeTabId}
@@ -737,7 +749,7 @@ export function BrowserView({
       <div className="browser-stage">
         <div className={`browser-progress${activeRuntime.loading ? ' browser-progress--active' : ''}`} />
 
-        {session.tabs.map((tab) => (
+        {renderedTabs.map((tab) => (
           <BrowserPage idPrefix={tabsId}
             key={tab.id}
             tab={tab}

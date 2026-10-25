@@ -1,3 +1,4 @@
+import type { BotDocumentReference } from '@peer-agent/protocol';
 export type WorkbenchFileMode = 'preview' | 'source' | 'diff';
 
 export interface DocumentTabSession {
@@ -7,6 +8,7 @@ export interface DocumentTabSession {
   /** 原始相对路径（解析前），用于主进程跨已知 workspace 回退查找。 */
   readonly relPath?: string;
   readonly mode: WorkbenchFileMode;
+  readonly reference?: BotDocumentReference;
 }
 
 export interface DocumentSessionState {
@@ -33,6 +35,7 @@ export function createDocumentTabSession(
     readonly workspaceRoot?: string;
     readonly relPath?: string;
     readonly mode?: WorkbenchFileMode;
+    readonly reference?: BotDocumentReference;
   } = {},
 ): DocumentTabSession {
   return {
@@ -41,6 +44,7 @@ export function createDocumentTabSession(
     ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
     ...(options.relPath ? { relPath: options.relPath } : {}),
     mode: options.mode ?? 'preview',
+    ...(options.reference ? { reference: options.reference } : {}),
   };
 }
 
@@ -65,6 +69,13 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
       : {}),
     ...(typeof tab.relPath === 'string' && tab.relPath ? { relPath: tab.relPath } : {}),
     mode: isDocumentMode(tab.mode) ? tab.mode : 'preview',
+    ...(tab.reference && typeof tab.reference === 'object'
+      && typeof (tab.reference as BotDocumentReference).workspaceId === 'string'
+      && typeof (tab.reference as BotDocumentReference).path === 'string'
+      ? { reference: { workspaceId: (tab.reference as BotDocumentReference).workspaceId,
+          path: (tab.reference as BotDocumentReference).path,
+          ...(typeof (tab.reference as BotDocumentReference).relativeTo === 'string'
+            ? { relativeTo: (tab.reference as BotDocumentReference).relativeTo } : {}) } } : {}),
   };
 }
 
@@ -76,9 +87,11 @@ export function normalizeDocumentSessionState(raw: unknown): DocumentSessionStat
   const tabs = (Array.isArray(value.tabs) ? value.tabs : [])
     .map(normalizeDocumentTab)
     .filter((tab): tab is DocumentTabSession => {
-      if (!tab || ids.has(tab.id) || paths.has(tab.absPath)) return false;
+      if (!tab) return false;
+      const key = JSON.stringify([tab.absPath, tab.reference?.workspaceId, tab.reference?.relativeTo]);
+      if (ids.has(tab.id) || paths.has(key)) return false;
       ids.add(tab.id);
-      paths.add(tab.absPath);
+      paths.add(key);
       return true;
     });
   if (tabs.length === 0) return createDocumentSessionState();
@@ -103,12 +116,15 @@ export function openDocumentTab(
   tab: DocumentTabSession,
   options: { readonly replaceMode?: boolean } = {},
 ): DocumentSessionState {
-  const index = session.tabs.findIndex((candidate) => candidate.absPath === tab.absPath);
+  const index = session.tabs.findIndex((candidate) => candidate.absPath === tab.absPath
+    && candidate.reference?.workspaceId === tab.reference?.workspaceId
+    && candidate.reference?.relativeTo === tab.reference?.relativeTo);
   if (index < 0) return { tabs: [...session.tabs, tab], activeTabId: tab.id };
 
   const current = session.tabs[index];
   const next = {
     ...current,
+    ...(tab.reference ? { reference: tab.reference } : {}),
     ...(tab.workspaceRoot ? { workspaceRoot: tab.workspaceRoot } : {}),
     ...(tab.relPath ? { relPath: tab.relPath } : {}),
     ...(options.replaceMode ? { mode: tab.mode } : {}),
@@ -116,6 +132,7 @@ export function openDocumentTab(
   const changed =
     next.workspaceRoot !== current.workspaceRoot ||
     next.relPath !== current.relPath ||
+    JSON.stringify(next.reference) !== JSON.stringify(current.reference) ||
     next.mode !== current.mode;
   if (!changed && session.activeTabId === current.id) return session;
   const tabs = changed

@@ -553,6 +553,8 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
+    comparison?: 'working' | 'staged',
   ) => Promise<{
     readonly ok: boolean;
     readonly status:
@@ -562,8 +564,10 @@ export interface BootstrapPreloadApi {
       | 'untracked'
       | 'no_changes'
       | 'not_git_repo'
+      | 'not_file'
       | 'not_found'
       | 'invalid_path'
+      | 'permission_denied' | 'scope_denied' | 'workspace_unavailable' | 'ambiguous_path' | 'relative_base_required'
       | 'error';
     readonly diffText: string;
     readonly error?: string;
@@ -577,6 +581,8 @@ export interface BootstrapPreloadApi {
     readonly workspaceRoot: string;
     readonly fromRef: string;
     readonly toRef?: string;
+    readonly documentReference?: import('@peer-agent/protocol').BotDocumentReference;
+    readonly comparison?: 'working' | 'staged';
   }) => Promise<{
     readonly ok: boolean;
     readonly status: 'ok' | 'no_changes' | 'not_git_repo' | 'invalid_ref' | 'error';
@@ -584,6 +590,9 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
     readonly fromRef?: string;
     readonly toRef?: string | null;
+    readonly untracked?: readonly string[];
+    readonly untrackedTruncated?: boolean;
+    readonly workspaceRoot?: string;
   }>;
   readonly gitListBranches: (params: {
     readonly workspaceRoot: string;
@@ -651,6 +660,7 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
   ) => Promise<{
     readonly ok: boolean;
     readonly status:
@@ -660,7 +670,8 @@ export interface BootstrapPreloadApi {
       | 'too_large'
       | 'unsupported_type'
       | 'invalid_path'
-      | 'error';
+      | 'error'
+      | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required';
     readonly dataUrl: string;
     readonly mimeType?: string;
     readonly size?: number;
@@ -722,9 +733,11 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
   ) => Promise<{
     readonly ok: boolean;
-    readonly status: 'ok' | 'not_found' | 'not_dir' | 'invalid_path' | 'error';
+    readonly status: import('@peer-agent/protocol').LocalDocumentReadResult['status'] | 'not_dir';
+    readonly truncated?: boolean;
     readonly entries: readonly {
       readonly name: string;
       readonly isDir: boolean;
@@ -741,17 +754,8 @@ export interface BootstrapPreloadApi {
     workspacePath: string,
     query?: string,
     limit?: number,
-  ) => Promise<{
-    readonly ok: boolean;
-    readonly status: 'ok' | 'not_found' | 'not_dir' | 'invalid_path' | 'error';
-    readonly files: readonly {
-      readonly relPath: string;
-      readonly name: string;
-      readonly kind: 'file' | 'directory';
-    }[];
-    readonly workspacePath?: string;
-    readonly error?: string;
-  }>;
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
+  ) => Promise<import('@peer-agent/protocol').BotResourceSearchResult>;
   /**
    * 同步文件树轻量监听目录集合（根 + 已展开）。传空数组清空。
    * main 侧按 webContents 维护 fs.watch，不递归整仓。

@@ -132,3 +132,31 @@ test('fallback discovery does not accept an unconfirmed companion, escaped file 
     assert.equal((await resolve({ workspaceId: 'bot', path: 'escape.md' })).status, 'not_found');
   } finally { f.dispose(); }
 });
+
+test('R1 directory intent resolves only confirmed scope and validates request shape', async () => {
+  const f = fixture();
+  try {
+    const resolve = createBotDocumentResolver(f.options);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'directory', metadataOnly: true })).target, f.root);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'Peer-Knowledge', kind: 'directory' })).target, f.knowledge);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md', kind: 'directory' })).ok, false);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'unknown' })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', metadataOnly: 'true' })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: f.dir, kind: 'directory' })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
+test('an absolute OS/path alias resolves to the same allowed physical root without admitting an escape', async () => {
+  const f = fixture();
+  try {
+    const alias = path.join(f.dir, 'alias');
+    symlinkSync(f.root, alias);
+    symlinkSync(path.join(f.dir, 'private.md'), path.join(f.root, 'escape.md'));
+    const resolve = createBotDocumentResolver(f.options);
+    const result = await resolve({ workspaceId: 'bot', path: path.join(alias, 'README.md') });
+    assert.equal(result.ok, true); assert.equal(result.target, path.join(f.root, 'README.md'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: alias, kind: 'directory' })).target, f.root);
+    assert.equal((await resolve({ workspaceId: 'bot', path: path.join(alias, 'escape.md') })).status, 'scope_denied');
+    assert.equal((await resolve({ workspaceId: 'bot', path: path.join(f.dir, 'private.md') })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});

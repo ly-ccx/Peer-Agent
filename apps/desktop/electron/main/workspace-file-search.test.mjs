@@ -83,3 +83,25 @@ test('query search stays inside the workspace root', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('search reports the entry budget and capped results without traversing symlinks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'peer-search-boundary-'));
+  try {
+    const scope = path.join(root, 'scope'), outside = path.join(root, 'outside');
+    fs.mkdirSync(scope); fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'secret.md'), 'private');
+    fs.symlinkSync(outside, path.join(scope, 'linked'), 'dir');
+    for (let index = 0; index < 45; index++) fs.writeFileSync(path.join(scope, `note-${index}.md`), '');
+    const partial = searchWorkspaceFiles(scope, { query: 'note', maxVisited: 3 });
+    assert.equal(partial.visited, 3);
+    assert.equal(partial.truncated, true);
+    const capped = searchWorkspaceFiles(scope, { query: 'note', limit: 100 });
+    assert.equal(capped.files.length, 40);
+    assert.equal(capped.truncated, true);
+    const escaped = searchWorkspaceFiles(scope, { query: 'secret' });
+    assert.deepEqual(escaped.files, []);
+    assert.equal(escaped.workspacePath, scope);
+    assert.equal(escaped.truncated, false);
+    assert.equal(searchWorkspaceFiles(scope, { query: 'x'.repeat(257) }).status, 'invalid_path');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

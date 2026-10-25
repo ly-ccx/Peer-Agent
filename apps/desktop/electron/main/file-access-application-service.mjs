@@ -113,8 +113,14 @@ export function createFileAccessApplicationService(options = {}) {
     return null;
   }
 
-  async function getGitDiff({ absPath, workspaceRoot, relPath } = {}) {
+  async function getGitDiff({ absPath, workspaceRoot, relPath, documentReference, comparison } = {}) {
     try {
+      if (comparison !== undefined && !['working', 'staged'].includes(comparison)) return { ok: false, status: 'invalid_path', diffText: '', error: 'invalid_comparison' };
+      if (documentReference !== undefined) {
+        const resolved = await options.resolveBotDocument?.({ ...documentReference, kind: 'file' });
+        if (!resolved?.ok) return { ...resolved, ok: false, status: resolved?.status ?? 'invalid_path', diffText: '' };
+        return getGitDiff({ absPath: resolved.target, workspaceRoot: resolved.root, comparison });
+      }
       if (!absPath || typeof absPath !== 'string') {
         return { ok: false, status: 'invalid_path', diffText: '', error: 'invalid_path' };
       }
@@ -163,6 +169,7 @@ export function createFileAccessApplicationService(options = {}) {
       }
 
       const runGit = async (args) => {
+        if (args[0] === 'diff') args = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', ...args.slice(1)];
         try {
           const { stdout } = await executeGit(
             repoRoot,
@@ -171,7 +178,7 @@ export function createFileAccessApplicationService(options = {}) {
           );
           return stdout;
         } catch (error) {
-          if (error && typeof error.stdout === 'string' && error.stdout.length > 0) {
+          if (error?.code === 1 && args.includes('--no-index') && typeof error.stdout === 'string' && error.stdout.length > 0) {
             return error.stdout;
           }
           throw error;
@@ -179,6 +186,7 @@ export function createFileAccessApplicationService(options = {}) {
       };
 
       if (!tracked) {
+        if (comparison === 'staged') return { ok: true, status: 'no_changes', diffText: '', resolvedFrom };
         const diffText = await runGit(['diff', '--no-index', '--', '/dev/null', target]);
         return {
           ok: true,
@@ -188,10 +196,15 @@ export function createFileAccessApplicationService(options = {}) {
         };
       }
 
+      if (comparison === 'staged') {
+        const diffText = await runGit(['diff', '--staged', '--', repoRelPath]);
+        return { ok: true, status: diffText.trim() ? 'staged' : 'no_changes', diffText, resolvedFrom };
+      }
       let diffText = await runGit(['diff', '--', repoRelPath]);
       if (diffText.trim()) {
         return { ok: true, status: 'modified', diffText, resolvedFrom };
       }
+      if (comparison === 'working') return { ok: true, status: 'no_changes', diffText: '', resolvedFrom };
       diffText = await runGit(['diff', '--staged', '--', repoRelPath]);
       if (diffText.trim()) {
         return { ok: true, status: 'staged', diffText, resolvedFrom };
@@ -242,7 +255,17 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
-  async function getGitRangeDiff({ workspaceRoot, fromRef, toRef } = {}) {
+  async function getGitRangeDiff({ workspaceRoot, fromRef, toRef, documentReference, comparison } = {}) {
+    let scopedRoot;
+    if (documentReference !== undefined) {
+      const resolved = await options.resolveBotDocument?.({ ...documentReference, kind: 'directory' });
+      if (!resolved?.ok) return { ok: false, status: 'error', diffText: '', error: resolved?.status ?? 'workspace_unavailable' };
+      scopedRoot = resolved.target;
+      workspaceRoot = scopedRoot;
+    }
+    if (comparison !== undefined && !['working', 'staged'].includes(comparison)) {
+      return { ok: false, status: 'invalid_ref', diffText: '', error: 'invalid_comparison' };
+    }
     if (!isSafeGitRef(fromRef)) {
       return { ok: false, status: 'invalid_ref', diffText: '', error: 'invalid_ref' };
     }
@@ -254,29 +277,43 @@ export function createFileAccessApplicationService(options = {}) {
     if (!repoRoot) {
       return { ok: false, status: 'not_git_repo', diffText: '', error: 'not_a_git_repository' };
     }
-    const args = endRef
-      ? ['diff', '--no-color', fromRef.trim(), endRef]
-      : ['diff', '--no-color', fromRef.trim()];
+    let resolvedBase = fromRef.trim(), resolvedEnd = endRef;
+    if (scopedRoot && !comparison) {
+      try {
+        resolvedBase = (await executeGit(repoRoot, ['rev-parse', '--verify', `${fromRef.trim()}^{commit}`], { maxBuffer: 1024 * 1024 })).stdout.trim();
+        if (endRef) resolvedEnd = (await executeGit(repoRoot, ['rev-parse', '--verify', `${endRef}^{commit}`], { maxBuffer: 1024 * 1024 })).stdout.trim();
+      } catch { return { ok: false, status: 'invalid_ref', diffText: '', error: 'revision_unavailable' }; }
+    }
+    const args = comparison === 'working' ? ['diff', '--no-color'] : comparison === 'staged' ? ['diff', '--no-color', '--staged'] : resolvedEnd
+      ? ['diff', '--no-color', resolvedBase, resolvedEnd]
+      : ['diff', '--no-color', resolvedBase];
+    const scopeRel = scopedRoot ? path.relative(repoRoot, scopedRoot) : null;
+    if (scopeRel && (scopeRel === '..' || scopeRel.startsWith(`..${path.sep}`) || path.isAbsolute(scopeRel))) {
+      return { ok: false, status: 'error', diffText: '', error: 'scope_denied' };
+    }
+    args.splice(1, 0, '--no-ext-diff', '--no-textconv');
+    if (scopedRoot) args.push('--', scopeRel || '.');
     try {
+      let untracked;
+      let untrackedTruncated = false;
+      if (scopedRoot && comparison === 'working') {
+        const listed = await executeGit(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', scopeRel || '.'], { maxBuffer: 1024 * 1024 });
+        const names = (listed.stdout || '').split('\0').filter(Boolean);
+        untracked = names.slice(0, 512).map(name => path.join(repoRoot, name));
+        untrackedTruncated = names.length > 512;
+      }
       const { stdout } = await executeGit(repoRoot, args, { maxBuffer: 1024 * 1024 * 32 });
       const diffText = stdout || '';
       return {
         ok: true,
         status: diffText.trim() ? 'ok' : 'no_changes',
         diffText,
-        fromRef: fromRef.trim(),
-        toRef: endRef,
+        fromRef: resolvedBase,
+        toRef: resolvedEnd,
+        workspaceRoot: repoRoot,
+        ...(untracked ? { untracked, untrackedTruncated } : {}),
       };
     } catch (error) {
-      if (error && typeof error.stdout === 'string' && error.stdout.length > 0) {
-        return {
-          ok: true,
-          status: 'ok',
-          diffText: error.stdout,
-          fromRef: fromRef.trim(),
-          toRef: endRef,
-        };
-      }
       return {
         ok: false,
         status: 'error',
@@ -452,7 +489,14 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
-  function readDirectory({ absPath, workspaceRoot, relPath } = {}) {
+  function readDirectory({ absPath, workspaceRoot, relPath, documentReference } = {}) {
+    if (documentReference !== undefined) {
+      return Promise.resolve(options.resolveBotDocument?.({ ...documentReference, kind: 'directory' })).then(resolved => {
+        if (!resolved?.ok) return { ...resolved, ok: false, status: resolved?.status ?? 'workspace_unavailable', entries: [] };
+        const result = readDirectory({ absPath: resolved.target, workspaceRoot: resolved.root });
+        return { ...result, entries: result.entries.slice(0, 1000), truncated: result.entries.length > 1000, resolvedFrom: resolved.root };
+      }).catch(() => ({ ok: false, status: 'error', entries: [], error: 'resolve_failed' }));
+    }
     try {
       if (!absPath || typeof absPath !== 'string') {
         return { ok: false, status: 'invalid_path', entries: [], error: 'invalid_path' };
@@ -581,6 +625,8 @@ export function createFileAccessApplicationService(options = {}) {
       if (documentReference !== undefined) {
         const resolved = await options.resolveBotDocument?.(documentReference);
         if (!resolved?.ok) return resolved ?? { ok: false, status: 'workspace_unavailable', content: '' };
+        if (documentReference.metadataOnly === true) return { ok: true, status: 'ok', content: '', metadataOnly: true, resolvedPath: resolved.target, resolvedFrom: resolved.root };
+        if (documentReference.kind === 'directory') return { ok: false, status: 'not_file', content: '' };
         const result = await readFile({ absPath: resolved.target, workspaceRoot: resolved.root });
         return { ...result, resolvedPath: resolved.target, resolvedFrom: resolved.root };
       }
@@ -775,7 +821,13 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
-  function readImageDataUrl({ absPath, workspaceRoot, relPath } = {}) {
+  function readImageDataUrl({ absPath, workspaceRoot, relPath, documentReference } = {}) {
+    if (documentReference !== undefined) {
+      return Promise.resolve(options.resolveBotDocument?.({ ...documentReference, kind: 'file' })).then(resolved => {
+        if (!resolved?.ok) return { ...resolved, ok: false, status: resolved?.status ?? 'workspace_unavailable', dataUrl: '' };
+        return readImageDataUrl({ absPath: resolved.target, workspaceRoot: resolved.root });
+      }).catch(() => ({ ok: false, status: 'error', dataUrl: '', error: 'resolve_failed' }));
+    }
     try {
       if (!absPath || typeof absPath !== 'string') {
         return { ok: false, status: 'invalid_path', dataUrl: '', error: 'invalid_path' };
@@ -858,6 +910,16 @@ export function createFileAccessApplicationService(options = {}) {
     for (const senderId of [...watchersBySender.keys()]) stopSenderWatchers(senderId);
   }
 
+  async function searchFiles({ workspacePath, query, limit, documentReference } = {}) {
+    if (documentReference === undefined) return searchWorkspaceFiles(workspacePath, { query, limit });
+    try {
+      const resolved = await options.resolveBotDocument?.({ ...documentReference, kind: 'directory' });
+      if (!resolved?.ok) return { ok: false, status: resolved?.status ?? 'workspace_unavailable', scoped: true, files: [] };
+      const result = searchWorkspaceFiles(resolved.target, { query, limit });
+      return { ...result, scoped: true };
+    } catch { return { ok: false, status: 'error', scoped: true, files: [] }; }
+  }
+
   return Object.freeze({
     getGitDiff,
     getGitRangeDiff,
@@ -870,9 +932,7 @@ export function createFileAccessApplicationService(options = {}) {
     readImageDataUrl,
     writeFile,
     mkdir,
-    searchWorkspaceFiles: ({ workspacePath, query, limit } = {}) => (
-      searchWorkspaceFiles(workspacePath, { query, limit })
-    ),
+    searchWorkspaceFiles: searchFiles,
     dispose,
   });
 }

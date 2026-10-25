@@ -4,4 +4,9 @@ import { createContext } from 'react';
 export const DocumentPreviewContext = createContext<{
   readonly open: (path: string, trigger: HTMLElement) => void;
   readonly label: string;
+  /** Resolve display text using exact source metadata; null leaves it as ordinary text. */
+  readonly resolve?: (path: string) => string | null;
+  readonly locate?: (path: string, candidates?: readonly string[]) => void;
+  readonly locateLabel?: string;
+  readonly openUrl?: (url: string) => void;
 } | null>(null);

@@ -45,10 +45,10 @@ describe('workbench view visibility', () => {
     assert.match(panelSource, /mountedBrowserConversations\(/);
     assert.match(panelSource, /stabilizeMountedBrowserOrder\(/);
     assert.match(panelSource, /key=\{`mounted-browser-\$\{id\}`\}/);
-    assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
+    assert.match(panelSource, /claimForeground=\{id === conversationId && \(!resourceMode \|\| open && activeTab === 'browser'\)\}/);
     assert.match(
       panelSource,
-      /workbench-view--prepared-browser[\s\S]*claimForeground=\{id === conversationId\}/,
+      /workbench-view--prepared-browser[\s\S]*claimForeground=\{id === conversationId && \(!resourceMode \|\| open && activeTab === 'browser'\)\}/,
     );
   });
 
@@ -61,7 +61,7 @@ describe('workbench view visibility', () => {
 
   it('keeps a prepared background Browser guest mounted without display:none or fixed reparent', () => {
     assert.match(panelSource, /workbench-view--prepared-browser/);
-    assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
+    assert.match(panelSource, /claimForeground=\{id === conversationId && \(!resourceMode \|\| open && activeTab === 'browser'\)\}/);
     assert.match(
       workbenchStyles,
       /\.workbench-view\.workbench-view--browser\[data-active='false'\],\s*\n\s*\.workbench-view--prepared-browser\[data-active='false'\]\s*\{\s*display:\s*flex;/,

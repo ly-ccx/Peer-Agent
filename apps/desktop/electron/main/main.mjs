@@ -2153,7 +2153,7 @@ function registerDesktopIpcHost() {
     ...createProviderAccessIpcRegistrations({
       providers: providerAccessApplicationService,
     }),
-    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService }),
+    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService, searchFiles: fileAccessApplicationService.searchWorkspaceFiles }),
     ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
     ...registerDesktopProjectAgent({
       configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),

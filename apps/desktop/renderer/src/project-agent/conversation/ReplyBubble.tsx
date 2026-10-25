@@ -1,3 +1,4 @@
+import { ReplyResourceContext } from './ReplyResourceContext';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useRef } from 'react';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
@@ -40,11 +41,11 @@ export function ReplyBubble({
       id={`bot-msg-${message.id}`}
       data-kind="agent_reply"
     >
-      <BotNarration segments={narration} />
+      <ReplyResourceContext references={message.resourceReferences}><BotNarration segments={narration} /></ReplyResourceContext>
       <div className="bot-reply-body">
         <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
         <div ref={bodyRef} className="bot-reply-text">
-          <MarkdownMessage content={message.content} />
+          <ReplyResourceContext references={message.resourceReferences}><MarkdownMessage content={message.content} /></ReplyResourceContext>
         </div>
       </div>
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />

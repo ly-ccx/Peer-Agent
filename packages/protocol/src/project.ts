@@ -134,6 +134,8 @@ export interface ProjectAgentPublicUpdate {
 
 /** Ephemeral interactive-turn presentation, including explicit wake retries. No hidden reasoning or Evidence. */
 export interface ProjectAgentActivity {
+  /** Same-turn successful local file results only; navigation hints never grant access. */
+  readonly resourceReferences?: readonly import('./document-reference.ts').BotResourceReferenceHint[];
   readonly workspaceId: string;
   readonly conversationId: string;
   readonly turnId: string;

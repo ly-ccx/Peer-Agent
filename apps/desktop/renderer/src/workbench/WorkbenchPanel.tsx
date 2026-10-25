@@ -6,6 +6,11 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
+import { ResourceWorkspaceHeader } from './ResourceWorkspaceHeader';
+import { ResourceLauncher } from './ResourceLauncher';
+import { ScopedResourceNavigator } from './ScopedResourceNavigator';
+import { useResourcePresentation } from './useResourcePresentation';
+import { resourceTabIds } from './ResourceTabStrip';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_DEFAULT_WIDTH,
@@ -100,13 +105,18 @@ const TABS: readonly TabDef[] = [
 ];
 
 interface WorkbenchPanelProps {
+  readonly resourceMode?: boolean;
+  readonly resourceVisible?: boolean;
+  readonly resourceWidthLimit?: number;
+  readonly resourceExiting?: boolean;
+  readonly botWorkspaceId?: string;
   readonly isZh: boolean;
   readonly workspacePath: string | null;
 }
 
-export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
+export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, resourceVisible = true, resourceWidthLimit, resourceExiting = false, botWorkspaceId }: WorkbenchPanelProps) {
   const {
-    open,
+    open: requestedOpen,
     width,
     maximized,
     activeTab,
@@ -127,7 +137,14 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     setDocumentSession,
     layoutHost,
     preparedBrowserConversations,
+    requestedBrowserConversations,
   } = useWorkbench();
+  const interactiveOpen = requestedOpen && resourceVisible;
+  const open = (requestedOpen || resourceExiting) && resourceVisible;
+  const presentation = useResourcePresentation(resourceMode);
+  useEffect(() => {
+    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes')) setActiveTab('documents');
+  }, [resourceMode, activeTab, setActiveTab]);
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -145,24 +162,28 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
   const browserMountOrderRef = useRef<string[]>([]);
   const mountedBrowserIds = stabilizeMountedBrowserOrder(
     browserMountOrderRef.current,
-    rawMountedBrowserIds,
+    rawMountedBrowserIds.filter(id => !resourceMode || browserMountOrderRef.current.includes(id)
+      || requestedBrowserConversations.includes(id) || (id === conversationId && interactiveOpen && activeTab === 'browser')),
   );
   browserMountOrderRef.current = mountedBrowserIds;
 
   const resize = usePointerResize();
+  const resizeLimit = resourceMode ? resourceWidthLimit ?? WORKBENCH_MIN_WIDTH : window.innerWidth;
+  const displayedWidth = resourceMode ? Math.min(width, resizeLimit) : width;
   const tabsId = useId();
   const [focusedTab, setFocusedTab] = useState<WorkbenchTabId | null>(null);
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || event.isPrimary === false) return;
     const resizer = event.currentTarget, panel = resizer.parentElement;
-    const startX = event.clientX, startWidth = maximized ? window.innerWidth : width;
+    const startX = event.clientX, startWidth = maximized ? window.innerWidth : displayedWidth;
     const previousRootWidth = document.documentElement.style.getPropertyValue('--za-workbench-width');
     let nextWidth = startWidth, autoCollapsed = sidebarAutoCollapsed, liveMaximized = maximized;
     const started = resize.start(event, {
       onMove: clientX => {
-        nextWidth = clampWorkbenchWidth(startWidth + startX - clientX, window.innerWidth, WORKBENCH_MIN_WIDTH);
+        nextWidth = clampWorkbenchWidth(startWidth + startX - clientX, resizeLimit, WORKBENCH_MIN_WIDTH);
         if (layoutHost === 'root') document.documentElement.style.setProperty('--za-workbench-width', `${nextWidth}px`);
         if (panel) panel.style.width = `${nextWidth}px`;
+        if (resourceMode) return; // Resource expansion belongs to the explicit header button.
         const stage = resolveWorkbenchResizeStage({ viewportWidth: window.innerWidth, workbenchWidth: nextWidth,
           sidebarOpen, sidebarAutoCollapsed: autoCollapsed, maximized: liveMaximized });
         if (sidebarOpen && stage.sidebarAutoCollapsed !== autoCollapsed) {
@@ -175,7 +196,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         if (layoutHost === 'root') delete document.documentElement.dataset.workbenchResizing;
         if (committed) setWidth(nextWidth);
         else {
-          if (panel) panel.style.width = maximized ? '100%' : `${width}px`;
+          if (panel) panel.style.width = maximized ? '100%' : `${displayedWidth}px`;
           if (layoutHost === 'root') document.documentElement.style.setProperty('--za-workbench-width', previousRootWidth || `${width}px`);
           setWidth(width); setMaximized(maximized); setSidebarAutoCollapsed(sidebarAutoCollapsed);
         }
@@ -185,32 +206,34 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
   };
 
   const onDoubleClick = () => {
-    resize.cancel(); setWidth(WORKBENCH_DEFAULT_WIDTH); setMaximized(false); setSidebarAutoCollapsed(false);
+    resize.cancel(); setWidth(WORKBENCH_DEFAULT_WIDTH); setMaximized(false);
+    if (!resourceMode) setSidebarAutoCollapsed(false);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (isImeKey(e.nativeEvent)) return;
-    const STEP = 16, current = maximized ? window.innerWidth : width;
+    const STEP = 16, current = maximized ? window.innerWidth : displayedWidth;
     const next = e.key === 'ArrowLeft' ? current + STEP : e.key === 'ArrowRight' ? current - STEP
-      : e.key === 'Home' ? WORKBENCH_MIN_WIDTH : e.key === 'End' ? Math.max(WORKBENCH_MIN_WIDTH, window.innerWidth) : null;
+      : e.key === 'Home' ? WORKBENCH_MIN_WIDTH : e.key === 'End' ? Math.max(WORKBENCH_MIN_WIDTH, resizeLimit) : null;
     if (next === null) return;
-    e.preventDefault(); resize.cancel(); setMaximized(false); setWidth(next);
+    e.preventDefault(); resize.cancel(); setMaximized(false); setWidth(clampWorkbenchWidth(next, resizeLimit, WORKBENCH_MIN_WIDTH));
   };
 
   // 收起态：组件保持挂载用于 Goal portal target，整体不可见。
   return (
     <aside
-      className={`workbench-panel${open ? ' workbench-panel--open' : ''}${maximized ? ' workbench-panel--maximized' : ''}`}
-      aria-hidden={!open}
-      inert={!open}
-      style={{ width: open ? (maximized ? '100%' : `${width}px`) : 0 }}
+      className={`workbench-panel${resourceMode ? ' resource-workspace' : ''}${open ? ' workbench-panel--open' : ''}${maximized ? ' workbench-panel--maximized' : ''}`}
+      aria-hidden={!interactiveOpen}
+      inert={!interactiveOpen}
+      data-resource-exiting={resourceExiting}
+      style={{ width: open ? (maximized ? '100%' : `${displayedWidth}px`) : 0 }}
     >
       {open ? (
         <div
           className="workbench-resizer"
           role="separator"
           aria-orientation="vertical"
-          aria-valuemin={WORKBENCH_MIN_WIDTH} aria-valuemax={Math.max(WORKBENCH_MIN_WIDTH, window.innerWidth)} aria-valuenow={maximized ? window.innerWidth : width}
+          aria-valuemin={WORKBENCH_MIN_WIDTH} aria-valuemax={Math.max(WORKBENCH_MIN_WIDTH, resizeLimit)} aria-valuenow={maximized ? window.innerWidth : displayedWidth}
           aria-label={isZh ? '拖拽调整工作台宽度' : 'Resize workbench'}
           tabIndex={0}
           onPointerDown={onPointerDown}
@@ -219,7 +242,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         />
       ) : null}
 
-      <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
+      {resourceMode ? <ResourceWorkspaceHeader isZh={isZh} presentation={presentation} idPrefix={tabsId} /> : <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedTab(null); }}>
         {TABS.map((tab) => {
           const disabled = tab.id === 'plan' && !hasGoalPlan;
@@ -267,9 +290,14 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         >
           <span aria-hidden="true">{maximized ? <RestoreIcon /> : <MaximizeIcon />}</span>
         </button>
-      </div>
+      </div>}
 
-      <div className="workbench-view-slot">
+      <div className="workbench-view-slot" id={resourceMode ? `${tabsId}-content` : undefined}
+        role={resourceMode ? (presentation.active ? 'tabpanel' : 'region') : undefined}
+        aria-labelledby={resourceMode && presentation.active ? resourceTabIds(tabsId, presentation.active).tab : undefined}>
+        {resourceMode ? <div className="workbench-view" data-active={activeTab === 'launcher'} inert={activeTab !== 'launcher'} aria-hidden={activeTab !== 'launcher'}>
+          <ResourceLauncher key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'launcher'} recent={presentation.recent} onChanges={() => setActiveTab('changes')} />
+        </div> : null}
         <div
           className="workbench-view workbench-view--goal"
           data-active={activeTab === 'plan'}
@@ -293,7 +321,8 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
               onSessionChange={id === conversationId
                 ? setBrowserSession
                 : (next) => setBrowserSessionFor(id, next)}
-              claimForeground={id === conversationId}
+              claimForeground={id === conversationId && (!resourceMode || interactiveOpen && activeTab === 'browser')}
+              hideTabStrip={resourceMode} lazyTabs={resourceMode} suspendBlank={resourceMode && activeTab !== 'browser'}
             />
           </div>
         ))}
@@ -302,20 +331,26 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
           data-active={activeTab === 'files'}
           role="tabpanel" id={`${tabsId}-panel-files`} aria-labelledby={`${tabsId}-tab-files`} tabIndex={0} inert={activeTab !== 'files'} aria-hidden={activeTab !== 'files'}
         >
-          <FilesView isZh={isZh} workspacePath={workspacePath} />
+          {resourceMode ? <ScopedResourceNavigator key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'files'} />
+            : <FilesView isZh={isZh} workspacePath={workspacePath} />}
         </div>
         <div
           className="workbench-view workbench-view--documents"
           data-active={activeTab === 'documents'}
           role="tabpanel" id={`${tabsId}-panel-documents`} aria-labelledby={`${tabsId}-tab-documents`} tabIndex={0} inert={activeTab !== 'documents'} aria-hidden={activeTab !== 'documents'}
         >
-          <DocumentView
+          {(!resourceMode || !!botWorkspaceId && !!conversationId) ? <DocumentView
             isZh={isZh}
             session={documentSession}
             onSessionChange={setDocumentSession}
             onBrowseFiles={() => setActiveTab('files')}
-          />
+            hideTabStrip={resourceMode} botWorkspaceId={resourceMode ? botWorkspaceId : undefined}
+            visible={!resourceMode || interactiveOpen && activeTab === 'documents'}
+          /> : null}
         </div>
+        {resourceMode ? <div className="workbench-view" data-active={activeTab === 'changes'} inert={activeTab !== 'changes'} aria-hidden={activeTab !== 'changes'}>
+          <ScopedResourceNavigator key={botWorkspaceId} isZh={isZh} changes active={interactiveOpen && activeTab === 'changes'} />
+        </div> : null}
 
       </div>
     </aside>
