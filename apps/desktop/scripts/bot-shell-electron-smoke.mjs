@@ -616,6 +616,7 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotVerification({page,until,report,captureDirectory:root,commandFile:workCommand});
   } else if (process.argv.includes('--completion-review-only')) {
+    await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotCompletionReview({page,until,report,captureDirectory:root,commandFile:workCommand});
