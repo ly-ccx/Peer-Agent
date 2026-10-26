@@ -7,11 +7,12 @@ import { useWorkbench } from '../WorkbenchContext';
 import {
   collectDirPathsToRefresh,
   collectWatchDirPaths,
+  createDirectoryReadRequests,
   mergePendingRefreshPaths,
   pruneAfterDirReload,
   stripTrailingSep,
 } from './filesTreeRefresh';
-import { getFileVisualKind, type FileVisualKind } from './filesTreePresentation';
+import { directoryReadMessage, getFileVisualKind, type FileVisualKind } from './filesTreePresentation';
 import { filterVisibleEntries, sanitizeNewEntryName } from './filesTreeFilter';
 
 interface FilesViewProps {
@@ -313,8 +314,9 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProp
   const selectedRef = useRef(selected);
   const selectedIsDirRef = useRef(selectedIsDir);
   const draftRef = useRef(draft);
-  const creating = useRef(new Set<string>()), scope = useRef({ workspacePath });
-  if (scope.current.workspacePath !== workspacePath) scope.current = { workspacePath };
+  const creating = useRef(new Set<string>()), scope = useRef({ workspacePath, botWorkspaceId });
+  if (scope.current.workspacePath !== workspacePath || scope.current.botWorkspaceId !== botWorkspaceId) scope.current = { workspacePath, botWorkspaceId };
+  const directoryRequests = useMemo(createDirectoryReadRequests, []);
   useEffect(() => { expandedRef.current = expanded; }, [expanded]);
   useEffect(() => { childrenRef.current = children; }, [children]);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
@@ -335,28 +337,34 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProp
       loading: loadingRef.current,
       selected: selectedRef.current,
     });
+    directoryRequests.prune(absPath, pruned.loading);
     childrenRef.current = new Map(pruned.children);
+    expandedRef.current = new Set(pruned.expanded);
+    loadingRef.current = new Set(pruned.loading);
+    selectedRef.current = pruned.selected;
     setChildren(new Map(pruned.children));
     setExpanded(new Set(pruned.expanded));
     setLoading(new Set(pruned.loading));
     setSelected(pruned.selected);
-  }, []);
+  }, [directoryRequests]);
 
   // 列目录并写入缓存；默认命中缓存。force 时绕过缓存并裁剪消失子树。
   const loadDir = useCallback(
     async (absPath: string, options?: { force?: boolean }): Promise<readonly DirEntry[]> => {
+      const origin = scope.current;
+      if (!mounted.current || origin.workspacePath !== workspacePath || origin.botWorkspaceId !== botWorkspaceId) return [];
       if (!options?.force) {
         const cached = childrenRef.current.get(absPath);
         if (cached) return cached;
       }
-      setLoading((prev) => {
-        const next = new Set(prev);
-        next.add(absPath);
-        return next;
-      });
+      const ticket = directoryRequests.begin(absPath);
+      const current = () => mounted.current && scope.current === origin && directoryRequests.current(ticket);
+      loadingRef.current = new Set(loadingRef.current).add(absPath);
+      setLoading(new Set(loadingRef.current));
       try {
         const result = await clientApi.readDir(botWorkspaceId ? '' : absPath, botWorkspaceId ? undefined : workspacePath ?? undefined, undefined,
           botWorkspaceId ? { workspaceId: botWorkspaceId, path: absPath, kind: 'directory' } : undefined);
+        if (!current()) return [];
         if (!result.ok) {
           if (botWorkspaceId) {
             setDirectoryNotices(current => ({ ...current, [absPath]: result.status }));
@@ -390,6 +398,7 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProp
         }
         return result.entries;
       } catch {
+        if (!current()) return [];
         if (botWorkspaceId) {
           setDirectoryNotices(current => ({ ...current, [absPath]: 'read_failed' }));
           return childrenRef.current.get(absPath) ?? [];
@@ -405,38 +414,45 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProp
         }
         return [];
       } finally {
-        setLoading((prev) => {
+        if (current()) setLoading((prev) => {
+          if (!current()) return prev;
           const next = new Set(prev);
           next.delete(absPath);
+          loadingRef.current = next;
           return next;
         });
       }
     },
-    [workspacePath, botWorkspaceId, applyReloadResult],
+    [workspacePath, botWorkspaceId, directoryRequests, applyReloadResult],
   );
 
   const refreshDirs = useCallback(async (dirPaths: readonly string[]) => {
+    const origin = scope.current;
+    const current = () => mounted.current && scope.current === origin;
     const unique = [...new Set(dirPaths.map(stripTrailingSep).filter(Boolean))];
     if (unique.length === 0) return;
     setRefreshing(true);
     try {
       for (const dirPath of unique) {
+        if (!current()) return;
         inFlightRefreshRef.current.add(dirPath);
         try {
           await loadDir(dirPath, { force: true });
         } finally {
-          inFlightRefreshRef.current.delete(dirPath);
+          if (current()) inFlightRefreshRef.current.delete(dirPath);
         }
       }
+      if (!current()) return;
       const deferred = [...deferredRefreshRef.current];
       deferredRefreshRef.current.clear();
       if (deferred.length > 0) {
         for (const dirPath of deferred) {
+          if (!current()) return;
           await loadDir(dirPath, { force: true });
         }
       }
     } finally {
-      setRefreshing(false);
+      if (current()) setRefreshing(false);
     }
   }, [loadDir]);
 
@@ -465,15 +481,10 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProp
 
   const toggleDir = useCallback(
     (absPath: string) => {
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(absPath)) next.delete(absPath);
-        else {
-          next.add(absPath);
-          void loadDir(absPath);
-        }
-        return next;
-      });
+      const next = new Set(expandedRef.current), wasExpanded = next.has(absPath);
+      if (wasExpanded) next.delete(absPath); else next.add(absPath);
+      expandedRef.current = next; setExpanded(next);
+      if (!wasExpanded) void loadDir(absPath);
       setSelected(absPath);
       setSelectedIsDir(true);
     },
@@ -606,8 +617,12 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProp
 
   // workspace 切换：重置树，默认展开根并加载第一层。
   useEffect(() => {
+    directoryRequests.reset();
+    setDirectoryNotices({});
+    setRefreshing(false);
     setChildren(new Map());
     childrenRef.current = new Map();
+    loadingRef.current = new Set();
     setLoading(new Set());
     setSelected(null);
     setSelectedIsDir(false);
@@ -755,8 +770,7 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId }: FilesViewProp
         </button>
       </div>
       {botWorkspaceId && Object.entries(directoryNotices).map(([path, status]) => <p className="resource-source-label" key={path} role={status === 'truncated' ? 'status' : 'alert'}>
-        {path}: {status === 'truncated' ? (isZh ? '仅显示前 1000 项。' : 'Showing the first 1000 entries.')
-          : (isZh ? '读取未完成；保留上次目录，可刷新重试。' : 'Reading failed; the previous tree is retained. Refresh to retry.')} {status}
+        {path}: {directoryReadMessage(status, isZh)}
       </p>)}
       <label className="workbench-files-filter">
         <SearchIcon />

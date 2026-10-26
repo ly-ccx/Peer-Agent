@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reconcileResourceOrder, resourceNeighbor, normalizeResourcePreferences, resourceWebUrl, resourceLayoutBounds } from './resourceWorkspaceState.ts';
-import { createDocumentSessionState, createDocumentTabSession, openDocumentTab, normalizeDocumentSessionState } from './documentSessionState.ts';
+import { createDocumentSessionState, createDocumentTabSession, openDocumentTab, normalizeDocumentComparison, normalizeDocumentSessionState } from './documentSessionState.ts';
 
 test('resource layout preserves two usable surfaces by collapsing navigation before using a single area', () => {
   const bounds = (width: number) => resourceLayoutBounds(width, 292, 10, 480, 320);
@@ -39,4 +39,32 @@ test('R1/R4d same relative filename in different sources survives persistence', 
   const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(state)));
   assert.equal(restored.tabs.length, 2);
   assert.equal(restored.activeTabId, 'b');
+});
+
+test('reopening a file targets its new line without creating a duplicate tab or changing its authority', () => {
+  const reference = { workspaceId: 'bot', path: '/repo/a.ts' };
+  let state = openDocumentTab(createDocumentSessionState(), createDocumentTabSession(reference.path, { id: 'first', reference, mode: 'source', line: 8 }));
+  state = openDocumentTab(state, createDocumentTabSession(reference.path, { id: 'second', reference, mode: 'source', line: 8 }), { replaceMode: true });
+  assert.equal(state.tabs.length, 1); assert.equal(state.activeTabId, 'first');
+  assert.deepEqual(state.tabs[0]?.navigation, { line: 8, requestId: 'second' });
+  assert.deepEqual(state.tabs[0]?.reference, reference);
+  const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(restored.tabs[0]?.navigation, { line: 8, requestId: 'restored:first' });
+  assert.equal(createDocumentTabSession('/repo/a.ts', { line: -4 }).navigation, undefined);
+});
+
+test('distinct fixed comparisons in the same directory survive mixed tabs and restoration without being deduplicated', () => {
+  const reference = { workspaceId: 'bot', path: '/repo', kind: 'directory' as const };
+  let state = createDocumentSessionState();
+  for (const [id, toRef] of [['a', 'b'.repeat(40)], ['b', 'c'.repeat(40)]]) state = openDocumentTab(state,
+    createDocumentTabSession('/repo', { id, reference, mode: 'diff', comparison: { fromRef: 'a'.repeat(40), toRef } }));
+  state = openDocumentTab(state, createDocumentTabSession('/repo', { id: 'duplicate', reference, mode: 'diff', comparison: { fromRef: 'a'.repeat(40), toRef: 'b'.repeat(40) } }));
+  assert.equal(state.tabs.length, 2); assert.equal(state.activeTabId, 'a');
+  const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(state)));
+  assert.equal(restored.tabs.length, 2); assert.equal(restored.tabs[0]?.reference?.kind, 'directory');
+  assert.equal(restored.tabs[1]?.comparison?.toRef, 'c'.repeat(40));
+  assert.equal(normalizeDocumentComparison({ fromRef: 'main', toRef: 'topic' }), undefined);
+  assert.equal(normalizeDocumentComparison({ fromRef: 'a'.repeat(40), toRef: '-command' }), undefined);
+  assert.deepEqual(normalizeDocumentComparison({ comparison: 'working', fromRef: '-ignored' }), { comparison: 'working', fromRef: 'HEAD' });
+  assert.equal(normalizeDocumentSessionState({ tabs: [{ ...state.tabs[0], comparison: { fromRef: 'main' } }] }).tabs.length, 0);
 });

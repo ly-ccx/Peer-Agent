@@ -489,13 +489,22 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
+  function directoryEntries(target, entries) {
+    return entries.filter(entry => !isSkippedFileTreeDirName(entry.name)).map(entry => ({
+      name: entry.name, isDir: entry.isDirectory(), absPath: path.join(target, entry.name),
+    })).sort((left, right) => left.isDir !== right.isDir ? left.isDir ? -1 : 1
+      : left.name.localeCompare(right.name, undefined, { sensitivity: 'accent' }));
+  }
+
   function readDirectory({ absPath, workspaceRoot, relPath, documentReference } = {}) {
     if (documentReference !== undefined) {
       return Promise.resolve(options.resolveBotDocument?.({ ...documentReference, kind: 'directory' })).then(resolved => {
         if (!resolved?.ok) return { ...resolved, ok: false, status: resolved?.status ?? 'workspace_unavailable', entries: [] };
-        const result = readDirectory({ absPath: resolved.target, workspaceRoot: resolved.root });
-        return { ...result, entries: result.entries.slice(0, 1000), truncated: result.entries.length > 1000, resolvedFrom: resolved.root };
-      }).catch(() => ({ ok: false, status: 'error', entries: [], error: 'resolve_failed' }));
+        if (typeof options.readDirectoryBounded !== 'function') return { ok: false, status: 'workspace_unavailable', entries: [] };
+        const result = options.readDirectoryBounded(resolved.target, 1000);
+        return { ok: true, status: 'ok', entries: directoryEntries(resolved.target, result.entries), truncated: result.truncated === true, resolvedFrom: resolved.root };
+      }).catch(error => ({ ok: false, status: ['EACCES', 'EPERM'].includes(error?.code) ? 'permission_denied'
+        : error?.code === 'ENOENT' ? 'not_found' : error?.code === 'ENOTDIR' ? 'not_dir' : 'error', entries: [], error: 'read_dir_failed' }));
     }
     try {
       if (!absPath || typeof absPath !== 'string') {
@@ -530,17 +539,7 @@ export function createFileAccessApplicationService(options = {}) {
           error: 'not_a_directory',
         };
       }
-      const entries = readDirectoryEntries(target)
-        .filter((entry) => !isSkippedFileTreeDirName(entry.name))
-        .map((entry) => ({
-          name: entry.name,
-          isDir: entry.isDirectory(),
-          absPath: path.join(target, entry.name),
-        }))
-        .sort((left, right) => {
-          if (left.isDir !== right.isDir) return left.isDir ? -1 : 1;
-          return left.name.localeCompare(right.name, undefined, { sensitivity: 'accent' });
-        });
+      const entries = directoryEntries(target, readDirectoryEntries(target));
       return { ok: true, status: 'ok', entries, resolvedFrom };
     } catch {
       return { ok: false, status: 'error', entries: [], error: 'read_dir_failed' };

@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference.ts';
+import { documentReferenceLocation, documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference.ts';
+
+test('source positions remain separate from file identity and invalid positions degrade safely', () => {
+  assert.deepEqual(documentReferenceLocation('/repo/a.ts:12:4'), { path: '/repo/a.ts', line: 12 });
+  assert.deepEqual(documentReferenceLocation('C:\\repo\\a.ts#L8-L11'), { path: 'C:\\repo\\a.ts', line: 8 });
+  assert.deepEqual(documentReferenceLocation('README.md:0'), { path: 'README.md' });
+  assert.deepEqual(documentReferenceLocation('README.md:999999999999999999'), { path: 'README.md' });
+  assert.equal(documentReferenceLocation('javascript:alert(1)'), null);
+});
 
 test('document destinations keep paths and strip optional source positions', () => {
   assert.equal(documentReferencePath('Peer-Knowledge/knowledge/decisions/104-bot-capability-visibility.md'), 'Peer-Knowledge/knowledge/decisions/104-bot-capability-visibility.md');

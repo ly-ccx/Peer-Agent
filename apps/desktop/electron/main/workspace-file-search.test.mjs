@@ -6,11 +6,26 @@ import test from 'node:test';
 import {
   isFinderPlaceholderName,
   rankWorkspaceFiles,
+  readBoundedDirectoryEntries,
   scoreWorkspaceFile,
   searchWorkspaceFiles,
   shouldSkipDirName,
   shouldSkipFileName,
 } from './workspace-file-search.mjs';
+
+test('directory enumeration stops at its bound and closes the handle on success and failure', () => {
+  let reads = 0, closed = 0;
+  const result = readBoundedDirectoryEntries('/scope', 2, target => {
+    assert.equal(target, '/scope');
+    return { readSync: () => ({ name: reads++ === 0 ? '.git' : `file-${reads}` }), closeSync: () => { closed++; } };
+  });
+  assert.equal(result.entries.length, 2); assert.equal(result.truncated, true);
+  assert.equal(reads, 4); assert.equal(closed, 1);
+  assert.throws(() => readBoundedDirectoryEntries('/scope', 2, () => ({
+    readSync() { throw Object.assign(new Error('denied'), { code: 'EACCES' }); }, closeSync() { closed++; },
+  })), /denied/);
+  assert.equal(closed, 2);
+});
 
 test('skips hidden and build directories', () => {
   assert.equal(shouldSkipDirName('node_modules'), true);

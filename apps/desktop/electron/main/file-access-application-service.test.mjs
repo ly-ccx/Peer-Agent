@@ -106,6 +106,11 @@ function createHarness(overrides = {}) {
         isDirectory: () => entry.isDir,
       }));
     },
+    readDirectoryBounded: overrides.disableBounded ? undefined : overrides.readDirectoryBounded ?? ((candidate, limit) => {
+      const node = nodes.get(candidate);
+      if (!node || node.kind !== 'directory') throw new Error('ENOTDIR');
+      return { entries: node.entries.slice(0, limit).map(entry => ({ name: entry.name, isDirectory: () => entry.isDir })), truncated: node.entries.length > limit };
+    }),
     readFile: (candidate) => {
       const node = nodes.get(candidate);
       if (!node || node.kind !== 'file') throw new Error('ENOENT');
@@ -813,6 +818,21 @@ test('R4 scoped directory listing signals its bound and creates no watcher', asy
   assert.equal(result.entries.length, 1000);
   assert.equal(result.truncated, true);
   assert.equal(harness.watchers.length, 0);
+});
+
+test('scoped directory reads require the bounded port and preserve exact permission/missing failures', async () => {
+  const resolveBotDocument = async () => ({ ok: true, target: '/ws-a', root: '/ws-a' });
+  const missing = createHarness({ resolveBotDocument, disableBounded: true });
+  assert.equal((await missing.service.readDirectory({ documentReference: { workspaceId: 'bot', path: '.' } })).status, 'workspace_unavailable');
+  for (const [code, status] of [['EACCES', 'permission_denied'], ['ENOENT', 'not_found'], ['ENOTDIR', 'not_dir']]) {
+    const h = createHarness({ resolveBotDocument, readDirectoryBounded(target, limit) {
+      assert.equal(target, '/ws-a'); assert.equal(limit, 1000);
+      throw Object.assign(new Error('read failed'), { code });
+    } });
+    const result = await h.service.readDirectory({ absPath: '/forged', documentReference: { workspaceId: 'bot', path: '.' } });
+    assert.equal(result.ok, false); assert.equal(result.status, status); assert.deepEqual(result.entries, []);
+    assert.equal(h.written.length, 0);
+  }
 });
 
 test('R4 range comparison freezes revisions, constrains scope and disables executable diff helpers', async () => {

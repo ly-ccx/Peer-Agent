@@ -131,7 +131,7 @@ type DocumentSessionUpdater =
   | ((current: DocumentSessionState) => DocumentSessionState);
 
 interface WorkbenchActions {
-  openDocumentReference: (reference: import('@peer-agent/protocol').BotDocumentReference) => void;
+  openDocumentReference: (reference: import('@peer-agent/protocol').BotDocumentReference, line?: number) => void;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
   setActiveTab: (tab: WorkbenchTabId) => void;
@@ -149,7 +149,7 @@ interface WorkbenchActions {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
-    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference },
+    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference; readonly line?: number; readonly comparison?: import('./documentSessionState').DocumentComparison },
   ) => void;
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
@@ -443,7 +443,7 @@ export function WorkbenchProvider({
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
-    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference },
+    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference; readonly line?: number; readonly comparison?: import('./documentSessionState').DocumentComparison },
   ) => {
     const preferredMode = options?.preferredMode;
     const tab = createDocumentTabSession(absPath, {
@@ -451,6 +451,8 @@ export function WorkbenchProvider({
       relPath,
       mode: preferredMode ?? defaultModeForKind(detectFileKind(absPath)),
       ...(options?.reference ? { reference: options.reference } : {}),
+      ...(options?.line ? { line: options.line } : {}),
+      ...(options?.comparison ? { comparison: options.comparison } : {}),
     });
     setDocumentSession((current) => openDocumentTab(current, tab, {
       replaceMode: preferredMode != null,
@@ -467,8 +469,9 @@ export function WorkbenchProvider({
     openFile(absPath, workspaceRoot, relPath, { preferredMode: 'diff' });
   }, [openFile]);
 
-  const openDocumentReference = useCallback((reference: import('@peer-agent/protocol').BotDocumentReference) => {
-    openFile(reference.path, undefined, undefined, { reference });
+  const openDocumentReference = useCallback((reference: import('@peer-agent/protocol').BotDocumentReference, line?: number) => {
+    const sourceLine = detectFileKind(reference.path) === 'image' ? undefined : line;
+    openFile(reference.path, undefined, undefined, { reference, ...(sourceLine ? { line: sourceLine, preferredMode: 'source' as const } : {}) });
   }, [openFile]);
 
   const revealInFiles = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {

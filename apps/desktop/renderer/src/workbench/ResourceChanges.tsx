@@ -1,22 +1,28 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { clientApi } from '../clientApi';
 import { useResourceRead } from '../ui/resources/useResourceState';
 import { useResourceWorkspace } from './ResourceWorkspaceContext';
 import { useWorkbench } from './WorkbenchContext';
 import { DiffViewer } from './file-preview/DiffViewer';
-import { comparisonReadError, resourceDiffFiles, taskComparisonBinding } from './resourceComparisonState';
+import { comparisonReadError, createFixedComparisonReader, resourceDiffFiles, taskComparisonBinding } from './resourceComparisonState';
 
-function ComparisonRead({ workspaceId, path, root, active, isZh, fromRef = 'HEAD', toRef, comparison }: {
+export function ComparisonRead({ workspaceId, path, root, active, isZh, fromRef = 'HEAD', toRef, comparison, allowKeep = true }: {
   readonly workspaceId: string; readonly path: string; readonly root: string; readonly active: boolean; readonly isZh: boolean;
   readonly fromRef?: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged';
+  readonly allowKeep?: boolean;
 }) {
   const workspace = useResourceWorkspace();
   const workbench = useWorkbench();
   const [selected, setSelected] = useState<string | null>(null);
   const reference = { workspaceId, path, kind: 'directory' as const };
-  const read = useResourceRead(JSON.stringify([reference, fromRef, toRef, comparison]), () => clientApi.gitDiffRange({
-    workspaceRoot: root, fromRef, ...(toRef ? { toRef } : {}), ...(comparison ? { comparison } : {}), documentReference: reference,
-  }), active);
+  const identity = JSON.stringify([reference, root, fromRef, toRef, comparison]);
+  const readRange = useMemo(() => {
+    const request = (range: { fromRef: string; toRef?: string }) => clientApi.gitDiffRange({
+      workspaceRoot: root, ...range, ...(comparison ? { comparison } : {}), documentReference: reference,
+    });
+    return comparison ? () => request({ fromRef }) : createFixedComparisonReader({ fromRef, ...(toRef ? { toRef } : {}) }, request);
+  }, [identity]);
+  const read = useResourceRead(identity, readRange, active);
   const value = read.value;
   const files = useMemo(() => resourceDiffFiles(value?.ok ? value.diffText : ''), [value]);
   const file = files.find(item => item.key === selected) ?? files[0];
@@ -27,6 +33,10 @@ function ComparisonRead({ workspaceId, path, root, active, isZh, fromRef = 'HEAD
       <span className="resource-source-label">{comparison === 'working' ? (isZh ? '暂存区 → 当前工作树' : 'Index → working tree')
         : comparison === 'staged' ? `HEAD → ${isZh ? '暂存区' : 'Index'}` : `${value?.fromRef ?? fromRef} → ${value?.toRef ?? (isZh ? '当前工作树' : 'Working tree')}`}</span>
       <button className="ui-button is-compact" type="button" disabled={read.loading} onClick={() => void read.reload()}>{isZh ? '刷新' : 'Refresh'}</button>
+      {allowKeep ? <button className="ui-button is-compact" type="button" disabled={!value?.ok || read.loading || read.error}
+        onClick={() => { if (value?.ok) workspace?.openComparison({ workspaceId, path: root, kind: 'directory' }, {
+          fromRef: value.fromRef ?? fromRef, ...(value.toRef ? { toRef: value.toRef } : {}), ...(comparison ? { comparison } : {}),
+        }); }}>{isZh ? '在独立标签保留比较' : 'Keep comparison in a separate tab'}</button> : null}
     </div>
     <p className="resource-source-label">{root}</p>
     {read.error || value && !value.ok ? <p role="alert">{comparisonReadError(value?.status, value?.error, isZh)}{value?.ok ? (isZh ? ' 仍显示上次读取的内容。' : ' Previous content is still shown.') : ''}</p> : null}
@@ -66,6 +76,8 @@ function TaskComparison({ workspaceId, active, isZh }: { readonly workspaceId: s
     return item.workspaceId === workspaceId && typeof item.sessionId === 'string' ? [{ id: item.sessionId, title: item.title || item.sessionId }] : [];
   }), [sessions.value, workspaceId]);
   const selectedExists = items.some(item => item.id === sessionId);
+  const selection = `${workspaceId}:${sessionId}:${active}`;
+  const latest = useRef(selection); latest.current = selection;
   const source = useResourceRead(`${workspaceId}:${sessionId}`, async () => {
     const result = await clientApi.projectAgentGetSession({ sessionId, detail: 'report' });
     const detail = result.session as { report?: { planId?: string } } | undefined;
@@ -73,13 +85,21 @@ function TaskComparison({ workspaceId, active, isZh }: { readonly workspaceId: s
     const plan = await clientApi.goalPlansGet({ planId: detail.report.planId });
     return taskComparisonBinding(detail, plan, workspaceId, sessionId);
   }, active && !!sessionId && selectedExists);
+  const refreshSources = async () => {
+    if (!await sessions.reload() || latest.current !== selection || !active || !sessionId) return;
+    const stillListed = sessions.snapshot().value?.sessions?.some(raw => {
+      const item = raw as { workspaceId?: string; sessionId?: string } | null;
+      return item?.workspaceId === workspaceId && item.sessionId === sessionId;
+    });
+    if (stillListed) await source.reload();
+  };
   return <>
     <div className="resource-changes-toolbar">
       <select aria-label={isZh ? '任务比较来源' : 'Task comparison source'} value={sessionId} onChange={event => setSessionId(event.target.value)}>
         <option value="">{isZh ? '选择任务' : 'Choose a task'}</option>
         {items.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
       </select>
-      <button className="ui-button is-compact" type="button" disabled={sessions.loading} onClick={() => void sessions.reload()}>{isZh ? '刷新任务' : 'Refresh tasks'}</button>
+      <button className="ui-button is-compact" type="button" disabled={sessions.loading || source.loading && !!sessionId} onClick={refreshSources}>{isZh ? '刷新任务' : 'Refresh tasks'}</button>
     </div>
     {sessions.error || sessions.value && !sessions.value.ok ? <p role="alert">{isZh ? '无法读取任务来源，请重试。' : 'Task sources could not be read. Retry.'}</p>
       : sessions.loaded && !items.length ? <p role="status">{isZh ? '此机器人暂时没有可选任务。' : 'This Bot has no available tasks.'}</p> : null}
@@ -101,22 +121,25 @@ export function ResourceChanges({ workspaceId, path, root, isZh, active }: {
 }) {
   const [mode, setMode] = useState<'working' | 'staged' | 'range' | 'task'>('working');
   const [from, setFrom] = useState('HEAD'), [to, setTo] = useState('');
-  const [range, setRange] = useState({ from: 'HEAD', to: '' });
+  const [range, setRange] = useState({ from: 'HEAD', to: '', revision: 0 });
   return <section className="resource-changes">
     <div className="resource-changes-toolbar"><select aria-label={isZh ? '比较范围' : 'Comparison'} value={mode}
       onChange={event => setMode(event.target.value as typeof mode)}>
       <option value="working">{isZh ? '未暂存' : 'Unstaged'}</option><option value="staged">{isZh ? '已暂存' : 'Staged'}</option>
       <option value="range">{isZh ? '提交比较' : 'Compare revisions'}</option><option value="task">{isZh ? '任务来源' : 'Task source'}</option>
     </select></div>
-    {mode === 'range' ? <form className="resource-range" onSubmit={event => { event.preventDefault(); setRange({ from: from.trim(), to: to.trim() }); }}>
+    {mode === 'range' ? <form className="resource-range" onSubmit={event => { event.preventDefault(); setRange(current => ({ from: from.trim(), to: to.trim(), revision: current.revision + 1 })); }}>
       <input aria-label={isZh ? '起始引用' : 'Base revision'} value={from} onChange={event => setFrom(event.target.value)} />
       <input aria-label={isZh ? '目标引用（空为工作树）' : 'Target revision (empty for working tree)'} value={to} onChange={event => setTo(event.target.value)} />
       <button type="submit" className="ui-button">{isZh ? '比较' : 'Compare'}</button>
     </form> : null}
-    {mode === 'task' ? <TaskComparison workspaceId={workspaceId} active={active} isZh={isZh} />
-      : <ComparisonRead workspaceId={workspaceId} path={path} root={root} active={active} isZh={isZh}
-        fromRef={mode === 'range' ? range.from : 'HEAD'} toRef={mode === 'range' ? range.to : undefined}
-        comparison={mode === 'range' ? undefined : mode} />}
+    {(['working', 'staged', 'range', 'task'] as const).map(view => <div key={view} hidden={mode !== view} inert={mode !== view}
+      aria-hidden={mode !== view} style={mode !== view ? { display: 'none' } : undefined}>
+      {view === 'task' ? <TaskComparison workspaceId={workspaceId} active={active && mode === view} isZh={isZh} />
+        : <ComparisonRead key={view === 'range' ? range.revision : view} workspaceId={workspaceId} path={path} root={root}
+          active={active && mode === view} isZh={isZh} fromRef={view === 'range' ? range.from : 'HEAD'}
+          toRef={view === 'range' ? range.to : undefined} comparison={view === 'range' ? undefined : view} />}
+    </div>)}
     {mode !== 'task' ? <p className="resource-source-label">{isZh ? '所选仓库的当前比较，可能包含已有本地改动。' : 'Current comparison of the selected repository; may include existing local changes.'}</p> : null}
   </section>;
 }

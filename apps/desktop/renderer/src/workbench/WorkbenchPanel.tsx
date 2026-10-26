@@ -141,7 +141,7 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
   } = useWorkbench();
   const interactiveOpen = requestedOpen && resourceVisible;
   const open = (requestedOpen || resourceExiting) && resourceVisible;
-  const presentation = useResourcePresentation(resourceMode);
+  const presentation = useResourcePresentation(resourceMode, isZh);
   useEffect(() => {
     if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes')) setActiveTab('documents');
   }, [resourceMode, activeTab, setActiveTab]);

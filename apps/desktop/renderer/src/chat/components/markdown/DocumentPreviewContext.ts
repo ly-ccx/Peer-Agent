@@ -9,4 +9,7 @@ export const DocumentPreviewContext = createContext<{
   readonly locate?: (path: string, candidates?: readonly string[]) => void;
   readonly locateLabel?: string;
   readonly openUrl?: (url: string) => void;
+  /** Static local documents expose remote images as explicit navigation, never eager requests. */
+  readonly remoteImages?: 'link';
+  readonly remoteImageLabel?: string;
 } | null>(null);

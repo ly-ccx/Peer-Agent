@@ -1,7 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resourceDiffFiles, taskComparisonBinding } from './resourceComparisonState.ts';
+import { createFixedComparisonReader, resourceDiffFiles, taskComparisonBinding } from './resourceComparisonState.ts';
 import { decodeGitPath, groupDiffByFile } from './file-preview/diffLines.ts';
+
+test('explicit named comparison freezes both commits across refresh and re-resolves only for a new comparison', async () => {
+  const calls: { fromRef: string; toRef?: string }[] = [];
+  const first = 'a'.repeat(40), second = 'b'.repeat(40);
+  const port = async (range: { fromRef: string; toRef?: string }) => {
+    calls.push(range); return { ok: true, status: 'ok' as const, diffText: 'diff', fromRef: first, toRef: second };
+  };
+  const read = createFixedComparisonReader({ fromRef: 'main', toRef: 'topic' }, port);
+  await read(); await read();
+  assert.deepEqual(calls, [{ fromRef: 'main', toRef: 'topic' }, { fromRef: first, toRef: second }]);
+  await createFixedComparisonReader({ fromRef: 'main', toRef: 'topic' }, port)();
+  assert.equal(calls.at(-1)?.fromRef, 'main');
+});
+
+test('comparison initial resolution is coalesced; missing SHA fails closed and working tree remains current', async () => {
+  let resolve!: (value: { ok: boolean; status: 'ok'; diffText: string; fromRef: string; toRef: null }) => void;
+  let calls = 0;
+  const read = createFixedComparisonReader({ fromRef: 'main' }, () => { calls++; return new Promise(done => { resolve = done; }); });
+  const one = read(), two = read(); assert.equal(calls, 1);
+  resolve({ ok: true, status: 'ok', diffText: 'diff', fromRef: 'a'.repeat(40), toRef: null });
+  await Promise.all([one, two]);
+  const ranges: unknown[] = [];
+  const current = createFixedComparisonReader({ fromRef: 'main' }, async range => {
+    ranges.push(range); return { ok: true, status: 'ok', diffText: '', fromRef: 'c'.repeat(40), toRef: null };
+  });
+  await current(); await current();
+  assert.deepEqual(ranges[1], { fromRef: 'c'.repeat(40) });
+  const invalid = await createFixedComparisonReader({ fromRef: 'main' }, async () => ({ ok: true, status: 'ok', diffText: 'unconfirmed', fromRef: 'main' }))();
+  assert.equal(invalid.ok, false); assert.equal(invalid.diffText, ''); assert.equal(invalid.error, 'revision_unavailable');
+});
 
 test('comparison index retains complete hunks and binary/deleted file identities', () => {
   const text = 'diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1 @@\n-old\n+new\n'

@@ -17,6 +17,15 @@ export function documentReferencePath(raw: string): string | null {
     || normalized.includes('/') && /\.[a-z][a-z0-9]{0,11}$/i.test(name) ? path : null;
 }
 
+/** Positions are presentation metadata. The host always receives the separate file path. */
+export function documentReferenceLocation(raw: string): { path: string; line?: number } | null {
+  const path = documentReferencePath(raw);
+  if (!path) return null;
+  const match = /#L(\d+)(?:-L\d+)?$/.exec(raw.trim()) ?? /:(\d+)(?::\d+)?$/.exec(raw.trim());
+  const line = match ? Number(match[1]) : undefined;
+  return { path, ...(line && Number.isSafeInteger(line) && line <= 1_000_000 ? { line } : {}) };
+}
+
 /** Explicit prose labels take precedence even when a branch ends in .md. */
 export function isGitReferenceContext(prefix: string): boolean {
   return /(?:分支|标签|(?:git\s+)?\b(?:branch|ref|tag))\s*(?:名(?:称)?\s*)?(?:为|是|[:：=])?\s*$/i.test(prefix)

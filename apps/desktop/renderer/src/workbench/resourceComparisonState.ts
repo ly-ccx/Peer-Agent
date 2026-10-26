@@ -1,4 +1,28 @@
 import { countDiffLineStats, groupDiffByFile } from './file-preview/diffLines.ts';
+import type { BootstrapPreloadApi } from '../preload/contracts/bootstrapPreloadApi';
+
+type ComparisonResult = Awaited<ReturnType<BootstrapPreloadApi['gitDiffRange']>>;
+type ComparisonRange = { readonly fromRef: string; readonly toRef?: string };
+
+/** Pin named revisions once per explicit comparison. Refresh never follows a moving branch. */
+export function createFixedComparisonReader(range: ComparisonRange, read: (range: ComparisonRange) => Promise<ComparisonResult>) {
+  let fixed: ComparisonRange | null = null;
+  let resolving: Promise<ComparisonResult> | null = null;
+  return () => {
+    if (fixed) return read(fixed);
+    if (resolving) return resolving;
+    const sha = (value: unknown): value is string => typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value);
+    resolving = read(range).then(result => {
+      if (!result.ok) return result;
+      if (!sha(result.fromRef) || range.toRef && !sha(result.toRef)) {
+        return { ...result, ok: false, status: 'invalid_ref' as const, diffText: '', error: 'revision_unavailable' };
+      }
+      fixed = { fromRef: result.fromRef, ...(range.toRef && result.toRef ? { toRef: result.toRef } : {}) };
+      return result;
+    }).finally(() => { resolving = null; });
+    return resolving;
+  };
+}
 
 export function resourceDiffFiles(text: string) {
   return text.split(/(?=^diff --git )/m).filter(part => part.trim()).map((raw, index) => {

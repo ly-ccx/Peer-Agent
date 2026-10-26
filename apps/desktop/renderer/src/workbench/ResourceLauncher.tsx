@@ -7,28 +7,35 @@ import { useWorkbench } from './WorkbenchContext';
 import { useResourceWorkspace } from './ResourceWorkspaceContext';
 import { resourceWebUrl } from './resourceWorkspaceState';
 import { ResourceSearchResults } from './ResourceSearchResults';
+import { documentComparisonLabel, normalizeDocumentComparison, type DocumentComparison } from './documentSessionState';
 
-function RecentResource({ raw, active }: { readonly raw: string; readonly active: boolean }) {
+function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly active: boolean; readonly isZh: boolean }) {
   const workspace = useResourceWorkspace();
   const descriptor = useMemo(() => {
     try {
-      const value = JSON.parse(raw) as { kind?: string; path?: string; relativeTo?: string; url?: string };
-      if (value.kind === 'document' && typeof value.path === 'string') return value;
-      if (value.kind === 'browser' && typeof value.url === 'string' && resourceWebUrl(value.url)) return value;
+      const value = JSON.parse(raw) as { kind?: string; path?: string; relativeTo?: string; url?: string; comparison?: DocumentComparison };
+      if (value.kind === 'document' && typeof value.path === 'string') return { ...value, comparison: undefined };
+      if (value.kind === 'comparison' && typeof value.path === 'string') {
+        const comparison = normalizeDocumentComparison(value.comparison);
+        if (comparison) return { ...value, comparison };
+      }
+      if (value.kind === 'browser' && typeof value.url === 'string' && resourceWebUrl(value.url)) return { ...value, comparison: undefined };
     } catch { /* Ignore unknown metadata. */ }
     return null;
   }, [raw]);
   const owner = workspace?.owner;
-  const reference = owner && descriptor?.kind === 'document' ? { workspaceId: owner.workspaceId, path: descriptor.path!,
-    ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}), metadataOnly: true } : null;
+  const reference = owner && descriptor && ['document', 'comparison'].includes(descriptor.kind ?? '') ? { workspaceId: owner.workspaceId, path: descriptor.path!,
+    ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}), ...(descriptor.kind === 'comparison' ? { kind: 'directory' as const } : {}), metadataOnly: true } : null;
   const metadata = useResourceRead(JSON.stringify(reference), () => clientApi.readFile('', undefined, undefined, reference!), active && !!workspace?.ready && !!reference);
   if (!descriptor || !workspace?.ready) return null;
-  if (descriptor.kind === 'document' && (!metadata.value?.ok || !metadata.value.metadataOnly || !metadata.value.resolvedPath)) return null;
+  if (descriptor.kind !== 'browser' && (!metadata.value?.ok || !metadata.value.metadataOnly || !metadata.value.resolvedPath)) return null;
   const path = metadata.value?.resolvedPath;
   return <button className="resource-recent" type="button" onClick={() => descriptor.kind === 'browser'
-    ? workspace.openUrl(descriptor.url!) : workspace.openReference({ workspaceId: owner!.workspaceId, path: path!, ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}) })}>
+    ? workspace.openUrl(descriptor.url!) : descriptor.kind === 'comparison' && descriptor.comparison
+      ? workspace.openComparison({ workspaceId: owner!.workspaceId, path: path!, kind: 'directory' }, descriptor.comparison)
+      : workspace.openReference({ workspaceId: owner!.workspaceId, path: path!, ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}) })}>
     <PeerIcon name={descriptor.kind === 'browser' ? 'globe' : 'fileText'} size={18} />
-    <span>{descriptor.kind === 'browser' ? new URL(descriptor.url!).hostname : path?.split(/[\\/]/).pop()}</span>
+    <span>{descriptor.kind === 'browser' ? new URL(descriptor.url!).hostname : descriptor.comparison ? documentComparisonLabel(descriptor.comparison, isZh) : path?.split(/[\\/]/).pop()}</span>
   </button>;
 }
 
@@ -71,7 +78,7 @@ export function ResourceLauncher({ isZh, active, recent, onChanges }: {
     </div>
     {notice ? <p className="resource-launcher-notice" role="status">{notice}</p> : null}
     {workspace?.ready && recent.length ? <><h2>{isZh ? '最近' : 'Recent'}</h2><div className="resource-recent-list">
-      {recent.map(raw => <RecentResource key={raw} raw={raw} active={active} />)}
+      {recent.map(raw => <RecentResource key={raw} raw={raw} active={active} isZh={isZh} />)}
     </div></> : null}
   </section>;
 }

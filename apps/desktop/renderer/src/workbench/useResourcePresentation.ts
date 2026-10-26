@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useWorkbench } from './WorkbenchContext';
 import { activateBrowserTab, closeBrowserTab, createBrowserTabSession } from './browserSessionState';
-import { activateDocumentTab, closeDocumentTab } from './documentSessionState';
+import { activateDocumentTab, closeDocumentTab, documentComparisonLabel } from './documentSessionState';
 import { LAUNCHER_TAB, normalizeResourcePreferences, reconcileResourceOrder, resourceKey, resourceNeighbor } from './resourceWorkspaceState';
 
 function read(owner: string | null) {
@@ -9,7 +9,7 @@ function read(owner: string | null) {
   catch { return normalizeResourcePreferences(null); }
 }
 
-export function useResourcePresentation(enabled = true) {
+export function useResourcePresentation(enabled = true, isZh = false) {
   const workbench = useWorkbench();
   const { conversationId: owner, browserSession, documentSession, activeTab } = workbench;
   const [stored, setStored] = useState(() => ({ owner, value: read(enabled ? owner : null) }));
@@ -20,12 +20,15 @@ export function useResourcePresentation(enabled = true) {
   }
   const resources = useMemo(() => [
     ...documentSession.tabs.map(tab => ({ key: resourceKey('document', tab.id), kind: 'document' as const, id: tab.id,
-      label: tab.absPath.split(/[\\/]/).pop() || tab.absPath, title: [tab.reference?.relativeTo, tab.absPath].filter(Boolean).join(' → ') })),
+      label: tab.comparison ? documentComparisonLabel(tab.comparison, isZh) : tab.absPath.split(/[\\/]/).pop() || tab.absPath,
+      title: [tab.comparison ? tab.comparison.comparison ? documentComparisonLabel(tab.comparison, isZh)
+        : `${tab.comparison.fromRef} → ${tab.comparison.toRef ?? (isZh ? '工作树' : 'Working tree')}` : null,
+        tab.reference?.relativeTo, tab.absPath].filter(Boolean).join(' → ') })),
     ...browserSession.tabs.filter(tab => tab.url !== 'about:blank' || !!tab.title || (activeTab === 'browser' && tab.id === browserSession.activeTabId)).map(tab => ({ key: resourceKey('browser', tab.id),
       kind: 'browser' as const, id: tab.id, label: tab.title || tab.url, title: tab.url })),
     ...(activeTab === 'changes' || preferences.order.includes('comparison:workspace')
       ? [{ key: 'comparison:workspace', kind: 'comparison' as const, id: 'workspace', label: 'Diff', title: 'Diff' }] : []),
-  ], [documentSession.tabs, browserSession.tabs, browserSession.activeTabId, activeTab, preferences.order]);
+  ], [documentSession.tabs, browserSession.tabs, browserSession.activeTabId, activeTab, preferences.order, isZh]);
   const order = reconcileResourceOrder(preferences.order, resources.map(item => item.key));
   const ordered = order.flatMap(key => { const item = resources.find(item => item.key === key);
     if (!item) return [];
@@ -44,7 +47,8 @@ export function useResourcePresentation(enabled = true) {
 
   const currentDocument = documentSession.tabs.find(tab => resourceKey('document', tab.id) === active);
   const currentWeb = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === active);
-  const visited = currentDocument ? JSON.stringify({ kind: 'document', path: currentDocument.absPath, relativeTo: currentDocument.reference?.relativeTo })
+  const visited = currentDocument ? JSON.stringify({ kind: currentDocument.comparison ? 'comparison' : 'document', path: currentDocument.absPath,
+    relativeTo: currentDocument.reference?.relativeTo, comparison: currentDocument.comparison })
     : currentWeb && currentWeb.url !== 'about:blank' ? JSON.stringify({ kind: 'browser', url: currentWeb.url }) : null;
   useEffect(() => {
     if (!enabled || !owner || !visited) return;
@@ -55,7 +59,7 @@ export function useResourcePresentation(enabled = true) {
   const remember = (key: string) => {
     const doc = documentSession.tabs.find(tab => resourceKey('document', tab.id) === key);
     const web = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === key);
-    const descriptor = doc ? JSON.stringify({ kind: 'document', path: doc.absPath, relativeTo: doc.reference?.relativeTo })
+    const descriptor = doc ? JSON.stringify({ kind: doc.comparison ? 'comparison' : 'document', path: doc.absPath, relativeTo: doc.reference?.relativeTo, comparison: doc.comparison })
       : web ? JSON.stringify({ kind: 'browser', url: web.url }) : null;
     setStored(current => {
       if (current.owner !== owner) return current;

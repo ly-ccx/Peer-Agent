@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { getFileVisualKind } from './filesTreePresentation.ts';
+import { directoryReadMessage, getFileVisualKind } from './filesTreePresentation.ts';
+
+it('directory feedback distinguishes permission, missing and partial results without exposing internal status codes', () => {
+  assert.match(directoryReadMessage('permission_denied', false), /not permitted/);
+  assert.match(directoryReadMessage('not_found', false), /missing or was moved/);
+  assert.match(directoryReadMessage('truncated', false), /first 1000/);
+  assert.doesNotMatch(directoryReadMessage('read_failed', false), /read_failed/);
+});
 
 describe('getFileVisualKind', () => {
   it('uses the folder visual for directories regardless of their name', () => {

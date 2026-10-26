@@ -6,6 +6,8 @@ import { MAIN_MIN_WIDTH, WORKBENCH_MIN_WIDTH, useWorkbench } from './WorkbenchCo
 import { WorkbenchPanel } from './WorkbenchPanel';
 import { addBrowserTab, createBrowserTabSession } from './browserSessionState';
 import { resourceLayoutBounds, resourceWebUrl } from './resourceWorkspaceState';
+import { documentReferenceLocation } from '../chat/components/markdown/documentReference';
+import { normalizeDocumentComparison, type DocumentComparison } from './documentSessionState';
 import './resource-workspace.css';
 import { useMotionAllowed } from '../app/hooks/useMotionAllowed';
 import { useMotionPresence } from '../app/hooks/useMotionPresence';
@@ -25,6 +27,7 @@ interface ResourceWorkspaceAdapter {
   readonly directoryIntent: { readonly path: string; readonly id: number } | null;
   readonly locate: (query: string, candidates?: readonly string[]) => void;
   readonly openReference: (reference: BotDocumentReference) => void;
+  readonly openComparison: (reference: BotDocumentReference, comparison: DocumentComparison) => void;
   readonly openUrl: (url: string) => void;
   readonly launch: () => void;
   readonly close: () => void;
@@ -160,9 +163,18 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
         if (reference.kind === 'directory') {
           setDirectory(previous => ({ owner: owner.conversationId!, path: reference.path, id: (previous?.id ?? 0) + 1 }));
           workbench.setActiveTab('files');
-        } else workbench.openDocumentReference(reference);
+        } else {
+          const location = documentReferenceLocation(reference.path);
+          workbench.openDocumentReference({ ...reference, path: location?.path ?? reference.path }, location?.line);
+        }
         reveal();
       }
+    },
+    openComparison: (reference, comparison) => {
+      const value = normalizeDocumentComparison(comparison);
+      if (!ready || reference.workspaceId !== owner?.workspaceId || !value) return;
+      workbench.openFile(reference.path, undefined, undefined, { reference: { ...reference, kind: 'directory' }, comparison: value, preferredMode: 'diff' });
+      reveal();
     },
     openUrl: input => {
       const url = resourceWebUrl(input);

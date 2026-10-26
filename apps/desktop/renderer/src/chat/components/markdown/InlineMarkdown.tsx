@@ -8,7 +8,7 @@ import {
 } from '../../state/localImagePreview';
 import { findMarkdownImage, findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
 import { DocumentPreviewContext } from './DocumentPreviewContext';
-import { documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
+import { documentReferenceLocation, documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
 import { PeerIcon } from '../../../ui/icons';
 
 /**
@@ -159,10 +159,12 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   const content = children ?? raw;
 
   if (preview && reference) {
+    const line = documentReferenceLocation(raw)?.line;
+    const target = line ? `${reference}#L${line}` : reference;
     return <code className="markdown-file-path" role="link" tabIndex={0}
-      title={`${preview.label}: ${reference}`}
-      onClick={event => { if (window.getSelection()?.type !== 'Range') preview.open(reference, event.currentTarget); }}
-      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview.open(reference, event.currentTarget); } }}>
+      title={`${preview.label}: ${target}`}
+      onClick={event => { if (window.getSelection()?.type !== 'Range') preview.open(target, event.currentTarget); }}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview.open(target, event.currentTarget); } }}>
       {content}
     </code>;
   }
@@ -280,7 +282,17 @@ function DocumentReferenceText({ text }: { readonly text: string }) {
   const preview = useContext(DocumentPreviewContext);
   if (!preview) return <>{text}</>;
   return <>{documentReferencesInText(text).map((part, index) => part.path
-    ? <FilePathCode key={index} raw={part.path}>{part.text}</FilePathCode> : part.text)}</>;
+    ? <FilePathCode key={index} raw={part.text}>{part.text}</FilePathCode> : part.text)}</>;
+}
+
+function RemoteMarkdownImage({ url, alt }: { readonly url: string; readonly alt: string }) {
+  const preview = useContext(DocumentPreviewContext);
+  return preview?.remoteImages === 'link'
+    ? <button type="button" className="ui-button is-compact" title={url}
+      onClick={() => preview.openUrl?.(url)} disabled={!preview.openUrl}>
+      <PeerIcon name="globe" size={14} />{preview.remoteImageLabel ?? 'Open external image'}: {alt}
+    </button>
+    : <span className="markdown-local-image"><img src={url} alt={alt} /></span>;
 }
 
 /**
@@ -354,9 +366,7 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
       const externalHref = safeExternalHref(next.destination);
       if (externalHref) {
         nodes.push(
-          <span key={key} className="markdown-local-image">
-            <img src={externalHref} alt={alt} />
-          </span>,
+          <RemoteMarkdownImage key={key} url={externalHref} alt={alt} />,
         );
       } else if (parseFilePathToken(next.destination) || isLocalImagePath(next.destination)) {
         nodes.push(

@@ -39,6 +39,23 @@ export function isSkippedFileTreePath(absPath) {
   return parts.some((part) => isSkippedFileTreeDirName(part));
 }
 
+/** Bound enumeration itself, including an extra entry to establish truncation. */
+export function readBoundedDirectoryEntries(root, limit = 1000, open = fs.opendirSync) {
+  const bound = Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.floor(limit))) : 1000;
+  const directory = open(root);
+  const entries = [];
+  let truncated = false;
+  try {
+    let entry;
+    while ((entry = directory.readSync())) {
+      if (isSkippedFileTreeDirName(entry.name)) continue;
+      if (entries.length === bound) { truncated = true; break; }
+      entries.push(entry);
+    }
+    return { entries, truncated };
+  } finally { directory.closeSync(); }
+}
+
 export function shouldSkipFileName(name) {
   if (!name) return true;
   if (name === '.' || name === '..') return true;

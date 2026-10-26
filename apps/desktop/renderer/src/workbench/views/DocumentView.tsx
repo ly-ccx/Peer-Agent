@@ -12,6 +12,7 @@ import {
 import { MarkdownDocument } from '../file-preview/MarkdownDocument';
 import { SourceViewer } from '../file-preview/SourceViewer';
 import { ScopedDocumentPage } from '../ScopedDocumentPage';
+import { ScopedComparisonPage } from '../ScopedComparisonPage';
 import { ResourceTabStrip, resourceTabIds } from '../ResourceTabStrip';
 import { OpenTargetSplitButton } from '../OpenTargetSplitButton';
 import {
@@ -205,7 +206,10 @@ export function DocumentView({
             </button>
           </div>
         ) : session.tabs.map((tab) => (
-          botWorkspaceId ? <ScopedDocumentPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
+          tab.comparison ? botWorkspaceId ? <ScopedComparisonPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
+            active={visible && session.activeTabId === tab.id} /> : <section key={tab.id} className="document-page" data-active={session.activeTabId === tab.id}
+              inert={session.activeTabId !== tab.id} aria-hidden={session.activeTabId !== tab.id}><p role="alert">{isZh ? '请回到所属机器人查看此比较。' : 'Return to the owning Bot to read this comparison.'}</p></section>
+            : botWorkspaceId ? <ScopedDocumentPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
             active={visible && session.activeTabId === tab.id} onModeChange={changeMode} /> : <DocumentPage idPrefix={tabsId}
             key={tab.id}
             isZh={isZh}
