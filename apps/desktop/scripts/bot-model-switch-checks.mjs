@@ -82,7 +82,7 @@ export async function checkModelSwitch({ page, picker, first, second, getBot, fa
 export async function checkModelSwitchOnly({ page, fixture, until, report, failNext, captureDirectory }) {
   const workspaceId = fixture.bots[0].workspaceId;
   await page.locator(`#bot-row-${workspaceId}`).click();
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   const models = await page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).modelOptions, workspaceId);
   const picker = page.locator('.bot-model-settings-row').first().locator('.pa-cascading-trigger');

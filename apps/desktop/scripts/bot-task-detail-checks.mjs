@@ -23,7 +23,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
   };
   const open = async (reset = false) => {
-    await page.locator('.bot-profile').click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '任务', exact: true }).click();
     if (reset && await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
     if (!await page.locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
@@ -188,7 +188,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.equal(readTurns(), beforeNavigation, 'locating a decision does not answer, confirm or resume the task');
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-question.png') });
   conversationMessages = [note, { ...question, cards: question.cards.map(card => ({ ...card, resolvedState: 'resolved' })) }];
-  change('waiting_user'); await page.locator('.bot-profile').click();
+  change('waiting_user'); await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await until(() => detail.locator('.bot-task-question').count(), count => count === 0);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages })); renameSync(commandFile + '.next', commandFile);

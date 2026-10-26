@@ -6,6 +6,8 @@ body:has(.bot-resource-layout[data-resource-active='true']) { min-width: 0; min-
 .bot-resource-primary > .bot-shell { height: 100%; }
 .bot-resource-pane { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; max-width: calc(100% - var(--resource-primary-min, 480px)); }
 .bot-resource-layout[data-resource-open='false'] > .bot-resource-pane { max-width: 0; }
+/* Retained paper borders must not become scrollable page width; exit owns its own clipping. */
+.bot-resource-layout[data-resource-open='false'] > .bot-resource-pane:not([data-resource-exiting='true']) { overflow: clip; }
 .bot-resource-pane[data-resource-exiting='true'] { overflow: hidden; pointer-events: none; }
 .bot-resource-pane[data-resource-exit-full='true'] { position: absolute; right: 0; max-width: 100% !important; z-index: 1; }
 .resource-workspace[data-resource-exiting='true'] { width: var(--resource-retained-width) !important; min-width: var(--resource-retained-width); flex-shrink: 0; transition: none; }

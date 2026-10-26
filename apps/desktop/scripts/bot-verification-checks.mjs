@@ -40,7 +40,7 @@ export async function checkBotVerification({ page, until, report, captureDirecto
     assert.equal(await page.locator('.bot-agent-activity[data-agent-state=verified]').count(), 0);
     assert.ok((await page.locator('#bot-msg-verification-explanation').innerText()).includes(explanation));
     await page.screenshot({ path: path.join(captureDirectory, `verification-main-${width}-${appearance}.png`), animations: 'disabled' });
-    await page.locator('.bot-profile').click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '任务', exact: true }).click();
     if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
     await page.locator('.bot-task-row').filter({ hasText: session.title }).click();

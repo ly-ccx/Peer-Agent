@@ -31,7 +31,7 @@ export async function checkSurfaceMotion({ page, fixture, until, report, capture
   await until(() => page.locator('.bot-app-menu-menu[data-surface-state="open"]').count(), count => count === 1);
   await composer.click();
   await until(() => page.getByRole('menu').count(), count => count === 0);
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   for (const name of ['概况', '任务', '目标', '记忆', '设置']) {
     await page.getByRole('tab', { name, exact: true }).click();
     await page.locator('.bot-drawer-pane').waitFor();
@@ -64,14 +64,14 @@ export async function checkSurfaceMotion({ page, fixture, until, report, capture
   await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
   assert.equal(await composer.inputValue(), 'SURFACE_MOTION_DRAFT');
   await page.setViewportSize({ width: 760, height: 860 });
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.locator('.pa-overlay-panel.bot-drawer-panel').waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(captureDirectory, 'surface-drawer-narrow.png') });
   await page.keyboard.press('Escape');
   await until(() => page.locator('.pa-overlay-panel.bot-drawer-panel').count(), count => count === 0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   const cover = page.locator('.pa-overlay-panel.bot-drawer-panel');
   await cover.waitFor();
   await until(() => cover.evaluate(node => node.getAnimations().some(animation => animation.playState === 'running')), running => !running);

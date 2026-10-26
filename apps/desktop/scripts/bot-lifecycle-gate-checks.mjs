@@ -33,12 +33,12 @@ export async function checkBotLifecycleGates({page, until, report, captureDirect
       assert.equal(session.status,'waiting_user'); assert.equal(session.statusLabel,expected); assert.equal(session.cancelable,true);
       const command = {...initial,seq:++seq,sessions:[session],detailReports:{},reportReadMode:'ready',conversationMessages:[]};
       writeFileSync(commandFile+'.next',JSON.stringify(command));renameSync(commandFile+'.next',commandFile);
-      await page.locator('.bot-profile').click();
+      await page.getByRole('button', { name: '机器人设置', exact: true }).click();
       await page.getByRole('tab',{name:'任务',exact:true}).click();
       if (await page.locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
       const row = page.locator('.bot-task-row').filter({hasText:plan.title});
       await until(()=>row.innerText(),text=>text.includes(expected));
-      assert.equal(await row.locator('xpath=ancestor::section').locator('h2').innerText(),'需要你');
+      assert.equal(await row.locator('xpath=ancestor::section[1]').locator('h2').innerText(),'需要你');
       assert.doesNotMatch(await row.innerText(),/已完成|已读/);
       await page.screenshot({path:path.join(captureDirectory,`lifecycle-${key}-list-${width}-${appearance}.png`),animations:'disabled'});
       await row.focus();await page.keyboard.press('Enter');

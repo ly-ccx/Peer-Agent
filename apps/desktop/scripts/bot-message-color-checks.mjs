@@ -12,7 +12,7 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
   }), workspaceId);
   const reply = page.locator('#bot-msg-rc-message-9999');
   const changeColor = async color => {
-    await page.locator('.bot-profile').click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '设置', exact: true }).click();
     const swatch = page.locator('.bot-avatar-color');
     const index = BOT_AVATAR_COLORS.indexOf(color);
@@ -83,7 +83,7 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
   } finally {
     await page.locator(`#bot-row-${workspaceId}`).click();
     await changeColor(original.avatar.color);
-    await page.locator('.bot-profile').click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '概况', exact: true }).click();
     await page.getByRole('button', { name: '关闭', exact: true }).click();
     await page.evaluate(original => {

@@ -811,7 +811,7 @@ try {
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }
-  await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
   assert.equal(await page.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
   await page.getByRole('button', { name: '关闭', exact: true }).click();

@@ -93,7 +93,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal(report.replyFocus.active, true);
   assert.equal(report.replyFocus.outline, 'solid');
   assert.equal(report.replyFocus.width, '1px');
-  await page.locator('.bot-profile').hover();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).hover();
   await process.evaluate(async node => { await Promise.all(node.getAnimations().map(animation => animation.finished.catch(() => {}))); });
   const normal = await process.evaluate(node => getComputedStyle(node).color);
   await process.hover();
