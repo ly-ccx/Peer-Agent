@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import type { LocalDocumentObservation } from '@peer-agent/protocol';
 import { useResourceActions, useResourceRead } from '../../ui/resources/useResourceState';
 import { clientApi } from '../../clientApi';
 import { DiffViewer } from '../file-preview/DiffViewer';
@@ -24,6 +25,8 @@ import {
   activateDocumentTab,
   closeDocumentTab,
   updateDocumentTabMode,
+  updateDocumentReading,
+  type DocumentReadPosition,
   type DocumentSessionState,
   type DocumentTabSession,
   type WorkbenchFileMode,
@@ -170,6 +173,12 @@ export function DocumentView({
   const changeMode = useCallback((tabId: string, mode: WorkbenchFileMode) => {
     onSessionChange((current) => updateDocumentTabMode(current, tabId, mode));
   }, [onSessionChange]);
+  const observe = useCallback((tabId: string, observation: LocalDocumentObservation) => {
+    onSessionChange(current => updateDocumentReading(current, tabId, { observation }));
+  }, [onSessionChange]);
+  const remember = useCallback((tabId: string, key: string, point: DocumentReadPosition) => {
+    onSessionChange(current => updateDocumentReading(current, tabId, { position: { key, point } }));
+  }, [onSessionChange]);
 
   const items = useMemo(() => session.tabs.map((tab) => ({
     id: tab.id,
@@ -210,7 +219,7 @@ export function DocumentView({
             active={visible && session.activeTabId === tab.id} /> : <section key={tab.id} className="document-page" data-active={session.activeTabId === tab.id}
               inert={session.activeTabId !== tab.id} aria-hidden={session.activeTabId !== tab.id}><p role="alert">{isZh ? '请回到所属机器人查看此比较。' : 'Return to the owning Bot to read this comparison.'}</p></section>
             : botWorkspaceId ? <ScopedDocumentPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
-            active={visible && session.activeTabId === tab.id} onModeChange={changeMode} /> : <DocumentPage idPrefix={tabsId}
+            active={visible && session.activeTabId === tab.id} onModeChange={changeMode} onObservation={observe} onReadingChange={remember} /> : <DocumentPage idPrefix={tabsId}
             key={tab.id}
             isZh={isZh}
             tab={tab}

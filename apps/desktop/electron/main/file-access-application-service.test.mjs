@@ -84,6 +84,7 @@ function createHarness(overrides = {}) {
   const watchers = [];
   const written = [];
   const created = [];
+  const reads = [];
 
   const service = createFileAccessApplicationService({
     resolveBotDocument: overrides.resolveBotDocument,
@@ -112,6 +113,7 @@ function createHarness(overrides = {}) {
       return { entries: node.entries.slice(0, limit).map(entry => ({ name: entry.name, isDirectory: () => entry.isDir })), truncated: node.entries.length > limit };
     }),
     readFile: (candidate) => {
+      reads.push(candidate);
       const node = nodes.get(candidate);
       if (!node || node.kind !== 'file') throw new Error('ENOENT');
       return node.buffer;
@@ -139,7 +141,7 @@ function createHarness(overrides = {}) {
     },
   });
 
-  return { service, nodes, gitCalls, watchers, written, created };
+  return { service, nodes, gitCalls, watchers, written, created, reads };
 }
 
 test('read-directory hides node_modules so file-tree watch cannot follow isolate symlinks', () => {
@@ -873,4 +875,43 @@ test('R4 explicit working comparison never falls through to staged or old commit
   const result = await harness.service.getGitDiff({ absPath: '/ws-a/a.md', comparison: 'working' });
   assert.equal(result.status, 'no_changes');
   assert.equal(harness.gitCalls.filter(([, args]) => args[0] === 'diff').length, 1);
+});
+
+test('scoped observations bind exact bytes and physical source; metadata remains a stat-only read', async () => {
+  let target = '/ws-a/report.md';
+  const h = createHarness({ nodes: [[target, file('old!')]], resolveBotDocument: async () => ({ ok: true, root: path.dirname(target), target }) });
+  const reference = { workspaceId: 'bot', path: 'report.md' };
+  const metadata = await h.service.readFile({ documentReference: { ...reference, metadataOnly: true } });
+  assert.equal(metadata.content, ''); assert.equal(metadata.observation, undefined);
+  assert.equal(h.reads.length, 0);
+  const first = await h.service.readFile({ documentReference: reference });
+  assert.match(first.observation.contentVersion, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(first.observation.resourceId, metadata.identity.resourceId);
+  h.nodes.set(target, file('new!')); // Identical length and no timestamp signal.
+  const changed = await h.service.readFile({ documentReference: { ...reference, expectedObservation: first.observation } });
+  assert.equal(changed.status, 'version_changed'); assert.equal(changed.content, '');
+  assert.notEqual(changed.observation.contentVersion, first.observation.contentVersion);
+  const adopted = await h.service.readFile({ documentReference: { ...reference, expectedObservation: { resourceId: first.observation.resourceId } } });
+  assert.equal(adopted.content, 'new!');
+  target = '/ws-b/report.md'; // Not present: source mismatch must fail before any byte read.
+  const beforeMove = h.reads.length;
+  const moved = await h.service.readFile({ documentReference: { ...reference, expectedObservation: first.observation } });
+  assert.equal(moved.status, 'source_changed'); assert.equal(moved.content, '');
+  assert.equal(h.reads.length, beforeMove);
+  assert.equal(h.written.length, 0); assert.equal(h.gitCalls.length, 0);
+});
+
+test('image observations use the same conditional source/version rules and legacy calls remain unchanged', async () => {
+  const h = createHarness({ nodes: [['/ws-a/shot.png', file(Buffer.from([1, 2, 3]))]],
+    resolveBotDocument: async () => ({ ok: true, root: '/ws-a', target: '/ws-a/shot.png' }) });
+  const reference = { workspaceId: 'bot', path: 'shot.png' };
+  const first = await h.service.readImageDataUrl({ documentReference: reference });
+  h.nodes.set('/ws-a/shot.png', file(Buffer.from([3, 2, 1])));
+  const changed = await h.service.readImageDataUrl({ documentReference: { ...reference, expectedObservation: first.observation } });
+  assert.equal(changed.status, 'version_changed'); assert.equal(changed.dataUrl, '');
+  assert.notEqual(changed.observation.contentVersion, first.observation.contentVersion);
+  const legacy = h.service.readImageDataUrl({ absPath: '/ws-a/shot.png' });
+  assert.equal(legacy.ok, true); assert.equal(legacy.observation, undefined);
+  assert.equal((await h.service.readFile({ documentReference: { ...reference, expectedObservation: {} } })).status, 'invalid_path');
+  assert.equal((await h.service.readImageDataUrl({ documentReference: { ...reference, expectedObservation: null } })).status, 'invalid_path');
 });

@@ -1,5 +1,17 @@
-import type { BotDocumentReference } from '@peer-agent/protocol';
+import type { BotDocumentReference, LocalDocumentObservation } from '@peer-agent/protocol';
+import { normalizeDocumentObservation } from './documentObservationState.ts';
 export type WorkbenchFileMode = 'preview' | 'source' | 'diff';
+export interface DocumentReadPosition { readonly top: number; readonly left: number }
+export type DocumentReadPositions = Readonly<Record<string, DocumentReadPosition>>;
+
+export function normalizeDocumentReadPositions(raw: unknown): DocumentReadPositions {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter(([key, point]) => {
+    if (!/^(sha256:[a-f0-9]{64}:(preview|source)|diff:(working|staged))$/.test(key) || !point || typeof point !== 'object') return false;
+    const value = point as DocumentReadPosition;
+    return [value.top, value.left].every(coordinate => typeof coordinate === 'number' && Number.isFinite(coordinate) && coordinate >= 0 && coordinate <= 10_000_000);
+  }).slice(-12).map(([key, point]) => [key, { top: (point as DocumentReadPosition).top, left: (point as DocumentReadPosition).left }]));
+}
 
 export interface DocumentNavigation { readonly line: number; readonly requestId: string }
 export interface DocumentComparison { readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' }
@@ -34,6 +46,8 @@ export interface DocumentTabSession {
   readonly reference?: BotDocumentReference;
   readonly navigation?: DocumentNavigation;
   readonly comparison?: DocumentComparison;
+  readonly observation?: LocalDocumentObservation;
+  readonly readingPositions?: DocumentReadPositions;
 }
 
 export interface DocumentSessionState {
@@ -123,6 +137,8 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
     mode: isDocumentMode(tab.mode) ? tab.mode : 'preview',
     ...(navigation ? { navigation } : {}),
     ...(comparison ? { comparison } : {}),
+    ...(normalizeDocumentObservation(tab.observation) ? { observation: normalizeDocumentObservation(tab.observation) } : {}),
+    ...(tab.readingPositions ? { readingPositions: normalizeDocumentReadPositions(tab.readingPositions) } : {}),
     ...(tab.reference && typeof tab.reference === 'object'
       && typeof (tab.reference as BotDocumentReference).workspaceId === 'string'
       && typeof (tab.reference as BotDocumentReference).path === 'string'
@@ -236,4 +252,22 @@ export function closeDocumentTab(
   if (session.activeTabId !== tabId) return { ...session, tabs };
   const nextActive = tabs[Math.min(index, tabs.length - 1)];
   return { tabs, activeTabId: nextActive.id };
+}
+
+/** Reading receipts and coordinates are presentation metadata, never saved file contents or grants. */
+export function updateDocumentReading(session: DocumentSessionState, tabId: string,
+  patch: { readonly observation?: LocalDocumentObservation; readonly position?: { readonly key: string; readonly point: DocumentReadPosition } }): DocumentSessionState {
+  let changed = false;
+  const tabs = session.tabs.map(tab => {
+    if (tab.id !== tabId) return tab;
+    const observation = normalizeDocumentObservation(patch.observation) ?? tab.observation;
+    const readingPositions = patch.position ? normalizeDocumentReadPositions({
+      ...Object.fromEntries(Object.entries(tab.readingPositions ?? {}).filter(([key]) => key !== patch.position!.key)),
+      [patch.position.key]: patch.position.point,
+    }) : tab.readingPositions;
+    if (JSON.stringify(observation) === JSON.stringify(tab.observation) && JSON.stringify(readingPositions) === JSON.stringify(tab.readingPositions)) return tab;
+    changed = true;
+    return { ...tab, ...(observation ? { observation } : {}), ...(readingPositions ? { readingPositions } : {}) };
+  });
+  return changed ? { ...session, tabs } : session;
 }

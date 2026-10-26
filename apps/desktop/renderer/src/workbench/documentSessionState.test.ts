@@ -9,6 +9,7 @@ import {
   normalizeDocumentSessionState,
   openDocumentTab,
   updateDocumentTabMode,
+  updateDocumentReading,
 } from './documentSessionState.ts';
 
 test('normalizes independent document sessions for each conversation', () => {
@@ -100,4 +101,19 @@ test('task provenance survives tab restoration and separates task scopes without
   assert.deepEqual(restored.tabs[0].reference?.task, first.reference?.task);
   assert.equal(normalizeDocumentSessionState({ tabs: [{ ...first, reference: { ...first.reference, task: {} } }] }).tabs.length, 0);
   assert.equal(normalizeDocumentSessionState({ tabs: [{ ...first, reference: { ...first.reference, workspaceId: null } }] }).tabs.length, 0);
+});
+
+test('observation and bounded reading positions restore without saving body or claiming a snapshot', () => {
+  const observation = { sourceId: `sha256:${'a'.repeat(64)}`, resourceId: `sha256:${'b'.repeat(64)}`, contentVersion: `sha256:${'c'.repeat(64)}`, relativePath: 'guide.md' };
+  let session = openDocumentTab(createDocumentSessionState(), createDocumentTabSession('/real/guide.md', { id: 'observed' }));
+  session = updateDocumentReading(session, 'observed', { observation, position: { key: `${observation.contentVersion}:source`, point: { top: 320, left: 18 } } });
+  const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(session)));
+  assert.deepEqual(restored.tabs[0].observation, observation);
+  assert.deepEqual(restored.tabs[0].readingPositions?.[`${observation.contentVersion}:source`], { top: 320, left: 18 });
+  assert.equal(updateDocumentReading(restored, 'closed-tab', { observation }), restored);
+  const damaged = normalizeDocumentSessionState({ tabs: [{ id: 'old', absPath: '/real/guide.md', content: 'must not persist',
+    observation: { ...observation, contentVersion: 'mtime:5' }, readingPositions: { bad: { top: 500, left: 0 }, [`${observation.contentVersion}:source`]: { top: -1, left: 0 } } }] });
+  assert.equal(damaged.tabs[0].observation, undefined);
+  assert.deepEqual(damaged.tabs[0].readingPositions, {});
+  assert.equal('content' in damaged.tabs[0], false);
 });

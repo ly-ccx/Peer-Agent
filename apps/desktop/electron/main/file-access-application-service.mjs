@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { documentIdentity, observeDocumentRead, validExpectedObservation } from './document-observation.mjs';
 import { isSkippedFileTreeDirName, isSkippedFileTreePath, searchWorkspaceFiles } from './workspace-file-search.mjs';
 
 const DEFAULT_MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
@@ -619,14 +620,20 @@ export function createFileAccessApplicationService(options = {}) {
     return { ok: true, watching: [...current.keys()] };
   }
 
-  async function readFile({ absPath, workspaceRoot, relPath, documentReference } = {}) {
+  async function readFile({ absPath, workspaceRoot, relPath, documentReference } = {}, observationContext) {
     try {
       if (documentReference !== undefined) {
+        if (!validExpectedObservation(documentReference?.expectedObservation)) return { ok: false, status: 'invalid_path', content: '' };
         const resolved = await options.resolveBotDocument?.(documentReference);
         if (!resolved?.ok) return resolved ?? { ok: false, status: 'workspace_unavailable', content: '' };
-        if (documentReference.metadataOnly === true) return { ok: true, status: 'ok', content: '', metadataOnly: true, resolvedPath: resolved.target, resolvedFrom: resolved.root };
+        if (documentReference.metadataOnly === true) return { ok: true, status: 'ok', content: '', metadataOnly: true,
+          ...(documentReference.kind !== 'directory' ? { identity: documentIdentity(documentReference, resolved) } : {}),
+          resolvedPath: resolved.target, resolvedFrom: resolved.root };
         if (documentReference.kind === 'directory') return { ok: false, status: 'not_file', content: '' };
-        const result = await readFile({ absPath: resolved.target, workspaceRoot: resolved.root });
+        if (documentReference.expectedObservation && documentReference.expectedObservation.resourceId !== documentIdentity(documentReference, resolved).resourceId) {
+          return { ok: false, status: 'source_changed', content: '', identity: documentIdentity(documentReference, resolved) };
+        }
+        const result = await readFile({ absPath: resolved.target, workspaceRoot: resolved.root }, { reference: documentReference, resolved });
         return { ...result, resolvedPath: resolved.target, resolvedFrom: resolved.root };
       }
       if (!absPath || typeof absPath !== 'string') {
@@ -667,6 +674,9 @@ export function createFileAccessApplicationService(options = {}) {
         };
       }
       const buffer = readFileBuffer(target);
+      if (buffer.length > maxTextFileBytes) return { ok: false, status: 'too_large', content: '', size: buffer.length, resolvedFrom };
+      const observed = observationContext ? observeDocumentRead(observationContext.reference, observationContext.resolved, buffer) : undefined;
+      if (observed && !observed.ok) return { ...observed, content: '', size: buffer.length, resolvedFrom };
       const sniffLength = Math.min(buffer.length, 8192);
       for (let index = 0; index < sniffLength; index += 1) {
         if (buffer[index] === 0) {
@@ -684,7 +694,8 @@ export function createFileAccessApplicationService(options = {}) {
         ok: true,
         status: 'ok',
         content: buffer.toString('utf8'),
-        size: stat.size,
+        ...(observed ? { identity: observed.identity, observation: observed.observation } : {}),
+        size: buffer.length,
         resolvedFrom,
       };
     } catch (error) {
@@ -820,11 +831,16 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
-  function readImageDataUrl({ absPath, workspaceRoot, relPath, documentReference } = {}) {
+  function readImageDataUrl({ absPath, workspaceRoot, relPath, documentReference } = {}, observationContext) {
     if (documentReference !== undefined) {
+      if (!validExpectedObservation(documentReference?.expectedObservation)) return Promise.resolve({ ok: false, status: 'invalid_path', dataUrl: '' });
       return Promise.resolve(options.resolveBotDocument?.({ ...documentReference, kind: 'file' })).then(resolved => {
         if (!resolved?.ok) return { ...resolved, ok: false, status: resolved?.status ?? 'workspace_unavailable', dataUrl: '' };
-        return readImageDataUrl({ absPath: resolved.target, workspaceRoot: resolved.root });
+        if (documentReference.expectedObservation && documentReference.expectedObservation.resourceId !== documentIdentity(documentReference, resolved).resourceId) {
+          return { ok: false, status: 'source_changed', dataUrl: '', identity: documentIdentity(documentReference, resolved) };
+        }
+        const result = readImageDataUrl({ absPath: resolved.target, workspaceRoot: resolved.root }, { reference: documentReference, resolved });
+        return { ...result, resolvedPath: resolved.target, resolvedFrom: resolved.root };
       }).catch(() => ({ ok: false, status: 'error', dataUrl: '', error: 'resolve_failed' }));
     }
     try {
@@ -876,7 +892,12 @@ export function createFileAccessApplicationService(options = {}) {
         };
       }
       const buffer = readFileBuffer(target);
+      if (buffer.length > DEFAULT_MAX_IMAGE_FILE_BYTES) return { ok: false, status: 'too_large', dataUrl: '', size: buffer.length };
+      const observed = observationContext ? observeDocumentRead(observationContext.reference, observationContext.resolved, buffer) : undefined;
+      if (observed && !observed.ok) return { ...observed, dataUrl: '', size: buffer.length, resolvedFrom };
       const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+      if (observed) return { ok: true, status: 'ok', dataUrl, mimeType, size: buffer.length, path: target,
+        resolvedFrom, identity: observed.identity, observation: observed.observation };
       return resolvedFrom
         ? {
             ok: true,

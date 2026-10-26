@@ -9,17 +9,34 @@ export interface BotDocumentReference {
   readonly kind?: 'file' | 'directory';
   /** Resolve/stat only; never returns file contents. */
   readonly metadataOnly?: boolean;
+  /** Conditional text/image read only; an observation never grants access. */
+  readonly expectedObservation?: { readonly resourceId: string; readonly contentVersion?: string };
+}
+
+/** Device-local locator identity, revalidated by the host on every access. */
+export interface LocalDocumentIdentity {
+  readonly sourceId: string;
+  readonly resourceId: string;
+  readonly relativePath: string;
+}
+
+/** Version of the actual bytes returned by a successful read; not a saved snapshot. */
+export interface LocalDocumentObservation extends LocalDocumentIdentity {
+  readonly contentVersion: string;
 }
 
 export interface LocalDocumentReadResult {
   readonly metadataOnly?: boolean;
   readonly ok: boolean;
   readonly status: 'ok' | 'not_found' | 'not_file' | 'too_large' | 'binary' | 'invalid_path' | 'error'
-    | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required';
+    | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required'
+    | 'version_changed' | 'source_changed' | 'version_unavailable';
   readonly content: string;
   readonly size?: number;
   readonly resolvedFrom?: string;
   readonly resolvedPath?: string;
+  readonly identity?: LocalDocumentIdentity;
+  readonly observation?: LocalDocumentObservation;
   /** Confirmed locations for an explicit human choice; never an authorization ticket. */
   readonly candidates?: readonly { readonly path: string; readonly root: string }[];
   readonly error?: string;

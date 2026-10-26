@@ -671,8 +671,12 @@ export interface BootstrapPreloadApi {
       | 'unsupported_type'
       | 'invalid_path'
       | 'error'
-      | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required';
+      | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required'
+      | 'version_changed' | 'source_changed' | 'version_unavailable';
     readonly dataUrl: string;
+    readonly identity?: import('@peer-agent/protocol').LocalDocumentIdentity;
+    readonly observation?: import('@peer-agent/protocol').LocalDocumentObservation;
+    readonly resolvedPath?: string;
     readonly mimeType?: string;
     readonly size?: number;
     readonly path?: string;

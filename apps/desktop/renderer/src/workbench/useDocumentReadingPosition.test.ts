@@ -70,3 +70,21 @@ test('explicit line navigation runs once per intent, while repeated clicks and i
   h.render('source', true, missing); view = h.render('source', true, missing);
   assert.equal(view.missingLine, true); assert.equal(h.node.scrollTop, 200);
 });
+
+test('restored reading coordinates remain separate for content versions and modes', () => {
+  const a = `sha256:${'a'.repeat(64)}:source`, b = `sha256:${'b'.repeat(64)}:source`;
+  const memory = createDocumentReadingMemory({ [a]: { top: 320, left: 18 } });
+  assert.deepEqual(memory.read(a), { top: 320, left: 18 });
+  assert.deepEqual(memory.read(b), { top: 0, left: 0 });
+  memory.remember(b, 80, 0);
+  assert.deepEqual(memory.read(a), { top: 320, left: 18 });
+});
+
+test('reading memory bounds retained versions and coordinates', () => {
+  const memory = createDocumentReadingMemory();
+  for (let i = 0; i < 14; i++) memory.remember(`version-${i}`, i + 1, 0);
+  assert.deepEqual(memory.read('version-0'), { top: 0, left: 0 });
+  assert.equal(memory.read('version-13').top, 14);
+  memory.remember('large', 20_000_000, 20_000_000);
+  assert.deepEqual(memory.read('large'), { top: 10_000_000, left: 10_000_000 });
+});

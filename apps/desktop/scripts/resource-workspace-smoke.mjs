@@ -152,7 +152,7 @@ try {
   await until(() => documentBody.locator('img.resource-image').evaluate(el => el.complete && el.naturalWidth > 0), Boolean);
   report.checks.push('scoped local image decoded by production host');
   await openPath('./missing.md');
-  await documentBody.getByRole('alert').filter({ hasText: '未能按此引用定位文件' }).waitFor();
+  await page.locator('.resource-document[data-active="true"]').getByRole('alert').filter({ hasText: '未能按此引用定位文件' }).waitFor();
   report.checks.push('missing file has a local error without blocking other resources');
   await page.locator('.bot-reply-text .markdown-file-path').filter({ hasText: 'host-lease.mjs' }).click();
   await until(() => page.locator('.resource-document[data-active="true"] .resource-document-body').innerText(), text => text.includes('SOURCE_BINDING_OK'));
