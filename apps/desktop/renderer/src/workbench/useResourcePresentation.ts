@@ -23,7 +23,7 @@ export function useResourcePresentation(enabled = true, isZh = false) {
       label: tab.comparison ? documentComparisonLabel(tab.comparison, isZh) : tab.absPath.split(/[\\/]/).pop() || tab.absPath,
       title: [tab.comparison ? tab.comparison.comparison ? documentComparisonLabel(tab.comparison, isZh)
         : `${tab.comparison.fromRef} → ${tab.comparison.toRef ?? (isZh ? '工作树' : 'Working tree')}` : null,
-        tab.reference?.relativeTo, tab.absPath].filter(Boolean).join(' → ') })),
+        tab.reference?.relativeTo, tab.absPath].filter(Boolean).join('; ') })),
     ...browserSession.tabs.filter(tab => tab.url !== 'about:blank' || !!tab.title || (activeTab === 'browser' && tab.id === browserSession.activeTabId)).map(tab => ({ key: resourceKey('browser', tab.id),
       kind: 'browser' as const, id: tab.id, label: tab.title || tab.url, title: tab.url })),
     ...(activeTab === 'changes' || preferences.order.includes('comparison:workspace')
