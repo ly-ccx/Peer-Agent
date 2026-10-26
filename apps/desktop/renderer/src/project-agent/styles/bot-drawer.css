@@ -14,6 +14,8 @@
   flex: 0 0 auto;
   min-width: 0;
   min-height: 0;
+  padding-inline-start: 0;
+  transition: padding-inline-start var(--za-motion-slow) var(--za-ease-decelerate);
 }
 
 .bot-drawer-dock {
@@ -45,10 +47,8 @@
   opacity: 1;
 }
 
-/* Release opening-only transitions once the dock has settled. */
-.bot-drawer-dock.is-open.is-settled {
-  transition: none;
-}
+/* Keyboard adjustments and reset keep the same width transition after opening.
+ * Only a live pointer drag disables it, via data-resizing above. */
 
 /* ── 抽屉拖拽条（两块面板之间的缝里，镜像 .bot-column-resizer）──
  * 拖拽条属于「缝」，不属于任何一块面板；它渲染在 dock 之外、与 dock 同级，
@@ -1233,7 +1233,7 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
 /* 玻璃缝改由外层 frame 的 padding-left 表达，而不是 dock 的 margin-left：
  * margin 不参与 dock 的 width 过渡，收起后会残留一条 10px 空白。 */
 html[data-vibrancy='true'] .bot-drawer-dock-frame.is-open {
-  padding-left: var(--bot-float-gap);
+  padding-inline-start: var(--bot-float-gap);
 }
 
 html[data-vibrancy='true'] .bot-drawer-dock {

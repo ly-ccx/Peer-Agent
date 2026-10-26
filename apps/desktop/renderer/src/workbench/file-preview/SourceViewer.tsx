@@ -23,7 +23,7 @@ export function SourceViewer({ content, emptyLabel, language, className }: Sourc
     <pre className={`workbench-source-pre${className ? ` ${className}` : ''}`}>
       <code className={highlighted.language ? `hljs language-${highlighted.language}` : undefined}>
         {highlighted.lines.map((html, i) => (
-          <span key={i} className="source-line">
+          <span key={i} className="source-line" data-source-line={i + 1}>
             <span className="source-gutter" aria-hidden="true">
               {i + 1}
             </span>

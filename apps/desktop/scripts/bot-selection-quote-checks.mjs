@@ -85,7 +85,7 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
     cases.push({ width, appearance, ...position });
   }
   await page.setViewportSize({ width: 1280, height: 860 });
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.locator('.bot-drawer-dock.is-open').waitFor();
   await until(() => page.locator('.bot-convo').evaluate(node => node.getBoundingClientRect().width < 700), Boolean);
   await select();

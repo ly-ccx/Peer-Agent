@@ -6,6 +6,7 @@ import {
   createDocumentSessionState,
   createDocumentTabSession,
   normalizeDocumentSessionMap,
+  normalizeDocumentSessionState,
   openDocumentTab,
   updateDocumentTabMode,
 } from './documentSessionState.ts';
@@ -86,4 +87,17 @@ test('invalid and duplicate persisted tabs are discarded', () => {
   assert.equal(sessions.conversation.tabs.length, 1);
   assert.equal(sessions.conversation.tabs[0].mode, 'preview');
   assert.equal(sessions.conversation.activeTabId, 'first');
+});
+
+test('task provenance survives tab restoration and separates task scopes without degrading malformed hints', () => {
+  const first = createDocumentTabSession('/internal/result.md', { id: 'task-a', reference: {
+    workspaceId: 'bot', path: '/internal/result.md', task: { sessionId: 'a', planId: 'plan-a' } } });
+  const second = createDocumentTabSession('/internal/result.md', { id: 'task-b', reference: {
+    workspaceId: 'bot', path: '/internal/result.md', task: { sessionId: 'b', planId: 'plan-b' } } });
+  const opened = openDocumentTab(openDocumentTab(createDocumentSessionState(), first), second);
+  const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(opened)));
+  assert.equal(restored.tabs.length, 2);
+  assert.deepEqual(restored.tabs[0].reference?.task, first.reference?.task);
+  assert.equal(normalizeDocumentSessionState({ tabs: [{ ...first, reference: { ...first.reference, task: {} } }] }).tabs.length, 0);
+  assert.equal(normalizeDocumentSessionState({ tabs: [{ ...first, reference: { ...first.reference, workspaceId: null } }] }).tabs.length, 0);
 });

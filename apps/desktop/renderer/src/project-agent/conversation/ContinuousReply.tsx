@@ -1,3 +1,5 @@
+import { ReplyResourceContext } from './ReplyResourceContext';
+import { referencesForReplyParagraph } from '../state/botResourceReference';
 import { useRef } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
@@ -31,7 +33,9 @@ export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, hig
     {reply.paragraphs.map((paragraph, index) => <div key={paragraph.id} className="bot-reply-body bot-narration-segment" aria-live="off" data-narration-id={paragraph.id}>
       {index === 0 ? <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} /> : null}
       <div className="bot-reply-text" ref={message?.kind === 'agent_reply' && index === reply.paragraphs.length - 1 ? body : undefined}>
-        <MarkdownMessage content={paragraph.text} />
+        <ReplyResourceContext references={referencesForReplyParagraph(paragraph.id, reply.messages, reply.activity)}>
+          <MarkdownMessage content={paragraph.text} />
+        </ReplyResourceContext>
       </div>
     </div>)}
     </div>

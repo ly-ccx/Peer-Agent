@@ -8,7 +8,8 @@ import {
 } from '../../state/localImagePreview';
 import { findMarkdownImage, findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
 import { DocumentPreviewContext } from './DocumentPreviewContext';
-import { documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
+import { documentReferenceLocation, documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
+import { PeerIcon } from '../../../ui/icons';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -104,7 +105,8 @@ function resolveAbsolutePath(
 
 function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; children?: ReactNode }) {
   const preview = useContext(DocumentPreviewContext);
-  const reference = preview ? documentReferencePath(raw) : null;
+  const candidate = preview ? documentReferencePath(raw) : null;
+  const reference = candidate && preview?.resolve ? preview.resolve(candidate) : candidate;
   const workspacePath = useContext(WorkspacePathContext);
   const workbench = useWorkbenchOptional();
   const parsed = parseFilePathToken(raw);
@@ -157,15 +159,19 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   const content = children ?? raw;
 
   if (preview && reference) {
+    const line = documentReferenceLocation(raw)?.line;
+    const target = line ? `${reference}#L${line}` : reference;
     return <code className="markdown-file-path" role="link" tabIndex={0}
-      title={`${preview.label}: ${reference}`}
-      onClick={event => { if (window.getSelection()?.type !== 'Range') preview.open(reference, event.currentTarget); }}
-      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview.open(reference, event.currentTarget); } }}>
+      title={`${preview.label}: ${target}`}
+      onClick={event => { if (window.getSelection()?.type !== 'Range') preview.open(target, event.currentTarget); }}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview.open(target, event.currentTarget); } }}>
       {content}
     </code>;
   }
 
-  if (preview) return <code>{content}</code>;
+  if (preview) return <><code>{content}</code>{candidate && preview.locate ? <button type="button" className="markdown-file-locate"
+    title={`${preview.locateLabel ?? 'Find file location'}: ${candidate}`} aria-label={`${preview.locateLabel ?? 'Find file location'}: ${candidate}`}
+    onClick={() => { if (window.getSelection()?.type !== 'Range') preview.locate?.(candidate); }}><PeerIcon name="search" size={12} /></button> : null}</>;
 
   if (!parsed || !absPath) {
     return <code>{content}</code>;
@@ -257,6 +263,15 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   );
 }
 
+function MarkdownExternalLink({ href, children }: { readonly href: string; readonly children: ReactNode }) {
+  const preview = useContext(DocumentPreviewContext);
+  return <a href={href} target="_blank" rel="noreferrer noopener" onClick={event => {
+    if (preview?.openUrl && /^https?:\/\//i.test(href) && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
+      event.preventDefault(); preview.openUrl(href);
+    }
+  }}>{children}</a>;
+}
+
 function MarkdownFileLink({ destination, children }: { readonly destination: string; readonly children: ReactNode }) {
   const preview = useContext(DocumentPreviewContext);
   return (preview ? documentReferencePath(destination) : parseFilePathToken(destination))
@@ -267,7 +282,17 @@ function DocumentReferenceText({ text }: { readonly text: string }) {
   const preview = useContext(DocumentPreviewContext);
   if (!preview) return <>{text}</>;
   return <>{documentReferencesInText(text).map((part, index) => part.path
-    ? <FilePathCode key={index} raw={part.path}>{part.text}</FilePathCode> : part.text)}</>;
+    ? <FilePathCode key={index} raw={part.text}>{part.text}</FilePathCode> : part.text)}</>;
+}
+
+function RemoteMarkdownImage({ url, alt }: { readonly url: string; readonly alt: string }) {
+  const preview = useContext(DocumentPreviewContext);
+  return preview?.remoteImages === 'link'
+    ? <button type="button" className="ui-button is-compact" title={url}
+      onClick={() => preview.openUrl?.(url)} disabled={!preview.openUrl}>
+      <PeerIcon name="globe" size={14} />{preview.remoteImageLabel ?? 'Open external image'}: {alt}
+    </button>
+    : <span className="markdown-local-image"><img src={url} alt={alt} /></span>;
 }
 
 /**
@@ -341,9 +366,7 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
       const externalHref = safeExternalHref(next.destination);
       if (externalHref) {
         nodes.push(
-          <span key={key} className="markdown-local-image">
-            <img src={externalHref} alt={alt} />
-          </span>,
+          <RemoteMarkdownImage key={key} url={externalHref} alt={alt} />,
         );
       } else if (parseFilePathToken(next.destination) || isLocalImagePath(next.destination)) {
         nodes.push(
@@ -364,9 +387,9 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
       const externalHref = safeExternalHref(next.destination);
       if (externalHref) {
         nodes.push(
-          <a key={key} href={externalHref} target="_blank" rel="noreferrer noopener">
+          <MarkdownExternalLink key={key} href={externalHref}>
             {label}
-          </a>,
+          </MarkdownExternalLink>,
         );
       } else {
         nodes.push(<MarkdownFileLink key={key} destination={next.destination}>{label}</MarkdownFileLink>);

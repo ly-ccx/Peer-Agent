@@ -1,8 +1,8 @@
-export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents';
+export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents' | 'launcher' | 'changes';
 
 function isWorkbenchTab(value: unknown): value is WorkbenchTabId {
   return (
-    value === 'plan' ||
+    value === 'plan' || value === 'launcher' || value === 'changes' ||
     value === 'browser' ||
     value === 'files' ||
     value === 'documents'

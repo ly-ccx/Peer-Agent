@@ -1,4 +1,28 @@
+import type { BotDocumentReference } from '@peer-agent/protocol';
 export type WorkbenchFileMode = 'preview' | 'source' | 'diff';
+
+export interface DocumentNavigation { readonly line: number; readonly requestId: string }
+export interface DocumentComparison { readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' }
+
+export function normalizeDocumentComparison(raw: unknown): DocumentComparison | undefined {
+  if (!raw || typeof raw !== 'object') return;
+  const value = raw as Record<string, unknown>;
+  if (value.comparison === 'working' || value.comparison === 'staged') return { fromRef: 'HEAD', comparison: value.comparison };
+  if (value.comparison !== undefined) return;
+  const sha = (ref: unknown): ref is string => typeof ref === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(ref);
+  if (!sha(value.fromRef) || value.toRef !== undefined && !sha(value.toRef)) return;
+  return { fromRef: value.fromRef, ...(value.toRef ? { toRef: value.toRef as string } : {}) };
+}
+
+export function documentComparisonLabel(value: DocumentComparison, isZh = false): string {
+  return value.comparison === 'working' ? (isZh ? 'Diff · 暂存区 → 工作树' : 'Diff · Index → Working tree')
+    : value.comparison === 'staged' ? (isZh ? 'Diff · HEAD → 暂存区' : 'Diff · HEAD → Index')
+      : `Diff · ${value.fromRef.slice(0, 8)} → ${value.toRef?.slice(0, 8) ?? (isZh ? '工作树' : 'Working tree')}`;
+}
+
+function documentNavigation(line: unknown, requestId: string): DocumentNavigation | undefined {
+  return typeof line === 'number' && Number.isSafeInteger(line) && line > 0 && line <= 1_000_000 ? { line, requestId } : undefined;
+}
 
 export interface DocumentTabSession {
   readonly id: string;
@@ -7,6 +31,9 @@ export interface DocumentTabSession {
   /** 原始相对路径（解析前），用于主进程跨已知 workspace 回退查找。 */
   readonly relPath?: string;
   readonly mode: WorkbenchFileMode;
+  readonly reference?: BotDocumentReference;
+  readonly navigation?: DocumentNavigation;
+  readonly comparison?: DocumentComparison;
 }
 
 export interface DocumentSessionState {
@@ -33,14 +60,23 @@ export function createDocumentTabSession(
     readonly workspaceRoot?: string;
     readonly relPath?: string;
     readonly mode?: WorkbenchFileMode;
+    readonly reference?: BotDocumentReference;
+    readonly line?: number;
+    readonly comparison?: DocumentComparison;
   } = {},
 ): DocumentTabSession {
+  const id = options.id ?? createDocumentTabId();
+  const navigation = documentNavigation(options.line, id);
+  const comparison = normalizeDocumentComparison(options.comparison);
   return {
-    id: options.id ?? createDocumentTabId(),
+    id,
     absPath,
     ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
     ...(options.relPath ? { relPath: options.relPath } : {}),
     mode: options.mode ?? 'preview',
+    ...(options.reference ? { reference: options.reference } : {}),
+    ...(navigation ? { navigation } : {}),
+    ...(comparison ? { comparison } : {}),
   };
 }
 
@@ -52,11 +88,31 @@ function isDocumentMode(value: unknown): value is WorkbenchFileMode {
   return value === 'preview' || value === 'source' || value === 'diff';
 }
 
+export function normalizeDocumentTask(value: unknown): BotDocumentReference['task'] | null {
+  if (!value || typeof value !== 'object') return null;
+  const task = value as Record<string, unknown>;
+  const valid = (id: unknown): id is string => typeof id === 'string' && !!id.trim() && id.length <= 256 && !/[\u0000-\u001f]/.test(id);
+  return valid(task.sessionId) && valid(task.planId) ? { sessionId: task.sessionId, planId: task.planId } : null;
+}
+
 function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const tab = raw as Record<string, unknown>;
   if (typeof tab.id !== 'string' || !tab.id.trim()) return null;
   if (typeof tab.absPath !== 'string' || !tab.absPath.trim()) return null;
+  const rawNavigation = tab.navigation && typeof tab.navigation === 'object' ? tab.navigation as Record<string, unknown> : undefined;
+  // The same normalizer runs on live reducer updates and persisted restoration.
+  // Replacing every intent ID with the tab ID loses repeated clicks on one file.
+  const requestId = typeof rawNavigation?.requestId === 'string' && rawNavigation.requestId.trim()
+    && rawNavigation.requestId.length <= 128 && !/[\u0000-\u001f]/.test(rawNavigation.requestId)
+    ? rawNavigation.requestId : `restored:${tab.id}`;
+  const navigation = documentNavigation(rawNavigation?.line, requestId);
+  const comparison = normalizeDocumentComparison(tab.comparison);
+  if (tab.comparison !== undefined && !comparison) return null;
+  const rawTask = (tab.reference as BotDocumentReference | undefined)?.task;
+  const task = normalizeDocumentTask(rawTask);
+  if (rawTask !== undefined && (!task || typeof (tab.reference as BotDocumentReference).workspaceId !== 'string'
+    || typeof (tab.reference as BotDocumentReference).path !== 'string')) return null;
   return {
     id: tab.id,
     absPath: tab.absPath,
@@ -65,6 +121,17 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
       : {}),
     ...(typeof tab.relPath === 'string' && tab.relPath ? { relPath: tab.relPath } : {}),
     mode: isDocumentMode(tab.mode) ? tab.mode : 'preview',
+    ...(navigation ? { navigation } : {}),
+    ...(comparison ? { comparison } : {}),
+    ...(tab.reference && typeof tab.reference === 'object'
+      && typeof (tab.reference as BotDocumentReference).workspaceId === 'string'
+      && typeof (tab.reference as BotDocumentReference).path === 'string'
+      ? { reference: { workspaceId: (tab.reference as BotDocumentReference).workspaceId,
+          path: (tab.reference as BotDocumentReference).path,
+          ...(task ? { task } : {}),
+          ...((tab.reference as BotDocumentReference).kind === 'directory' ? { kind: 'directory' as const } : {}),
+          ...(typeof (tab.reference as BotDocumentReference).relativeTo === 'string'
+            ? { relativeTo: (tab.reference as BotDocumentReference).relativeTo } : {}) } } : {}),
   };
 }
 
@@ -76,9 +143,11 @@ export function normalizeDocumentSessionState(raw: unknown): DocumentSessionStat
   const tabs = (Array.isArray(value.tabs) ? value.tabs : [])
     .map(normalizeDocumentTab)
     .filter((tab): tab is DocumentTabSession => {
-      if (!tab || ids.has(tab.id) || paths.has(tab.absPath)) return false;
+      if (!tab) return false;
+      const key = JSON.stringify([tab.absPath, tab.reference?.workspaceId, tab.reference?.relativeTo, tab.reference?.task, tab.comparison]);
+      if (ids.has(tab.id) || paths.has(key)) return false;
       ids.add(tab.id);
-      paths.add(tab.absPath);
+      paths.add(key);
       return true;
     });
   if (tabs.length === 0) return createDocumentSessionState();
@@ -103,12 +172,18 @@ export function openDocumentTab(
   tab: DocumentTabSession,
   options: { readonly replaceMode?: boolean } = {},
 ): DocumentSessionState {
-  const index = session.tabs.findIndex((candidate) => candidate.absPath === tab.absPath);
+  const index = session.tabs.findIndex((candidate) => candidate.absPath === tab.absPath
+    && candidate.reference?.workspaceId === tab.reference?.workspaceId
+    && candidate.reference?.relativeTo === tab.reference?.relativeTo
+    && JSON.stringify(candidate.reference?.task) === JSON.stringify(tab.reference?.task)
+    && JSON.stringify(candidate.comparison) === JSON.stringify(tab.comparison));
   if (index < 0) return { tabs: [...session.tabs, tab], activeTabId: tab.id };
 
   const current = session.tabs[index];
   const next = {
     ...current,
+    ...(tab.reference ? { reference: tab.reference } : {}),
+    ...(tab.navigation ? { navigation: tab.navigation } : {}),
     ...(tab.workspaceRoot ? { workspaceRoot: tab.workspaceRoot } : {}),
     ...(tab.relPath ? { relPath: tab.relPath } : {}),
     ...(options.replaceMode ? { mode: tab.mode } : {}),
@@ -116,6 +191,8 @@ export function openDocumentTab(
   const changed =
     next.workspaceRoot !== current.workspaceRoot ||
     next.relPath !== current.relPath ||
+    JSON.stringify(next.reference) !== JSON.stringify(current.reference) ||
+    next.navigation !== current.navigation ||
     next.mode !== current.mode;
   if (!changed && session.activeTabId === current.id) return session;
   const tabs = changed

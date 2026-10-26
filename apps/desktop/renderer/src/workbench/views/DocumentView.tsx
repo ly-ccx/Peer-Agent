@@ -11,6 +11,8 @@ import {
 } from '../file-preview/fileTypes';
 import { MarkdownDocument } from '../file-preview/MarkdownDocument';
 import { SourceViewer } from '../file-preview/SourceViewer';
+import { ScopedDocumentPage } from '../ScopedDocumentPage';
+import { ScopedComparisonPage } from '../ScopedComparisonPage';
 import { ResourceTabStrip, resourceTabIds } from '../ResourceTabStrip';
 import { OpenTargetSplitButton } from '../OpenTargetSplitButton';
 import {
@@ -28,6 +30,9 @@ import {
 } from '../documentSessionState';
 
 interface DocumentViewProps {
+  readonly visible?: boolean;
+  readonly hideTabStrip?: boolean;
+  readonly botWorkspaceId?: string;
   readonly isZh: boolean;
   readonly session: DocumentSessionState;
   readonly onSessionChange: (
@@ -149,6 +154,9 @@ export function DocumentView({
   session,
   onSessionChange,
   onBrowseFiles,
+  hideTabStrip = false,
+  botWorkspaceId,
+  visible = true,
 }: DocumentViewProps) {
   const tabsId = useId();
   const selectTab = useCallback((tabId: string) => {
@@ -171,7 +179,7 @@ export function DocumentView({
 
   return (
     <div className="document-view">
-      <ResourceTabStrip idPrefix={tabsId}
+      <ResourceTabStrip hidden={hideTabStrip} idPrefix={tabsId}
         ariaLabel={isZh ? '文档标签' : 'Document tabs'}
         items={items}
         activeId={session.activeTabId}
@@ -198,7 +206,11 @@ export function DocumentView({
             </button>
           </div>
         ) : session.tabs.map((tab) => (
-          <DocumentPage idPrefix={tabsId}
+          tab.comparison ? botWorkspaceId ? <ScopedComparisonPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
+            active={visible && session.activeTabId === tab.id} /> : <section key={tab.id} className="document-page" data-active={session.activeTabId === tab.id}
+              inert={session.activeTabId !== tab.id} aria-hidden={session.activeTabId !== tab.id}><p role="alert">{isZh ? '请回到所属机器人查看此比较。' : 'Return to the owning Bot to read this comparison.'}</p></section>
+            : botWorkspaceId ? <ScopedDocumentPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
+            active={visible && session.activeTabId === tab.id} onModeChange={changeMode} /> : <DocumentPage idPrefix={tabsId}
             key={tab.id}
             isZh={isZh}
             tab={tab}

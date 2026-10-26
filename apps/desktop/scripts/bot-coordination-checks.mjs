@@ -19,7 +19,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
         reason:'根据补充说明，检查对象改为引用卡片，保留已经做过的检查。',goalRevision:2,priorSessionId:base.sessionId,
         ...(state==='cancelled'?{replacementSessionId:replacement.sessionId,replacementTitle:replacement.title}:{})};
       update({sessions:[{...base,status:state==='handoff'?'starting':state,coordination},replacement]});
-      await page.locator('.bot-profile').click();
+      await page.getByRole('button', { name: '机器人设置', exact: true }).click();
       await page.getByRole('tab',{name:'任务',exact:true}).click();
       if (await page.locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
       await until(()=>page.locator('.bot-task-row').filter({hasText:base.title}).count(),count=>count===1);

@@ -22,10 +22,13 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   assert.equal(await page.locator('.bot-row.is-open').getAttribute('id'), rowIds.at(-1));
   await list.focus(); await list.press('Home'); await list.press('Enter');
   checks.push('Space opens the selected bot without scrolling the page');
-  const trigger = page.locator('.bot-profile'); await trigger.focus(); await trigger.press('Enter');
+  const trigger = page.getByRole('button', { name: '机器人设置', exact: true }); await trigger.focus(); await trigger.press('Enter');
   const tabs = page.locator('.bot-drawer-tabs');
   await until(() => focused(tabs.getByRole('tab', { selected: true })), Boolean);
-  assert.equal(await trigger.textContent(), '机器人设置');
+  assert.equal(await trigger.getAttribute('aria-label'), '机器人设置');
+  assert.equal(await trigger.getAttribute('title'), '机器人设置');
+  assert.equal(await trigger.locator('svg').count(), 1);
+  assert.equal((await trigger.textContent()).trim(), '', 'compact header uses an accessible icon button');
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'Bot settings enters configuration directly');
   const header = await page.locator('.bot-main-head').evaluate(node => {
     const rect = node.getBoundingClientRect(), avatar = node.querySelector('.bot-avatar').getBoundingClientRect();
@@ -159,7 +162,9 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   await choose('语言', 'English'); await page.getByRole('button', { name: 'Interface', exact: true }).waitFor();
   await page.locator('.settings-nav').getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('.bot-shell').waitFor();
-  await trigger.click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+  const englishTrigger = page.getByRole('button', { name: 'Bot settings', exact: true });
+  assert.equal(await englishTrigger.getAttribute('title'), 'Bot settings');
+  await englishTrigger.click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   const quick = app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat');
   await quickNative('open');
@@ -319,7 +324,7 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   await page.keyboard.press('Escape');
   assert.equal(await form.isVisible(), true, 'Escape from the strength popover keeps the drawer open');
   await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await until(() => picker('对话模型').locator('.model-selection-trigger-label').textContent(), text => text === first.label);
   assert.equal(await picker('任务执行').locator('.model-selection-trigger-label').textContent(), second.label);
@@ -348,7 +353,7 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
     if (!result.ok) throw Error('Fixture model policy restore failed');
   }, { workspaceId, policy: original.modelPolicy || {} });
   await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   const restored = await page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).modelViews, workspaceId);
   assert.equal(restored.session_worker.resolution.ok, true);
@@ -363,7 +368,7 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
     await page.keyboard.press('Escape');
     await page.evaluate(async ({workspaceId,policy}) => window.peerAgent.projectAgentUpdateProfile({workspaceId,modelPolicy:policy}),
       {workspaceId,policy:original.modelPolicy||{}});
-    await page.locator('.bot-profile').click(); await page.getByRole('tab', { name: '设置', exact: true }).click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click(); await page.getByRole('tab', { name: '设置', exact: true }).click();
   }
   report.botModelSettings = { fixedSelectionSaved: true, effortSaved: true, effortRetained: true, reopenRetained: true, modelSwitchSaved: true, inheritanceRestored: true,
     independentRoles: true, otherBotUnchanged: true, globalConfigUnchanged: true,

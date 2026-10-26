@@ -18,6 +18,7 @@ import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
 import { BotDocumentPreview } from './conversation/BotDocumentPreview';
+import { BotResourceButton, useBotResourceOwner, type BotResourceOwner } from '../workbench/ResourceWorkspaceContext';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
 import type { TaskConversationContext, TaskConversationRequest } from './state/taskConversationState';
@@ -50,6 +51,7 @@ import './styles/bot-list.css';
 type BotPage = 'chat' | 'home' | 'automations' | 'tools' | 'settings';
 
 export interface BotListShellProps {
+  readonly onResourceOwnerChange?: (owner: BotResourceOwner | null) => void;
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly activePage: BotPage;
@@ -79,7 +81,10 @@ function typingTarget(target: EventTarget | null): boolean {
   return target.getAttribute('type') !== 'search';
 }
 
+const ignoreResourceOwner = (_owner: BotResourceOwner | null) => {};
+
 export function BotListShell({
+  onResourceOwnerChange = ignoreResourceOwner,
   i18n,
   isZh,
   activePage,
@@ -124,6 +129,7 @@ export function BotListShell({
   useEffect(() => { drawerEntered.current = drawerMemory.open; }, [drawerMemory.open]);
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  useBotResourceOwner(opened?.workspaceId ?? null, onResourceOwnerChange, opened?.profile.agentConversationId);
   const currentDrawerMemory = drawerLoadedFor === opened?.workspaceId ? drawerMemory : closeDrawer(drawerMemory);
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
     const mood = botAvatarMood(item.state, replyFlash === item.workspaceId);
@@ -444,7 +450,9 @@ export function BotListShell({
               <button
                 ref={profileButtonRef}
                 type="button"
-                className="bot-profile"
+                className="bot-profile is-icon"
+                title={i18n.t('projectAgent.list.profile')}
+                aria-label={i18n.t('projectAgent.list.profile')}
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
                 data-session-id={locateSessionId ?? currentDrawerMemory.sessionId ?? undefined}
@@ -459,8 +467,8 @@ export function BotListShell({
                 }}
               >
                 <PeerIcon name="settings" size={16} strokeWidth={1.75} />
-                <span>{i18n.t('projectAgent.list.profile')}</span>
               </button>
+              <BotResourceButton isZh={isZh} />
             </header>
             <BotDocumentPreview key={opened.workspaceId} workspaceId={opened.workspaceId} i18n={i18n}>
             <BotConversation

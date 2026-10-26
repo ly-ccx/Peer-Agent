@@ -79,15 +79,18 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
           const transparencyReduced = matchMedia('(prefers-reduced-transparency: reduce)').matches;
           probe.style.background = `var(${material === 'glass' && !transparencyReduced ? '--glass-chrome' : '--chrome-raised'})`;
           shell.append(probe); const expected = getComputedStyle(probe).backgroundColor; probe.remove();
+          const canvas = shell.closest('.bot-resource-layout') ?? shell;
           const column = shell.querySelector('.bot-column'), main = shell.querySelector('.bot-main');
           const c = column.getBoundingClientRect(), m = main.getBoundingClientRect(), s = shell.getBoundingClientRect();
-          return { background: getComputedStyle(shell).backgroundColor, expected, transparencyReduced,
+          return { background: getComputedStyle(canvas).backgroundColor, expected, transparencyReduced,
+            resourceHost: canvas !== shell, innerBackground: getComputedStyle(shell).backgroundColor,
             sidebar: getComputedStyle(column).backgroundColor, divider: getComputedStyle(column).borderRightWidth, radius: parseFloat(getComputedStyle(main).borderRadius),
             gap: m.left - c.right, top: m.top - s.top, fits: shell.scrollWidth <= shell.clientWidth };
         }, material);
         assert.ok(actual.fits);
         if (nativeGlass) {
           assert.equal(actual.background, actual.expected, 'one theme-derived tint covers sidebar and all panel gutters');
+          if (actual.resourceHost) assert.equal(actual.innerBackground, 'rgba(0, 0, 0, 0)', 'the inner conversation shell does not apply the resource canvas tint twice');
           assert.equal(actual.divider, '0px', 'floating panels replace the old sidebar seam');
           assert.equal(actual.sidebar, 'rgba(0, 0, 0, 0)', 'sidebar cannot tint the same backdrop a second time');
           assert.ok(actual.gap >= 9 && actual.top >= 9 && actual.radius > 0, 'content remains floating in either material');
@@ -95,13 +98,17 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
         cases.push({ width, theme, material, nativeGlass, ...actual });
         await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `window-material-${material}-${width}-${theme}.png`) });
         if (width === 1280 && theme === 'dark' && material === 'glass') {
-          await page.locator('.bot-profile').click();
+          await page.getByRole('button', { name: '机器人设置', exact: true }).click();
           const dock = page.locator('.bot-drawer-dock.is-open'); await dock.waitFor();
           await until(() => dock.evaluate(node => node.getBoundingClientRect().width), value => value > 300);
-          if (nativeGlass) assert.equal(await dock.evaluate(node => {
+          const settledDock = () => dock.evaluate(node => {
             const main = document.querySelector('.bot-main').getBoundingClientRect();
             return node.getBoundingClientRect().left - main.right >= 9 && parseFloat(getComputedStyle(node).borderRadius) > 0;
-          }), true, 'details and main content remain separate floating panels');
+          });
+          if (nativeGlass) {
+            await until(settledDock, Boolean);
+            assert.equal(await settledDock(), true, 'details and main content remain separate floating panels');
+          }
           await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'window-material-drawer-1280-dark.png') });
           await page.getByRole('button', { name: '关闭', exact: true }).click();
           await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
@@ -115,7 +122,10 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
       if (nativeGlass) assert.equal(await page.locator('.bot-shell').evaluate(shell => {
         const probe = document.createElement('span'); probe.style.background = 'var(--chrome-raised)'; shell.append(probe);
         const expected = getComputedStyle(probe).backgroundColor; probe.remove();
-        return getComputedStyle(shell).backgroundColor === expected && getComputedStyle(shell.querySelector('.bot-column')).backgroundColor === 'rgba(0, 0, 0, 0)';
+        const canvas = shell.closest('.bot-resource-layout') ?? shell;
+        return getComputedStyle(canvas).backgroundColor === expected
+          && (canvas === shell || getComputedStyle(shell).backgroundColor === 'rgba(0, 0, 0, 0)')
+          && getComputedStyle(shell.querySelector('.bot-column')).backgroundColor === 'rgba(0, 0, 0, 0)';
       }), true, 'reduced transparency uses one solid base without changing floating layout');
       await openAppearance();
       await inspectSettings('light', 'glass', true);

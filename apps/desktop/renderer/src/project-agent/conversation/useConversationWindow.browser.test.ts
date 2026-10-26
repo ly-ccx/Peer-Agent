@@ -4,12 +4,12 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import * as windowGeometry from '../state/conversationWindow.ts';
-import { createConversationReadingMemory } from '../state/conversationReadingMemory.ts';
+import { createConversationReadingMemory, type ReadingSnapshot } from '../state/conversationReadingMemory.ts';
 import { resolveThreadFollowAfterScroll } from '../../chat/state/threadScrollPolicy.ts';
 import { createStreamingScrollScheduler } from '../../chat/state/streamingScrollScheduler.ts';
 import { isImeKey } from '../../chat/state/compositionGuard.ts';
 
-function mountConversation(rows: unknown[] = []) {
+function mountConversation(rows: unknown[] = [], snapshot?: ReadingSnapshot) {
   const effects: (() => void | (() => void))[] = [];
   const layoutEffects: (() => void | (() => void))[] = [];
   const frames = new Map<number, () => void>();
@@ -26,6 +26,9 @@ function mountConversation(rows: unknown[] = []) {
     addEventListener() {}, removeEventListener() {},
   };
   const memory = createConversationReadingMemory();
+  if (snapshot) memory.save('clicked-bot', snapshot);
+  const resizeCallbacks = new Set<() => void>();
+  let rowHeight = 72, paragraphOffset = 40;
   const modules: Record<string, unknown> = {
     react: {
       useRef: (current: unknown) => ({ current }),
@@ -46,6 +49,12 @@ function mountConversation(rows: unknown[] = []) {
   runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, {
     exports, window: browser, requestAnimationFrame: browser.requestAnimationFrame,
     cancelAnimationFrame: browser.cancelAnimationFrame, setTimeout, clearTimeout,
+    ResizeObserver: class {
+      readonly callback: () => void;
+      constructor(callback: () => void) { this.callback = callback; resizeCallbacks.add(callback); }
+      observe() {}
+      disconnect() { resizeCallbacks.delete(this.callback); }
+    },
     require(id: string) { if (id in modules) return modules[id]; throw Error('Unexpected dependency: ' + id); },
   });
   const view = exports.useConversationWindow(rows, null, 0, 0,
@@ -55,10 +64,12 @@ function mountConversation(rows: unknown[] = []) {
   const scroller = {
     get scrollTop() { return scrollTop; },
     set scrollTop(value: number) { scrollTop = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)); },
-    scrollHeight: rows.length ? rows.length * 72 : 1040, clientHeight: 320,
+    scrollHeight: rows.length ? rows.length * 72 : 1040, clientHeight: 320, clientWidth: 800,
     getBoundingClientRect: () => ({ top: 0 }),
     querySelectorAll: () => rows.map((_row, index) => ({ dataset: { conversationRow: `m${index}` },
-      getBoundingClientRect: () => ({ top: index * 72 - scrollTop, bottom: (index + 1) * 72 - scrollTop, height: 72 }) })),
+      getBoundingClientRect: () => ({ top: index * rowHeight - scrollTop, bottom: (index + 1) * rowHeight - scrollTop, height: rowHeight }),
+      querySelectorAll: () => [{ getBoundingClientRect: () => ({ top: index * rowHeight + paragraphOffset - scrollTop,
+        bottom: index * rowHeight + paragraphOffset + 32 - scrollTop, height: 32 }) }] })),
     addEventListener(type: string, listener: () => void, options?: { capture?: boolean }) {
       if (type === 'scroll' && options?.capture) nativeScroll.add(listener);
     },
@@ -67,11 +78,41 @@ function mountConversation(rows: unknown[] = []) {
   view.scrollerRef.current = scroller;
   const cleanups = [...layoutEffects, ...effects].map(effect => effect());
   return { view, scroller, memory, frames, layoutEffects, cleanups, nativeScroll,
+    resize(width: number, nextRowHeight: number, nextParagraphOffset: number) {
+      scroller.clientWidth = width; rowHeight = nextRowHeight; paragraphOffset = nextParagraphOffset;
+      scroller.scrollHeight = rows.length * rowHeight;
+      resizeCallbacks.forEach(measure => measure());
+    },
     get requested() { return requested; }, get cancelled() { return cancelled; },
     flush() { const pending = [...frames.values()]; frames.clear(); pending.forEach(frame => frame()); },
     dispose() { cleanups.reverse().forEach(cleanup => { if (typeof cleanup === 'function') cleanup(); }); },
   };
 }
+
+test('sidebar reflow keeps a visible paragraph at its reading offset, in both directions', () => {
+  const rows = Array.from({ length: 50 }, (_, index) => ({ type: 'message', message: { id: `m${index}`, kind: 'user_input' } }));
+  const mounted = mountConversation(rows, { following: false, anchor: { key: 'm20', delta: -24 }, top: 1464,
+    heights: rows.map((_, index) => [`m${index}`, 72] as const) });
+  assert.equal(mounted.scroller.scrollTop, 1464);
+  mounted.resize(600, 104, 70);
+  assert.equal(20 * 104 + 70 - mounted.scroller.scrollTop, 16, 'the same paragraph stays in place after wrapping');
+  mounted.resize(800, 72, 40);
+  assert.equal(mounted.scroller.scrollTop, 1464, 'restoring width restores the reading position without following');
+  mounted.dispose();
+});
+
+test('sidebar reflow cannot override a current reading gesture', () => {
+  const rows = Array.from({ length: 50 }, (_, index) => ({ type: 'message', message: { id: `m${index}`, kind: 'user_input' } }));
+  const mounted = mountConversation(rows, { following: false, anchor: { key: 'm20', delta: -24 }, top: 1464,
+    heights: rows.map((_, index) => [`m${index}`, 72] as const) });
+  mounted.view.onWheel({ deltaY: -40 });
+  mounted.scroller.scrollTop -= 40;
+  mounted.nativeScroll.forEach(capture => capture());
+  const applied = mounted.scroller.scrollTop;
+  mounted.resize(600, 104, 70);
+  assert.equal(mounted.scroller.scrollTop, applied, 'pointer/scroll intent wins over automatic compensation');
+  mounted.dispose();
+});
 
 test('mounting and leaving a conversation invoke frame APIs with their browser receiver', () => {
   const mounted = mountConversation();

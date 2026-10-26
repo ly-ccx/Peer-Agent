@@ -132,3 +132,69 @@ test('fallback discovery does not accept an unconfirmed companion, escaped file 
     assert.equal((await resolve({ workspaceId: 'bot', path: 'escape.md' })).status, 'not_found');
   } finally { f.dispose(); }
 });
+
+test('R1 directory intent resolves only confirmed scope and validates request shape', async () => {
+  const f = fixture();
+  try {
+    const resolve = createBotDocumentResolver(f.options);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'directory', metadataOnly: true })).target, f.root);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'Peer-Knowledge', kind: 'directory' })).target, f.knowledge);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md', kind: 'directory' })).ok, false);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'unknown' })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', metadataOnly: 'true' })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: f.dir, kind: 'directory' })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
+test('an absolute OS/path alias resolves to the same allowed physical root without admitting an escape', async () => {
+  const f = fixture();
+  try {
+    const alias = path.join(f.dir, 'alias');
+    symlinkSync(f.root, alias);
+    symlinkSync(path.join(f.dir, 'private.md'), path.join(f.root, 'escape.md'));
+    const resolve = createBotDocumentResolver(f.options);
+    const result = await resolve({ workspaceId: 'bot', path: path.join(alias, 'README.md') });
+    assert.equal(result.ok, true); assert.equal(result.target, path.join(f.root, 'README.md'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: alias, kind: 'directory' })).target, f.root);
+    assert.equal((await resolve({ workspaceId: 'bot', path: path.join(alias, 'escape.md') })).status, 'scope_denied');
+    assert.equal((await resolve({ workspaceId: 'bot', path: path.join(f.dir, 'private.md') })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
+test('task worktrees outside registered roots require live matching Session and GoalPlan records on every read', async () => {
+  const f = fixture();
+  try {
+    const worktree = path.join(f.dir, 'internal', 'task-tree'); mkdirSync(worktree, { recursive: true });
+    writeFileSync(path.join(worktree, 'result.md'), '# Task result');
+    writeFileSync(path.join(worktree, 'other.md'), '# Nested');
+    symlinkSync(path.join(f.dir, 'private.md'), path.join(worktree, 'escape.md'));
+    const task = { sessionId: 'task', planId: 'plan' };
+    let session = { workspaceId: 'bot', sessionId: 'task', report: { planId: 'plan' } };
+    let plan = { planId: 'plan', delegationOrigin: { workspaceId: 'bot', sessionId: 'task' },
+      deliveryBinding: { executionIsolation: 'worktree', worktreePath: worktree, targetWorkspacePath: f.root, baseCommit: 'a'.repeat(40) } };
+    const originalPlan = structuredClone(plan), originalSession = structuredClone(session);
+    const resolve = createBotDocumentResolver({ ...f.options, getTaskSession: id => id === 'task' ? session : null,
+      getTaskPlan: id => id === 'plan' ? plan : null });
+    const reference = { workspaceId: 'bot', path: path.join(worktree, 'result.md'), task };
+    assert.equal((await resolve({ ...reference, task: undefined })).status, 'scope_denied');
+    assert.deepEqual(await resolve(reference), { ok: true, root: worktree, target: reference.path });
+    assert.equal((await resolve({ ...reference, path: 'other.md', relativeTo: reference.path })).target, path.join(worktree, 'other.md'));
+    for (const change of [{ path: path.join(f.root, 'README.md') }, { path: '../private.md' }, { path: path.join(worktree, 'escape.md') },
+      { task: { ...task, planId: 'forged' } }, { task: { ...task, sessionId: 'other' } }, { task: {} }, { task: null }]) {
+      assert.equal((await resolve({ ...reference, ...change })).ok, false);
+    }
+    for (const change of [{ workspaceId: 'other' }, { sessionId: 'other' }, { report: { planId: 'other' } }]) {
+      session = { ...originalSession, ...change }; assert.equal((await resolve(reference)).status, 'scope_denied');
+    }
+    session = originalSession;
+    for (const change of [{ planId: 'other' }, { delegationOrigin: { workspaceId: 'other', sessionId: 'task' } },
+      { delegationOrigin: { workspaceId: 'bot', sessionId: 'other' } }, { deliveryBinding: { ...originalPlan.deliveryBinding, worktreePath: undefined } },
+      { deliveryBinding: { ...originalPlan.deliveryBinding, baseCommit: 'HEAD' } }]) {
+      plan = { ...originalPlan, ...change }; assert.equal((await resolve(reference)).ok, false);
+    }
+    plan = originalPlan;
+    unlinkSync(reference.path); assert.equal((await resolve(reference)).status, 'not_found');
+    rmSync(worktree, { recursive: true }); assert.equal((await resolve(reference)).ok, false);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md' })).ok, true);
+  } finally { f.dispose(); }
+});

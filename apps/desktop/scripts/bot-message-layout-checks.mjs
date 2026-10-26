@@ -86,7 +86,11 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       }), Boolean);
       const bounds = await recoveryMessage.evaluate(node => {
         const shell = node.closest('.bot-shell').getBoundingClientRect(), body = node.querySelector('.bot-reply-body').getBoundingClientRect();
-        return { shellLeft: shell.left, shellRight: shell.right, bodyLeft: body.left, bodyRight: body.right, viewport: innerWidth };
+        const layout = node.closest('.bot-resource-layout'), primary = node.closest('.bot-resource-primary');
+        return { shellLeft: shell.left, shellRight: shell.right, bodyLeft: body.left, bodyRight: body.right, viewport: innerWidth,
+          documentScrollLeft: document.documentElement.scrollLeft, bodyScrollLeft: document.body.scrollLeft,
+          layoutScrollLeft: layout?.scrollLeft, layoutScrollWidth: layout?.scrollWidth, layoutWidth: layout?.clientWidth,
+          primaryScrollLeft: primary?.scrollLeft };
       });
       assert.ok(bounds.shellLeft >= -1 && bounds.shellRight <= bounds.viewport + 1 && bounds.bodyLeft >= 0 && bounds.bodyRight <= bounds.viewport,
         `recovery image must use settled page bounds: ${JSON.stringify({ state, width, appearance, ...bounds })}`);
@@ -108,7 +112,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
       for (const docked of width === 1280 ? [false, true] : [false]) {
         if (docked) {
-          await page.locator('.bot-profile').click();
+          await page.getByRole('button', { name: '机器人设置', exact: true }).click();
           await page.locator('.bot-drawer-dock.is-open').waitFor();
           await until(() => page.locator('.bot-convo').evaluate(node => node.getBoundingClientRect().width < 700), Boolean);
         }

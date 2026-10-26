@@ -17,3 +17,12 @@ test('runtime context lists additional source folders as readable only', () => {
   assert.match(text, /Write, edit, and default command cwd stay in the current workspace/);
   assert.equal(text.includes('/tmp/knowledge\n- /tmp/knowledge'), false);
 });
+
+test('R2 runtime source requires complete file targets and distinguishes navigation from execution facts', () => {
+  const text = renderRuntimeContext('/project');
+  assert.match(text, /actual complete path and source/);
+  assert.match(text, /correct repository\/worktree/);
+  assert.match(text, /branch, symbol or guessed basename/);
+  assert.match(text, /not proof/);
+  assert.doesNotMatch(text, /Prefer workspace-relative/);
+});

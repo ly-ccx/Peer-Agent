@@ -207,6 +207,7 @@ import { createConversationApplicationService } from './conversation-application
 import { createConversationReadProjection } from './conversation-read-projection.mjs';
 import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
+import { readBoundedDirectoryEntries } from './workspace-file-search.mjs';
 import { createBotDocumentResolver } from './bot-document-reference.mjs';
 import { createGoalApplicationService } from './goal-application-service.mjs';
 import { createOpenPathApplicationService } from './open-path-application-service.mjs';
@@ -1650,6 +1651,8 @@ const workspaceApplicationService = createWorkspaceApplicationService({
 const fileAccessApplicationService = createFileAccessApplicationService({
   resolveBotDocument: createBotDocumentResolver({
     getWorkspace: workspaceId => projectAgentDirectory.projectAccess?.directory?.get(workspaceId),
+    getTaskSession: sessionId => projectAgentDirectory.projectAccess?.getSession(sessionId),
+    getTaskPlan: planId => goalPlanStore.getPlan(planId),
     getKnownRoots: () => {
       const settings = settingsStore.getAll();
       return [...(settings.workspaces || []).map(item => typeof item === 'string' ? item : item?.path), settings.activeWorkspace]
@@ -1667,6 +1670,7 @@ const fileAccessApplicationService = createFileAccessApplicationService({
   pathExists: (candidate) => existsSync(candidate),
   statPath: (candidate) => statSync(candidate),
   readDirectory: (candidate) => readdirSync(candidate, { withFileTypes: true }),
+  readDirectoryBounded: readBoundedDirectoryEntries,
   readFile: (candidate) => readFileSync(candidate),
   writeFile: (candidate, content) => writeFileSync(candidate, content, 'utf8'),
   createDirectory: (candidate) => mkdirSync(candidate, { recursive: false }),
@@ -2153,7 +2157,7 @@ function registerDesktopIpcHost() {
     ...createProviderAccessIpcRegistrations({
       providers: providerAccessApplicationService,
     }),
-    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService }),
+    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService, searchFiles: fileAccessApplicationService.searchWorkspaceFiles }),
     ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
     ...registerDesktopProjectAgent({
       configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),

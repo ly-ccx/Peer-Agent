@@ -169,7 +169,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   checks.push('waiting work stays a factual status in reply and background; named main bot owns follow-up, optional detail returns to main dialogue');
   report.delegatedWorkHandoff = { reply: true, background: true, noDirectHandling: true, detailReturnsToBot: true, hintChecks };
   // The detail visit remembers Tasks; restore Overview for the following evidence-return case.
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '概况', exact: true }).click();
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await openReplyDetails(page, reply);
@@ -210,7 +210,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   report.replyEvidenceReturn = { sameReply: true, focusInDetails: true };
   assert.equal(await context.locator('.bot-evidence-list li').count(), 20);
   await closeReplyDetails(page);
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '概况', exact: true }).click();
   await page.locator('.bot-overview-identity').waitFor();
   assert.equal(await page.locator('.bot-process').count(), 0);
@@ -264,7 +264,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await context.waitFor();
   assert.equal(await page.locator('.bot-memory-tab, .bot-overview-tab').count(), 0);
   await closeReplyDetails(page);
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '概况', exact: true }).click();
   await page.locator('.bot-overview-identity').waitFor();
   assert.equal(await page.getByRole('tab', { name: '概况', exact: true }).getAttribute('aria-selected'), 'true');
@@ -309,10 +309,9 @@ async function checkParallelTaskRows({ page, until, report, captureDirectory, ch
     assert.equal(await background.locator('.bot-work-title').count(), 2);
     assert.equal(await background.locator('.bot-work-row .bot-work-row').count(), 0);
     if (!wasOpen) { await group.focus(); await page.keyboard.press('Enter'); }
-    await background.evaluate(async node => {
-      await Promise.all(node.getAnimations({ subtree: true }).filter(animation =>
-        animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation => animation.finished));
-    });
+    await until(() => background.evaluate(node => node.getAnimations({ subtree: true }).every(animation =>
+      !Number.isFinite(animation.effect?.getComputedTiming().endTime)
+      || animation.playState !== 'running' && !animation.pending)), Boolean);
     if (!wasRowOpen) { await rows.nth(0).locator(':scope > summary').focus(); await page.keyboard.press('Enter'); }
     assert.equal(await rows.nth(0).getAttribute('open'), '');
     assert.equal(await rows.nth(1).getAttribute('open'), null);

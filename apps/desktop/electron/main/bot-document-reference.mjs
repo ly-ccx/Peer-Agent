@@ -9,6 +9,7 @@ const identity = remote => /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\
 
 /** Bounded resource resolution for the existing file:read service; never a model tool. */
 export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => [], readGitOrigin,
+  getTaskSession, getTaskPlan,
   environment = process.env, realpath = realpathSync, stat = statSync, readFile = readFileSync } = {}) {
   async function knowledgeRoot(root, { optional = false } = {}) {
     const configured = environment.PEER_KNOWLEDGE_ROOT;
@@ -37,16 +38,47 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
     return optional && !configured && !hinted ? null : failure('workspace_unavailable');
   }
 
-  function checkedFile(target, scope) {
+  function checkedFile(target, scope, kind = 'file') {
     if (!scope || !inside(scope, target)) return failure('scope_denied');
     try {
       const canonical = realpath(target);
       if (!inside(scope, canonical)) return failure('scope_denied');
-      if (!stat(canonical).isFile()) return failure('not_file');
+      const info = stat(canonical);
+      if (kind === 'directory' ? !info.isDirectory() : !info.isFile()) return failure('not_file');
       return { ok: true, target: canonical, root: scope };
     } catch (error) {
       return failure(permission(error) ? 'permission_denied' : ['ENOENT', 'ENOTDIR'].includes(error?.code) ? 'not_found' : 'invalid_path');
     }
+  }
+
+  async function resolveTask(reference) {
+    const task = reference.task;
+    const validId = value => typeof value === 'string' && value.trim() && value.length <= 256 && !/[\u0000-\u001f]/.test(value);
+    if (!task || !validId(task.sessionId) || !validId(task.planId)) return failure('invalid_path');
+    const session = await getTaskSession?.(task.sessionId);
+    const plan = await getTaskPlan?.(task.planId);
+    if (!session || !plan || session.workspaceId !== reference.workspaceId || session.sessionId !== task.sessionId
+      || session.report?.planId !== task.planId || plan.planId !== task.planId
+      || plan.delegationOrigin?.workspaceId !== reference.workspaceId || plan.delegationOrigin?.sessionId !== task.sessionId) return failure('scope_denied');
+    const binding = plan.deliveryBinding;
+    const baseline = binding?.baseCommit || plan.baseCommit;
+    const recorded = binding?.executionIsolation === 'worktree' ? binding.worktreePath : binding?.targetWorkspacePath;
+    if (!recorded || !path.isAbsolute(recorded) || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(baseline ?? '')) return failure('workspace_unavailable');
+    // Only this task's recorded root is admitted. No global roots or companion fallback.
+    const scope = realpath(recorded);
+    if (!stat(scope).isDirectory()) return failure('workspace_unavailable');
+    let base = scope;
+    if (reference.relativeTo) {
+      const origin = realpath(reference.relativeTo);
+      if (!inside(scope, origin) || !stat(origin).isFile()) return failure('scope_denied');
+      base = path.dirname(origin);
+    }
+    const raw = reference.path.replace(/\\/g, '/');
+    let target = path.resolve(base, raw);
+    if (!inside(scope, target) && path.isAbsolute(raw)) {
+      try { target = realpath(target); } catch { return failure('scope_denied'); }
+    }
+    return checkedFile(target, scope, reference.kind);
   }
 
   async function otherRelativeLocations(raw, root, known) {
@@ -69,10 +101,13 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
   return async function resolve(reference) {
     if (!reference || typeof reference.workspaceId !== 'string' || typeof reference.path !== 'string'
       || !reference.path.trim() || reference.path.length > 8192 || /[\u0000-\u001f]/.test(reference.path)
+      || (reference.kind !== undefined && !['file', 'directory'].includes(reference.kind))
+      || (reference.metadataOnly !== undefined && typeof reference.metadataOnly !== 'boolean')
       || /^[a-z][\w+.-]*:\/\//i.test(reference.path)) return failure('invalid_path');
     const workspace = getWorkspace(reference.workspaceId);
     if (!workspace?.ok || !workspace.path) return failure('workspace_unavailable');
     try {
+      if (reference.task !== undefined) return await resolveTask(reference);
       const root = realpath(workspace.path);
       const known = [...new Set([root, ...getKnownRoots().flatMap(value => {
         try { return [realpath(value)]; } catch { return []; }
@@ -89,7 +124,17 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
         if (companion.ok) known.push(companion.root);
       }
       let candidates, scope, bareRelative = false;
-      if (path.isAbsolute(raw)) { candidates = [raw]; scope = known.find(base => inside(base, raw)); }
+      if (path.isAbsolute(raw)) {
+        scope = known.find(base => inside(base, raw));
+        let target = raw;
+        if (!scope) {
+          // Native tools may retain a physical root's OS alias (e.g. /var vs /private/var).
+          // Resolve this exact target only; aliases never add an allowed root.
+          try { target = realpath(raw); } catch { return failure('scope_denied'); }
+          scope = known.find(base => inside(base, target));
+        }
+        candidates = [target];
+      }
       else if (qualifiedKnowledge) { candidates = [path.resolve(companion.root, ...parts.slice(1))]; scope = companion.root; }
       else {
         const named = known.filter(base => path.basename(base).toLowerCase() === parts[0].toLowerCase());
@@ -110,8 +155,8 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
       }
       const target = candidates[0];
       // Keep a qualified reference inside its own root, including its lexical traversal.
-      const checked = checkedFile(target, scope);
-      if (checked.status === 'not_found' && bareRelative) return await otherRelativeLocations(raw, root, known);
+      const checked = checkedFile(target, scope, reference.kind);
+      if (checked.status === 'not_found' && bareRelative && reference.kind !== 'directory') return await otherRelativeLocations(raw, root, known);
       return checked;
     } catch (error) {
       return failure(permission(error) ? 'permission_denied' : ['ENOENT', 'ENOTDIR'].includes(error?.code) ? 'not_found' : 'invalid_path');

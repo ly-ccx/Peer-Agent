@@ -62,7 +62,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentListSessions({ workspaceId }), bots[0].workspaceId),
     result => result.sessions?.some(session => session.sessionId === command.sessions[0].sessionId && session.conversationId === child.id));
-  await page.locator('.bot-profile').click();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   // The preceding 760px case must reach its cover layout before opening a child.
   await page.locator('.bot-drawer-panel .bot-drawer-body').waitFor({ state: 'visible' });
   await page.getByRole('tab', { name: '任务', exact: true }).click();

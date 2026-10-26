@@ -6,11 +6,26 @@ import test from 'node:test';
 import {
   isFinderPlaceholderName,
   rankWorkspaceFiles,
+  readBoundedDirectoryEntries,
   scoreWorkspaceFile,
   searchWorkspaceFiles,
   shouldSkipDirName,
   shouldSkipFileName,
 } from './workspace-file-search.mjs';
+
+test('directory enumeration stops at its bound and closes the handle on success and failure', () => {
+  let reads = 0, closed = 0;
+  const result = readBoundedDirectoryEntries('/scope', 2, target => {
+    assert.equal(target, '/scope');
+    return { readSync: () => ({ name: reads++ === 0 ? '.git' : `file-${reads}` }), closeSync: () => { closed++; } };
+  });
+  assert.equal(result.entries.length, 2); assert.equal(result.truncated, true);
+  assert.equal(reads, 4); assert.equal(closed, 1);
+  assert.throws(() => readBoundedDirectoryEntries('/scope', 2, () => ({
+    readSync() { throw Object.assign(new Error('denied'), { code: 'EACCES' }); }, closeSync() { closed++; },
+  })), /denied/);
+  assert.equal(closed, 2);
+});
 
 test('skips hidden and build directories', () => {
   assert.equal(shouldSkipDirName('node_modules'), true);
@@ -82,4 +97,26 @@ test('query search stays inside the workspace root', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('search reports the entry budget and capped results without traversing symlinks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'peer-search-boundary-'));
+  try {
+    const scope = path.join(root, 'scope'), outside = path.join(root, 'outside');
+    fs.mkdirSync(scope); fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'secret.md'), 'private');
+    fs.symlinkSync(outside, path.join(scope, 'linked'), 'dir');
+    for (let index = 0; index < 45; index++) fs.writeFileSync(path.join(scope, `note-${index}.md`), '');
+    const partial = searchWorkspaceFiles(scope, { query: 'note', maxVisited: 3 });
+    assert.equal(partial.visited, 3);
+    assert.equal(partial.truncated, true);
+    const capped = searchWorkspaceFiles(scope, { query: 'note', limit: 100 });
+    assert.equal(capped.files.length, 40);
+    assert.equal(capped.truncated, true);
+    const escaped = searchWorkspaceFiles(scope, { query: 'secret' });
+    assert.deepEqual(escaped.files, []);
+    assert.equal(escaped.workspacePath, scope);
+    assert.equal(escaped.truncated, false);
+    assert.equal(searchWorkspaceFiles(scope, { query: 'x'.repeat(257) }).status, 'invalid_path');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

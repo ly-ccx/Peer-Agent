@@ -32,9 +32,11 @@ export async function checkBotCompletionReview({ page, until, report, captureDir
   await current.getByRole('button', { name: '查看报告', exact: true }).focus(); await page.keyboard.press('Enter');
   const drawer = page.getByRole('dialog', { name: '查看报告', exact: true });
   await drawer.waitFor(); assert.match(await drawer.innerText(), /REPORT_COMPLETE_END/);
-  await drawer.evaluate(async node => {
-    await Promise.all([...node.getAnimations(), ...node.parentElement.getAnimations()].map(animation => animation.finished));
-  });
+  // Overlay releases entrance fill by cancelling its Animation objects when settled.
+  // Re-read live motion instead of awaiting a captured promise that can reject on that valid cleanup.
+  await until(() => drawer.evaluate(node => node.classList.contains('is-settled')
+    && [...node.getAnimations(), ...node.parentElement.getAnimations()]
+      .every(animation => animation.playState !== 'running' && !animation.pending)), Boolean);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'completion-review-report.png') });
   await drawer.getByRole('button', { name: '关闭', exact: true }).click();
   await drawer.waitFor({ state: 'detached' });

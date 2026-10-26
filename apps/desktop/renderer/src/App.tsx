@@ -59,6 +59,7 @@ import { registeredWorkspacePath } from './chat/state/registeredWorkspace';
 import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
+import { BotResourceLayout, type BotResourceOwner } from './workbench/ResourceWorkspaceContext';
 import { BotListShell } from './project-agent/BotListShell';
 import { ClassicShellNotice } from './project-agent/onboarding/ClassicShellNotice';
 import { publishProjectAgentShell } from './project-agent/onboarding/botShell';
@@ -143,6 +144,7 @@ export function App() {
 function MainApp() {
   const { availableLocales, initError, loading: bootstrapLoading, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
   const botListShell = useBotListShell();
+  const [botResourceOwner, setBotResourceOwner] = useState<BotResourceOwner | null>(null);
   const showMainShell = Boolean(session);
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
@@ -991,11 +993,14 @@ function MainApp() {
             inert={activePage === 'settings'}
           >
             <WorkbenchProvider
-              conversationId={activeConversationId}
-              isPageActive={activePage === 'chat'}
+              conversationId={botListShell.active ? botResourceOwner?.conversationId ?? null : activeConversationId}
+              resourceMode={botListShell.active}
+              isPageActive={activePage === 'chat' && (!botListShell.active || !!botResourceOwner?.conversationId)}
             >
               {botListShell.active ? (
+                <BotResourceLayout owner={botResourceOwner} active={activePage === 'chat'} isZh={isZh}>
                 <BotListShell
+                  onResourceOwnerChange={setBotResourceOwner}
                   i18n={i18n}
                   isZh={isZh}
                   activePage={activePage}
@@ -1024,6 +1029,7 @@ function MainApp() {
                   }}
                   notificationFocus={botNotificationFocus}
                 />
+                </BotResourceLayout>
               ) : (
               <div className="app-layout">
             <Sidebar

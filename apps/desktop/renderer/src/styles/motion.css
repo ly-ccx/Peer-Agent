@@ -152,6 +152,21 @@
   }
 }
 
+/* A measured side column gives its space back while its content remains stable. */
+@keyframes motion-exit-collapse-inline {
+  from {
+    flex-basis: var(--motion-collapse-inline-from);
+    width: var(--motion-collapse-inline-from);
+    max-width: var(--motion-collapse-inline-from);
+    padding-inline-end: var(--motion-collapse-inline-padding, 0px);
+  }
+  to { flex-basis: 0px; width: 0px; max-width: 0px; padding-inline-end: 0px; }
+}
+
+.motion-exit-collapse-inline {
+  animation: motion-exit-collapse-inline var(--za-motion-medium) var(--za-ease-accelerate) both;
+}
+
 /* 淡出 + 缩小，支持方向变量（--motion-collapse-x / -y）：
  * 默认原地收缩；升级弹窗「飞向左上角」即传入负向 x/y 的定向实例。
  * 位移上限受 --za-motion-shift-lg（24px）约束，transform-origin 由调用点设定。 */
