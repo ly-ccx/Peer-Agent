@@ -3,6 +3,8 @@ export interface BotDocumentReference {
   readonly workspaceId: string;
   readonly path: string;
   readonly relativeTo?: string;
+  /** Host revalidates Session/GoalPlan ownership on every read; never a root or grant. */
+  readonly task?: { readonly sessionId: string; readonly planId: string };
   /** Explicit UI navigation intent; never an authorization root. */
   readonly kind?: 'file' | 'directory';
   /** Resolve/stat only; never returns file contents. */

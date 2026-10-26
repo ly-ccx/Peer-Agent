@@ -88,6 +88,13 @@ function isDocumentMode(value: unknown): value is WorkbenchFileMode {
   return value === 'preview' || value === 'source' || value === 'diff';
 }
 
+export function normalizeDocumentTask(value: unknown): BotDocumentReference['task'] | null {
+  if (!value || typeof value !== 'object') return null;
+  const task = value as Record<string, unknown>;
+  const valid = (id: unknown): id is string => typeof id === 'string' && !!id.trim() && id.length <= 256 && !/[\u0000-\u001f]/.test(id);
+  return valid(task.sessionId) && valid(task.planId) ? { sessionId: task.sessionId, planId: task.planId } : null;
+}
+
 function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const tab = raw as Record<string, unknown>;
@@ -102,6 +109,10 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
   const navigation = documentNavigation(rawNavigation?.line, requestId);
   const comparison = normalizeDocumentComparison(tab.comparison);
   if (tab.comparison !== undefined && !comparison) return null;
+  const rawTask = (tab.reference as BotDocumentReference | undefined)?.task;
+  const task = normalizeDocumentTask(rawTask);
+  if (rawTask !== undefined && (!task || typeof (tab.reference as BotDocumentReference).workspaceId !== 'string'
+    || typeof (tab.reference as BotDocumentReference).path !== 'string')) return null;
   return {
     id: tab.id,
     absPath: tab.absPath,
@@ -117,6 +128,7 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
       && typeof (tab.reference as BotDocumentReference).path === 'string'
       ? { reference: { workspaceId: (tab.reference as BotDocumentReference).workspaceId,
           path: (tab.reference as BotDocumentReference).path,
+          ...(task ? { task } : {}),
           ...((tab.reference as BotDocumentReference).kind === 'directory' ? { kind: 'directory' as const } : {}),
           ...(typeof (tab.reference as BotDocumentReference).relativeTo === 'string'
             ? { relativeTo: (tab.reference as BotDocumentReference).relativeTo } : {}) } } : {}),
@@ -132,7 +144,7 @@ export function normalizeDocumentSessionState(raw: unknown): DocumentSessionStat
     .map(normalizeDocumentTab)
     .filter((tab): tab is DocumentTabSession => {
       if (!tab) return false;
-      const key = JSON.stringify([tab.absPath, tab.reference?.workspaceId, tab.reference?.relativeTo, tab.comparison]);
+      const key = JSON.stringify([tab.absPath, tab.reference?.workspaceId, tab.reference?.relativeTo, tab.reference?.task, tab.comparison]);
       if (ids.has(tab.id) || paths.has(key)) return false;
       ids.add(tab.id);
       paths.add(key);
@@ -163,6 +175,7 @@ export function openDocumentTab(
   const index = session.tabs.findIndex((candidate) => candidate.absPath === tab.absPath
     && candidate.reference?.workspaceId === tab.reference?.workspaceId
     && candidate.reference?.relativeTo === tab.reference?.relativeTo
+    && JSON.stringify(candidate.reference?.task) === JSON.stringify(tab.reference?.task)
     && JSON.stringify(candidate.comparison) === JSON.stringify(tab.comparison));
   if (index < 0) return { tabs: [...session.tabs, tab], activeTabId: tab.id };
 

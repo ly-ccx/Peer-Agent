@@ -37,12 +37,13 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
   const live = useRef(active); live.current = active;
   // Restored renderer metadata never chooses a different Bot's authority.
   const reference = useMemo(() => ({ workspaceId, path: tab.reference?.path ?? tab.absPath,
+    ...(tab.reference?.task ? { task: tab.reference.task } : {}),
     ...(tab.reference?.relativeTo ? { relativeTo: tab.reference.relativeTo } : {}) }), [workspaceId, tab.reference, tab.absPath]);
   const identity = JSON.stringify(reference);
   const metadata = useResourceRead(`meta:${identity}`, () => clientApi.readFile('', undefined, undefined, { ...reference, metadataOnly: true }), active);
   const metadataPath = metadata.value?.resolvedPath ?? reference.path;
   const kind = detectFileKind(metadataPath);
-  const resolved = metadata.value?.ok && metadata.value.metadataOnly && metadata.value.resolvedPath ? { workspaceId, path: metadata.value.resolvedPath } : null;
+  const resolved = metadata.value?.ok && metadata.value.metadataOnly && metadata.value.resolvedPath ? { ...reference, path: metadata.value.resolvedPath } : null;
   const scopedService = !!resolved;
   const readIdentity = JSON.stringify(resolved);
   const content = useResourceRead(`text:${readIdentity}`, () => clientApi.readFile('', undefined, undefined, resolved!), active && scopedService && kind !== 'image' && tab.mode !== 'diff');
@@ -57,11 +58,11 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
   const refreshKey = `${identity}:${readIdentity}:${tab.mode}:${comparison}`;
   const latestRefresh = useRef(refreshKey); latestRefresh.current = refreshKey;
   const nested = useMemo(() => ({ label: isZh ? '打开文档' : 'Open document',
-    open: (value: string) => workspace?.openReference({ workspaceId, path: value, ...(loaded?.resolvedPath ? { relativeTo: loaded.resolvedPath } : resolved ? { relativeTo: resolved.path } : {}) }),
+    open: (value: string) => workspace?.openReference({ ...reference, path: value, ...(loaded?.resolvedPath ? { relativeTo: loaded.resolvedPath } : resolved ? { relativeTo: resolved.path } : {}) }),
     openUrl: (value: string) => workspace?.openUrl(value),
     remoteImages: 'link' as const,
     remoteImageLabel: isZh ? '打开外部图片' : 'Open external image',
-  }), [workspace, workspaceId, loaded?.resolvedPath, resolved?.path, isZh]);
+  }), [workspace, reference, loaded?.resolvedPath, resolved?.path, isZh]);
   const refresh = async () => {
     const previous = metadata.snapshot().value?.resolvedPath;
     if (!await metadata.reload() || !live.current || latestRefresh.current !== refreshKey) return;

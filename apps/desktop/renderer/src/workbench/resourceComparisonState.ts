@@ -39,14 +39,14 @@ export function taskComparisonBinding(session: unknown, plan: unknown, workspace
   const detail = session as { sessionId?: string; workspaceId?: string; report?: { planId?: string } };
   const goal = plan as { planId?: string; delegationOrigin?: { workspaceId?: string; sessionId?: string };
     baseCommit?: string; deliveryBinding?: { baseCommit?: string; worktreePath?: string; targetWorkspacePath?: string; executionIsolation?: string } };
-  if (detail.sessionId !== sessionId || detail.workspaceId !== workspaceId || detail.report?.planId !== goal.planId
+  if (!goal.planId || detail.sessionId !== sessionId || detail.workspaceId !== workspaceId || detail.report?.planId !== goal.planId
     || goal.delegationOrigin?.workspaceId !== workspaceId || goal.delegationOrigin.sessionId !== sessionId) return null;
   const binding = goal.deliveryBinding;
   if (binding?.executionIsolation === 'worktree' && !binding.worktreePath) return null;
-  const root = binding?.worktreePath || binding?.targetWorkspacePath;
+  const root = binding?.executionIsolation === 'worktree' ? binding.worktreePath : binding?.targetWorkspacePath;
   const base = binding?.baseCommit || goal.baseCommit;
   if (!root || !/^(?:\/|[a-z]:[\\/])/i.test(root) || !base || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(base)) return null;
-  return { root, base, isolated: binding?.executionIsolation === 'worktree' };
+  return { root, base, isolated: binding?.executionIsolation === 'worktree', task: { sessionId, planId: goal.planId } };
 }
 
 export function comparisonReadError(status: string | undefined, detail: string | undefined, isZh: boolean) {

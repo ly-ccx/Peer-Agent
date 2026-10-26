@@ -48,7 +48,7 @@ export function useResourcePresentation(enabled = true, isZh = false) {
   const currentDocument = documentSession.tabs.find(tab => resourceKey('document', tab.id) === active);
   const currentWeb = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === active);
   const visited = currentDocument ? JSON.stringify({ kind: currentDocument.comparison ? 'comparison' : 'document', path: currentDocument.absPath,
-    relativeTo: currentDocument.reference?.relativeTo, comparison: currentDocument.comparison })
+    relativeTo: currentDocument.reference?.relativeTo, task: currentDocument.reference?.task, comparison: currentDocument.comparison })
     : currentWeb && currentWeb.url !== 'about:blank' ? JSON.stringify({ kind: 'browser', url: currentWeb.url }) : null;
   useEffect(() => {
     if (!enabled || !owner || !visited) return;
@@ -59,7 +59,7 @@ export function useResourcePresentation(enabled = true, isZh = false) {
   const remember = (key: string) => {
     const doc = documentSession.tabs.find(tab => resourceKey('document', tab.id) === key);
     const web = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === key);
-    const descriptor = doc ? JSON.stringify({ kind: doc.comparison ? 'comparison' : 'document', path: doc.absPath, relativeTo: doc.reference?.relativeTo, comparison: doc.comparison })
+    const descriptor = doc ? JSON.stringify({ kind: doc.comparison ? 'comparison' : 'document', path: doc.absPath, relativeTo: doc.reference?.relativeTo, task: doc.reference?.task, comparison: doc.comparison })
       : web ? JSON.stringify({ kind: 'browser', url: web.url }) : null;
     setStored(current => {
       if (current.owner !== owner) return current;

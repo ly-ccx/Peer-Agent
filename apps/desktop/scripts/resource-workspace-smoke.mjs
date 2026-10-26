@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import { _electron } from 'playwright-core';
 import { seedBotShellHome } from './seed-bot-shell-home.mjs';
 import { createOwnedProcessRegistry } from './lab-process-identity.mjs';
+import { createGoalPlanStore } from '@peer-agent/runtime-node';
 
 const source = fileURLToPath(new URL('../../..', import.meta.url));
 const root = mkdtempSync(path.join(tmpdir(), 'peer-resource-ui-'));
@@ -46,6 +47,21 @@ execFileSync('git', ['-C', project, 'add', 'staged.md']);
 writeFileSync(path.join(project, 'guide.md'), '# DOCUMENT_BODY_OK\n\nDIFF_CHANGE_OK\n');
 const outside = path.join(home, 'private.txt'); writeFileSync(outside, 'OUTSIDE_SECRET_MUST_NOT_RENDER');
 const now = new Date().toISOString();
+const taskTree = path.join(home, 'internal-task-worktrees', 'fixture');
+mkdirSync(path.dirname(taskTree), { recursive: true });
+execFileSync('git', ['-C', project, 'worktree', 'add', '--quiet', '--detach', taskTree, baseCommit]);
+writeFileSync(path.join(taskTree, 'guide.md'), '# TASK_WORKTREE_BODY_OK\n\nTASK_WORKTREE_DIFF_OK\n\n[Nested](task-nested.md)\n');
+writeFileSync(path.join(taskTree, 'task-nested.md'), '# TASK_NESTED_OK\n');
+const task = { sessionId: 'resource-task-fixture', planId: 'resource-plan-fixture' };
+const model = { providerId: 'fixture', modelId: 'fixture', modelProviderId: 'fixture', family: 'fixture' };
+createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') }).createPlan({
+  planId: task.planId, title: 'Isolated resource fixture', goal: 'Read only', tasks: [], status: 'paused',
+  deliveryBinding: { repoId: 'resource-fixture', targetBranch: 'fixture', targetBranchSource: 'user_confirmed',
+    executionIsolation: 'worktree', worktreePath: taskTree, targetWorkspacePath: project, baseCommit },
+  delegationOrigin: { workspaceId: fixture.bots[0].workspaceId, sessionId: task.sessionId, parentConversationId: fixture.bots[0].conversationId,
+    anchorMessageId: 'input-fixture', inputId: 'input-fixture', phase: 'paused',
+    modelSelection: { worker: model, explorer: model, verifier: { ...model, sameFamilyAsWorker: true }, source: { worker: 'global' }, resolvedAt: now } },
+});
 const history = [{ id: 'input-fixture', kind: 'user_input', role: 'user', content: 'Read a fixture file.', createdAt: now },
   { id: 'turn-fixture', kind: 'agent_turn', role: 'assistant', createdAt: now, rounds: [{ toolCalls: [{ name: 'read_file', result: JSON.stringify({ kind: 'local_file_ref', tool: 'read_file', path: path.join(project, 'scripts/host-lease.mjs') }) }] }] },
   { id: 'reply-fixture', turnId: 'turn-fixture', kind: 'agent_reply', role: 'assistant', content: 'Source: `host-lease.mjs`.', createdAt: now, replyTo: ['input-fixture'] }];
@@ -70,8 +86,10 @@ const until = async (read, predicate, timeout = 15000) => {
 try {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   writeFileSync(path.join(project, 'remote.md'), `# REMOTE_IMAGE_OK\n\n![tracking](http://127.0.0.1:${server.address().port}/tracking.png)\n`);
-  const filesBefore = snapshotFiles(project), knowledgeBefore = snapshotFiles(knowledge);
+  const filesBefore = snapshotFiles(project), knowledgeBefore = snapshotFiles(knowledge), taskBefore = snapshotFiles(taskTree);
   const indexBefore = readFileSync(path.join(project, '.git/index'));
+  const taskIndexPath = execFileSync('git', ['-C', taskTree, 'rev-parse', '--git-path', 'index'], { encoding: 'utf8' }).trim();
+  const taskIndexBefore = readFileSync(taskIndexPath);
   const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1', PEER_WORKSPACE_ROOT: project };
   delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL; delete env.PEER_KNOWLEDGE_ROOT;
   app = await _electron.launch({ args: [entry], env, cwd: path.join(source, 'apps/desktop'), timeout: 30000 });
@@ -175,6 +193,26 @@ try {
   await until(() => documentBody.innerText(), text => text.includes('FIXED_REVISION_OK') && !text.includes('STAGED_CHANGE_OK'));
   await shot('workspace-comparison-tabs');
   report.checks.push('staged Diff, pinned moving revision refresh and independent comparison tabs');
+  await openLauncher(); await panel.getByRole('button', { name: '查看更改', exact: true }).click();
+  await changes.getByRole('combobox', { name: '比较范围', exact: true }).selectOption('task');
+  await changes.getByRole('combobox', { name: '任务比较来源', exact: true }).selectOption(task.sessionId);
+  await until(() => changes.locator('.resource-comparison:visible').innerText(), text => text.includes('TASK_WORKTREE_DIFF_OK'));
+  await changes.locator('.resource-comparison:visible').getByRole('button', { name: '在独立标签保留比较', exact: true }).click();
+  await until(() => documentBody.innerText(), text => text.includes('TASK_WORKTREE_DIFF_OK'));
+  await page.locator('.resource-document[data-active="true"]').getByRole('button', { name: '打开当前文件', exact: true }).click();
+  await page.locator('.resource-document[data-active="true"] h1').filter({ hasText: 'TASK_WORKTREE_BODY_OK' }).waitFor();
+  await page.locator('.resource-document[data-active="true"]').getByRole('link', { name: 'Nested', exact: true }).click();
+  await page.locator('.resource-document[data-active="true"] h1').filter({ hasText: 'TASK_NESTED_OK' }).waitFor();
+  await openLauncher();
+  await panel.locator('.resource-recent').filter({ hasText: 'task-nested.md' }).click();
+  await page.locator('.resource-document[data-active="true"] h1').filter({ hasText: 'TASK_NESTED_OK' }).waitFor();
+  const taskReads = await page.evaluate(async ({ workspaceId, task, path }) => {
+    const read = reference => window.peerAgent.readFile('', undefined, undefined, reference);
+    return Promise.all([read({ workspaceId, path }), read({ workspaceId, path, task }),
+      read({ workspaceId, path, task: { ...task, sessionId: 'forged-session' } })]);
+  }, { workspaceId: fixture.bots[0].workspaceId, task, path: path.join(taskTree, 'guide.md') });
+  assert.equal(taskReads[0].status, 'scope_denied'); assert.equal(taskReads[1].ok, true); assert.equal(taskReads[2].status, 'scope_denied');
+  report.checks.push('host-owned unregistered task worktree comparison, retained tab/current file/nested link and forged-scope rejection');
   await openPath(outside);
   await page.locator('.resource-document[data-active="true"] [role="alert"]').filter({ hasText: '超出' }).waitFor();
   assert.equal((await panel.innerText()).includes('OUTSIDE_SECRET_MUST_NOT_RENDER'), false);
@@ -309,6 +347,7 @@ try {
   assert.equal(await panel.getByRole('tab').filter({ hasText: 'guide.md' }).count(), 0);
   report.checks.push('ordinary Bot switch starts collapsed and does not inherit another Bot resource tabs');
   assert.deepEqual(snapshotFiles(project), filesBefore); assert.deepEqual(snapshotFiles(knowledge), knowledgeBefore);
+  assert.deepEqual(snapshotFiles(taskTree), taskBefore); assert.deepEqual(readFileSync(taskIndexPath), taskIndexBefore);
   assert.deepEqual(readFileSync(path.join(project, '.git/index')), indexBefore);
   assert.equal(execFileSync('git', ['-C', project, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), endCommit);
   report.checks.push('all resource interactions preserve fixture files, Git index and current commit');

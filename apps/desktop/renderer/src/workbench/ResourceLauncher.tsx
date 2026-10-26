@@ -7,13 +7,15 @@ import { useWorkbench } from './WorkbenchContext';
 import { useResourceWorkspace } from './ResourceWorkspaceContext';
 import { resourceWebUrl } from './resourceWorkspaceState';
 import { ResourceSearchResults } from './ResourceSearchResults';
-import { documentComparisonLabel, normalizeDocumentComparison, type DocumentComparison } from './documentSessionState';
+import { documentComparisonLabel, normalizeDocumentComparison, normalizeDocumentTask, type DocumentComparison } from './documentSessionState';
+import type { BotDocumentReference } from '@peer-agent/protocol';
 
 function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly active: boolean; readonly isZh: boolean }) {
   const workspace = useResourceWorkspace();
   const descriptor = useMemo(() => {
     try {
-      const value = JSON.parse(raw) as { kind?: string; path?: string; relativeTo?: string; url?: string; comparison?: DocumentComparison };
+      const value = JSON.parse(raw) as { kind?: string; path?: string; relativeTo?: string; url?: string; comparison?: DocumentComparison; task?: BotDocumentReference['task'] };
+      if (value.task !== undefined && !normalizeDocumentTask(value.task)) return null;
       if (value.kind === 'document' && typeof value.path === 'string') return { ...value, comparison: undefined };
       if (value.kind === 'comparison' && typeof value.path === 'string') {
         const comparison = normalizeDocumentComparison(value.comparison);
@@ -25,6 +27,7 @@ function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly 
   }, [raw]);
   const owner = workspace?.owner;
   const reference = owner && descriptor && ['document', 'comparison'].includes(descriptor.kind ?? '') ? { workspaceId: owner.workspaceId, path: descriptor.path!,
+    ...(descriptor.task ? { task: descriptor.task } : {}),
     ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}), ...(descriptor.kind === 'comparison' ? { kind: 'directory' as const } : {}), metadataOnly: true } : null;
   const metadata = useResourceRead(JSON.stringify(reference), () => clientApi.readFile('', undefined, undefined, reference!), active && !!workspace?.ready && !!reference);
   if (!descriptor || !workspace?.ready) return null;
@@ -32,8 +35,8 @@ function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly 
   const path = metadata.value?.resolvedPath;
   return <button className="resource-recent" type="button" onClick={() => descriptor.kind === 'browser'
     ? workspace.openUrl(descriptor.url!) : descriptor.kind === 'comparison' && descriptor.comparison
-      ? workspace.openComparison({ workspaceId: owner!.workspaceId, path: path!, kind: 'directory' }, descriptor.comparison)
-      : workspace.openReference({ workspaceId: owner!.workspaceId, path: path!, ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}) })}>
+      ? workspace.openComparison({ ...reference!, path: path!, kind: 'directory' }, descriptor.comparison)
+      : workspace.openReference({ ...reference!, path: path!, kind: 'file' })}>
     <PeerIcon name={descriptor.kind === 'browser' ? 'globe' : 'fileText'} size={18} />
     <span>{descriptor.kind === 'browser' ? new URL(descriptor.url!).hostname : descriptor.comparison ? documentComparisonLabel(descriptor.comparison, isZh) : path?.split(/[\\/]/).pop()}</span>
   </button>;

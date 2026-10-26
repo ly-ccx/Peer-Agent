@@ -9,6 +9,7 @@ const identity = remote => /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\
 
 /** Bounded resource resolution for the existing file:read service; never a model tool. */
 export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => [], readGitOrigin,
+  getTaskSession, getTaskPlan,
   environment = process.env, realpath = realpathSync, stat = statSync, readFile = readFileSync } = {}) {
   async function knowledgeRoot(root, { optional = false } = {}) {
     const configured = environment.PEER_KNOWLEDGE_ROOT;
@@ -50,6 +51,36 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
     }
   }
 
+  async function resolveTask(reference) {
+    const task = reference.task;
+    const validId = value => typeof value === 'string' && value.trim() && value.length <= 256 && !/[\u0000-\u001f]/.test(value);
+    if (!task || !validId(task.sessionId) || !validId(task.planId)) return failure('invalid_path');
+    const session = await getTaskSession?.(task.sessionId);
+    const plan = await getTaskPlan?.(task.planId);
+    if (!session || !plan || session.workspaceId !== reference.workspaceId || session.sessionId !== task.sessionId
+      || session.report?.planId !== task.planId || plan.planId !== task.planId
+      || plan.delegationOrigin?.workspaceId !== reference.workspaceId || plan.delegationOrigin?.sessionId !== task.sessionId) return failure('scope_denied');
+    const binding = plan.deliveryBinding;
+    const baseline = binding?.baseCommit || plan.baseCommit;
+    const recorded = binding?.executionIsolation === 'worktree' ? binding.worktreePath : binding?.targetWorkspacePath;
+    if (!recorded || !path.isAbsolute(recorded) || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(baseline ?? '')) return failure('workspace_unavailable');
+    // Only this task's recorded root is admitted. No global roots or companion fallback.
+    const scope = realpath(recorded);
+    if (!stat(scope).isDirectory()) return failure('workspace_unavailable');
+    let base = scope;
+    if (reference.relativeTo) {
+      const origin = realpath(reference.relativeTo);
+      if (!inside(scope, origin) || !stat(origin).isFile()) return failure('scope_denied');
+      base = path.dirname(origin);
+    }
+    const raw = reference.path.replace(/\\/g, '/');
+    let target = path.resolve(base, raw);
+    if (!inside(scope, target) && path.isAbsolute(raw)) {
+      try { target = realpath(target); } catch { return failure('scope_denied'); }
+    }
+    return checkedFile(target, scope, reference.kind);
+  }
+
   async function otherRelativeLocations(raw, root, known) {
     const companion = await knowledgeRoot(root, { optional: true });
     if (companion && !companion.ok) return companion;
@@ -76,6 +107,7 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
     const workspace = getWorkspace(reference.workspaceId);
     if (!workspace?.ok || !workspace.path) return failure('workspace_unavailable');
     try {
+      if (reference.task !== undefined) return await resolveTask(reference);
       const root = realpath(workspace.path);
       const known = [...new Set([root, ...getKnownRoots().flatMap(value => {
         try { return [realpath(value)]; } catch { return []; }

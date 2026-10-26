@@ -54,7 +54,7 @@ test('task comparison requires matching host ownership and immutable baseline; m
   const session = { workspaceId: 'bot', sessionId: 'task', report: { planId: 'plan' } };
   const plan = { planId: 'plan', delegationOrigin: { workspaceId: 'bot', sessionId: 'task' },
     deliveryBinding: { executionIsolation: 'worktree', worktreePath: '/task-tree', targetWorkspacePath: '/project', baseCommit: 'a'.repeat(40) } };
-  assert.deepEqual(taskComparisonBinding(session, plan, 'bot', 'task'), { root: '/task-tree', base: 'a'.repeat(40), isolated: true });
+  assert.deepEqual(taskComparisonBinding(session, plan, 'bot', 'task'), { root: '/task-tree', base: 'a'.repeat(40), isolated: true, task: { sessionId: 'task', planId: 'plan' } });
   assert.equal(taskComparisonBinding(session, plan, 'other-bot', 'task'), null);
   assert.equal(taskComparisonBinding(session, { ...plan, delegationOrigin: { workspaceId: 'bot', sessionId: 'other-task' } }, 'bot', 'task'), null);
   assert.equal(taskComparisonBinding(session, { ...plan, deliveryBinding: { ...plan.deliveryBinding, worktreePath: undefined } }, 'bot', 'task'), null);

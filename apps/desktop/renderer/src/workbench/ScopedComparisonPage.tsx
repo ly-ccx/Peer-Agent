@@ -10,6 +10,7 @@ export function ScopedComparisonPage({ tab, workspaceId, active, isZh }: {
   readonly tab: DocumentTabSession; readonly workspaceId: string; readonly active: boolean; readonly isZh: boolean;
 }) {
   const reference = { workspaceId, path: tab.reference?.path ?? tab.absPath,
+    ...(tab.reference?.task ? { task: tab.reference.task } : {}),
     ...(tab.reference?.relativeTo ? { relativeTo: tab.reference.relativeTo } : {}), kind: 'directory' as const, metadataOnly: true };
   const metadata = useResourceRead(JSON.stringify(reference), () => clientApi.readFile('', undefined, undefined, reference), active);
   const root = metadata.value?.ok && metadata.value.metadataOnly ? metadata.value.resolvedPath : undefined;
@@ -19,7 +20,7 @@ export function ScopedComparisonPage({ tab, workspaceId, active, isZh }: {
     <div ref={reading.ref} onScroll={reading.onScroll} className="resource-document-body" aria-busy={metadata.loading}>
       {!metadata.loaded && !metadata.error ? <p role="status">{isZh ? '正在核对比较来源…' : 'Checking comparison source…'}</p>
         : root && tab.comparison ? <ComparisonRead key={root} workspaceId={workspaceId} path={root} root={root}
-          active={active} isZh={isZh} {...tab.comparison} allowKeep={false} />
+          active={active} isZh={isZh} {...tab.comparison} task={reference.task} allowKeep={false} />
           : <p role="alert">{metadata.value?.status === 'not_file'
             ? (isZh ? '比较来源已经不是目录，请重新选择。' : 'The comparison source is no longer a directory. Choose another source.')
             : documentReadError(metadata.value?.ok ? 'workspace_unavailable' : metadata.value?.status, isZh)}</p>}

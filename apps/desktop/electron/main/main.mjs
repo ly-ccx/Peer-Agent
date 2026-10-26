@@ -1651,6 +1651,8 @@ const workspaceApplicationService = createWorkspaceApplicationService({
 const fileAccessApplicationService = createFileAccessApplicationService({
   resolveBotDocument: createBotDocumentResolver({
     getWorkspace: workspaceId => projectAgentDirectory.projectAccess?.directory?.get(workspaceId),
+    getTaskSession: sessionId => projectAgentDirectory.projectAccess?.getSession(sessionId),
+    getTaskPlan: planId => goalPlanStore.getPlan(planId),
     getKnownRoots: () => {
       const settings = settingsStore.getAll();
       return [...(settings.workspaces || []).map(item => typeof item === 'string' ? item : item?.path), settings.activeWorkspace]
