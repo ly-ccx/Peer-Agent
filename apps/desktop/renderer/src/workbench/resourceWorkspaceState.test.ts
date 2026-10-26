@@ -43,13 +43,17 @@ test('R1/R4d same relative filename in different sources survives persistence', 
 
 test('reopening a file targets its new line without creating a duplicate tab or changing its authority', () => {
   const reference = { workspaceId: 'bot', path: '/repo/a.ts' };
-  let state = openDocumentTab(createDocumentSessionState(), createDocumentTabSession(reference.path, { id: 'first', reference, mode: 'source', line: 8 }));
-  state = openDocumentTab(state, createDocumentTabSession(reference.path, { id: 'second', reference, mode: 'source', line: 8 }), { replaceMode: true });
+  let state = normalizeDocumentSessionState(openDocumentTab(createDocumentSessionState(), createDocumentTabSession(reference.path, { id: 'first', reference, mode: 'source', line: 8 })));
+  state = normalizeDocumentSessionState(openDocumentTab(state, createDocumentTabSession(reference.path, { id: 'second', reference, mode: 'source', line: 8 }), { replaceMode: true }));
   assert.equal(state.tabs.length, 1); assert.equal(state.activeTabId, 'first');
   assert.deepEqual(state.tabs[0]?.navigation, { line: 8, requestId: 'second' });
   assert.deepEqual(state.tabs[0]?.reference, reference);
   const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(state)));
-  assert.deepEqual(restored.tabs[0]?.navigation, { line: 8, requestId: 'restored:first' });
+  assert.deepEqual(restored.tabs[0]?.navigation, { line: 8, requestId: 'second' });
+  state = normalizeDocumentSessionState(openDocumentTab(state, createDocumentTabSession(reference.path, { id: 'third', reference, mode: 'source', line: 90 }), { replaceMode: true }));
+  assert.deepEqual(state.tabs[0]?.navigation, { line: 90, requestId: 'third' });
+  const legacy = normalizeDocumentSessionState({ ...state, tabs: [{ ...state.tabs[0], navigation: { line: 90, requestId: '' } }] });
+  assert.deepEqual(legacy.tabs[0]?.navigation, { line: 90, requestId: 'restored:first' });
   assert.equal(createDocumentTabSession('/repo/a.ts', { line: -4 }).navigation, undefined);
 });
 

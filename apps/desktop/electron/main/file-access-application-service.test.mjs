@@ -339,6 +339,7 @@ test('git range diff and branch list stay inside a known repository', async () =
     diffText: 'range diff',
     fromRef: 'abc',
     toRef: 'def',
+    workspaceRoot: '/repo',
   });
   assert.deepEqual(await harness.service.getGitRangeDiff({
     workspaceRoot: '/repo',

@@ -93,8 +93,13 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
   const tab = raw as Record<string, unknown>;
   if (typeof tab.id !== 'string' || !tab.id.trim()) return null;
   if (typeof tab.absPath !== 'string' || !tab.absPath.trim()) return null;
-  const navigation = documentNavigation(tab.navigation && typeof tab.navigation === 'object'
-    ? (tab.navigation as Record<string, unknown>).line : undefined, `restored:${tab.id}`);
+  const rawNavigation = tab.navigation && typeof tab.navigation === 'object' ? tab.navigation as Record<string, unknown> : undefined;
+  // The same normalizer runs on live reducer updates and persisted restoration.
+  // Replacing every intent ID with the tab ID loses repeated clicks on one file.
+  const requestId = typeof rawNavigation?.requestId === 'string' && rawNavigation.requestId.trim()
+    && rawNavigation.requestId.length <= 128 && !/[\u0000-\u001f]/.test(rawNavigation.requestId)
+    ? rawNavigation.requestId : `restored:${tab.id}`;
+  const navigation = documentNavigation(rawNavigation?.line, requestId);
   const comparison = normalizeDocumentComparison(tab.comparison);
   if (tab.comparison !== undefined && !comparison) return null;
   return {

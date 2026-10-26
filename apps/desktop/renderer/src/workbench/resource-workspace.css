@@ -1,3 +1,6 @@
+/* This adaptive page must not inherit the classic shell's 1024px body minimum.
+   Otherwise native focus scrolling shifts the entire window in compact mode. */
+body:has(.bot-resource-layout[data-resource-active='true']) { min-width: 0; min-height: 0; }
 .bot-resource-layout { position: relative; background: var(--chrome-canvas, var(--paper-sheet)); display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .bot-resource-primary { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
 .bot-resource-primary > .bot-shell { height: 100%; }

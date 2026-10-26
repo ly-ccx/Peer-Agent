@@ -80,6 +80,7 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
       <button className="ui-button" type="button" disabled={busy} onClick={refresh}>{isZh ? '刷新' : 'Refresh'}</button>
     </header>
     <p className="resource-source-label">{path}</p>
+    {current.value?.ok && tab.mode === 'source' && reading.missingLine ? <p className="resource-source-label" role="status">{isZh ? '引用的行号超出当前文件范围，已保留正常阅读位置。' : 'The referenced line is outside the current file. The reading position is preserved.'}</p> : null}
     <div ref={reading.ref} onScroll={reading.onScroll} className="resource-document-body" aria-busy={busy}>
       {!metadata.loaded && !metadata.error ? <p role="status">{isZh ? '正在核对并读取文档…' : 'Resolving document…'}</p>
         : !metadata.value?.ok ? <>
@@ -102,7 +103,6 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
               : <SourceViewer content={loaded.content} language={highlightLanguageForPath(path)} emptyLabel={isZh ? '文件为空。' : 'The file is empty.'} />}
           </DocumentPreviewContext.Provider>
             : <p role={!content.loaded && !content.error ? 'status' : 'alert'}>{!content.loaded && !content.error ? (isZh ? '正在读取正文…' : 'Reading content…') : documentReadError(loaded?.status, isZh)}</p>}
-      {current.value?.ok && tab.mode === 'source' && reading.missingLine ? <p role="status">{isZh ? '引用的行号超出当前文件范围，已保留正常阅读位置。' : 'The referenced line is outside the current file. The reading position is preserved.'}</p> : null}
       {metadata.error || current.error ? <p role="alert">{isZh ? '刷新未确认，上次内容可能已过期。可重试。' : 'Refresh was not confirmed. Previous content may be stale. Retry.'}</p> : null}
     </div>
   </section>;

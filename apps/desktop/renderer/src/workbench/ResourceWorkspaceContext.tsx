@@ -184,7 +184,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     },
   };
   return <Context.Provider value={adapter}>
-    <div ref={bindLayout} className="bot-resource-layout" data-resource-open={ready && active && workbench.open}
+    <div ref={bindLayout} className="bot-resource-layout" data-resource-active={active} data-resource-open={ready && active && workbench.open}
       style={{ '--resource-primary-min': `${bounds?.primaryMin ?? MAIN_MIN_WIDTH}px` } as CSSProperties}
       data-resource-measured-width={bounds?.viewport}
       data-resource-compact={compact} data-resource-focus={focusArea}

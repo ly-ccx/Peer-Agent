@@ -1,6 +1,7 @@
 /** Focused production Electron check. Synthetic data/home only; no model or user-task execution. */
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -27,11 +28,21 @@ writeFileSync(path.join(knowledge, 'knowledge/nested.md'), '# NESTED_BODY_OK\n')
 execFileSync('git', ['init', '--quiet', knowledge]);
 execFileSync('git', ['-C', knowledge, 'remote', 'add', 'origin', 'https://github.com/ly-ccx/Peer-Knowledge.git']);
 writeFileSync(path.join(project, 'guide.md'), '# DOCUMENT_BODY_OK\n\nLocal Markdown content.\n');
+writeFileSync(path.join(project, 'long.md'), '# LONG_DOCUMENT_OK\n\n' + Array.from({ length: 180 }, (_, i) => `Paragraph ${i + 1}: reading continuity.\n`).join('\n'));
+writeFileSync(path.join(project, 'pixel.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jQ2kAAAAASUVORK5CYII=', 'base64'));
 mkdirSync(path.join(project, 'scripts'));
 writeFileSync(path.join(project, 'scripts/host-lease.mjs'), 'export const SOURCE_BINDING_OK = true;\n');
 execFileSync('git', ['init', '--quiet', project]);
 execFileSync('git', ['-C', project, '-c', 'user.name=Resource Fixture', '-c', 'user.email=fixture@example.invalid', 'add', '.']);
 execFileSync('git', ['-C', project, '-c', 'user.name=Resource Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'synthetic baseline']);
+const baseCommit = execFileSync('git', ['-C', project, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+writeFileSync(path.join(project, 'revision.md'), '# FIXED_REVISION_OK\n');
+execFileSync('git', ['-C', project, 'add', 'revision.md']);
+execFileSync('git', ['-C', project, '-c', 'user.name=Resource Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'synthetic next revision']);
+const endCommit = execFileSync('git', ['-C', project, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+execFileSync('git', ['-C', project, 'branch', 'moving-base', baseCommit]);
+writeFileSync(path.join(project, 'staged.md'), '# STAGED_CHANGE_OK\n');
+execFileSync('git', ['-C', project, 'add', 'staged.md']);
 writeFileSync(path.join(project, 'guide.md'), '# DOCUMENT_BODY_OK\n\nDIFF_CHANGE_OK\n');
 const outside = path.join(home, 'private.txt'); writeFileSync(outside, 'OUTSIDE_SECRET_MUST_NOT_RENDER');
 const now = new Date().toISOString();
@@ -44,7 +55,13 @@ writeFileSync(entry, `import {app} from 'electron';\napp.setPath('userData',${JS
 const report = { synthetic: true, checks: [], pageErrors: [], screenshots: [], root, theme, scope: 'Fresh production Electron main/preload/renderer; no real model, installed build or user profile.' };
 const logs = [], owned = createOwnedProcessRegistry();
 let app, handle, page, requests = 0;
-const server = createServer((_req, res) => { requests++; res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><h1>WEB_BODY_OK</h1><input id="draft" value="WEB_DRAFT_OK">'); });
+let imageRequests = 0;
+const server = createServer((req, res) => { requests++; if (req.url === '/tracking.png') imageRequests++;
+  res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><h1>WEB_BODY_OK</h1><input id="draft" value="WEB_DRAFT_OK">'); });
+const snapshotFiles = directory => Object.fromEntries(readdirSync(directory, { withFileTypes: true }).filter(entry => entry.name !== '.git').flatMap(entry => {
+  const target = path.join(directory, entry.name);
+  return entry.isDirectory() ? Object.entries(snapshotFiles(target)) : [[target, createHash('sha256').update(readFileSync(target)).digest('hex')]];
+}));
 const until = async (read, predicate, timeout = 15000) => {
   const end = Date.now() + timeout;
   while (Date.now() < end) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 50)); }
@@ -52,6 +69,9 @@ const until = async (read, predicate, timeout = 15000) => {
 };
 try {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  writeFileSync(path.join(project, 'remote.md'), `# REMOTE_IMAGE_OK\n\n![tracking](http://127.0.0.1:${server.address().port}/tracking.png)\n`);
+  const filesBefore = snapshotFiles(project), knowledgeBefore = snapshotFiles(knowledge);
+  const indexBefore = readFileSync(path.join(project, '.git/index'));
   const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1', PEER_WORKSPACE_ROOT: project };
   delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL; delete env.PEER_KNOWLEDGE_ROOT;
   app = await _electron.launch({ args: [entry], env, cwd: path.join(source, 'apps/desktop'), timeout: 30000 });
@@ -69,8 +89,12 @@ try {
   report.shellGeometry = [];
   const draft = page.locator('.bot-main textarea').first(); await draft.fill('COMPOSER_DRAFT_OK');
   const panel = page.locator('.resource-workspace');
+  const shot = async name => { const file = path.join(root, name + '.png'); await page.screenshot({ path: file }); report.screenshots.push(file); };
   const openLauncher = async () => { await panel.locator('.resource-tab-action').first().click(); await page.locator('.resource-address input').waitFor({ state: 'visible' }); };
-  const openPath = async target => { await openLauncher(); await page.locator('.resource-address input').fill(target); await page.locator('.resource-address input').press('Enter'); };
+  const openPath = async target => {
+    await openLauncher(); await page.locator('.resource-address input').fill(target); await page.locator('.resource-address input').press('Enter');
+    if (!/[\\/]/.test(target)) await panel.locator('.resource-search-hit').filter({ hasText: target }).click();
+  };
   await workspaceButton.click();
   await page.locator('.resource-launcher').waitFor({ state: 'visible' });
   assert.equal(await page.locator('webview').count(), 0, 'launcher must not allocate a guest');
@@ -82,6 +106,36 @@ try {
   await until(() => page.locator('.resource-document[data-active="true"] .resource-document-body').innerText(), text => text.includes('# DOCUMENT_BODY_OK'));
   await panel.getByRole('button', { name: '正文', exact: true }).click();
   report.checks.push('Markdown body/source and Composer draft survive opening');
+  await openPath('./long.md');
+  const documentBody = page.locator('.resource-document[data-active="true"] .resource-document-body');
+  await page.locator('.resource-document[data-active="true"] h1').filter({ hasText: 'LONG_DOCUMENT_OK' }).waitFor();
+  await documentBody.evaluate(el => { el.scrollTop = 600; el.dispatchEvent(new Event('scroll')); });
+  await panel.getByRole('button', { name: '源码', exact: true }).click();
+  await until(() => documentBody.locator('[data-source-line]').count(), count => count > 100);
+  await documentBody.evaluate(el => { el.scrollTop = 1000; el.dispatchEvent(new Event('scroll')); });
+  await panel.getByRole('button', { name: '正文', exact: true }).click();
+  assert.ok(Math.abs(await documentBody.evaluate(el => el.scrollTop) - 600) < 2);
+  await panel.getByRole('button', { name: '源码', exact: true }).click();
+  assert.ok(Math.abs(await documentBody.evaluate(el => el.scrollTop) - 1000) < 2);
+  await openPath('./long.md#L120');
+  await until(() => documentBody.evaluate(el => Math.abs(el.querySelector('[data-source-line="120"]').getBoundingClientRect().top - el.getBoundingClientRect().top)), value => value < 2);
+  await openPath('./long.md#L9999');
+  await page.locator('.resource-document[data-active="true"]').getByRole('status').filter({ hasText: '行号超出' }).waitFor();
+  await shot('workspace-line-warning');
+  report.checks.push('real DOM mode reading positions, repeated line intents and missing-line fallback');
+  await openPath('./remote.md');
+  await documentBody.getByRole('button', { name: /打开外部图片/ }).waitFor();
+  assert.equal(await documentBody.locator('img').count(), 0); assert.equal(imageRequests, 0);
+  await shot('workspace-static-image');
+  await documentBody.getByRole('button', { name: /打开外部图片/ }).click();
+  await until(() => imageRequests, value => value > 0);
+  report.checks.push('static Markdown external image makes no request before explicit opening');
+  await openPath('./pixel.png');
+  await until(() => documentBody.locator('img.resource-image').evaluate(el => el.complete && el.naturalWidth > 0), Boolean);
+  report.checks.push('scoped local image decoded by production host');
+  await openPath('./missing.md');
+  await documentBody.getByRole('alert').filter({ hasText: '未能按此引用定位文件' }).waitFor();
+  report.checks.push('missing file has a local error without blocking other resources');
   await page.locator('.bot-reply-text .markdown-file-path').filter({ hasText: 'host-lease.mjs' }).click();
   await until(() => page.locator('.resource-document[data-active="true"] .resource-document-body').innerText(), text => text.includes('SOURCE_BINDING_OK'));
   report.checks.push('same-turn short filename resolves to its full tool-result source');
@@ -97,6 +151,30 @@ try {
   await openLauncher(); await panel.getByRole('button', { name: '查看更改', exact: true }).click();
   await until(() => page.locator('.resource-changes').innerText(), text => text.includes('DIFF_CHANGE_OK'));
   report.checks.push('full unstaged repository Diff');
+  const changes = page.locator('.resource-changes');
+  await changes.getByRole('combobox', { name: '比较范围', exact: true }).selectOption('staged');
+  await until(() => changes.innerText(), text => text.includes('STAGED_CHANGE_OK'));
+  await changes.getByRole('combobox', { name: '比较范围', exact: true }).selectOption('range');
+  await changes.getByRole('textbox', { name: '起始引用', exact: true }).fill('moving-base');
+  await changes.getByRole('textbox', { name: '目标引用（空为工作树）', exact: true }).fill(endCommit);
+  await changes.getByRole('button', { name: '比较', exact: true }).click();
+  await until(() => changes.locator('.resource-comparison:visible').innerText(), text => text.includes('FIXED_REVISION_OK') && text.includes(baseCommit));
+  execFileSync('git', ['-C', project, 'branch', '-f', 'moving-base', endCommit]);
+  await changes.locator('.resource-comparison:visible').getByRole('button', { name: '刷新', exact: true }).click();
+  await until(() => changes.locator('.resource-comparison:visible').getAttribute('aria-busy'), busy => busy === 'false');
+  assert.ok((await changes.locator('.resource-comparison:visible').innerText()).includes(baseCommit));
+  await changes.getByRole('button', { name: '在独立标签保留比较', exact: true }).filter({ visible: true }).click();
+  await until(() => documentBody.innerText(), text => text.includes('FIXED_REVISION_OK') && text.includes(baseCommit));
+  const fixedTab = panel.getByRole('tab').filter({ hasText: `Diff · ${baseCommit.slice(0, 8)}` });
+  await fixedTab.waitFor({ state: 'visible' });
+  await openLauncher(); await panel.getByRole('button', { name: '查看更改', exact: true }).click();
+  await changes.getByRole('combobox', { name: '比较范围', exact: true }).selectOption('staged');
+  await changes.locator('.resource-comparison:visible').getByRole('button', { name: '在独立标签保留比较', exact: true }).click();
+  await until(() => documentBody.innerText(), text => text.includes('STAGED_CHANGE_OK'));
+  await fixedTab.click();
+  await until(() => documentBody.innerText(), text => text.includes('FIXED_REVISION_OK') && !text.includes('STAGED_CHANGE_OK'));
+  await shot('workspace-comparison-tabs');
+  report.checks.push('staged Diff, pinned moving revision refresh and independent comparison tabs');
   await openPath(outside);
   await page.locator('.resource-document[data-active="true"] [role="alert"]').filter({ hasText: '超出' }).waitFor();
   assert.equal((await panel.innerText()).includes('OUTSIDE_SECRET_MUST_NOT_RENDER'), false);
@@ -113,7 +191,6 @@ try {
   assert.equal(await app.evaluate(({ webContents }, id) => webContents.fromId(id).executeJavaScript("document.querySelector('#draft').value"), guest), 'USER_WEB_DRAFT_OK');
   report.checks.push('real browser guest preserved across mixed document/web tabs');
   await openPath('guide.md');
-  const shot = async name => { const file = path.join(root, name + '.png'); await page.screenshot({ path: file }); report.screenshots.push(file); };
   const checkShell = async mode => {
     await until(() => panel.evaluate(el => {
       const frame = el.closest('.bot-resource-layout');
@@ -139,6 +216,7 @@ try {
         root: rect(frame), panel: rect(panel), main: rect(document.querySelector('.bot-main')), button: button ? rect(button) : null,
         bar: button ? rect(button.closest('.resource-navigation-bar')) : null };
     });
+    report.shellGeometry.push({ mode, nativeButtons, ...geometry });
     assert.ok(geometry.measuredWidth > 0 && Math.abs(geometry.measuredWidth - (geometry.root.right - geometry.root.left)) <= 1, `${mode}: attached container has a current positive measurement`);
     assert.deepEqual(geometry.headerPadding, ['8px', '8px', '8px', '8px'], `${mode}: equal padding on all sides`);
     for (const [side, value] of Object.entries(geometry.toolbarInsets)) assert.ok(Math.abs(value - 8) <= 0.5, `${mode}: exact ${side} inset`);
@@ -159,7 +237,6 @@ try {
       }
     }
     if (nativeButtons && geometry.button) assert.ok(geometry.button.left >= nativeButtons.x + 72 || geometry.button.top >= nativeButtons.y + 20, `${mode}: native traffic lights remain unobstructed`);
-    report.shellGeometry.push({ mode, nativeButtons, ...geometry });
   };
 
   await until(() => panel.locator('.resource-workspace-header [aria-selected="true"]').evaluate(el => {
@@ -167,6 +244,15 @@ try {
     return item.left >= rail.left - 1 && item.right <= rail.right + 1;
   }), Boolean);
   await checkShell('split');
+  const resizeHandle = panel.getByRole('separator', { name: '拖拽调整工作台宽度', exact: true });
+  const resizeBox = await resizeHandle.boundingBox();
+  await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + 80);
+  await page.mouse.down(); await page.mouse.move(resizeBox.x - 30, resizeBox.y + 80);
+  await resizeHandle.dispatchEvent('pointercancel', { pointerId: 1, pointerType: 'mouse', isPrimary: true });
+  await page.mouse.up();
+  await until(() => resizeHandle.getAttribute('data-active'), value => value !== 'true');
+  assert.equal(await draft.inputValue(), 'COMPOSER_DRAFT_OK');
+  report.checks.push('pointer resize cancellation cleans up and retains Composer draft');
   await shot('workspace-wide');
   await panel.getByRole('button', { name: '展开工作区', exact: true }).click();
   await until(() => page.locator('.bot-resource-layout').getAttribute('data-resource-maximized'), value => value === 'true');
@@ -207,6 +293,8 @@ try {
   await page.getByRole('button', { name: '返回资源', exact: true }).click();
   await page.locator('.resource-document[data-active="true"] h1').filter({ hasText: 'DOCUMENT_BODY_OK' }).waitFor();
   await checkShell('compact');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollLeft), 0);
+  assert.equal(await page.evaluate(() => document.body.clientWidth), 760);
   await shot('workspace-compact');
   await openLauncher();
   await checkShell('compact-launcher');
@@ -220,10 +308,16 @@ try {
   await until(() => workspaceButton.isEnabled(), Boolean); await workspaceButton.click();
   assert.equal(await panel.getByRole('tab').filter({ hasText: 'guide.md' }).count(), 0);
   report.checks.push('ordinary Bot switch starts collapsed and does not inherit another Bot resource tabs');
+  assert.deepEqual(snapshotFiles(project), filesBefore); assert.deepEqual(snapshotFiles(knowledge), knowledgeBefore);
+  assert.deepEqual(readFileSync(path.join(project, '.git/index')), indexBefore);
+  assert.equal(execFileSync('git', ['-C', project, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), endCommit);
+  report.checks.push('all resource interactions preserve fixture files, Git index and current commit');
   assert.deepEqual(report.pageErrors, []);
   report.ok = true;
 } catch (error) {
   report.ok = false; report.failure = error.stack; process.exitCode = 1;
+  if (page) report.failureGeometry = await page.evaluate(() => [...document.querySelectorAll('html, body, #root, .app-layout, .bot-resource-layout, .resource-navigation-bar, .resource-workspace, .resource-tabs')].map(el => ({ name: el.className || el.tagName,
+    scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth, width: el.clientWidth, left: el.getBoundingClientRect().left, overflow: getComputedStyle(el).overflow }))).catch(() => []);
   if (page) await page.screenshot({ path: path.join(root, 'failure.png') }).catch(() => {});
 } finally {
   if (handle) report.ownedStop = await owned.stop({ handleId: handle, reason: 'owned' });
