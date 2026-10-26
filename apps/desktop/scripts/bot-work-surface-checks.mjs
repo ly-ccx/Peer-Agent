@@ -309,10 +309,9 @@ async function checkParallelTaskRows({ page, until, report, captureDirectory, ch
     assert.equal(await background.locator('.bot-work-title').count(), 2);
     assert.equal(await background.locator('.bot-work-row .bot-work-row').count(), 0);
     if (!wasOpen) { await group.focus(); await page.keyboard.press('Enter'); }
-    await background.evaluate(async node => {
-      await Promise.all(node.getAnimations({ subtree: true }).filter(animation =>
-        animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation => animation.finished));
-    });
+    await until(() => background.evaluate(node => node.getAnimations({ subtree: true }).every(animation =>
+      !Number.isFinite(animation.effect?.getComputedTiming().endTime)
+      || animation.playState !== 'running' && !animation.pending)), Boolean);
     if (!wasRowOpen) { await rows.nth(0).locator(':scope > summary').focus(); await page.keyboard.press('Enter'); }
     assert.equal(await rows.nth(0).getAttribute('open'), '');
     assert.equal(await rows.nth(1).getAttribute('open'), null);
