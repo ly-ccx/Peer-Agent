@@ -47,7 +47,9 @@ describe('workbench maximize behavior', () => {
     assert.match(panelSource, /aria-label=\{maximized \?/);
     assert.match(panelSource, /aria-pressed=\{maximized\}/);
     assert.match(panelSource, /onClick=\{\(\) => setMaximized\(!maximized\)\}/);
-    assert.match(panelSource, /\{open \? \(/);
+    assert.match(panelSource, /const resizer = open \? \(/);
+    assert.match(panelSource, /\{resourceMode \? resizer : null\}/);
+    assert.match(panelSource, /\{!resourceMode \? resizer : null\}/);
     assert.match(panelSource, /maximized \? '100%' : `\$\{displayedWidth\}px`/);
     assert.match(panelSource, /const displayedWidth = resourceMode \? Math\.min\(width, resizeLimit\) : width/);
   });

@@ -157,7 +157,12 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
       // Keep a qualified reference inside its own root, including its lexical traversal.
       const checked = checkedFile(target, scope, reference.kind);
       if (checked.status === 'not_found' && bareRelative && reference.kind !== 'directory') return await otherRelativeLocations(raw, root, known);
-      return checked;
+      if (!checked.ok) return checked;
+      // Normalize identity only after checking the originally requested scope. A nested
+      // registered root may narrow it, but never authorize an escape from a named root.
+      const physicalScope = known.filter(base => inside(scope, base) && inside(base, checked.target))
+        .sort((a, b) => b.length - a.length)[0] ?? scope;
+      return { ...checked, root: physicalScope };
     } catch (error) {
       return failure(permission(error) ? 'permission_denied' : ['ENOENT', 'ENOTDIR'].includes(error?.code) ? 'not_found' : 'invalid_path');
     }

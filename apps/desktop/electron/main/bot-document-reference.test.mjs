@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, unlinkSync, rmSync,
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createBotDocumentResolver } from './bot-document-reference.mjs';
+import { documentIdentity, observeDocumentRead } from './document-observation.mjs';
 
 function fixture() {
   const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'peer-doc-preview-')));
@@ -16,6 +17,36 @@ function fixture() {
     readGitOrigin: async candidate => candidate === knowledge ? 'https://github.com/ly-ccx/Peer-Knowledge.git' : '' };
   return { dir, root, knowledge, options, dispose: () => rmSync(dir, { recursive: true, force: true }) };
 }
+
+test('nested registered roots keep one physical identity across qualified and absolute conditional reads', async () => {
+  const f = fixture();
+  try {
+    const child = path.join(f.root, 'child'), target = path.join(child, 'guide.md');
+    mkdirSync(child); writeFileSync(target, '# Nested');
+    writeFileSync(path.join(child, 'index.md'), '# Index');
+    symlinkSync(path.join(f.root, 'README.md'), path.join(child, 'outside.md'));
+    let roots = [f.root, child];
+    const resolve = createBotDocumentResolver({ ...f.options, getKnownRoots: () => roots });
+    const reference = { workspaceId: 'bot', path: 'child/guide.md' };
+    const metadata = await resolve({ ...reference, metadataOnly: true });
+    assert.equal(metadata.root, child);
+    const expectedObservation = { resourceId: documentIdentity(reference, metadata).resourceId };
+    for (const request of [reference, { workspaceId: 'bot', path: './child/guide.md' },
+      { workspaceId: 'bot', path: target }, { workspaceId: 'bot', path: 'guide.md', relativeTo: path.join(child, 'index.md') }]) {
+      const exact = await resolve(request);
+      assert.equal(exact.ok, true); assert.equal(exact.root, child);
+      assert.equal(observeDocumentRead({ ...request, expectedObservation }, exact, Buffer.from('# Nested')).status, 'ok');
+    }
+    roots = [child, f.root, child];
+    assert.deepEqual(documentIdentity(reference, await resolve(reference)), documentIdentity(reference, metadata));
+    for (const name of ['child/../README.md', 'child/outside.md']) {
+      assert.equal((await resolve({ workspaceId: 'bot', path: name })).status, 'scope_denied');
+    }
+    roots = [];
+    const withdrawn = await resolve({ workspaceId: 'bot', path: target });
+    assert.equal(observeDocumentRead({ workspaceId: 'bot', expectedObservation }, withdrawn, Buffer.from('# Nested')).status, 'source_changed');
+  } finally { f.dispose(); }
+});
 
 test('project and confirmed cross-repository paths resolve without changing the reference', async () => {
   const f = fixture();
