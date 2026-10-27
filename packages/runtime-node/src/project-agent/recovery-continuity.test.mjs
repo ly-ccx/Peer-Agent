@@ -628,7 +628,9 @@ test('fresh input preempts an automatically resumed user request and preserves i
     assert.equal(env.work().state, 'retry_wait');
     background = env.advance(2000); await started;
     foreground = env.runner.enqueueUserInputs([input('new')]);
-    await Promise.race([foreground, new Promise(resolve => setTimeout(resolve, 150))]);
+    // Await the actual pump (including the carried request), not a 150ms
+    // wall-clock race that can return before its persisted result under load.
+    await Promise.all([background, foreground]);
     assert.equal(oldSignal.aborted, true);
     assert.deepEqual(seen.slice(0, 4), ['old', 'old', 'new', 'old']);
     assert.equal(env.messages.filter(row => row.card === 'agent_unavailable').length, 1, 'only the initial authentic timeout is an error');

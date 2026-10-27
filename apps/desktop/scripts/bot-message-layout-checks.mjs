@@ -137,10 +137,11 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
             textFits: fragments.every(box => box.left >= rect.left - 1 && box.right <= rect.right + 1),
             lines: fragments.length,
             cardFits: node.scrollWidth <= node.clientWidth,
-            conversationFits: document.querySelector('.bot-convo').scrollWidth <= document.querySelector('.bot-convo').clientWidth,
+            conversationFits: !document.querySelector('.bot-convo').checkVisibility() || document.querySelector('.bot-convo').scrollWidth <= document.querySelector('.bot-convo').clientWidth,
+            detailFits: node.getBoundingClientRect().left >= 0 && node.getBoundingClientRect().right <= innerWidth,
           };
         });
-        assert.ok(bounds.textFits && bounds.cardFits && bounds.conversationFits,
+        assert.ok(bounds.textFits && bounds.cardFits && bounds.conversationFits && bounds.detailFits,
           `long error must fit its text area, card and conversation: ${JSON.stringify({ width, appearance, docked, ...bounds })}`);
         assert.ok(bounds.lines > 1, 'long error should wrap into readable lines');
         cases.push({ viewportWidth: width, appearance, docked, diagnosticsCollapsed: true, detailsKeyboard: true, ...bounds });
