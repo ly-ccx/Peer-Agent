@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import { BOT_DETAIL_TITLE } from './bot-detail-surface-selectors.mjs';
 import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
@@ -100,7 +101,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await process.hover();
   await until(() => process.evaluate(node => getComputedStyle(node).color), color => color !== normal);
   await process.press('Enter');
-  await page.locator('.bot-reply-details').waitFor();
+  await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').waitFor();
   assert.equal(await page.locator('.bot-reply-details .bot-turn-process').count(), 0, 'ordinary fixture has no fabricated execution record');
   assert.equal(await page.locator(BOT_DETAIL_TITLE).innerText(), '回复详情');
   await closeReplyDetails(page);

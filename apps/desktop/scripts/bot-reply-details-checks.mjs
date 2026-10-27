@@ -57,8 +57,8 @@ export async function openReplyDetails(page, message) {
     }
     const action = history.getByRole('button', { name: '回复详情', exact: true });
     await action.focus(); await action.press('Enter');
-    await page.locator('.bot-reply-details').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
+    await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').waitFor({ state: 'visible' });
+    assert.equal(await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
     return;
   }
   const button = message.locator('.bot-reply-context > button').first();
@@ -93,7 +93,7 @@ export async function openReplyDetails(page, message) {
   await hoverBotReply(page, message, button);
   await page.mouse.move(1, 1);
   await button.focus(); await button.press('Enter');
-  const details = page.locator('.bot-reply-details');
+  const details = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   await details.waitFor({ state: 'visible' });
   assert.equal(await details.evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
   assert.equal(await message.locator('.bot-turn-process, .bot-evidence-list, .bot-context-error').count(), 0);
@@ -102,7 +102,7 @@ export async function openReplyDetails(page, message) {
 }
 
 export async function closeReplyDetails(page) {
-  const replyId = await page.locator('.bot-reply-details').getAttribute('data-reply-id');
+  const replyId = await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').getAttribute('data-reply-id');
   const mountedTrigger = await page.evaluate(id => {
     const reply = document.getElementById(`bot-msg-${id}`)?.closest('.bot-reply, .bot-system');
     return Boolean(reply?.querySelector('.bot-reply-context > button, .bot-recovery-history-body > button'));

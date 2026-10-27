@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -51,7 +52,7 @@ export async function checkBotLifecycleGates({page, until, report, captureDirect
       await page.screenshot({path:path.join(captureDirectory,`lifecycle-${key}-detail-${width}-${appearance}.png`),animations:'disabled'});
       await page.getByRole('button',{name:'关闭',exact:true}).click();
       await detail.waitFor({state:'hidden'});
-      await page.locator('.bot-drawer-body').waitFor({state:'hidden'});
+      await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
       cases.push({key,width,appearance,listVisible:true,detailVisible:true,cancellationFromDecision:true,sameFacts:true});
     }
   }

@@ -10,7 +10,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const message = page.locator('#bot-msg-rc-message-9998');
   const card = message.locator('.bot-card');
-  const details = page.locator('.bot-reply-details');
+  const details = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   const rawError = details.locator('.bot-context-error pre');
   const budgetMessage = page.locator('#bot-msg-rc-message-9997');
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {

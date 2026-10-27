@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {readFileSync, writeFileSync, renameSync} from 'node:fs';
@@ -47,7 +48,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-detail-${width}-${appearance}.png`), animations: 'disabled'});
     await page.getByRole('button', {name: '关闭', exact: true}).click();
     await detail.waitFor({state: 'hidden'});
-    await page.locator('.bot-drawer-body').waitFor({state: 'hidden'});
+    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
     await page.locator('.pa-overlay-backdrop--drawer').waitFor({state: 'hidden'});
     cases.push({width, appearance, named: true, svg: true, stableIdentity: true, distinctShapes: true, legacyReportDeduped: true,
       taskDestination: true, humanWaitDistinct: true, verificationProgress: true, fits: true});
