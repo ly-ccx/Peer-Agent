@@ -335,7 +335,7 @@
 
 [data-theme="dark"] .bot-row.is-open {
   /* Lift the selected surface above both the glass sidebar and its hover fill. */
-  background: color-mix(in srgb, var(--graphite-base) 20%, var(--chrome-active));
+  background: color-mix(in srgb, var(--graphite-base) 14%, var(--chrome-active));
 }
 
 .bot-row-copy {

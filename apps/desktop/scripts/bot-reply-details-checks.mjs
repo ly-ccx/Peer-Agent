@@ -16,13 +16,17 @@ export async function wheelBotConversation(page, deltaY) {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
-/** Reach an unmounted row through the real scroller; never disable virtualization. */
-export async function scrollToBotMessage(page, message) {
+async function settleBotLayout(page) {
   // Closing or resizing a side pane can still be remeasuring virtual rows after
   // its body becomes inert. Locate only after the actual finite layout settles.
   await page.waitForFunction(() => !document.querySelector('.bot-resource-layout')?.getAnimations({ subtree: true }).some(animation =>
     animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime)));
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+/** Reach an unmounted row through the real scroller; never disable virtualization. */
+export async function scrollToBotMessage(page, message) {
+  await settleBotLayout(page);
   if (!await message.count()) {
     const thread = page.locator('.bot-thread');
     // Numeric IDs belong to this ordered 10,000-message fixture, not production identity.
@@ -63,6 +67,7 @@ export async function openReplyDetails(page, message) {
     const action = history.getByRole('button', { name: '回复详情', exact: true });
     await action.focus(); await action.press('Enter');
     await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').waitFor({ state: 'visible' });
+    await settleBotLayout(page);
     assert.equal(await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
     return;
   }
@@ -100,6 +105,7 @@ export async function openReplyDetails(page, message) {
   await button.focus(); await button.press('Enter');
   const details = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   await details.waitFor({ state: 'visible' });
+  await settleBotLayout(page);
   assert.equal(await details.evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
   assert.equal(await message.locator('.bot-turn-process, .bot-evidence-list, .bot-context-error').count(), 0);
   assert.equal(await page.locator(BOT_DETAIL_TITLE).innerText(), '回复详情');
