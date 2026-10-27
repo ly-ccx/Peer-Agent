@@ -158,7 +158,7 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   const englishTrigger = page.getByRole('button', { name: 'Bot settings', exact: true });
   assert.equal(await englishTrigger.getAttribute('title'), 'Bot settings');
   await englishTrigger.click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   const quick = app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat');
   await quickNative('open');
   await quick.getByRole('button', { name: 'Choose bot', exact: true }).waitFor();
