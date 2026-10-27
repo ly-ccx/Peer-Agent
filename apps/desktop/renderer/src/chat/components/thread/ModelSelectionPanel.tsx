@@ -6,6 +6,8 @@ import { InteractionLayerContext, useInteractionLayer } from '../../../app/hooks
 import { isImeKey } from '../../state/compositionGuard';
 import { selectionNavigation } from '../../../app/components/selectionNavigation';
 import { useModelSelectionPosition } from './useModelSelectionPosition';
+import { useModelSelectionTransition } from './useModelSelectionTransition';
+import { EffortSliderVisual } from './EffortSliderVisual';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { PeerIcon } from '../../../ui/icons/PeerIcon';
 import { effortLabel, effortShortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
@@ -41,6 +43,8 @@ function EffortRange({
   const selectedValue = levels.length > 1 ? (selectedIndex / (levels.length - 1)) * 100 : 0;
   const [dragValue, setDragValue] = useState(selectedValue);
   const [dirty, setDirty] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const pointerStart = useRef<number | null>(null);
   const committing = useRef(false), edited = useRef(false), cancelled = useRef(false);
   const sliderRef = useRef<HTMLInputElement>(null);
 
@@ -84,15 +88,8 @@ function EffortRange({
         <span>{isZh ? '思考强度' : 'Reasoning effort'}</span>
         <strong>{displayLabel}</strong>
       </div>
-      <div className="reasoning-effort-slider-shell">
-        <div className="reasoning-effort-slider-track" aria-hidden="true">
-          <div
-            className="reasoning-effort-slider-fill"
-            style={{
-              width: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${effectiveValue} / 100)`,
-            }}
-          />
-        </div>
+      <div className="reasoning-effort-slider-shell is-animated" data-dragging={dragging}>
+        <EffortSliderVisual value={effectiveValue} disabled={disabled} />
         {levels.map((level, index) => {
           const t = levels.length > 1 ? index / (levels.length - 1) : 0;
           const previewIndex = dirty
@@ -126,8 +123,10 @@ function EffortRange({
             edited.current = true; cancelled.current = false; setDirty(true);
             setDragValue(Number(event.currentTarget.value));
           }}
-          onPointerUp={(event) => { commit(Number(event.currentTarget.value)); }}
-          onPointerCancel={() => { cancelled.current = true; edited.current = false; setDirty(false); setDragValue(selectedValue); }}
+          onPointerDown={event => { pointerStart.current = event.clientX; }}
+          onPointerMove={event => { if (pointerStart.current !== null && event.clientX !== pointerStart.current) setDragging(true); }}
+          onPointerUp={(event) => { pointerStart.current = null; setDragging(false); commit(Number(event.currentTarget.value)); }}
+          onPointerCancel={() => { pointerStart.current = null; setDragging(false); cancelled.current = true; edited.current = false; setDirty(false); setDragValue(selectedValue); }}
           onKeyDown={event => {
             if (event.key === 'Escape' && !isImeKey(event) && edited.current) { event.preventDefault(); event.stopPropagation(); cancelled.current = true; edited.current = false; setDirty(false); setDragValue(selectedValue); }
           }}
@@ -137,7 +136,7 @@ function EffortRange({
               commit(Number(event.currentTarget.value));
             }
           }}
-          onBlur={(event) => { commit(Number(event.currentTarget.value)); }}
+          onBlur={(event) => { pointerStart.current = null; setDragging(false); commit(Number(event.currentTarget.value)); }}
         />
       </div>
     </>
@@ -218,6 +217,7 @@ export function ModelSelectionPanel({
   const [menuBelow, setMenuBelow] = useState(embedded);
   const [activeModelIndex, setActiveModelIndex] = useState(-1);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const providerButtonRef = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
 
@@ -236,6 +236,7 @@ export function ModelSelectionPanel({
   const selectionVisible = Boolean(browsed && activeModel && browsed.models.some((model) => model.id === activeModel.id));
   const effortLevels = selectionVisible ? modelEffortLevels(activeModel) : [];
   const fastAvailable = selectionVisible && supportsComposerFastMode(activeModel?.authMethod) && Boolean(onFastModeChange);
+  useModelSelectionTransition(panelRef, bodyRef, browsed?.id, modelId, effortLevels.length, fastAvailable, embedded);
 
   useLayoutEffect(() => {
     if (!providerMenuOpen || embedded) {
@@ -252,13 +253,17 @@ export function ModelSelectionPanel({
     setActiveModelIndex(-1);
     setBrowsedId(group.id);
     providerButtonRef.current?.focus({ preventScroll: true });
+    if (group.id !== selected?.group.id) {
+      const firstModel = group.models.find((model) => !model.disabled);
+      if (firstModel) chooseModel(firstModel.id);
+    }
   };
 
   const chooseModel = (nextId: string) => {
     if (disabled || selectionDisabled) return;
     const match = findSelectionModel(groups, nextId);
     if (!match || match.model.disabled || match.group.disabled) return;
-    // The owner commits model + compatible effort together; browsing never writes.
+    // Explicit provider/model selection uses the same owner commit; keyboard browsing alone never writes.
     onSelectModel(nextId);
   };
 
@@ -346,7 +351,7 @@ export function ModelSelectionPanel({
           ) : null}
         </div>
       ) : null}</MotionSurface>
-      <div className="model-selection-body">
+      <div ref={bodyRef} className="model-selection-body">
       <div className="model-selection-section-label">{isZh ? '模型' : 'Models'}</div>
       {!browsed?.models.some(model => !model.disabled) ? <p className="ui-form-feedback">{isZh ? '当前没有可选模型，请检查服务连接与模型范围。' : 'No model is available. Check the service connection and model scope.'}</p> : null}
       <div className="model-selection-models" role="listbox" aria-label={isZh ? '模型' : 'Models'}>

@@ -4,7 +4,11 @@ body:has(.bot-resource-layout[data-resource-active='true']) { min-width: 0; min-
 .bot-resource-layout { position: relative; background: var(--chrome-canvas, var(--paper-sheet)); display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .bot-resource-primary { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
 .bot-resource-primary > .bot-shell { height: 100%; }
-.bot-resource-pane { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; max-width: calc(100% - var(--resource-primary-min, 480px)); }
+.bot-resource-pane { position: relative; display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; max-width: calc(100% - var(--resource-primary-min, 480px)); }
+/* The handle belongs to the gap, outside the rounded paper's overflow clip. */
+.bot-resource-pane > .resource-workspace-resizer { top: 0; bottom: 0; left: -3px; height: auto; touch-action: none; }
+.bot-resource-pane > .resource-workspace-resizer::after { top: var(--space-4, 16px); bottom: var(--space-4, 16px); left: 2px; width: 2px; }
+html[data-vibrancy='true'] .bot-resource-pane > .resource-workspace-resizer { top: var(--bot-float-gap); bottom: var(--bot-float-gap); left: calc(-1 * (var(--bot-float-gap) + 6px) / 2); }
 .bot-resource-layout[data-resource-open='false'] > .bot-resource-pane { max-width: 0; }
 /* Retained paper borders must not become scrollable page width; exit owns its own clipping. */
 .bot-resource-layout[data-resource-open='false'] > .bot-resource-pane:not([data-resource-exiting='true']) { overflow: clip; }

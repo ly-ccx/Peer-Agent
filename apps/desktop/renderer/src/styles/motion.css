@@ -23,6 +23,14 @@
  * 入场 enter — 元素挂载时的呈现（收敛自 ~15 个旧 keyframes）
  * ------------------------------------------------------------------------- */
 
+/* Decorative flow from the left edge toward the effort thumb; not execution/progress. */
+@keyframes motion-effort-mote {
+  0% { opacity: 0; transform: translateX(0%); }
+  15% { opacity: 0.55; }
+  80% { opacity: 0.4; }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+
 /* Fresh content expands its intrinsic footprint without moving existing rows at once. */
 @keyframes motion-enter-layout {
   from { height: 0; padding-bottom: 0; }

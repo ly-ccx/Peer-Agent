@@ -147,6 +147,7 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
   }, [resourceMode, activeTab, setActiveTab]);
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     registerGoalSlot(goalSlotRef.current);
     return () => registerGoalSlot(null);
@@ -174,7 +175,7 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
   const [focusedTab, setFocusedTab] = useState<WorkbenchTabId | null>(null);
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || event.isPrimary === false) return;
-    const resizer = event.currentTarget, panel = resizer.parentElement;
+    const resizer = event.currentTarget, panel = panelRef.current;
     const startX = event.clientX, startWidth = maximized ? window.innerWidth : displayedWidth;
     const previousRootWidth = document.documentElement.style.getPropertyValue('--za-workbench-width');
     let nextWidth = startWidth, autoCollapsed = sidebarAutoCollapsed, liveMaximized = maximized;
@@ -219,28 +220,36 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
     e.preventDefault(); resize.cancel(); setMaximized(false); setWidth(clampWorkbenchWidth(next, resizeLimit, WORKBENCH_MIN_WIDTH));
   };
 
+  const resizer = open ? (
+    <div
+      className={`workbench-resizer${resourceMode ? ' resource-workspace-resizer' : ''}`}
+      role="separator"
+      aria-orientation="vertical"
+      aria-valuemin={WORKBENCH_MIN_WIDTH} aria-valuemax={Math.max(WORKBENCH_MIN_WIDTH, resizeLimit)} aria-valuenow={maximized ? window.innerWidth : displayedWidth}
+      aria-label={isZh ? '拖拽调整工作台宽度' : 'Resize workbench'}
+      aria-hidden={!interactiveOpen}
+      inert={!interactiveOpen}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
+      onKeyDown={onKeyDown}
+    />
+  ) : null;
+
+  // Resource handles live beside the clipped paper; classic workbenches retain their host.
   // 收起态：组件保持挂载用于 Goal portal target，整体不可见。
   return (
+    <>
+    {resourceMode ? resizer : null}
     <aside
+      ref={panelRef}
       className={`workbench-panel${resourceMode ? ' resource-workspace' : ''}${open ? ' workbench-panel--open' : ''}${maximized ? ' workbench-panel--maximized' : ''}`}
       aria-hidden={!interactiveOpen}
       inert={!interactiveOpen}
       data-resource-exiting={resourceExiting}
       style={{ width: open ? (maximized ? '100%' : `${displayedWidth}px`) : 0 }}
     >
-      {open ? (
-        <div
-          className="workbench-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-valuemin={WORKBENCH_MIN_WIDTH} aria-valuemax={Math.max(WORKBENCH_MIN_WIDTH, resizeLimit)} aria-valuenow={maximized ? window.innerWidth : displayedWidth}
-          aria-label={isZh ? '拖拽调整工作台宽度' : 'Resize workbench'}
-          tabIndex={0}
-          onPointerDown={onPointerDown}
-          onDoubleClick={onDoubleClick}
-          onKeyDown={onKeyDown}
-        />
-      ) : null}
+      {!resourceMode ? resizer : null}
 
       {resourceMode ? <ResourceWorkspaceHeader isZh={isZh} presentation={presentation} idPrefix={tabsId} /> : <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedTab(null); }}>
@@ -354,5 +363,6 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
 
       </div>
     </aside>
+    </>
   );
 }

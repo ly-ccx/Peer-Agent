@@ -16,15 +16,22 @@ export function useModelSelectionPosition(
   useLayoutEffect(() => {
     if (!open) { setStyle(undefined); return; }
     let openingHeight: number | null = null;
-    const updatePosition = () => {
+    let openingAnchor: Pick<DOMRect, 'right' | 'top' | 'bottom'> | null = null;
+    const updatePosition = (reanchor = false) => {
       const trigger = triggerRef.current;
       const panel = panelRef.current;
       if (!trigger || !panel) return;
       const rect = trigger.getBoundingClientRect();
+      // A different model label or save indicator can resize the trigger. Only
+      // vertical movement, scrolling or viewport changes move an already-open menu.
+      if (!openingAnchor || reanchor || rect.top !== openingAnchor.top || rect.bottom !== openingAnchor.bottom) {
+        openingAnchor = { right: rect.right, top: rect.top, bottom: rect.bottom };
+      }
       const width = panel.offsetWidth;
       openingHeight ??= panel.offsetHeight;
       const position = positionAnchoredOverlay(
-        { left: rect.right - width, top: rect.top, bottom: rect.bottom },
+        { left: openingAnchor.right - width,
+          top: openingAnchor.top, bottom: openingAnchor.bottom },
         { width, height: openingHeight },
         { width: window.innerWidth, height: window.innerHeight },
       );
@@ -40,15 +47,20 @@ export function useModelSelectionPosition(
         ? current : next);
     };
     updatePosition();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => updatePosition());
     if (triggerRef.current) observer?.observe(triggerRef.current);
     if (panelRef.current) observer?.observe(panelRef.current);
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
+    const reanchor = () => updatePosition(true);
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && panelRef.current?.contains(event.target)) return;
+      reanchor();
+    };
+    window.addEventListener('resize', reanchor);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       observer?.disconnect();
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', reanchor);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [open, triggerRef, panelRef]);
   return style;
