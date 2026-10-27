@@ -71,7 +71,7 @@ export function ConversationSceneDrawer({
   </WorkbenchProvider>;
   if (embedded) return <section className="bot-inline-scene" aria-label={i18n.t('projectAgent.drawer.scene')}>
     <header className="bot-inline-scene-heading"><button type="button" className="ui-button" onClick={onClose}>
-      <PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.back')}</button><span>{title}</span></header>
+      <PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.sceneBack')}</button><span>{title}</span></header>
     <BotDocumentPreview workspaceId={workspaceId} i18n={i18n} task={task}>{content(onClose)}</BotDocumentPreview>
   </section>;
   return <Drawer onClose={onClose} ariaLabel={i18n.t('projectAgent.drawer.scene')}

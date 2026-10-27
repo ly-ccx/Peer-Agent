@@ -69,7 +69,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
-  const scene = page.locator('.conversation-chat-drawer--nested');
+  const scene = page.locator('.bot-inline-scene');
   await openTaskScene(page, scene);
   const status = scene.locator('.conversation-access-inherited');
   await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
@@ -77,21 +77,13 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     const previousScene = await scene.elementHandle();
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
-    // Crossing the push/cover breakpoint remounts the task and its nested scene.
-    // Observe the new parent before deciding whether the scene needs reopening.
-    await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor({ state: 'visible' });
-    // The old portal can remain connected during its exit animation even after
-    // the new parent is visible. Inspect only the newly mounted scene.
-    await page.waitForFunction(node => !node.isConnected, previousScene);
-    await previousScene.dispose();
-    // Presence and responsive layout can finish in different commits. Decide
-    // whether to reopen only after finite transitions and the resulting DOM settle.
+    // One side workspace retains the exact scene while its width changes.
+    // It does not remount a second push/cover drawer at the breakpoint.
+    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'visible' });
     await page.waitForFunction(() => !document.getAnimations().some(animation => animation.playState === 'running'
       && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility()));
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    if (!await scene.count()) {
-      await openTaskScene(page, scene);
-    }
+    assert.equal(await scene.evaluate((node, previous) => node === previous && previous.isConnected, previousScene), true);
+    await previousScene.dispose();
     await scene.waitFor({ state: 'visible' });
     await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
     await page.screenshot({ path: path.join(captureDirectory, `bot-access-child-${width}-${appearance}.png`), animations: 'disabled' });

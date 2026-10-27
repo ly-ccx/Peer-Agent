@@ -128,6 +128,9 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     if (!focusAfterIntent.current) return;
     focusAfterIntent.current = false;
     const previous = returnFocus.current;
+    // A task action can already have focused its exact message or Composer in
+    // a child layout effect. That explicit destination outranks close fallback.
+    if (!workbench.open && root.current?.querySelector('.bot-resource-primary')?.contains(document.activeElement)) return;
     if (!workbench.open && previous?.isConnected && root.current?.querySelector('.bot-resource-primary')?.contains(previous)) { previous.focus({ preventScroll: true }); return; }
     const target = root.current?.querySelector<HTMLElement>(focusArea === 'resource'
       ? '.resource-workspace [aria-selected="true"], .resource-workspace button' : '.bot-main textarea, .bot-main button');

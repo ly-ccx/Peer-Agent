@@ -64,7 +64,7 @@ const startupOnly = process.argv.includes('--startup-only');
 const startupCommand = path.join(root, 'startup-command.json');
 if (startupOnly) writeFileSync(startupCommand, JSON.stringify({ release: false }));
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--completion-review-only') || process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--task-detail-only') || process.argv.includes('--completion-review-only') || process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -541,6 +541,10 @@ try {
     await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
     await page.locator('.project-diagnostics__summary').waitFor();
     await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--task-detail-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
   } else if (process.argv.includes('--work-surfaces-only')) {
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
