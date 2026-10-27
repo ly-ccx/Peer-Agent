@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE } from '../apps/desktop/scripts/bot-detail-surface-selectors.mjs';
 import { openReplyDetails, closeReplyDetails, wheelBotConversation, selectBotByName } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
 import { checkReplyPresence } from '../apps/desktop/scripts/bot-reply-presence-checks.mjs';
 import { runYieldFeedbackFixture } from '../apps/desktop/scripts/bot-yield-feedback-checks.mjs';
@@ -213,9 +214,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
       for (const docked of width === 1280 ? [false, true] : [false]) {
         if (docked) {
           await openDetails(live);
-          await until(() => page.locator('.bot-drawer-dock').evaluate(node =>
-            node.classList.contains('is-open') && node.getBoundingClientRect().width >=
-              parseFloat(getComputedStyle(node).getPropertyValue('--pa-drawer-width'))), Boolean);
+          await until(() => page.locator(BOT_DETAIL_SURFACE).evaluate(node =>
+            !node.getAnimations({ subtree: true }).some(animation => animation.playState === 'running'
+              && Number.isFinite(animation.effect?.getComputedTiming().endTime))), Boolean);
         }
         const bounds = await live.evaluate(node => {
           const row = node.closest('.bot-thread-row');
@@ -303,12 +304,12 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.setViewportSize({ width: 760, height: 780 });
-  // setViewportSize acknowledges the native window resize before React's resize
-  // listener necessarily replaces the pushed drawer. Measure the narrow layout
-  // after that mode switch; the outgoing dock still occupies 414px in between.
+  // The compact workspace keeps one visible reading area. Explicitly return
+  // to the conversation before inspecting its streaming geometry.
   if (workCommandFile) {
-    await page.locator('.bot-drawer-dock').waitFor({ state: 'detached' });
-    await page.locator('.bot-drawer-panel').waitFor({ state: 'visible' });
+    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: '返回对话', exact: true }).click();
+    await page.locator('.bot-convo').waitFor({ state: 'visible' });
   }
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -451,8 +452,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width: 760, height: 780 });
     if (workCommandFile) {
-      await page.locator('.bot-drawer-dock').waitFor({ state: 'detached' });
-      await page.locator('.bot-drawer-panel').waitFor({ state: 'visible' });
+      await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'visible' });
     }
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     assert.equal(await live.evaluate(node => node.scrollWidth <= node.clientWidth), true);

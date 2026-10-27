@@ -64,8 +64,8 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentListSessions({ workspaceId }), bots[0].workspaceId),
     result => result.sessions?.some(session => session.sessionId === command.sessions[0].sessionId && session.conversationId === child.id));
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-  // The preceding 760px case must reach its cover layout before opening a child.
-  await page.locator('.bot-drawer-panel .bot-drawer-body').waitFor({ state: 'visible' });
+  // Wait for the compact resource detail surface before opening a child.
+  await page.locator(BOT_DETAIL_SURFACE).locator('.bot-drawer-body').waitFor({ state: 'visible' });
   await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
