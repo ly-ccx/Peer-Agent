@@ -271,8 +271,8 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.equal(await page.getByRole('tab', { name: '概况', exact: true }).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('.bot-turn-process').count(), 0);
   await until(() => page.locator(BOT_DETAIL_SURFACE).evaluate(node =>
-    node.classList.contains('is-open') && node.getBoundingClientRect().width >=
-      parseFloat(getComputedStyle(node).getPropertyValue('--pa-drawer-width'))), Boolean);
+    node.getBoundingClientRect().width > 0 && !node.getAnimations({ subtree: true }).some(animation =>
+      animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime))), Boolean);
   await page.locator(BOT_DETAIL_CLOSE).click();
   await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
   checks.push('reply detail sidebar isolates process from bot profile; the Archive entry opens bot overview');
@@ -363,7 +363,12 @@ async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) 
           return { replyLeft: row.left, replyRight: row.right, authorLeft: author.left };
         });
         for (const expanded of [false, true]) {
-          const following = await page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop < 2);
+          // Reaching the end geometrically does not restore follow intent after
+          // a reading gesture. Use the actual user control before testing follow.
+          const latest = page.locator('.bot-thread-latest');
+          if (await latest.count()) await latest.click();
+          await page.waitForFunction(() => { const node = document.querySelector('.bot-thread'); return node.scrollHeight - node.clientHeight - node.scrollTop < 2; });
+          const following = await latest.count() === 0;
           if ((await background.getAttribute('open') !== null) !== expanded) {
             await summary.focus();
             await page.keyboard.press('Enter');

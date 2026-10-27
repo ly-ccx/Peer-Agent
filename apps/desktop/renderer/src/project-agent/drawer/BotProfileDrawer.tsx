@@ -5,6 +5,7 @@ import { useMotionSettled } from '../../app/hooks/useMotionSettled';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, useRef, type RefObject } from 'react';
+import { collectFocusable } from '../../app/hooks/focusScope';
 import { useFocusScope } from '../../app/hooks/useFocusScope';
 import { Drawer } from '../../app/components/Drawer';
 import { InteractionLayerContext, useInteractionLayer } from '../../app/hooks/useInteractionLayer';
@@ -119,10 +120,25 @@ export function BotProfileDrawer({
   const paneSettled = useMotionSettled(paneRef, memory.open && !inspect, memory.tab);
   const previousInspect = useRef(inspect);
   useEffect(() => {
+    let frame: number | undefined;
     if (visible && previousInspect.current !== inspect) {
       if (previousInspect.current?.evidence && inspect?.replyId && !inspect.evidence) {
-        (bodyRef.current?.querySelector<HTMLElement>('.bot-reply-details summary, .bot-reply-details button')
-          ?? bodyRef.current?.querySelector<HTMLElement>('.bot-drawer-head button'))?.focus({ preventScroll: true });
+        const restore = () => {
+          const reply = bodyRef.current?.querySelector<HTMLElement>('.bot-reply-details');
+          if (!reply) return false;
+          for (const target of [...reply.querySelectorAll<HTMLElement>('summary'), ...collectFocusable(reply)]) {
+            // Closed native disclosures can retain geometry. Native focus is
+            // the final check that this control can receive the return.
+            target.focus({ preventScroll: true });
+            if (document.activeElement === target) return true;
+          }
+          return false;
+        };
+        if (!restore()) frame = requestAnimationFrame(() => {
+          // A nested portal may commit after its parent effect. A later human
+          // focus choice wins; retry only while the removed Back left body active.
+          if (document.activeElement === document.body) restore();
+        });
       } else if (inspect) {
         bodyRef.current?.querySelector<HTMLElement>('.bot-drawer-head button')?.focus({ preventScroll: true });
       } else if (previousInspect.current) {
@@ -130,6 +146,7 @@ export function BotProfileDrawer({
       }
     }
     previousInspect.current = inspect;
+    return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
   }, [inspect, visible]);
   const close = () => {
     // A live reply can become a durable message while the drawer is open.

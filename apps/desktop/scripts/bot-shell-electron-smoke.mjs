@@ -160,20 +160,20 @@ if (workSurfaces) {
   seededMessages.at(-1).meta.evidenceRefs = Array.from({length:20}, (_,i)=>'rc-evidence-'+i);
   seededMessages.at(-1).meta.sessionStates = [{sessionId:'rc-work-1', status:'running'}];
   const sourceAt = '2026-10-07T03:12:39.953Z';
-  const evidenceRows = Array.from({length:20}, (_,i) => ({ evidenceRef: `rc-evidence-${i}`, createdAt: sourceAt,
+  const evidenceRows = Array.from({length:20}, (_,i) => ({ evidenceRef: `rc-evidence-${i}`, createdAt: sourceAt, conversationId: fixture.bots[0].conversationId,
     toolName: 'read_file', capabilityId: 'local.file.read' }));
   evidenceRows[0].bodyPreview = {kind:'file', text:'README.md\n\nPeer 是本机任务委托系统。代理负责持续推进，并在交还前验证结果。', truncated:false};
   evidenceRows[1] = {...evidenceRows[1], toolName:'get_session', capabilityId:'local.delegation.get_session',
-    conversationId:fixture.bots[2].conversationId, streamId:'rc-evidence-history'};
+    conversationId:fixture.bots[0].conversationId, streamId:'rc-evidence-history'};
   evidenceRows[2] = {...evidenceRows[1], evidenceRef:'rc-evidence-2', streamId:'missing-historical-turn'};
   evidenceRows[4] = {...evidenceRows[4], toolName:'bash', capabilityId:'local.shell.exec',
     bodyPreview:{kind:'command',text:JSON.stringify({exitCode:0,stdout:'回归通过：5 项检查完成。',stderr:''}),truncated:false}};
   const evidenceHistory={id:'rc-evidence-history',kind:'agent_turn',role:'assistant',turnId:'rc-evidence-history',
     content:'',createdAt:sourceAt,rounds:[{text:'',toolCalls:[{name:'get_session',input:{sessionId:'historical-session'},
       result:{ok:true,title:'只读熟悉 Peer-Agent',statusLabel:'执行受阻',evidenceRefs:['rc-evidence-1']}}]}]};
-  const evidenceHistoryFile=path.join(home,'conversations',evidenceRows[1].conversationId+'.jsonl');
-  const existingEvidenceHistory=existsSync(evidenceHistoryFile)?readFileSync(evidenceHistoryFile,'utf8').trim():'';
-  writeFileSync(evidenceHistoryFile,(existingEvidenceHistory?existingEvidenceHistory+'\n':'')+JSON.stringify(evidenceHistory)+'\n');
+  // Scoped evidence belongs to this Bot's actual canonical history. Keep the
+  // 10,000-row corpus and chronology; never seed a cross-Bot read as success.
+  seededMessages[100] = { ...evidenceHistory, createdAt: seededMessages[100].createdAt };
   mkdirSync(path.join(home,'goal-plans'),{recursive:true});
   writeFileSync(path.join(home,'goal-plans','evidence-index.jsonl'),evidenceRows.filter((_,i)=>i!==3).map(row=>JSON.stringify(row)).join('\n')+'\n');
 }

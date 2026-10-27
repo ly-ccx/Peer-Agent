@@ -65,3 +65,31 @@ test('task file navigation carries exact structured provenance and does not turn
   assert.equal(opened.length, 2); assert.equal(searched.length, 0);
   assert.deepEqual(opened[0].task, task); assert.equal(opened[1].workspaceId, 'A');
 });
+
+test('detail navigation reveals a hidden area once without stealing in-pane return focus or reopening a closed workspace', () => {
+  const slots: (readonly unknown[])[] = []; let index = 0, reveals = 0;
+  let pane = { ready: true, owner: { workspaceId: 'A' }, open: false, detailActive: false,
+    registerDetail() {}, showDetails() { reveals++; pane.open = true; pane.detailActive = true; } };
+  const effects: (() => void)[] = [];
+  const hooks = moduleFrom('./useBotDetailWorkspace.ts', {
+    react: { useEffect(effect: () => void, deps: readonly unknown[]) {
+      const slot = index++, previous = slots[slot];
+      if (!previous || deps.some((value, i) => !Object.is(value, previous[i]))) effects.push(effect);
+      slots[slot] = deps;
+    } },
+    '../../workbench/ResourceWorkspaceContext': { useResourceWorkspace: () => pane },
+    './botDetailReference': { botDetailReference: (workspaceId: string, _memory: unknown, inspect: unknown) => ({ workspaceId, inspect }) },
+    '../../workbench/resourceDetailState': { resourceDetailKey: JSON.stringify },
+  });
+  const render = (open: boolean, inspect: unknown) => {
+    index = 0; hooks.useBotDetailWorkspace('A', { open }, inspect, 'Detail');
+    effects.splice(0).forEach(effect => effect());
+  };
+  render(false, null); assert.equal(reveals, 0);
+  render(true, { replyId: 'r' }); assert.equal(reveals, 1);
+  render(true, { replyId: 'r', evidence: 'e' });
+  render(true, { replyId: 'r' }); assert.equal(reveals, 1, 'the reply owns its local return focus');
+  pane.open = false; render(true, { replyId: 'r' }); assert.equal(reveals, 1, 'closing is not a new navigation intent');
+  render(true, { sessionId: 'new-task' }); assert.equal(reveals, 2);
+  pane.detailActive = false; render(true, { replyId: 'new-reply' }); assert.equal(reveals, 3);
+});

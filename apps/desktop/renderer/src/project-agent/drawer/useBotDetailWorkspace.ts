@@ -13,6 +13,9 @@ export function useBotDetailWorkspace(workspaceId: string, memory: DrawerMemory,
   const key = resourceDetailKey(reference);
   const ready = !!workspace?.ready && workspace.owner?.workspaceId === workspaceId;
   useEffect(() => { if (ready) register?.({ target: reference, title }); }, [ready, register, key, title]);
-  useEffect(() => { if (ready && memory.open) show?.(); }, [ready, show, memory.open, key]);
+  // Domain navigation may need to reveal the workspace, but changing a detail
+  // inside the visible pane must not override that domain's focus restoration.
+  // Closing the workspace is not a new navigation intent and must not reopen it.
+  useEffect(() => { if (ready && memory.open && (!workspace?.open || !workspace.detailActive)) show?.(); }, [ready, show, memory.open, key]);
   return workspace;
 }
