@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
@@ -52,10 +53,10 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     const action = work.first().getByRole('button', { name: '查看任务详情', exact: true });
     await action.waitFor({ state: 'visible' });
     await action.focus(); await action.press('Enter');
-    const detail = page.locator('.bot-task-detail'); await detail.waitFor();
+    const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail'); await detail.waitFor();
     assert.match(await detail.innerText(), /入口样式收尾/);
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
-    await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+    await page.locator(BOT_DETAIL_CLOSE).click();
+    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
     await openReplyDetails(page, reply);
     assert.equal(await page.locator('.bot-reply-details .bot-work-row').first().evaluate(node => node.open), true,
       'reopening reply details preserves the task disclosure state');

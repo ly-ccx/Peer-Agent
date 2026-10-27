@@ -1,3 +1,4 @@
+import { ResourceFeedbackCards } from './ResourceFeedbackCards';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { QuoteChip } from './QuoteChip';
@@ -25,9 +26,11 @@ export function BotComposer({
   modelUpdating = false,
   draftRequest = null,
   onDraftPrepared,
+  resourceRecipientConversationId,
 }: {
   readonly i18n: I18nRuntime;
   readonly botName: string;
+  readonly resourceRecipientConversationId?: string;
   readonly draft: InputDraftValue;
   readonly onDraftChange: (patch: Partial<InputDraftValue>) => void;
   readonly ready: boolean;
@@ -53,6 +56,7 @@ export function BotComposer({
   const uploads = useComposerAttachments(i18n.locale.startsWith('zh'), { attachments: draft.attachments, onChange: attachments => onDraftChange({ attachments }) });
   const fileInput = useRef<HTMLInputElement>(null);
   const trimmed = text.trim();
+  const resourceRecipientChanged = !!resourceRecipientConversationId && !!draft.resourceFeedback?.some(row => row.recipient.conversationId !== resourceRecipientConversationId);
   const hasContent = Boolean(trimmed) || uploads.attachments.length > 0;
   const tooLong = trimmed.length > 100_000;
   const prompt = i18n.t('projectAgent.chat.placeholder', { name: botName });
@@ -85,7 +89,7 @@ export function BotComposer({
   }, []);
 
   function send() {
-    if (!ready || !hasContent || tooLong || uploads.isReading() || modelUpdating || permissionSaving || composition.active()) return;
+    if (!ready || resourceRecipientChanged || !hasContent || tooLong || uploads.isReading() || modelUpdating || permissionSaving || composition.active()) return;
     onSend();
   }
 
@@ -114,6 +118,8 @@ export function BotComposer({
         send();
       }}
     >
+      <ResourceFeedbackCards rows={draft.resourceFeedback ?? []} botName={botName} conversationId={resourceRecipientConversationId} isZh={i18n.locale.startsWith('zh')}
+        onRemove={id => onDraftChange({ resourceFeedback: (draft.resourceFeedback ?? []).filter(row => row.id !== id) })} />
       {quote ? (
         <QuoteChip text={quote} source={quoteSource || i18n.t('projectAgent.chat.quote')}
           removeLabel={i18n.t('projectAgent.chat.quoteRemove')} onRemove={() => { onQuoteRemove(); textareaRef.current?.focus({ preventScroll: true }); }}
@@ -168,7 +174,7 @@ export function BotComposer({
         <div className="bot-composer-actions">
           {modelControls}
           {generating ? <button type="button" className="bot-stop-response" disabled={stopping} title={i18n.t('projectAgent.chat.stopHint')} aria-label={i18n.t(stopping ? 'projectAgent.chat.stopping' : 'projectAgent.chat.stop')} onClick={onStop}><PeerIcon name="stop" size={15} /></button> : null}
-          {!generating || hasContent ? <button type="submit" disabled={!ready || !hasContent || tooLong || uploads.reading || modelUpdating || permissionSaving} aria-label={i18n.t('projectAgent.chat.send')} title={i18n.t('projectAgent.chat.send')}><PeerIcon name="send" size={17} /></button> : null}
+          {!generating || hasContent ? <button type="submit" disabled={!ready || resourceRecipientChanged || !hasContent || tooLong || uploads.reading || modelUpdating || permissionSaving} aria-label={i18n.t('projectAgent.chat.send')} title={i18n.t('projectAgent.chat.send')}><PeerIcon name="send" size={17} /></button> : null}
         </div>
       </div>
     </form>

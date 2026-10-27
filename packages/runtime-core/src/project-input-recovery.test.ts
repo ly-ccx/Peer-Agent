@@ -98,3 +98,18 @@ test('a stale native editor value cannot allocate another input after a first su
   await session.send({ text: 'send once' });
   assert.equal((await session.send({ text: 'send once' })).code, 'INPUT_CHANGED'); assert.equal(f.calls.length, 1);
 });
+
+test('resource feedback survives pending input recovery/retry; later draft edits cannot retarget it or auto-submit it', async () => {
+  const f = fixture(), session = f.make(); await session.load();
+  const hash = 'sha256:' + 'a'.repeat(64);
+  const feedback = { id: 'selection-a', recipient: { workspaceId: 'ws', conversationId: 'conversation-a' }, capturedAt: '2026-10-27T00:00:00.000Z',
+    resource: { kind: 'document' as const, mode: 'preview' as const, reference: { workspaceId: 'ws', path: '/repo/a.md', kind: 'file' as const } },
+    version: { kind: 'content' as const, resourceId: hash, contentVersion: hash }, excerpt: 'selected', selection: { kind: 'discussion' as const } };
+  session.edit({ text: 'question', resourceFeedback: [feedback] }); await session.flush(); assert.equal(f.calls.length, 0);
+  f.lose(); await session.send(); const input = session.getSnapshot().pending[0]!;
+  assert.deepEqual(input.resourceFeedback, [feedback]); assert.equal(session.getSnapshot().draft.resourceFeedback, undefined);
+  session.edit({ text: 'new question', resourceFeedback: [{ ...feedback, id: 'selection-b' }] });
+  await session.retry(input.inputId);
+  assert.equal(f.calls[1]!.inputId, input.inputId); assert.equal(f.calls[1]!.resourceFeedback![0]!.id, 'selection-a');
+  assert.equal(session.getSnapshot().draft.resourceFeedback![0]!.id, 'selection-b');
+});

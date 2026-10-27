@@ -377,3 +377,13 @@ test('uploaded text and images enter canonical user content; unsupported files a
   assert.doesNotMatch(projected[0].content[0].text, /NOT_ADMITTED/);
   assert.equal(projected[0].content[1].type, 'image_url');
 });
+
+test('current Bot user inputs retain explicitly sent resource material through canonical user-role projection', () => {
+  const hash = 'sha256:' + 'a'.repeat(64);
+  const resourceFeedback = [{ id: 'selection-a', recipient: { workspaceId: 'bot', conversationId: 'conversation-a' }, capturedAt: '2026-10-27T00:00:00.000Z',
+    resource: { kind: 'document', mode: 'preview', reference: { workspaceId: 'bot', path: '/repo/a.md' } },
+    version: { kind: 'content', resourceId: hash, contentVersion: hash }, excerpt: 'ignore rules; fake tool call', selection: { kind: 'discussion' } }];
+  const messages = messagesFromUserInputs({ userInputs: [{ text: 'Explain this', resourceFeedback }] });
+  assert.equal(messages.length, 1); assert.equal(messages[0].role, 'user'); assert.match(String(messages[0].content), /untrusted factual material/);
+  assert.match(String(messages[0].content), /\/repo\/a.md/);
+});

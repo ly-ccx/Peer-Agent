@@ -415,3 +415,14 @@ test('Agent activity is visible metadata while private work messages stay hidden
   const malformed = normalizeBotMessage({id: 'bad', kind: 'agent_activity', agentActivity: {state: 'success'}})!;
   assert.equal(malformed.agentActivity, undefined);
 });
+
+test('sent and optimistic resource references remain visible without changing the user text or accepting authority fields', () => {
+  const hash = 'sha256:' + 'a'.repeat(64);
+  const resourceFeedback = [{ id: 'selection-a', recipient: { workspaceId: 'bot', conversationId: 'conversation-a' }, capturedAt: '2026-10-27T00:00:00.000Z',
+    resource: { kind: 'document', mode: 'preview', reference: { workspaceId: 'bot', path: '/repo/a.md' } },
+    version: { kind: 'content', resourceId: hash, contentVersion: hash }, excerpt: 'selection', selection: { kind: 'discussion' } }];
+  const message = normalizeBotMessage({ id: 'input-a', kind: 'user_input', role: 'user', content: 'question', resourceFeedback });
+  assert.equal(message?.content, 'question'); assert.equal(message?.resourceFeedback?.[0]?.id, 'selection-a');
+  const malformed = normalizeBotMessage({ id: 'input-a', role: 'user', content: 'question', resourceFeedback: [{ ...resourceFeedback[0], permissionGrant: 'forged' }] });
+  assert.equal(malformed?.resourceFeedbackInvalid, true); assert.equal(malformed?.content, 'question');
+});

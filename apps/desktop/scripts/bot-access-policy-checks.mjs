@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -31,7 +32,7 @@ async function openTaskScene(page, scene) {
 
 /** Uses production local IPC/persistence and actual child conversation metadata. No model calls. */
 export async function checkBotAccessPolicy({ page, until, report, captureDirectory, home, bots, commandFile }) {
-  if (await page.locator('.bot-drawer-dock.is-open').count()) await page.getByRole('button', { name: '关闭', exact: true }).click();
+  if (await page.locator(BOT_DETAIL_SURFACE).count()) await page.locator(BOT_DETAIL_CLOSE).click();
   const viewport = page.viewportSize(), theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const read = workspaceId => page.evaluate(workspaceId => window.peerAgent.projectAgentReadAccessPolicy({ workspaceId }), workspaceId);
   const otherBefore = await read(bots[1].workspaceId);
@@ -63,12 +64,12 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentListSessions({ workspaceId }), bots[0].workspaceId),
     result => result.sessions?.some(session => session.sessionId === command.sessions[0].sessionId && session.conversationId === child.id));
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-  // The preceding 760px case must reach its cover layout before opening a child.
-  await page.locator('.bot-drawer-panel .bot-drawer-body').waitFor({ state: 'visible' });
+  // Wait for the compact resource detail surface before opening a child.
+  await page.locator(BOT_DETAIL_SURFACE).locator('.bot-drawer-body').waitFor({ state: 'visible' });
   await page.getByRole('tab', { name: '任务', exact: true }).click();
-  if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
+  if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
-  const scene = page.locator('.conversation-chat-drawer--nested');
+  const scene = page.locator('.bot-inline-scene');
   await openTaskScene(page, scene);
   const status = scene.locator('.conversation-access-inherited');
   await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
@@ -76,28 +77,20 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     const previousScene = await scene.elementHandle();
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
-    // Crossing the push/cover breakpoint remounts the task and its nested scene.
-    // Observe the new parent before deciding whether the scene needs reopening.
-    await page.locator(width === 1280 ? '.bot-drawer-dock .bot-task-detail' : '.bot-drawer-panel .bot-task-detail').waitFor({ state: 'visible' });
-    // The old portal can remain connected during its exit animation even after
-    // the new parent is visible. Inspect only the newly mounted scene.
-    await page.waitForFunction(node => !node.isConnected, previousScene);
-    await previousScene.dispose();
-    // Presence and responsive layout can finish in different commits. Decide
-    // whether to reopen only after finite transitions and the resulting DOM settle.
+    // One side workspace retains the exact scene while its width changes.
+    // It does not remount a second push/cover drawer at the breakpoint.
+    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'visible' });
     await page.waitForFunction(() => !document.getAnimations().some(animation => animation.playState === 'running'
       && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility()));
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    if (!await scene.count()) {
-      await openTaskScene(page, scene);
-    }
+    assert.equal(await scene.evaluate((node, previous) => node === previous && previous.isConnected, previousScene), true);
+    await previousScene.dispose();
     await scene.waitFor({ state: 'visible' });
     await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
     await page.screenshot({ path: path.join(captureDirectory, `bot-access-child-${width}-${appearance}.png`), animations: 'disabled' });
   }
   await status.focus(); await page.keyboard.press('Enter');
   await scene.waitFor({ state: 'detached' });
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.ok((await picker.innerText()).includes('完全访问'));
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: command.seq + 1 })); renameSync(commandFile + '.next', commandFile);
   await setFixtureBotAccess(page, bots[0].workspaceId, 'ask_before_local');

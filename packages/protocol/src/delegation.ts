@@ -366,6 +366,7 @@ export interface ProjectInput {
   readonly quoteRefs: readonly string[];
   readonly attachmentRefs: readonly string[];
   readonly attachments?: readonly ProjectInputAttachment[];
+  readonly resourceFeedback?: readonly import('./resource-feedback.ts').ResourceFeedback[];
   readonly createdAt: string;
 }
 

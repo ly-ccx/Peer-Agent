@@ -136,8 +136,9 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   await technical.locator('summary').press('Enter');
   // A dock's body has its final width while the opening transition is still running.
   await until(() => process.evaluate(node => {
-    const dock = node.closest('.bot-drawer-dock');
+    const dock = node.closest('.resource-workspace, .bot-drawer-dock');
     if (!dock) return true;
+    if (dock.matches('.resource-workspace')) return dock.getAnimations().every(animation => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity);
     return dock.getBoundingClientRect().width >= parseFloat(getComputedStyle(dock).getPropertyValue('--pa-drawer-width'));
   }), Boolean);
   const states = await process.locator('.bot-process-status').allTextContents();
@@ -151,6 +152,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   await page.setViewportSize({ width: 760, height: 780 });
   for (const value of ['dark', 'light']) {
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, value);
+    await until(() => page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), Boolean);
     assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);
     const rect = await first.card.evaluate(node => ({ card: getComputedStyle(node).borderLeftWidth, shadow: getComputedStyle(node).boxShadow,
       user: getComputedStyle(document.querySelector('.bot-user')).backgroundColor }));

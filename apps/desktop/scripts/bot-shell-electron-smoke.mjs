@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import { checkBotWindowMaterial } from './bot-window-material-checks.mjs';
 import { checkBotVerification } from './bot-verification-checks.mjs';
 import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
@@ -63,7 +64,7 @@ const startupOnly = process.argv.includes('--startup-only');
 const startupCommand = path.join(root, 'startup-command.json');
 if (startupOnly) writeFileSync(startupCommand, JSON.stringify({ release: false }));
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--completion-review-only') || process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--task-detail-only') || process.argv.includes('--completion-review-only') || process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
@@ -159,20 +160,20 @@ if (workSurfaces) {
   seededMessages.at(-1).meta.evidenceRefs = Array.from({length:20}, (_,i)=>'rc-evidence-'+i);
   seededMessages.at(-1).meta.sessionStates = [{sessionId:'rc-work-1', status:'running'}];
   const sourceAt = '2026-10-07T03:12:39.953Z';
-  const evidenceRows = Array.from({length:20}, (_,i) => ({ evidenceRef: `rc-evidence-${i}`, createdAt: sourceAt,
+  const evidenceRows = Array.from({length:20}, (_,i) => ({ evidenceRef: `rc-evidence-${i}`, createdAt: sourceAt, conversationId: fixture.bots[0].conversationId,
     toolName: 'read_file', capabilityId: 'local.file.read' }));
   evidenceRows[0].bodyPreview = {kind:'file', text:'README.md\n\nPeer 是本机任务委托系统。代理负责持续推进，并在交还前验证结果。', truncated:false};
   evidenceRows[1] = {...evidenceRows[1], toolName:'get_session', capabilityId:'local.delegation.get_session',
-    conversationId:fixture.bots[2].conversationId, streamId:'rc-evidence-history'};
+    conversationId:fixture.bots[0].conversationId, streamId:'rc-evidence-history'};
   evidenceRows[2] = {...evidenceRows[1], evidenceRef:'rc-evidence-2', streamId:'missing-historical-turn'};
   evidenceRows[4] = {...evidenceRows[4], toolName:'bash', capabilityId:'local.shell.exec',
     bodyPreview:{kind:'command',text:JSON.stringify({exitCode:0,stdout:'回归通过：5 项检查完成。',stderr:''}),truncated:false}};
   const evidenceHistory={id:'rc-evidence-history',kind:'agent_turn',role:'assistant',turnId:'rc-evidence-history',
     content:'',createdAt:sourceAt,rounds:[{text:'',toolCalls:[{name:'get_session',input:{sessionId:'historical-session'},
       result:{ok:true,title:'只读熟悉 Peer-Agent',statusLabel:'执行受阻',evidenceRefs:['rc-evidence-1']}}]}]};
-  const evidenceHistoryFile=path.join(home,'conversations',evidenceRows[1].conversationId+'.jsonl');
-  const existingEvidenceHistory=existsSync(evidenceHistoryFile)?readFileSync(evidenceHistoryFile,'utf8').trim():'';
-  writeFileSync(evidenceHistoryFile,(existingEvidenceHistory?existingEvidenceHistory+'\n':'')+JSON.stringify(evidenceHistory)+'\n');
+  // Scoped evidence belongs to this Bot's actual canonical history. Keep the
+  // 10,000-row corpus and chronology; never seed a cross-Bot read as success.
+  seededMessages[100] = { ...evidenceHistory, createdAt: seededMessages[100].createdAt };
   mkdirSync(path.join(home,'goal-plans'),{recursive:true});
   writeFileSync(path.join(home,'goal-plans','evidence-index.jsonl'),evidenceRows.filter((_,i)=>i!==3).map(row=>JSON.stringify(row)).join('\n')+'\n');
 }
@@ -478,7 +479,7 @@ const tracePaging = async (phase) => {
 const until = async (read, predicate, timeout = 30000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
-  throw Error('Shell acceptance timed out');
+  throw Error(`Shell acceptance timed out: ${String(read).slice(0, 220)}`);
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
@@ -540,6 +541,10 @@ try {
     await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
     await page.locator('.project-diagnostics__summary').waitFor();
     await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--task-detail-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
   } else if (process.argv.includes('--work-surfaces-only')) {
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
@@ -816,10 +821,10 @@ try {
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }
-  await page.getByRole('button', { name: '机器人设置', exact: true }).click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click(); await page.locator(BOT_DETAIL_SURFACE).waitFor();
   assert.equal(await page.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   report.checks.push('Bot settings opens configuration directly');
   await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   if (process.argv.includes('--accessibility')) await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });

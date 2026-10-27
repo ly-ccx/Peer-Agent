@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import { checkBotEvidence } from './bot-evidence-checks.mjs';
 import assert from 'node:assert/strict';
@@ -11,7 +12,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   const reply = page.locator('#bot-msg-rc-message-9999');
   await scrollToBotMessage(page, reply);
   await reply.locator('.bot-reply-body').click();
-  const context = page.locator('.bot-reply-details');
+  const context = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   assert.equal(await reply.locator('.bot-reply-context > button').innerText(), '回复详情');
   assert.equal(await reply.locator('.bot-work-row, .bot-evidence-list').count(), 0);
   assert.equal(await reply.locator('.bot-reply-marks > button').count(), 0);
@@ -162,16 +163,16 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(waitingViewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, waitingTheme);
   await work.getByRole('button', { name: '查看任务详情', exact: true }).focus(); await page.keyboard.press('Enter');
-  await page.locator('.bot-task-detail').waitFor();
+  await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor();
   await page.getByRole('button', { name: '查看对话中的完整说明', exact: true }).click();
-  await until(() => page.locator('.bot-drawer-dock.is-open').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await page.locator('.bot-composer textarea').isVisible(), true);
   checks.push('waiting work stays a factual status in reply and background; named main bot owns follow-up, optional detail returns to main dialogue');
   report.delegatedWorkHandoff = { reply: true, background: true, noDirectHandling: true, detailReturnsToBot: true, hintChecks };
   // The detail visit remembers Tasks; restore Overview for the following evidence-return case.
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '概况', exact: true }).click();
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   await openReplyDetails(page, reply);
   change([{ ...initial.sessions[0], status: 'result_ready' }]);
   await until(() => work.getAttribute('data-status'), value => value === 'result_ready');
@@ -256,7 +257,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(memoryViewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, memoryTheme);
   await page.locator('.bot-drawer-body').screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'bot-memory.png') });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   checks.push('memory starts with saved content, keeps settings and provenance on demand and contains no process view');
   checks.push('memory filter controls fit their columns with visible spacing at 1280px and 760px in both themes');
 
@@ -269,11 +270,11 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.locator('.bot-overview-identity').waitFor();
   assert.equal(await page.getByRole('tab', { name: '概况', exact: true }).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('.bot-turn-process').count(), 0);
-  await until(() => page.locator('.bot-drawer-dock').evaluate(node =>
-    node.classList.contains('is-open') && node.getBoundingClientRect().width >=
-      parseFloat(getComputedStyle(node).getPropertyValue('--pa-drawer-width'))), Boolean);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+  await until(() => page.locator(BOT_DETAIL_SURFACE).evaluate(node =>
+    node.getBoundingClientRect().width > 0 && !node.getAnimations({ subtree: true }).some(animation =>
+      animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime))), Boolean);
+  await page.locator(BOT_DETAIL_CLOSE).click();
+  await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
   checks.push('reply detail sidebar isolates process from bot profile; the Archive entry opens bot overview');
 
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -288,7 +289,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   }
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
   await page.setViewportSize(viewport);
-  if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) await closeReplyDetails(page);
+  if (await page.locator(BOT_DETAIL_CLOSE).isVisible()) await closeReplyDetails(page);
   checks.push('classified reply and delegated work fit a 760px viewport in both themes');
 }
 
@@ -362,7 +363,12 @@ async function checkBackgroundWorkAlignment({ page, report, captureDirectory }) 
           return { replyLeft: row.left, replyRight: row.right, authorLeft: author.left };
         });
         for (const expanded of [false, true]) {
-          const following = await page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop < 2);
+          // Reaching the end geometrically does not restore follow intent after
+          // a reading gesture. Use the actual user control before testing follow.
+          const latest = page.locator('.bot-thread-latest');
+          if (await latest.count()) await latest.click();
+          await page.waitForFunction(() => { const node = document.querySelector('.bot-thread'); return node.scrollHeight - node.clientHeight - node.scrollTop < 2; });
+          const following = await latest.count() === 0;
           if ((await background.getAttribute('open') !== null) !== expanded) {
             await summary.focus();
             await page.keyboard.press('Enter');

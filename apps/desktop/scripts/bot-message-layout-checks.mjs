@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -9,7 +10,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const message = page.locator('#bot-msg-rc-message-9998');
   const card = message.locator('.bot-card');
-  const details = page.locator('.bot-reply-details');
+  const details = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   const rawError = details.locator('.bot-context-error pre');
   const budgetMessage = page.locator('#bot-msg-rc-message-9997');
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
@@ -113,13 +114,13 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       for (const docked of width === 1280 ? [false, true] : [false]) {
         if (docked) {
           await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-          await page.locator('.bot-drawer-dock.is-open').waitFor();
+          await page.locator(BOT_DETAIL_SURFACE).waitFor();
           await until(() => page.locator('.bot-convo').evaluate(node => node.getBoundingClientRect().width < 700), Boolean);
         }
         await scrollToBotMessage(page, card);
-        if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) {
-          await page.getByRole('button', { name: '关闭', exact: true }).click();
-          await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+        if (await page.locator(BOT_DETAIL_CLOSE).isVisible()) {
+          await page.locator(BOT_DETAIL_CLOSE).click();
+          await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
         }
         await rawError.waitFor({ state: 'hidden' });
         assert.equal(await card.locator(':scope > p').textContent(), '服务未接受这次请求。需要先检查模型或连接配置，已有进展已保留。', 'failure is stated plainly outside technical details');
@@ -135,18 +136,21 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
           return {
             textFits: fragments.every(box => box.left >= rect.left - 1 && box.right <= rect.right + 1),
             lines: fragments.length,
+            paragraphWidth: rect.width, whiteSpace: getComputedStyle(paragraph).whiteSpace,
+            overflowRight: Math.max(0, ...fragments.map(box => box.right - rect.right)),
             cardFits: node.scrollWidth <= node.clientWidth,
-            conversationFits: document.querySelector('.bot-convo').scrollWidth <= document.querySelector('.bot-convo').clientWidth,
+            conversationFits: !document.querySelector('.bot-convo').checkVisibility({ visibilityProperty: true }) || document.querySelector('.bot-convo').scrollWidth <= document.querySelector('.bot-convo').clientWidth,
+            detailFits: node.getBoundingClientRect().left >= 0 && node.getBoundingClientRect().right <= innerWidth,
           };
         });
-        assert.ok(bounds.textFits && bounds.cardFits && bounds.conversationFits,
+        assert.ok(bounds.textFits && bounds.cardFits && bounds.conversationFits && bounds.detailFits,
           `long error must fit its text area, card and conversation: ${JSON.stringify({ width, appearance, docked, ...bounds })}`);
         assert.ok(bounds.lines > 1, 'long error should wrap into readable lines');
         cases.push({ viewportWidth: width, appearance, docked, diagnosticsCollapsed: true, detailsKeyboard: true, ...bounds });
         if (width === 760 && appearance === 'dark') await closeReplyDetails(page);
         await page.waitForTimeout(180);
         await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `long-error-${docked ? 'docked' : width}-${appearance}.png`) });
-        if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) await closeReplyDetails(page);
+        if (await page.locator(BOT_DETAIL_CLOSE).isVisible()) await closeReplyDetails(page);
       }
     }
   }

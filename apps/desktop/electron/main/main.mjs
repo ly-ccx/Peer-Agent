@@ -1,4 +1,14 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
+import { createResourceEditApplicationService } from './resource-edit-application-service.mjs';
+import { createResourceEditSources } from './resource-edit-sources.mjs';
+import { createResourceEditSubmissionHost } from './resource-edit-submission-host.mjs';
+import { createResourceEditIpcRegistrations } from './ipc/register-resource-edit-ipc.mjs';
+import { bindBrowserSelectionFeedback } from './browser-selection-feedback.mjs';
+import { resolveResourceFeedbackRecipient } from './resource-feedback-recipient.mjs';
+import { createResourceFeedbackPreparation } from './resource-feedback-preparation.mjs';
+import { createResourceFeedbackIpcRegistrations } from './ipc/register-resource-feedback-ipc.mjs';
+import { createBrowserWindowController } from './browser-window-controller.mjs';
+import { createBrowserWindowIpcRegistrations } from './ipc/register-browser-window-ipc.mjs';
+import { app, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
@@ -34,6 +44,7 @@ import { createRemoteAccessController } from './runtime-gateway/remote-access-co
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
   getActiveBrowserEntry,
+  getBrowserEntry,
   registerBrowserWebContents,
   unregisterBrowserWebContents,
   getActiveWebContentsId,
@@ -112,7 +123,7 @@ import {
   shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
-  applyStartupApprovalRecovery, createApprovalStore, createHostLease, listBotWorkspaceIds,
+  applyStartupApprovalRecovery, createApprovalStore, createHostLease, listBotWorkspaceIds, createResourceEditStorage, createBotProfileStore, createBotAccessPolicyAuthority,
 } from '@peer-agent/runtime-node';
 import {
   createContextAccountingCompactionPipeline,
@@ -181,6 +192,8 @@ import { createAutomationChatProposalService } from './automation-chat-proposal-
 import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
 import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
 import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
+import { createResourceWindowIpcRegistrations } from './ipc/register-resource-window-ipc.mjs';
+import { createResourceWindowController } from './resource-window-controller.mjs';
 import { createPendingTaskIpcRegistrations } from './ipc/register-pending-task-ipc.mjs';
 import { createPasswordVaultIpcRegistrations } from './ipc/register-password-vault-ipc.mjs';
 import { createProviderConfigurationIpcRegistrations } from './ipc/register-provider-configuration-ipc.mjs';
@@ -567,8 +580,10 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
     }).resolveArtifact } : {}),
   },
 });
+let browserWindowController = null;
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
+  revealNative: request => browserWindowController?.reveal(request),
   isBrowserReady: (conversationId) => {
     const entry = getActiveBrowserEntry(conversationId);
     if (!entry?.webContentsId) return false;
@@ -1481,7 +1496,32 @@ const conversationApplicationService = createConversationApplicationService({
   },
 });
 
+const popupResourceFeedback = (window, item) => {
+  Menu.buildFromTemplate([{ label: item.label, enabled: item.enabled, click: () => { void item.onClick(); } }, { type: 'separator' }, { role: 'copy' }])
+    .popup({ window: window ?? undefined, ...(item.params?.frame ? { frame: item.params.frame } : {}) });
+};
+const feedbackRecipientForConversation = conversationId => resolveResourceFeedbackRecipient(conversationId, {
+  items: projectAgentDirectory.listItems?.() ?? [],
+  conversations: conversationStore.listConversations({ roles: ['default', 'project_agent', 'work_session'], includeMessageCount: false }),
+});
+const resourceFeedbackPreparation = createResourceFeedbackPreparation({
+  isMainSender: sender => trustedWindowRegistry.getRole(sender) === 'main',
+  getRecipient: workspaceId => {
+    const item = projectAgentDirectory.listItems?.().find(value => value.workspaceId === workspaceId);
+    return item?.profile?.status === 'active' && item.profile.agentConversationId ? { conversationId: item.profile.agentConversationId } : null;
+  },
+});
+
 const browserCoreApplicationService = createBrowserCoreApplicationService({
+  bindSelectionFeedback: ({ contents, getRegistration, sourceSender }) => bindBrowserSelectionFeedback({ contents,
+    getBinding: () => { const owned = getRegistration(), registration = owned?.registration;
+      const recipient = registration ? feedbackRecipientForConversation(registration.conversationId) : null;
+      return owned?.sender === sourceSender && contents.hostWebContents === sourceSender && recipient
+        ? { sourceSender, recipient, conversationId: registration.conversationId, browserTabId: registration.browserTabId } : null; },
+    prepare: request => resourceFeedbackPreparation.prepare(request), isZh: () => sessionStore.getSession().locale?.startsWith('zh'),
+    popup: item => popupResourceFeedback(BrowserWindow.fromWebContents(sourceSender), item),
+    report: notice => { if (!sourceSender.isDestroyed()) sourceSender.send('resource-feedback:notice', notice); },
+  }),
   getActiveWebContentsId: () => getActiveWebContentsId(),
   registerWebContents: (registration) => registerBrowserWebContents(registration),
   unregisterWebContents: (registration) => unregisterBrowserWebContents(registration),
@@ -1648,24 +1688,25 @@ const workspaceApplicationService = createWorkspaceApplicationService({
   readProjectIndex: (options) => readProjectIndex(options),
 });
 
+const resolveBotDocumentReference = createBotDocumentResolver({
+  getWorkspace: workspaceId => projectAgentDirectory.projectAccess?.directory?.get(workspaceId),
+  getTaskSession: sessionId => projectAgentDirectory.projectAccess?.getSession(sessionId),
+  getTaskPlan: planId => goalPlanStore.getPlan(planId),
+  getKnownRoots: () => {
+    const settings = settingsStore.getAll();
+    return [...(settings.workspaces || []).map(item => typeof item === 'string' ? item : item?.path), settings.activeWorkspace]
+      .filter(value => typeof value === 'string' && path.isAbsolute(value));
+  },
+  readGitOrigin: async root => {
+    const [location, remote] = await Promise.all([
+      execFileAsync('git', ['-C', root, 'rev-parse', '--show-toplevel']),
+      execFileAsync('git', ['-C', root, 'config', '--local', '--get', 'remote.origin.url']),
+    ]);
+    return realpathSync(location.stdout.trim()) === root ? remote.stdout : '';
+  },
+});
 const fileAccessApplicationService = createFileAccessApplicationService({
-  resolveBotDocument: createBotDocumentResolver({
-    getWorkspace: workspaceId => projectAgentDirectory.projectAccess?.directory?.get(workspaceId),
-    getTaskSession: sessionId => projectAgentDirectory.projectAccess?.getSession(sessionId),
-    getTaskPlan: planId => goalPlanStore.getPlan(planId),
-    getKnownRoots: () => {
-      const settings = settingsStore.getAll();
-      return [...(settings.workspaces || []).map(item => typeof item === 'string' ? item : item?.path), settings.activeWorkspace]
-        .filter(value => typeof value === 'string' && path.isAbsolute(value));
-    },
-    readGitOrigin: async root => {
-      const [location, remote] = await Promise.all([
-        execFileAsync('git', ['-C', root, 'rev-parse', '--show-toplevel']),
-        execFileAsync('git', ['-C', root, 'config', '--local', '--get', 'remote.origin.url']),
-      ]);
-      return realpathSync(location.stdout.trim()) === root ? remote.stdout : '';
-    },
-  }),
+  resolveBotDocument: resolveBotDocumentReference,
   getSettings: () => settingsStore.getAll(),
   pathExists: (candidate) => existsSync(candidate),
   statPath: (candidate) => statSync(candidate),
@@ -1677,6 +1718,58 @@ const fileAccessApplicationService = createFileAccessApplicationService({
   watchDirectory: (candidate, options, onChange) => fsWatch(candidate, options, onChange),
   executeGit: (cwd, args, options) =>
     execFileAsync('git', ['-C', cwd, ...args], options),
+});
+
+const resourceWindowController = createResourceWindowController({
+  BrowserWindow, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),
+  preloadPath: path.join(__dirname, '../preload/resource-window.cjs'),
+  resolveDocument: resolveBotDocumentReference, fileAccess: fileAccessApplicationService,
+  prepareFeedback: request => resourceFeedbackPreparation.prepare(request),
+  getAppearance: () => settingsStore.getAll().appearance,
+  getLocale: () => sessionStore.getSession().locale,
+  readHistory: () => settingsStore.getAll().resourceWindowReadingHistory,
+  writeHistory: value => settingsStore.merge({ resourceWindowReadingHistory: value }),
+  getOwner: workspaceId => {
+    const item = projectAgentDirectory.listItems?.().find(value => value.workspaceId === workspaceId);
+    return item?.profile?.status === 'active' && item.profile.agentConversationId
+      ? { conversationId: item.profile.agentConversationId } : null;
+  },
+});
+
+const resourceEditProfiles = createBotProfileStore({ rootDir: dataHome });
+const resourceEditOwner = workspaceId => {
+  const profile = resourceEditProfiles.read(workspaceId);
+  return profile && (profile.status === 'active' || profile.status == null) && profile.agentConversationId ? { conversationId: profile.agentConversationId } : null;
+};
+const resourceEditStorage = createResourceEditStorage({ rootDir: path.join(dataHome, 'project-runtime') });
+const resourceEditSources = createResourceEditSources({ fileAccess: fileAccessApplicationService, resourceWindows: resourceWindowController,
+  getRole: sender => trustedWindowRegistry.getRole(sender), getOwner: resourceEditOwner });
+const resourceEdits = createResourceEditApplicationService({ storage: resourceEditStorage,
+  notify: (sender, notice) => sender.send('resource-edit:changed', notice),
+  getRole: sender => trustedWindowRegistry.getRole(sender), getOwner: resourceEditOwner,
+  getWindowId: sender => { const window = BrowserWindow.fromWebContents(sender); return window && !window.isDestroyed() ? `window-${window.id}` : null; },
+  readSource: resourceEditSources.read, isSourceCurrent: resourceEditSources.isCurrent, canReadRetained: resourceEditSources.canReadRetained,
+});
+const resourceEditAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore: resourceEditProfiles, conversationStore, goalPlanStore,
+  legacyAccessLevel: sessionStore.getSession().accessLevel });
+const resourceEditSubmissionHost = createResourceEditSubmissionHost({ edits: resourceEdits, storage: resourceEditStorage, sources: resourceEditSources,
+  authority: resourceEditAuthority, approvalStore: createApprovalStore({ rootDir: path.join(dataHome, 'project-runtime') }), sessionStore, userDataPath: dataHome });
+
+browserWindowController = createBrowserWindowController({
+  getFeedbackRecipient: feedbackRecipientForConversation,
+  prepareFeedback: request => resourceFeedbackPreparation.prepare(request), popupFeedback: popupResourceFeedback, isZh: () => sessionStore.getSession().locale?.startsWith('zh'),
+  BrowserWindow, WebContentsView, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),
+  preloadPath: path.join(__dirname, '../preload/browser-window.cjs'), getWebContents: id => webContents.fromId(id),
+  getEntry: (conversationId, tabId) => tabId ? getBrowserEntry(conversationId, tabId) : getActiveBrowserEntry(conversationId),
+  register: registerBrowserWebContents, unregister: unregisterBrowserWebContents, rebuildMenu: () => rebuildAppMenu(),
+  getOwner: conversationId => {
+    const conversation = conversationStore.getConversation(conversationId);
+    if (!conversation || conversation.archivedAt) return null;
+    const workspaceId = projectAgentDirectory.workspaceIdForConversation(conversationId);
+    return { conversationId, ...(workspaceId ? { workspaceId } : {}) };
+  },
+  canFocus: conversationId => !!viewingBotWorkspaceId && projectAgentDirectory.workspaceIdForConversation(conversationId) === viewingBotWorkspaceId,
+  getAppearance: () => settingsStore.getAll().appearance, getLocale: () => sessionStore.getSession().locale,
 });
 
 const goalApplicationService = createGoalApplicationService({
@@ -2159,6 +2252,10 @@ function registerDesktopIpcHost() {
     }),
     ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService, searchFiles: fileAccessApplicationService.searchWorkspaceFiles }),
     ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
+    ...createResourceWindowIpcRegistrations({ resourceWindows: resourceWindowController }),
+    ...createResourceEditIpcRegistrations({ edits: resourceEdits, submissions: resourceEditSubmissionHost.submissions }),
+    ...createResourceFeedbackIpcRegistrations({ preparation: resourceFeedbackPreparation }),
+    ...createBrowserWindowIpcRegistrations({ browserWindows: browserWindowController }),
     ...registerDesktopProjectAgent({
       configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),
       enabled: () => true,
@@ -3760,6 +3857,10 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
     { name: 'task-overview-broadcast', dispose: () => taskOverviewBroadcast.dispose() },
     { name: 'goal-plan-change-subscription', dispose: stopGoalPlanChangeSubscription },
     { name: 'mcp-oauth-callback', dispose: closeMcpOAuthCallback },
+    { name: 'browser-windows', dispose: () => browserWindowController?.dispose() },
+    { name: 'resource-feedback-preparation', dispose: () => resourceFeedbackPreparation.dispose() },
+    { name: 'resource-windows', dispose: () => resourceWindowController.dispose() },
+    { name: 'resource-edit-host', dispose: async () => { resourceEdits.dispose(); await resourceEditSubmissionHost.dispose(); resourceEditStorage.close(); resourceEditAuthority.close(); } },
     { name: 'catalog-ipc-main', dispose: () => ipcMain.dispose() },
     { name: 'project-agent', dispose: () => projectAgentDirectory?.dispose() },
     { name: 'trusted-window-registry', dispose: () => trustedWindowRegistry.dispose() },

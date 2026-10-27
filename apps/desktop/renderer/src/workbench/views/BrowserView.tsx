@@ -1,3 +1,5 @@
+import { browserFeedbackNoticeText } from '../feedback/browserFeedbackNotice';
+import { createCompositionGuard } from '../../chat/state/compositionGuard';
 import { MotionSurface } from '../../app/components/MotionSurface';
 import { PeerIcon } from '../../ui/icons';
 import {
@@ -7,13 +9,13 @@ import {
   useMemo,
   useRef,
   useState,
-  type DetailedHTMLProps,
-  type HTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
-  type Ref,
 } from 'react';
 import { clientApi } from '../../clientApi';
-import { ResourceTabStrip, resourceTabIds } from '../ResourceTabStrip';
+import { ResourceTabStrip } from '../ResourceTabStrip';
+import { BrowserPage, initialRuntime, safeGetWebContentsId, type WebviewElement, type BrowserTabRuntimeState } from './BrowserPage';
+import { browserRecoveryDescription } from '../browserRecoveryState';
+import { MotionDetails } from '../../app/components/MotionDetails';
 import {
   BROWSER_HOME_URL,
   activateBrowserTab,
@@ -31,36 +33,6 @@ import {
 import { SessionImportWizard } from './SessionImportWizard';
 import { PasswordManagerPanel } from './PasswordManagerPanel';
 
-interface WebviewElement extends HTMLElement {
-  src: string;
-  loadURL(url: string): Promise<void>;
-  getURL(): string;
-  getTitle(): string;
-  goBack(): void;
-  goForward(): void;
-  canGoBack(): boolean;
-  canGoForward(): boolean;
-  reload(): void;
-  stop(): void;
-  getWebContentsId(): number;
-}
-
-interface WebviewProps
-  extends DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement> {
-  readonly src?: string;
-  readonly partition?: string;
-  readonly allowpopups?: string;
-}
-
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace JSX {
-    interface IntrinsicElements {
-      webview: WebviewProps;
-    }
-  }
-}
-
 interface BrowserViewProps {
   readonly hideTabStrip?: boolean;
   readonly suspendBlank?: boolean;
@@ -73,62 +45,6 @@ interface BrowserViewProps {
   ) => void;
   /** 只有前台可见会话才能改窗口菜单绑定的 Browser 目标。 */
   readonly claimForeground?: boolean;
-}
-
-interface BrowserFailure {
-  readonly code: number;
-  readonly desc: string;
-  readonly url: string;
-}
-
-interface BrowserTabRuntimeState {
-  readonly currentUrl: string;
-  readonly loading: boolean;
-  readonly canBack: boolean;
-  readonly canForward: boolean;
-  readonly failure: BrowserFailure | null;
-  /** guest webContents id；仅在 webview dom-ready 后可用。 */
-  readonly webContentsId: number | null;
-}
-
-interface BrowserPageProps {
-  readonly idPrefix: string;
-  readonly tab: BrowserTabSession;
-  readonly active: boolean;
-  readonly conversationId: string | null;
-  readonly claimForeground?: boolean;
-  readonly onHandleChange: (tabId: string, handle: WebviewElement | null) => void;
-  readonly onMetadataChange: (
-    tabId: string,
-    patch: Partial<Pick<BrowserTabSession, 'url' | 'title'>>,
-  ) => void;
-  readonly onRuntimeChange: (tabId: string, patch: Partial<BrowserTabRuntimeState>) => void;
-}
-
-// Cookie / localStorage 在所有会话和标签间共享，浏览器身份与主应用 renderer 隔离。
-const BROWSER_PARTITION = 'persist:peer-browser';
-
-function initialRuntime(tab: BrowserTabSession): BrowserTabRuntimeState {
-  return {
-    currentUrl: tab.url || BROWSER_HOME_URL,
-    loading: false,
-    canBack: false,
-    canForward: false,
-    failure: null,
-    webContentsId: null,
-  };
-}
-
-/** webview guest API：未 attach / 未 dom-ready 时会 throw，不能直接在 render 里调。 */
-function safeGetWebContentsId(wv: WebviewElement | null | undefined): number | null {
-  if (!wv) return null;
-  try {
-    const id = wv.getWebContentsId();
-    if (!Number.isInteger(id) || id <= 0) return null;
-    return id;
-  } catch {
-    return null;
-  }
 }
 
 function normalizeInput(raw: string): string {
@@ -227,152 +143,6 @@ function IconMore() {
   );
 }
 
-function BrowserPage({
-  idPrefix,
-  tab,
-  active,
-  conversationId,
-  claimForeground = true,
-  onHandleChange,
-  onMetadataChange,
-  onRuntimeChange,
-}: BrowserPageProps) {
-  const webviewRef = useRef<WebviewElement | null>(null);
-  // src 只负责 guest 首次挂载；后续导航由 WebContents 自己维护，避免 redirect 后
-  // 元数据回写再次改 src，造成重复加载和 history 被重置。
-  const initialUrlRef = useRef(tab.url || BROWSER_HOME_URL);
-  const registeredIdRef = useRef<number | null>(null);
-  const activeRef = useRef(active);
-  activeRef.current = active;
-
-  const publishRegistration = useCallback((isActive = activeRef.current) => {
-    const wv = webviewRef.current;
-    if (!wv) return;
-    const webContentsId = safeGetWebContentsId(wv);
-    if (webContentsId == null) return;
-    registeredIdRef.current = webContentsId;
-    onRuntimeChange(tab.id, { webContentsId });
-    try {
-      void clientApi.registerBrowserWebContents({
-        webContentsId,
-        conversationId,
-        browserTabId: tab.id,
-        active: isActive,
-        claimForeground,
-        url: wv.getURL(),
-        title: wv.getTitle(),
-      }).catch(() => {});
-    } catch {
-      // 非 Electron 环境或 guest 尚未就绪，dom-ready 后会再次发布。
-    }
-  }, [claimForeground, conversationId, onRuntimeChange, tab.id]);
-
-  useEffect(() => {
-    const wv = webviewRef.current;
-    if (!wv) return;
-    onHandleChange(tab.id, wv);
-
-    const syncNavState = () => {
-      try {
-        onRuntimeChange(tab.id, {
-          canBack: wv.canGoBack(),
-          canForward: wv.canGoForward(),
-        });
-      } catch {
-        // guest 尚未就绪。
-      }
-    };
-    const updateUrl = () => {
-      const url = wv.getURL() || BROWSER_HOME_URL;
-      onRuntimeChange(tab.id, { currentUrl: url });
-      onMetadataChange(tab.id, { url });
-      syncNavState();
-      publishRegistration();
-    };
-    const onStartLoading = () => {
-      onRuntimeChange(tab.id, { loading: true, failure: null });
-    };
-    const onStopLoading = () => {
-      onRuntimeChange(tab.id, { loading: false });
-      syncNavState();
-      publishRegistration();
-    };
-    const onTitle = (event: Event) => {
-      const detail = (event as unknown as { title?: string }).title;
-      onMetadataChange(tab.id, { title: detail ?? wv.getTitle() });
-      publishRegistration();
-    };
-    const onFailLoad = (event: Event) => {
-      const ev = event as unknown as {
-        errorCode: number;
-        errorDescription: string;
-        validatedURL: string;
-        isMainFrame: boolean;
-      };
-      if (ev.isMainFrame === false || ev.errorCode === -3) return;
-      onRuntimeChange(tab.id, {
-        loading: false,
-        failure: { code: ev.errorCode, desc: ev.errorDescription, url: ev.validatedURL },
-      });
-    };
-    const onDomReady = () => {
-      updateUrl();
-      onMetadataChange(tab.id, { title: wv.getTitle() });
-      publishRegistration();
-    };
-
-    wv.addEventListener('did-start-loading', onStartLoading);
-    wv.addEventListener('did-stop-loading', onStopLoading);
-    wv.addEventListener('did-navigate', updateUrl);
-    wv.addEventListener('did-navigate-in-page', updateUrl);
-    wv.addEventListener('page-title-updated', onTitle);
-    wv.addEventListener('did-fail-load', onFailLoad);
-    wv.addEventListener('dom-ready', onDomReady);
-
-    return () => {
-      wv.removeEventListener('did-start-loading', onStartLoading);
-      wv.removeEventListener('did-stop-loading', onStopLoading);
-      wv.removeEventListener('did-navigate', updateUrl);
-      wv.removeEventListener('did-navigate-in-page', updateUrl);
-      wv.removeEventListener('page-title-updated', onTitle);
-      wv.removeEventListener('did-fail-load', onFailLoad);
-      wv.removeEventListener('dom-ready', onDomReady);
-      onHandleChange(tab.id, null);
-      onRuntimeChange(tab.id, { webContentsId: null });
-      if (registeredIdRef.current != null) {
-        void clientApi.unregisterBrowserWebContents({
-          webContentsId: registeredIdRef.current,
-          conversationId,
-          browserTabId: tab.id,
-        }).catch(() => {});
-      }
-    };
-  }, [
-    conversationId,
-    onHandleChange,
-    onMetadataChange,
-    onRuntimeChange,
-    publishRegistration,
-    tab.id,
-  ]);
-
-  useEffect(() => {
-    if (active) publishRegistration(true);
-  }, [active, publishRegistration]);
-
-  return (
-    <webview
-      ref={webviewRef as unknown as Ref<HTMLElement>}
-      className="browser-webview"
-      id={resourceTabIds(idPrefix, tab.id).panel} role="tabpanel" aria-labelledby={resourceTabIds(idPrefix, tab.id).tab}
-      tabIndex={active ? 0 : -1} aria-hidden={!active} inert={!active}
-      data-active={active}
-      src={initialUrlRef.current}
-      partition={BROWSER_PARTITION}
-    />
-  );
-}
-
 export function BrowserView({
   isZh,
   conversationId,
@@ -391,6 +161,7 @@ export function BrowserView({
   if (selected && !(suspendBlank && selected.url === 'about:blank' && !selected.title)) mountedTabs.current.add(selected.id);
   const renderedTabs = lazyTabs ? session.tabs.filter(tab => mountedTabs.current.has(tab.id)) : session.tabs;
   const handlesRef = useRef(new Map<string, WebviewElement>());
+  const navigationRequests = useRef(new Map<string, number>());
   const sessionTabsRef = useRef(session.tabs);
   sessionTabsRef.current = session.tabs;
   const [runtimeByTab, setRuntimeByTab] = useState<Record<string, BrowserTabRuntimeState>>(() =>
@@ -400,6 +171,8 @@ export function BrowserView({
   const activeRuntime = runtimeByTab[activeTab.id] ?? initialRuntime(activeTab);
   const [address, setAddress] = useState(() => displayUrl(activeRuntime.currentUrl));
   const editingRef = useRef(false);
+  const composition = useRef(createCompositionGuard());
+  const [copying, setCopying] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuNotice, setMenuNotice] = useState<string | null>(null);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
@@ -510,6 +283,11 @@ export function BrowserView({
     }
   }, [externalUrl, isZh]);
 
+  useEffect(() => window.peerAgent?.onBrowserResourceFeedbackNotice?.(notice => {
+    const actual = safeGetWebContentsId(activeWebview());
+    if (notice.conversationId === conversationId && notice.browserTabId === activeTab.id && notice.webContentsId === actual) setMenuNotice(browserFeedbackNoticeText(notice, isZh));
+  }), [conversationId, activeTab.id, activeWebview, isZh]);
+
   const handleMenuAction = useCallback(
     async (id: BrowserMenuActionId) => {
       setMenuOpen(false);
@@ -563,13 +341,21 @@ export function BrowserView({
   const navigate = useCallback((url: string) => {
     const wv = activeWebview();
     if (!wv || !url) return;
-    handleRuntimeChange(activeTab.id, { failure: null });
+    handleRuntimeChange(activeTab.id, { failure: null, reopenedFromUrl: false });
     try {
-      void wv.loadURL(url);
+      const request = (navigationRequests.current.get(activeTab.id) ?? 0) + 1;
+      navigationRequests.current.set(activeTab.id, request);
+      void wv.loadURL(url).catch((error: unknown) => {
+        const failure = error as { code?: string; errno?: number } | null;
+        if (failure?.code === 'ERR_ABORTED' || failure?.errno === -3) return;
+        if (navigationRequests.current.get(activeTab.id) !== request || handlesRef.current.get(activeTab.id) !== wv) return;
+        handleRuntimeChange(activeTab.id, { loading: false, failure: { code: -1, url,
+          desc: isZh ? '无法打开此页面，请重试。' : 'Unable to open this page. Please retry.' } });
+      });
     } catch {
       wv.src = url;
     }
-  }, [activeTab.id, activeWebview, handleRuntimeChange]);
+  }, [activeTab.id, activeWebview, handleRuntimeChange, isZh]);
 
   const handleSubmit = useCallback(() => {
     const url = normalizeInput(address);
@@ -579,6 +365,7 @@ export function BrowserView({
   }, [address, navigate]);
 
   const handleAddressKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (composition.current.keyDown(event.nativeEvent)) return;
     if (event.key === 'Enter') {
       event.preventDefault();
       handleSubmit();
@@ -689,6 +476,9 @@ export function BrowserView({
               editingRef.current = false;
               setAddress(displayUrl(activeRuntime.currentUrl));
             }}
+            onCompositionStart={event => composition.current.start(event.currentTarget)}
+            onCompositionEnd={event => composition.current.end(event.currentTarget)}
+            onKeyUp={event => composition.current.keyUp(event.nativeEvent)}
             onKeyDown={handleAddressKeyDown}
           />
           <button
@@ -711,6 +501,18 @@ export function BrowserView({
         >
           <IconOpenExternal />
         </button>
+        {typeof window.peerAgent?.browserWindowCopy === 'function' ? <button type="button" className="browser-nav-btn"
+          aria-label={isZh ? '另开网址副本' : 'Open address copy in a new window'} title={isZh ? '另开网址副本，不移动原页面' : 'Open an address copy; keep the original page'}
+          disabled={copying || !canOpenExternal || activeRuntime.webContentsId == null || !conversationId}
+          onClick={() => {
+            const webContentsId = safeGetWebContentsId(activeWebview());
+            if (!conversationId || !webContentsId || copying) return;
+            setCopying(true);
+            void window.peerAgent!.browserWindowCopy!({ conversationId, browserTabId: activeTab.id, webContentsId })
+              .then(result => { if (!result.ok) setMenuNotice(result.status === 'limit_reached' ? (isZh ? '独立网页窗口已达上限，请先关闭一个窗口。' : 'Close a browser window before opening another.')
+                : (isZh ? '无法另开此页面，原页面保持不变。' : 'Unable to open a copy. The original page is preserved.')); })
+              .catch(() => setMenuNotice(isZh ? '暂时无法另开页面，可重试。' : 'Unable to open a copy. Retry.')).finally(() => setCopying(false));
+          }}><PeerIcon name="arrowUpRight" size={16} /></button> : null}
         <div className="browser-menu-wrap" ref={menuWrapRef}>
           <button
             type="button"
@@ -750,7 +552,7 @@ export function BrowserView({
         <div className={`browser-progress${activeRuntime.loading ? ' browser-progress--active' : ''}`} />
 
         {renderedTabs.map((tab) => (
-          <BrowserPage idPrefix={tabsId}
+          <BrowserPage isZh={isZh} idPrefix={tabsId}
             key={tab.id}
             tab={tab}
             active={tab.id === session.activeTabId}
@@ -787,6 +589,10 @@ export function BrowserView({
         ) : null}
       </div>
 
+      {activeRuntime.reopenedFromUrl ? <MotionDetails key={activeTab.id} className="browser-recovery-notice">
+        <summary><PeerIcon name="chevronRight" size={12} />{isZh ? '按网址恢复的网页' : 'Page restored from URL'}</summary>
+        <p>{browserRecoveryDescription(isZh)}</p>
+      </MotionDetails> : null}
       <div className="browser-statusbar" data-loading={activeRuntime.loading}>
         <span className="browser-status-text">
           {menuNotice

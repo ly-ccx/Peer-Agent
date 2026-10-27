@@ -1,4 +1,11 @@
+import { DraftDocumentPage } from '../editing/DraftDocumentPage';
+import { resourceEditRegistry } from '../editing/resourceEditRegistry';
+import { RasterImageView } from '../file-preview/RasterImageView';
+import { adapterModeUnavailable, documentAdapterNotice } from '../file-preview/documentAdapterState';
+import { useClassicDocumentNavigation } from '../file-preview/useClassicDocumentNavigation';
+import { DocumentPreviewContext } from '../../chat/components/markdown/DocumentPreviewContext';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import type { LocalDocumentObservation } from '@peer-agent/protocol';
 import { useResourceActions, useResourceRead } from '../../ui/resources/useResourceState';
 import { clientApi } from '../../clientApi';
 import { DiffViewer } from '../file-preview/DiffViewer';
@@ -13,6 +20,7 @@ import { MarkdownDocument } from '../file-preview/MarkdownDocument';
 import { SourceViewer } from '../file-preview/SourceViewer';
 import { ScopedDocumentPage } from '../ScopedDocumentPage';
 import { ScopedComparisonPage } from '../ScopedComparisonPage';
+import { documentFileLabel } from '../documentRevisionState';
 import { ResourceTabStrip, resourceTabIds } from '../ResourceTabStrip';
 import { OpenTargetSplitButton } from '../OpenTargetSplitButton';
 import {
@@ -24,6 +32,8 @@ import {
   activateDocumentTab,
   closeDocumentTab,
   updateDocumentTabMode,
+  updateDocumentReading,
+  type DocumentReadPosition,
   type DocumentSessionState,
   type DocumentTabSession,
   type WorkbenchFileMode,
@@ -118,7 +128,7 @@ function modeBadge(mode: WorkbenchFileMode, kind: WorkbenchFileKind, isZh: boole
     case 'image':
       return isZh ? '图片' : 'Image';
     case 'html':
-      return isZh ? '网页' : 'HTML';
+      return isZh ? '只读源码' : 'Read-only source';
     default:
       return isZh ? '预览' : 'Preview';
   }
@@ -163,19 +173,28 @@ export function DocumentView({
     onSessionChange((current) => activateDocumentTab(current, tabId));
   }, [onSessionChange]);
 
-  const removeTab = useCallback((tabId: string) => {
+  const removeTab = useCallback(async (tabId: string) => {
+    const tab = session.tabs.find(value => value.id === tabId);
+    const registry = resourceEditRegistry();
+    if (tab?.draftId && tab.reference && registry && !await registry.flushDraft(tab.reference.workspaceId, tab.draftId)) return;
     onSessionChange((current) => closeDocumentTab(current, tabId));
-  }, [onSessionChange]);
+  }, [onSessionChange, session.tabs]);
 
   const changeMode = useCallback((tabId: string, mode: WorkbenchFileMode) => {
     onSessionChange((current) => updateDocumentTabMode(current, tabId, mode));
   }, [onSessionChange]);
+  const observe = useCallback((tabId: string, observation: LocalDocumentObservation) => {
+    onSessionChange(current => updateDocumentReading(current, tabId, { observation }));
+  }, [onSessionChange]);
+  const remember = useCallback((tabId: string, key: string, point: DocumentReadPosition) => {
+    onSessionChange(current => updateDocumentReading(current, tabId, { position: { key, point } }));
+  }, [onSessionChange]);
 
   const items = useMemo(() => session.tabs.map((tab) => ({
     id: tab.id,
-    label: basename(tab.absPath),
+    label: `${documentFileLabel(tab.absPath, tab.reference?.revision, isZh)}${tab.draftId ? (isZh ? ' · 草稿' : ' · Draft') : ''}`,
     icon: <DocumentIcon />,
-  })), [session.tabs]);
+  })), [session.tabs, isZh]);
 
   return (
     <div className="document-view">
@@ -206,11 +225,15 @@ export function DocumentView({
             </button>
           </div>
         ) : session.tabs.map((tab) => (
-          tab.comparison ? botWorkspaceId ? <ScopedComparisonPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
+          tab.draftId ? botWorkspaceId ? <DraftDocumentPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh} active={visible && session.activeTabId === tab.id} />
+            : <section key={tab.id} className="document-page" data-active={session.activeTabId === tab.id} inert={session.activeTabId !== tab.id} aria-hidden={session.activeTabId !== tab.id}><p role="alert">{isZh ? '请回到所属机器人打开此草稿。' : 'Return to the owning Bot to open this draft.'}</p></section>
+          : tab.reference?.revision && !botWorkspaceId ? <section key={tab.id} className="document-page" data-active={session.activeTabId === tab.id}
+            inert={session.activeTabId !== tab.id} aria-hidden={session.activeTabId !== tab.id}><p role="alert">{isZh ? '请回到所属机器人查看此历史版本。' : 'Return to the owning Bot to read this historical version.'}</p></section>
+            : tab.comparison ? botWorkspaceId ? <ScopedComparisonPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
             active={visible && session.activeTabId === tab.id} /> : <section key={tab.id} className="document-page" data-active={session.activeTabId === tab.id}
               inert={session.activeTabId !== tab.id} aria-hidden={session.activeTabId !== tab.id}><p role="alert">{isZh ? '请回到所属机器人查看此比较。' : 'Return to the owning Bot to read this comparison.'}</p></section>
             : botWorkspaceId ? <ScopedDocumentPage key={tab.id} tab={tab} workspaceId={botWorkspaceId} isZh={isZh}
-            active={visible && session.activeTabId === tab.id} onModeChange={changeMode} /> : <DocumentPage idPrefix={tabsId}
+            active={visible && session.activeTabId === tab.id} onModeChange={changeMode} onObservation={observe} onReadingChange={remember} /> : <DocumentPage idPrefix={tabsId}
             key={tab.id}
             isZh={isZh}
             tab={tab}
@@ -238,8 +261,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
   const content = useResourceRead(`content:${identity}`, () => clientApi.readFile(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath), active && mode !== 'diff' && !isImage);
   const image = useResourceRead(`image:${identity}`, () => clientApi.readImageDataUrl(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath), active && mode !== 'diff' && isImage);
   const actions = useResourceActions(identity);
-  const [decodeError, setDecodeError] = useState(false);
-  useEffect(() => setDecodeError(false), [identity, image.value]);
+  const navigation = useClassicDocumentNavigation(content.value?.resolvedPath ?? fileTarget.absPath, content.value?.resolvedFrom ?? fileTarget.workspaceRoot, isZh, !content.value?.resolvedFrom || !!content.value?.resolvedPath);
 
   const fileName = basename(fileTarget.absPath);
   const highlightLanguage = useMemo(
@@ -299,7 +321,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
       return;
     }
     if (isImage) {
-      setDecodeError(false); void image.reload();
+      void image.reload();
       return;
     }
     void content.reload();
@@ -325,7 +347,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
         </div>
       );
     }
-    if ((image.error && !image.loaded) || decodeError) {
+    if ((image.error && !image.loaded)) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
           {isZh ? '图片读取或解码失败，可刷新重试。' : 'Image reading or decoding failed; refresh to try again.'}
@@ -346,7 +368,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
     }
     return (
       <div className="workbench-image-preview">
-        <img src={image.value.dataUrl} alt={fileName} onError={() => setDecodeError(true)} />
+        <RasterImageView dataUrl={image.value.dataUrl} name={fileName} isZh={isZh} onRetry={() => void image.reload()} />
       </div>
     );
   };
@@ -378,7 +400,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
               : `Found this file in another repository: ${content.value.resolvedFrom}`}
           </div>
         ) : null}
-        <SourceViewer
+        <SourceViewer isZh={isZh}
           content={content.value.content}
           language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
@@ -418,7 +440,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
       return (
         <>
           {resolved}
-          <MarkdownDocument
+          <MarkdownDocument isZh={isZh}
             content={content.value.content}
             emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
             copyLabel={isZh ? '复制' : 'Copy'}
@@ -428,27 +450,15 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
       );
     }
 
-    if (kind === 'html') {
-      return (
-        <>
-          {resolved}
-          <iframe
-            className="workbench-html-preview"
-            title={fileName}
-            srcDoc={content.value.content}
-            sandbox=""
-            referrerPolicy="no-referrer"
-          />
-        </>
-      );
-    }
+    if (kind === 'html') return <>{resolved}
+      <SourceViewer isZh={isZh} content={content.value.content} language={highlightLanguage} emptyLabel={isZh ? '文件为空。' : 'The file is empty.'} /></>;
 
     if (kind === 'json') {
       const formatted = formatJsonForPreview(content.value.content);
       return (
         <>
           {resolved}
-          <SourceViewer
+          <SourceViewer isZh={isZh}
             className="workbench-json-preview"
             content={formatted ?? content.value.content}
             language={highlightLanguage}
@@ -456,7 +466,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
           />
           {!formatted && content.value.content !== '' ? (
             <div className="workbench-diff-hint workbench-file-preview-hint">
-              {isZh ? 'JSON 解析失败，已按源码显示。' : 'JSON parsing failed; showing source text.'}
+              {isZh ? '未应用 JSON 排版，按原始文本显示。' : 'JSON formatting was not applied. Original source text is shown.'}
             </div>
           ) : null}
         </>
@@ -466,7 +476,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
     return (
       <>
         {resolved}
-        <SourceViewer
+        <SourceViewer isZh={isZh}
           content={content.value.content}
           language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
@@ -577,6 +587,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
               type="button"
               role="tab"
               aria-selected={mode === 'preview'}
+              disabled={adapterModeUnavailable(fileTarget.absPath, 'preview')}
               className={`workbench-diff-segment${mode === 'preview' ? ' is-active' : ''}`}
               onClick={() => onModeChange(fileTarget.id, 'preview')}
             >
@@ -586,6 +597,7 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
               type="button"
               role="tab"
               aria-selected={mode === 'source'}
+              disabled={adapterModeUnavailable(fileTarget.absPath, 'source')}
               className={`workbench-diff-segment${mode === 'source' ? ' is-active' : ''}`}
               onClick={() => onModeChange(fileTarget.id, 'source')}
             >
@@ -622,8 +634,10 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
 
       {(mode === 'diff' ? diff.error : isImage ? image.error : content.error) ? <p role="alert">{isZh ? '刷新失败，保留上次预览。请重新读取；预览不代表最新文件或核验结果。' : 'Refresh failed. The previous preview is preserved. Read again; this preview is not proof of current file contents or verification.'}</p> : null}
       {actions.get('open').error ? <p role="alert">{isZh ? '打开或默认编辑器保存未确认，请检查路径后重试。' : 'Opening or saving the default editor was not confirmed. Check the path and try again.'}</p> : null}
+      {mode !== 'diff' && documentAdapterNotice(fileTarget.absPath, isZh) ? <p className="resource-adapter-notice" role="status">{documentAdapterNotice(fileTarget.absPath, isZh)}</p> : null}
+      {content.value?.ok && content.value.resolvedFrom && !content.value.resolvedPath && kind === 'markdown' && mode === 'preview' ? <p className="resource-adapter-notice" role="status">{isZh ? '读取服务未返回准确文件位置，相对链接暂不可用；绝对路径仍可显式打开。' : 'The reader did not return an exact file location. Relative links are unavailable; explicit absolute paths remain usable.'}</p> : null}
       <div className="workbench-diff-body" aria-busy={mode === 'diff' ? diff.loading : isImage ? image.loading : content.loading}>
-        {mode === 'diff' ? renderDiff() : mode === 'source' ? renderSource() : renderPreview()}
+        <DocumentPreviewContext.Provider value={navigation}>{mode === 'diff' ? renderDiff() : mode === 'source' ? renderSource() : renderPreview()}</DocumentPreviewContext.Provider>
       </div>
     </div>
   );

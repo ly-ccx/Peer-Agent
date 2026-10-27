@@ -1,3 +1,4 @@
+import { withFileMutationLock } from './file-mutation-lock.mjs';
 import { evaluateObjectiveProbeCall,objectiveProbeDenial } from '../chat-runtime/objective-probe-gate.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -610,7 +611,13 @@ export async function runFileSearch({ args = {}, cwd, requestPermission, signal 
   });
 }
 
-async function runFileTool({ name, args, cwd, toolContext, requestPermission }) {
+async function runFileTool(options) {
+  if (!['write_file', 'edit_file'].includes(options.name)) return runUnlockedFileTool(options);
+  try { return await withFileMutationLock(resolveToolPath(options.args.path, options.cwd), () => runUnlockedFileTool(options), { signal: options.signal }); }
+  catch (error) { return formatToolFailure(options.name, 'blocked', error.code ?? 'FILE_MUTATION_UNAVAILABLE'); }
+}
+
+async function runUnlockedFileTool({ name, args, cwd, toolContext, requestPermission, signal }) {
   try {
     if (name === 'read_file') {
       const filePath = resolveToolPath(args.path, cwd);
@@ -732,6 +739,9 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
       }
       const accessDenial = recheckFileAuthority(toolContext, pathPermission);
       if (accessDenial) return formatToolFailure('edit_file', 'blocked', accessDenial, { path: filePath });
+      const latest = validateFreshReadState(toolContext, filePath);
+      if (!latest.ok) return formatToolFailure('edit_file', 'blocked', latest.reason, { path: filePath });
+      if (signal?.aborted) return formatToolFailure('edit_file', 'cancelled', 'execution_cancelled', { path: filePath });
       writeFileSync(filePath, after, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: after, fullRead: true });
       return {
@@ -801,6 +811,11 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
 
       const accessDenial = recheckFileAuthority(toolContext, pathPermission);
       if (accessDenial) return formatToolFailure('write_file', 'blocked', accessDenial, { path: filePath });
+      if (exists) {
+        const latest = validateFreshReadState(toolContext, filePath);
+        if (!latest.ok) return formatToolFailure('write_file', 'blocked', latest.reason, { path: filePath });
+      } else if (existsSync(filePath)) return formatToolFailure('write_file', 'blocked', 'File appeared while awaiting permission; read it before replacing it.', { path: filePath });
+      if (signal?.aborted) return formatToolFailure('write_file', 'cancelled', 'execution_cancelled', { path: filePath });
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, args.content, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: args.content, fullRead: true });
@@ -968,6 +983,7 @@ export function createLocalFileProvider({ workspaceRoot } = {}) {
       cwd,
       toolContext: context.toolContext,
       requestPermission: context.requestPermission,
+      signal: context.signal,
     });
     const status = statusFromFileResult(fileResult);
     const grant = createPermissionGrant({

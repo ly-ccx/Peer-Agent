@@ -27,3 +27,8 @@ test('normalizes a persisted tab map and drops invalid values', () => {
     e: 'plan',
   });
 });
+
+test('details is a runtime presentation destination, never a restored open Bot/task view', () => {
+  assert.equal(normalizeWorkbenchTab('details'), 'details');
+  assert.deepEqual(normalizeWorkbenchTabMap({ A: 'details', B: 'documents' }), { A: 'launcher', B: 'documents' });
+});

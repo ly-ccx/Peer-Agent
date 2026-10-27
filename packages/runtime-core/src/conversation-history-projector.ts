@@ -1,3 +1,4 @@
+import { formatResourceFeedbackContext } from '@peer-agent/protocol';
 /**
  * Canonical persisted-conversation -> active provider history projection.
  *
@@ -6,7 +7,7 @@
  * but must not reinterpret persisted segments.
  */
 
-export const CANONICAL_HISTORY_PROJECTOR_VERSION = 1;
+export const CANONICAL_HISTORY_PROJECTOR_VERSION = 2;
 
 type AnyRecord = Record<string, unknown>;
 
@@ -192,6 +193,7 @@ function userMessage(message: AnyRecord): CanonicalHistoryMessage | null {
     : [];
   const text = [
     typeof message.content === 'string' ? message.content : '',
+    formatResourceFeedbackContext(message.resourceFeedback),
     attachmentText(attachments),
   ].filter((value) => value.trim()).join('\n\n');
   const parts: CanonicalHistoryContentPart[] = [];

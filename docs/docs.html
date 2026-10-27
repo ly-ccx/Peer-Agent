@@ -602,6 +602,7 @@ pnpm dist:linux
             <li data-i18n="desktop.botsProfile">Bot settings opens configuration directly, with Overview, Tasks, Objectives and Memory in adjacent tabs. Back up the complete data root before upgrading. RC18 adds coordination journal events that older versions may refuse to restore; rollback requires the complete pre-upgrade backup. RC19 retains complete local reply receipts and reduces large-history execution overhead. RC25 reads public interactions by default, loads child process details on demand and recovers large coordination journals in background workers. Publishing does not restart the installed app; install only after active execution finishes. Once the new format is activated, older hosts cannot safely continue from the retained legacy journal; an incompatible downgrade requires the full pre-upgrade backup.</li>
             <li data-i18n="desktop.botsReply">Waiting, public streamed text and the final answer stay in one continuous reply, with the avatar and Reply details in place. Internal verification verdicts and progress live in task details; the main Bot explains the result. Overdue unaccepted results prompt factual follow-up. On macOS, Settings → Appearance offers glass/solid window materials. A single neutral backdrop surrounds independent floating conversation, detail and Settings panels in both themes; reduced transparency keeps the layout. Complete data backups must include coordination content proofs; pre-seal RC25 backups need certification against the original source before relocation recovery.</li>
           </ul>
+          <p data-i18n="desktop.resources">The conversation’s Workspace button opens browser, document/code, directory and diff tabs beside the conversation. Read actual Git revisions and preserve accepted content when files change. Save local document drafts and prepare source-bound selection feedback; applying a fixed draft follows local authorization and a fresh version check. Separate windows return to the same source; browser windows are address copies.</p>
           <p data-i18n="desktop.classic">Settings → General → Interface returns to classic chat. Its layout is described below.</p>
 
           <h2 id="desktop-layout" data-i18n="desktop.layoutTitle">Classic screen layout</h2>
@@ -1469,6 +1470,7 @@ Evidence owns governance.</code></pre>
             "desktop.classic": "设置 → 通用 → 界面可以返回经典对话，下面介绍经典界面的布局。",
             "desktop.layoutTitle": "经典界面布局",
             "desktop.thRegion": "区域", "desktop.thJob": "职责",
+            "desktop.resources": "对话右上角的工作区可并排打开网页、文档/代码、目录与 Diff，查看真实 Git 历史，文件变化时保留已有阅读。可保存本机文档草稿、准备带来源的选区反馈；明确提交固定稿沿本地授权并再次核对版本，冲突不覆盖、未知结果不重写。独立窗口返回同一来源，网页窗口为地址副本。",
             "desktop.r1a": "侧栏", "desktop.r1b": "工作区切换、新建任务、会话列表、设置入口",
             "desktop.r2a": "执行线程", "desktop.r2b": "当前任务的决策 + 执行流",
             "desktop.r3a": "Composer", "desktop.r3b": "输入框 + mode / access / model 控制",

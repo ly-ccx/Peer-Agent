@@ -59,7 +59,7 @@ export function seedClassicUiFixture({ home }) {
     userArtifacts: [{ kind: 'code-change', ref: pathToFileURL(path.join(workspacePath, 'new-name.ts')).href,
       path: path.join(workspacePath, 'new-name.ts'), label: 'new-name.ts',
       preview: { kind: 'code', additions: 1, deletions: 1, diffLines: diff.split('\n') } }] });
-  return { workspacePath, conversationId: conversation.id, diff };
+  return { workspacePath, conversationId: conversation.id, diff, ordinaryDiff: git(['diff', '--no-renames', baseCommit, 'HEAD']) };
 }
 
 /** Inactive legacy surfaces: bundle the actual components without adding a product route. */
@@ -84,7 +84,7 @@ async function buildLegacyComponentFixture({ captureDirectory, classicFixture })
       React.createElement('p', null, '旧产物披露与 Diff 索引；不代表当前任务流程可达。'),
       React.createElement(ArtifactList, { item }),
       React.createElement('h3', null, '重命名文件对照'),
-      React.createElement(DiffViewer, { diffText: ${JSON.stringify(classicFixture.diff)}, showFileIndex: true, isZh: true }),
+      React.createElement(DiffViewer, { diffText: ${JSON.stringify(classicFixture.ordinaryDiff)}, showFileIndex: true, isZh: true }),
       React.createElement(DiffViewer, { diffText: ${JSON.stringify(classicFixture.diff)}, isZh: true })));
   `;
   await build({ root: desktop, configFile: path.join(desktop, 'vite.config.ts'), logLevel: 'error',
@@ -244,14 +244,17 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
         && details.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running');
     });
   });
+  await page.locator('.resource-adapter-notice').filter({ hasText: '元数据' }).first().waitFor();
+  assert.match(await page.locator('.workbench-diff-files').last().textContent(), /rename from old-name\.ts[\s\S]*rename to new-name\.ts/);
   const file = page.locator('.diff-file-index-row').filter({ hasText: 'new-name.ts' });
   await file.waitFor();
   await layouts('classic-diff', async () => {
     await page.locator('.diff-file-preview-portal').waitFor({ state: 'hidden' });
     await file.evaluate(node => node.blur());
     await file.focus();
-    await page.locator('.diff-file-preview .diff-rename-arrow').waitFor();
-    assert.equal(await page.locator('.diff-file-preview .diff-rename-source').textContent(), 'old-name.ts');
+    await page.locator('.diff-file-preview').waitFor();
+    assert.equal(await page.locator('.diff-file-preview .diff-rename-arrow').count(), 0);
+    assert.match(await page.locator('.diff-file-preview').textContent(), /item0 = 100/);
     assert.equal(await page.locator('.diff-file-preview-portal').evaluate(node => {
       const rect = node.getBoundingClientRect();
       return rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;

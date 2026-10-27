@@ -6,8 +6,7 @@ import { validateRegistrationInventory } from '../electron/ipc/registration-inve
 const desktopRoot = path.resolve(import.meta.dirname, '..');
 const mainRoot = path.join(desktopRoot, 'electron/main');
 const catalogPath = path.join(desktopRoot, 'electron/ipc/channels.mjs');
-const sourcePath = path.join(desktopRoot, 'electron/preload/preload.source.cjs');
-const generatedPath = path.join(desktopRoot, 'electron/preload/preload.cjs');
+const preloadNames = ['preload', 'resource-window', 'browser-window'];
 const checkOnly = process.argv.includes('--check');
 const SOURCE_TOKEN = '/* __PEER_IPC_CHANNELS__ */ []';
 
@@ -117,8 +116,12 @@ function generatePreload(source, catalog) {
 
 const catalog = await loadCatalog();
 const { channels, transportCounts } = validateCatalog(catalog);
-const source = await readFile(sourcePath, 'utf8');
-const { operationCount, usedKeys } = validatePreloadSource(source, catalog);
+const templates = await Promise.all(preloadNames.map(async name => {
+  const source = await readFile(path.join(desktopRoot, `electron/preload/${name}.source.cjs`), 'utf8');
+  return { name, source, usage: validatePreloadSource(source, catalog) };
+}));
+const operationCount = templates.reduce((sum, item) => sum + item.usage.operationCount, 0);
+const usedKeys = new Set(templates.flatMap(item => [...item.usage.usedKeys]));
 const {
   registrationCount,
   handleCount,
@@ -126,18 +129,19 @@ const {
   directCount,
   ownerCount,
 } = await validateMainInventory(catalog);
-const generated = generatePreload(source, catalog);
 
 if (checkOnly) {
-  const current = await readFile(generatedPath, 'utf8');
-  if (current !== generated) throw new Error('preload.cjs is stale; run pnpm ipc:generate');
+  for (const { name, source } of templates) {
+    const current = await readFile(path.join(desktopRoot, `electron/preload/${name}.cjs`), 'utf8');
+    if (current !== generatePreload(source, catalog)) throw new Error(`${name}.cjs is stale; run pnpm ipc:generate`);
+  }
   console.log(
     `Desktop IPC catalog fresh: ${channels.size} channels, ` +
     `${operationCount} preload operations, ${registrationCount} main registrations ` +
     `(handle=${handleCount}, on=${onCount}, direct=${directCount}, owner=${ownerCount})`,
   );
 } else {
-  await writeFile(generatedPath, generated, 'utf8');
+  for (const { name, source } of templates) await writeFile(path.join(desktopRoot, `electron/preload/${name}.cjs`), generatePreload(source, catalog), 'utf8');
   console.log(
     `Generated sandbox preload from ${channels.size} canonical channels ` +
     `(${usedKeys.size} used by preload; transports=${JSON.stringify(Object.fromEntries(transportCounts))})`,

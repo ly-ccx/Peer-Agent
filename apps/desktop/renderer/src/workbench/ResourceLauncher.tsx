@@ -1,3 +1,4 @@
+import { ResourceDraftLibrary } from './editing/ResourceDraftLibrary';
 import { useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
@@ -9,13 +10,16 @@ import { resourceWebUrl } from './resourceWorkspaceState';
 import { ResourceSearchResults } from './ResourceSearchResults';
 import { documentComparisonLabel, normalizeDocumentComparison, normalizeDocumentTask, type DocumentComparison } from './documentSessionState';
 import type { BotDocumentReference } from '@peer-agent/protocol';
+import { documentFileLabel, normalizeDocumentRevision } from './documentRevisionState';
+import { ResourceWindowHistory } from './ResourceWindowHistory';
 
 function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly active: boolean; readonly isZh: boolean }) {
   const workspace = useResourceWorkspace();
   const descriptor = useMemo(() => {
     try {
-      const value = JSON.parse(raw) as { kind?: string; path?: string; relativeTo?: string; url?: string; comparison?: DocumentComparison; task?: BotDocumentReference['task'] };
+      const value = JSON.parse(raw) as { kind?: string; path?: string; relativeTo?: string; url?: string; comparison?: DocumentComparison; task?: BotDocumentReference['task']; revision?: BotDocumentReference['revision'] };
       if (value.task !== undefined && !normalizeDocumentTask(value.task)) return null;
+      if (value.revision !== undefined && (!normalizeDocumentRevision(value.revision) || value.kind !== 'document')) return null;
       if (value.kind === 'document' && typeof value.path === 'string') return { ...value, comparison: undefined };
       if (value.kind === 'comparison' && typeof value.path === 'string') {
         const comparison = normalizeDocumentComparison(value.comparison);
@@ -28,6 +32,7 @@ function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly 
   const owner = workspace?.owner;
   const reference = owner && descriptor && ['document', 'comparison'].includes(descriptor.kind ?? '') ? { workspaceId: owner.workspaceId, path: descriptor.path!,
     ...(descriptor.task ? { task: descriptor.task } : {}),
+    ...(descriptor.revision ? { revision: normalizeDocumentRevision(descriptor.revision) } : {}),
     ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}), ...(descriptor.kind === 'comparison' ? { kind: 'directory' as const } : {}), metadataOnly: true } : null;
   const metadata = useResourceRead(JSON.stringify(reference), () => clientApi.readFile('', undefined, undefined, reference!), active && !!workspace?.ready && !!reference);
   if (!descriptor || !workspace?.ready) return null;
@@ -38,7 +43,7 @@ function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly 
       ? workspace.openComparison({ ...reference!, path: path!, kind: 'directory' }, descriptor.comparison)
       : workspace.openReference({ ...reference!, path: path!, kind: 'file' })}>
     <PeerIcon name={descriptor.kind === 'browser' ? 'globe' : 'fileText'} size={18} />
-    <span>{descriptor.kind === 'browser' ? new URL(descriptor.url!).hostname : descriptor.comparison ? documentComparisonLabel(descriptor.comparison, isZh) : path?.split(/[\\/]/).pop()}</span>
+    <span title={descriptor.revision?.commit}>{descriptor.kind === 'browser' ? new URL(descriptor.url!).hostname : descriptor.comparison ? documentComparisonLabel(descriptor.comparison, isZh) : documentFileLabel(path ?? descriptor.path ?? '', descriptor.revision, isZh)}</span>
   </button>;
 }
 
@@ -83,5 +88,7 @@ export function ResourceLauncher({ isZh, active, recent, onChanges }: {
     {workspace?.ready && recent.length ? <><h2>{isZh ? '最近' : 'Recent'}</h2><div className="resource-recent-list">
       {recent.map(raw => <RecentResource key={raw} raw={raw} active={active} isZh={isZh} />)}
     </div></> : null}
+    {workspace?.ready && workspace.owner ? <ResourceDraftLibrary key={`drafts:${workspace.owner.workspaceId}:${workspace.owner.conversationId}`} scope={{ workspaceId: workspace.owner.workspaceId }} isZh={isZh} active={active} onOpen={workspace.openDraft} /> : null}
+    {workspace?.ready && workspace.owner ? <ResourceWindowHistory key={workspace.owner.workspaceId} workspaceId={workspace.owner.workspaceId} isZh={isZh} active={active} /> : null}
   </section>;
 }

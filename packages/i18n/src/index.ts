@@ -546,6 +546,7 @@ export type TranslationKey =
   | 'projectAgent.drawer.title'
   | 'projectAgent.drawer.close'
   | 'projectAgent.drawer.back'
+  | 'projectAgent.drawer.sceneBack'
   | 'projectAgent.drawer.missing'
   | 'projectAgent.drawer.tab.overview'
   | 'projectAgent.drawer.tab.tasks'
@@ -2194,6 +2195,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.title': '机器人设置',
     'projectAgent.drawer.close': '关闭',
     'projectAgent.drawer.back': '任务列表',
+    'projectAgent.drawer.sceneBack': '返回详情',
     'projectAgent.drawer.missing': '还没有',
     'projectAgent.drawer.tab.overview': '概况',
     'projectAgent.drawer.tab.tasks': '任务',
@@ -3607,6 +3609,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.title': 'Bot settings',
     'projectAgent.drawer.close': 'Close',
     'projectAgent.drawer.back': 'Back to tasks',
+    'projectAgent.drawer.sceneBack': 'Back to details',
     'projectAgent.drawer.missing': 'None yet',
     'projectAgent.drawer.tab.overview': 'Overview',
     'projectAgent.drawer.tab.tasks': 'Tasks',

@@ -13,3 +13,6 @@ export const DocumentPreviewContext = createContext<{
   readonly remoteImages?: 'link';
   readonly remoteImageLabel?: string;
 } | null>(null);
+
+/** Local documents are inert reading surfaces, independent of their navigation adapter. */
+export const LocalDocumentRenderingContext = createContext(false);

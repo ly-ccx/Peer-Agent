@@ -3,17 +3,19 @@ import path from 'node:path';
 
 /** Real component + delayed/failing production IPC save in the disposable smoke host. */
 export async function checkEffortStability({ page, slider, strength, until, getBot, failNext, report, captureDirectory, highEffort, scope = 'settings' }) {
-  const feedback = page.locator(scope === 'settings' ? '.bot-settings-tab' : '.model-selection-popover');
+  const feedback = page.locator(scope === 'settings' ? '.bot-settings-tab' : '.model-selection-popover[data-surface-state="open"]');
   const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
   const sample = async (key, collectionDelayMs = 0, errorReceipt = false) => {
     // Establish the baseline after entry motion, before starting a save.
-    await until(() => page.locator('.model-selection-popover').evaluate(node =>
-      node.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
-    await until(() => page.locator('.bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel').evaluateAll(nodes =>
+    // Continuous decorative particles do not own layout or the completion of a save.
+    await until(() => page.locator('.model-selection-popover[data-surface-state="open"]').evaluate(node =>
+      node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+        .every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
+    await until(() => page.locator('.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel').evaluateAll(nodes =>
       nodes.every(node => node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState)))), Boolean);
     const baseline = await page.evaluate(selector => {
       const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height }; };
-      return { trigger: box(selector), panel: box('.model-selection-panel') };
+      return { trigger: box(selector), panel: box('.model-selection-popover[data-surface-state="open"] .model-selection-panel') };
     }, selector);
     await slider.focus();
     // Arm inside the renderer before dispatching the real key. A slow CDP round
@@ -21,21 +23,21 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     await page.evaluate(({ selector, key }) => {
       globalThis.rcEffortFrames = new Promise(resolve => {
         const frames = [];
-        const slider = document.querySelector('.reasoning-effort-slider');
-        const popover = document.querySelector('.model-selection-popover');
-        const drawerSelector = '.bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel';
+        const slider = document.querySelector('.model-selection-popover[data-surface-state="open"] .reasoning-effort-slider');
+        const popover = document.querySelector('.model-selection-popover[data-surface-state="open"]');
+        const drawerSelector = '.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel';
         const drawer = document.querySelector(drawerSelector);
         let start = 0;
         const finish = () => { clearTimeout(deadline); slider.removeEventListener('keyup', begin); resolve(frames); };
         const capture = () => {
           if (performance.now() - start > 1100) { finish(); return; }
-          const slider = document.querySelector('.reasoning-effort-slider');
+          const slider = document.querySelector('.model-selection-popover[data-surface-state="open"] .reasoning-effort-slider');
           const trigger = document.querySelector(selector);
-          const panel = document.querySelector('.model-selection-panel');
+          const panel = document.querySelector('.model-selection-popover[data-surface-state="open"] .model-selection-panel');
           const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
           const currentDrawer = document.querySelector(drawerSelector);
           frames.push({ timeMs: performance.now() - start, value: slider.value, trigger: rect(trigger), panel: rect(panel),
-            popoverRetained: document.querySelector('.model-selection-popover') === popover,
+            popoverRetained: document.querySelector('.model-selection-popover[data-surface-state="open"]') === popover,
             popoverOpacity: Number(getComputedStyle(popover).opacity),
             drawerRetained: currentDrawer === drawer,
             drawerOpacity: drawer ? Number(getComputedStyle(drawer).opacity) : 1,
@@ -76,7 +78,7 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     return frames.length;
   };
   assert.equal(await strength.getAttribute('aria-expanded'), 'true');
-  assert.equal(await page.locator('.model-selection-panel[role="dialog"]').isVisible(), true);
+  assert.equal(await page.locator('.model-selection-popover[data-surface-state="open"] .model-selection-panel[role="dialog"]').isVisible(), true);
   const successFrames = await sample('End');
   await page.keyboard.press('Escape');
   assert.equal(await strength.evaluate(node => node === document.activeElement), true, 'Escape must return focus even while the save is pending');
@@ -99,7 +101,7 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     await slider.waitFor();
   }
   if (captureDirectory) {
-    await until(() => page.locator('.model-selection-popover').evaluate(node =>
+    await until(() => page.locator('.model-selection-popover[data-surface-state="open"]').evaluate(node =>
       node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState))), Boolean);
     await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
   }

@@ -48,6 +48,8 @@ test('Git quoted UTF-8 paths and rename targets remain usable file paths', () =>
   assert.equal(decodeGitPath('"a/\\346\\226\\207\\346\\241\\243.md"'), 'a/文档.md');
   const files = groupDiffByFile('diff --git "a/old name.md" "b/\\346\\226\\207\\346\\241\\243.md"\nsimilarity index 100%\nrename from old name.md\nrename to "\\346\\226\\207\\346\\241\\243.md"\n');
   assert.equal(files[0]?.path, '文档.md'); assert.equal(files[0]?.fromPath, 'old name.md');
+  const renamed = resourceDiffFiles('diff --git a/old.md b/new.md\nsimilarity index 100%\nrename from old.md\nrename to new.md\n');
+  assert.equal(renamed[0]?.fromPath, 'old.md'); assert.equal(renamed[0]?.path, 'new.md');
 });
 
 test('task comparison requires matching host ownership and immutable baseline; missing worktrees never fall back', () => {

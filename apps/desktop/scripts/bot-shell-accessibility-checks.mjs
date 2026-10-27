@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFileSync } from 'node:fs';
@@ -24,7 +25,8 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   checks.push('Space opens the selected bot without scrolling the page');
   const trigger = page.getByRole('button', { name: '机器人设置', exact: true }); await trigger.focus(); await trigger.press('Enter');
   const tabs = page.locator('.bot-drawer-tabs');
-  await until(() => focused(tabs.getByRole('tab', { selected: true })), Boolean);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).evaluate(node => node.contains(document.activeElement)), Boolean);
+  await tabs.getByRole('tab', { selected: true }).focus();
   assert.equal(await trigger.getAttribute('aria-label'), '机器人设置');
   assert.equal(await trigger.getAttribute('title'), '机器人设置');
   assert.equal(await trigger.locator('svg').count(), 1);
@@ -47,41 +49,32 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'false');
   await page.keyboard.press('Enter');
   assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
-  assert.equal(await page.locator('.bot-drawer-dock.is-open').count(), 1, 'tab Enter must not be intercepted by the shell');
+  assert.equal(await page.locator(BOT_DETAIL_SURFACE).count(), 1, 'tab Enter must not be intercepted by the shell');
   await trigger.click();
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'settings entry navigates from another drawer tab');
   await page.keyboard.press('Escape');
   await until(() => focused(trigger), Boolean);
-  assert.equal(await page.locator('.bot-drawer-dock:not([inert])').count(), 0);
+  assert.equal(await page.locator(BOT_DETAIL_SURFACE).count(), 0);
   checks.push('docked drawer enters selected tab, roves with arrows/endpoints, closes with focus returned; hidden dock is inert');
 
   await page.setViewportSize({ width: 900, height: 780 });
   await trigger.focus(); await trigger.press('Enter');
-  const modal = page.getByRole('dialog', { name: '机器人设置', exact: true });
+  const modal = page.locator(BOT_DETAIL_SURFACE);
   await modal.waitFor();
   await modal.getByRole('tab', { name: '设置', exact: true }).click();
   const narrow = modal.locator('.bot-settings-tab');
   await narrow.waitFor();
-  assert.equal(await narrow.evaluate(node => node.scrollWidth <= node.clientWidth), true, 'settings must fit the cover drawer');
+  assert.equal(await narrow.evaluate(node => node.scrollWidth <= node.clientWidth), true, 'settings fit the resource surface');
   await narrow.locator('.bot-runtime-settings summary').press('Enter');
   await narrow.locator('.bot-runtime-settings').getByRole('button', { name: '在桌面接管', exact: true }).scrollIntoViewIfNeeded();
   assert.equal(await tabsVisible(page), true);
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-narrow.png') });
-  const ends = () => modal.evaluate(node => {
-    const items = [...node.querySelectorAll('button,input,textarea,select,a[href],[tabindex]')]
-      .filter(item => item.tabIndex >= 0 && !item.disabled && item.getClientRects().length && !item.closest('[inert]'));
-    return { first: items[0]?.outerHTML, last: items.at(-1)?.outerHTML, active: document.activeElement?.outerHTML };
-  });
-  await modal.evaluate(node => {
-    const items = [...node.querySelectorAll('button,input,textarea,select,a[href],[tabindex]')].filter(item => item.tabIndex >= 0 && !item.disabled && item.getClientRects().length);
-    items.at(-1).focus();
-  });
-  await page.keyboard.press('Tab'); let edge = await ends(); assert.equal(edge.active, edge.first);
-  await page.keyboard.press('Shift+Tab'); edge = await ends(); assert.equal(edge.active, edge.last);
-  await page.keyboard.press('Escape'); await modal.waitFor({ state: 'detached' });
+  assert.equal(await page.getByRole('dialog', { name: '机器人设置', exact: true }).count(), 0, 'Bot details use a nonmodal resource surface');
+  await narrow.locator('input').first().focus();
+  await page.keyboard.press('Escape'); await modal.waitFor({ state: 'hidden' });
   await until(() => focused(trigger), Boolean);
   await page.setViewportSize({ width: 1360, height: 900 });
-  checks.push('900px emulated viewport modal drawer constrains Tab in both directions, Escape returns focus');
+  checks.push('900px resource settings remain nonmodal, fit the viewport and close by Escape with focus restored');
 
   const composer = page.locator('.bot-composer textarea');
   await composer.fill('界'.repeat(100001));
@@ -108,11 +101,11 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   await page.getByRole('button', { name: '上一页', exact: true }).click();
   assert.equal(await memoryRows.first().locator('p').first().textContent(), firstMemory);
   checks.push('10000 memory records render 50 at a time; next and previous retain distinct identities');
-  report.reducedDrawerState = await page.locator('.bot-drawer-dock').evaluate(node => ({ attrs: [...node.attributes].map(a => [a.name,a.value]), active: document.activeElement?.className, focused: document.hasFocus(), buttons: [...node.querySelectorAll('button')].slice(0,8).map(item => ({text:item.textContent,disabled:item.disabled,inert:!!item.closest('[inert]'),hidden:!!item.closest('[aria-hidden=\"true\"]')})) }));
+  report.reducedDrawerState = await page.locator(BOT_DETAIL_SURFACE).evaluate(node => ({ attrs: [...node.attributes].map(a => [a.name,a.value]), active: document.activeElement?.className, focused: document.hasFocus(), buttons: [...node.querySelectorAll('button')].slice(0,8).map(item => ({text:item.textContent,disabled:item.disabled,inert:!!item.closest('[inert]'),hidden:!!item.closest('[aria-hidden=\"true\"]')})) }));
   report.reducedDrawerState.roleButtonCount = await page.getByRole('button').count();
-  report.reducedDrawerState.closeSnapshot = await page.locator('.bot-drawer-head button').ariaSnapshot();
-  report.reducedDrawerState.closeMatches = await page.getByRole('button', { name: '关闭', exact: true }).count();
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  report.reducedDrawerState.closeSnapshot = await page.locator(BOT_DETAIL_CLOSE).ariaSnapshot();
+  report.reducedDrawerState.closeMatches = await page.locator(BOT_DETAIL_CLOSE).count();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   checks.push('reduced motion stops avatar/enter displacement animations while drawer remains usable');
 
   report.contrast = await page.evaluate(() => {
@@ -165,7 +158,7 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   const englishTrigger = page.getByRole('button', { name: 'Bot settings', exact: true });
   assert.equal(await englishTrigger.getAttribute('title'), 'Bot settings');
   await englishTrigger.click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   const quick = app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat');
   await quickNative('open');
   await quick.getByRole('button', { name: 'Choose bot', exact: true }).waitFor();
@@ -323,7 +316,7 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.reasoningEffort === highEffort);
   await page.keyboard.press('Escape');
   assert.equal(await form.isVisible(), true, 'Escape from the strength popover keeps the drawer open');
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await until(() => picker('对话模型').locator('.model-selection-trigger-label').textContent(), text => text === first.label);
@@ -352,14 +345,14 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
     const result = await window.peerAgent.projectAgentUpdateProfile({ workspaceId, modelPolicy: policy });
     if (!result.ok) throw Error('Fixture model policy restore failed');
   }, { workspaceId, policy: original.modelPolicy || {} });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   const restored = await page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).modelViews, workspaceId);
   assert.equal(restored.session_worker.resolution.ok, true);
   await until(() => row('任务执行').locator('.bot-model-control').getAttribute('data-model-id'), id => id === restored.session_worker.resolution.selection.modelProviderId);
   if (effortCommandFile) {
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     const compactStrength = page.locator('.bot-composer .model-selection-trigger');
     await until(() => compactStrength.isEnabled(), Boolean); await compactStrength.click();
     await checkEffortStability({ page, slider: page.getByRole('slider'), strength: compactStrength, until,

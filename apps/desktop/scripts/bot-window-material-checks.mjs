@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
@@ -99,7 +100,7 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
         await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `window-material-${material}-${width}-${theme}.png`) });
         if (width === 1280 && theme === 'dark' && material === 'glass') {
           await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-          const dock = page.locator('.bot-drawer-dock.is-open'); await dock.waitFor();
+          const dock = page.locator(BOT_DETAIL_SURFACE); await dock.waitFor();
           await until(() => dock.evaluate(node => node.getBoundingClientRect().width), value => value > 300);
           const settledDock = () => dock.evaluate(node => {
             const main = document.querySelector('.bot-main').getBoundingClientRect();
@@ -110,8 +111,8 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
             assert.equal(await settledDock(), true, 'details and main content remain separate floating panels');
           }
           await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'window-material-drawer-1280-dark.png') });
-          await page.getByRole('button', { name: '关闭', exact: true }).click();
-          await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+          await page.locator(BOT_DETAIL_CLOSE).click();
+          await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
         }
       }
     }

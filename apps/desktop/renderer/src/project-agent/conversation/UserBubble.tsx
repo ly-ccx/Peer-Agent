@@ -1,3 +1,4 @@
+import { ResourceFeedbackCards } from './ResourceFeedbackCards';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotChatMessage } from '../state/botConversationState';
 import { BotAttachments } from './BotAttachments';
@@ -37,6 +38,8 @@ export function UserBubble({
     <article className={`bot-user${highlighted ? ' is-anchored' : ''}${arriving ? ' is-arriving' : ''}`}
       onAnimationEnd={() => setArriving(false)} id={`bot-msg-${message.id}`} data-kind="user_input" data-input-id={message.inputId}>
       <div className="bot-user-content">
+        <ResourceFeedbackCards rows={message.resourceFeedback ?? []} botName="" sent isZh={i18n.locale.startsWith('zh')} />
+        {message.resourceFeedbackInvalid ? <p role="status">{i18n.locale.startsWith('zh') ? '此消息的资源引用暂不可用，原消息保留。' : 'Resource references for this message are unavailable. The original message is preserved.'}</p> : null}
         {excerpt ? (
           <ReplyAnchorPreview id={message.quoteRefs[0]} anchor={anchors.get(message.quoteRefs[0])}
             excerpt={excerpt} className="bot-user-quote" i18n={i18n} onJump={onJump} />

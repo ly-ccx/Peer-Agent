@@ -1,18 +1,21 @@
 import { useMemo } from 'react';
+import { boundedPresentation, presentationLimitLabel } from './presentationBudget';
 
 import { highlightSourceLines } from './sourceHighlight.ts';
 
 interface SourceViewerProps {
   readonly content: string;
+  readonly isZh?: boolean;
   readonly emptyLabel: string;
   readonly language?: string | null;
   readonly className?: string;
 }
 
-export function SourceViewer({ content, emptyLabel, language, className }: SourceViewerProps) {
+export function SourceViewer({ content, emptyLabel, language, className, isZh = false }: SourceViewerProps) {
+  const bounded = useMemo(() => boundedPresentation(content), [content]);
   const highlighted = useMemo(
-    () => highlightSourceLines(content, language),
-    [content, language],
+    () => highlightSourceLines(bounded.text, language),
+    [bounded.text, language],
   );
 
   if (content === '') {
@@ -20,6 +23,8 @@ export function SourceViewer({ content, emptyLabel, language, className }: Sourc
   }
 
   return (
+    <>
+    {bounded.truncated ? <p className="resource-adapter-notice" role="status">{presentationLimitLabel(bounded, isZh)}</p> : null}
     <pre className={`workbench-source-pre${className ? ` ${className}` : ''}`}>
       <code className={highlighted.language ? `hljs language-${highlighted.language}` : undefined}>
         {highlighted.lines.map((html, i) => (
@@ -39,5 +44,6 @@ export function SourceViewer({ content, emptyLabel, language, className }: Sourc
         ))}
       </code>
     </pre>
+    </>
   );
 }

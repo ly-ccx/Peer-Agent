@@ -273,3 +273,9 @@ test('drawer memory without a width never fabricates one', () => {
   writeDrawerMemory('w', { open: true, tab: 'overview', sessionId: null }, store);
   assert.equal(readDrawerMemory('w', store).width, undefined);
 });
+
+test('task detail reading preserves the structured plan ID for scoped resource navigation', () => {
+  const session = readDrawerSession({ sessionId: 'work', status: 'accepted', report: { planId: 'confirmed-plan' } });
+  assert.equal(session?.planId, 'confirmed-plan');
+  assert.equal(readDrawerSession({ sessionId: 'legacy' })?.planId, undefined);
+});

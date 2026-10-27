@@ -20,7 +20,10 @@ export async function checkBotEvidence({ page, until, report, captureDirectory, 
   };
   const restore = async () => {
     await back.click(); await context.waitFor({state:'visible'});
-    await until(()=>context.evaluate(node=>node.contains(document.activeElement)),Boolean);
+    try { await until(()=>context.evaluate(node=>node.contains(document.activeElement)),Boolean); } catch (error) {
+      report.evidenceReturnFocus = await context.evaluate(node => ({ active: document.activeElement?.outerHTML?.slice(0, 700), controls: [...node.querySelectorAll('button, summary')].slice(0, 8).map(item => ({ text: item.textContent?.slice(0, 80), rects: item.getClientRects().length, hidden: item.closest('[hidden],[inert],[aria-hidden="true"]')?.className })), layout: document.querySelector('.bot-resource-layout')?.dataset }));
+      throw error;
+    }
   };
   await open(0);
   assert.equal(await view.getAttribute('data-availability'),'available');

@@ -1,3 +1,4 @@
+import { parseUnifiedHunk, isNoNewlineMarker } from './diffHunkState.ts';
 export type DiffLineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
 
 export interface DiffLine {
@@ -7,14 +8,11 @@ export interface DiffLine {
   readonly newNo: number | null;
 }
 
-function parseHunkHeader(line: string): readonly [number, number] | null {
-  const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-  if (!m) return null;
-  return [Number(m[1]), Number(m[2])];
-}
-
-function classifyLine(line: string): DiffLineKind {
+function classifyLine(line: string, inHunk = false): DiffLineKind {
   if (line.startsWith('@@')) return 'hunk';
+  if (isNoNewlineMarker(line)) return 'meta';
+  if (inHunk && line.startsWith('+')) return 'add';
+  if (inHunk && line.startsWith('-')) return 'del';
   if (
     line.startsWith('diff ') ||
     line.startsWith('index ') ||
@@ -95,6 +93,7 @@ export function groupDiffByFile(text: string): DiffFileGroup[] {
       continue;
     }
     const raw = line.text;
+    if (isNoNewlineMarker(raw)) { ensureFile().lines.push(line); continue; }
     if (raw.startsWith('diff --git')) {
       const parsed = pathsFromDiffGit(raw);
       current = {
@@ -154,15 +153,19 @@ export function diffFileDisplayName(path: string, paths: readonly string[]): str
 export function buildDiffLines(text: string): DiffLine[] {
   if (!text) return [];
   const out: DiffLine[] = [];
+  let inHunk = false, oldLeft = 0, newLeft = 0;
   let oldCursor: number | null = null;
   let newCursor: number | null = null;
   for (const raw of text.replace(/\n$/, '').split('\n')) {
-    const kind = classifyLine(raw);
+    if (inHunk && oldLeft === 0 && newLeft === 0) { inHunk = false; oldCursor = null; newCursor = null; }
+    if (raw.startsWith('diff ')) { inHunk = false; oldCursor = null; newCursor = null; }
+    const kind = classifyLine(raw, inHunk);
     if (kind === 'hunk') {
-      const parsed = parseHunkHeader(raw);
+      const parsed = parseUnifiedHunk(raw);
+      inHunk = parsed !== null; oldCursor = null; newCursor = null;
       if (parsed) {
-        oldCursor = parsed[0];
-        newCursor = parsed[1];
+        oldCursor = parsed.oldStart; newCursor = parsed.newStart;
+        oldLeft = parsed.oldCount; newLeft = parsed.newCount;
       }
       out.push({ kind, text: raw, oldNo: null, newNo: null });
       continue;
@@ -171,23 +174,23 @@ export function buildDiffLines(text: string): DiffLine[] {
       out.push({ kind, text: raw, oldNo: null, newNo: null });
       continue;
     }
-    const body = raw.slice(1);
+    const body = inHunk || kind === 'add' || kind === 'del' ? raw.slice(1) : raw;
     if (kind === 'add') {
-      const newNo = newCursor;
-      if (newCursor != null) newCursor += 1;
+      const newNo = newCursor && newCursor > 0 ? newCursor : null;
+      if (newCursor != null) { newCursor += 1; newLeft--; }
       out.push({ kind, text: body, oldNo: null, newNo });
       continue;
     }
     if (kind === 'del') {
-      const oldNo = oldCursor;
-      if (oldCursor != null) oldCursor += 1;
+      const oldNo = oldCursor && oldCursor > 0 ? oldCursor : null;
+      if (oldCursor != null) { oldCursor += 1; oldLeft--; }
       out.push({ kind, text: body, oldNo, newNo: null });
       continue;
     }
-    const oldNo = oldCursor;
-    const newNo = newCursor;
-    if (oldCursor != null) oldCursor += 1;
-    if (newCursor != null) newCursor += 1;
+    const oldNo = oldCursor && oldCursor > 0 ? oldCursor : null;
+    const newNo = newCursor && newCursor > 0 ? newCursor : null;
+    if (oldCursor != null) { oldCursor += 1; oldLeft--; }
+    if (newCursor != null) { newCursor += 1; newLeft--; }
     out.push({ kind, text: body, oldNo, newNo });
   }
   return out;

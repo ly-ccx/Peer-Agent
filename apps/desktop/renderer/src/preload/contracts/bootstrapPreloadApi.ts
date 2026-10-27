@@ -471,6 +471,20 @@ export interface DeveloperDiagnosticsView {
 }
 
 export interface BootstrapPreloadApi {
+  readonly resourceEdits?: import('@peer-agent/protocol').ResourceEditsApi;
+  readonly browserWindowCopy?: (request: import('@peer-agent/protocol').BrowserWindowCopyRequest) => Promise<import('@peer-agent/protocol').BrowserWindowResult>;
+  readonly onBrowserWindowReturn?: (listener: (request: import('@peer-agent/protocol').BrowserWindowReturnRequest) => void) => () => void;
+  readonly browserWindowAcknowledgeReturn?: (request: import('@peer-agent/protocol').BrowserWindowReturnAck) => Promise<{ readonly ok: boolean }>;
+  readonly claimResourceFeedbackPreparation?: (request: import('@peer-agent/protocol').ResourceFeedbackPreparationKey) => Promise<import('@peer-agent/protocol').ResourceFeedbackPreparationResult>;
+  readonly acknowledgeResourceFeedbackPreparation?: (request: import('@peer-agent/protocol').ResourceFeedbackPreparationAck) => Promise<{ readonly ok: boolean }>;
+  readonly onBrowserResourceFeedbackNotice?: (listener: (notice: import('@peer-agent/protocol').BrowserResourceFeedbackNotice) => void) => () => void;
+  readonly onResourceFeedbackPreparation?: (listener: (request: import('@peer-agent/protocol').ResourceFeedbackPreparationRequest) => void) => () => void;
+  readonly resourceWindowOpen?: (request: import('@peer-agent/protocol').ResourceWindowOpenRequest) => Promise<import('@peer-agent/protocol').ResourceWindowResult>;
+  readonly onResourceWindowReturn?: (listener: (request: import('@peer-agent/protocol').ResourceWindowReturnRequest) => void) => () => void;
+  readonly resourceWindowAcknowledgeReturn?: (request: import('@peer-agent/protocol').ResourceWindowReturnAck) => Promise<{ readonly ok: boolean }>;
+  readonly resourceWindowHistory?: (request: { readonly workspaceId: string }) => Promise<import('@peer-agent/protocol').ResourceWindowHistoryResult>;
+  readonly resourceWindowRestore?: (request: { readonly workspaceId: string; readonly id: string }) => Promise<import('@peer-agent/protocol').ResourceWindowResult>;
+  readonly resourceWindowForget?: (request: { readonly workspaceId: string; readonly id: string }) => Promise<{ readonly ok: boolean }>;
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
   readonly listCapabilities: () => Promise<readonly CapabilityManifest[]>;
@@ -576,6 +590,7 @@ export interface BootstrapPreloadApi {
      * 标注实际命中的仓库根目录，便于在 UI 上提示「已在其他仓库找到该文件」。
      */
     readonly resolvedFrom?: string;
+    readonly resolvedPath?: string;
   }>;
   readonly gitDiffRange: (params: {
     readonly workspaceRoot: string;
@@ -593,6 +608,7 @@ export interface BootstrapPreloadApi {
     readonly untracked?: readonly string[];
     readonly untrackedTruncated?: boolean;
     readonly workspaceRoot?: string;
+    readonly resolvedPath?: string;
   }>;
   readonly gitListBranches: (params: {
     readonly workspaceRoot: string;
@@ -671,8 +687,14 @@ export interface BootstrapPreloadApi {
       | 'unsupported_type'
       | 'invalid_path'
       | 'error'
-      | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required';
+      | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required'
+      | 'version_changed' | 'source_changed' | 'version_unavailable'
+      | 'not_git_repo' | 'invalid_ref' | 'revision_unavailable' | 'unsupported_entry';
     readonly dataUrl: string;
+    readonly identity?: import('@peer-agent/protocol').LocalDocumentIdentity;
+    readonly observation?: import('@peer-agent/protocol').LocalDocumentObservation;
+    readonly revision?: import('@peer-agent/protocol').ConfirmedGitDocumentRevision;
+    readonly resolvedPath?: string;
     readonly mimeType?: string;
     readonly size?: number;
     readonly path?: string;
@@ -744,6 +766,7 @@ export interface BootstrapPreloadApi {
       readonly absPath: string;
     }[];
     readonly resolvedFrom?: string;
+    readonly resolvedPath?: string;
     readonly error?: string;
   }>;
   /**
@@ -782,6 +805,7 @@ export interface BootstrapPreloadApi {
     readonly browserTabId: string;
     readonly active: boolean;
     readonly claimForeground?: boolean;
+    readonly metadataOnly?: boolean;
     readonly url?: string;
     readonly title?: string;
   }) => Promise<{
@@ -1070,6 +1094,7 @@ export interface BootstrapPreloadApi {
     text: string;
     surface?: string;
     attachments?: readonly import('@peer-agent/protocol').ProjectInputAttachment[];
+    resourceFeedback?: readonly import('@peer-agent/protocol').ResourceFeedback[];
     quoteRefs?: readonly string[];
     anchorRefs?: readonly string[];
     attachmentRefs?: readonly string[];

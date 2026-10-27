@@ -420,3 +420,18 @@ describe('local file provider', () => {
     assert.equal(output.matchCount, 1);
   });
 });
+
+it('legacy writes recheck file contents after out-of-workspace permission wait', async () => {
+  const { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'peer-file-permission-version-')), workspace = join(root, 'workspace'), file = join(root, 'outside.md'); mkdirSync(workspace);
+  try {
+    for (const capabilityId of ['local.file.edit', 'local.file.write']) {
+      writeFileSync(file, 'base'); const provider = createLocalFileProvider({ workspaceRoot: workspace }), toolContext = { conversationId: 'test', readFiles: new Map() };
+      await provider.executeCapability({ call: { toolCallId: 'read', capabilityId: 'local.file.read', arguments: { path: file } } }, { toolContext, requestPermission: async () => ({ granted: true }) });
+      const result = await provider.executeCapability({ call: { toolCallId: 'write', capabilityId, arguments: capabilityId === 'local.file.edit' ? { path: file, old_string: 'base', new_string: 'wrong' } : { path: file, content: 'wrong', allow_overwrite: true } } },
+        { toolContext, requestPermission: async () => { writeFileSync(file, 'external change'); return { granted: true }; } });
+      assert.equal(result.result.status, 'denied'); assert.equal(readFileSync(file, 'utf8'), 'external change');
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

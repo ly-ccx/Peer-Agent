@@ -1,3 +1,4 @@
+import { BOT_DETAIL_CLOSE, BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -42,7 +43,7 @@ export async function checkBotVerification({ page, until, report, captureDirecto
     await page.screenshot({ path: path.join(captureDirectory, `verification-main-${width}-${appearance}.png`), animations: 'disabled' });
     await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '任务', exact: true }).click();
-    if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
+    if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
     await page.locator('.bot-task-row').filter({ hasText: session.title }).click();
     for (const outcome of ['passed', 'failed', 'partial', 'unverifiable']) {
       change(outcome);
@@ -53,7 +54,7 @@ export async function checkBotVerification({ page, until, report, captureDirecto
       await history.focus(); await history.press('Enter');
       await detail.getByText('窗口恢复检查未完成，不能据此认定全部验收通过。', { exact: true }).waitFor({ state: 'visible' });
       assert.ok((await detail.innerText()).includes('历史记录仅供调查，不代表当前结论。'));
-      assert.equal(await page.locator('.bot-task-detail').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+      assert.equal(await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').evaluate(node => node.scrollWidth <= node.clientWidth), true);
       await detail.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(captureDirectory, `verification-task-${outcome}-${width}-${appearance}.png`), animations: 'disabled' });
     }
@@ -71,8 +72,8 @@ export async function checkBotVerification({ page, until, report, captureDirecto
     change('passed', { sessions: [{ ...session, status: 'running', statusLabel: '正在处理任务', observationRevision: `working-${seq}` }] });
     await until(() => page.locator('.bot-task-progress-text').innerText(), value => value === '正在处理任务');
     assert.equal(await page.locator('.bot-task-verification').count(), 0, 'a running task cannot display its earlier verdict as the current result');
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
-    await page.locator('.bot-task-detail').waitFor({ state: 'hidden' });
+    await page.locator(BOT_DETAIL_CLOSE).click();
+    await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor({ state: 'hidden' });
   }
   report.taskVerification = { outcomes: ['passed', 'failed', 'partial', 'unverifiable'], themes: ['dark', 'light'], legacyHidden: true, botExplanation: true, historyKeyboard: true, staleHidden: true, retry: true, activeProgressOnly: true };
   if (viewport) await page.setViewportSize(viewport);

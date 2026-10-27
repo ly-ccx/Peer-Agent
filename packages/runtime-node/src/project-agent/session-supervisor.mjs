@@ -22,7 +22,7 @@ import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
 
-import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
+import { normalizeResourceFeedbackList, projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
 import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
 import { normalizeInputAttachments } from './input-queue.mjs';
@@ -475,6 +475,7 @@ export function createSessionSupervisor({
       // A delegation admits its explicit anchors, not an implicit fork of all
       // prior chat. Missing admitted material and explicit snapshots still ask.
       const attachments = attachmentsFromMessages(history.messages, anchorMessageIds);
+      const resourceFeedback = resourceFeedbackFromMessages(history.messages, anchorMessageIds);
       const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
       const completeInlineAttachments = !presetSnapshotId
         && inlineAttachmentsCoverOmissions(history.messages, anchorMessageIds);
@@ -511,6 +512,7 @@ export function createSessionSupervisor({
         }),
         ...(carried.length > 0 ? { attachmentRefs: carried } : {}),
         ...(attachments.length > 0 ? { attachments } : {}),
+        ...(resourceFeedback.length ? { resourceFeedback } : {}),
       });
       if (!stored) throw new Error('delegation message was not stored');
 
@@ -1347,4 +1349,22 @@ function text(value) {
 function stringList(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => text(item)).filter(Boolean);
+}
+
+
+/** Explicit delegation anchors only. Resource materials remain user context, not authority. */
+export function resourceFeedbackFromMessages(messages, anchorMessageIds) {
+  const anchors = new Set(anchorMessageIds), rows = new Map();
+  for (const message of messages) {
+    if (!anchors.has(message?.id)) continue;
+    const refs = normalizeResourceFeedbackList(message.resourceFeedback);
+    if (!refs) throw new TypeError('INVALID_RESOURCE_FEEDBACK');
+    for (const ref of refs) {
+      if (rows.has(ref.id) && JSON.stringify(rows.get(ref.id)) !== JSON.stringify(ref)) throw new TypeError('RESOURCE_FEEDBACK_ID_CONFLICT');
+      rows.set(ref.id, ref);
+    }
+  }
+  const result = normalizeResourceFeedbackList([...rows.values()]);
+  if (!result) throw new TypeError('RESOURCE_FEEDBACK_LIMIT');
+  return result;
 }

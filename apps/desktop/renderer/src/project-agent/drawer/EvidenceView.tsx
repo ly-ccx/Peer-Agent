@@ -6,6 +6,9 @@ import { ResourceFeedback } from '../../ui/resources/ResourceFeedback';
 import type { EvidenceSourceDescription } from '@peer-agent/protocol';
 import { PeerIcon } from '../../ui/icons';
 import { toolPresentation, type BotEvidenceInspect } from './agentProcess';
+import type { BotDocumentReference, ProjectAgentEvidenceReadResult } from '@peer-agent/protocol';
+import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
+import { EvidenceDeliveries } from './EvidenceDeliveries';
 
 export function evidenceLabel(source: EvidenceSourceDescription | undefined, i18n: I18nRuntime) {
   const key = source?.toolName ? toolPresentation(source.toolName).labelKey : 'projectAgent.evidence.record';
@@ -18,13 +21,15 @@ export function evidenceTime(value: string | undefined, i18n: I18nRuntime) {
 }
 
 /** Historical content and source metadata have separate, honest empty states. */
-export function EvidenceView({ evidence: target, i18n }: { readonly evidence: Pick<BotEvidenceInspect, 'evidenceRef'>; readonly i18n: I18nRuntime }) {
-  const resource = useResourceRead(target.evidenceRef, async () => {
-    const result = await clientApi.projectAgentReadEvidence({ evidenceRef: target.evidenceRef });
-    if (!result || (!result.ok && (!result.availability || result.availability === 'unavailable'))) throw Error('READ_FAILED');
+export function EvidenceView({ evidence: target, i18n, workspaceId: requestedOwner, task }: { readonly evidence: Pick<BotEvidenceInspect, 'evidenceRef'>; readonly i18n: I18nRuntime; readonly workspaceId?: string; readonly task?: BotDocumentReference['task'] }) {
+  const workspace = useResourceWorkspace(), workspaceId = requestedOwner ?? workspace?.owner?.workspaceId;
+  const context = workspaceId ? { workspaceId, ...(task ? { task } : {}) } : undefined;
+  const resource = useResourceRead(JSON.stringify([target.evidenceRef, context]), async () => {
+    const result = await clientApi.projectAgentReadEvidence({ evidenceRef: target.evidenceRef, ...(context ? { context } : {}) });
+    if (!result || (!result.ok && !result.availability)) throw Error('READ_FAILED');
     return result;
   });
-  const evidence = resource.value ?? { ok: false, availability: 'unavailable' as const, summary: '', source: undefined, kind: undefined, truncated: false, code: '' };
+  const evidence: ProjectAgentEvidenceReadResult = resource.value ?? { ok: false, availability: 'unavailable', summary: '', truncated: false, code: '' };
   const label = evidenceLabel(evidence.source, i18n);
   const at = evidenceTime(evidence.source?.createdAt, i18n);
   const state = evidence.availability ?? (evidence.ok ? 'available' : 'unavailable');
@@ -42,6 +47,9 @@ export function EvidenceView({ evidence: target, i18n }: { readonly evidence: Pi
       <h3>{label}</h3></div>
     {at ? <time className="bot-evidence-time" dateTime={evidence.source?.createdAt}>{at}</time> : null}
     <ResourceFeedback i18n={i18n} loading={resource.loading} error={resource.error} onReload={resource.reload} />
+    {context && resource.loaded && evidence.deliveryStatus === undefined ? <p role="status" className="bot-evidence-help">{i18n.locale.startsWith('zh') ? '交付关联尚未确认。' : 'The delivery association has not been confirmed.'}</p> : null}
+    {evidence.deliveryStatus === 'scope_denied' ? <p role="alert">{i18n.locale.startsWith('zh') ? '此证据不属于当前机器人或任务。' : 'This evidence does not belong to the current Bot or task.'}</p> : null}
+    {evidence.deliveryStatus === 'available' && evidence.deliveries?.length ? <EvidenceDeliveries deliveries={evidence.deliveries} isZh={i18n.locale.startsWith('zh')} /> : null}
     {resource.loaded && evidence.ok ? <>
       <p className="bot-evidence-help">{i18n.t('projectAgent.evidence.historical')}</p>
       <div className="bot-evidence-content">{content || i18n.t('projectAgent.evidence.emptyOutput')}</div>

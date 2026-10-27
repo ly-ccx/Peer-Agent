@@ -1,12 +1,9 @@
+import { ConversationSceneDrawer } from './ConversationScene';
+export { ConversationSceneDrawer } from './ConversationScene';
 import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { WORK_SESSION_STATUSES, type LlmProviderConfigView } from '@peer-agent/protocol';
-import { useEffect, useState } from 'react';
-import { Drawer } from '../../app/components/Drawer';
-import { ChatSurface } from '../../chat/components/ChatSurface';
-import { clientApi } from '../../clientApi';
-import { WorkbenchPanel } from '../../workbench/WorkbenchPanel';
-import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
+import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
+import { useState } from 'react';
 import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
 import { PeerIcon } from '../../ui/icons';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
@@ -31,7 +28,9 @@ export function SessionDetail({
   hasReadReport,
   onRetryReport,
   onSelect,
+  embedded = false,
 }: {
+  readonly embedded?: boolean;
   readonly workspaceId: string;
   readonly workspacePath: string;
   readonly session: DrawerSession;
@@ -65,7 +64,8 @@ export function SessionDetail({
   const updateText = context?.content.replace(/\s+/g, ' ').trim() ?? '';
   const updatePreview = updateText.length > 240 ? `${updateText.slice(0, 240)}…` : updateText;
   return (
-    <div className="bot-drawer-detail bot-task-detail" data-status={session.status}>
+    <>
+    <div className="bot-drawer-detail bot-task-detail" data-status={session.status} hidden={embedded && sceneOpen} inert={embedded && sceneOpen}>
       <button type="button" className="bot-task-back" onClick={onBack}><PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.back')}</button>
       <header className="bot-task-detail-head">
         <h2>{title}</h2>
@@ -117,14 +117,19 @@ export function SessionDetail({
           <div><dt>{i18n.t('projectAgent.drawer.task.id')}</dt><dd><code>{session.sessionId}</code></dd></div>
           {session.anchorMessageId && <div><dt>{i18n.t('projectAgent.drawer.anchor')}</dt><dd><code>{session.anchorMessageId}</code></dd></div>}
           {session.evidenceRefs.length > 0 && <div><dt>{i18n.t('projectAgent.drawer.task.records', { count: session.evidenceRefs.length })}</dt>
-            <dd><EvidencePreview refs={session.evidenceRefs} i18n={i18n} /></dd></div>}
+            <dd><EvidencePreview refs={session.evidenceRefs} i18n={i18n} inline={embedded} workspaceId={workspaceId}
+              task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined} /></dd></div>}
         </dl>
         {session.conversationId && <button type="button" className="bot-task-scene" onClick={() => setSceneOpen(true)}>
           <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}
         </button>}
       </MotionDetails>
+
+    </div>
       {sceneOpen && session.conversationId ? (
         <ConversationSceneDrawer
+          embedded={embedded}
+          task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined}
           workspaceId={workspaceId}
           workspacePath={workspacePath}
           conversationId={session.conversationId}
@@ -135,83 +140,6 @@ export function SessionDetail({
           onOpenBot={() => { setSceneOpen(false); onConversation({}); }}
         />
       ) : null}
-    </div>
-  );
-}
-
-export function ConversationSceneDrawer({
-  workspacePath,
-  conversationId,
-  title,
-  i18n,
-  isZh,
-  onClose,
-  onOpenBot,
-}: {
-  readonly workspaceId: string;
-  readonly workspacePath: string;
-  readonly conversationId: string;
-  readonly title: string;
-  readonly i18n: I18nRuntime;
-  readonly isZh: boolean;
-  readonly onClose: () => void;
-  readonly onOpenBot?: () => void;
-}) {
-  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [systemInstructions, setSystemInstructions] = useState('');
-  const [replyLanguage, setReplyLanguage] = useState('');
-  const [gitBranchPrefix, setGitBranchPrefix] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    void clientApi.llmListProviders().then((listed) => {
-      if (!cancelled) setProviders(listed ?? []);
-    }).catch(() => {});
-    void clientApi.getSettings().then((settings) => {
-      if (cancelled || !settings) return;
-      if (typeof settings.systemInstructions === 'string') setSystemInstructions(settings.systemInstructions);
-      if (typeof settings.replyLanguage === 'string') setReplyLanguage(settings.replyLanguage);
-      if (typeof settings.gitBranchPrefix === 'string') setGitBranchPrefix(settings.gitBranchPrefix);
-    }).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [conversationId]);
-
-  return (
-    <Drawer
-      onClose={onClose}
-      ariaLabel={i18n.t('projectAgent.drawer.scene')}
-      panelClassName="conversation-result-drawer conversation-chat-drawer conversation-chat-drawer--nested"
-      softBackdrop
-    >
-      {({ requestClose }) => <>
-      <WorkbenchProvider conversationId={conversationId} isPageActive layoutHost="local">
-        <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
-          <div className="conversation-chat-drawer__body">
-            <ChatSurface
-              onOpenPermissionBot={onOpenBot}
-              i18n={i18n}
-              providers={providers}
-              conversationId={conversationId}
-              conversationTitle={title}
-              systemInstructions={systemInstructions}
-              replyLanguage={replyLanguage}
-              gitBranchPrefix={gitBranchPrefix}
-              onOpenSettings={() => {}}
-              onProvidersRefresh={async () => {
-                setProviders(await clientApi.llmListProviders());
-              }}
-              workspacePath={workspacePath}
-              workspaces={workspacePath ? [{ path: workspacePath, name: title }] : []}
-              isPageActive
-              onClose={requestClose}
-            />
-          </div>
-          <WorkbenchPanel isZh={isZh} workspacePath={workspacePath} />
-        </div>
-      </WorkbenchProvider>
-      </>}
-    </Drawer>
+    </>
   );
 }

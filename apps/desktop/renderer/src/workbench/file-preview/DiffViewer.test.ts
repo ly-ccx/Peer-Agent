@@ -58,8 +58,8 @@ test('range diff 收成文件名，不摊 git 协议头', () => {
   );
 });
 
-test('DiffViewer 用悬停弹层看对照，不用系统 tooltip', async () => {
-  const source = await readFile(new URL('./DiffViewer.tsx', import.meta.url), 'utf8');
+test('DiffViewer 保留有界悬停预览，并提供显式点击阅读', async () => {
+  const source = await readFile(new URL('./DiffViewer.tsx', import.meta.url), 'utf8') + await readFile(new URL('./DiffFileIndex.tsx', import.meta.url), 'utf8');
   const overlay = await readFile(new URL('../../styles/task-artifact-preview-overlay.css', import.meta.url), 'utf8');
   assert.match(source, /groupDiffByFile/);
   assert.match(source, /showFileIndex/);
@@ -102,4 +102,17 @@ test('counts added and deleted lines for the file index', () => {
     diffFileDisplayName('app/a.ts', ['app/a.ts', 'lib/a.ts']),
     'app/a.ts',
   );
+});
+
+
+test('hunk counts separate header-like body text from the next file and stop stale line numbers', () => {
+  const rows = buildDiffLines(['@@ -12 +13 @@', '--- old body', '+++ new body', String.fromCharCode(92) + ' No newline at end of file',
+    'diff --git a/b b/b', '--- a/b', '+++ b/b', '@@ -0,0 +1 @@', '+new'].join('\n'));
+  assert.deepEqual(rows.slice(1, 4).map(row => [row.kind, row.text, row.oldNo, row.newNo]), [
+    ['del', '-- old body', 12, null], ['add', '++ new body', null, 13], ['meta', String.fromCharCode(92) + ' No newline at end of file', null, null],
+  ]);
+  assert.equal(rows.at(-1)?.newNo, 1);
+  assert.equal(rows[5]?.oldNo, null);
+  const invalid = buildDiffLines('@@ -9007199254740992 +1 @@\n+x');
+  assert.equal(invalid.at(-1)?.newNo, null);
 });

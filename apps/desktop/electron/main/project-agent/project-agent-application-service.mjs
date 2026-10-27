@@ -302,6 +302,7 @@ export function createProjectAgentApplicationService({
         quoteRefs: payload.quoteRefs,
         attachmentRefs: payload.attachmentRefs,
         attachments: payload.attachments,
+        resourceFeedback: payload.resourceFeedback,
         createdAt: payload.createdAt,
         ...(answerTo ? { answerTo } : {}),
       });
@@ -337,7 +338,7 @@ export function createProjectAgentApplicationService({
       }
       return { ok: true, input, delivery };
     } catch (error) {
-      return { ok: false, code: 'INVALID_INPUT', message: error?.message || 'invalid input' };
+      return { ok: false, code: ['RESOURCE_FEEDBACK_RECIPIENT_CHANGED', 'INVALID_RESOURCE_FEEDBACK'].includes(error?.code) ? error.code : 'INVALID_INPUT', message: error?.message || 'invalid input' };
     }
   }
 
@@ -723,16 +724,19 @@ export function createProjectAgentApplicationService({
         || !payload.evidenceRefs.every(evidenceRefAllowed)) return { ok: false, code: 'INVALID_REF' };
       const refs = [...new Set(payload.evidenceRefs.map(ref => ref.trim()))];
       try {
-        return { ok: true, items: refs.map(evidenceRef => readEvidenceBody?.(evidenceRef, { metadataOnly: true })?.source ?? { evidenceRef }) };
+        return { ok: true, items: refs.map(evidenceRef => readEvidenceBody?.(evidenceRef, { metadataOnly: true, ...(payload.context !== undefined ? { context: payload.context } : {}) })?.source ?? { evidenceRef }) };
       } catch { return { ok: false, code: 'READ_FAILED' }; }
     }
     const evidenceRef = typeof payload?.evidenceRef === 'string' ? payload.evidenceRef.trim() : '';
     if (!evidenceRefAllowed(evidenceRef)) return { ok: false, code: 'INVALID_REF' };
     if (typeof readEvidenceBody !== 'function') return { ok: false, evidenceRef, availability: 'unavailable', code: 'READ_FAILED' };
     try {
-      const body = readEvidenceBody(evidenceRef);
+      const body = readEvidenceBody(evidenceRef, payload.context !== undefined ? { context: payload.context } : undefined);
       if (!body) return { ok: false, evidenceRef, availability: 'not_found', code: 'NOT_FOUND' };
-      return presentEvidence({ ...body, evidenceRef });
+      return { ...presentEvidence({ ...body, evidenceRef }), ...(payload.context !== undefined ? {
+        deliveryStatus: body.deliveryStatus ?? 'unavailable', ...(body.deliveries ? { deliveries: body.deliveries } : {}),
+        ...(body.code ? { code: body.code } : {}),
+      } : {}) };
     } catch { return { ok: false, evidenceRef, availability: 'unavailable', code: 'READ_FAILED' }; }
   }
 

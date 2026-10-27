@@ -18,7 +18,7 @@ import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
 import { BotDocumentPreview } from './conversation/BotDocumentPreview';
-import { BotResourceButton, useBotResourceOwner, type BotResourceOwner } from '../workbench/ResourceWorkspaceContext';
+import { BotResourceButton, useResourceWorkspace, useBotResourceOwner, type BotResourceOwner } from '../workbench/ResourceWorkspaceContext';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
 import type { TaskConversationContext, TaskConversationRequest } from './state/taskConversationState';
@@ -100,6 +100,8 @@ export function BotListShell({
   notificationFocus = null,
 }: BotListShellProps) {
   const list = useBotList();
+  const resources = useResourceWorkspace();
+  const showDetails = resources?.showDetails;
   const resizeGesture = usePointerResize();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -131,6 +133,7 @@ export function BotListShell({
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
   useBotResourceOwner(opened?.workspaceId ?? null, onResourceOwnerChange, opened?.profile.agentConversationId);
   const currentDrawerMemory = drawerLoadedFor === opened?.workspaceId ? drawerMemory : closeDrawer(drawerMemory);
+  const detailsVisible = resources ? resources.detailsVisible : currentDrawerMemory.open;
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
     const mood = botAvatarMood(item.state, replyFlash === item.workspaceId);
     return [item.workspaceId, replyFlash !== item.workspaceId && mood !== 'needs_you' && (mood !== 'error' || replyPresence?.mood !== 'idle') && item.workspaceId === opened?.workspaceId
@@ -195,14 +198,30 @@ export function BotListShell({
     setInspect(null);
     list.openBot(workspaceId);
     if (notificationFocus?.sessionId) {
+      showDetails?.();
       setLocateSessionId(notificationFocus.sessionId);
       setDrawerMemory((current) => locateDrawerSession(current, notificationFocus.sessionId || ''));
       return;
     }
     if (notificationFocus?.drawerTab) {
+      showDetails?.();
       setDrawerMemory((current) => openDrawer(current, notificationFocus.drawerTab || 'overview'));
     }
-  }, [list.openBot, notificationFocus]);
+  }, [list.openBot, notificationFocus, showDetails]);
+
+  useEffect(() => window.peerAgent?.onResourceWindowReturn?.(request => {
+    if (!request?.context || !Number.isFinite(request.expiresAt) || request.expiresAt <= Date.now()) return;
+    const { context } = request;
+    // This event is emitted only for an explicit return from the captured native view.
+    setInspect(null);
+    list.openBot(context.owner.workspaceId);
+    onClosePage();
+  }), [list.openBot, onClosePage]);
+
+  useEffect(() => window.peerAgent?.onBrowserWindowReturn?.(request => {
+    if (!request?.workspaceId || !Number.isFinite(request.expiresAt) || request.expiresAt <= Date.now()) return;
+    setInspect(null); list.openBot(request.workspaceId); onClosePage();
+  }), [list.openBot, onClosePage]);
 
   const lookingAtBot = Boolean(opened?.workspaceId) && !pageOverride && activePage !== 'settings';
   useEffect(() => {
@@ -256,7 +275,8 @@ export function BotListShell({
         if (!opened?.workspaceId) return;
         event.preventDefault();
         event.stopPropagation();
-        setDrawerMemory((current) => (current.open ? closeDrawer(current) : openDrawer(current)));
+        if (!detailsVisible) showDetails?.(); else resources?.close();
+        setDrawerMemory((current) => (current.open && detailsVisible ? closeDrawer(current) : openDrawer(current)));
         return;
       }
       if (shortcut?.action === 'switch-bot') {
@@ -287,7 +307,7 @@ export function BotListShell({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [list, opened?.workspaceId, pageOverride]);
+  }, [list, opened?.workspaceId, pageOverride, detailsVisible, showDetails, resources?.close]);
 
   const emptyLabel = list.status === 'loading'
     ? i18n.t('projectAgent.list.loading')
@@ -456,12 +476,14 @@ export function BotListShell({
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
                 data-session-id={locateSessionId ?? currentDrawerMemory.sessionId ?? undefined}
-                aria-expanded={currentDrawerMemory.open && !inspect}
+                aria-expanded={currentDrawerMemory.open && !inspect && detailsVisible && (!resources || resources.detail?.target.kind === 'bot')}
                 onClick={() => {
                   drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
+                  if (currentDrawerMemory.open && currentDrawerMemory.tab === 'settings' && !inspect && detailsVisible) resources?.close();
+                  else showDetails?.();
                   setDrawerMemory((current) => (
-                    current.open && current.tab === 'settings' && !inspect
+                    current.open && current.tab === 'settings' && !inspect && detailsVisible
                       ? closeDrawer(current) : openDrawer(current, 'settings')
                   ));
                 }}
@@ -483,13 +505,14 @@ export function BotListShell({
               i18n={i18n}
               onReplyArrived={announceReply}
               onReplyPresenceChange={updateReplyPresence}
-              onLocateSession={setLocateSessionId}
+              onLocateSession={sessionId => { showDetails?.(); setLocateSessionId(sessionId); }}
               contextSessionId={currentDrawerMemory.open && currentDrawerMemory.tab === 'tasks' ? currentDrawerMemory.sessionId : null}
               onTaskContext={setTaskContext}
               taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}
               replyDetailsId={inspect?.replyId ?? null}
               replyDetailsTarget={replyDetailsTarget}
               onInspect={(next) => {
+                showDetails?.();
                 const trigger = document.activeElement;
                 if (trigger instanceof HTMLButtonElement && !trigger.closest('.bot-drawer-body')) drawerTriggerRef.current = trigger;
                 setInspect(next);
@@ -557,6 +580,7 @@ export function BotListShell({
           taskContext={taskContext?.workspaceId === opened.workspaceId ? taskContext : null}
           onTaskConversation={request => {
             setInspect(null);
+            resources?.close();
             setDrawerMemory(current => closeDrawer(current));
             setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
           }}
@@ -566,7 +590,7 @@ export function BotListShell({
           triggerRef={drawerTriggerRef}
           i18n={i18n}
           isZh={isZh}
-          onMemory={next => { if (next.open) setInspect(null); setDrawerMemory(next); }}
+          onMemory={next => { if (next.open) setInspect(null); else resources?.close(); setDrawerMemory(next); }}
           onProfile={list.updateProfile}
           onOpenConversation={onOpenConversation}
           onOpenAutomations={onOpenAutomations}

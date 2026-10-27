@@ -203,6 +203,54 @@
   background: var(--graphite-soft);
 }
 
+.model-selection-panel .reasoning-effort-slider-shell.is-animated {
+  --effort-track-h: var(--space-5);
+  --effort-thumb: var(--space-6);
+  height: var(--space-8);
+}
+
+.reasoning-effort-slider-shell.is-animated .reasoning-effort-slider-fill {
+  overflow: hidden;
+  transition: width var(--za-motion-medium) var(--za-ease-decelerate);
+}
+
+.reasoning-effort-slider-visual-thumb {
+  position: absolute;
+  top: 50%;
+  width: var(--effort-thumb);
+  height: var(--effort-thumb);
+  border-radius: var(--ui-radius-circle);
+  background: var(--graphite-base);
+  transform: translate(-50%, -50%);
+  transition: left var(--za-motion-medium) var(--za-ease-decelerate);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.reasoning-effort-slider-shell.is-animated .reasoning-effort-slider { z-index: 4; }
+.reasoning-effort-slider-shell.is-animated .reasoning-effort-slider::-webkit-slider-thumb { background: transparent; box-shadow: none; transform: none; }
+.reasoning-effort-slider-shell.is-animated .reasoning-effort-slider::-moz-range-thumb { background: transparent; box-shadow: none; }
+.reasoning-effort-slider-shell.is-animated .reasoning-effort-slider-tick { transition: background-color var(--za-motion-fast) var(--za-ease-standard); }
+.reasoning-effort-slider-shell[data-dragging='true'] :is(.reasoning-effort-slider-fill, .reasoning-effort-slider-visual-thumb) { transition: none; }
+
+.reasoning-effort-slider-motes { position: absolute; inset: 0; pointer-events: none; color: var(--graphite-base); }
+.reasoning-effort-slider-motes circle {
+  fill: currentColor;
+  transform-box: view-box;
+  animation: motion-effort-mote var(--effort-mote-duration) linear var(--effort-mote-delay) infinite both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reasoning-effort-slider-shell.is-animated :is(.reasoning-effort-slider-fill, .reasoning-effort-slider-visual-thumb, .reasoning-effort-slider-tick) { transition: none; }
+  .reasoning-effort-slider-motes { display: none; }
+}
+
+@media (forced-colors: active) {
+  .reasoning-effort-slider-visual-thumb { background: ButtonText; }
+  .reasoning-effort-slider-shell.is-animated .reasoning-effort-slider-fill { background: Highlight; }
+  .reasoning-effort-slider-motes { display: none; }
+}
+
 .model-selection-effort .reasoning-request-channel {
   border-top: 0;
   margin-top: 8px;

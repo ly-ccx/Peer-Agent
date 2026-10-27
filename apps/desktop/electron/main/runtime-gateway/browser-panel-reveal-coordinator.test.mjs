@@ -171,3 +171,16 @@ test('browser panel reveal coordinator returns renderer rejection and ignores du
   await assert.rejects(pending, /conversation_not_foreground/);
   assert.equal(coordinator.acknowledge(ack), false);
 });
+
+test('native ready receipt bypasses renderer reveal; native failure cannot fall through to another instance', async () => {
+  const sent = [];
+  const coordinator = createBrowserPanelRevealCoordinator({ broadcast: (...args) => sent.push(args),
+    revealNative: ({ conversationId }) => { if (conversationId === 'broken') throw Error('native_browser_unavailable');
+      return { status: 'already_active', sessionId: 'copy', focused: false, windowId: 'w', generation: 'g' }; } });
+  try {
+    const receipt = await coordinator.ensureBrowserReady({ conversationId: 'c' });
+    assert.equal(receipt.windowId, 'w'); assert.equal(receipt.focused, false); assert.deepEqual(sent, []);
+    await assert.rejects(coordinator.ensureBrowserReady({ conversationId: 'broken' }), /native_browser_unavailable/);
+    assert.deepEqual(sent, []);
+  } finally { coordinator.dispose(); }
+});

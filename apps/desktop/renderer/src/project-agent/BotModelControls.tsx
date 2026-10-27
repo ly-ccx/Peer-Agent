@@ -77,7 +77,6 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
   const selection = botConfiguredModelSelection(policy, role, models, view)
     ?? (view?.resolution.ok ? view.resolution.selection : undefined);
   const model = models.find(item => item.id === selection?.modelProviderId);
-  const levels = model?.reasoningEffortLevels ?? [];
   const effort = selection?.reasoningEffort ?? model?.defaultReasoningEffort;
   const setting = policy?.overrides?.[role];
   const groups = useMemo(() => botPanelGroups(
@@ -118,7 +117,8 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
       : feedback?.loaded && !feedback.models.length ? 'forms.noModels' : null;
   const runningModel = activeSelection
     ? models.find(item => item.id === activeSelection.modelProviderId)?.label ?? i18n.t('projectAgent.model.unavailable') : null;
-  const modelTitle = [label, source, runningModel ? `${i18n.t('projectAgent.model.runningReply')}: ${runningModel}` : null,
+  const modelTitle = [label, source, model && !model.reasoningEffortLevels?.length ? i18n.t('projectAgent.model.noEffort') : null,
+    runningModel ? `${i18n.t('projectAgent.model.runningReply')}: ${runningModel}` : null,
     i18n.t('projectAgent.model.nextReply')].filter(Boolean).join(' · ');
   return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={updating}>
     <div className="bot-model-control-row">
@@ -148,7 +148,6 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         }}
       />
     </div>
-    {!compact ? <p className="bot-model-source">{view?.resolution.ok ? source : i18n.t('projectAgent.model.unavailable')}
-      {model && !levels.length ? ` · ${i18n.t('projectAgent.model.noEffort')}` : ''}</p> : null}
+    {!compact && view?.resolution.ok && setting?.mode !== 'fixed' ? <p className="bot-model-source">{source}</p> : null}
   </div>;
 }
