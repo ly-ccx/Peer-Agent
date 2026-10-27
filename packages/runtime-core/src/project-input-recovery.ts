@@ -1,4 +1,4 @@
-import { emptyInputDraft, projectInputWasReceived, type InputDraftValue, type LocalInputSurface,
+import { normalizeResourceFeedbackList, emptyInputDraft, projectInputWasReceived, type InputDraftValue, type LocalInputSurface,
   type ProjectAgentSubmitInputResult, type ProjectInputDraftSnapshot, type ProjectInputRecoveryPort,
   type UnconfirmedProjectInput } from '@peer-agent/protocol';
 
@@ -59,6 +59,11 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     return writing;
   }
   function edit(patch: Partial<InputDraftValue>) {
+    if (patch.resourceFeedback !== undefined) {
+      const rows = normalizeResourceFeedbackList(patch.resourceFeedback);
+      if (!rows || rows.some(row => row.recipient.workspaceId !== workspaceId)) { publish({ error: 'INVALID_RESOURCE_FEEDBACK' }); return; }
+      patch = { ...patch, resourceFeedback: rows };
+    }
     if (!view.ready) earlyEdits = { ...earlyEdits, ...patch };
     changed++; publish({ draft: { ...view.draft, ...patch } });
     if (view.ready) void flush();
@@ -103,7 +108,10 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
       if (existing) return existing.text === text ? dispatch(existing) : { ok: false, code: 'INPUT_PENDING_ANSWER' };
     }
     if (view.pending.length >= 32) return { ok: false, code: 'DRAFT_LIMIT' };
-    const input = { inputId: createId(), text, attachments, createdAt: now(), quoteRefs: options.quoteRefs ?? [],
+    const resourceFeedback = useDraft ? normalizeResourceFeedbackList(draft.resourceFeedback) : [];
+    if (!resourceFeedback) return { ok: false, code: 'INVALID_RESOURCE_FEEDBACK' };
+    if (resourceFeedback.some(item => item.recipient.workspaceId !== workspaceId)) return { ok: false, code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' };
+    const input = { inputId: createId(), text, attachments, ...(resourceFeedback.length ? { resourceFeedback } : {}), createdAt: now(), quoteRefs: options.quoteRefs ?? [],
       ...(options.answerTo ? { answerTo: options.answerTo } : {}) };
     changed++; publish({ pending: [...view.pending, input], ...(useDraft ? { draft: emptyInputDraft() } : {}) });
     return dispatch(input);

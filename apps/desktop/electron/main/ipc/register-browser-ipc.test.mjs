@@ -125,8 +125,8 @@ test('browser owner projects Browser and Session Import payloads', () => {
   );
 
   assert.deepEqual(calls, [
-    ['register', { webContentsId: 1 }],
-    ['unregister', { webContentsId: 2 }],
+    ['register', { webContentsId: 1 }, sender],
+    ['unregister', { webContentsId: 2 }, sender],
     ['clear-site-data', { url: 'https://example.com' }],
     ['capture-page', { webContentsId: 3, savePath: '/tmp/page.png', sender }],
     ['open-external', { url: 'https://example.com' }],
@@ -217,8 +217,8 @@ test('browser owner preserves default empty payloads', () => {
   listeners.get('browser:start-app-drag')({ sender });
 
   assert.deepEqual(calls, [
-    ['register', {}],
-    ['unregister', {}],
+    ['register', {}, sender],
+    ['unregister', {}, sender],
     ['clear-site-data', {}],
     ['capture-page', { sender }],
     ['list-session-sources'],

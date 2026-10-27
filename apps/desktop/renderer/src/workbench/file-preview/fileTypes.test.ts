@@ -19,7 +19,7 @@ test('uses preview for document-like kinds and source for code-like kinds', () =
   assert.equal(defaultModeForKind('markdown'), 'preview');
   assert.equal(defaultModeForKind('json'), 'preview');
   assert.equal(defaultModeForKind('image'), 'preview');
-  assert.equal(defaultModeForKind('html'), 'preview');
+  assert.equal(defaultModeForKind('html'), 'source');
   assert.equal(defaultModeForKind('code'), 'source');
   assert.equal(defaultModeForKind('unknown'), 'source');
 });
@@ -44,4 +44,13 @@ test('maps common source extensions to highlight languages', () => {
 test('formats valid json and keeps invalid json unavailable', () => {
   assert.equal(formatJsonForPreview('{"b":1,"a":[2]}'), '{\n  "b": 1,\n  "a": [\n    2\n  ]\n}');
   assert.equal(formatJsonForPreview('{broken'), null);
+});
+
+
+test('SVG is inert source and JSON formatting has depth and expansion budgets', () => {
+  assert.equal(detectFileKind('/tmp/diagram.SVG'), 'code');
+  assert.equal(formatJsonForPreview('['.repeat(65) + '0' + ']'.repeat(65)), null);
+  assert.equal(formatJsonForPreview(JSON.stringify('a'.repeat(100_000))), null);
+  assert.equal(formatJsonForPreview(JSON.stringify('['.repeat(70))), JSON.stringify('['.repeat(70)));
+  assert.equal(formatJsonForPreview('["a",]'), null);
 });

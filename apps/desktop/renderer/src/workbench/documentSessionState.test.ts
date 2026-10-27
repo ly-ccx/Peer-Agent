@@ -10,6 +10,7 @@ import {
   openDocumentTab,
   updateDocumentTabMode,
   updateDocumentReading,
+  updateComparisonReading,
 } from './documentSessionState.ts';
 
 test('normalizes independent document sessions for each conversation', () => {
@@ -116,4 +117,49 @@ test('observation and bounded reading positions restore without saving body or c
   assert.equal(damaged.tabs[0].observation, undefined);
   assert.deepEqual(damaged.tabs[0].readingPositions, {});
   assert.equal('content' in damaged.tabs[0], false);
+});
+
+test('live files and distinct immutable commits coexist; invalid historical restoration never falls back to live', () => {
+  const reference = { workspaceId: 'bot', path: '/repo/doc.md' };
+  let session = openDocumentTab(createDocumentSessionState(), createDocumentTabSession(reference.path, { id: 'live', reference }));
+  for (const [id, commit] of [['old', 'a'.repeat(40)], ['other', 'b'.repeat(40)]]) {
+    session = openDocumentTab(session, createDocumentTabSession(reference.path, { id, reference: { ...reference, revision: { kind: 'git', commit } } }));
+  }
+  assert.equal(session.tabs.length, 3);
+  const contentKey = `sha256:${'c'.repeat(64)}:source`;
+  session = updateDocumentReading(session, 'old', { position: { key: contentKey, point: { top: 320, left: 0 } } });
+  session = updateDocumentReading(session, 'other', { position: { key: contentKey, point: { top: 650, left: 0 } } });
+  const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(session)));
+  assert.equal(restored.tabs.length, 3); assert.equal(restored.tabs[1].reference?.revision?.commit, 'a'.repeat(40));
+  assert.equal(restored.tabs[1].readingPositions?.[contentKey].top, 320); assert.equal(restored.tabs[2].readingPositions?.[contentKey].top, 650);
+  assert.equal(updateDocumentTabMode(restored, 'old', 'diff'), restored);
+  const broken = normalizeDocumentSessionState({ tabs: [{ ...restored.tabs[1], reference: { ...reference, revision: { kind: 'git', commit: 'main' } } }] });
+  assert.equal(broken.tabs.length, 0);
+});
+
+test('comparison reading metadata restores separately from plain document bytes and invalid hints do not downgrade the target', () => {
+  const tab = createDocumentTabSession('/repo', { id: 'comparison', reference: { workspaceId: 'bot', path: '/repo', kind: 'directory' }, comparison: { fromRef: 'a'.repeat(40), toRef: 'b'.repeat(40) }, mode: 'diff' });
+  const session = updateComparisonReading({ tabs: [tab], activeTabId: tab.id }, tab.id, { selected: 'src/a.ts', top: 80, left: 0 });
+  const restored = normalizeDocumentSessionState(JSON.parse(JSON.stringify(session)));
+  assert.equal(restored.tabs[0].resourceReading?.selected, 'src/a.ts'); assert.equal(restored.tabs[0].comparison?.fromRef, 'a'.repeat(40));
+  const invalid = normalizeDocumentSessionState({ tabs: [{ ...tab, resourceReading: { top: Infinity, left: 0 } }], activeTabId: tab.id });
+  assert.equal(invalid.tabs.length, 0);
+});
+
+test('draft locators stay distinct from current files and persist metadata without bodies or writer handles', () => {
+  const reference = { workspaceId: 'bot', path: '/repo/a.md' };
+  let session = openDocumentTab(createDocumentSessionState(), createDocumentTabSession(reference.path, { id: 'file', reference }));
+  session = openDocumentTab(session, createDocumentTabSession(reference.path, { id: 'draft', reference, draftId: 'local-draft' }));
+  session = openDocumentTab(session, createDocumentTabSession(reference.path, { id: 'other-base', reference, draftId: 'other-draft' }));
+  assert.equal(session.tabs.length, 3); assert.equal(session.activeTabId, 'other-base');
+  const restored = normalizeDocumentSessionState({ ...session, tabs: session.tabs.map(tab => ({ ...tab, text: 'secret input', writer: { token: 'secret' } })) });
+  assert.equal(restored.tabs.length, 3); assert.equal(JSON.stringify(restored).includes('secret'), false);
+  assert.equal(updateDocumentTabMode(restored, 'draft', 'diff'), restored);
+});
+test('invalid draft metadata is rejected rather than downgraded into an ordinary current-file tab', () => {
+  const tab = createDocumentTabSession('/repo/a.md', { reference: { workspaceId: 'bot', path: '/repo/a.md' }, draftId: 'draft' });
+  for (const patch of [{ draftId: '../bad' }, { mode: 'diff' }, { comparison: { fromRef: 'HEAD', comparison: 'working' } }, { reference: { workspaceId: 'bot', path: 'a.md' } },
+    { reference: { workspaceId: 'bot', path: '/repo/a.md', revision: { ref: 'HEAD' } } }, { reference: { workspaceId: 'bot', path: '/repo/a.md', kind: 'directory' } }]) {
+    assert.equal(normalizeDocumentSessionState({ tabs: [{ ...tab, ...patch }], activeTabId: tab.id }).tabs.length, 0);
+  }
 });

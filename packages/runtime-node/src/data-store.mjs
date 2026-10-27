@@ -71,6 +71,8 @@ export const DATA_STORE_ENTRIES = {
   // these retain local work/delivery receipts and must never enter portable exports.
   // Includes per-project circuit-breaker/recovery state, memory-maintenance checkpoints, objective watch-state/probe-evidence reservations and delivery/execution cursors (device only).
   // input-drafts/<surface>.json and input-draft-blobs/<digest>.json retain device-local UI intent only; never model context or execution truth.
+  // resource-edits/store.sqlite holds device-local text drafts, retained versions and modification receipts.
+  // It is not portable configuration, permission truth, or an execution queue; recovery never starts writes.
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
 };
 

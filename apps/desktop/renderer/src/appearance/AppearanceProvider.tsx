@@ -45,6 +45,9 @@ function readSystemScheme(): AppearanceScheme {
 
 function loadSettings(): AppearanceSettings {
   if (typeof window === 'undefined') return DEFAULT_APPEARANCE_SETTINGS;
+  if (window.peerResource) return sanitizeSettings(window.peerResource.initialAppearance);
+  if (window.peerBrowserWindow) return sanitizeSettings(window.peerBrowserWindow.initialAppearance);
+  if (new URLSearchParams(window.location?.search).get('window') === 'resource' || new URLSearchParams(window.location?.search).get('window') === 'browser-resource') return DEFAULT_APPEARANCE_SETTINGS;
   const api = window.peerAgent;
   // 1) 优先读主进程同步注入的初始设置——与 ~/.peer-agent/settings.json 同源，
   //    保证刷新/重启后主题立刻正确，无 localStorage 往返、无闪烁
@@ -113,7 +116,7 @@ export function AppearanceProvider({
   // Main window / settings may change appearance while Quick Chat is open.
   // Main process broadcasts `appearance:changed` to all windows.
   useEffect(() => {
-    const api = typeof window !== 'undefined' ? window.peerAgent : undefined;
+    const api = typeof window !== 'undefined' ? window.peerAgent ?? window.peerResource ?? window.peerBrowserWindow : undefined;
     if (!api?.onAppearanceChanged) return undefined;
     return api.onAppearanceChanged((next) => {
       if (!next || typeof next !== 'object') return;

@@ -11,6 +11,7 @@ export function createDocumentReadingMemory(initial?: DocumentReadPositions) {
       while (positions.size > 12) positions.delete(positions.keys().next().value!);
     },
     read(mode: string) { return { ...(positions.get(mode) ?? { top: 0, left: 0 }) }; },
+    snapshot() { return Object.fromEntries([...positions].map(([key, point]) => [key, { ...point }])); },
   };
 }
 
@@ -61,6 +62,7 @@ export function useDocumentReadingPosition(identity: string, mode: string, activ
     node.scrollTop = point.top; node.scrollLeft = point.left;
   }, [active, ready, identity, memory, mode, key, navigation?.line, navigation?.requestId, persistence?.onRemember]);
   useLayoutEffect(restore, [restore]);
-  return { ref, onScroll: remember, restore,
+  return { ref, onScroll: remember, restore, snapshot: memory.snapshot,
+    capture: () => { remember(); return memory.read(key); },
     missingLine: !!navigation && lineResult?.key === `${identity}:${navigation.requestId}` && lineResult.missing };
 }

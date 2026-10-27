@@ -1,3 +1,4 @@
+import { useBrowserWindowReturn } from './useBrowserWindowReturn';
 import {
   createContext,
   useCallback,
@@ -9,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { clientApi } from '../clientApi';
+import { normalizeDirectorySession, normalizeDirectorySessionMap, EMPTY_DIRECTORY_SESSION, type DirectorySession, type DirectorySessionMap } from './directorySessionState';
 import {
   createBrowserSessionState,
   isBlankBrowserSession,
@@ -93,6 +95,7 @@ interface WorkbenchSettingsShape {
   activeTab?: Record<string, WorkbenchTabId>;
   browserSessions?: BrowserSessionMap;
   documentSessions?: DocumentSessionMap;
+  directorySessions?: DirectorySessionMap;
   sidebarOpen?: boolean;
   sidebarWidth?: number;
 }
@@ -115,6 +118,7 @@ interface WorkbenchState {
   filesTarget: WorkbenchFilesTarget | null;
   browserSession: BrowserSessionState;
   documentSession: DocumentSessionState;
+  directorySessions: DirectorySessionMap;
   /** 根工作台才承担全局 Browser 调度；会话抽屉只表达当前会话。 */
   layoutHost: 'root' | 'local';
   /** 后台 Task 已拉起、需要继续挂着 WebContents 的会话（不含当前前台会话）。 */
@@ -149,7 +153,7 @@ interface WorkbenchActions {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
-    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference; readonly line?: number; readonly comparison?: import('./documentSessionState').DocumentComparison },
+    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference; readonly line?: number; readonly comparison?: import('./documentSessionState').DocumentComparison; readonly delivery?: import('@peer-agent/protocol').EvidenceDeliveryBinding },
   ) => void;
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
@@ -158,6 +162,7 @@ interface WorkbenchActions {
   setBrowserSessionFor: (targetConversationId: string, next: BrowserSessionUpdater) => void;
   resolveBrowserSession: (targetConversationId: string | null) => BrowserSessionState;
   setDocumentSession: (next: DocumentSessionUpdater) => void;
+  setDirectorySession: (workspaceId: string, update: (current: DirectorySession) => DirectorySession) => void;
 }
 
 type WorkbenchContextValue = WorkbenchState & WorkbenchActions & { conversationId: string | null };
@@ -216,6 +221,7 @@ export function WorkbenchProvider({
   const [documentSessionMap, setDocumentSessionMap] = useState<DocumentSessionMap>(
     normalizeDocumentSessionMap(initial.documentSessions),
   );
+  const [directorySessions, setDirectorySessions] = useState(() => normalizeDirectorySessionMap(initial.directorySessions));
   const defaultDocumentSessionsRef = useRef<DocumentSessionMap>({});
   const [goalSlot, setGoalSlotState] = useState<HTMLElement | null>(null);
   const [hasGoalPlan, setHasGoalPlanState] = useState<boolean>(false);
@@ -266,6 +272,7 @@ export function WorkbenchProvider({
     activeTabMap,
     browserSessionMap,
     documentSessionMap,
+    directorySessions,
     sidebarOpen,
     sidebarWidth,
   });
@@ -275,6 +282,7 @@ export function WorkbenchProvider({
     activeTabMap,
     browserSessionMap,
     documentSessionMap,
+    directorySessions,
     sidebarOpen,
     sidebarWidth,
   };
@@ -288,6 +296,7 @@ export function WorkbenchProvider({
         activeTabMap: m,
         browserSessionMap: b,
         documentSessionMap: d,
+        directorySessions: directories,
         sidebarOpen: so,
         sidebarWidth: sw,
       } = latestRef.current;
@@ -301,6 +310,7 @@ export function WorkbenchProvider({
             activeTab: m,
             browserSessions: b,
             documentSessions: d,
+            directorySessions: directories,
             sidebarOpen: so,
             sidebarWidth: sw,
           },
@@ -394,7 +404,7 @@ export function WorkbenchProvider({
       hostBrowserActive: latestRef.current.activeTabMap[currentSessionKey] === 'browser',
       requestSessionExists: existing != null,
       preserveAttention: resourceMode && (!isPageActive || (openRef.current
-        && ['documents', 'files', 'changes'].includes(latestRef.current.activeTabMap[currentSessionKey] ?? ''))),
+        && ['documents', 'files', 'changes', 'details'].includes(latestRef.current.activeTabMap[currentSessionKey] ?? ''))),
     });
     if (!decision.accept) {
       if (decision.error === 'attention_preserved') void clientApi.acknowledgeBrowserPanelReveal({
@@ -439,11 +449,21 @@ export function WorkbenchProvider({
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
+  const setDirectorySession = useCallback((workspaceId: string, update: (current: DirectorySession) => DirectorySession) => {
+    if (!workspaceId || ['__proto__', 'constructor', 'prototype'].includes(workspaceId)) return;
+    setDirectorySessions(previous => {
+      const current = previous[workspaceId] ?? EMPTY_DIRECTORY_SESSION;
+      const next = normalizeDirectorySession(update(current));
+      return JSON.stringify(current) === JSON.stringify(next) ? previous : { ...previous, [workspaceId]: next };
+    });
+    schedulePersist();
+  }, [schedulePersist]);
+
   const openFile = useCallback((
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
-    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference; readonly line?: number; readonly comparison?: import('./documentSessionState').DocumentComparison },
+    options?: { readonly preferredMode?: WorkbenchFileMode; readonly reference?: import('@peer-agent/protocol').BotDocumentReference; readonly line?: number; readonly comparison?: import('./documentSessionState').DocumentComparison; readonly delivery?: import('@peer-agent/protocol').EvidenceDeliveryBinding },
   ) => {
     const preferredMode = options?.preferredMode;
     const tab = createDocumentTabSession(absPath, {
@@ -451,6 +471,7 @@ export function WorkbenchProvider({
       relPath,
       mode: preferredMode ?? defaultModeForKind(detectFileKind(absPath)),
       ...(options?.reference ? { reference: options.reference } : {}),
+      ...(options?.delivery ? { delivery: options.delivery } : {}),
       ...(options?.line ? { line: options.line } : {}),
       ...(options?.comparison ? { comparison: options.comparison } : {}),
     });
@@ -632,6 +653,9 @@ export function WorkbenchProvider({
     return created;
   }, [documentSessionMap, currentSessionKey]);
 
+  useBrowserWindowReturn({ conversationId, active: isPageActive, open, activeTab, session: browserSession,
+    setSession: setBrowserSession, setOpen, setActiveTab, setMaximized });
+
   const value = useMemo<WorkbenchContextValue>(() => ({
     openDocumentReference,
     open,
@@ -647,6 +671,8 @@ export function WorkbenchProvider({
     filesTarget,
     browserSession,
     documentSession,
+    directorySessions,
+    setDirectorySession,
     layoutHost,
     preparedBrowserConversations: livePreparedBrowserConversations,
     requestedBrowserConversations,
@@ -671,7 +697,7 @@ export function WorkbenchProvider({
     setDocumentSession,
   }), [
     open, width, maximized, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    filesTarget, browserSession, documentSession, layoutHost, livePreparedBrowserConversations, requestedBrowserConversations, conversationId,
+    filesTarget, browserSession, documentSession, directorySessions, setDirectorySession, layoutHost, livePreparedBrowserConversations, requestedBrowserConversations, conversationId,
     setOpen, toggleOpen, setActiveTab, setWidth, setMaximized, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
     setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, openDocumentReference, revealInFiles,
     setBrowserSession, setBrowserSessionFor, resolveBrowserSession, setDocumentSession,

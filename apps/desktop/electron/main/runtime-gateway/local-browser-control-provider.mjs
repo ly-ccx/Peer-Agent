@@ -1,3 +1,4 @@
+import { browserTargetContinuity } from './browser-target-continuity.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -890,6 +891,7 @@ export function createLocalBrowserControlProvider({
     const entry = getActiveBrowserEntry(conversationId);
     const id = entry?.webContentsId ?? null;
     if (!id) return { ok: false, reason: 'no_active_browser' };
+    if (entry.surface === 'native' && entry.available === false) return { ok: false, reason: 'browser_instance_unavailable' };
     const wc = resolveWebContents(id);
     if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
       return { ok: false, reason: 'browser_unavailable' };
@@ -906,12 +908,18 @@ export function createLocalBrowserControlProvider({
     // reveal ack 后再解析/等待同会话 WebContents，保持可见语义与控制目标一致。
     //
     // 注意：reveal 是「尽力而为」，失败不阻断——面板未打开时降级到 headless 执行
-    // （执行不依赖展示层）。
-    await ensureBrowserReady?.({
-      conversationId,
-      focus: false,
-      timeoutMs: browserReadyTimeoutMs,
-    }).catch(() => { /* 尽力 reveal：面板不在时由 headless 降级接住 */ });
+    // （执行不依赖展示层）；已选中的原生实例例外，跨 await 保持同一身份。
+    const captured = getActiveBrowserEntry(conversationId);
+    let reveal, revealFailure = false;
+    try { reveal = await ensureBrowserReady?.({ conversationId, focus: false, timeoutMs: browserReadyTimeoutMs }); }
+    catch { revealFailure = true; }
+    const current = getActiveBrowserEntry(conversationId);
+    const continuity = browserTargetContinuity({ captured, current, reveal, revealFailure });
+    if (continuity.pinned) {
+      if (continuity.reason) return { ok: false, reason: continuity.reason };
+      const target = resolveRegisteredTarget(conversationId);
+      return target.ok ? target : { ok: false, reason: 'browser_instance_unavailable' };
+    }
     const immediate = resolveRegisteredTarget(conversationId);
     if (immediate.ok) return immediate;
     await waitForActiveBrowserEntry(conversationId, { timeoutMs: browserReadyTimeoutMs }).catch(() => null);
@@ -996,7 +1004,7 @@ export function createLocalBrowserControlProvider({
               status,
               conversationId,
               sessionId,
-              visible: true,
+              visible: reveal?.visible !== false,
               focused: reveal?.focused !== false,
             }),
             dataLevel: 'D1_internal',
@@ -1128,7 +1136,9 @@ export function createLocalBrowserControlProvider({
     const target = await resolveTarget(context);
     if (!target.ok) {
       const reason =
-        target.reason === 'no_active_browser'
+        target.reason === 'browser_instance_unavailable' ? (zh ? '选定的独立网页实例暂不可用，请在该窗口重试或明确选择其他页面；未自动切换页面。' : 'The selected native page instance is unavailable. Retry in that window or explicitly select another page; the target was not replaced.')
+          : target.reason === 'browser_target_changed' ? (zh ? '等待过程中网页目标发生变化，本次操作未执行，请确认目标后重试。' : 'The page target changed while waiting. This action was not executed; confirm the target and retry.')
+          : target.reason === 'no_active_browser'
           ? zh
             ? '未检测到可用的内嵌浏览器（面板未打开且后台浏览器不可用），请重试或打开「浏览器」面板。'
             : 'No usable in-app browser detected (panel closed and headless fallback unavailable). Retry or open the Browser panel.'
@@ -1143,6 +1153,7 @@ export function createLocalBrowserControlProvider({
       conversationId: target.entry?.conversationId ?? target.conversationId,
       browserTabId: target.entry?.browserTabId ?? null,
       ...(target.headless ? { headless: true } : {}),
+      ...(target.entry?.surface === 'native' ? { surface: 'native', windowId: target.entry.windowId, generation: target.entry.generation } : {}),
     };
     const startedAt = nowIso();
 

@@ -45,6 +45,7 @@ import { createProjectAgentApplicationService } from './project-agent-applicatio
 import { createDelegationFactsReader } from './delegation-facts-reader.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { createEvidenceReader } from './evidence-reader.mjs';
+import { createEvidenceDeliveryProjection, createScopedExternalEvidenceReader } from './evidence-deliveries.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 import { createProjectObjectivesIpcRegistrations } from '../ipc/register-project-objectives-ipc.mjs';
@@ -71,6 +72,7 @@ export function messagesFromUserInputs(plan) {
     role: 'user',
     content: typeof item?.text === 'string' ? item.text : '',
     attachments: Array.isArray(item?.attachments) ? item.attachments : [],
+    resourceFeedback: item?.resourceFeedback,
   }))).messages;
   if (projected.length === 0) return null;
   return projected.map((message) => ({ role: message.role, content: message.content }));
@@ -137,6 +139,10 @@ export function registerDesktopProjectAgent({
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
   executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
   const readEvidenceBody = createEvidenceReader({
+    readScopedExternal: createScopedExternalEvidenceReader({ findWatch: ref => objectiveWatches?.resolveEvidence(ref),
+      readWatchBody: ref => objectiveWatches?.readEvidenceBody(ref) }),
+    projectDeliveries: createEvidenceDeliveryProjection({ getConversationId: id => profileStore.read(id)?.agentConversationId,
+      getPlan: id => goalPlanStore.getPlan(id), getSession: id => supervisor.get({ sessionId: id, detail: 'report' }) }),
     findRecords: refs => goalPlanStore.findEvidenceIndexRecords?.(refs),
     readMessages: id => conversationStore.getPersistedConversationHistory(id)?.messages ?? [],
     readArtifact: (ref, record) => readRegisteredArtifact(dataHome, ref, record),

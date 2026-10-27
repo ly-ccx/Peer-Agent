@@ -920,3 +920,11 @@ test('draft persistence is gated by the existing bot directory and never submits
   assert.equal(service.writeInputDraft({ workspaceId: 'local', surface: 'remote' }).ok, false);
   assert.equal(calls.length, 4);
 });
+
+test('explicit resource feedback follows the existing input queue without materializing a file or granting access', async () => {
+  let submitted;
+  const service = createProjectAgentApplicationService({ enabled: () => true, inputQueue: { submitInput(value) { submitted = value; return value; } } });
+  const resourceFeedback = [{ id: 'selected', recipient: { workspaceId: 'w', conversationId: 'c' }, excerpt: 'user selection' }];
+  const result = await service.submitInput({ workspaceId: 'w', inputId: 'i', text: 'Explain this', resourceFeedback });
+  assert.equal(result.ok, true); assert.equal(submitted.text, 'Explain this'); assert.deepEqual(submitted.resourceFeedback, resourceFeedback);
+});

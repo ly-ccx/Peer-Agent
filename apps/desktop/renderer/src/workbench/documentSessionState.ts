@@ -1,5 +1,7 @@
-import type { BotDocumentReference, LocalDocumentObservation } from '@peer-agent/protocol';
+import { deliveryBindingKey, normalizeDeliveryBinding } from './deliveryBindingState.ts';
+import { resourceEditToken, normalizeResourceWindowNavigation, type BotDocumentReference, type EvidenceDeliveryBinding, type LocalDocumentObservation, type ResourceWindowNavigation } from '@peer-agent/protocol';
 import { normalizeDocumentObservation } from './documentObservationState.ts';
+import { documentRevisionKey, normalizeDocumentRevision } from './documentRevisionState.ts';
 export type WorkbenchFileMode = 'preview' | 'source' | 'diff';
 export interface DocumentReadPosition { readonly top: number; readonly left: number }
 export type DocumentReadPositions = Readonly<Record<string, DocumentReadPosition>>;
@@ -46,8 +48,11 @@ export interface DocumentTabSession {
   readonly reference?: BotDocumentReference;
   readonly navigation?: DocumentNavigation;
   readonly comparison?: DocumentComparison;
+  readonly draftId?: string;
+  readonly delivery?: EvidenceDeliveryBinding;
   readonly observation?: LocalDocumentObservation;
   readonly readingPositions?: DocumentReadPositions;
+  readonly resourceReading?: ResourceWindowNavigation;
 }
 
 export interface DocumentSessionState {
@@ -76,6 +81,8 @@ export function createDocumentTabSession(
     readonly mode?: WorkbenchFileMode;
     readonly reference?: BotDocumentReference;
     readonly line?: number;
+    readonly draftId?: string;
+    readonly delivery?: EvidenceDeliveryBinding;
     readonly comparison?: DocumentComparison;
   } = {},
 ): DocumentTabSession {
@@ -89,6 +96,8 @@ export function createDocumentTabSession(
     ...(options.relPath ? { relPath: options.relPath } : {}),
     mode: options.mode ?? 'preview',
     ...(options.reference ? { reference: options.reference } : {}),
+    ...(options.draftId !== undefined ? { draftId: options.draftId, mode: 'source' as const } : {}),
+    ...(options.delivery ? { delivery: options.delivery } : {}),
     ...(navigation ? { navigation } : {}),
     ...(comparison ? { comparison } : {}),
   };
@@ -123,8 +132,26 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
   const navigation = documentNavigation(rawNavigation?.line, requestId);
   const comparison = normalizeDocumentComparison(tab.comparison);
   if (tab.comparison !== undefined && !comparison) return null;
+  const resourceReading = tab.resourceReading === undefined ? undefined : normalizeResourceWindowNavigation(tab.resourceReading, 'comparison');
+  if (tab.resourceReading !== undefined && (!comparison || !resourceReading)) return null;
+  const draftId = tab.draftId;
+  if (draftId !== undefined && (!resourceEditToken(draftId) || comparison || tab.delivery !== undefined
+    || (tab.reference as BotDocumentReference | undefined)?.revision || (tab.reference as BotDocumentReference | undefined)?.relativeTo
+    || (tab.reference as BotDocumentReference | undefined)?.kind === 'directory'
+    || typeof (tab.reference as BotDocumentReference | undefined)?.workspaceId !== 'string'
+    || (tab.reference as BotDocumentReference | undefined)?.path !== tab.absPath
+    || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(tab.absPath) || tab.mode === 'diff')) return null;
+  const delivery = normalizeDeliveryBinding(tab.delivery);
+  if (tab.delivery !== undefined && (!delivery || comparison || (tab.reference as BotDocumentReference | undefined)?.revision
+    || (tab.reference as BotDocumentReference | undefined)?.kind === 'directory'
+    || typeof (tab.reference as BotDocumentReference | undefined)?.workspaceId !== 'string'
+    || typeof (tab.reference as BotDocumentReference | undefined)?.path !== 'string')) return null;
   const rawTask = (tab.reference as BotDocumentReference | undefined)?.task;
   const task = normalizeDocumentTask(rawTask);
+  const rawRevision = (tab.reference as BotDocumentReference | undefined)?.revision;
+  const revision = normalizeDocumentRevision(rawRevision);
+  if (rawRevision !== undefined && (!revision || comparison || tab.mode === 'diff' || (tab.reference as BotDocumentReference).kind === 'directory'
+    || typeof (tab.reference as BotDocumentReference).workspaceId !== 'string' || typeof (tab.reference as BotDocumentReference).path !== 'string')) return null;
   if (rawTask !== undefined && (!task || typeof (tab.reference as BotDocumentReference).workspaceId !== 'string'
     || typeof (tab.reference as BotDocumentReference).path !== 'string')) return null;
   return {
@@ -134,9 +161,12 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
       ? { workspaceRoot: tab.workspaceRoot }
       : {}),
     ...(typeof tab.relPath === 'string' && tab.relPath ? { relPath: tab.relPath } : {}),
-    mode: isDocumentMode(tab.mode) ? tab.mode : 'preview',
+    mode: draftId ? 'source' : isDocumentMode(tab.mode) ? tab.mode : 'preview',
+    ...(draftId ? { draftId: draftId as string } : {}),
     ...(navigation ? { navigation } : {}),
     ...(comparison ? { comparison } : {}),
+    ...(resourceReading ? { resourceReading } : {}),
+    ...(delivery ? { delivery } : {}),
     ...(normalizeDocumentObservation(tab.observation) ? { observation: normalizeDocumentObservation(tab.observation) } : {}),
     ...(tab.readingPositions ? { readingPositions: normalizeDocumentReadPositions(tab.readingPositions) } : {}),
     ...(tab.reference && typeof tab.reference === 'object'
@@ -145,6 +175,7 @@ function normalizeDocumentTab(raw: unknown): DocumentTabSession | null {
       ? { reference: { workspaceId: (tab.reference as BotDocumentReference).workspaceId,
           path: (tab.reference as BotDocumentReference).path,
           ...(task ? { task } : {}),
+          ...(revision ? { revision } : {}),
           ...((tab.reference as BotDocumentReference).kind === 'directory' ? { kind: 'directory' as const } : {}),
           ...(typeof (tab.reference as BotDocumentReference).relativeTo === 'string'
             ? { relativeTo: (tab.reference as BotDocumentReference).relativeTo } : {}) } } : {}),
@@ -160,7 +191,7 @@ export function normalizeDocumentSessionState(raw: unknown): DocumentSessionStat
     .map(normalizeDocumentTab)
     .filter((tab): tab is DocumentTabSession => {
       if (!tab) return false;
-      const key = JSON.stringify([tab.absPath, tab.reference?.workspaceId, tab.reference?.relativeTo, tab.reference?.task, tab.comparison]);
+      const key = JSON.stringify([tab.absPath, tab.reference?.workspaceId, tab.reference?.relativeTo, tab.reference?.task, documentRevisionKey(tab.reference?.revision), deliveryBindingKey(tab.delivery), tab.comparison, tab.draftId]);
       if (ids.has(tab.id) || paths.has(key)) return false;
       ids.add(tab.id);
       paths.add(key);
@@ -189,9 +220,12 @@ export function openDocumentTab(
   options: { readonly replaceMode?: boolean } = {},
 ): DocumentSessionState {
   const index = session.tabs.findIndex((candidate) => candidate.absPath === tab.absPath
+    && candidate.draftId === tab.draftId
     && candidate.reference?.workspaceId === tab.reference?.workspaceId
     && candidate.reference?.relativeTo === tab.reference?.relativeTo
     && JSON.stringify(candidate.reference?.task) === JSON.stringify(tab.reference?.task)
+    && documentRevisionKey(candidate.reference?.revision) === documentRevisionKey(tab.reference?.revision)
+    && deliveryBindingKey(candidate.delivery) === deliveryBindingKey(tab.delivery)
     && JSON.stringify(candidate.comparison) === JSON.stringify(tab.comparison));
   if (index < 0) return { tabs: [...session.tabs, tab], activeTabId: tab.id };
 
@@ -234,7 +268,7 @@ export function updateDocumentTabMode(
 ): DocumentSessionState {
   let changed = false;
   const tabs = session.tabs.map((tab) => {
-    if (tab.id !== tabId || tab.mode === mode) return tab;
+    if (tab.id !== tabId || tab.draftId || tab.mode === mode || mode === 'diff' && tab.reference?.revision) return tab;
     changed = true;
     return { ...tab, mode };
   });
@@ -268,6 +302,16 @@ export function updateDocumentReading(session: DocumentSessionState, tabId: stri
     if (JSON.stringify(observation) === JSON.stringify(tab.observation) && JSON.stringify(readingPositions) === JSON.stringify(tab.readingPositions)) return tab;
     changed = true;
     return { ...tab, ...(observation ? { observation } : {}), ...(readingPositions ? { readingPositions } : {}) };
+  });
+  return changed ? { ...session, tabs } : session;
+}
+
+export function updateComparisonReading(session: DocumentSessionState, tabId: string, raw: ResourceWindowNavigation): DocumentSessionState {
+  const value = normalizeResourceWindowNavigation(raw, 'comparison'); if (!value) return session;
+  let changed = false;
+  const tabs = session.tabs.map(tab => {
+    if (tab.id !== tabId || !tab.comparison || JSON.stringify(tab.resourceReading) === JSON.stringify(value)) return tab;
+    changed = true; return { ...tab, resourceReading: value };
   });
   return changed ? { ...session, tabs } : session;
 }

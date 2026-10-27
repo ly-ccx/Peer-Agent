@@ -1,3 +1,7 @@
+import { useMotionAllowed } from '../app/hooks/useMotionAllowed';
+import { ComparisonNavigationProvider, ComparisonNavigator } from './ComparisonNavigation';
+import { useResourceNavigation } from './useResourceNavigation';
+import { PeerIcon } from '../ui/icons';
 import { usePointerResize } from '../app/hooks/usePointerResize';
 import { isImeKey } from '../chat/state/compositionGuard';
 import { selectionNavigation } from '../app/components/selectionNavigation';
@@ -6,6 +10,7 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
+import { useResourceWorkspace } from './ResourceWorkspaceContext';
 import { ResourceWorkspaceHeader } from './ResourceWorkspaceHeader';
 import { ResourceLauncher } from './ResourceLauncher';
 import { ScopedResourceNavigator } from './ScopedResourceNavigator';
@@ -139,11 +144,16 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
     preparedBrowserConversations,
     requestedBrowserConversations,
   } = useWorkbench();
+  const workspace = useResourceWorkspace();
+  const auxiliaryMotion = useMotionAllowed();
+  const navigation = useResourceNavigation(resourceMode ? botWorkspaceId : undefined, activeTab, setActiveTab);
+  const filesVisible = activeTab === 'files' || navigation.mode === 'files';
+  const showingDetails = resourceMode && activeTab === 'details';
   const interactiveOpen = requestedOpen && resourceVisible;
   const open = (requestedOpen || resourceExiting) && resourceVisible;
   const presentation = useResourcePresentation(resourceMode, isZh);
   useEffect(() => {
-    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes')) setActiveTab('documents');
+    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes' || activeTab === 'details')) setActiveTab('documents');
   }, [resourceMode, activeTab, setActiveTab]);
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
@@ -239,19 +249,20 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
   // Resource handles live beside the clipped paper; classic workbenches retain their host.
   // 收起态：组件保持挂载用于 Goal portal target，整体不可见。
   return (
-    <>
+    <ComparisonNavigationProvider workspaceId={botWorkspaceId ?? ''}>
     {resourceMode ? resizer : null}
     <aside
-      ref={panelRef}
+      ref={node => { panelRef.current = node; navigation.ref.current = node; }}
       className={`workbench-panel${resourceMode ? ' resource-workspace' : ''}${open ? ' workbench-panel--open' : ''}${maximized ? ' workbench-panel--maximized' : ''}`}
       aria-hidden={!interactiveOpen}
       inert={!interactiveOpen}
+      data-resource-aux-motion={auxiliaryMotion}
       data-resource-exiting={resourceExiting}
       style={{ width: open ? (maximized ? '100%' : `${displayedWidth}px`) : 0 }}
     >
       {!resourceMode ? resizer : null}
 
-      {resourceMode ? <ResourceWorkspaceHeader isZh={isZh} presentation={presentation} idPrefix={tabsId} /> : <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
+      {resourceMode ? <ResourceWorkspaceHeader isZh={isZh} presentation={presentation} idPrefix={tabsId} navigation={navigation} /> : <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedTab(null); }}>
         {TABS.map((tab) => {
           const disabled = tab.id === 'plan' && !hasGoalPlan;
@@ -301,9 +312,12 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
         </button>
       </div>}
 
-      <div className="workbench-view-slot" id={resourceMode ? `${tabsId}-content` : undefined}
-        role={resourceMode ? (presentation.active ? 'tabpanel' : 'region') : undefined}
-        aria-labelledby={resourceMode && presentation.active ? resourceTabIds(tabsId, presentation.active).tab : undefined}>
+      <div className="workbench-view-slot" data-resource-auxiliary={resourceMode ? navigation.mode ?? undefined : undefined} id={resourceMode ? `${tabsId}-content` : undefined}
+        role={resourceMode ? (!showingDetails && presentation.active ? 'tabpanel' : 'region') : undefined}
+        aria-labelledby={resourceMode && !showingDetails && presentation.active ? resourceTabIds(tabsId, presentation.active).tab : undefined}>
+        {resourceMode ? <div ref={workspace?.bindDetailTarget} className="workbench-view resource-details-slot"
+          data-active={showingDetails} inert={!showingDetails} aria-hidden={!showingDetails}
+          role="region" aria-label={workspace?.detail?.title || (isZh ? '详情' : 'Details')} /> : null}
         {resourceMode ? <div className="workbench-view" data-active={activeTab === 'launcher'} inert={activeTab !== 'launcher'} aria-hidden={activeTab !== 'launcher'}>
           <ResourceLauncher key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'launcher'} recent={presentation.recent} onChanges={() => setActiveTab('changes')} />
         </div> : null}
@@ -336,11 +350,12 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
           </div>
         ))}
         <div
-          className="workbench-view workbench-view--files"
-          data-active={activeTab === 'files'}
-          role="tabpanel" id={`${tabsId}-panel-files`} aria-labelledby={`${tabsId}-tab-files`} tabIndex={0} inert={activeTab !== 'files'} aria-hidden={activeTab !== 'files'}
+          className={`workbench-view workbench-view--files${navigation.mode === 'files' ? ' resource-aux-pane' : ''}`}
+          data-active={filesVisible}
+          role={resourceMode ? 'region' : 'tabpanel'} aria-label={resourceMode ? (isZh ? '文件导航' : 'File navigation') : undefined} id={`${tabsId}-panel-files`} aria-labelledby={resourceMode ? undefined : `${tabsId}-tab-files`} tabIndex={0} inert={!filesVisible} aria-hidden={!filesVisible}
         >
-          {resourceMode ? <ScopedResourceNavigator key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'files'} />
+          {navigation.mode === 'files' ? <AuxiliaryHeading isZh={isZh} onClose={navigation.close} /> : null}
+          {resourceMode ? <ScopedResourceNavigator key={botWorkspaceId} isZh={isZh} active={interactiveOpen && filesVisible} />
             : <FilesView isZh={isZh} workspacePath={workspacePath} />}
         </div>
         <div
@@ -361,8 +376,16 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
           <ScopedResourceNavigator key={botWorkspaceId} isZh={isZh} changes active={interactiveOpen && activeTab === 'changes'} />
         </div> : null}
 
+        {resourceMode ? <aside className="resource-aux-pane resource-comparison-sidebar" data-active={navigation.mode === 'changes'}
+          hidden={navigation.mode !== 'changes'} inert={navigation.mode !== 'changes'} aria-label={isZh ? '变更导航' : 'Changes navigation'}>
+          <AuxiliaryHeading isZh={isZh} onClose={navigation.close} /><ComparisonNavigator isZh={isZh} />
+        </aside> : null}
       </div>
-    </aside>
-    </>
+    </aside></ComparisonNavigationProvider>
   );
+}
+
+function AuxiliaryHeading({ isZh, onClose }: { readonly isZh: boolean; readonly onClose: () => void }) {
+  return <div className="resource-aux-heading"><span>{isZh ? '导航' : 'Navigation'}</span><button type="button" className="ui-button"
+    onClick={onClose} aria-label={isZh ? '收起辅助导航' : 'Collapse auxiliary navigation'}><PeerIcon name="close" size={14} /></button></div>;
 }

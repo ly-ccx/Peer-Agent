@@ -7,8 +7,10 @@ export async function checkEffortStability({ page, slider, strength, until, getB
   const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
   const sample = async (key, collectionDelayMs = 0, errorReceipt = false) => {
     // Establish the baseline after entry motion, before starting a save.
+    // Continuous decorative particles do not own layout or the completion of a save.
     await until(() => page.locator('.model-selection-popover').evaluate(node =>
-      node.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
+      node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+        .every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
     await until(() => page.locator('.bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel').evaluateAll(nodes =>
       nodes.every(node => node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState)))), Boolean);
     const baseline = await page.evaluate(selector => {

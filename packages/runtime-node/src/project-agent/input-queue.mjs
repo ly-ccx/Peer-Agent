@@ -1,3 +1,4 @@
+import { normalizeResourceFeedbackList } from '@peer-agent/protocol';
 /**
  * 项目输入队列。所有入口把用户输入追加到 input-queue.jsonl。
  * 只有宿主按游标消费：写入机器人对话（消息 id 由 inputId 派生），再推进游标，然后通知唤醒。
@@ -47,6 +48,7 @@ export function createInputQueue({
   const copyInputs = inputs => inputs.map(input => ({ ...input,
     anchorRefs: [...input.anchorRefs], quoteRefs: [...input.quoteRefs], attachmentRefs: [...input.attachmentRefs],
     ...(input.attachments ? { attachments: input.attachments.map(item => ({ ...item })) } : {}),
+    ...(input.resourceFeedback ? { resourceFeedback: normalizeResourceFeedbackList(input.resourceFeedback) } : {}),
   }));
   function root() {
     return rootDir || pathOf('projectRuntime');
@@ -205,7 +207,11 @@ export function createInputQueue({
   function pendingExecution(workspaceId, { repliedTo = [] } = {}) {
     const id = workspaceIdOf(workspaceId);
     if (!id || typeof holdsLease === 'function' && holdsLease(id) !== true) return [];
-    return withLock(id, () => executionState(id, [], Array.isArray(repliedTo) ? repliedTo : []));
+    return withLock(id, () => {
+      const pending = executionState(id, [], Array.isArray(repliedTo) ? repliedTo : []);
+      if (pending.some(input => input.resourceFeedback?.some(row => row.recipient.conversationId !== resolveConversationId?.(id)))) throw new Error('RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
+      return pending;
+    });
   }
 
   function completeExecution(workspaceId, inputIds) {
@@ -222,6 +228,10 @@ export function createInputQueue({
     return withLock(workspaceId, () => {
       const existing = readInputs(workspaceId).find((item) => item.inputId === normalized.inputId);
       if (existing) return existing;
+      if (normalized.resourceFeedback?.length) {
+        const conversationId = typeof resolveConversationId === 'function' ? resolveConversationId(workspaceId) : null;
+        if (!conversationId || normalized.resourceFeedback.some(row => row.recipient.conversationId !== conversationId)) throw Object.assign(new TypeError('RESOURCE_FEEDBACK_RECIPIENT_CHANGED'), { code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' });
+      }
       mkdirSync(dirFor(workspaceId), { recursive: true });
       appendFileSync(queueFile(workspaceId), `${JSON.stringify(normalized)}\n`);
       return normalized;
@@ -254,6 +264,7 @@ export function createInputQueue({
       const targetId = conversationId.trim();
       const consumed = [];
       for (const input of pendingAfter(dirName)) {
+        if (input.resourceFeedback?.some(row => row.recipient.conversationId !== targetId)) throw new Error('RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
         const messageId = inputMessageId(input.inputId);
         const duplicateMessage = hasMessage(targetId, messageId) === true;
         if (!duplicateMessage) {
@@ -267,6 +278,7 @@ export function createInputQueue({
             surface: input.surface,
             anchorRefs: input.anchorRefs,
             quoteRefs: input.quoteRefs,
+            ...(input.resourceFeedback ? { resourceFeedback: normalizeResourceFeedbackList(input.resourceFeedback) } : {}),
             attachmentRefs: input.attachmentRefs,
             ...(Array.isArray(input.attachments) && input.attachments.length > 0
               ? { attachments: input.attachments }
@@ -318,6 +330,8 @@ function normalizeSubmission(input, workspaceId, createdAt) {
   if (!SURFACES.has(input?.surface)) throw new TypeError('surface is invalid');
   const text = typeof input?.text === 'string' ? input.text.trim() : '';
   const attachments = normalizeInputAttachments(input?.attachments);
+  const resourceFeedback = normalizeResourceFeedbackList(input?.resourceFeedback);
+  if (!resourceFeedback || resourceFeedback.some(row => row.recipient.workspaceId !== workspaceId)) throw Object.assign(new TypeError('INVALID_RESOURCE_FEEDBACK'), { code: 'INVALID_RESOURCE_FEEDBACK' });
   if (!text && attachments.length === 0) throw new TypeError('text or attachments are required');
   if (text.length > 100_000) throw new TypeError('text is too long');
   const suppliedAt = Date.parse(input?.createdAt);
@@ -330,6 +344,7 @@ function normalizeSubmission(input, workspaceId, createdAt) {
     quoteRefs: stringRefs(input?.quoteRefs),
     attachmentRefs: stringRefs(input?.attachmentRefs),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(resourceFeedback.length > 0 ? { resourceFeedback } : {}),
     createdAt: Number.isFinite(suppliedAt) ? new Date(suppliedAt).toISOString() : createdAt,
   };
   const answerTo = optionalAnswer(input?.answerTo);

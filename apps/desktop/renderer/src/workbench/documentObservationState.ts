@@ -1,4 +1,4 @@
-import type { BotDocumentReference, LocalDocumentObservation } from '@peer-agent/protocol';
+import type { BotDocumentReference, ConfirmedGitDocumentRevision, LocalDocumentObservation } from '@peer-agent/protocol';
 
 const version = (value: unknown): value is string => typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
 
@@ -16,6 +16,7 @@ export interface ObservedDocumentRead {
   readonly ok: boolean;
   readonly status: string;
   readonly observation?: LocalDocumentObservation;
+  readonly revision?: ConfirmedGitDocumentRevision;
   readonly resolvedPath?: string;
   readonly content?: string;
   readonly dataUrl?: string;

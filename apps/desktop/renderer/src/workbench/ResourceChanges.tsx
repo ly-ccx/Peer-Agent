@@ -1,73 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import type { BotDocumentReference } from '@peer-agent/protocol';
 import { clientApi } from '../clientApi';
 import { useResourceRead } from '../ui/resources/useResourceState';
-import { useResourceWorkspace } from './ResourceWorkspaceContext';
-import { useWorkbench } from './WorkbenchContext';
-import { DiffViewer } from './file-preview/DiffViewer';
-import { comparisonReadError, createFixedComparisonReader, resourceDiffFiles, taskComparisonBinding } from './resourceComparisonState';
+import { taskComparisonBinding } from './resourceComparisonState';
+import { ComparisonRead } from './ComparisonRead';
+export { ComparisonRead } from './ComparisonRead';
 
-export function ComparisonRead({ workspaceId, path, root, active, isZh, fromRef = 'HEAD', toRef, comparison, allowKeep = true, task }: {
-  readonly workspaceId: string; readonly path: string; readonly root: string; readonly active: boolean; readonly isZh: boolean;
-  readonly fromRef?: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged';
-  readonly allowKeep?: boolean;
-  readonly task?: BotDocumentReference['task'];
-}) {
-  const workspace = useResourceWorkspace();
-  const workbench = useWorkbench();
-  const [selected, setSelected] = useState<string | null>(null);
-  const reference = { workspaceId, path, kind: 'directory' as const, ...(task ? { task } : {}) };
-  const identity = JSON.stringify([reference, root, fromRef, toRef, comparison]);
-  const readRange = useMemo(() => {
-    const request = (range: { fromRef: string; toRef?: string }) => clientApi.gitDiffRange({
-      workspaceRoot: root, ...range, ...(comparison ? { comparison } : {}), documentReference: reference,
-    });
-    return comparison ? () => request({ fromRef }) : createFixedComparisonReader({ fromRef, ...(toRef ? { toRef } : {}) }, request);
-  }, [identity]);
-  const read = useResourceRead(identity, readRange, active);
-  const value = read.value;
-  const files = useMemo(() => resourceDiffFiles(value?.ok ? value.diffText : ''), [value]);
-  const file = files.find(item => item.key === selected) ?? files[0];
-  const repo = value?.workspaceRoot;
-  const currentFile = repo && file?.path ? `${repo.replace(/[/\\]+$/, '')}/${file.path}` : null;
-  return <section className="resource-comparison" aria-busy={read.loading}>
-    <div className="resource-changes-toolbar">
-      <span className="resource-source-label">{comparison === 'working' ? (isZh ? '暂存区 → 当前工作树' : 'Index → working tree')
-        : comparison === 'staged' ? `HEAD → ${isZh ? '暂存区' : 'Index'}` : `${value?.fromRef ?? fromRef} → ${value?.toRef ?? (isZh ? '当前工作树' : 'Working tree')}`}</span>
-      <button className="ui-button is-compact" type="button" disabled={read.loading} onClick={() => void read.reload()}>{isZh ? '刷新' : 'Refresh'}</button>
-      {allowKeep ? <button className="ui-button is-compact" type="button" disabled={!value?.ok || read.loading || read.error}
-        onClick={() => { if (value?.ok) workspace?.openComparison({ ...reference, path: root }, {
-          fromRef: value.fromRef ?? fromRef, ...(value.toRef ? { toRef: value.toRef } : {}), ...(comparison ? { comparison } : {}),
-        }); }}>{isZh ? '在独立标签保留比较' : 'Keep comparison in a separate tab'}</button> : null}
-    </div>
-    <p className="resource-source-label">{root}</p>
-    {read.error || value && !value.ok ? <p role="alert">{comparisonReadError(value?.status, value?.error, isZh)}{value?.ok ? (isZh ? ' 仍显示上次读取的内容。' : ' Previous content is still shown.') : ''}</p> : null}
-    {!read.loaded && !read.error ? <p role="status">{isZh ? '正在读取更改…' : 'Reading changes…'}</p> : null}
-    {value?.ok ? <>
-      {files.length ? <>
-        <nav className="resource-diff-index" aria-label={isZh ? '变更文件' : 'Changed files'}>
-          {files.map(item => <button key={item.key} type="button" className="resource-diff-file" aria-pressed={file?.key === item.key} onClick={() => setSelected(item.key)}>
-            <span>{item.path || (isZh ? '比较内容' : 'Comparison')}</span><small>{item.binary ? (isZh ? '二进制' : 'Binary') : `+${item.additions} / −${item.deletions}`}</small>
-          </button>)}
-        </nav>
-        {file ? <>
-          <div className="resource-changes-toolbar"><span className="resource-document-name" title={file.path}>{file.path}</span>
-            <button type="button" className="ui-button is-compact" disabled={!currentFile || file.removed}
-              title={file.removed ? (isZh ? '文件已删除，仍可阅读下面的变更。' : 'The file was deleted. Its changes remain readable below.') : undefined}
-              onClick={() => { if (currentFile) workspace?.openReference({ ...reference, kind: 'file', path: currentFile }); }}>{isZh ? '打开当前文件' : 'Open current file'}</button>
-          </div>
-          {file.binary ? <p role="status">{isZh ? '这是二进制变更，无法显示文本差异。' : 'This is a binary change. Text differences are unavailable.'}</p>
-            : <DiffViewer diffText={file.raw} showFileHeaders showFileIndex={false} isZh={isZh} />}
-        </> : null}
-      </> : <p role="status">{isZh ? '此范围没有已跟踪文件的改动。' : 'No tracked changes in this range.'}</p>}
-      {value.untracked?.length ? <div className="resource-untracked"><h3>{isZh ? '未跟踪文件' : 'Untracked files'}</h3>
-        {value.untracked.map(target => <button className="ui-button" type="button" key={target}
-          onClick={() => workbench.openFile(target, undefined, undefined, { preferredMode: 'diff', reference: { ...reference, kind: 'file', path: target } })}>{target}</button>)}
-        {value.untrackedTruncated ? <p role="status">{isZh ? '列表未完整显示，请在目录中继续查看。' : 'The list is incomplete. Continue in Files.'}</p> : null}
-      </div> : null}
-    </> : null}
-  </section>;
-}
 
 function TaskComparison({ workspaceId, active, isZh }: { readonly workspaceId: string; readonly active: boolean; readonly isZh: boolean }) {
   const [sessionId, setSessionId] = useState('');

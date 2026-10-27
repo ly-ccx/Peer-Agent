@@ -3,7 +3,7 @@ export type { ProjectWorkBudgetLimits, ProjectWorkBudgetBoundary, ProjectReplyRe
 export type { CoordinationAction, CoordinationLifecycle, CoordinationMandate, CoordinationDecision, TaskTransitionPhase, TaskTransition, CoordinationExecutionBinding, CoordinationSessionFacts } from './delegation-coordination.ts';
 export { deriveSessionFacts, type SessionFactSnapshot } from './session-facts.ts';
 export { projectAgentFailureKind, classifyProjectAgentFailure, type ProjectRecoveryFailureKind, type ProviderRequestRecovery, type ProjectAgentTurnRecovery, type ReplyAnchorCandidate } from './project-agent-failure.ts';
-export type { EvidenceSourceDescription, ProjectAgentEvidenceReadRequest, ProjectAgentEvidenceReadResult } from './evidence-inspection.ts';
+export type { EvidenceSourceDescription, EvidenceDeliveryBinding, EvidenceDelivery, ProjectAgentEvidenceReadRequest, ProjectAgentEvidenceReadResult } from './evidence-inspection.ts';
 export { toolActivityPreview, toolActivitySummary } from './tool-activity-preview.ts';
 export { isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort, type ModelReasoningEffort } from './model-reasoning.ts';
 export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
@@ -1115,3 +1115,12 @@ export type { CapabilityBlocker, DelegationCapabilityAdmission } from './capabil
 export * from './project-input-recovery.ts';
 
 export { botResourceReferences } from './resource-reference-hints.ts';
+
+export type { ResourceWindowCheckpointRequest, ResourceWindowCheckpointAck, ResourceWindowCloseBlocked, ResourceWindowReturnRequest, ResourceWindowReturnAck, ResourceWindowHistoryEntry, ResourceWindowHistoryResult, ResourceWindowReadRequest, ResourceWindowReadResult, ResourceWindowResource, ResourceWindowNavigation, ResourceWindowOpenRequest, ResourceWindowOwner, ResourceWindowIdentity, ResourceWindowContext, ResourceWindowStatus, ResourceWindowResult } from './resource-window.ts';
+export { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation } from './resource-window.ts';
+export * from './browser-window.js';
+export * from './resource-feedback.js';
+
+export * from './resource-edit.ts';
+export * from './resource-file-replace.ts';
+export * from './resource-edit-execution.ts';

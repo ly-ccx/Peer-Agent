@@ -1,9 +1,12 @@
+import * as documentErrors from './documentReadError.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import * as adapterState from './file-preview/documentAdapterState.ts';
 import * as fileTypes from './file-preview/fileTypes.ts';
+import * as revisionState from './documentRevisionState.ts';
 
 function moduleFrom(file: string, modules: Record<string, unknown>) {
   const exports: Record<string, any> = {};
@@ -18,12 +21,12 @@ function reader() {
   let metadata = async () => ({ ok: true, metadataOnly: true, resolvedPath: '/real/guide.md', content: '' });
   const api = {
     readFile: async (_: string, _root: unknown, _rel: unknown, reference: any) => {
-      calls.push(reference); return reference.metadataOnly ? metadata() : { ok: true, status: 'ok', content: 'body' };
+      calls.push(reference); return reference.metadataOnly ? metadata() : { ok: true, status: 'ok', content: 'body', revision: reference.revision };
     },
     readImageDataUrl: async (_: string, _root: unknown, _rel: unknown, reference: any) => { calls.push(reference); return { ok: true, status: 'ok', dataUrl: 'data:image/png;base64,AA==' }; },
   };
   const exports = moduleFrom('./useObservedDocument.ts', { react: {}, '../clientApi': { clientApi: api },
-    './file-preview/fileTypes': fileTypes, './documentObservationState': {} });
+    './file-preview/fileTypes': fileTypes, './documentObservationState': {}, './documentRevisionState': revisionState });
   return { calls, metadata(read: () => Promise<any>) { metadata = read; }, read: exports.readObservedDocument };
 }
 
@@ -61,12 +64,18 @@ test('a changed version keeps the accepted body and limits adoption feedback to 
   let reading: any = { value: { ok: true, content: 'accepted old body', media: 'text', resolvedPath: '/real/guide.md' },
     failure: { ok: false, status: 'version_changed' }, loading: false, loadCurrent() { adopts++; } };
   const modules: Record<string, unknown> = {
+    './documentReadError': documentErrors,
+    './editing/EditDraftButton': { EditDraftButton: 'edit-draft-button' },
+    './feedback/ResourceSelectionFeedback': { ResourceSelectionFeedback: 'resource-selection-feedback' },
+    './OpenResourceWindowButton': { OpenResourceWindowButton: 'open-native-window' },
     react: { useMemo: (read: () => unknown) => read(), useCallback: (read: unknown) => read, useState: (value: unknown) => [value, () => {}], useRef: (value: unknown) => ({ current: value }) },
     'react/jsx-runtime': { jsx: (type: unknown, props: object) => ({ type, props }), jsxs: (type: unknown, props: object) => ({ type, props }) },
     '../clientApi': { clientApi: {} }, '../ui/resources/useResourceState': { useResourceRead: () => ({ value: null, loaded: false, loading: false, snapshot: () => ({}) }) },
     './useObservedDocument': { useObservedDocument: () => reading },
+    './DocumentHistoryTools': { DocumentHistoryTools: 'history-tools' }, './DocumentDeliveryTools': { DocumentDeliveryTools: 'delivery-tools' }, './documentRevisionState': revisionState,
     '../chat/components/markdown/DocumentPreviewContext': { DocumentPreviewContext: { Provider: 'provider' } },
     './file-preview/MarkdownDocument': { MarkdownDocument: 'markdown' }, './file-preview/SourceViewer': { SourceViewer: 'source' }, './file-preview/DiffViewer': { DiffViewer: 'diff' },
+    './file-preview/RasterImageView': { RasterImageView: 'raster' }, './file-preview/documentAdapterState': adapterState,
     './file-preview/fileTypes': fileTypes, './ResourceWorkspaceContext': { useResourceWorkspace: () => ({}) },
     './useDocumentReadingPosition': { useDocumentReadingPosition: () => ({ ref: {}, onScroll() {}, restore() {} }) },
   };
@@ -95,4 +104,19 @@ test('the first byte read binds the identity returned by metadata even without a
   const h = reader(); h.metadata(async () => ({ ok: true, metadataOnly: true, resolvedPath: '/real/guide.md', identity: { resourceId: 'confirmed-resource' } }));
   await h.read({ workspaceId: 'bot', path: 'guide.md' });
   assert.equal(h.calls[1].expectedObservation.resourceId, 'confirmed-resource');
+});
+
+test('a historical read binds host-confirmed commit/repository; old hosts cannot silently read live content', async () => {
+  const commit = 'a'.repeat(40), repositoryId = `sha256:${'b'.repeat(64)}`;
+  const reference = { workspaceId: 'bot', path: '/real/guide.md', revision: { kind: 'git', commit } };
+  const h = reader();
+  const result = await h.read(reference);
+  assert.equal(result.status, 'version_unavailable'); assert.equal(h.calls.length, 1);
+  const pinned = reader(); pinned.metadata(async () => ({ ok: true, metadataOnly: true, resolvedPath: '/real/guide.md',
+    revision: { kind: 'git', commit, repositoryId, path: 'guide.md' } }));
+  assert.equal((await pinned.read(reference)).ok, true);
+  assert.equal(pinned.calls[1].revision.repositoryId, repositoryId);
+  const moved = reader(); moved.metadata(async () => ({ ok: true, metadataOnly: true, resolvedPath: '/real/guide.md',
+    revision: { kind: 'git', commit: 'c'.repeat(40), repositoryId, path: 'guide.md' } }));
+  assert.equal((await moved.read(reference)).status, 'source_changed'); assert.equal(moved.calls.length, 1);
 });

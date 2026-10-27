@@ -1,3 +1,7 @@
+import { ResourceEditAppFrame } from './workbench/editing/ResourceEditContinuity';
+import { useResourceFeedbackPreparations } from './workbench/feedback/useResourceFeedbackPreparations';
+import { NativeBrowserWindow } from './workbench/NativeBrowserWindow';
+import { NativeResourceWindow } from './workbench/NativeResourceWindow';
 import { useSettingsAwarePage, requestSettingsNavigation } from './ui/forms/settingsNavigation';
 import { isImeKey } from './chat/state/compositionGuard';
 import { createI18n } from '@peer-agent/i18n';
@@ -135,13 +139,16 @@ function readGitBranchPrefix(settings: Record<string, unknown> | null | undefine
 
 export function App() {
   const windowView = new URLSearchParams(window.location.search).get('window');
+  if (windowView === 'browser-resource') return <NativeBrowserWindow />;
+  if (windowView === 'resource') return <ResourceEditAppFrame><NativeResourceWindow /></ResourceEditAppFrame>;
   if (windowView === 'quick-chat') return <QuickChatWindow />;
   if (windowView === 'quick-chat-popover') return <QuickChatPopoverHost />;
 
-  return <MainApp />;
+  return <ResourceEditAppFrame><MainApp /></ResourceEditAppFrame>;
 }
 
 function MainApp() {
+  useResourceFeedbackPreparations();
   const { availableLocales, initError, loading: bootstrapLoading, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
   const botListShell = useBotListShell();
   const [botResourceOwner, setBotResourceOwner] = useState<BotResourceOwner | null>(null);

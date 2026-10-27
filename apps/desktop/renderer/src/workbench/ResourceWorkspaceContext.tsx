@@ -1,5 +1,10 @@
+import { ResourceFeedbackProvider } from './feedback/ResourceFeedbackContext';
+import { useResourceWindowReturn } from './useResourceWindowReturn';
+import { isImeKey } from '../chat/state/compositionGuard';
+import { interactionLayers } from '../app/components/interactionLayers';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { BotDocumentReference } from '@peer-agent/protocol';
+import type { BotDocumentReference, EvidenceDelivery, ResourceEditDraftInfo } from '@peer-agent/protocol';
+import { normalizeDeliveryBinding } from './deliveryBindingState';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
 import { MAIN_MIN_WIDTH, WORKBENCH_MIN_WIDTH, useWorkbench } from './WorkbenchContext';
@@ -7,8 +12,9 @@ import { WorkbenchPanel } from './WorkbenchPanel';
 import { addBrowserTab, createBrowserTabSession } from './browserSessionState';
 import { resourceLayoutBounds, resourceWebUrl } from './resourceWorkspaceState';
 import { documentReferenceLocation } from '../chat/components/markdown/documentReference';
-import { normalizeDocumentComparison, type DocumentComparison } from './documentSessionState';
+import { createDocumentTabSession, openDocumentTab, normalizeDocumentComparison, type DocumentComparison } from './documentSessionState';
 import './resource-workspace.css';
+import { useResourceDetails } from './useResourceDetails';
 import { useMotionAllowed } from '../app/hooks/useMotionAllowed';
 import { useMotionPresence } from '../app/hooks/useMotionPresence';
 import { motionDurationMs } from '../app/state/visualMotion';
@@ -18,15 +24,18 @@ export interface BotResourceOwner {
   readonly conversationId: string | null;
   readonly path: string | null;
 }
-interface ResourceWorkspaceAdapter {
+interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails> {
   readonly owner: BotResourceOwner | null;
   readonly ready: boolean;
   readonly open: boolean;
   readonly navigationCollapsed: boolean;
   readonly searchIntent: { readonly query: string; readonly candidates: readonly string[]; readonly id: number } | null;
-  readonly directoryIntent: { readonly path: string; readonly id: number } | null;
+  readonly directoryIntent: { readonly path: string; readonly id: number; readonly task?: BotDocumentReference['task']; readonly relativeTo?: string } | null;
+  readonly consumeDirectoryIntent: (id: number) => void;
   readonly locate: (query: string, candidates?: readonly string[]) => void;
   readonly openReference: (reference: BotDocumentReference) => void;
+  readonly openDraft: (draft: Pick<ResourceEditDraftInfo, 'id' | 'target'>) => void;
+  readonly openDelivery: (delivery: EvidenceDelivery) => void;
   readonly openComparison: (reference: BotDocumentReference, comparison: DocumentComparison) => void;
   readonly openUrl: (url: string) => void;
   readonly launch: () => void;
@@ -82,7 +91,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
   const navigationCollapsed = bounds?.navigationCollapsed ?? false;
   const [focusArea, setFocusArea] = useState<'primary' | 'resource'>('primary');
   const [search, setSearch] = useState<{ owner: string; query: string; candidates: readonly string[]; id: number } | null>(null);
-  const [directory, setDirectory] = useState<{ owner: string; path: string; id: number } | null>(null);
+  const [directory, setDirectory] = useState<{ owner: string; path: string; id: number; task?: BotDocumentReference['task']; relativeTo?: string } | null>(null);
   const ready = !!owner?.path && !!owner.conversationId && owner.conversationId === workbench.conversationId;
   const closing = presence.exiting && !!exitLayout && exitLayout.owner === owner?.conversationId && ready && active && !workbench.open;
   useLayoutEffect(() => {
@@ -130,14 +139,19 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     if (!workbench.open) workbench.setMaximized(false);
     focusAfterIntent.current = true; setFocusRequest(value => value + 1); setFocusArea('resource'); workbench.setOpen(true);
   };
-  const launch = () => { if (ready) { workbench.setActiveTab('launcher'); reveal(); } };
+  const details = useResourceDetails({ workspaceId: owner?.workspaceId ?? null, ready, visible: active && workbench.open,
+    activeTab: workbench.activeTab, setTab: workbench.setActiveTab, reveal });
+  const launch = () => { details.rememberDetailSource(); if (ready) { workbench.setActiveTab('launcher'); reveal(); } };
   const adapter: ResourceWorkspaceAdapter = {
+    ...details,
     owner, ready, open: ready && active && workbench.open,
     navigationCollapsed: ready && active && workbench.open && navigationCollapsed,
     searchIntent: search?.owner === owner?.conversationId ? search : null,
     directoryIntent: directory?.owner === owner?.conversationId ? directory : null,
+    consumeDirectoryIntent: id => setDirectory(previous => previous?.id === id ? null : previous),
     locate: (query, candidates = []) => {
       if (!ready || !owner?.conversationId || !query.trim()) return;
+      details.rememberDetailSource();
       setSearch(previous => ({ owner: owner.conversationId!, query: query.slice(0, 256), candidates: candidates.slice(0, 256), id: (previous?.id ?? 0) + 1 }));
       workbench.setActiveTab('launcher'); reveal();
     },
@@ -160,8 +174,9 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     },
     openReference: reference => {
       if (ready && reference.workspaceId === owner?.workspaceId) {
+        details.rememberDetailSource();
         if (reference.kind === 'directory') {
-          setDirectory(previous => ({ owner: owner.conversationId!, path: reference.path, id: (previous?.id ?? 0) + 1 }));
+          setDirectory(previous => ({ owner: owner.conversationId!, path: reference.path, task: reference.task, relativeTo: reference.relativeTo, id: (previous?.id ?? 0) + 1 }));
           workbench.setActiveTab('files');
         } else {
           const location = documentReferenceLocation(reference.path);
@@ -170,20 +185,47 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
         reveal();
       }
     },
+    openDraft: draft => {
+      if (!ready || draft.target.recipient.workspaceId !== owner?.workspaceId || draft.target.recipient.conversationId !== owner.conversationId) return;
+      const reference = draft.target.reference;
+      workbench.setDocumentSession(current => openDocumentTab(current, createDocumentTabSession(reference.path, { reference, draftId: draft.id, mode: 'source' })));
+      workbench.setActiveTab('documents'); reveal();
+    },
+    openDelivery: delivery => {
+      const binding = normalizeDeliveryBinding(delivery), reference = delivery.reference;
+      if (!ready || !binding || !reference || reference.workspaceId !== owner?.workspaceId || reference.revision || reference.kind === 'directory') return;
+      details.rememberDetailSource();
+      workbench.openFile(reference.path, undefined, undefined, { reference, delivery: binding, preferredMode: 'preview' });
+      reveal();
+    },
     openComparison: (reference, comparison) => {
       const value = normalizeDocumentComparison(comparison);
       if (!ready || reference.workspaceId !== owner?.workspaceId || !value) return;
+      details.rememberDetailSource();
       workbench.openFile(reference.path, undefined, undefined, { reference: { ...reference, kind: 'directory' }, comparison: value, preferredMode: 'diff' });
       reveal();
     },
     openUrl: input => {
       const url = resourceWebUrl(input);
       if (!ready || !url) return;
+      details.rememberDetailSource();
       workbench.setBrowserSession(current => addBrowserTab(current, createBrowserTabSession(undefined, url)));
       workbench.setActiveTab('browser'); reveal();
     },
   };
-  return <Context.Provider value={adapter}>
+  useResourceWindowReturn({ owner, ready, active, workbench, reveal, openDirectory: adapter.openReference });
+  useEffect(() => {
+    if (!ready || !active || !workbench.open) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || isImeKey(event) || event.defaultPrevented || interactionLayers.topInteractive()) return;
+      if (!(event.target instanceof Node) || !pane.current?.contains(event.target)) return;
+      event.preventDefault(); adapter.close();
+    };
+    // Bubble after controls/menus have had the first chance to consume Escape.
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [ready, active, workbench.open, adapter.close]);
+  return <ResourceFeedbackProvider recipient={ready && owner?.conversationId ? { workspaceId: owner.workspaceId, conversationId: owner.conversationId } : null}><Context.Provider value={adapter}>
     <div ref={bindLayout} className="bot-resource-layout" data-resource-active={active} data-resource-open={ready && active && workbench.open}
       style={{ '--resource-primary-min': `${bounds?.primaryMin ?? MAIN_MIN_WIDTH}px` } as CSSProperties}
       data-resource-measured-width={bounds?.viewport}
@@ -209,7 +251,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
         resourceVisible={ready && active} resourceExiting={closing} resourceWidthLimit={bounds?.sideMax} botWorkspaceId={owner?.workspaceId} />
       </div>
     </div>
-  </Context.Provider>;
+  </Context.Provider></ResourceFeedbackProvider>;
 }
 
 export function BotResourceButton({ isZh }: { readonly isZh: boolean }) {
@@ -217,8 +259,8 @@ export function BotResourceButton({ isZh }: { readonly isZh: boolean }) {
   return <>{workspace?.navigationCollapsed ? <button type="button" className="bot-profile is-icon" onClick={() => workspace.close()}
     title={isZh ? '收起资源并显示机器人列表' : 'Close resources and show Bot list'}
     aria-label={isZh ? '显示机器人列表' : 'Show Bot list'}><PeerIcon name="panelLeft" size={16} /></button> : null}
-    <button type="button" className="bot-profile is-icon" disabled={!workspace?.ready} onClick={() => workspace?.open ? workspace.close() : workspace?.launch()}
-    aria-label={isZh ? '工作区' : 'Workspace'} aria-expanded={workspace?.open ?? false}
+    <button type="button" className="bot-profile is-icon" disabled={!workspace?.ready} onClick={() => workspace?.open && !workspace.detailActive ? workspace.close() : workspace?.launch()}
+    aria-label={isZh ? '工作区' : 'Workspace'} aria-expanded={!!workspace?.open && !workspace.detailActive}
     title={!workspace?.ready ? (isZh ? '正在确认机器人会话与来源' : 'Resolving the Bot conversation and source') : workspace.open ? (isZh ? '收起工作区' : 'Collapse workspace') : (isZh ? '打开工作区' : 'Open workspace')}>
     <PeerIcon name="panelRight" size={16} />
   </button></>;

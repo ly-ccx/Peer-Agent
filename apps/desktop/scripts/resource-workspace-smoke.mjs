@@ -127,6 +127,10 @@ try {
   await openPath('./long.md');
   const documentBody = page.locator('.resource-document[data-active="true"] .resource-document-body');
   await page.locator('.resource-document[data-active="true"] h1').filter({ hasText: 'LONG_DOCUMENT_OK' }).waitFor();
+  const readingGeometry = await documentBody.evaluate(el => ({ scroll: el.scrollHeight, height: el.clientHeight, viewport: innerHeight,
+    position: getComputedStyle(el.closest('.document-page')).position }));
+  assert.equal(readingGeometry.position, 'absolute'); assert.ok(readingGeometry.height < readingGeometry.viewport);
+  assert.ok(readingGeometry.scroll > readingGeometry.height + 1000, 'the document body, not the entire tab page, owns scrolling');
   await documentBody.evaluate(el => { el.scrollTop = 600; el.dispatchEvent(new Event('scroll')); });
   await panel.getByRole('button', { name: '源码', exact: true }).click();
   await until(() => documentBody.locator('[data-source-line]').count(), count => count > 100);
@@ -138,7 +142,7 @@ try {
   await openPath('./long.md#L120');
   await until(() => documentBody.evaluate(el => Math.abs(el.querySelector('[data-source-line="120"]').getBoundingClientRect().top - el.getBoundingClientRect().top)), value => value < 2);
   await openPath('./long.md#L9999');
-  await page.locator('.resource-document[data-active="true"]').getByRole('status').filter({ hasText: '行号超出' }).waitFor();
+  await page.locator('.resource-document[data-active="true"]').getByRole('status').filter({ hasText: /行号.*(?:超出|不在)/ }).waitFor();
   await shot('workspace-line-warning');
   report.checks.push('real DOM mode reading positions, repeated line intents and missing-line fallback');
   await openPath('./remote.md');
@@ -149,7 +153,7 @@ try {
   await until(() => imageRequests, value => value > 0);
   report.checks.push('static Markdown external image makes no request before explicit opening');
   await openPath('./pixel.png');
-  await until(() => documentBody.locator('img.resource-image').evaluate(el => el.complete && el.naturalWidth > 0), Boolean);
+  await until(() => documentBody.locator('img.resource-raster-image').evaluate(el => el.complete && el.naturalWidth > 0), Boolean);
   report.checks.push('scoped local image decoded by production host');
   await openPath('./missing.md');
   await page.locator('.resource-document[data-active="true"]').getByRole('alert').filter({ hasText: '未能按此引用定位文件' }).waitFor();

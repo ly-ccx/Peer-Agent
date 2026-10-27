@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { resourceEditRegistry } from './editing/resourceEditRegistry';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWorkbench } from './WorkbenchContext';
 import { activateBrowserTab, closeBrowserTab, createBrowserTabSession } from './browserSessionState';
 import { activateDocumentTab, closeDocumentTab, documentComparisonLabel } from './documentSessionState';
+import { documentFileLabel } from './documentRevisionState';
 import { LAUNCHER_TAB, normalizeResourcePreferences, reconcileResourceOrder, resourceKey, resourceNeighbor } from './resourceWorkspaceState';
 
 function read(owner: string | null) {
@@ -20,10 +22,10 @@ export function useResourcePresentation(enabled = true, isZh = false) {
   }
   const resources = useMemo(() => [
     ...documentSession.tabs.map(tab => ({ key: resourceKey('document', tab.id), kind: 'document' as const, id: tab.id,
-      label: tab.comparison ? documentComparisonLabel(tab.comparison, isZh) : tab.absPath.split(/[\\/]/).pop() || tab.absPath,
+      label: tab.comparison ? documentComparisonLabel(tab.comparison, isZh) : `${documentFileLabel(tab.absPath, tab.reference?.revision, isZh)}${tab.draftId ? (isZh ? ' · 草稿' : ' · Draft') : ''}`,
       title: [tab.comparison ? tab.comparison.comparison ? documentComparisonLabel(tab.comparison, isZh)
         : `${tab.comparison.fromRef} → ${tab.comparison.toRef ?? (isZh ? '工作树' : 'Working tree')}` : null,
-        tab.reference?.relativeTo, tab.absPath].filter(Boolean).join('; ') })),
+        tab.reference?.revision?.commit, tab.reference?.relativeTo, tab.absPath].filter(Boolean).join('; ') })),
     ...browserSession.tabs.filter(tab => tab.url !== 'about:blank' || !!tab.title || (activeTab === 'browser' && tab.id === browserSession.activeTabId)).map(tab => ({ key: resourceKey('browser', tab.id),
       kind: 'browser' as const, id: tab.id, label: tab.title || tab.url, title: tab.url })),
     ...(activeTab === 'changes' || preferences.order.includes('comparison:workspace')
@@ -47,8 +49,9 @@ export function useResourcePresentation(enabled = true, isZh = false) {
 
   const currentDocument = documentSession.tabs.find(tab => resourceKey('document', tab.id) === active);
   const currentWeb = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === active);
-  const visited = currentDocument ? JSON.stringify({ kind: currentDocument.comparison ? 'comparison' : 'document', path: currentDocument.absPath,
-    relativeTo: currentDocument.reference?.relativeTo, task: currentDocument.reference?.task, comparison: currentDocument.comparison })
+  const visited = currentDocument && !currentDocument.draftId && (!currentDocument.reference?.revision || !!currentDocument.observation) ? JSON.stringify({ kind: currentDocument.comparison ? 'comparison' : 'document', path: currentDocument.absPath,
+    relativeTo: currentDocument.reference?.relativeTo, task: currentDocument.reference?.task, comparison: currentDocument.comparison,
+    ...(currentDocument.reference?.revision ? { revision: { ...currentDocument.reference.revision, repositoryId: currentDocument.observation?.sourceId } } : {}) })
     : currentWeb && currentWeb.url !== 'about:blank' ? JSON.stringify({ kind: 'browser', url: currentWeb.url }) : null;
   useEffect(() => {
     if (!enabled || !owner || !visited) return;
@@ -59,7 +62,8 @@ export function useResourcePresentation(enabled = true, isZh = false) {
   const remember = (key: string) => {
     const doc = documentSession.tabs.find(tab => resourceKey('document', tab.id) === key);
     const web = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === key);
-    const descriptor = doc ? JSON.stringify({ kind: doc.comparison ? 'comparison' : 'document', path: doc.absPath, relativeTo: doc.reference?.relativeTo, task: doc.reference?.task, comparison: doc.comparison })
+    const descriptor = doc && !doc.draftId && (!doc.reference?.revision || !!doc.observation) ? JSON.stringify({ kind: doc.comparison ? 'comparison' : 'document', path: doc.absPath, relativeTo: doc.reference?.relativeTo, task: doc.reference?.task, comparison: doc.comparison,
+      ...(doc.reference?.revision ? { revision: { ...doc.reference.revision, repositoryId: doc.observation?.sourceId } } : {}) })
       : web ? JSON.stringify({ kind: 'browser', url: web.url }) : null;
     setStored(current => {
       if (current.owner !== owner) return current;
@@ -76,14 +80,23 @@ export function useResourcePresentation(enabled = true, isZh = false) {
     } else workbench.setActiveTab('changes');
     remember(key);
   };
-  const close = (key: string) => {
+  const latest = useRef({ owner, active, order, activate }); latest.current = { owner, active, order, activate };
+  const closing = useRef(new Set<string>());
+  const close = async (key: string) => {
     const item = resources.find(item => item.key === key);
     if (!item) { activate(order.at(-1) ?? LAUNCHER_TAB); return; }
-    const next = resourceNeighbor(order, key);
-    if (item.kind === 'document') workbench.setDocumentSession(current => closeDocumentTab(current, item.id));
-    else if (item.kind === 'browser') workbench.setBrowserSession(current => closeBrowserTab(current, item.id, createBrowserTabSession()));
-    else setStored(current => ({ ...current, value: { ...current.value, order: current.value.order.filter(value => value !== key) } }));
-    if (active === key) activate(next);
+    const closeKey = JSON.stringify([owner, key]); if (closing.current.has(closeKey)) return;
+    closing.current.add(closeKey);
+    try {
+      const draft = item.kind === 'document' ? documentSession.tabs.find(tab => tab.id === item.id) : undefined;
+      const registry = resourceEditRegistry();
+      if (draft?.draftId && draft.reference && registry && !await registry.flushDraft(draft.reference.workspaceId, draft.draftId)) return;
+      const next = resourceNeighbor(latest.current.owner === owner ? latest.current.order : order, key);
+      if (item.kind === 'document') workbench.setDocumentSession(current => closeDocumentTab(current, item.id));
+      else if (item.kind === 'browser') workbench.setBrowserSession(current => closeBrowserTab(current, item.id, createBrowserTabSession()));
+      else setStored(current => ({ ...current, value: { ...current.value, order: current.value.order.filter(value => value !== key) } }));
+      if (latest.current.owner === owner && latest.current.active === key) latest.current.activate(next);
+    } finally { closing.current.delete(closeKey); }
   };
   return { resources: ordered, active, activate, close, recent: preferences.recent,
     launch: () => workbench.setActiveTab('launcher') };

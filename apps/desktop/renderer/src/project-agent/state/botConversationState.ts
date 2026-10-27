@@ -6,7 +6,7 @@
  */
 import type { TranslationKey } from '@peer-agent/i18n';
 import type { ChatAttachment } from '../../chat/state/types';
-import type { ProjectInputAttachment } from '@peer-agent/protocol';
+import { normalizeResourceFeedbackList, type ResourceFeedback, type ProjectInputAttachment } from '@peer-agent/protocol';
 import {
   dispositionEventsFromToolCalls,
   WORK_SESSION_STATUSES,
@@ -118,10 +118,13 @@ export interface BotChatMessage {
   readonly separatorLabel: string;
   readonly pending?: 'sending' | 'received' | 'failed' | 'unknown';
   readonly attachments?: readonly ChatAttachment[];
+  readonly resourceFeedback?: readonly ResourceFeedback[];
+  readonly resourceFeedbackInvalid?: boolean;
   readonly images?: readonly { readonly id: string; readonly name: string; readonly dataUrl: string }[];
 }
 
 export interface PendingBotInput {
+  readonly resourceFeedback?: readonly ResourceFeedback[];
   readonly attachments?: readonly ProjectInputAttachment[];
   readonly inputId: string;
   readonly text: string;
@@ -159,6 +162,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
   if (kind === 'agent_activity' && agentActivity && ['verifying', 'verified'].includes(agentActivity.state)) return null;
   const cards = readBotCards(raw.cards);
   if (kind === 'system_card' && cards.length && cards.every(card => card.kind === 'verdict')) return null;
+  const feedback = normalizeResourceFeedbackList(raw.resourceFeedback);
   const meta = readMeta(raw.meta);
   const replyTo = readStringList(raw.replyTo).length > 0 ? readStringList(raw.replyTo) : (meta.replyTo ?? []);
   const sources = readStringList(raw.sources).length > 0 ? readStringList(raw.sources) : (meta.sources ?? []);
@@ -189,6 +193,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     separatorLabel: readString(raw.separatorLabel) || meta.separatorLabel || '',
     ...imageField(raw.attachments),
     attachments: readAttachments(raw.attachments),
+    ...(raw.resourceFeedback !== undefined ? { resourceFeedback: feedback ?? [], resourceFeedbackInvalid: !feedback } : {}),
   };
 }
 
@@ -288,6 +293,7 @@ export function applyOptimistic(
       separatorLabel: '',
       pending: item.state,
       attachments: item.attachments,
+      ...(item.resourceFeedback ? { resourceFeedback: normalizeResourceFeedbackList(item.resourceFeedback) ?? [] } : {}),
       ...imageField(item.attachments),
     }));
   return [...messages, ...extras];

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { documentIdentity, observeDocumentRead, validExpectedObservation } from './document-observation.mjs';
+import { createGitDocumentReader } from './git-document-reader.mjs';
 import { isSkippedFileTreeDirName, isSkippedFileTreePath, searchWorkspaceFiles } from './workspace-file-search.mjs';
 
 const DEFAULT_MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
@@ -62,6 +63,8 @@ export function createFileAccessApplicationService(options = {}) {
   const watchDirectory = assertFunction(options.watchDirectory, 'watchDirectory');
   const executeGit = assertFunction(options.executeGit, 'executeGit');
   const maxTextFileBytes = options.maxTextFileBytes ?? DEFAULT_MAX_TEXT_FILE_BYTES;
+  const readGitDocument = createGitDocumentReader({ resolveBotDocument: options.resolveBotDocument, executeGit,
+    maxTextFileBytes, maxImageFileBytes: DEFAULT_MAX_IMAGE_FILE_BYTES, imageMimeFromPath });
   const watchersBySender = new Map();
 
   function recoverPath(absPath, relPath, workspaceRoot, includeWorkspaceRoot = true) {
@@ -116,11 +119,13 @@ export function createFileAccessApplicationService(options = {}) {
 
   async function getGitDiff({ absPath, workspaceRoot, relPath, documentReference, comparison } = {}) {
     try {
+      if (documentReference?.revision !== undefined) return { ok: false, status: 'invalid_path', diffText: '', error: 'historical_document_not_live_diff' };
       if (comparison !== undefined && !['working', 'staged'].includes(comparison)) return { ok: false, status: 'invalid_path', diffText: '', error: 'invalid_comparison' };
       if (documentReference !== undefined) {
         const resolved = await options.resolveBotDocument?.({ ...documentReference, kind: 'file' });
         if (!resolved?.ok) return { ...resolved, ok: false, status: resolved?.status ?? 'invalid_path', diffText: '' };
-        return getGitDiff({ absPath: resolved.target, workspaceRoot: resolved.root, comparison });
+        const result = await getGitDiff({ absPath: resolved.target, workspaceRoot: resolved.root, comparison });
+        return { ...result, resolvedPath: resolved.target, resolvedFrom: resolved.root };
       }
       if (!absPath || typeof absPath !== 'string') {
         return { ok: false, status: 'invalid_path', diffText: '', error: 'invalid_path' };
@@ -158,11 +163,12 @@ export function createFileAccessApplicationService(options = {}) {
       }
 
       const repoRelPath = path.relative(repoRoot, target);
+      const literalRepoPath = `:(literal)${repoRelPath}`;
       let tracked = true;
       try {
         await executeGit(
           repoRoot,
-          ['ls-files', '--error-unmatch', '--', repoRelPath],
+          ['ls-files', '--error-unmatch', '--', literalRepoPath],
           { maxBuffer: 1024 * 1024 * 16 },
         );
       } catch {
@@ -198,20 +204,20 @@ export function createFileAccessApplicationService(options = {}) {
       }
 
       if (comparison === 'staged') {
-        const diffText = await runGit(['diff', '--staged', '--', repoRelPath]);
+        const diffText = await runGit(['diff', '--staged', '--', literalRepoPath]);
         return { ok: true, status: diffText.trim() ? 'staged' : 'no_changes', diffText, resolvedFrom };
       }
-      let diffText = await runGit(['diff', '--', repoRelPath]);
+      let diffText = await runGit(['diff', '--', literalRepoPath]);
       if (diffText.trim()) {
         return { ok: true, status: 'modified', diffText, resolvedFrom };
       }
       if (comparison === 'working') return { ok: true, status: 'no_changes', diffText: '', resolvedFrom };
-      diffText = await runGit(['diff', '--staged', '--', repoRelPath]);
+      diffText = await runGit(['diff', '--staged', '--', literalRepoPath]);
       if (diffText.trim()) {
         return { ok: true, status: 'staged', diffText, resolvedFrom };
       }
       try {
-        diffText = await runGit(['diff', 'HEAD~1', 'HEAD', '--', repoRelPath]);
+        diffText = await runGit(['diff', 'HEAD~1', 'HEAD', '--', literalRepoPath]);
         if (diffText.trim()) {
           return { ok: true, status: 'last_commit', diffText, resolvedFrom };
         }
@@ -293,12 +299,12 @@ export function createFileAccessApplicationService(options = {}) {
       return { ok: false, status: 'error', diffText: '', error: 'scope_denied' };
     }
     args.splice(1, 0, '--no-ext-diff', '--no-textconv');
-    if (scopedRoot) args.push('--', scopeRel || '.');
+    if (scopedRoot) args.push('--', scopeRel ? `:(literal)${scopeRel}` : '.');
     try {
       let untracked;
       let untrackedTruncated = false;
       if (scopedRoot && comparison === 'working') {
-        const listed = await executeGit(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', scopeRel || '.'], { maxBuffer: 1024 * 1024 });
+        const listed = await executeGit(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', scopeRel ? `:(literal)${scopeRel}` : '.'], { maxBuffer: 1024 * 1024 });
         const names = (listed.stdout || '').split('\0').filter(Boolean);
         untracked = names.slice(0, 512).map(name => path.join(repoRoot, name));
         untrackedTruncated = names.length > 512;
@@ -312,6 +318,7 @@ export function createFileAccessApplicationService(options = {}) {
         fromRef: resolvedBase,
         toRef: resolvedEnd,
         workspaceRoot: repoRoot,
+        ...(scopedRoot ? { resolvedPath: scopedRoot } : {}),
         ...(untracked ? { untracked, untrackedTruncated } : {}),
       };
     } catch (error) {
@@ -503,7 +510,7 @@ export function createFileAccessApplicationService(options = {}) {
         if (!resolved?.ok) return { ...resolved, ok: false, status: resolved?.status ?? 'workspace_unavailable', entries: [] };
         if (typeof options.readDirectoryBounded !== 'function') return { ok: false, status: 'workspace_unavailable', entries: [] };
         const result = options.readDirectoryBounded(resolved.target, 1000);
-        return { ok: true, status: 'ok', entries: directoryEntries(resolved.target, result.entries), truncated: result.truncated === true, resolvedFrom: resolved.root };
+        return { ok: true, status: 'ok', entries: directoryEntries(resolved.target, result.entries), truncated: result.truncated === true, resolvedFrom: resolved.root, resolvedPath: resolved.target };
       }).catch(error => ({ ok: false, status: ['EACCES', 'EPERM'].includes(error?.code) ? 'permission_denied'
         : error?.code === 'ENOENT' ? 'not_found' : error?.code === 'ENOTDIR' ? 'not_dir' : 'error', entries: [], error: 'read_dir_failed' }));
     }
@@ -622,6 +629,7 @@ export function createFileAccessApplicationService(options = {}) {
 
   async function readFile({ absPath, workspaceRoot, relPath, documentReference } = {}, observationContext) {
     try {
+      if (documentReference?.revision !== undefined) return await readGitDocument(documentReference);
       if (documentReference !== undefined) {
         if (!validExpectedObservation(documentReference?.expectedObservation)) return { ok: false, status: 'invalid_path', content: '' };
         const resolved = await options.resolveBotDocument?.(documentReference);
@@ -832,6 +840,7 @@ export function createFileAccessApplicationService(options = {}) {
   }
 
   function readImageDataUrl({ absPath, workspaceRoot, relPath, documentReference } = {}, observationContext) {
+    if (documentReference?.revision !== undefined) return readGitDocument(documentReference, true);
     if (documentReference !== undefined) {
       if (!validExpectedObservation(documentReference?.expectedObservation)) return Promise.resolve({ ok: false, status: 'invalid_path', dataUrl: '' });
       return Promise.resolve(options.resolveBotDocument?.({ ...documentReference, kind: 'file' })).then(resolved => {

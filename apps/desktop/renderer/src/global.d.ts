@@ -5,6 +5,8 @@ import type { PeerAgentPreloadApi } from './preload/contracts/peerAgentPreloadAp
 declare global {
   interface Window {
     peerAgent?: PeerAgentPreloadApi;
+    peerBrowserWindow?: import('./preload/contracts/browserWindowApi').BrowserWindowApi;
+    peerResource?: import('./preload/contracts/resourceWindowApi').ResourceWindowApi;
   }
 }
 

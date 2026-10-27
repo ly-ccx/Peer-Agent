@@ -48,6 +48,38 @@ test('nested registered roots keep one physical identity across qualified and ab
   } finally { f.dispose(); }
 });
 
+test('historical virtual paths retain the original scope and deleted origins without weakening live reads', async () => {
+  const f = fixture();
+  try {
+    const resolve = createBotDocumentResolver(f.options), revision = { kind: 'git', commit: 'a'.repeat(40) };
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'deleted/guide.md' })).status, 'not_found');
+    const old = await resolve({ workspaceId: 'bot', path: 'deleted/guide.md', revision });
+    assert.equal(old.ok, true); assert.equal(old.root, f.root); assert.equal(old.target, path.join(f.root, 'deleted/guide.md'));
+    const nested = await resolve({ workspaceId: 'bot', path: 'nested.md', relativeTo: old.target, revision });
+    assert.equal(nested.target, path.join(f.root, 'deleted/nested.md'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: '../private.md', revision })).status, 'scope_denied');
+    symlinkSync(f.dir, path.join(f.root, 'outside-parent'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'outside-parent/missing.md', revision })).status, 'scope_denied');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'Peer-Knowledge/knowledge/deleted.md', revision })).root, f.knowledge);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'directory', revision })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md', revision: { kind: 'git', commit: 'HEAD' } })).status, 'invalid_path');
+  } finally { f.dispose(); }
+});
+
+test('a historical task locator still requires the current Session/Plan ownership', async () => {
+  const f = fixture();
+  try {
+    const task = { sessionId: 'task', planId: 'plan' };
+    const resolve = createBotDocumentResolver({ ...f.options,
+      getTaskSession: id => id === 'task' ? { sessionId: id, workspaceId: 'bot', report: { planId: 'plan' } } : null,
+      getTaskPlan: () => ({ planId: 'plan', delegationOrigin: { workspaceId: 'bot', sessionId: 'task' },
+        deliveryBinding: { executionIsolation: 'worktree', worktreePath: f.root, baseCommit: 'a'.repeat(40) } }) });
+    const reference = { workspaceId: 'bot', path: 'deleted/result.md', task, revision: { kind: 'git', commit: 'a'.repeat(40) } };
+    assert.equal((await resolve(reference)).ok, true);
+    assert.equal((await resolve({ ...reference, task: { ...task, sessionId: 'forged' } })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
 test('project and confirmed cross-repository paths resolve without changing the reference', async () => {
   const f = fixture();
   try {

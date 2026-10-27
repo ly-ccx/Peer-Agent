@@ -27,7 +27,8 @@ export function createFixedComparisonReader(range: ComparisonRange, read: (range
 export function resourceDiffFiles(text: string) {
   return text.split(/(?=^diff --git )/m).filter(part => part.trim()).map((raw, index) => {
     const file = groupDiffByFile(raw)[0];
-    return { key: file?.path || `comparison:${index}`, path: file?.path ?? '', raw,
+    return { key: file?.path || `comparison:${index}`, path: file?.path ?? '', fromPath: file?.fromPath ?? file?.path ?? '', raw,
+      added: /^new file mode /m.test(raw),
       binary: /^Binary files |^GIT binary patch/m.test(raw), removed: /^deleted file mode /m.test(raw),
       ...countDiffLineStats(file?.lines ?? []) };
   });

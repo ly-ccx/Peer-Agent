@@ -201,6 +201,7 @@ export function BotConversation({
         key={`composer:${workspaceId}`}
         i18n={i18n}
         botName={label}
+        resourceRecipientConversationId={profile.agentConversationId}
         permissionControls={onSavingChange => <BotAccessControl key={workspaceId} workspaceId={workspaceId} i18n={i18n} onSavingChange={onSavingChange} />}
         modelUpdating={modelControls.busy}
         draftRequest={taskRequest?.draft ? { id: taskRequest.id, text: taskRequest.draft } : null}

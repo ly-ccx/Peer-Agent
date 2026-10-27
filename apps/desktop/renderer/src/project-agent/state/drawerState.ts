@@ -39,6 +39,7 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly planId?: string;
   readonly sourceRevision?: string;
   readonly observationRevision?: string;
   readonly verification?: SessionVerificationDetail;
@@ -233,6 +234,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     && ['ready', 'requesting', 'tools', 'completed'].includes(progress.phase);
   return {
     sessionId,
+    ...(readString(report.planId) || readString(record.planId) ? { planId: readString(report.planId) || readString(record.planId) } : {}),
     sourceRevision: readString(record.sourceRevision),
     observationRevision: readString(record.observationRevision),
     ...(verification ? { verification } : {}),

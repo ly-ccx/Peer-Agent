@@ -7,7 +7,7 @@ import {
   loadLocalImageDataUrl,
 } from '../../state/localImagePreview';
 import { findMarkdownImage, findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
-import { DocumentPreviewContext } from './DocumentPreviewContext';
+import { DocumentPreviewContext, LocalDocumentRenderingContext } from './DocumentPreviewContext';
 import { documentReferenceLocation, documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
 import { PeerIcon } from '../../../ui/icons';
 
@@ -105,6 +105,7 @@ function resolveAbsolutePath(
 
 function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; children?: ReactNode }) {
   const preview = useContext(DocumentPreviewContext);
+  const localDocument = useContext(LocalDocumentRenderingContext);
   const candidate = preview ? documentReferencePath(raw) : null;
   const reference = candidate && preview?.resolve ? preview.resolve(candidate) : candidate;
   const workspacePath = useContext(WorkspacePathContext);
@@ -116,12 +117,12 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   const relPath = parsed && !parsed.isAbsolute ? parsed.path : undefined;
   // 路径以「看起来像路径」为前提；最终是否可点取决于 fileExists 结果。
   // 绝对路径即使当前 workspace 未绑定也允许探测（主进程会直接 stat）。
-  const canProbe = Boolean(!preview && absPath && (parsed?.isAbsolute || workspacePath));
+  const canProbe = Boolean(!preview && !localDocument && absPath && (parsed?.isAbsolute || workspacePath));
   const [exists, setExists] = useState<boolean | null>(canProbe ? null : false);
   const [isDir, setIsDir] = useState(false);
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const looksLikeImage = Boolean(parsed && isLocalImagePath(parsed.path));
+  const looksLikeImage = Boolean(!localDocument && parsed && isLocalImagePath(parsed.path));
 
   useEffect(() => {
     if (!canProbe || !absPath) return;
@@ -287,6 +288,8 @@ function DocumentReferenceText({ text }: { readonly text: string }) {
 
 function RemoteMarkdownImage({ url, alt }: { readonly url: string; readonly alt: string }) {
   const preview = useContext(DocumentPreviewContext);
+  const localDocument = useContext(LocalDocumentRenderingContext);
+  if (localDocument && preview?.remoteImages !== 'link') return <MarkdownExternalLink href={url}><PeerIcon name="globe" size={14} />{alt || url}</MarkdownExternalLink>;
   return preview?.remoteImages === 'link'
     ? <button type="button" className="ui-button is-compact" title={url}
       onClick={() => preview.openUrl?.(url)} disabled={!preview.openUrl}>

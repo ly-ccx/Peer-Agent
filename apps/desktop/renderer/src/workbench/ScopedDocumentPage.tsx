@@ -1,3 +1,10 @@
+import { EditDraftButton } from './editing/EditDraftButton';
+import { ResourceSelectionFeedback } from './feedback/ResourceSelectionFeedback';
+import { documentReadError } from './documentReadError';
+export { documentReadError } from './documentReadError';
+import { OpenResourceWindowButton } from './OpenResourceWindowButton';
+import { RasterImageView } from './file-preview/RasterImageView';
+import { adapterModeUnavailable, documentAdapterNotice } from './file-preview/documentAdapterState';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { LocalDocumentObservation } from '@peer-agent/protocol';
 import { useObservedDocument } from './useObservedDocument';
@@ -7,31 +14,13 @@ import { DocumentPreviewContext } from '../chat/components/markdown/DocumentPrev
 import { MarkdownDocument } from './file-preview/MarkdownDocument';
 import { SourceViewer } from './file-preview/SourceViewer';
 import { DiffViewer } from './file-preview/DiffViewer';
-import { detectFileKind, highlightLanguageForPath } from './file-preview/fileTypes';
+import { detectFileKind, formatJsonForPreview, highlightLanguageForPath } from './file-preview/fileTypes';
 import { useResourceWorkspace } from './ResourceWorkspaceContext';
 import type { DocumentReadPosition, DocumentTabSession, WorkbenchFileMode } from './documentSessionState';
 import { useDocumentReadingPosition } from './useDocumentReadingPosition';
-
-export function documentReadError(status: string | undefined, zh: boolean): string {
-  const labels: Record<string, readonly [string, string]> = {
-    version_unavailable: ['当前读取服务不能核对内容版本，请更新本机服务后重试。', 'The local reader cannot confirm content versions. Update it and retry.'],
-    version_changed: ['文件已更新，尚未加载当前版本。', 'The file has changed. The current version has not been loaded.'],
-    source_changed: ['文件来源已变化，请关闭此标签后从原允许来源重新打开。', 'The file source changed. Close this tab and reopen it from an allowed source.'],
-    not_found: ['未能按此引用定位文件，请检查来源和完整路径。', 'The reference could not locate the file. Check its source and complete path.'],
-    permission_denied: ['当前没有读取权限。', 'Reading this resource is not permitted.'],
-    scope_denied: ['目标超出当前已确认的来源范围。', 'The target is outside the confirmed source scope.'],
-    workspace_unavailable: ['项目或知识库来源当前不可用。', 'The project or knowledge source is unavailable.'],
-    ambiguous_path: ['有多个匹配来源，请明确选择文件位置。', 'Multiple sources match. Choose an explicit location.'],
-    relative_base_required: ['这个相对路径需要明确来源，请选择位置。', 'This relative path needs an explicit source. Choose a location.'],
-    not_file: ['这是目录，请从工作区的目录入口浏览。', 'This is a directory. Open it from Files.'],
-    too_large: ['内容超出预览限额，未作为完整正文加载。', 'This resource exceeds the preview limit and was not loaded as complete content.'],
-    binary: ['此二进制格式暂不支持正文预览。', 'Text preview is unavailable for this binary format.'],
-    invalid_path: ['引用路径无效。', 'The reference path is invalid.'],
-    not_git_repo: ['此文件不在 Git 仓库中，无法比较。', 'This file is not in a Git repository.'],
-    unsupported_type: ['此格式暂不支持图片预览。', 'Image preview is unavailable for this format.'],
-  };
-  return labels[status ?? '']?.[zh ? 0 : 1] ?? (zh ? '读取失败，可重试。' : 'Reading failed. You can retry.');
-}
+import { DocumentHistoryTools } from './DocumentHistoryTools';
+import { DocumentDeliveryTools } from './DocumentDeliveryTools';
+import { nestedDocumentReference } from './documentRevisionState';
 
 export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChange, onObservation, onReadingChange }: {
   readonly tab: DocumentTabSession; readonly active: boolean; readonly workspaceId: string; readonly isZh: boolean;
@@ -43,6 +32,7 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
   const [comparison, setComparison] = useState<'working' | 'staged'>('working');
   const live = useRef(active); live.current = active;
   const reference = useMemo(() => ({ workspaceId, path: tab.reference?.path ?? tab.absPath,
+    ...(tab.reference?.revision ? { revision: tab.reference.revision } : {}),
     ...(tab.reference?.task ? { task: tab.reference.task } : {}),
     ...(tab.reference?.relativeTo ? { relativeTo: tab.reference.relativeTo } : {}) }), [workspaceId, tab.reference, tab.absPath]);
   const identity = JSON.stringify([workspaceId, tab.id, reference]);
@@ -55,6 +45,8 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
   const diff = useResourceRead(`diff:${identity}:${resolved?.path}:${comparison}`, () => clientApi.gitDiff('', undefined, undefined, resolved!, comparison), active && tab.mode === 'diff' && !!resolved);
   const path = tab.mode === 'diff' ? resolved?.path ?? reference.path : loaded?.resolvedPath ?? reference.path;
   const kind = detectFileKind(path);
+  const formattedJson = useMemo(() => kind === 'json' && tab.mode === 'preview' && loaded?.media === 'text'
+    ? formatJsonForPreview(loaded.content ?? '') : null, [kind, tab.mode, loaded?.media, loaded?.content]);
   const ready = tab.mode === 'diff' ? !!diff.value?.ok : !!loaded?.ok;
   const reading = useDocumentReadingPosition(identity, tab.mode === 'diff' ? `diff:${comparison}` : tab.mode, active, ready, tab.navigation, {
     key: tab.mode === 'diff' ? `diff:${comparison}` : `${loaded?.observation?.contentVersion ?? 'unconfirmed'}:${tab.mode}`,
@@ -64,10 +56,10 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
   const refreshKey = `${identity}:${tab.mode}:${comparison}`;
   const latestRefresh = useRef(refreshKey); latestRefresh.current = refreshKey;
   const nested = useMemo(() => ({ label: isZh ? '打开文档' : 'Open document',
-    open: (value: string) => workspace?.openReference({ ...reference, path: value, ...(loaded?.resolvedPath ? { relativeTo: loaded.resolvedPath } : {}) }),
+    open: (value: string) => workspace?.openReference(nestedDocumentReference(reference, value, loaded?.resolvedPath, loaded?.revision)),
     openUrl: (value: string) => workspace?.openUrl(value), remoteImages: 'link' as const,
     remoteImageLabel: isZh ? '打开外部图片' : 'Open external image',
-  }), [workspace, reference, loaded?.resolvedPath, isZh]);
+  }), [workspace, reference, loaded?.resolvedPath, loaded?.revision, isZh]);
   const refresh = async () => {
     if (tab.mode !== 'diff') { await document.reload(); return; }
     const previous = metadata.snapshot().value?.resolvedPath;
@@ -81,19 +73,40 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
       <span className="resource-document-name" title={path}>{path.split(/[\\/]/).pop()}</span>
       <div role="group" aria-label={isZh ? '文档模式' : 'Document mode'}>
         {(['preview', 'source', 'diff'] as const).map(mode => <button key={mode} type="button" className="ui-button" aria-pressed={tab.mode === mode}
-          disabled={kind === 'image' && mode === 'source'} title={kind === 'image' && mode === 'source' ? (isZh ? '图片不提供文本源码。' : 'Images have no text source view.') : undefined}
+          disabled={adapterModeUnavailable(path, mode) || !!reference.revision && mode === 'diff'} title={mode === 'preview' && adapterModeUnavailable(path, mode) ? (isZh ? '此格式仅提供只读源码。' : 'Only read-only source is available for this format.') : kind === 'image' && mode === 'source' ? (isZh ? '图片不提供文本源码。' : 'Images have no text source view.')
+            : reference.revision && mode === 'diff' ? (isZh ? '历史正文只读；请从提交比较查看差异。' : 'Historical content is read-only. Use a commit comparison for differences.') : undefined}
           onClick={() => onModeChange(tab.id, mode)}>{mode === 'preview' ? (isZh ? '正文' : 'Preview') : mode === 'source' ? (isZh ? '源码' : 'Source') : 'Diff'}</button>)}
       </div>
+      <EditDraftButton active={active && ready && !busy} isZh={isZh} text={loaded?.media === 'text' ? loaded.content : undefined}
+        source={tab.mode !== 'diff' && !reference.revision && loaded?.ok && loaded.media === 'text' && loaded.observation ? { kind: 'document', reference: { ...reference, path, relativeTo: undefined }, observed: { resourceId: loaded.observation.resourceId, contentVersion: loaded.observation.contentVersion } } : null}
+        onOpen={session => { const draft = session.snapshot().view?.draft; if (draft) workspace?.openDraft(draft); }} />
+      <OpenResourceWindowButton isZh={isZh} disabled={!ready || busy} request={() => ({ sourceTabId: tab.id, resource: { kind: 'document', reference: { ...reference, path,
+        ...(loaded?.observation && tab.mode !== 'diff' ? { expectedObservation: { resourceId: loaded.observation.resourceId, contentVersion: loaded.observation.contentVersion } } : {}) },
+        ...(tab.mode === 'diff' ? { mode: 'diff', comparison } : { mode: tab.mode }), ...(tab.navigation?.line && !reading.ref.current ? { line: tab.navigation.line } : {}), ...(tab.delivery ? { delivery: tab.delivery } : {}) },
+        ...(reading.ref.current ? { navigation: { top: reading.ref.current.scrollTop, left: reading.ref.current.scrollLeft } } : {}) })} />
       <button className="ui-button" type="button" disabled={busy} onClick={refresh}>{isZh ? '刷新' : 'Refresh'}</button>
     </header>
+    <ResourceSelectionFeedback container={reading.ref} isZh={isZh} active={active && ready && !busy}
+      resource={ready && (tab.mode === 'diff' || loaded?.media === 'text' && (loaded.observation || loaded.revision)) ? { kind: 'document', reference: { ...reference, path }, ...(tab.mode === 'diff' ? { mode: 'diff', comparison } : { mode: tab.mode }) } : null}
+      version={tab.mode !== 'diff' && loaded?.media === 'text' ? loaded.revision ? { kind: 'git', commit: loaded.revision.commit }
+        : loaded.observation ? { kind: 'content', resourceId: loaded.observation.resourceId, contentVersion: loaded.observation.contentVersion } : undefined : undefined}
+      digestText={tab.mode === 'diff' && diff.value?.ok ? diff.value.diffText : undefined}
+      sourceContent={tab.mode === 'source' && loaded?.media === 'text' ? loaded.content : undefined} />
     <p className="resource-source-label">{path}</p>
+    {tab.mode !== 'diff' && documentAdapterNotice(path, isZh) ? <p className="resource-adapter-notice" role="status">{documentAdapterNotice(path, isZh)}</p> : null}
+    {loaded?.ok && loaded.media === 'text' && tab.mode === 'preview' && kind === 'json' && formattedJson === null ? <p className="resource-adapter-notice" role="status">{isZh ? '未应用 JSON 排版，按原始文本显示。' : 'JSON formatting was not applied. Original source text is shown.'}</p> : null}
+    <DocumentHistoryTools reference={reference} path={path} confirmed={loaded?.revision} isZh={isZh} hidden={tab.mode === 'diff'} />
+    {tab.delivery ? <DocumentDeliveryTools binding={tab.delivery} reference={reference} active={active} isZh={isZh} /> : null}
     {tab.mode !== 'diff' && failure ? <div className="resource-source-label" role={loaded || failure.status === 'version_changed' ? 'status' : 'alert'}>
-      {failure.status === 'version_changed' && loaded ? (isZh ? '文件已更新，仍保留当前阅读内容。' : 'The file changed. Your current reading is preserved.') : documentReadError(failure.status, isZh)}
-      {failure.status === 'version_changed' ? <button className="ui-button is-compact" type="button" disabled={busy} onClick={() => void document.loadCurrent()}>{isZh ? '加载当前版本' : 'Load current version'}</button> : null}
+      {failure.status === 'not_file' && reference.revision ? (isZh ? '此提交中的路径是目录，暂不支持历史目录浏览。' : 'This path is a directory in this commit. Historical directory browsing is unavailable.')
+        : failure.status === 'version_unavailable' && reference.revision ? (isZh ? '本机 Git 或读取服务不支持安全的历史版本读取，请检查更新后重试。' : 'The local Git or reader cannot safely read historical versions. Check for updates and retry.')
+        : failure.status === 'not_found' && reference.revision ? (isZh ? '此提交中不存在这个路径，未使用当前文件替代。' : 'This path does not exist in this commit. The current file was not substituted.')
+        : failure.status === 'version_changed' && loaded ? (isZh ? '文件已更新，仍保留当前阅读内容。' : 'The file changed. Your current reading is preserved.') : documentReadError(failure.status, isZh)}
+      {failure.status === 'version_changed' && !reference.revision ? <button className="ui-button is-compact" type="button" disabled={busy} onClick={() => void document.loadCurrent()}>{isZh ? '加载当前版本' : 'Load current version'}</button> : null}
       {failure.candidates?.map(candidate => <button key={candidate.path} type="button" className="resource-candidate"
         onClick={() => workspace?.openReference({ ...reference, path: candidate.path, relativeTo: undefined })}>{candidate.path}</button>)}
     </div> : null}
-    {ready && tab.mode === 'source' && reading.missingLine ? <p className="resource-source-label" role="status">{isZh ? '引用的行号超出当前文件范围，已保留正常阅读位置。' : 'The referenced line is outside the current file. The reading position is preserved.'}</p> : null}
+    {ready && tab.mode === 'source' && reading.missingLine ? <p className="resource-source-label" role="status">{isZh ? '引用的行号不在当前已显示范围，已保留正常阅读位置。' : 'The referenced line is outside the currently displayed range. The reading position is preserved.'}</p> : null}
     <div ref={reading.ref} onScroll={reading.onScroll} className="resource-document-body" aria-busy={busy}>
       {tab.mode === 'diff' ? <>
         <select value={comparison} aria-label={isZh ? '比较基准' : 'Comparison base'} onChange={event => setComparison(event.target.value as 'working' | 'staged')}>
@@ -103,10 +116,10 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
           : diff.value?.ok ? diff.value.diffText ? <DiffViewer diffText={diff.value.diffText} showFileIndex={false} isZh={isZh} /> : <p>{isZh ? '当前比较范围没有改动。' : 'No changes in this comparison.'}</p>
             : <p role={diff.loaded || diff.error ? 'alert' : 'status'}>{diff.loaded || diff.error ? documentReadError(diff.value?.status, isZh) : (isZh ? '正在读取 Diff…' : 'Reading Diff…')}</p>}
       </> : loaded?.ok ? loaded.media === 'image'
-        ? <img className="resource-image" src={loaded.dataUrl} onLoad={reading.restore} alt={path.split(/[\\/]/).pop() ?? ''} />
+        ? <RasterImageView dataUrl={loaded.dataUrl ?? ''} name={path.split(/[\\/]/).pop() ?? ''} isZh={isZh} onReady={reading.restore} onRetry={() => void document.reload()} />
         : <DocumentPreviewContext.Provider value={nested}>{kind === 'markdown' && tab.mode === 'preview'
-          ? <MarkdownDocument content={loaded.content ?? ''} emptyLabel={isZh ? '文档为空。' : 'The document is empty.'} copyLabel={isZh ? '复制' : 'Copy'} copiedLabel={isZh ? '已复制' : 'Copied'} />
-          : <SourceViewer content={loaded.content ?? ''} language={highlightLanguageForPath(path)} emptyLabel={isZh ? '文件为空。' : 'The file is empty.'} />}</DocumentPreviewContext.Provider>
+          ? <MarkdownDocument isZh={isZh} content={loaded.content ?? ''} emptyLabel={isZh ? '文档为空。' : 'The document is empty.'} copyLabel={isZh ? '复制' : 'Copy'} copiedLabel={isZh ? '已复制' : 'Copied'} />
+          : <SourceViewer isZh={isZh} content={kind === 'json' && tab.mode === 'preview' ? formattedJson ?? loaded.content ?? '' : loaded.content ?? ''} language={highlightLanguageForPath(path)} emptyLabel={isZh ? '文件为空。' : 'The file is empty.'} />}</DocumentPreviewContext.Provider>
         : !failure && !document.error ? <p role="status">{isZh ? '正在核对并读取文档…' : 'Resolving document…'}</p> : null}
       {(tab.mode === 'diff' ? metadata.error || diff.error : document.error) ? <p role="alert">{isZh ? '读取未确认，已有阅读内容保留。可重试。' : 'The read was not confirmed. Existing reading is preserved. Retry.'}</p> : null}
     </div>
