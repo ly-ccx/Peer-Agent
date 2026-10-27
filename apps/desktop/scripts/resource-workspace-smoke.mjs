@@ -286,7 +286,7 @@ try {
     return item.left >= rail.left - 1 && item.right <= rail.right + 1;
   }), Boolean);
   await checkShell('split');
-  const resizeHandle = panel.getByRole('separator', { name: '拖拽调整工作台宽度', exact: true });
+  const resizeHandle = page.locator('.bot-resource-pane > .resource-workspace-resizer');
   const resizeBox = await resizeHandle.boundingBox();
   await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + 80);
   await page.mouse.down(); await page.mouse.move(resizeBox.x - 30, resizeBox.y + 80);
@@ -316,7 +316,7 @@ try {
   assert.equal(await page.locator('.bot-resource-layout').getAttribute('data-resource-compact'), 'false');
   assert.equal(await page.locator('.bot-column').isVisible(), false);
   assert.equal(await draft.isVisible(), true);
-  const separator = panel.getByRole('separator', { name: '拖拽调整工作台宽度', exact: true });
+  const separator = page.locator('.bot-resource-pane > .resource-workspace-resizer');
   await separator.focus(); await separator.press('End');
   assert.equal(await page.locator('.bot-resource-layout').getAttribute('data-resource-maximized'), 'false');
   assert.equal(await draft.isVisible(), true);

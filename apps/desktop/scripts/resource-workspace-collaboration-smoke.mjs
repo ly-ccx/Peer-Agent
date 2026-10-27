@@ -45,8 +45,8 @@ try {
   page.on('pageerror', error => report.pageErrors.push(error.message)); page.setDefaultTimeout(15000); await page.setViewportSize({ width: 1600, height: 1000 });
   await page.locator('.bot-row').filter({ hasText: 'project-000' }).click(); await page.locator('.bot-main textarea').first().fill('主对话未发送的输入');
   await page.getByRole('button', { name: '工作区', exact: true }).click(); await open(file);
-  await panel().getByRole('separator', { name: '拖拽调整工作台宽度', exact: true }).focus();
-  await panel().getByRole('separator', { name: '拖拽调整工作台宽度', exact: true }).press('End');
+  await page.locator('.bot-resource-pane > .resource-workspace-resizer').focus();
+  await page.locator('.bot-resource-pane > .resource-workspace-resizer').press('End');
   await active().getByRole('heading', { name: '协作验收文档', exact: true }).waitFor();
   const delivery = await page.evaluate(async ({ evidenceRef, workspaceId }) => window.peerAgent.projectAgentReadEvidence({ evidenceRef, context: { workspaceId } }), { evidenceRef, workspaceId: bot.workspaceId });
   assert.equal(delivery.deliveryStatus, 'available'); assert.equal(delivery.deliveries[0].artifactRef, artifactRef);
