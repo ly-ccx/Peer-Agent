@@ -1,4 +1,4 @@
-import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {readFileSync, writeFileSync, renameSync} from 'node:fs';
@@ -37,16 +37,16 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     assert.equal(await row.evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-${width}-${appearance}.png`), animations: 'disabled'});
     await row.focus(); await page.keyboard.press('Enter');
-    const detail = page.locator('.bot-task-detail'); await detail.waitFor();
+    const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail'); await detail.waitFor();
     await until(() => detail.innerText(), text => text.includes('实现检查') && text.includes('由主 Bot 跟进'));
     assert.doesNotMatch(await detail.innerText(), /需要你的选择/);
-    await page.getByRole('button', {name: '关闭', exact: true}).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     await detail.waitFor({state: 'hidden'});
     await scrollToBotMessage(page, otherRow);
     await otherRow.focus(); await page.keyboard.press('Enter');
     await until(() => detail.innerText(), text => text.includes('独立核验') && text.includes('已检查 7 项事实'));
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-detail-${width}-${appearance}.png`), animations: 'disabled'});
-    await page.getByRole('button', {name: '关闭', exact: true}).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     await detail.waitFor({state: 'hidden'});
     await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
     await page.locator('.pa-overlay-backdrop--drawer').waitFor({state: 'hidden'});

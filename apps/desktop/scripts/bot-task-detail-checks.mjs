@@ -26,14 +26,14 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   const open = async (reset = false) => {
     await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '任务', exact: true }).click();
-    if (reset && await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
-    if (!await page.locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
+    if (reset && await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
+    if (!await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
     const pendingQuestion = conversationMessages.at(-1).cards?.find(card => card.kind === 'question' && card.resolvedState !== 'resolved');
     if (pendingQuestion) await until(() => page.locator('.bot-task-question').innerText(), text => text === pendingQuestion.content);
     else await until(() => page.locator('.bot-task-update-preview').innerText(), text => text.includes(noteHeadline));
   };
   change('running', false, 'unavailable'); await open(true);
-  const detail = page.locator('.bot-task-detail');
+  const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
   const reportFeedback = detail.locator('.bot-task-report-read');
   const reportInfo = detail.locator('.bot-task-information');
   const captureReport = async name => {

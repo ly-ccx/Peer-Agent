@@ -163,7 +163,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(waitingViewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, waitingTheme);
   await work.getByRole('button', { name: '查看任务详情', exact: true }).focus(); await page.keyboard.press('Enter');
-  await page.locator('.bot-task-detail').waitFor();
+  await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor();
   await page.getByRole('button', { name: '查看对话中的完整说明', exact: true }).click();
   await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await page.locator('.bot-composer textarea').isVisible(), true);

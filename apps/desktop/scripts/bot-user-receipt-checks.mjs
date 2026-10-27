@@ -53,7 +53,7 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     const action = work.first().getByRole('button', { name: '查看任务详情', exact: true });
     await action.waitFor({ state: 'visible' });
     await action.focus(); await action.press('Enter');
-    const detail = page.locator('.bot-task-detail'); await detail.waitFor();
+    const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail'); await detail.waitFor();
     assert.match(await detail.innerText(), /入口样式收尾/);
     await page.locator(BOT_DETAIL_CLOSE).click();
     await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });

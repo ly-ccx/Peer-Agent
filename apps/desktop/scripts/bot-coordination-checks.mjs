@@ -1,4 +1,4 @@
-import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import path from 'node:path';
@@ -22,10 +22,10 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
       update({sessions:[{...base,status:state==='handoff'?'starting':state,coordination},replacement]});
       await page.getByRole('button', { name: '机器人设置', exact: true }).click();
       await page.getByRole('tab',{name:'任务',exact:true}).click();
-      if (await page.locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
+      if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
       await until(()=>page.locator('.bot-task-row').filter({hasText:base.title}).count(),count=>count===1);
       await page.locator('.bot-task-row').filter({hasText:base.title}).click();
-      const detail=page.locator('.bot-task-detail');
+      const detail=page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
       const label=state==='handoff'?'正在接手':state==='stopping'?'正在停止':state==='cancelled'?'已取消':'执行结果待核实';
       await until(()=>detail.locator('.bot-task-status').innerText(),text=>text===label);
       const info=detail.locator('.bot-task-information');
@@ -43,7 +43,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
         await until(()=>detail.locator('h2').innerText(),text=>text===replacement.title);
       }
       cases.push({state,width,appearance,truthful:true,relationship:state==='cancelled',humanQuestionAbsent:true});
-      await page.getByRole('button',{name:'关闭',exact:true}).click();
+      await page.locator(BOT_DETAIL_CLOSE).click();
       await until(()=>page.locator(BOT_DETAIL_SURFACE).count(),count=>count===0);
     }
   }

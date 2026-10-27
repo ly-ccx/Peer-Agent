@@ -67,7 +67,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   // Wait for the compact resource detail surface before opening a child.
   await page.locator(BOT_DETAIL_SURFACE).locator('.bot-drawer-body').waitFor({ state: 'visible' });
   await page.getByRole('tab', { name: '任务', exact: true }).click();
-  if (await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
+  if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
   const scene = page.locator('.bot-inline-scene');
   await openTaskScene(page, scene);
