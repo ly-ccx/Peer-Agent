@@ -1,3 +1,4 @@
+import { BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { BOT_AVATAR_COLORS } from '@peer-agent/protocol';
@@ -19,7 +20,7 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
     assert.ok(index >= 0);
     await swatch.nth(index).click();
     await until(() => swatch.nth(index).getAttribute('aria-pressed'), value => value === 'true');
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     await until(() => page.locator('.bot-convo').evaluate(node => node.style.getPropertyValue('--bot-message-accent')), value => value === color);
     await reply.scrollIntoViewIfNeeded();
   };
@@ -85,7 +86,7 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
     await changeColor(original.avatar.color);
     await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '概况', exact: true }).click();
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     await page.evaluate(original => {
       for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
     }, original);

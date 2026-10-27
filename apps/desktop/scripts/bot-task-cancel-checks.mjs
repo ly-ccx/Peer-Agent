@@ -1,3 +1,4 @@
+import { BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -96,7 +97,7 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   update({ sessions: [first, other], cancelMode: 'deferred-status' });
   await until(() => detail.getAttribute('data-status'), value => value === 'waiting_user');
   await detailCancel.focus(); await page.keyboard.press('Enter');
-  const close = page.getByRole('button', { name: '关闭', exact: true });
+  const close = page.locator(BOT_DETAIL_CLOSE);
   await close.focus();
   await release(4);
   await release(4, true);

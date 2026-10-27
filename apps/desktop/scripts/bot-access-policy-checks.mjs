@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -31,7 +32,7 @@ async function openTaskScene(page, scene) {
 
 /** Uses production local IPC/persistence and actual child conversation metadata. No model calls. */
 export async function checkBotAccessPolicy({ page, until, report, captureDirectory, home, bots, commandFile }) {
-  if (await page.locator('.bot-drawer-dock.is-open').count()) await page.getByRole('button', { name: '关闭', exact: true }).click();
+  if (await page.locator(BOT_DETAIL_SURFACE).count()) await page.locator(BOT_DETAIL_CLOSE).click();
   const viewport = page.viewportSize(), theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const read = workspaceId => page.evaluate(workspaceId => window.peerAgent.projectAgentReadAccessPolicy({ workspaceId }), workspaceId);
   const otherBefore = await read(bots[1].workspaceId);
@@ -78,7 +79,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
     // Crossing the push/cover breakpoint remounts the task and its nested scene.
     // Observe the new parent before deciding whether the scene needs reopening.
-    await page.locator(width === 1280 ? '.bot-drawer-dock .bot-task-detail' : '.bot-drawer-panel .bot-task-detail').waitFor({ state: 'visible' });
+    await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor({ state: 'visible' });
     // The old portal can remain connected during its exit animation even after
     // the new parent is visible. Inspect only the newly mounted scene.
     await page.waitForFunction(node => !node.isConnected, previousScene);
@@ -97,7 +98,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   }
   await status.focus(); await page.keyboard.press('Enter');
   await scene.waitFor({ state: 'detached' });
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.ok((await picker.innerText()).includes('完全访问'));
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: command.seq + 1 })); renameSync(commandFile + '.next', commandFile);
   await setFixtureBotAccess(page, bots[0].workspaceId, 'ask_before_local');

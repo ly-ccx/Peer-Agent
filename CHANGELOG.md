@@ -2,6 +2,24 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.27 - 2026-10-27
+
+### 新功能与优化
+
+- 完成右侧资源工作区：网页、文档/代码、目录、Diff、真实 Git 历史及按模式阅读恢复；来源范围、文件变化和历史缺失明确表达。
+- 新增有界原生独立窗口与返回、统一 Bot/任务/回复详情、格式降级、交付关联、固定来源选区反馈、本机草稿与三方比较。
+- 文档提交沿现有本地授权与 Evidence 链处理固定稿，授权后核对版本；冲突保留输入，未知结果只核对不重写。
+- 优化提供商首个模型选择、稳定浮层与思考强度粒子，修正草稿/模型辅助文案、暗色选中及面板间拖拽反馈。
+- 改善服务商、权限菜单、档位参数、回复等待和历史任务图标；修复嵌套工作区读取身份。
+- 同步中英文发布说明、README、使用文档和生成式网站更新日志。
+
+### Improvements (English)
+
+- Complete scoped side-by-side reading, historical revisions, native windows, details and resource adapters.
+- Add source-bound feedback, recoverable local drafts and governed conditional submission without replaying unknown writes.
+- Improve model selection/motion, dark selection, draft presentation, task feedback and nested-root identity.
+- Update bilingual release documentation and the generated website changelog.
+
 ## 0.1.0-rc.26 - 2026-10-23
 
 ### 修复与优化

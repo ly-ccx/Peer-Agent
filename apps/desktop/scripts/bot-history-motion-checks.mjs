@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -36,7 +37,7 @@ export function instrumentHistoryReads(source) {
 export async function checkBotHistoryMotion({ page, until, report, captureDirectory, commandFile, fixtureRows, workspaceId, home }) {
   const checks = report.historyMotion = [];
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  if (await page.locator('.bot-drawer-body').isVisible()) await page.getByRole('button', { name: '关闭', exact: true }).click();
+  if (await page.locator(BOT_DETAIL_SURFACE).count()) await page.locator(BOT_DETAIL_CLOSE).click();
   const initial = JSON.parse(readFileSync(commandFile, 'utf8')); let seq = initial.seq;
   const changeHistory = async mode => {
     writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, historyReadMode: mode }));

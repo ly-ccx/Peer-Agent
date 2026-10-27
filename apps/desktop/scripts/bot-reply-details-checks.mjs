@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE, BOT_DETAIL_TITLE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 
 /** Search results can retain the previous snapshot while the new query loads. */
@@ -96,7 +97,7 @@ export async function openReplyDetails(page, message) {
   await details.waitFor({ state: 'visible' });
   assert.equal(await details.evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
   assert.equal(await message.locator('.bot-turn-process, .bot-evidence-list, .bot-context-error').count(), 0);
-  assert.equal(await page.locator('.bot-drawer-head > p').innerText(), '回复详情');
+  assert.equal(await page.locator(BOT_DETAIL_TITLE).innerText(), '回复详情');
   return details;
 }
 
@@ -106,8 +107,8 @@ export async function closeReplyDetails(page) {
     const reply = document.getElementById(`bot-msg-${id}`)?.closest('.bot-reply, .bot-system');
     return Boolean(reply?.querySelector('.bot-reply-context > button, .bot-recovery-history-body > button'));
   }, replyId);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+  await page.locator(BOT_DETAIL_CLOSE).click();
+  await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
   // Cancelling work in the scrolled tail can unmount the original reply. The
   // existing drawer contract then returns focus to the thread with preventScroll.
   assert.equal(await page.evaluate(mounted => {

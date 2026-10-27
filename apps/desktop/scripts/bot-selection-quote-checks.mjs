@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import { scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -86,15 +87,15 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
   }
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-  await page.locator('.bot-drawer-dock.is-open').waitFor();
+  await page.locator(BOT_DETAIL_SURFACE).waitFor();
   await until(() => page.locator('.bot-convo').evaluate(node => node.getBoundingClientRect().width < 700), Boolean);
   await select();
   const docked = await measure();
   assert.ok(docked.fits && docked.gap <= 12);
   await page.screenshot({ path: path.join(captureDirectory, 'selection-quote-docked-light.png'), animations: 'disabled' });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   await action.waitFor({ state: 'detached' });
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   await input.fill(draft);
   await page.setViewportSize(viewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; window.getSelection()?.removeAllRanges(); }, theme);

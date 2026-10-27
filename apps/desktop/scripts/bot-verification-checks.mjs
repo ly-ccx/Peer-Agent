@@ -1,3 +1,4 @@
+import { BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -71,7 +72,7 @@ export async function checkBotVerification({ page, until, report, captureDirecto
     change('passed', { sessions: [{ ...session, status: 'running', statusLabel: '正在处理任务', observationRevision: `working-${seq}` }] });
     await until(() => page.locator('.bot-task-progress-text').innerText(), value => value === '正在处理任务');
     assert.equal(await page.locator('.bot-task-verification').count(), 0, 'a running task cannot display its earlier verdict as the current result');
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     await page.locator('.bot-task-detail').waitFor({ state: 'hidden' });
   }
   report.taskVerification = { outcomes: ['passed', 'failed', 'partial', 'unverifiable'], themes: ['dark', 'light'], legacyHidden: true, botExplanation: true, historyKeyboard: true, staleHidden: true, retry: true, activeProgressOnly: true };

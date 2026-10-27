@@ -1,3 +1,4 @@
+import { BOT_DETAIL_TITLE } from './bot-detail-surface-selectors.mjs';
 import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -101,7 +102,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await process.press('Enter');
   await page.locator('.bot-reply-details').waitFor();
   assert.equal(await page.locator('.bot-reply-details .bot-turn-process').count(), 0, 'ordinary fixture has no fabricated execution record');
-  assert.equal(await page.locator('.bot-drawer-head > p').innerText(), '回复详情');
+  assert.equal(await page.locator(BOT_DETAIL_TITLE).innerText(), '回复详情');
   await closeReplyDetails(page);
   checks.push('process action has hover and visible keyboard focus; Enter opens the existing process drawer');
 

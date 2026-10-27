@@ -226,7 +226,12 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     return () => window.removeEventListener('keydown', onEscape);
   }, [ready, active, workbench.open, adapter.close]);
   return <ResourceFeedbackProvider recipient={ready && owner?.conversationId ? { workspaceId: owner.workspaceId, conversationId: owner.conversationId } : null}><Context.Provider value={adapter}>
-    <div ref={bindLayout} className="bot-resource-layout" data-resource-active={active} data-resource-open={ready && active && workbench.open}
+    <div ref={bindLayout} className="bot-resource-layout" onFocusCapture={event => {
+      // React portals bubble through their source tree. Determine the visible
+      // reading area from the physical DOM, including embedded Bot details.
+      if (pane.current?.contains(event.target)) setFocusArea('resource');
+      else if (event.currentTarget.querySelector('.bot-resource-primary')?.contains(event.target)) setFocusArea('primary');
+    }} data-resource-active={active} data-resource-open={ready && active && workbench.open}
       style={{ '--resource-primary-min': `${bounds?.primaryMin ?? MAIN_MIN_WIDTH}px` } as CSSProperties}
       data-resource-measured-width={bounds?.viewport}
       data-resource-compact={compact} data-resource-focus={focusArea}
@@ -240,13 +245,13 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
           else setFocusArea(current => current === 'primary' ? 'resource' : 'primary');
         }}>{compact && focusArea === 'primary' ? (isZh ? '返回资源' : 'Return to resource') : (isZh ? '返回对话' : 'Return to conversation')}</button>
       </div> : null}
-      <div className="bot-resource-primary" onFocusCapture={() => setFocusArea('primary')}>{children}</div>
+      <div className="bot-resource-primary">{children}</div>
       <div ref={pane} className={`bot-resource-pane${closing ? exitLayout?.full ? ' motion-exit-slide-inline' : ' motion-exit-collapse-inline' : ''}`}
         data-resource-exiting={closing} data-resource-exit-full={closing && exitLayout?.full === true}
         style={closing && exitLayout ? { '--motion-collapse-inline-from': `${exitLayout.width}px`, '--motion-collapse-inline-padding': `${exitLayout.padding}px`,
           '--resource-retained-width': `${exitLayout.panelWidth}px`, ...(exitLayout.full ? { top: exitLayout.top, height: exitLayout.height, width: exitLayout.width } : {}) } as CSSProperties : undefined}
         onAnimationEnd={presence.onAnimationEnd} inert={closing} aria-hidden={closing || undefined}
-        onFocusCapture={() => setFocusArea('resource')}>
+        >
       <WorkbenchPanel isZh={isZh} workspacePath={owner?.path ?? null} resourceMode
         resourceVisible={ready && active} resourceExiting={closing} resourceWidthLimit={bounds?.sideMax} botWorkspaceId={owner?.workspaceId} />
       </div>

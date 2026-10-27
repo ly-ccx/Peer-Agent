@@ -1,10 +1,11 @@
+import { BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { modelMenuChannelName } from '@peer-agent/protocol';
 
-/** Browse the unified panel without turning provider navigation into a write. */
+/** Explicit provider activation selects its first eligible model through the real owner. */
 export async function openModelProvider({ page, picker, model }) {
   if (await picker.getAttribute('aria-expanded') !== 'true') await picker.click();
-  const panel = page.locator('.model-selection-panel');
+  const panel = page.locator('.model-selection-popover[data-surface-state="open"] .model-selection-panel');
   await panel.waitFor();
   await panel.locator('.model-selection-provider').click();
   const group = model ? modelMenuChannelName(model.providerName, model.model, model.authMethod, true) : '默认与档位';
@@ -39,7 +40,7 @@ export async function checkModelSwitch({ page, picker, first, second, getBot, fa
               && picker.getAttribute('aria-disabled') !== 'true' && !picker.disabled;
             if (committed || now - start > 4000) {
               resolve({ committed, committedMs: now - start, maxFrameGapMs, frames,
-                panelRetained: Boolean(document.querySelector('.model-selection-panel')) }); return;
+                panelRetained: Boolean(document.querySelector('.model-selection-popover[data-surface-state="open"] .model-selection-panel')) }); return;
             }
             requestAnimationFrame(frame);
           };
@@ -90,7 +91,7 @@ export async function checkModelSwitchOnly({ page, fixture, until, report, failN
     second: models.find(model => model.label === 'RC Bot model B'),
     getBot: () => page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).item.profile, workspaceId),
     failNext, until, report });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   await page.locator('.bot-composer textarea').focus();
   await page.screenshot({ path: captureDirectory + '/composer-focus.png' });
   report.checks.push('real model switch, unchanged choice, failed save rollback and focused composer');

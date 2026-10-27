@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -113,13 +114,13 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       for (const docked of width === 1280 ? [false, true] : [false]) {
         if (docked) {
           await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-          await page.locator('.bot-drawer-dock.is-open').waitFor();
+          await page.locator(BOT_DETAIL_SURFACE).waitFor();
           await until(() => page.locator('.bot-convo').evaluate(node => node.getBoundingClientRect().width < 700), Boolean);
         }
         await scrollToBotMessage(page, card);
-        if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) {
-          await page.getByRole('button', { name: '关闭', exact: true }).click();
-          await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+        if (await page.locator(BOT_DETAIL_CLOSE).isVisible()) {
+          await page.locator(BOT_DETAIL_CLOSE).click();
+          await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
         }
         await rawError.waitFor({ state: 'hidden' });
         assert.equal(await card.locator(':scope > p').textContent(), '服务未接受这次请求。需要先检查模型或连接配置，已有进展已保留。', 'failure is stated plainly outside technical details');
@@ -146,7 +147,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
         if (width === 760 && appearance === 'dark') await closeReplyDetails(page);
         await page.waitForTimeout(180);
         await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `long-error-${docked ? 'docked' : width}-${appearance}.png`) });
-        if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) await closeReplyDetails(page);
+        if (await page.locator(BOT_DETAIL_CLOSE).isVisible()) await closeReplyDetails(page);
       }
     }
   }

@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import path from 'node:path';
@@ -11,7 +12,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
   const replacement={...base,sessionId:'rc-coordination-corrected',title:'检查引用卡片圆角',status:'running'};
   const update=patch=>{writeFileSync(commandFile+'.next',JSON.stringify({...initial,...patch,seq:++seq}));renameSync(commandFile+'.next',commandFile);};
   const cases=[];
-  await until(()=>page.locator('.bot-drawer-dock').count(),count=>count===0);
+  await until(()=>page.locator(BOT_DETAIL_SURFACE).count(),count=>count===0);
   for (const [width,appearance] of [[1280,'dark'],[760,'light']]) {
     await page.setViewportSize({width,height:850}); await page.evaluate(value=>{document.documentElement.dataset.theme=value;},appearance);
     for (const state of ['stopping','awaiting_outcome','cancelled','handoff']) {
@@ -43,7 +44,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
       }
       cases.push({state,width,appearance,truthful:true,relationship:state==='cancelled',humanQuestionAbsent:true});
       await page.getByRole('button',{name:'关闭',exact:true}).click();
-      await until(()=>page.locator('.bot-drawer-dock').count(),count=>count===0);
+      await until(()=>page.locator(BOT_DETAIL_SURFACE).count(),count=>count===0);
     }
   }
   update({sessions:initial.sessions}); await page.setViewportSize(viewport); await page.evaluate(value=>{document.documentElement.dataset.theme=value;},theme);

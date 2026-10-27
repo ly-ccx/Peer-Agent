@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -151,10 +152,10 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await page.setViewportSize(viewport); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
   const beforeNavigation = readTurns();
   await detail.getByRole('button', { name: '查看对话中的完整说明', exact: true }).click();
-  await until(() => page.locator('.bot-drawer-dock.is-open').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   const noteRow = page.locator('#bot-msg-rc-task-note'); await noteRow.waitFor();
   await until(() => noteRow.evaluate(node => document.activeElement === node), Boolean);
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await noteRow.isVisible(), true);
   assert.equal(await noteRow.locator('.markdown-content').getAttribute('data-selection-source'), note.content, 'the full related reply remains available in the main conversation');
   assert.equal(readTurns(), beforeNavigation, 'reading the related bot note does not execute anything');
@@ -166,7 +167,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.equal(await composer.evaluate(node => document.activeElement === node), true);
   assert.equal(readTurns(), beforeNavigation, 'follow-up is a draft, never automatically submitted');
   assert.match(await page.locator('.bot-composer').innerText(), /逐条核对本项目/);
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-follow-up-draft.png') });
   await page.getByRole('button', { name: '取消引用', exact: true }).click();
   await composer.fill('保留我正在写的消息');
@@ -183,14 +184,14 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await detail.getByRole('button', { name: '在对话中回答', exact: true }).focus(); await page.keyboard.press('Enter');
   const answer = page.locator('#bot-msg-rc-task-question .bot-question button').first();
   await until(() => answer.evaluate(node => document.activeElement === node), Boolean);
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await answer.isVisible(), true);
   assert.equal(readTurns(), beforeNavigation, 'locating a decision does not answer, confirm or resume the task');
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-question.png') });
   conversationMessages = [note, { ...question, cards: question.cards.map(card => ({ ...card, resolvedState: 'resolved' })) }];
   change('waiting_user'); await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await until(() => detail.locator('.bot-task-question').count(), count => count === 0);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages })); renameSync(commandFile + '.next', commandFile);
   report.taskDetails = { states: [...states, 'unavailable'], dimensions, reportFromDetail: true, metadataCollapsed: true,
     reportReadFailureExplained: true, reportLoadingVisible: true, staleReportPreserved: true, reportRetryRecovers: true,

@@ -1,12 +1,13 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Exercise the real composer without sending or mutating a model policy. */
 export async function checkBotComposerLayout({ page, until, report, captureDirectory }) {
-  if (await page.locator('.bot-drawer-dock.is-open').count()) {
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
-    await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  if (await page.locator(BOT_DETAIL_SURFACE).count()) {
+    await page.locator(BOT_DETAIL_CLOSE).click();
+    await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   }
   const composer = page.locator('.bot-composer');
   const input = composer.locator('textarea');

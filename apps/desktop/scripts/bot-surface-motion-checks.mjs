@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { chooseModelInPanel } from './bot-model-switch-checks.mjs';
@@ -60,29 +61,31 @@ export async function checkSurfaceMotion({ page, fixture, until, report, capture
   assert.equal(await page.locator('.bot-settings-tab').isVisible(), true);
   await page.locator('.model-selection-popover').waitFor({ state: 'detached' });
   await page.screenshot({ path: path.join(captureDirectory, 'surface-drawer-effort-wide.png') });
-  await page.locator('.bot-drawer-head button').click();
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await page.locator(BOT_DETAIL_CLOSE).click();
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await composer.inputValue(), 'SURFACE_MOTION_DRAFT');
   await page.setViewportSize({ width: 760, height: 860 });
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-  await page.locator('.pa-overlay-panel.bot-drawer-panel').waitFor();
+  await page.locator(BOT_DETAIL_SURFACE).waitFor();
   await page.getByRole('tab', { name: '设置', exact: true }).click();
   await page.screenshot({ path: path.join(captureDirectory, 'surface-drawer-narrow.png') });
+  assert.equal(await page.locator('.bot-resource-layout').getAttribute('data-resource-focus'), 'resource', 'portalled Bot tabs retain the visible resource area in a compact window');
+  assert.equal(await page.locator(BOT_DETAIL_SURFACE).isVisible(), true);
   await page.keyboard.press('Escape');
-  await until(() => page.locator('.pa-overlay-panel.bot-drawer-panel').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-  const cover = page.locator('.pa-overlay-panel.bot-drawer-panel');
+  const cover = page.locator(BOT_DETAIL_SURFACE);
   await cover.waitFor();
   await until(() => cover.evaluate(node => node.getAnimations().some(animation => animation.playState === 'running')), running => !running);
   await page.screenshot({ path: path.join(captureDirectory, 'surface-drawer-reduced.png') });
-  await page.locator('.bot-drawer-head button').click();
-  await cover.waitFor({ state: 'detached' });
+  await page.locator(BOT_DETAIL_CLOSE).click();
+  await cover.waitFor({ state: 'hidden' });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   assert.equal(await composer.inputValue(), 'SURFACE_MOTION_DRAFT');
   assert.deepEqual(report.pageErrors, []);
   report.surfaceMotion = { settingsSections: sections, drawerTabs: 5, draftRetained: true, menuReversal: true,
-    keyboardAndFocus: true, disclosure: true, pushAndCover: true, reducedMotion: true,
+    keyboardAndFocus: true, disclosure: true, sideAndCompact: true, reducedMotion: true,
     effortSaveAndFailure: true, composerSaveWithDrawerOpen: true, noPageErrors: true };
-  report.checks.push('surface motion: settings navigation, menu reversal, draft/focus, drawer tabs and native disclosure, delayed/failing effort with open drawer, cover and reduced motion');
+  report.checks.push('surface motion: settings navigation, menu reversal, draft/focus, drawer tabs and native disclosure, delayed/failing effort with open drawer, side/compact resources and reduced motion');
 }

@@ -1,3 +1,4 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import { checkBotWindowMaterial } from './bot-window-material-checks.mjs';
 import { checkBotVerification } from './bot-verification-checks.mjs';
 import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
@@ -478,7 +479,7 @@ const tracePaging = async (phase) => {
 const until = async (read, predicate, timeout = 30000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
-  throw Error('Shell acceptance timed out');
+  throw Error(`Shell acceptance timed out: ${String(read).slice(0, 220)}`);
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
@@ -816,10 +817,10 @@ try {
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }
-  await page.getByRole('button', { name: '机器人设置', exact: true }).click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click(); await page.locator(BOT_DETAIL_SURFACE).waitFor();
   assert.equal(await page.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   report.checks.push('Bot settings opens configuration directly');
   await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   if (process.argv.includes('--accessibility')) await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });
