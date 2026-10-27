@@ -18,6 +18,11 @@ export async function wheelBotConversation(page, deltaY) {
 
 /** Reach an unmounted row through the real scroller; never disable virtualization. */
 export async function scrollToBotMessage(page, message) {
+  // Closing or resizing a side pane can still be remeasuring virtual rows after
+  // its body becomes inert. Locate only after the actual finite layout settles.
+  await page.waitForFunction(() => !document.querySelector('.bot-resource-layout')?.getAnimations({ subtree: true }).some(animation =>
+    animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime)));
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   if (!await message.count()) {
     const thread = page.locator('.bot-thread');
     // Numeric IDs belong to this ordered 10,000-message fixture, not production identity.
