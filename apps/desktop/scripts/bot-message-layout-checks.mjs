@@ -136,6 +136,8 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
           return {
             textFits: fragments.every(box => box.left >= rect.left - 1 && box.right <= rect.right + 1),
             lines: fragments.length,
+            paragraphWidth: rect.width, whiteSpace: getComputedStyle(paragraph).whiteSpace,
+            overflowRight: Math.max(0, ...fragments.map(box => box.right - rect.right)),
             cardFits: node.scrollWidth <= node.clientWidth,
             conversationFits: !document.querySelector('.bot-convo').checkVisibility({ visibilityProperty: true }) || document.querySelector('.bot-convo').scrollWidth <= document.querySelector('.bot-convo').clientWidth,
             detailFits: node.getBoundingClientRect().left >= 0 && node.getBoundingClientRect().right <= innerWidth,

@@ -1,5 +1,5 @@
 import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
-import { scrollToBotMessage } from './bot-reply-details-checks.mjs';
+import { scrollToBotMessage, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
@@ -9,11 +9,14 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const reply = page.locator('#bot-msg-rc-message-9996');
   const body = reply.locator('.bot-reply-text');
-  const action = page.locator('.bot-quote-action');
+  const action = page.locator('.bot-quote-action[data-surface-state="open"]:not([inert])');
   const input = page.locator('.bot-composer textarea');
   const draft = await input.inputValue();
   const phrase = '叶子证据和独立校验都通过了';
   const select = async (mouseUp = true) => {
+    // Reading an already-mounted old row still needs explicit history intent;
+    // scrollIntoView alone must not masquerade as the user's choice to stop following.
+    await wheelBotConversation(page, -1);
     await scrollToBotMessage(page, reply);
     await body.locator('p').first().scrollIntoViewIfNeeded();
     await body.evaluate((node, params) => {
@@ -25,7 +28,7 @@ export async function checkBotSelectionQuote({ page, until, report, captureDirec
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       if (params.mouseUp) node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     }, { phrase, mouseUp });
-    await until(() => action.count(), count => count === 1);
+    await action.waitFor({ state: 'visible' });
   };
   const measure = () => action.evaluate(node => {
     const selected = window.getSelection().getRangeAt(0).getClientRects()[0];

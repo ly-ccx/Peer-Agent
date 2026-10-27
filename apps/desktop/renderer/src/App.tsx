@@ -1554,7 +1554,7 @@ function MainApp() {
         </>
       ) : (
         <section className="startup-surface">
-          <ResourceFeedback i18n={i18n} loading={bootstrapLoading} error={Boolean(initError)} onReload={refreshBootstrap} />
+          {initError ? <ResourceFeedback i18n={i18n} loading={bootstrapLoading} error onReload={refreshBootstrap} /> : null}
           {!initError ? <BrandStartupLoader /> : null}
         </section>
       )}

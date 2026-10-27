@@ -148,5 +148,5 @@ test('startup readiness has no brand hold and bootstrap failures offer a retry',
   const app = await readRendererSource('../App.tsx');
   assert.match(app, /showMainShell = Boolean\(session\)/);
   assert.doesNotMatch(app, /brandStartupHoldDone|useBrandStartupMinHold|BRAND_STARTUP_INTRO_MS/);
-  assert.match(app, /ResourceFeedback[\s\S]*onReload=\{refreshBootstrap\}/);
+  assert.match(app, /initError \? <ResourceFeedback[\s\S]*onReload=\{refreshBootstrap\}/);
 });

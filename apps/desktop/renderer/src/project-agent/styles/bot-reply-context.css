@@ -30,7 +30,7 @@
 .bot-reply-context-body > section { padding: 16px; background: var(--chrome-canvas); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); }
 .bot-reply-context-body .bot-delegated-work { margin-top: 0; }
 .bot-reply-context-body h3 { margin: 0 0 12px; font-size: 12px; font-weight: 500; color: var(--graphite-base); }
-.bot-context-error pre { margin: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.75 var(--font-mono, monospace); color: var(--graphite-soft); }
+.bot-context-error pre { margin: 0; max-width: 100%; white-space: pre-wrap; white-space: break-spaces; overflow-wrap: anywhere; font: 11px/1.75 var(--font-mono, monospace); color: var(--graphite-soft); }
 .bot-reply-context-body button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 0; min-height: 27px; border: 0; background: transparent; border-radius: var(--ui-radius-control); color: var(--graphite-soft); font: inherit; cursor: pointer; }
 .bot-reply-context-body button:hover { color: var(--graphite-base); background: var(--paper-hover); }
 .bot-reply-context-body button:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
