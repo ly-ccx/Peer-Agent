@@ -31,7 +31,7 @@ const requiredShots = [...settingsFloatingShots, ...startupShots, ...verificatio
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
-  'updater-minimize-760-light-before.png', 'updater-minimize-760-light-after.png', 'bot-footer-progress-dark-narrow.png',
+  'updater-minimize-760-light-before.png', 'updater-minimize-760-light-after.png', 'bot-header-progress-dark-narrow.png',
   'task-report-loading.png', 'task-report-unavailable.png', 'task-report-stale.png',
   'conversation-updates-dark.png', 'conversation-updates-light.png', 'conversation-complete.png', 'conversation-complete-light.png', 'conversation-details.png', 'task-main-note.png', 'task-follow-up-draft.png', 'task-decision.png', 'task-main-question.png', 'task-detail-running.png', 'task-detail-waiting_user.png', 'task-detail-accepted.png',
   'task-detail-failed.png', 'task-detail-1280-dark.png', 'task-detail-1280-light.png',

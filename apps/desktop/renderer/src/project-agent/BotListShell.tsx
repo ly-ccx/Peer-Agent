@@ -344,8 +344,12 @@ export function BotListShell({
               <img className="bot-brand-icon light" src="./logo-light.png" alt="" />
               <img className="bot-brand-icon dark" src="./logo-dark.png" alt="" />
             </span>
-            <span>{i18n.t('projectAgent.list.brand')}</span>
+            <span className="bot-brand-copy">
+              <span className="bot-brand-name">{i18n.t('projectAgent.list.brand')}</span>
+              <VersionBadge i18n={i18n} variant="bot-subtitle" />
+            </span>
           </div>
+          <VersionBadge i18n={i18n} variant="bot-upgrade" />
           <button
             type="button"
             className="bot-new"
@@ -422,7 +426,6 @@ export function BotListShell({
               list.setMenuOpen(false);
               onOpenCapabilities();
             }}
-            metadata={<VersionBadge i18n={i18n} variant="bot-footer" />}
           />
         </footer>
         <div

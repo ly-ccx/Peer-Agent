@@ -5,27 +5,28 @@ import { checkUpdaterMinimize } from './updater-minimize-checks.mjs';
 
 export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory }) {
   const checks = report.updater = [];
-  const badge = page.locator('.bot-column-footer .sidebar-version-badge');
+  const badge = page.locator('.bot-brand .bot-version-subtitle');
+  const header = page.locator('.bot-column-top');
   await badge.waitFor({ timeout: 5000 });
   const settingsMark = page.locator('.bot-column-footer .bot-app-menu-icon');
   assert.equal(await page.locator('.bot-app-menu-button svg').count(), 1, 'the settings entry must use an SVG icon');
   assert.equal((await settingsMark.textContent()).trim(), '', 'the settings icon must not contain a character glyph');
   const footer = page.locator('.bot-column-footer');
-  assert.equal(await page.locator('.bot-app-menu-details .sidebar-version-badge').count(), 1);
-  // Compare one layout snapshot; separate remote reads can straddle window resize.
-  const geometry = await footer.evaluate(node => {
-    const box = element => { const rect = element.getBoundingClientRect(); return { y: rect.y, height: rect.height }; };
-    return { footer: box(node), settings: box(node.querySelector('.bot-app-menu-button')),
-      version: box(node.querySelector('.sidebar-version-badge')) };
+  assert.equal(await page.locator('.bot-column-footer .sidebar-version-badge').count(), 0, 'version leaves the settings row');
+  assert.equal(await page.locator('.bot-app-menu-details .sidebar-version-badge').count(), 0);
+  const geometry = await page.evaluate(() => {
+    const box = element => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, height: rect.height }; };
+    const footerNode = document.querySelector('.bot-column-footer');
+    return { footer: box(footerNode), settings: box(footerNode.querySelector('.bot-app-menu-button')),
+      name: box(document.querySelector('.bot-brand-name')), version: box(document.querySelector('.bot-version-subtitle')) };
   });
   report.updaterInitialGeometry = geometry;
-  assert.ok(geometry.footer.height <= 64, 'idle settings and update controls should form a compact footer');
+  assert.ok(geometry.footer.height <= 64, 'settings footer stays compact without the version control');
   assert.equal(await badge.locator('.pa-dropdown-trigger').count(), 0, 'update channel belongs in settings only');
-  const settingsBox = geometry.settings, versionBox = geometry.version;
-  assert.ok(Math.abs(settingsBox.y + settingsBox.height / 2 - versionBox.y - versionBox.height / 2) <= 1,
-    'settings and version must share one row while idle');
+  assert.ok(geometry.version.y >= geometry.name.y + geometry.name.height - 2, 'version sits under the Peer name');
+  assert.ok(Math.abs(geometry.version.x - geometry.name.x) <= 2, 'version aligns with the Peer name');
   report.updaterFooterHeight = geometry.footer.height;
-  checks.push('SVG settings entry and right-aligned update metadata form a compact footer without a fake account avatar');
+  checks.push('version is a subtitle under Peer; settings footer no longer carries update metadata');
   const settingsTrigger = page.locator('.bot-app-menu-button');
   assert.equal((await settingsTrigger.textContent()).trim(), '设置');
   await settingsTrigger.focus(); await settingsTrigger.press('Enter');
@@ -54,24 +55,18 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
   assert.equal(await settingsTrigger.evaluate(node => node === document.activeElement), true);
   await settingsTrigger.press('Enter'); await menu.waitFor();
   await page.keyboard.press('Tab'); await menu.waitFor({ state: 'detached' });
-  assert.equal(await badge.locator('.sidebar-version-text-btn').evaluate(node => node === document.activeElement), true);
+  assert.equal(await settingsTrigger.evaluate(node => node === document.activeElement), true);
   await settingsTrigger.focus(); await settingsTrigger.press('Enter'); await menu.waitFor();
   await page.keyboard.press('Shift+Tab'); await menu.waitFor({ state: 'detached' });
   assert.equal(await settingsTrigger.evaluate(node => node === document.activeElement), true);
-  checks.push('settings replaces the identity placeholder; all four SVG menu items support arrows, Home/End, Escape focus return and Tab to version');
+  checks.push('settings replaces the identity placeholder; all four SVG menu items support arrows, Home/End, and Escape or Tab focus return');
   const initial = await page.evaluate(() => window.peerAgent.updaterGetStatus());
   const candidate = /^(\d+\.\d+\.\d+)-(alpha|beta|rc)\.(\d+)$/.exec(initial.currentVersion);
   assert.equal(await badge.locator('.sidebar-version-text').textContent(), `v${candidate?.[1] ?? initial.currentVersion}`);
   if (candidate) assert.equal(await badge.locator('.sidebar-version-stage').textContent(), `${candidate[2].toUpperCase()} ${candidate[3]}`);
-  assert.ok((await badge.locator('.sidebar-version-text-btn').getAttribute('aria-label')).includes(`v${initial.currentVersion}`));
+  assert.equal(await badge.locator('button').count(), 0, 'the version subtitle is not the update control');
   assert.equal(await badge.locator('select').count(), 0);
-  checks.push('current version aligns with settings in one row; update channel is absent from the footer');
-
-  await badge.locator('.sidebar-version-text-btn').click();
-  const dialog = page.getByRole('dialog', { name: '发现新版本', exact: true });
-  await dialog.waitFor();
-  await page.keyboard.press('Escape'); await dialog.waitFor({ state: 'detached' });
-  checks.push('version button opens the existing update modal and Escape closes it');
+  checks.push('current version is the Peer subtitle; update channel is absent from the list column');
 
   for (const [preference, option] of [
     ['beta', 'Beta（尝鲜版）'], ['stable', '正式（稳定版）'], ['auto', '自动（跟随当前版本）'],
@@ -93,29 +88,57 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
   }
   checks.push('Updates & about retains its SVG channel selector, keyboard focus and all three persisted preferences through production IPC');
 
+  await emitUpdaterEvent({ type: 'update-available', version: '0.1.0-rc.99' });
+  const upgrade = page.locator('.bot-column-top .bot-upgrade');
+  await upgrade.waitFor();
+  const { upgradeBox, plusBox } = await page.evaluate(() => {
+    const box = selector => {
+      const { left, right, y, height } = document.querySelector(selector).getBoundingClientRect();
+      return { left, right, y, height };
+    };
+    return { upgradeBox: box('.bot-column-top .bot-upgrade'), plusBox: box('.bot-new') };
+  });
+  assert.ok(upgradeBox.right <= plusBox.left + 1 && plusBox.left - upgradeBox.right <= 16, 'upgrade control sits immediately left of new');
+  assert.ok(Math.abs((upgradeBox.y + upgradeBox.height / 2) - (plusBox.y + plusBox.height / 2)) <= 2, 'upgrade control aligns with new');
+  await upgrade.click();
+  const dialog = page.getByRole('dialog', { name: '发现新版本', exact: true });
+  await dialog.waitFor();
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  checks.push('upgrade icon left of new opens the existing update modal and Escape closes it');
+
   report.updaterPhaseScope = 'Synthetic updater events verify renderer states only; no release download or install is performed';
   const fit = async () => {
-    const layouts = await badge.evaluate(node => {
+    const layouts = await page.evaluate(() => {
+      const box = (rect) => rect ? {
+        left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height,
+      } : null;
       const measure = () => {
-        const column = node.closest('.bot-column').getBoundingClientRect();
-        const footer = node.closest('.bot-column-footer');
-        const controls = [...footer.querySelectorAll('button')].map(button => {
-          const box = button.getBoundingClientRect();
-          return { text: button.textContent, width: box.width, height: box.height, left: box.left, right: box.right,
-            top: box.top, bottom: box.bottom, transform: getComputedStyle(button).transform };
-        });
-        const settings = footer.querySelector('.bot-app-menu-button').getBoundingClientRect();
-        const version = node.getBoundingClientRect();
+        const column = document.querySelector('.bot-column').getBoundingClientRect();
+        const footer = document.querySelector('.bot-column-footer');
+        const top = document.querySelector('.bot-column-top');
+        const upgradeEl = top.querySelector('.bot-upgrade');
+        const upgrade = upgradeEl?.getBoundingClientRect();
+        const value = upgradeEl?.querySelector('.bot-upgrade-value');
+        const valueBox = value?.getBoundingClientRect();
         const footerBox = footer.getBoundingClientRect();
-        const footerStyle = getComputedStyle(footer);
-        const contentRight = footerBox.right - parseFloat(footerStyle.paddingRight) - parseFloat(footerStyle.borderRightWidth);
-        return { controls, settingsRight: settings.right, versionLeft: version.left, versionRight: version.right,
-          footerLeft: footerBox.left, footerRight: footerBox.right, contentRight,
-          column: { left: column.left, right: column.right }, viewport: innerHeight,
-          scrollWidth: footer.scrollWidth, clientWidth: footer.clientWidth };
+        return {
+          column: { left: column.left, right: column.right },
+          footerLeft: footerBox.left, footerRight: footerBox.right,
+          name: box(document.querySelector('.bot-brand-name').getBoundingClientRect()),
+          version: box(document.querySelector('.bot-version-subtitle').getBoundingClientRect()),
+          upgrade: box(upgrade),
+          plus: box(document.querySelector('.bot-new').getBoundingClientRect()),
+          value: value?.textContent ?? '',
+          valueCenter: valueBox ? valueBox.left + valueBox.width / 2 : null,
+          upgradeCenter: upgrade ? upgrade.left + upgrade.width / 2 : null,
+          viewport: innerHeight,
+          scrollWidth: top.scrollWidth,
+          clientWidth: top.clientWidth,
+        };
       };
       const normal = measure();
-      const version = node.querySelector('.sidebar-version-text');
+      const version = document.querySelector('.bot-version-subtitle .sidebar-version-text');
       const original = version.textContent;
       try {
         // Also measure a long candidate label independently of the current package.
@@ -128,13 +151,22 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
     });
     for (const layout of layouts) {
       (report.updaterLayouts ??= []).push(layout);
-      assert.equal(layout.scrollWidth <= layout.clientWidth && layout.controls.every(box =>
-        box.width > 0 && box.height >= 24 && box.left >= layout.column.left && box.right <= layout.column.right
-        && box.top >= 0 && box.bottom <= layout.viewport), true, 'every footer control must remain visible inside the narrow column');
+      const boxes = [layout.name, layout.version, layout.upgrade, layout.plus];
+      assert.equal(layout.scrollWidth <= layout.clientWidth + 1 && boxes.every(item =>
+        item && item.width > 0 && item.left >= layout.column.left - 1 && item.right <= layout.column.right + 1
+        && item.top >= 0 && item.bottom <= layout.viewport), true, 'brand, version and header controls stay inside the column');
       assert.ok(Math.abs(layout.footerLeft - layout.column.left) <= 1 && Math.abs(layout.footerRight - layout.column.right) <= 1,
         'footer divider must span the column without inset gaps');
-      assert.ok(layout.versionLeft >= layout.settingsRight && layout.versionRight <= layout.contentRight
-        && layout.contentRight - layout.versionRight <= 5, 'version group must align to the right content edge without overlapping settings');
+      assert.ok(layout.upgrade.height >= 24 && layout.plus.height >= 24, 'upgrade and new stay large enough to hit');
+      assert.ok(layout.version.top >= layout.name.bottom - 2 && Math.abs(layout.version.left - layout.name.left) <= 2,
+        'version subtitle stays under the Peer name');
+      assert.ok(layout.upgrade.right <= layout.plus.left + 1 && layout.plus.left - layout.upgrade.right <= 16
+        && Math.abs((layout.upgrade.top + layout.upgrade.height / 2) - (layout.plus.top + layout.plus.height / 2)) <= 2,
+        'upgrade control stays immediately left of new');
+      assert.ok(layout.version.right <= layout.upgrade.left + 1, 'version subtitle does not overlap the upgrade control');
+      if (layout.valueCenter != null) {
+        assert.ok(Math.abs(layout.valueCenter - layout.upgradeCenter) <= 2, 'progress number stays centered in the ring');
+      }
     }
   };
   for (const locale of ['zh-CN', 'en-US']) {
@@ -147,24 +179,24 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
         if (width === 292) await page.locator('.bot-column-resizer').dblclick();
         else await page.locator('.bot-column-resizer').press(width === 240 ? 'Home' : 'End');
         await emitUpdaterEvent({ type: 'update-available', version: '0.1.0-rc.99' });
-        await badge.locator('.sidebar-version-update-icon svg').waitFor(); await fit();
+        await header.locator('.bot-upgrade svg').waitFor(); await fit();
         if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
-          await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-available-dark-narrow.png') });
+          await header.screenshot({ path: path.join(captureDirectory, 'bot-header-available-dark-narrow.png') });
         }
         await emitUpdaterEvent({ type: 'download-progress', percent: 42 });
-        await until(() => badge.locator('.sidebar-version-progress-text').textContent(), text => text === '42%'); await fit();
+        await until(() => header.locator('.bot-upgrade-value').textContent(), text => text === '42'); await fit();
         if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
-          await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-progress-dark-narrow.png') });
+          await header.screenshot({ path: path.join(captureDirectory, 'bot-header-progress-dark-narrow.png') });
         }
         await emitUpdaterEvent({ type: 'update-downloaded', version: '0.1.0-rc.99' });
-        await badge.locator('.sidebar-version-install-btn').waitFor(); await fit();
+        await header.locator('.bot-upgrade.is-install').waitFor(); await fit();
         if (captureDirectory && locale === 'zh-CN' && theme === 'dark' && width === 240) {
-          await footer.screenshot({ path: path.join(captureDirectory, 'bot-footer-install-dark-narrow.png') });
+          await header.screenshot({ path: path.join(captureDirectory, 'bot-header-install-dark-narrow.png') });
         }
       }
     }
   }
-  checks.push('available SVG indicator, horizontal 42% progress and install control fit 240–360px columns in both locales and themes, including a temporarily measured long candidate label');
+  checks.push('available icon, centered 42 progress and install control fit 240–360px columns in both locales and themes, including a temporarily measured long candidate label');
   await page.evaluate(() => window.peerAgent.setLocale('zh-CN'));
   await page.reload(); await badge.waitFor();
   await page.locator('.bot-column-resizer').dblclick();
