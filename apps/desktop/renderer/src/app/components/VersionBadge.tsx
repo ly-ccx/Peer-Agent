@@ -9,20 +9,130 @@ import { versionBadgeLabel } from './versionBadgeLabel';
 import { PeerIcon } from '../../ui/icons';
 
 /**
- * VersionBadge —— 侧边栏品牌区右侧的版本徽标（表达层）。
+ * VersionBadge —— 版本与更新的表达层。
  *
- * 行为（按确认的产品设计）：
- *   - 始终展示当前版本号（vX.Y.Z）。
- *   - 有可用更新时（available）：版本号旁显示更新图标，与版本号共享点击入口。
- *   - 下载中（downloading）：Bot 页脚显示横向进度条与百分比；经典界面保留进度环。
- *   - 下载完成（downloaded）：版本号旁持久挂「安装」按钮
- *     （Codex 模式），不再弹出右下角 toast。
- *   - 点击版本号：打开更新摘要弹窗（无更新时顺带触发一次检查）。
- *   - 点击「安装」按钮：直接触发安装，不打开弹窗。
+ * classic：经典侧边栏底部。版本号本身可点；下载中保留进度环，完成后在旁边放「安装」。
+ * bot-subtitle：机器人列表里，Peer 名称下的缩小版本号。只展示，不承接更新。
+ * bot-upgrade：有更新时才出现，放在「新建」左侧。
+ *   点击仍打开更新摘要弹窗；确认下载后按钮缩小成环形进度，数字居中。
+ *   下载完成后同一位置展开成写着「安装」的按钮。
  *
  * 能力真相在主进程，本组件通过 useUpdater 消费状态与动作。
  */
 export function VersionBadge({ i18n, showChannel = false, variant = 'classic' }: {
+  readonly i18n: I18nRuntime;
+  readonly showChannel?: boolean;
+  readonly variant?: 'classic' | 'bot-subtitle' | 'bot-upgrade';
+}) {
+  if (variant === 'bot-subtitle') return <BotVersionSubtitle />;
+  if (variant === 'bot-upgrade') return <BotUpgradeControl i18n={i18n} />;
+  return <ClassicVersionBadge i18n={i18n} showChannel={showChannel} />;
+}
+
+function BotVersionSubtitle() {
+  const { status } = useUpdater();
+  if (!status) return null;
+  const label = versionBadgeLabel(status.currentVersion);
+  return (
+    <span className="sidebar-version-badge bot-version-subtitle" title={`v${status.currentVersion}`}>
+      <span className="sidebar-version-text">{label.version}</span>
+      {label.stage ? <span className="sidebar-version-stage">{label.stage}</span> : null}
+      {import.meta.env.DEV ? (
+        <span className="sidebar-version-dev-tag" aria-label="开发版本">
+          开发
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function BotUpgradeControl({ i18n }: { readonly i18n: I18nRuntime }) {
+  const { status, hasUpdate, check, download, install, openReleasePage } = useUpdater();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [pendingDownload, setPendingDownload] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const progressTarget = useCallback(() => buttonRef.current, []);
+  const phase = status?.phase;
+
+  useEffect(() => {
+    if (!pendingDownload) return;
+    if (phase === 'downloading' || phase === 'downloaded' || phase === 'error') {
+      setPendingDownload(false);
+    }
+  }, [phase, pendingDownload]);
+
+  if (!status) return null;
+
+  const isDownloading = phase === 'downloading';
+  const isReady = phase === 'downloaded';
+  const isAvailable = hasUpdate && !isDownloading && !isReady && !pendingDownload;
+  const isError = phase === 'error';
+  const showProgress = (isDownloading || pendingDownload) && phase !== 'downloaded' && phase !== 'error';
+  const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)));
+  const progressPercent = isDownloading ? percent : 0;
+  const readyVersion = status.availableVersion ?? '';
+  const title = showProgress
+    ? i18n.t('updater.badge.downloading', { percent: progressPercent })
+    : isReady
+      ? i18n.t('updater.badge.ready', { version: readyVersion })
+      : isError
+        ? i18n.t('updater.modal.error', { message: status.error ?? '' })
+        : hasUpdate
+          ? i18n.t('updater.badge.updateAvailable')
+          : i18n.t('updater.badge.upToDate');
+  const visible = showProgress || isAvailable || isReady || isError;
+
+  return (
+    <>
+      {visible ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          className={`bot-upgrade${showProgress ? ' is-progress' : ''}${isReady && !showProgress ? ' is-install' : ''}${isError && !showProgress ? ' is-error' : ''}`}
+          style={showProgress ? ({ '--progress': `${progressPercent}%` } as CSSProperties) : undefined}
+          title={title}
+          aria-label={isReady && !showProgress ? i18n.t('updater.badge.install') : showProgress ? title : isAvailable ? i18n.t('updater.badge.ariaHasUpdate') : title}
+          role={showProgress ? 'progressbar' : undefined}
+          aria-valuemin={showProgress ? 0 : undefined}
+          aria-valuemax={showProgress ? 100 : undefined}
+          aria-valuenow={showProgress ? progressPercent : undefined}
+          onClick={() => {
+            if (isReady && !showProgress) {
+              void install();
+              return;
+            }
+            setModalOpen(true);
+            if (!showProgress && !hasUpdate && phase !== 'error') void check();
+          }}
+        >
+          {showProgress ? (
+            <span className="bot-upgrade-value" data-digits={String(progressPercent).length}>{progressPercent}</span>
+          ) : isReady ? (
+            i18n.t('updater.badge.install')
+          ) : (
+            <PeerIcon name={isError ? 'warning' : 'arrowDown'} size={15} strokeWidth={1.75} />
+          )}
+        </button>
+      ) : null}
+      <UpdateModal
+        i18n={i18n}
+        open={modalOpen}
+        status={status}
+        pendingDownload={pendingDownload}
+        onClose={() => setModalOpen(false)}
+        progressTarget={progressTarget}
+        onUpdate={() => {
+          setPendingDownload(true);
+          void download().finally(() => setPendingDownload(false));
+        }}
+        onOpenReleasePage={() => void openReleasePage()}
+        onRecheck={() => void check()}
+      />
+    </>
+  );
+}
+
+function ClassicVersionBadge({ i18n, showChannel = false, variant = 'classic' }: {
   readonly i18n: I18nRuntime;
   readonly showChannel?: boolean;
   readonly variant?: 'classic' | 'bot-footer';

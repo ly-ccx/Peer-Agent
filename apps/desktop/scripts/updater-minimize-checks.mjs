@@ -22,7 +22,7 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
       await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
       await emitUpdaterEvent({ type: 'update-available', version: '0.1.0-rc.99' });
-      const trigger = page.locator('.bot-column-footer .sidebar-version-text-btn');
+      const trigger = page.locator('.bot-column-top .bot-upgrade');
       await trigger.click();
       const dialog = page.locator('.updater-modal');
       await dialog.waitFor();
@@ -36,7 +36,7 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
           const frames = [], started = performance.now();
           const sampleFrame = event => {
             const box = panel.isConnected ? panel.getBoundingClientRect() : null;
-            const bar = document.querySelector('.bot-column-footer .sidebar-version-progress');
+            const bar = document.querySelector('.bot-column-top .bot-upgrade.is-progress');
             const target = bar?.getBoundingClientRect();
             frames.push({ time: performance.now() - started, connected: panel.isConnected,
               event,
@@ -102,23 +102,19 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
       if (!reduced) {
         assert.ok(active.some(frame => frame.event === 'animation-midpoint'), 'native CSS midpoint must be inspectable before unmount');
         assert.ok(active.some(frame => (frame.animations.find(item => item.name === 'motion-exit-to-target')?.currentTime ?? 0) > 30 && frame.panel.width < original.width * 0.9
-          && frame.panel.width > frame.target.width + 10), 'dialog must stay mounted while shrinking toward the footer');
+          && frame.panel.width > frame.target.width + 10), 'dialog must stay mounted while shrinking toward the header control');
         assert.ok(active.some(frame => frame.panel.left + frame.panel.width / 2 < original.left + original.width / 2 - 15
-          && frame.panel.top + frame.panel.height / 2 > original.top + original.height / 2 + 15), 'exit must head to the actual bottom-left target');
+          && frame.panel.top + frame.panel.height / 2 < original.top + original.height / 2 - 15), 'exit must head to the actual top-left target');
         assert.ok(active.some(frame => Math.abs(frame.panel.left - frame.target.left) < 20
           && Math.abs(frame.panel.top - frame.target.top) < 20), 'modal must arrive at the measured progress destination');
         assert.ok(active.some(frame => frame.animation));
       } else assert.equal(frames.slice(1).some(frame => frame.animation), false);
-      const progress = page.locator('.bot-column-footer [role="progressbar"]');
+      const progress = page.locator('.bot-column-top .bot-upgrade.is-progress');
       assert.equal(await progress.getAttribute('aria-valuenow'), '42');
-      const track = await progress.locator('.sidebar-version-progress-track').boundingBox();
-      assert.ok(track.width >= 36 && track.height > 0 && track.height <= 4, 'footer must show a horizontal progress bar');
-      // The network fixture resolves at 700ms; its progress transition may still
-      // be running when the independent modal-exit sampling ends at 850ms.
-      await page.waitForFunction(node => Math.abs(new DOMMatrixReadOnly(getComputedStyle(node).transform).a - 0.42) < 0.01,
-        await progress.locator('.sidebar-version-progress-fill').elementHandle());
-      const ratio = await progress.locator('.sidebar-version-progress-fill').evaluate(node => new DOMMatrixReadOnly(getComputedStyle(node).transform).a);
-      assert.ok(Math.abs(ratio - 0.42) < 0.01, 'visual fill must match host progress');
+      assert.equal(await progress.locator('.bot-upgrade-value').textContent(), '42');
+      const ring = await progress.boundingBox();
+      assert.ok(ring && Math.abs(ring.width - ring.height) <= 6 && ring.width >= 24 && ring.width <= 34,
+        'header must show a circular progress control');
       assert.equal(await trigger.evaluate(node => document.activeElement === node), true);
       if (!reduced) await page.screenshot({ path: path.join(captureDirectory, `updater-minimize-${width}-${appearance}-after.png`) });
       cases.at(-1).passed = true;
@@ -126,7 +122,7 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
     // A completion may arrive before the outgoing modal finishes; keep its captured content stable.
     await emitUpdaterEvent({ type: 'update-available', version: '0.1.0-rc.99' });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await page.locator('.bot-column-footer .sidebar-version-text-btn').click();
+    await page.locator('.bot-column-top .bot-upgrade').click();
     const completionButton = page.locator('.updater-modal').getByRole('button', { name: '更新', exact: true });
     // Observe the transient exit before dispatch. Inspector/trace latency can
     // outlast the animation, so a post-click DOM query cannot prove retention.
@@ -141,7 +137,7 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
         const sample = () => {
           frames.push({ time: performance.now() - started, connected: panel.isConnected,
             minimizing: panel.classList.contains('is-minimizing'),
-            downloaded: Boolean(document.querySelector('.bot-column-footer .sidebar-version-install-btn')),
+            downloaded: Boolean(document.querySelector('.bot-column-top .bot-upgrade.is-install')),
             contentRetained: panel.querySelector('.updater-modal-changelog')?.textContent === initialContent });
           if (performance.now() - started < 650) requestAnimationFrame(sample);
           else window.rcUpdateCompletionFrames = frames;
@@ -162,12 +158,12 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
     assert.ok(exitingFrames.every(frame => frame.contentRetained), 'outgoing modal retains its captured content until exit finishes');
     assert.equal(completionFrames.at(-1).connected, false, 'fast completion still closes the modal');
     await page.locator('.updater-modal').waitFor({ state: 'detached' });
-    await page.locator('.sidebar-version-install-btn').waitFor();
+    await page.locator('.bot-column-top .bot-upgrade.is-install').waitFor();
     assert.equal(await app.evaluate(() => globalThis.rcUpdateDownloadCalls), 4, 'each update click dispatches once');
     report.updaterMinimize.fastCompletion = true;
     await emitUpdaterEvent({ type: 'error', message: 'RC synthetic download interrupted' });
-    assert.equal(await page.locator('.bot-column-footer [role="progressbar"]').count(), 0);
-    await page.locator('.bot-column-footer .sidebar-version-text-btn').click();
+    assert.equal(await page.locator('.bot-column-top .bot-upgrade.is-progress').count(), 0);
+    await page.locator('.bot-column-top .bot-upgrade').click();
     await page.getByText('更新出错：RC synthetic download interrupted', { exact: true }).waitFor();
     await page.keyboard.press('Escape');
     await page.locator('.updater-modal').waitFor({ state: 'detached' });
