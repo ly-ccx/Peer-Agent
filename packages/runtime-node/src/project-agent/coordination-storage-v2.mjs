@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from '../sqlite/connection.mjs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { copyFile, truncate } from 'node:fs/promises';
-import { mkdirSync, readFileSync, renameSync, existsSync, statSync, openSync, closeSync, fsyncSync, writeSync, fstatSync, readSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, existsSync, statSync, lstatSync, openSync, closeSync, fsyncSync, writeSync, fstatSync, readSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { prepareLegacyIntegrity, acceptsLegacyIntegrity } from './coordination-legacy-integrity.mjs';
 import { journalLines } from './journal-lines.mjs';
@@ -182,11 +182,17 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
   const dir = path.join(directory, 'coordination-v2'), manifestFile = path.join(dir, 'manifest.json');
   const headFile = path.join(dir, 'head.json');
   const indexDirectory = path.join(directory, '.read-models'), pointerFile = path.join(indexDirectory, 'coordination-current.json');
+  const originalLegacyFile = legacyFile;
   let db, dbIdentity, indexFile, manifest, cached, cachedRevision, preparing;
   function load() {
-    if (!existsSync(manifestFile)) throw fail('coordination_recovery_pending');
+    if (existsSync(path.join(directory, 'coordination-fence.json')) && JSON.parse(readFileSync(path.join(directory, 'coordination-fence.json'), 'utf8')).status !== 'complete') throw fail('coordination_fence_incomplete');
+    if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
     const next = JSON.parse(readFileSync(manifestFile, 'utf8'));
-    if (next.schemaVersion !== 2 || next.minimumReaderVersion !== 2 || next.minimumWriterVersion !== 2) throw fail('coordination_schema_unsupported');
+    if (next.schemaVersion !== 2 || ![2, 3].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.minimumReaderVersion === 3) {
+      if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
+      legacyFile = path.join(dir, next.frozenLegacyFile);
+    } else legacyFile = originalLegacyFile;
     if (manifest && next.generation !== manifest.generation) { db?.close(); db = undefined; cached = undefined; }
     manifest = next;
     if (!existsSync(headFile)) throw fail('coordination_head_missing');
@@ -236,6 +242,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (preparing) return preparing;
     preparing = (async () => {
       assertOwner();
+      if (existsSync(path.join(directory, 'coordination-recovery.json')) && JSON.parse(readFileSync(path.join(directory, 'coordination-recovery.json'), 'utf8')).status !== 'complete') throw fail('coordination_repair_incomplete');
       try {
         load();
         // A matching derived receipt was already checked by load. Only the

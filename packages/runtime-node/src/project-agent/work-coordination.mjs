@@ -49,6 +49,16 @@ export function reduceCoordination(state, entry) {
     const delivery = next.deliveries[entry.messageId];
     if (!delivery) throw new Error('reply_not_prepared');
     next.deliveries[entry.messageId] = { ...delivery, state: 'invalidated', reason: entry.reason };
+  } else if (entry.kind === 'history_reconciled') {
+    const canonical = value => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
+    if (previous.revision !== 0 || entry.revision !== 1 || entry.state?.revision !== 0
+      || entry.recovery?.executionBlocked !== true || !/^[a-f0-9]{64}$/.test(entry.recovery?.sourceFingerprint || '')
+      || createHash('sha256').update(canonical(entry.state)).digest('hex') !== entry.stateHash
+      || !['events', 'works', 'deliveries'].every(key => entry.state[key] && typeof entry.state[key] === 'object' && !Array.isArray(entry.state[key])))
+      throw new Error('coordination_repair_state_invalid');
+    next = { ...structuredClone(entry.state), revision: entry.revision,
+      lastRecovery: { ...structuredClone(entry.recovery), at: entry.at } };
   } else if (entry.kind === 'journal_recovered') {
     next.lastRecovery = { at: entry.at, backup: entry.backup };
   } else throw new Error('unknown_coordination_event');

@@ -650,3 +650,5 @@ export { capabilityDenial } from './project-agent/capability-denial.mjs';
 export * from './project-agent/input-draft-store.mjs';
 
 export * from './project-agent/resource-edit-storage.mjs';
+
+export { inspectCoordinationFork, recoverCoordinationForkBackup } from './project-agent/coordination-fork-recovery.mjs';
