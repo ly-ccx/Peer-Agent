@@ -18,7 +18,7 @@ const path=require('node:path');\n`;
 const resourceHintSource = transpileModule(readFileSync(path.join(root, 'packages/protocol/src/resource-reference-hints.ts'), 'utf8'),
   { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 } }).outputText;
 const targets = [
-  { output: 'packages/runtime-node/src/project-agent/coordination-worker-source.generated.mjs', name: 'COORDINATION_WORKER_SOURCE', files: ['packages/runtime-node/src/project-agent/coordination-kernel.mjs', 'packages/runtime-node/src/project-agent/work-delta.mjs', 'packages/runtime-node/src/project-agent/work-coordination.mjs', 'packages/runtime-node/src/project-agent/journal-lines.mjs', 'packages/runtime-node/src/project-agent/coordination-legacy-integrity.mjs', 'packages/runtime-node/src/project-agent/coordination-storage-v2.mjs'] },
+  { output: 'packages/runtime-node/src/project-agent/coordination-worker-source.generated.mjs', name: 'COORDINATION_WORKER_SOURCE', files: ['packages/runtime-node/src/project-agent/history-resumption.mjs', 'packages/runtime-node/src/project-agent/coordination-kernel.mjs', 'packages/runtime-node/src/project-agent/work-delta.mjs', 'packages/runtime-node/src/project-agent/work-coordination.mjs', 'packages/runtime-node/src/project-agent/journal-lines.mjs', 'packages/runtime-node/src/project-agent/coordination-legacy-integrity.mjs', 'packages/runtime-node/src/project-agent/coordination-storage-v2.mjs'] },
   { output: 'packages/conversation-store/src/interaction-worker-source.generated.mjs', name: 'INTERACTION_WORKER_SOURCE', files: ['packages/conversation-store/src/interaction-reader.mjs'] },
 ];
 for (const target of targets) {

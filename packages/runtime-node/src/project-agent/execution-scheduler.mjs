@@ -40,6 +40,7 @@ function rank(priority, enqueuedAt, at) {
 export function createExecutionScheduler({ rootDir = null, getConcurrency = () => 4, now = () => new Date().toISOString() } = {}) {
   const turnContext = new AsyncLocalStorage();
   let isWorkspaceReady = () => true;
+  let isPlanRecoveryHeld = () => false;
   const turnsByPlan = new Map();
   const queues = new Map();
   let plansById = new Map();
@@ -98,6 +99,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     }
   }
   function inspect(plan, plans = [...plansById.values()]) {
+    if (isPlanRecoveryHeld(plan)) return { allowed: false, reason: 'coordination_reconciliation_required', queuedBehind: [] };
     const origin = plan.delegationOrigin || {};
     const sameProject = plans.filter(item => item.delegationOrigin?.workspaceId === origin.workspaceId);
     const bySession = new Map(sameProject.map(item => [item.delegationOrigin.sessionId, item]));
@@ -109,7 +111,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     if (unmet.length) return { allowed: false, reason: 'dependencies', queuedBehind: describe(unmet) };
     if (origin.isolationBlock) return { allowed: false, reason: origin.isolationBlock, queuedBehind: [] };
     const kind = slot(plan);
-    const occupants = sameProject.filter(item => item.planId !== plan.planId && occupying(item) && slot(item) === kind);
+    const occupants = sameProject.filter(item => item.planId !== plan.planId && !isPlanRecoveryHeld(item) && occupying(item) && slot(item) === kind);
     const limit = kind === 'read' ? 2 : kind === 'write' ? 1 : Infinity;
     if (occupants.length >= limit) return { allowed: false, reason: `${kind}_slot`, queuedBehind: describe(occupants) };
     return { allowed: true, reason: null, queuedBehind: [] };
@@ -174,6 +176,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
       if (options.rootDir && options.rootDir !== rootDir) { rootDir = options.rootDir; queues.clear(); }
       if (typeof options.getConcurrency === 'function') getConcurrency = options.getConcurrency;
       if (typeof options.isWorkspaceReady === 'function') isWorkspaceReady = options.isWorkspaceReady;
+      if (typeof options.isPlanRecoveryHeld === 'function') isPlanRecoveryHeld = options.isPlanRecoveryHeld;
       drain();
     },
     reconcile, inspect, select, isWorkspaceReady: workspaceId => isWorkspaceReady(workspaceId) === true,
@@ -186,6 +189,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     },
     async withTurn(input, run) {
       const plan = plansById.get(input.planId);
+      if (isPlanRecoveryHeld(plan)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'coordination_reconciliation_required' };
       if (plan?.delegationOrigin && !isWorkspaceReady(plan.delegationOrigin.workspaceId)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'recovery_pending' };
       const controller = new AbortController();
       let settle; controller.settled = new Promise(resolve => { settle = resolve; });
@@ -201,6 +205,7 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
         if (!release) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' };
         context = { input: owned, release, active: true };
         if (controller.signal.aborted) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' };
+        if (isPlanRecoveryHeld(plan)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'coordination_reconciliation_required' };
         if (plan?.delegationOrigin && !isWorkspaceReady(plan.delegationOrigin.workspaceId)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'recovery_pending' };
         return await turnContext.run(context, () => run(controller.signal));
       } finally {

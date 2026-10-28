@@ -1,4 +1,5 @@
 import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { seedHistoryRecovery, checkHistoryRecovery } from './bot-history-recovery-checks.mjs';
 import { checkBotWindowMaterial } from './bot-window-material-checks.mjs';
 import { checkBotVerification } from './bot-verification-checks.mjs';
 import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
@@ -68,7 +69,9 @@ const workSurfaces = process.argv.includes('--task-detail-only') || process.argv
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
-const fixture = seedBotShellHome({ home });
+const recoveryOnly = process.argv.includes('--recovery-only');
+const fixture = seedBotShellHome({ home, ...(recoveryOnly ? { scale: { bots: 2, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
+const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
 if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
 const classicUiFixture = sharedUiOnly ? seedClassicUiFixture({ home }) : null;
 const historyFixtures = workSurfaces ? seedHistoryFixtures({ home }) : [];
@@ -512,7 +515,9 @@ try {
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--surface-motion-only')) {
+  if (recoveryOnly) {
+    await checkHistoryRecovery({ page, until, report, captureDirectory: root, bots: fixture.bots, histories: recoveryHistories, readTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--surface-motion-only')) {
     assert.ok(process.argv.includes('--effort-stability'), '--surface-motion-only requires controlled save latency/failure');
     await checkSurfaceMotion({ page, fixture, until, report, captureDirectory: root,
       failNext: () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) });

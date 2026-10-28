@@ -1,0 +1,11 @@
+.bot-recovery-control { flex: none; padding: 12px 18px; border-bottom: 1px solid var(--chrome-hairline); color: var(--graphite-soft); overflow-wrap: anywhere; }
+.bot-recovery-control p { margin: 4px 0 8px; }
+.bot-recovery-control summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.bot-recovery-control summary::-webkit-details-marker { display: none; }
+.bot-recovery-control details[open] > summary > svg { transform: rotate(180deg); }
+.bot-recovery-control summary:focus-visible, .bot-recovery-control button:focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 2px; }
+.bot-recovery-control button { padding: 6px 10px; margin: 4px 8px 4px 0; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); background: var(--chrome-hover); color: var(--graphite-base); font: inherit; cursor: pointer; }
+.bot-recovery-control button:disabled { opacity: 0.55; cursor: default; }
+.bot-recovery-control ul { max-height: min(38vh, 320px); overflow: auto; list-style: none; padding: 0; margin: 8px 0; }
+.bot-recovery-control li, .bot-recovery-confirm { padding: 10px; margin-block: 8px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); }
+.bot-recovery-control strong { color: var(--graphite-base); font-weight: 500; }

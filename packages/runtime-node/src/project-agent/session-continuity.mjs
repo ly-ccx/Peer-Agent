@@ -58,6 +58,7 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
     const plan = findBySession(input.sessionId);
     const checked = check(plan, context);
     if (!checked.ok) return checked;
+    if (executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required') return error('coordination_reconciliation_required');
     if (!anchor(plan, input.anchorMessageId)) return error('invalid_anchor');
     if (plan.delegationOrigin.lastResumeAnchorMessageId === input.anchorMessageId) return { ok: true, replayed: true, plan };
     if (!SUSPENDED.has(plan.delegationOrigin.phase)) return error('session_not_paused');

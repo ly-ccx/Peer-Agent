@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
+import { historyExecutionHeld } from './history-resumption.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, isEnabled = () => true }) {
+export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
@@ -41,6 +42,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       return { ok: true, session, legacy: !mandate, goalRevision: mandate?.goalRevision ?? null,
         ...(mandate ? { workId: mandate.workId } : {}), nextAction: mandate ? 'use_current_revision_for_changes' : 'legacy_session_requires_current_user_for_changes' };
     }
+    if (!canExecute(workspaceId)) return { ok: false, error: 'recovery_pending' };
+    if (state.lastRecovery?.quarantinedSessionIds?.includes(input.sessionId)) return { ok: false, error: 'coordination_reconciliation_required' };
     const messages = readMessages(parentConversationId);
     const current = messages.filter(row => context.currentInputAnchors?.includes(row.id) && isCanonicalUserInput(row));
     const sourceInputIds = current.map(row => row.inputId || row.id);
@@ -118,6 +121,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const read = () => store.read().transitions[transition.operationId];
     const move = (phase, patch = {}) => { const current = read(); store.advanceTransition(current.operationId, current.phase, { phase, ...patch }); return read(); };
     const state = store.read(), mandate = state.mandates[transition.workId], decision = state.decisions[transition.operationId];
+    if (mandate && !canExecute(mandate.workspaceId)) return;
+    if (historyExecutionHeld(state.works[transition.workId]) || state.lastRecovery?.quarantinedOperationIds?.includes(transition.operationId)) return;
     if (!mandate || mandate.goalRevision !== transition.expectedGoalRevision) {
       if (!['blocked', 'completed'].includes(transition.phase)) move('blocked', { error: 'goal_revision_stale' });
       return;
@@ -207,5 +212,6 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
         priorSessionId:lineage.oldSessionId, replacementSessionId:lineage.replacementSessionId,
         replacementTitle:state.decisions[lineage.operationId].payload?.task?.title} : {})};
   }
-  return { coordinate, recover, facts, forSession };
+  return { coordinate, recover, facts, forSession,
+    async waitForIdle(workspaceId) { while (drains.has(workspaceId)) await drains.get(workspaceId); } };
 }

@@ -12,6 +12,19 @@ function plan(id, { workspaceId = 'w', phase = 'queued', readOnly = true, priori
     delegationOrigin: { sessionId: id, workspaceId, phase, readOnly, priority, dependsOn }, ...rest };
 }
 
+test('history isolation denies execution and frees the old write slot for fresh work', async () => {
+  const scheduler = createExecutionScheduler();
+  const old = plan('old', { phase: 'running', readOnly: false }), fresh = plan('fresh', { readOnly: false });
+  scheduler.configure({ isPlanRecoveryHeld: value => value?.planId === 'old' });
+  assert.equal(scheduler.inspect(old, [old, fresh]).reason, 'coordination_reconciliation_required');
+  assert.equal(scheduler.inspect(fresh, [old, fresh]).allowed, true);
+  scheduler.reconcile([old, fresh]);
+  let dispatched = false;
+  const result = await scheduler.withTurn({ planId: 'old' }, () => { dispatched = true; });
+  assert.equal(result.error, 'coordination_reconciliation_required');
+  assert.equal(dispatched, false);
+});
+
 test('one in-place write and two reads run independently; isolation hints do not bypass write slots', () => {
   const s = createExecutionScheduler();
   const plans = [plan('write', { phase: 'running', readOnly: false }), plan('read', { phase: 'running' }),

@@ -1,3 +1,4 @@
+import { recoveryZh, recoveryEn, type RecoveryTranslationKey } from './recovery.ts';
 import { resourcesZh, resourcesEn, type ResourcesTranslationKey } from './resources.ts';
 import { formsZh, formsEn, type FormsTranslationKey } from './forms.ts';
 import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
@@ -10,6 +11,7 @@ export const DEFAULT_LOCALE: LocaleCode = 'zh-CN';
 export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly LocaleCode[];
 
 export type TranslationKey =
+  | RecoveryTranslationKey
   | RemoteAccessTranslationKey
   | ResourcesTranslationKey
   | FormsTranslationKey
@@ -1467,6 +1469,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     ...remoteAccessZh,
     ...resourcesZh,
     ...formsZh,
+    ...recoveryZh,
     'app.newTask': '新任务',
     'searchChats.open': '搜索任务',
     'searchChats.placeholder': '搜索任务',
@@ -2885,6 +2888,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     ...remoteAccessEn,
     ...resourcesEn,
     ...formsEn,
+    ...recoveryEn,
     'app.newTask': 'New task',
     'searchChats.open': 'Search tasks',
     'searchChats.placeholder': 'Search tasks',

@@ -63,6 +63,7 @@ import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
 import { retryProjectAgentTurn } from './response-retry.mjs';
+import { createDesktopRecoveryController } from './project-recovery-controller.mjs';
 
 /** Current user inputs become the model messages, including bounded image thumbnails. */
 export function messagesFromUserInputs(plan) {
@@ -137,7 +138,8 @@ export function registerDesktopProjectAgent({
   const runtimeEnabled = () => enabled() && readRuntimePolicy()?.projectAgent?.shell !== 'classic';
   const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
-  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
+  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true,
+    isPlanRecoveryHeld: plan => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const readEvidenceBody = createEvidenceReader({
     readScopedExternal: createScopedExternalEvidenceReader({ findWatch: ref => objectiveWatches?.resolveEvidence(ref),
       readWatchBody: ref => objectiveWatches?.readEvidenceBody(ref) }),
@@ -478,7 +480,11 @@ export function registerDesktopProjectAgent({
       defaultPath: 'peer-agent-diagnostics.json', filters: [{ name: 'JSON', extensions: ['json'] }] };
     return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
   } });
+  const recoveryControl = createDesktopRecoveryController({ rootDir: runtimeRoot, host, hostLeases, holdsLease: ownsProject,
+    readLeaseEpoch, supervisor, goalPlanStore, goalRunner, agentTurnExecutor, objectiveWatches, executionScheduler,
+    changed: workspaceId => broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] }) });
   const projectAgent = createProjectAgentApplicationService({
+    recoveryControl,
     accessAuthority,
     diagnostics: diagnostics.execute,
     enabled: runtimeEnabled,

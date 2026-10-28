@@ -656,6 +656,7 @@ export function createProjectAgentRunner({
     const list = (Array.isArray(inputs) ? inputs : []).filter(item => {
       if (!item || typeof item !== 'object') return false;
       if (typeof item.inputId !== 'string') return true;
+      if (coordination?.ownsInput(item.inputId)) return false;
       if (knownInputs.has(item.inputId)) return false;
       knownInputs.add(item.inputId); return true;
     });

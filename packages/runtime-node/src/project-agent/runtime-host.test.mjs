@@ -23,6 +23,25 @@ function harness(executeTurn = async () => ({ text: 'reply' }), extra = {}) {
     remove: id => { ids = ids.filter(value => value !== id); } };
 }
 
+test('maintenance drains a startup already in flight and rejects incidental restarts until explicit release', async () => {
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { entered = resolve; });
+  let executions = 0;
+  const h = harness(async () => { executions++; return { text: 'reply' }; }, {
+    recoverTasks: async () => { entered(); await gate; },
+  });
+  try {
+    const pending = h.host.sync(['a']); await started;
+    h.host.beginMaintenance('a');
+    await assert.rejects(h.host.restart('a'), /coordination_maintenance_pending/);
+    let drained = false; const idle = h.host.waitForIdle('a').then(() => { drained = true; });
+    await Promise.resolve(); assert.equal(drained, false);
+    release(); await pending; await idle;
+    assert.equal(h.host.isReady('a'), false); assert.equal(h.host.runnerFor('a'), null); assert.equal(executions, 0);
+    h.host.endMaintenance('a'); await h.host.restart('a'); assert.equal(h.host.isReady('a'), true);
+  } finally { release(); h.close(); }
+});
+
 test('targeted wake keeps other bot runners and their in-flight turns alive', async () => {
   let release, entered;
   const gate = new Promise(resolve => { release = resolve; });

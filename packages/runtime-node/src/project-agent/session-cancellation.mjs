@@ -12,7 +12,8 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     if (!canManageWorkspace(origin.workspaceId)) return { error: 'lease_unavailable' };
     if (plan.status === 'completed' || plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
     if (plan.status === 'cancelled' && !origin.cancellation?.cleanupPending) return { completed: project(plan) };
-    const receipt = origin.cancellation || { operationId: input.operationId || `cancel-${randomUUID()}`, reason: input.reason || 'cancelled', phase: 'stopping', requestedAt: now() };
+    const receipt = { ...(origin.cancellation || { operationId: input.operationId || `cancel-${randomUUID()}`, reason: input.reason || 'cancelled', phase: 'stopping', requestedAt: now() }),
+      ...(input.preserveArtifacts === true ? { preserveArtifacts: true } : {}) };
     // pause() closes the runner pump before cancellation returns any acknowledgement.
     if (plan.status !== 'cancelled') {
       goalRunner?.pause?.(plan.planId, receipt.reason);

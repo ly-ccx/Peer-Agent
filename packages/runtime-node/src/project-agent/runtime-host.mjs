@@ -74,6 +74,9 @@ export function createProjectAgentHost({
   const runners = new Map();
   const stagedInputs = new Map();
   const stoppedWorkspaces = new Set();
+  const maintenanceWorkspaces = new Set();
+  const syncFlights = new Map();
+  const recoverySessions = new Map();
   const digests = digestQueue || createDigestQueue({
     file: rootDir ? path.join(rootDir, 'digest-queue.json') : null,
   });
@@ -117,6 +120,7 @@ export function createProjectAgentHost({
   }
 
   async function ensureRunner(workspaceId, conversationId) {
+    if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
     const existing = runners.get(workspaceId);
     if (existing && existing.conversationId === conversationId) return existing;
     if (existing) drop(workspaceId);
@@ -131,9 +135,12 @@ export function createProjectAgentHost({
     });
     try {
       await coordinationStore.prepare();
+      if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
       if (holdsLease(workspaceId) !== true) { coordinationStore.close(); throw new Error('coordination_lease_lost'); }
       coordinationStore.recover();
-      if (coordinationStore.readSnapshot().lastRecovery?.executionBlocked === true) {
+      const restored = coordinationStore.readSnapshot().lastRecovery;
+      recoverySessions.set(workspaceId, new Set(restored?.quarantinedSessionIds || []));
+      if (restored?.executionBlocked === true) {
         throw Object.assign(new Error('coordination_reconciliation_required'), { code: 'coordination_reconciliation_required' });
       }
       if (continuityVersion !== 1 && Object.values(coordinationStore.read().works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
@@ -144,7 +151,7 @@ export function createProjectAgentHost({
       conversationId,
       inbox: inboxStore,
       coordinationStore: continuityVersion === 1 ? coordinationStore : null,
-      holdsLease: () => recovery.isReady(workspaceId),
+      holdsLease: () => !stoppedWorkspaces.has(workspaceId) && recovery.isReady(workspaceId),
       circuitBreaker: createCircuitBreaker({ rootDir, workspaceId, ...(now ? { now } : {}) }),
       onInputsCompleted: inputs => queue.completeExecution?.(workspaceId, inputs.map(input => input.inputId)),
       executeTurn,
@@ -186,9 +193,10 @@ export function createProjectAgentHost({
     return runner;
   }
 
-  const recovery = createProjectRecovery({ rootDir, holdsLease, ...(now ? { now } : {}), onPhase: onRecoveryPhase, onChange: onRecoveryStatus,
+  const recovery = createProjectRecovery({ rootDir, holdsLease: workspaceId => !stoppedWorkspaces.has(workspaceId) && holdsLease(workspaceId), ...(now ? { now } : {}), onPhase: onRecoveryPhase, onChange: onRecoveryStatus,
     ports: {
       lease(workspaceId) {
+        if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
         if (!holdsLease(workspaceId) && typeof acquireLease === 'function') acquireLease(workspaceId);
         if (holdsLease(workspaceId) !== true) throw new Error('lease_unavailable');
       },
@@ -207,6 +215,7 @@ export function createProjectAgentHost({
   });
 
   async function consumeInputs(workspaceId) {
+    if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
     const consumed = queue.consume(workspaceId);
     if (consumed.skipped) throw new Error(consumed.skipped);
     if (consumed.consumed?.length && typeof onInputsConsumed === 'function') await onInputsConsumed(workspaceId, consumed.consumed);
@@ -237,25 +246,31 @@ export function createProjectAgentHost({
     // Execution/recovery still use holdsLease at their original authority gates.
     const ownedIds = typeof readOwnedWorkspaceIds === 'function' ? new Set(readOwnedWorkspaceIds([...registeredIds])) : null;
     for (const workspaceId of runners.keys()) if (!registeredIds.has(workspaceId) || (ownedIds ? !ownedIds.has(workspaceId) : !holdsLease(workspaceId))) drop(workspaceId);
-    const outcomes = await Promise.all(wanted.map(async workspaceId => {
-      if (!holdsLease(workspaceId) && typeof acquireLease !== 'function') return { workspaceId, skipped: 'not-host' };
-      const recovered = await recovery.recover(workspaceId);
-      if (!recovered.ok) return { workspaceId, ...recovered };
-      try {
-        if (!recovered.reused && typeof activateSessions === 'function') await activateSessions(workspaceId);
-        const conversationId = resolveConversationId(workspaceId), runner = await ensureRunner(workspaceId, conversationId);
-        const consumed = [...(stagedInputs.get(workspaceId) || []), ...await consumeInputs(workspaceId)];
-        stagedInputs.delete(workspaceId);
-        const pending = pendingInputs(workspaceId, conversationId, consumed);
-        const due = armDigest(runner, workspaceId);
-        publishWatch(workspaceId);
-        if (pending.length) await runner.enqueueUserInputs(pending);
-        else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) {
-          await runner.kick();
-        }
-        if (runner.hasContinuation()) scheduleSweepSoon();
-        return { workspaceId, ok: true };
-      } catch (error) { drop(workspaceId); try { recovery.fail(workspaceId, error); } catch { /* Returned failure still identifies the project. */ } return { workspaceId, ok: false, error: error?.message || String(error) }; }
+    const outcomes = await Promise.all(wanted.map(workspaceId => {
+      const pending = (async () => {
+        if (!holdsLease(workspaceId) && typeof acquireLease !== 'function') return { workspaceId, skipped: 'not-host' };
+        const recovered = await recovery.recover(workspaceId);
+        if (!recovered.ok) return { workspaceId, ...recovered };
+        try {
+          if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+          if (!recovered.reused && typeof activateSessions === 'function') await activateSessions(workspaceId);
+          const conversationId = resolveConversationId(workspaceId), runner = await ensureRunner(workspaceId, conversationId);
+          const consumed = [...(stagedInputs.get(workspaceId) || []), ...await consumeInputs(workspaceId)];
+          if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+          stagedInputs.delete(workspaceId);
+          const pending = pendingInputs(workspaceId, conversationId, consumed);
+          const due = armDigest(runner, workspaceId);
+          publishWatch(workspaceId);
+          if (pending.length) await runner.enqueueUserInputs(pending);
+          else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) {
+            await runner.kick();
+          }
+          if (runner.hasContinuation()) scheduleSweepSoon();
+          return { workspaceId, ok: true };
+        } catch (error) { drop(workspaceId); try { recovery.fail(workspaceId, error); } catch { /* Returned failure still identifies the project. */ } return { workspaceId, ok: false, error: error?.message || String(error) }; }
+      })();
+      const flights = syncFlights.get(workspaceId) || new Set(); flights.add(pending); syncFlights.set(workspaceId, flights);
+      return pending.finally(() => { flights.delete(pending); if (!flights.size) syncFlights.delete(workspaceId); });
     }));
     return { workspaces: outcomes.filter(item => item.ok).map(item => item.workspaceId), outcomes };
   }
@@ -418,10 +433,17 @@ export function createProjectAgentHost({
     dispose,
     drain: drop,
     stop(workspaceId) { stoppedWorkspaces.add(workspaceId); drop(workspaceId); },
-    restart(workspaceId) { stoppedWorkspaces.delete(workspaceId); return sync([workspaceId]); },
+    beginMaintenance(workspaceId) { maintenanceWorkspaces.add(workspaceId); stoppedWorkspaces.add(workspaceId); drop(workspaceId); },
+    endMaintenance(workspaceId) { maintenanceWorkspaces.delete(workspaceId); },
+    async waitForIdle(workspaceId) { while (syncFlights.has(workspaceId)) await Promise.allSettled([...syncFlights.get(workspaceId)]); },
+    restart(workspaceId) {
+      if (maintenanceWorkspaces.has(workspaceId)) return Promise.reject(new Error('coordination_maintenance_pending'));
+      stoppedWorkspaces.delete(workspaceId); return sync([workspaceId]);
+    },
     isReady: recovery.isReady,
     recovery,
     runnerFor: (workspaceId) => runners.get(workspaceId) ?? null,
+    sessionHeld: (workspaceId, sessionId) => recoverySessions.get(workspaceId)?.has(sessionId) === true,
     inbox: inboxStore,
     inputQueue: queue,
   };

@@ -40,6 +40,27 @@ function fixture(t, stoppedReason) {
   return { store, handoff, get, answer, calls, own: v => { owned = v; }, discard: v => { discardOk = v; } };
 }
 
+test('historical isolation prevents both automatic merge and explicit old-card repair or discard paths', async t => {
+  const f = fixture(t, 'handoff_confirmation_required');
+  const handoff = createSessionHandoff({ findBySession: f.get, isRecoveryHeld: () => true,
+    goalRunner: { handoffDelegatedPlan() { assert.fail('must not merge old execution'); },
+      discardDelegatedLine() { assert.fail('must preserve old results'); } } });
+  const plan = f.get(); assert.equal(await handoff.afterAcceptance(plan), plan);
+  for (const text of ['合回改动', '让任务自己解决', '放弃这次改动']) {
+    assert.equal((await handoff.answer(f.answer(text))).error, 'coordination_reconciliation_required');
+  }
+});
+
+test('recovery artifact retention survives persisted GoalPlan normalization and reopening', t => {
+  const f = fixture(t), plan = f.get();
+  f.store.revisePlan(plan.planId, { delegationOrigin: { ...plan.delegationOrigin, retainedForRecovery: true,
+    cancellation: { operationId: 'recovery-retain', reason: 'recovery_retained', phase: 'completed',
+      requestedAt: '2026-10-28T00:00:00Z', preserveArtifacts: true } } });
+  const reopened = createGoalPlanStore({ storeDir: f.store.getStoreDir() }).getPlan(plan.planId);
+  assert.equal(reopened.delegationOrigin.retainedForRecovery, true);
+  assert.equal(reopened.delegationOrigin.cancellation.preserveArtifacts, true);
+});
+
 test('acceptance alone does not merge; host confirmation is scoped to current card, workspace and lease', async t => {
   const f = fixture(t);
   const saved = f.store.revisePlan(f.get().planId, { delegationOrigin: { ...f.get().delegationOrigin, handoffAuthorizedAt: null } });

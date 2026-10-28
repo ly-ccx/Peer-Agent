@@ -64,7 +64,8 @@ export function createTuiProjectHost(options: {
   const readMessages = (id: string): any[] => conversations.getPersistedConversationHistory?.(id)?.messages as any[] ?? [];
   const holds = (id: string): boolean => !closed && !admissionClosed && id === selectedId && profiles.read(id)?.status === 'active' && leases.holds(id);
   const scheduler = createExecutionScheduler({ rootDir: runtimeRoot, getConcurrency: () => getSettings().projectAgent?.concurrency } as never);
-  scheduler.configure({ isWorkspaceReady: (id: string) => host?.isReady(id) === true });
+  scheduler.configure({ isWorkspaceReady: (id: string) => host?.isReady(id) === true,
+    isPlanRecoveryHeld: (plan: any) => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const leases = createHostLease({ rootDir: runtimeRoot, hostId: `tui-${randomUUID()}`, surface: 'tui', appVersion: options.appVersion ?? '',
     projectAgentEnabled: () => !closed, botWorkspaceIds: () => selectedId && profiles.read(selectedId)?.status === 'active' ? [selectedId] : [] } as never);
   const executor = createTuiTurnExecutor({ dataHome, getSettings, holdsLease: holds,

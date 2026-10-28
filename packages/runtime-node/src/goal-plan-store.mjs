@@ -1835,6 +1835,7 @@ function normalizeDelegationOrigin(value) {
   if (['disk_space', 'isolation_failed'].includes(value.isolationBlock)) origin.isolationBlock = value.isolationBlock;
   const isolationRetainedAt = toIsoOrNull(value.isolationRetainedAt);
   if (isolationRetainedAt) origin.isolationRetainedAt = isolationRetainedAt;
+  if (value.retainedForRecovery === true) origin.retainedForRecovery = true;
   for (const key of ['handoffAuthorizedAt', 'handoffDeferredAt', 'supersededAt']) {
     const at = toIsoOrNull(value[key]);
     if (at) origin[key] = at;

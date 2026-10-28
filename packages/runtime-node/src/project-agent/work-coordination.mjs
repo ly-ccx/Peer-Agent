@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { reduceCoordinationDecision } from './coordination-kernel.mjs';
 import { applyWorkUpdate } from './work-delta.mjs';
+import { admitHistoryResumption, retainHistoricalWork, retainHistoricalSession } from './history-resumption.mjs';
 /** Durable event transfer and handling are different receipts. Replay is deterministic. */
 export function reduceCoordination(state, entry) {
   if (entry.schemaVersion !== undefined && entry.schemaVersion !== 1) throw new Error('coordination_schema_unsupported');
@@ -59,8 +60,14 @@ export function reduceCoordination(state, entry) {
       throw new Error('coordination_repair_state_invalid');
     next = { ...structuredClone(entry.state), revision: entry.revision,
       lastRecovery: { ...structuredClone(entry.recovery), at: entry.at } };
+  } else if (entry.kind === 'history_resume_admitted') {
+    next = { ...admitHistoryResumption(previous, entry), revision: entry.revision };
+  } else if (entry.kind === 'history_work_retained') {
+    next = { ...retainHistoricalWork(previous, entry), revision: entry.revision };
+  } else if (entry.kind === 'history_session_retained') {
+    next = { ...retainHistoricalSession(previous, entry), revision: entry.revision };
   } else if (entry.kind === 'journal_recovered') {
-    next.lastRecovery = { at: entry.at, backup: entry.backup };
+    next.lastRecovery = { ...previous.lastRecovery, at: entry.at, backup: entry.backup };
   } else throw new Error('unknown_coordination_event');
   return next;
 }
