@@ -504,7 +504,10 @@ try {
   if (startupOnly) {
     await checkStartupSurface({ page, until, report, captureDirectory: root, commandFile: startupCommand });
   } else {
-  await page.locator('.bot-shell').waitFor();
+  // Cold recovery prepares 200 isolated stores, including their durable writer
+  // fences. Keep this startup bound separate from interaction action timeouts.
+  await page.locator('.bot-shell').waitFor({ timeout: 120000 });
+  report.shellReadyMs = Date.now() - Date.parse(report.startedAt);
   await page.bringToFront();
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
