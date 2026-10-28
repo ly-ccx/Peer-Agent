@@ -80,10 +80,11 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         blockedCode: 'RECOVERY_CHECKPOINT_UNAVAILABLE' },
       waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
   }
-  function pendingFrom(works) {
+  function pendingFrom(snapshot) {
+    const works = Object.values(snapshot.works);
     // An owned batch continues through its durable job, never a duplicate wake.
     const owned = new Set(works.flatMap(work => [...(work.pendingEventIds || []), ...(work.consumedEventIds || [])]));
-    const history = readSnapshot().lastRecovery;
+    const history = snapshot.lastRecovery;
     return store.pendingEvents().filter(event => !ROUTINE.has(event.kind) && !owned.has(event.eventId)
       && !history?.quarantinedSessionIds?.includes(event.sessionId) && !history?.quarantinedEventIds?.includes(event.eventId)
       && !works.some(work => historyExecutionHeld(work) && work.sessionIds?.includes(event.sessionId))
@@ -142,7 +143,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         return { ...checkpoint.job, workId: work.workId, continuation: true,
           ...(work.state === 'retry_wait' ? { recoveryReservationId: work.recovery.reservationId, recoveryRevision: work.revision } : {}) };
       },
-      pending: () => pendingFrom(Object.values(decision().works)),
+      pending: () => pendingFrom(decision()),
     };
   }
   return {
@@ -168,7 +169,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     pending() {
       if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows });
-      return pendingFrom(Object.values(readSnapshot().works));
+      return pendingFrom(readSnapshot());
     },
     ownedInputIds() { const state = readSnapshot(); return [...new Set([...Object.values(state.works).flatMap(work => work.anchorInputIds || []), ...(state.lastRecovery?.quarantinedInputIds || [])])]; },
     ownsInput(inputId) { return this.ownedInputIds().includes(inputId); },

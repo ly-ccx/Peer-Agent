@@ -2,8 +2,8 @@ import { historyExecutionHeld } from './history-resumption.mjs';
 /** Recover each persisted step. append must be idempotent by message id. Acceptance remains a host port. */
 export function createReplyDelivery({ store, readMessages, appendMessage, accept = null, validate = () => true, onRecovered = null, onInvalidated = null }) {
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
-  const held = message => { const state = readSnapshot(); return historyExecutionHeld(state.works[message.meta?.workId])
-    || state.lastRecovery?.quarantinedDeliveryIds?.includes(message.id); };
+  const held = (message, state = readSnapshot()) => historyExecutionHeld(state.works[message.meta?.workId])
+    || state.lastRecovery?.quarantinedDeliveryIds?.includes(message.id);
   async function deliver(message) {
     store.assertOwner();
     const saved = readSnapshot().deliveries[message.id];
@@ -23,14 +23,16 @@ export function createReplyDelivery({ store, readMessages, appendMessage, accept
     deliver,
     prepare(messages) {
       store.assertOwner();
-      if (messages.some(held)) throw new Error('coordination_reconciliation_required');
+      const snapshot = readSnapshot();
+      if (messages.some(message => held(message, snapshot))) throw new Error('coordination_reconciliation_required');
       if (!messages.every(validate)) throw new Error('reply_source_changed');
       for (const message of messages) if (!readSnapshot().deliveries[message.id]) store.append({ kind: 'reply_prepared', message });
     },
     async recover() {
-      for (const row of Object.values(readSnapshot().deliveries)) {
+      const snapshot = readSnapshot();
+      for (const row of Object.values(snapshot.deliveries)) {
         const message = structuredClone(row.message);
-        if (held(message)) continue;
+        if (held(message, snapshot)) continue;
         // A crash can occur after delivery but before the work/handled receipts.
         if (row.state === 'delivered') { await onRecovered?.(message); continue; }
         if (row.state !== 'prepared') continue;
@@ -43,6 +45,6 @@ export function createReplyDelivery({ store, readMessages, appendMessage, accept
         await onRecovered?.(message);
       }
     },
-    pending: () => Object.values(readSnapshot().deliveries).some(row => row.state === 'prepared' && !held(row.message)),
+    pending: () => { const snapshot = readSnapshot(); return Object.values(snapshot.deliveries).some(row => row.state === 'prepared' && !held(row.message, snapshot)); },
   };
 }
