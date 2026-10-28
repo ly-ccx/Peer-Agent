@@ -55,7 +55,7 @@ function SkillSection({
         <span>{skills.length}</span>
       </header>
       {skills.length === 0 ? (
-        <div className="skill-scope-empty">当前工作空间没有项目级 Skill</div>
+        <div className="skill-scope-empty">当前机器人没有项目级 Skill</div>
       ) : (
       <div className="skill-grid">
         {skills.map((skill) => (
@@ -216,7 +216,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
           {workspaceGroups.map((workspace) => (
             <SkillSection
               key={workspace.path}
-              title={`工作空间 · ${workspace.name || workspace.path.split('/').filter(Boolean).at(-1) || workspace.path}`}
+              title={`机器人 · ${workspace.name || workspace.path.split('/').filter(Boolean).at(-1) || workspace.path}`}
               description={workspace.path}
               skills={workspace.skills}
               onSelect={setSelectedSkill}
@@ -225,7 +225,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
           ))}
           <SkillSection
             title="全局"
-            description="安装在用户目录中，可挂载到任意工作空间"
+            description="安装在用户目录中，可挂载到任意机器人"
             skills={globalSkills}
             onSelect={setSelectedSkill}
             onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled, null); }}

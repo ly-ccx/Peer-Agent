@@ -8,7 +8,7 @@ import { Switch } from '../../ui/boolean-controls';
 function ScopeBadge({ scope }: { readonly scope: SkillSummary['scope'] }) {
   return (
     <span className={`skill-scope-badge skill-scope-badge--${scope}`}>
-      {scope === 'workspace' ? '工作空间' : '全局'}
+      {scope === 'workspace' ? '机器人' : '全局'}
     </span>
   );
 }
@@ -91,7 +91,7 @@ export function SkillDetailDialog({
             <Switch
               checked={current.enabled}
               disabled={toggling || uninstalling}
-              aria-label="挂载到当前工作空间"
+              aria-label="挂载到当前机器人"
               onClick={(event) => event.stopPropagation()}
               onCheckedChange={async (enabled) => {
                 setToggling(true);
@@ -107,7 +107,7 @@ export function SkillDetailDialog({
           </header>
 
           <div className="skill-detail-meta">
-            <span>{current.scope === 'workspace' ? '仅当前工作空间可用' : '所有工作空间均可挂载'}</span>
+            <span>{current.scope === 'workspace' ? '仅当前机器人可用' : '所有机器人均可挂载'}</span>
             {detail?.sourcePath ? <code>{detail.sourcePath}</code> : null}
           </div>
 
@@ -129,7 +129,7 @@ export function SkillDetailDialog({
                 <div className="skill-uninstall-confirm" role="group" aria-label="确认卸载">
                   <p>
                     {current.scope === 'workspace'
-                      ? `确认卸载「${current.name}」？当前工作区中的安装目录会被永久删除，且无法撤销。`
+                      ? `确认卸载「${current.name}」？当前机器人中的安装目录会被永久删除，且无法撤销。`
                       : `确认卸载「${current.name}」？用户安装目录会被删除；若是借用技能，仅取消本地软链。`}
                   </p>
                   <div className="skill-uninstall-actions">
