@@ -25,7 +25,7 @@ import {
   DESKTOP_PREVIEW_CAPABILITY,
   isAcceptanceClosePatch,
 } from '@peer-agent/protocol';
-import { normalizeVisualRepair } from './goal-visual-repair.mjs';
+import { normalizeVisualRepair, hasActiveGoalRepair } from './goal-visual-repair.mjs';
 import { projectUiCompletion } from './goal-ui-completion.mjs';
 import { classifyUiDeliveryIntake } from './goal-intake-ui-delivery.mjs';
 
@@ -2364,7 +2364,8 @@ export function createGoalPlanStore({
     const normalized = normalizePlan(overlay);
     const next = guardUiCompletion({
       ...normalized,
-      status: derivePlanStatus(normalized.status, normalized.tasks),
+      status: hasActiveGoalRepair(normalized) && derivePlanStatus(normalized.status, normalized.tasks) === TERMINAL_OK
+        ? 'executing' : derivePlanStatus(normalized.status, normalized.tasks),
       progress: aggregateProgress(normalized.tasks),
     });
     writeJsonAtomic(planFile(next.planId), next);
@@ -2691,12 +2692,10 @@ export function createGoalPlanStore({
     // pending 未开工不算继续执行。
     const verificationBlocked = normalized.runner?.status === 'blocked'
       && normalized.runner?.intent === 'verify';
-    const visualRepairOpen = Boolean(normalized.runner?.visualRepair)
-      && normalized.runner?.status === 'running'
-      && normalized.runner?.phase === 'repair';
+    const repairOpen = hasActiveGoalRepair(normalized);
     const keepLiveInterruption = hasUnconsumedInterruption
       && (derivedStatus !== TERMINAL_OK || prevStatus === 'interrupted');
-    const candidateStatus = (verificationBlocked || visualRepairOpen) && derivedStatus === TERMINAL_OK
+    const candidateStatus = (verificationBlocked || repairOpen) && derivedStatus === TERMINAL_OK
       ? 'executing'
       : keepLiveInterruption
         ? (workContinues ? 'executing' : 'interrupted')
@@ -3608,8 +3607,7 @@ export function createGoalPlanStore({
       const normalized = normalizePlan(nextPlan);
       const next = guardUiCompletion({
         ...normalized,
-        status: (nextRunner?.visualRepair && nextRunner.status === 'running' && nextRunner.phase === 'repair'
-          && derivePlanStatus(normalized.status, normalized.tasks) === TERMINAL_OK)
+        status: (hasActiveGoalRepair(normalized) && derivePlanStatus(normalized.status, normalized.tasks) === TERMINAL_OK)
           ? 'executing'
           : derivePlanStatus(normalized.status, normalized.tasks),
         progress: aggregateProgress(normalized.tasks),
