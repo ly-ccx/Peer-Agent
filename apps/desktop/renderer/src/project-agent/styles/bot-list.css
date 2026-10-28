@@ -33,6 +33,7 @@
 .bot-app-menu,
 .bot-column-footer,
 .bot-new,
+.bot-upgrade,
 .bot-upgrade-banner,
 .bot-column-resizer {
   -webkit-app-region: no-drag;
@@ -51,8 +52,64 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.bot-brand-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  gap: 1px;
+}
+
+.bot-brand-name {
+  overflow: hidden;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-version-subtitle {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--graphite-fade);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.bot-version-subtitle .sidebar-version-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-version-subtitle .sidebar-version-stage,
+.bot-version-subtitle .sidebar-version-dev-tag {
+  flex: none;
+}
+
+.bot-version-subtitle .sidebar-version-stage {
+  color: var(--graphite-soft);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.bot-version-subtitle .sidebar-version-dev-tag {
+  height: 13px;
+  font-size: 8px;
 }
 
 .bot-brand-mark {
@@ -122,6 +179,82 @@
 }
 
 .bot-new:active {
+  transform: scale(0.96);
+}
+
+.bot-upgrade {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  color: var(--azure-seal);
+  background: var(--chrome-canvas);
+  border: 1px solid color-mix(in srgb, var(--azure-seal) 35%, var(--chrome-hairline));
+  border-radius: var(--ui-radius-circle);
+  appearance: none;
+  cursor: pointer;
+  transform-origin: center;
+  transition:
+    color var(--za-motion-fast) var(--za-ease-standard),
+    background var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard),
+    transform var(--za-motion-medium) var(--za-ease-standard);
+}
+
+.bot-upgrade:hover {
+  background: var(--chrome-hover);
+}
+
+.bot-upgrade:active {
+  transform: scale(0.96);
+}
+
+.bot-upgrade.is-progress,
+.bot-upgrade.is-progress:hover {
+  color: var(--graphite-base);
+  background:
+    radial-gradient(circle at center, var(--chrome-raised) 0 11px, transparent 11.5px),
+    conic-gradient(from -90deg, var(--azure-seal) var(--progress, 0%), color-mix(in srgb, var(--graphite-base) 16%, var(--chrome-raised)) 0);
+  border-color: transparent;
+  transform: scale(0.9);
+}
+
+.bot-upgrade.is-progress:active {
+  transform: scale(0.84);
+}
+
+.bot-upgrade-value {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.bot-upgrade-value[data-digits='3'] {
+  font-size: 8px;
+}
+
+.bot-upgrade.is-install,
+.bot-upgrade.is-install:hover {
+  width: auto;
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--azure-seal);
+  color: var(--za-accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: none;
+}
+
+.bot-upgrade.is-install:active {
   transform: scale(0.96);
 }
 
@@ -592,104 +725,6 @@
   padding: 12px 14px 0;
 }
 
-.bot-column-footer .sidebar-version-badge {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  color: var(--graphite-fade);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.bot-column-footer .sidebar-version-text-btn {
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 5px;
-  gap: 6px;
-  border-radius: var(--ui-radius-control);
-  font: inherit;
-}
-
-.bot-column-footer .sidebar-version-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bot-column-footer .sidebar-version-stage {
-  flex: none;
-  padding: 3px 5px;
-  border-radius: var(--ui-radius-chip);
-  background: var(--chrome-hover);
-  color: var(--graphite-soft);
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-}
-
-.bot-column-footer .sidebar-version-text-btn:hover,
-.bot-column-footer .sidebar-version-badge.has-update .sidebar-version-text-btn {
-  color: var(--graphite-soft);
-}
-
-.bot-column-footer .sidebar-version-update-icon {
-  color: var(--azure-seal);
-  animation: none;
-}
-
-.bot-column-footer .sidebar-version-progress {
-  min-height: 14px;
-  gap: 5px;
-  padding-inline: 5px;
-  color: var(--graphite-soft);
-  font-size: 10px;
-}
-
-.bot-column-footer .sidebar-version-badge.is-progress { display: grid; gap: 0; }
-.bot-column-footer .sidebar-version-progress-track {
-  flex: 1;
-  min-width: 36px;
-  height: 3px;
-  overflow: hidden;
-  background: var(--chrome-hairline);
-  border-radius: var(--ui-radius-pill);
-}
-.bot-column-footer .sidebar-version-progress-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: var(--azure-seal);
-  transform-origin: left;
-  transform: scaleX(var(--progress-ratio, 0));
-  transition: transform var(--za-motion-medium) var(--za-ease-standard);
-}
-.bot-column-footer .sidebar-version-progress-text { min-width: 24px; text-align: right; }
-
-.bot-column-footer .sidebar-version-progress-ring {
-  width: 12px;
-  height: 12px;
-  border-radius: var(--ui-radius-circle);
-  background: conic-gradient(var(--azure-seal) var(--progress), var(--chrome-hairline) 0);
-  mask-image: radial-gradient(circle, transparent 48%, black 54%);
-}
-
-.bot-column-footer .sidebar-version-install-btn {
-  min-height: 28px;
-  padding: 0 8px;
-  border-radius: var(--ui-radius-control);
-  background: var(--graphite-base);
-  color: var(--chrome-canvas);
-  animation: none;
-  font-family: inherit;
-}
-
-.bot-column-footer .sidebar-version-text-btn:focus-visible,
-.bot-column-footer .sidebar-version-install-btn:focus-visible,
 .bot-app-menu-button:focus-visible,
 .bot-app-menu-menu button:focus-visible {
   outline: 2px solid var(--azure-seal);
@@ -831,6 +866,7 @@
 .bot-column-resizer:focus-visible,
 .bot-row:focus-visible,
 .bot-new:focus-visible,
+.bot-upgrade:focus-visible,
 .bot-need-filter:focus-visible {
   outline: 2px solid var(--azure-seal);
   outline-offset: 1px;
