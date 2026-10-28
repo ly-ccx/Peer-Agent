@@ -5,6 +5,7 @@ import { PeerIcon } from '../../ui/icons';
 import { useResourceRead } from '../../ui/resources/useResourceState';
 import { ResourceFeedback } from '../../ui/resources/ResourceFeedback';
 import { evidenceLabel, evidenceTime } from '../drawer/EvidenceView';
+import '../styles/bot-evidence-list.css';
 
 export function EvidenceList({ refs, i18n, onOpen }: {
   readonly refs: readonly string[]; readonly i18n: I18nRuntime; readonly onOpen?: (ref: string) => void;
@@ -26,7 +27,7 @@ export function EvidenceList({ refs, i18n, onOpen }: {
     return collected;
   });
   const byRef = new Map((sources.value ?? []).map(source => [source.evidenceRef, source]));
-  return <section aria-label={i18n.t('projectAgent.evidence.title')}>
+  return <section className="bot-evidence-section" aria-label={i18n.t('projectAgent.evidence.title')}>
     <h3>{i18n.t('projectAgent.evidence.title')}</h3>
     <p className="bot-evidence-help">{i18n.t('projectAgent.evidence.listHelp')}</p>
     <ResourceFeedback i18n={i18n} loading={sources.loading} error={sources.error} onReload={sources.reload} />
