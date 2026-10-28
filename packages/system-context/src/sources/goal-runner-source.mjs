@@ -84,7 +84,7 @@ function summarizeCriteria(rawCriteria, rawResults, limit) {
       description = sanitizeRuntimeText(raw).trim();
     } else if (raw && typeof raw === 'object') {
       id = asString(raw.id) || null;
-      kind = AUTO_CRITERION_KINDS_SET.has(asString(raw.kind)) || asString(raw.kind) === 'manual'
+      kind = AUTO_CRITERION_KINDS_SET.has(asString(raw.kind)) || ['manual', 'model_review'].includes(asString(raw.kind))
         ? asString(raw.kind)
         : 'manual';
       description = sanitizeRuntimeText(raw.description || raw.command || raw.path).trim();
@@ -95,7 +95,7 @@ function summarizeCriteria(rawCriteria, rawResults, limit) {
       const result = id ? resultById.get(id) : null;
       verify = !result ? 'pending' : result.passed === true ? 'passed' : 'failed';
     } else {
-      verify = 'manual';
+      verify = kind === 'model_review' ? 'host_review' : 'manual';
     }
     const fields = {};
     const omittedFields = [];
@@ -224,7 +224,15 @@ function normalizePlan(plan) {
                     }
                   : { kind: 'plan', taskId: null, criterionId: null },
                 evidenceCount: Array.isArray(run?.evidenceRefs) ? run.evidenceRefs.length : 0,
-                summary: sanitizeRuntimeText(run?.summary).trim(),
+                summary: sanitizeRuntimeText(run?.summary).trim().slice(0, 600),
+                issues: [...(Array.isArray(run?.report?.failedCriteria) ? run.report.failedCriteria : []),
+                  ...(Array.isArray(run?.report?.missingEvidence) ? run.report.missingEvidence : [])]
+                  .slice(0, 4).map(issue => ({
+                    target: sanitizeRuntimeText(issue?.criterionId || issue?.taskId).slice(0, 200),
+                    reason: sanitizeRuntimeText(issue?.reason).slice(0, 400),
+                    evidenceRefs: asStringArray(issue?.evidenceRefs, 3).map(ref => ref.slice(0, 240)),
+                  })),
+                recommendedNextAction: sanitizeRuntimeText(run?.report?.recommendedNextAction).slice(0, 400),
               }))
             : [],
         }
@@ -313,6 +321,10 @@ function formatFacts(plan, options = {}) {
             : 'plan';
         const summary = run.summary ? ` — ${run.summary}` : '';
         lines.push(`- ${run.verifierRunId ?? '(no-id)'} ${target} ${run.status} (evidenceRefs=${run.evidenceCount})${summary}`);
+        for (const issue of run.issues) {
+          lines.push(`  reported gap (${issue.target || target}): ${issue.reason}; evidenceRefs=${JSON.stringify(issue.evidenceRefs)}`);
+        }
+        if (run.recommendedNextAction) lines.push(`  verifier suggested next action (unverified): ${run.recommendedNextAction}`);
       }
     }
   }
