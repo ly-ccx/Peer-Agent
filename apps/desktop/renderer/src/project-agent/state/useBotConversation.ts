@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { useInputRecovery } from './useInputRecovery';
-import { projectInputWasReceived, type ProjectAgentSubmitInputResult } from '@peer-agent/protocol';
+import { projectBotRecoveryStatus, projectInputWasReceived, type ProjectAgentSubmitInputResult } from '@peer-agent/protocol';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity, activityFromConversationSnapshot } from './botActivityState';
+import { recoveryConversationRows } from './recoveryConversationRows.ts';
 import { continuousReplyRows, type AwaitingBotInput } from './botReplyContinuity';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
@@ -70,6 +71,7 @@ export function useBotConversation(workspaceId: string) {
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
   const [cardsError, setCardsError] = useState(false);
+  const [runtimeRecovery, setRuntimeRecovery] = useState<import('@peer-agent/protocol').BotRecoveryStatus | null>(null);
   const [refreshError, setRefreshError] = useState(false);
   const [catchUpRequired, setCatchUpRequired] = useState(false);
   const [awaitingInputs, setAwaitingInputs] = useState<readonly AwaitingBotInput[]>([]);
@@ -101,6 +103,7 @@ export function useBotConversation(workspaceId: string) {
     setHasOlder(false);
     setOlderError(false);
     setStatus('loading');
+    setRuntimeRecovery(null);
     setCards([]); setCardsError(false); setRefreshError(false); setCatchUpRequired(false);
     setActivity(null); setStopping(false); setStopError(false);
     replyIdentitiesRef.current = new Map();
@@ -108,6 +111,7 @@ export function useBotConversation(workspaceId: string) {
       read: async params => {
         const revision = activityEventRef.current;
         const result = await clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true, view: 'interactions' });
+        if (generationRef.current === ticket) setRuntimeRecovery(result.recovery ?? null);
         // Carry the read fence to publication; never clear live state before its messages.
         return { ...result, activityRevision: revision };
       },
@@ -128,6 +132,7 @@ export function useBotConversation(workspaceId: string) {
       try {
         const result = await clientApi.projectAgentReadConversation({ workspaceId, view: 'cards' });
         if (generationRef.current !== ticket) return;
+        setRuntimeRecovery(result.recovery ?? (!result.ok && result.code?.startsWith('coordination_') ? projectBotRecoveryStatus(result.code) : null));
         if (!result.ok) { setCardsError(true); return; }
         setCards(result.cards ?? []); setCardsError(false);
       } catch { if (generationRef.current === ticket) setCardsError(true); }
@@ -248,11 +253,11 @@ export function useBotConversation(workspaceId: string) {
     status,
     recovery,
     reload: () => refreshRef.current?.(),
-    cardsError, refreshError, catchUpRequired,
+    runtimeRecovery, cardsError, refreshError, catchUpRequired,
     messages: shown,
     rows,
-    viewRows,
-    generating: isActivityRunning(activity),
+    viewRows: recoveryConversationRows(viewRows, runtimeRecovery),
+    generating: !runtimeRecovery && isActivityRunning(activity),
     activeModelSelection: isActivityRunning(activity) ? activity?.modelSelection : undefined,
     stopping, stopError, stop, followRequestId,
     hasOlder,

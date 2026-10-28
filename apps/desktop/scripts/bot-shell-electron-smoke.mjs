@@ -239,7 +239,7 @@ writeFileSync(main, isolatedMain);
 // Observe production pagination without changing its results or admitting a new IPC.
 const applicationService = path.join(isolation.launch.desktopDir, 'electron/main/project-agent/project-agent-application-service.mjs');
 const serviceText = readFileSync(applicationService, 'utf8');
-const readSeam = 'const decorate = page => {\n      if (!page?.ok) return page;';
+const readSeam = '      if (!page?.ok) return { ...page, recovery };';
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
 let observedService = serviceText.replace('function readConversation(payload = {}) {', `function readConversation(payload = {}) {
     if(payload.workspaceId===globalThis.rcBotWorkWorkspace && (globalThis.rcInteractionReadMode==='all'||globalThis.rcInteractionReadMode==='cards'&&payload.view==='cards'))return {ok:false,code:'CONTROLLED_READ_FAILURE'};`).replace(readSeam, `${readSeam}\n  const result = page;
@@ -504,7 +504,10 @@ try {
   if (startupOnly) {
     await checkStartupSurface({ page, until, report, captureDirectory: root, commandFile: startupCommand });
   } else {
-  await page.locator('.bot-shell').waitFor();
+  // Cold recovery prepares 200 isolated stores, including their durable writer
+  // fences. Keep this startup bound separate from interaction action timeouts.
+  await page.locator('.bot-shell').waitFor({ timeout: 120000 });
+  report.shellReadyMs = Date.now() - Date.parse(report.startedAt);
   await page.bringToFront();
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });

@@ -432,6 +432,7 @@ export function registerDesktopProjectAgent({
     onMaintenance: info => {
       if (ownsProject(info.workspaceId) && memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(info.workspaceId) })) memoryMaintenance.runDue(info);
     },
+    onRecoveryStatus: workspaceId => broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] }),
     onStatus: (workspaceId) => {
       if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
     },
@@ -496,6 +497,7 @@ export function registerDesktopProjectAgent({
     listModels,
     readModelRouting: () => readRuntimePolicy()?.modelRouting,
     readActivity: workspaceId => host.runnerFor(workspaceId)?.activity() || null,
+    readRecovery: workspaceId => host.recovery.status(workspaceId),
     stopResponseTurn: ({ workspaceId, turnId }) => {
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
       return host.runnerFor(workspaceId)?.stopResponse(turnId) || { ok: false, code: 'STALE_TURN' };

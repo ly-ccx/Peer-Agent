@@ -928,3 +928,20 @@ test('explicit resource feedback follows the existing input queue without materi
   const result = await service.submitInput({ workspaceId: 'w', inputId: 'i', text: 'Explain this', resourceFeedback });
   assert.equal(result.ok, true); assert.equal(submitted.text, 'Explain this'); assert.deepEqual(submitted.resourceFeedback, resourceFeedback);
 });
+
+test('conversation reads expose recovery failure independently of readable messages and cards', async () => {
+  let status = { status: 'failed', phase: 'inputs', error: 'coordination_legacy_changed' };
+  const service = createProjectAgentApplicationService({ enabled: () => true, schedule: () => 1,
+    directory: { readInteractions: () => ({ ok: true, messages: [{ id: 'existing', content: 'preserved' }] }),
+      readConversation: () => ({ ok: false, code: 'coordination_legacy_changed', cards: [] }) },
+    readRecovery: () => status });
+  const messages = service.readConversation({ workspaceId: 'w', view: 'interactions' });
+  assert.equal(messages.ok, true); assert.equal(messages.messages[0].id, 'existing');
+  assert.equal(messages.recovery.code, 'coordination_legacy_changed'); assert.equal(messages.recovery.retryable, false);
+  assert.equal(service.readConversation({ workspaceId: 'w', view: 'cards' }).recovery.reason, 'history_conflict');
+  status = { status: 'failed', phase: 'inputs', error: 'coordination_reconciliation_required' };
+  assert.equal(service.readConversation({ workspaceId: 'w', view: 'interactions' }).recovery.reason, 'reconciliation_required');
+  status = { status: 'ready' };
+  assert.equal(service.readConversation({ workspaceId: 'w', view: 'interactions' }).recovery, null);
+  service.dispose?.();
+});
