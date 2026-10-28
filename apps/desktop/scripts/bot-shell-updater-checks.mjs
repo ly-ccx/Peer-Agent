@@ -91,8 +91,13 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
   await emitUpdaterEvent({ type: 'update-available', version: '0.1.0-rc.99' });
   const upgrade = page.locator('.bot-column-top .bot-upgrade');
   await upgrade.waitFor();
-  const upgradeBox = await upgrade.boundingBox();
-  const plusBox = await page.locator('.bot-new').boundingBox();
+  const { upgradeBox, plusBox } = await page.evaluate(() => {
+    const box = selector => {
+      const { left, right, y, height } = document.querySelector(selector).getBoundingClientRect();
+      return { left, right, y, height };
+    };
+    return { upgradeBox: box('.bot-column-top .bot-upgrade'), plusBox: box('.bot-new') };
+  });
   assert.ok(upgradeBox.right <= plusBox.left + 1 && plusBox.left - upgradeBox.right <= 16, 'upgrade control sits immediately left of new');
   assert.ok(Math.abs((upgradeBox.y + upgradeBox.height / 2) - (plusBox.y + plusBox.height / 2)) <= 2, 'upgrade control aligns with new');
   await upgrade.click();
