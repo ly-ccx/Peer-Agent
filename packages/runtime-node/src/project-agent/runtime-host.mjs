@@ -57,6 +57,7 @@ export function createProjectAgentHost({
   continuityVersion = 1,
   readLeaseEpoch = null,
   onRecoveryPhase = null,
+  onRecoveryStatus = null,
 } = {}) {
   if (typeof executeTurn !== 'function') {
     throw new TypeError('ProjectAgentHost requires executeTurn');
@@ -119,7 +120,7 @@ export function createProjectAgentHost({
     const existing = runners.get(workspaceId);
     if (existing && existing.conversationId === conversationId) return existing;
     if (existing) drop(workspaceId);
-    const coordinationStore = createWorkCoordinationStore({ rootDir, workspaceId, formatVersion: 2,
+    const coordinationStore = createWorkCoordinationStore({ rootDir, workspaceId, formatVersion: 2, fenceLegacyWrites: true,
       holdsLease: () => holdsLease(workspaceId),
       leaseEpoch: () => {
         if (readLeaseEpoch) return readLeaseEpoch(workspaceId);
@@ -128,10 +129,15 @@ export function createProjectAgentHost({
         return `${lease.hostId}:${lease.acquiredAt}`;
       },
     });
-    await coordinationStore.prepare();
-    if (holdsLease(workspaceId) !== true) { coordinationStore.close(); throw new Error('coordination_lease_lost'); }
-    coordinationStore.recover();
-    if (continuityVersion !== 1 && Object.values(coordinationStore.read().works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
+    try {
+      await coordinationStore.prepare();
+      if (holdsLease(workspaceId) !== true) { coordinationStore.close(); throw new Error('coordination_lease_lost'); }
+      coordinationStore.recover();
+      if (coordinationStore.readSnapshot().lastRecovery?.executionBlocked === true) {
+        throw Object.assign(new Error('coordination_reconciliation_required'), { code: 'coordination_reconciliation_required' });
+      }
+      if (continuityVersion !== 1 && Object.values(coordinationStore.read().works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
+    } catch (error) { coordinationStore.close(); throw error; }
     const unregisterBudget = registerWorkBudget(workspaceId, coordinationStore, readSettings?.()?.projectAgent?.executionBudget);
     const runner = createProjectAgentRunner({
       workspaceId,
@@ -180,7 +186,7 @@ export function createProjectAgentHost({
     return runner;
   }
 
-  const recovery = createProjectRecovery({ rootDir, holdsLease, ...(now ? { now } : {}), onPhase: onRecoveryPhase,
+  const recovery = createProjectRecovery({ rootDir, holdsLease, ...(now ? { now } : {}), onPhase: onRecoveryPhase, onChange: onRecoveryStatus,
     ports: {
       lease(workspaceId) {
         if (!holdsLease(workspaceId) && typeof acquireLease === 'function') acquireLease(workspaceId);

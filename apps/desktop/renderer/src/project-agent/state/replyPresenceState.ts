@@ -11,6 +11,8 @@ interface ReplyPresenceView {
 
 /** Receipt, activity and delivery are distinct facts. Time alone cannot change their meaning. */
 export function replyPresenceState(reply: BotReplyRow, i18n: I18nRuntime): ReplyPresenceView {
+  // The shared recovery banner owns this blocked state. Retain process facts without a stale spinner.
+  if (reply.recovery) return { label: null, busy: false, refresh: false };
   const activity = reply.activity;
   const running = isActivityRunning(activity ?? null);
   if (reply.message && !running) return { label: null, busy: false, refresh: false };

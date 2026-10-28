@@ -19,7 +19,7 @@ import {
   projectClassicGoals,
   projectHistory,
 } from '@peer-agent/runtime-node';
-import { projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import { projectBotRecoveryStatus, projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { projectBotModelViews } from './model-controls.mjs';
 import { profilePolicyPatch } from './profile-policy.mjs';
@@ -96,6 +96,7 @@ export function createProjectAgentApplicationService({
   readModelRouting = () => undefined,
   retryTurn = null,
   readActivity = () => null,
+  readRecovery = () => null,
   stopResponseTurn = null,
   requestTakeover = null,
   diagnostics = null,
@@ -348,9 +349,12 @@ export function createProjectAgentApplicationService({
       : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
         ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
     const decorate = page => {
-      if (!page?.ok) return page;
-      try { return { ...page, activity: readActivity(payload.workspaceId) }; }
-      catch { return { ...page, activity: null }; }
+      const status = readRecovery(payload.workspaceId);
+      const recovery = status?.status === 'failed' ? projectBotRecoveryStatus(status.error, status.phase)
+        : !page?.ok && page?.code?.startsWith('coordination_') ? projectBotRecoveryStatus(page.code) : null;
+      if (!page?.ok) return { ...page, recovery };
+      try { return { ...page, recovery, activity: readActivity(payload.workspaceId) }; }
+      catch { return { ...page, recovery, activity: null }; }
     };
     return result && typeof result.then === 'function' ? result.then(decorate) : decorate(result);
   }

@@ -16,6 +16,8 @@ export interface BotReplyRow {
   readonly message?: BotChatMessage;
   readonly activity?: ProjectAgentActivity;
   readonly stopping?: boolean;
+  /** Authoritative runtime recovery feedback, projected for display only. */
+  readonly recovery?: import('@peer-agent/protocol').BotRecoveryStatus;
   readonly pending?: { readonly since: string; readonly sending: boolean; readonly restored: boolean; readonly deliveryIssue?: boolean };
 }
 export type BotConversationViewRow = ConversationRow | BotReplyRow;

@@ -140,13 +140,19 @@ export function BotConversation({
         disclosure={detailsDisclosure}
         relatedTurns={relatedTurns} onOpenRelatedReply={id => onInspect?.({ replyId: id, evidence: null, rounds: null })}
         onOpenEvidence={openEvidence} onOpenWork={onLocateSession} />, replyDetailsTarget) : null}
-      {conversation.status === 'ready' && (conversation.cardsError || conversation.refreshError || conversation.catchUpRequired) ? <div className="bot-thread-feedback" role="status">
+      {conversation.status === 'ready' && (conversation.runtimeRecovery || conversation.cardsError || conversation.refreshError || conversation.catchUpRequired) ? <div className="bot-thread-feedback" role="status">
         <div>
           {conversation.catchUpRequired ? <p>{i18n.t('resources.catchUp')}</p> : null}
-          {conversation.cardsError ? <p>{i18n.t('projectAgent.chat.cardsUnavailable')}</p> : null}
+          {conversation.runtimeRecovery ? <>
+            <p>{i18n.t(conversation.runtimeRecovery.reason === 'history_conflict' ? 'projectAgent.chat.recoveryConflict'
+              : conversation.runtimeRecovery.reason === 'reconciliation_required' ? 'projectAgent.chat.recoveryReconcile' : 'projectAgent.chat.recoveryBlocked')}</p>
+            <details><summary>{i18n.t('projectAgent.chat.recoveryDiagnostics')}<PeerIcon name="chevronDown" size={12} /></summary>
+              <p><code>{conversation.runtimeRecovery.code}</code> · {conversation.runtimeRecovery.phase}</p>
+            </details>
+          </> : conversation.cardsError ? <p>{i18n.t('projectAgent.chat.cardsUnavailable')}</p> : null}
           {conversation.refreshError && conversation.status === 'ready' ? <p>{i18n.t('projectAgent.chat.refreshFailed')}</p> : null}
         </div>
-        <button type="button" onClick={conversation.reload}>{i18n.t(conversation.catchUpRequired ? 'resources.continueRead' : 'projectAgent.history.retry')}</button>
+        {conversation.catchUpRequired || !conversation.runtimeRecovery || conversation.runtimeRecovery.retryable ? <button type="button" onClick={conversation.reload}>{i18n.t(conversation.catchUpRequired ? 'resources.continueRead' : 'projectAgent.history.retry')}</button> : null}
       </div> : null}
       {conversation.status === 'error' ? (
         <div className="bot-thread-failed" role="status">

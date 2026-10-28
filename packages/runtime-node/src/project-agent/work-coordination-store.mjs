@@ -7,9 +7,10 @@ import { admitCoordinationDecision } from './coordination-kernel.mjs';
 import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
 import { createRecoveryCheckpointView, createContinuationCheckpointView } from './recovery-checkpoint-view.mjs';
 import { createCoordinationStorageV2 } from './coordination-storage-v2.mjs';
+import { protectCoordinationWriter } from './coordination-writer-fence.mjs';
 import { journalLines } from './journal-lines.mjs';
 
-export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString(), onJournalRead, formatVersion = 1, segmentBytes }) {
+export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString(), onJournalRead, formatVersion = 1, segmentBytes, fenceLegacyWrites = false }) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)) throw new Error('invalid_workspace');
   const dir = path.join(rootDir || pathOf('projectRuntime'), workspaceId);
   const file = path.join(dir, 'coordination.jsonl');
@@ -73,7 +74,13 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   }
   return {
     read, readSnapshot: reader.readSnapshot, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
-    append, assertOwner, recover, prepare: () => useV2() ? storage.prepare() : Promise.resolve(), close: storage.close,
+    append, assertOwner, recover, prepare: async () => {
+      if (!useV2()) return;
+      // Finish an interrupted owned fence before trying to load mismatched head/manifest.
+      if (fenceLegacyWrites && existsSync(path.join(dir, 'coordination-fence.json'))) await protectCoordinationWriter({ directory: dir, assertOwner });
+      await storage.prepare();
+      if (fenceLegacyWrites && await protectCoordinationWriter({ directory: dir, assertOwner })) await storage.prepare();
+    }, close: storage.close,
     journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
     observeUsage(workId, observationId, usage) {
       assertOwner();
