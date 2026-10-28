@@ -23,12 +23,6 @@
 .bot-reply-context-body button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 0; min-height: 27px; border: 0; background: transparent; border-radius: var(--control-radius-compact); color: var(--graphite-soft); font: inherit; cursor: pointer; }
 .bot-reply-context-body button:hover { color: var(--graphite-base); background: var(--paper-hover); }
 .bot-reply-context-body button:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
-.bot-evidence-list { list-style: none; margin: 0; padding: 0; max-height: 192px; overflow: auto; }
-.bot-evidence-list button { width: 100%; justify-content: flex-start; gap: 10px; padding: 8px 4px; }
-.bot-evidence-list button > span { flex: 1; text-align: left; }
-.bot-evidence-list strong { display: block; color: var(--graphite-base); font-size: 12px; font-weight: 500; line-height: 1.5; }
-.bot-evidence-list small { display: block; font-size: 10px; line-height: 1.5; color: var(--graphite-soft); }
-.bot-evidence-list svg { flex-shrink: 0; }
 .bot-context-process { justify-self: start; }
 .bot-context-metadata { display: grid; gap: 5px; color: var(--graphite-mute); font-size: 11px; }
 .bot-reply-context-body .bot-reply-delivery { margin: 0; }

@@ -4,6 +4,7 @@ import type { EvidenceSourceDescription } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { evidenceLabel, evidenceTime } from '../drawer/EvidenceView';
+import '../styles/bot-evidence-list.css';
 
 export function EvidenceList({ refs, i18n, onOpen }: {
   readonly refs: readonly string[]; readonly i18n: I18nRuntime; readonly onOpen?: (ref: string) => void;
@@ -19,7 +20,7 @@ export function EvidenceList({ refs, i18n, onOpen }: {
     return () => { current = false; };
   }, [key]);
   const byRef = new Map(sources.map(source => [source.evidenceRef, source]));
-  return <section aria-label={i18n.t('projectAgent.evidence.title')}>
+  return <section className="bot-evidence-section" aria-label={i18n.t('projectAgent.evidence.title')}>
     <h3>{i18n.t('projectAgent.evidence.title')}</h3>
     <p className="bot-evidence-help">{i18n.t('projectAgent.evidence.listHelp')}</p>
     <ol className="bot-evidence-list">{refs.map((ref, index) => {
