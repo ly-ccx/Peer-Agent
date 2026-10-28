@@ -16,6 +16,7 @@
 .bot-task-progress { padding: 14px; border-radius: var(--ui-radius-panel); background: var(--chrome-canvas); }
 .bot-task-detail p { margin: 0; overflow-wrap: anywhere; }
 .bot-task-progress-text { font-size: 14px; line-height: 1.6; font-weight: 500; color: var(--graphite-base); }
+.bot-task-progress .bot-task-scene { margin-top: 2px; }
 .bot-task-hint { font-size: 11px; line-height: 1.6; color: var(--graphite-secondary); }
 .bot-task-next { padding-bottom: 16px; border-bottom: 1px solid var(--chrome-hairline); }
 .bot-task-next h3 { font-size: 13px; color: var(--graphite-base); }

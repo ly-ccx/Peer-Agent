@@ -15,17 +15,6 @@ export async function setFixtureBotAccess(page, workspaceId, accessLevel) {
 }
 
 async function openTaskScene(page, scene) {
-  const information = page.locator('.bot-task-information');
-  if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
-  // Native details keeps descendant rectangles at their final positions while
-  // its clipped content is still expanding. Wait for that real transition
-  // before dispatching the single pointer action into the revealed content.
-  await information.evaluate(async node => {
-    await Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
-      .map(animation => animation.finished.catch(() => {})));
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  });
   await page.locator('.bot-task-scene').click();
   await scene.waitFor({ state: 'visible' });
 }
@@ -69,7 +58,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
-  const scene = page.locator('.bot-inline-scene');
+  const scene = page.getByRole('dialog', { name: '工作会话', exact: true });
   await openTaskScene(page, scene);
   const status = scene.locator('.conversation-access-inherited');
   await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));

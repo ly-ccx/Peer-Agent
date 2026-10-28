@@ -127,15 +127,16 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.match(await information.innerText(), /internal-source-message-id|tool-result:\/\/actual-record/);
   assert.equal(await information.locator('summary svg').count(), 1);
   await page.keyboard.press('Enter'); assert.equal(await information.getAttribute('open'), null);
-  await information.locator(':scope > summary').click();
-  await detail.locator('.bot-task-scene').click();
-  const nestedScene = page.locator('.bot-inline-scene');
-  await nestedScene.waitFor();
-  assert.equal(await nestedScene.getAttribute('role'), null, 'the task scene is part of the nonmodal reading area');
-  await nestedScene.locator('.bot-inline-scene-heading').getByRole('button', { name: '返回详情', exact: true }).click();
-  await nestedScene.waitFor({ state: 'detached' });
-  assert.equal(await detail.isVisible(), true, 'returning from the inline scene preserves the task detail');
-  await information.locator(':scope > summary').click();
+  const sceneButton = detail.locator('.bot-task-scene');
+  const progress = detail.locator('.bot-task-progress');
+  assert.equal(await sceneButton.evaluate((node, section) => section.contains(node), await progress.elementHandle()), true, 'the work conversation opens from the progress section');
+  await sceneButton.click();
+  const scene = page.getByRole('dialog', { name: '工作会话', exact: true });
+  await scene.waitFor();
+  assert.equal(await detail.isVisible(), true, 'the task detail stays under the conversation overlay');
+  await scene.getByRole('button', { name: '关闭', exact: true }).click();
+  await scene.waitFor({ state: 'detached' });
+  assert.equal(await detail.isVisible(), true, 'closing the overlay returns to the same task detail');
   task.title = '逐条核对本项目跨月份的历史 AI 任务、交付结果与验证依据，并整理可追溯的完成情况';
   change('waiting_user'); await until(() => detail.locator('h2').innerText(), title => title === task.title);
   for (const width of [1280, 760]) {

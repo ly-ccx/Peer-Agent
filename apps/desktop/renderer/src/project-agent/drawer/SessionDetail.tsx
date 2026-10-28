@@ -65,7 +65,7 @@ export function SessionDetail({
   const updatePreview = updateText.length > 240 ? `${updateText.slice(0, 240)}…` : updateText;
   return (
     <>
-    <div className="bot-drawer-detail bot-task-detail" data-status={session.status} hidden={embedded && sceneOpen} inert={embedded && sceneOpen}>
+    <div className="bot-drawer-detail bot-task-detail" data-status={session.status}>
       <button type="button" className="bot-task-back" onClick={onBack}><PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.back')}</button>
       <header className="bot-task-detail-head">
         <h2>{title}</h2>
@@ -78,6 +78,11 @@ export function SessionDetail({
         <h3>{i18n.t('projectAgent.drawer.progress')}</h3>
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
         <p className="bot-task-hint">{i18n.t(`projectAgent.drawer.task.hint.${hint}`, { name: botName })}</p>
+        {session.conversationId ? (
+          <button type="button" className="bot-task-scene" onClick={() => setSceneOpen(true)}>
+            <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}
+          </button>
+        ) : null}
       </section>
       {reportState === 'ready' && !['queued', 'starting', 'running', 'verifying', 'awaiting_approval'].includes(session.status) && session.verification
         && <TaskVerification detail={session.verification} i18n={i18n} />}
@@ -120,15 +125,11 @@ export function SessionDetail({
             <dd><EvidencePreview refs={session.evidenceRefs} i18n={i18n} inline={embedded} workspaceId={workspaceId}
               task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined} /></dd></div>}
         </dl>
-        {session.conversationId && <button type="button" className="bot-task-scene" onClick={() => setSceneOpen(true)}>
-          <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}
-        </button>}
       </MotionDetails>
 
     </div>
       {sceneOpen && session.conversationId ? (
         <ConversationSceneDrawer
-          embedded={embedded}
           task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined}
           workspaceId={workspaceId}
           workspacePath={workspacePath}
