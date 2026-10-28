@@ -362,6 +362,10 @@
   border-color: var(--ui-selected-border, var(--azure-trace));
 }
 
+.chat-surface--process .chat-scroll-bottom-btn {
+  bottom: calc(var(--space-5) + var(--space-8));
+}
+
 .chat-scroll-bottom-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--ui-focus-ring, var(--za-focus)), var(--shadow-popover);

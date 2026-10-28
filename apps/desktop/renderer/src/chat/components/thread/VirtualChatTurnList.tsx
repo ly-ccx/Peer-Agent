@@ -29,6 +29,7 @@ interface VirtualChatTurnListProps {
   readonly isZh: boolean;
   readonly i18n: I18nRuntime;
   readonly enabled: boolean;
+  readonly readOnly?: boolean;
   readonly scrollRef: RefObject<HTMLDivElement | null>;
   readonly onMessageAction: (messageIndex: number, action: MessageActionId) => void;
   readonly onBeginEdit: (
@@ -52,6 +53,7 @@ const VirtualChatTurnListImpl = forwardRef<VirtualChatTurnListHandle, VirtualCha
     isZh,
     i18n,
     enabled,
+    readOnly = false,
     scrollRef,
     onMessageAction,
     onBeginEdit,
@@ -103,6 +105,7 @@ const VirtualChatTurnListImpl = forwardRef<VirtualChatTurnListHandle, VirtualCha
               streamStartedAt={live ? streamStartedAt : null}
               isZh={isZh}
               i18n={i18n}
+              readOnly={readOnly}
               onMessageAction={onMessageAction}
               onBeginEdit={onBeginEdit}
               onRegenerate={onRegenerate}
