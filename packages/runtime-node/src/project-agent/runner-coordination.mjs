@@ -8,6 +8,7 @@ import { hostWakeWait } from './wake-wait.mjs';
 import { replyRecoveryAdmission, recoverLegacyBudgetWorks } from './reply-recovery-admission.mjs';
 import { reconcileContinuationCustody } from './continuation-custody.mjs';
 import { reportedWaitFor, reportedWaitCurrent } from './reported-wait.mjs';
+import { historyExecutionHeld } from './history-resumption.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
 export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
@@ -54,7 +55,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     const works = Object.values(readSnapshot().works);
     let snapshot;
     const roster = () => snapshot ??= rows();
-    const routine = pending.filter(event => ROUTINE.has(event.kind) || works.some(work => work.recovery
+    const routine = pending.filter(event => ROUTINE.has(event.kind) || works.some(work => !historyExecutionHeld(work) && work.recovery
       && !hasUnsettledDispatch(work) && hostWakeWait({ kind: 'wake', events: [event] }, { ...work, recovery: undefined }, roster())));
     if (routine.length) store.handled(routine.map(event => event.eventId));
     return pending.filter(event => !routine.includes(event));
@@ -82,7 +83,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   function pendingFrom(works) {
     // An owned batch continues through its durable job, never a duplicate wake.
     const owned = new Set(works.flatMap(work => [...(work.pendingEventIds || []), ...(work.consumedEventIds || [])]));
+    const history = readSnapshot().lastRecovery;
     return store.pendingEvents().filter(event => !ROUTINE.has(event.kind) && !owned.has(event.eventId)
+      && !history?.quarantinedSessionIds?.includes(event.sessionId) && !history?.quarantinedEventIds?.includes(event.eventId)
+      && !works.some(work => historyExecutionHeld(work) && work.sessionIds?.includes(event.sessionId))
       && !works.some(work => work.sessionIds?.includes(event.sessionId) && work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)));
   }
   // A synchronous selection shares preparation only until control returns to its
@@ -97,13 +101,14 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverLegacyBudgetWorks({ store, workspaceId, conversationId, rows: roster, now });
     if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: roster });
     for (const work of Object.values(decision().works)) {
+      if (historyExecutionHeld(work)) continue;
       if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
       if (!reportedWaitCurrent(work.reportedWait, roster())) update({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
     }
     // Older releases persisted technical blocks as human waits. Only current
     // owned facts plus an existing protected checkpoint can reclaim custody.
     for (const work of Object.values(decision().works)) {
-      if (work.state !== 'waiting_user' || work.reportedWait || work.stopScope === 'work' || !work.checkpointRef
+      if (historyExecutionHeld(work) || work.state !== 'waiting_user' || work.reportedWait || work.stopScope === 'work' || !work.checkpointRef
         || work.parentConversationId !== conversationId) continue;
       const related = roster().filter(row => work.sessionIds?.includes(row.sessionId));
       const ownership = repairOwnership(related);
@@ -112,7 +117,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     }
     return {
       choose(userOnly) {
-        const candidates = Object.values(decision().works).filter(work => (!userOnly || work.anchorInputIds?.length)
+        const candidates = Object.values(decision().works).filter(work => !historyExecutionHeld(work) && (!userOnly || work.anchorInputIds?.length)
           && (work.state === 'runnable' && work.checkpointRef
             || work.checkpointRef && recoveryReservationDue(work, now())
             || work.state === 'blocked_system' && work.stopScope !== 'work' && work.recovery?.dispatchesReconciled
@@ -165,8 +170,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows });
       return pendingFrom(Object.values(readSnapshot().works));
     },
-    ownedInputIds() { return [...new Set(Object.values(readSnapshot().works).flatMap(work => work.anchorInputIds || []))]; },
-    ownsInput(inputId) { return Object.values(readSnapshot().works).some(work => work.anchorInputIds?.includes(inputId)); },
+    ownedInputIds() { const state = readSnapshot(); return [...new Set([...Object.values(state.works).flatMap(work => work.anchorInputIds || []), ...(state.lastRecovery?.quarantinedInputIds || [])])]; },
+    ownsInput(inputId) { return this.ownedInputIds().includes(inputId); },
     canPreemptRequest(workId) {
       const work = readWork(workId);
       return Boolean(work && !hasUnsettledDispatch(work)
@@ -218,6 +223,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (!job.workId || !job.continuation) return true;
       const existing = readWork(job.workId);
       if (!existing || existing.parentConversationId !== conversationId) return false;
+      if (historyExecutionHeld(existing)) return false;
       if (job.recoveryRevision !== undefined && existing.revision !== job.recoveryRevision) return false;
       if (job.recoveryReservationId && (existing.recovery?.reservationId !== job.recoveryReservationId || !recoveryReservationDue(existing, now()))) return false;
       if (existing.state === 'coalesced' || !job.manualRecovery && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(existing.state)) return false;

@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { handoffQuestionId, isHandoffConflict } from './acceptance.mjs';
 
 /** User merge decisions and execution stay on host facts and existing handoff ports. */
-export function createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, conversationStore, promote, now }) {
+export function createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, isRecoveryHeld = () => false, conversationStore, promote, now }) {
   async function handoffAccepted(plan) {
+    if (isRecoveryHeld(plan)) return plan;
     if (!plan?.resultAcceptance?.acceptedAt || !plan.delegationOrigin?.handoffAuthorizedAt
       || !plan.deliveryBinding?.worktreePath) return plan;
     if (typeof goalRunner?.handoffDelegatedPlan !== 'function') return plan;
@@ -16,6 +17,7 @@ export function createSessionHandoff({ findBySession, goalPlanStore, goalRunner,
 
   async function handoffAnswerLocked(input) {
     const plan = findBySession(String(input.sessionId || '').trim());
+    if (plan && isRecoveryHeld(plan)) return { handled: true, error: 'coordination_reconciliation_required' };
     if (!plan || input.workspaceId !== plan.delegationOrigin.workspaceId
       || canManageWorkspace(input.workspaceId) !== true) return { handled: false };
     const questionId = handoffQuestionId(plan.deliveryHandoff, plan.resultAcceptance?.acceptedAt);

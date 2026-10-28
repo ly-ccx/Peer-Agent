@@ -1101,7 +1101,7 @@ export interface BootstrapPreloadApi {
     createdAt?: string;
     answerTo?: string;
   }) => Promise<import('@peer-agent/protocol').ProjectAgentSubmitInputResult>;
-  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[]; presentationOnly?: boolean; processFor?: string; view?: import('@peer-agent/protocol').BotConversationReadView }) => Promise<{ ok: boolean; code?: string; cards?: readonly Record<string, unknown>[]; recovery?: import('@peer-agent/protocol').BotRecoveryStatus | null; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activeReplyQuestionId?: import('@peer-agent/protocol').BotDecisionSnapshot['activeReplyQuestionId']; processMessageId?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
+  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[]; presentationOnly?: boolean; processFor?: string; view?: import('@peer-agent/protocol').BotConversationReadView }) => Promise<{ ok: boolean; code?: string; cards?: readonly Record<string, unknown>[]; recovery?: import('@peer-agent/protocol').BotRecoveryStatus | null; recoveryAvailable?: boolean; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activeReplyQuestionId?: import('@peer-agent/protocol').BotDecisionSnapshot['activeReplyQuestionId']; processMessageId?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
   readonly projectAgentReadEvidence: (params: ProjectAgentEvidenceReadRequest) => Promise<ProjectAgentEvidenceReadResult>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
@@ -1142,6 +1142,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentConfirmResult: (params: import('@peer-agent/protocol').SessionConfirmationInput) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentAcceptReadme: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentTakeoverHost: (params: import('@peer-agent/protocol').ProjectHostTakeoverRequest) => Promise<import('@peer-agent/protocol').ProjectHostTakeoverResult>;
+  readonly projectAgentRecovery: (params: import('@peer-agent/protocol').ProjectRecoveryRequest) => Promise<import('@peer-agent/protocol').ProjectRecoveryResult>;
   readonly projectAgentDiagnostics: (params: import('@peer-agent/protocol').ProjectDiagnosticsRequest) => Promise<import('@peer-agent/protocol').ProjectDiagnosticsResult>;
   readonly projectAgentRetry: (params: { workspaceId: string; turnId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentStopResponse: (params: ProjectAgentStopResponseRequest) => Promise<ProjectAgentStopResponseResult>;

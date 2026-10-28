@@ -298,6 +298,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'project-agent:retry',
   'project-agent:stop-response',
   'project-agent:takeover-host',
+  'project-agent:recovery',
   'project-agent:submit-input',
   'project-agent:read-input-draft',
   'project-agent:write-input-draft',

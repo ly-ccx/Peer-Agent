@@ -77,9 +77,10 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     if (bytes.length !== record.payloadRef.bytes || createHash('sha256').update(bytes).digest('hex') !== record.payloadRef.hash) throw fail('coordination_payload_invalid');
     record = { ...JSON.parse(bytes), revision: envelope.revision, schemaVersion: 1 };
   }
-  const before = empty(); before.revision = getMeta(db, 'revision') || 0;
+  const before = record.kind.startsWith('history_') ? snapshot(db, true) : empty(); before.revision = getMeta(db, 'revision') || 0;
+  if (record.kind === 'journal_recovered') before.lastRecovery = getMeta(db, 'lastRecovery');
   const ids = [record.workId, record.work?.workId, record.owner?.workId, ...(record.retired || []).map(w => w.workId)].filter(Boolean);
-  for (const id of ids) { const work = head(db, id); if (work) before.works[id] = work; }
+  if (!record.kind.startsWith('history_')) for (const id of ids) { const work = head(db, id); if (work) before.works[id] = work; }
   if (['transfer', 'handled'].includes(record.kind)) before.events = all(db, 'events');
   if (record.kind.startsWith('reply_')) {
     const id = record.message?.id || record.messageId, value = get(db, 'deliveries', id);
@@ -188,8 +189,8 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (existsSync(path.join(directory, 'coordination-fence.json')) && JSON.parse(readFileSync(path.join(directory, 'coordination-fence.json'), 'utf8')).status !== 'complete') throw fail('coordination_fence_incomplete');
     if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
     const next = JSON.parse(readFileSync(manifestFile, 'utf8'));
-    if (next.schemaVersion !== 2 || ![2, 3].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
-    if (next.minimumReaderVersion === 3) {
+    if (next.schemaVersion !== 2 || ![2, 3, 4].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.minimumReaderVersion >= 3) {
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
     } else legacyFile = originalLegacyFile;

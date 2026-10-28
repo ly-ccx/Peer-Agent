@@ -56,6 +56,7 @@ export function createIsolationPlanner({ readFacts, isolatePlan, recordIsolation
   }
   async function cleanup(plan) {
     if (!plan?.deliveryBinding?.worktreePath) return plan;
+    if (plan.delegationOrigin?.cancellation?.preserveArtifacts === true || plan.delegationOrigin?.retainedForRecovery === true) return plan;
     if (plan.deliveryHandoff?.status === 'delivered' || plan.status === 'cancelled') {
       const result = await discardLine(plan, { deleteBranch: false });
       return result?.ok ? result.plan : plan;

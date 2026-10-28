@@ -36,6 +36,7 @@ const CHANNELS = [
   'project-agent:accept-readme',
   'project-agent:retry',
   'project-agent:takeover-host',
+  'project-agent:recovery',
   'project-agent:diagnostics',
 ];
 
@@ -76,6 +77,7 @@ function harness() {
       confirmResult: port('confirm-result'),
       acceptReadme: port('accept-readme'),
       takeoverHost: port('takeover-host'),
+      controlRecovery: port('recovery'),
       retry: port('retry'),
       stopResponse: port('stop-response'),
       diagnostics: port('diagnostics'),

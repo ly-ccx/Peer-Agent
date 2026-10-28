@@ -97,6 +97,7 @@ export function createProjectAgentApplicationService({
   retryTurn = null,
   readActivity = () => null,
   readRecovery = () => null,
+  recoveryControl = null,
   stopResponseTurn = null,
   requestTakeover = null,
   diagnostics = null,
@@ -349,6 +350,7 @@ export function createProjectAgentApplicationService({
       : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
         ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
     const decorate = page => {
+      page = { ...page, recoveryAvailable: recoveryControl?.available?.(payload.workspaceId) === true };
       const status = readRecovery(payload.workspaceId);
       const recovery = status?.status === 'failed' ? projectBotRecoveryStatus(status.error, status.phase)
         : !page?.ok && page?.code?.startsWith('coordination_') ? projectBotRecoveryStatus(page.code) : null;
@@ -756,9 +758,16 @@ export function createProjectAgentApplicationService({
     return { ok: true, requested: result?.requested === true, ...(result?.reason === 'self' ? { alreadyHost: true } : {}) };
   }
 
+  async function controlRecovery(payload = {}) {
+    if (!open()) return disabled();
+    if (typeof payload?.workspaceId !== 'string' || !directory?.get?.(payload.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
+    return recoveryControl?.execute(payload) ?? { ok: false, code: 'RECOVERY_UNAVAILABLE' };
+  }
+
   return {
     diagnostics: (...args) => typeof diagnostics === 'function' ? diagnostics(...args) : { ok: false, code: 'DIAGNOSTICS_UNAVAILABLE' },
     takeoverHost,
+    controlRecovery,
     dispose: () => expiry.dispose(),
     list,
     listAttention,

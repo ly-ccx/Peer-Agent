@@ -135,7 +135,8 @@ export function createSessionSupervisor({
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
   const communication = createAgentCommunication({ conversationStore, goalPlanStore, goalRunner, findSession: findBySession,
     listSessions: delegatedPlans, canManageWorkspace, emitEvent, now });
-  const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, conversationStore, promote, now });
+  const recoveryHeld = plan => Boolean(plan && executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required');
+  const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, isRecoveryHeld: recoveryHeld, conversationStore, promote, now });
   const continuity = createSessionContinuity({ goalPlanStore, conversationStore, goalRunner, executionScheduler,
     findBySession, canManageWorkspace, abortStream, emit, now });
   const legacyCriteria = createLegacyCriterionRecovery({ store: goalPlanStore, readProvenance: readLegacyCriterionProvenance,
@@ -182,7 +183,7 @@ export function createSessionSupervisor({
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
     spawn: (input, context) => exclusive(() => spawnLocked(input, context)), requestCancel: cancellation.request,
     send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request,
-    holdsLease: canManageWorkspace, isEnabled: autonomousCoordinationEnabled, now });
+    holdsLease: canManageWorkspace, canExecute: workspaceId => executionScheduler.isWorkspaceReady(workspaceId), isEnabled: autonomousCoordinationEnabled, now });
 
   function delegatedPlans() {
     return readQuery.memo('delegated-plans', () => planCatalog.read());
@@ -629,6 +630,7 @@ export function createSessionSupervisor({
   async function promote(spawningPlanId = null) {
     const eligible = plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true
       && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)
+      && executionScheduler.inspect(plan).reason !== 'coordination_reconciliation_required'
       && (autonomousCoordinationEnabled() || plan.delegationOrigin.phase !== 'queued'
         || coordination.forSession(plan.delegationOrigin.workspaceId, plan.delegationOrigin.sessionId)?.replacementSessionId !== plan.delegationOrigin.sessionId);
     let observed = delegatedPlans();
@@ -823,6 +825,7 @@ export function createSessionSupervisor({
   async function settleLocked(sessionId) {
     const plan = findBySession(text(sessionId));
     if (!plan) return null;
+    if (recoveryHeld(plan)) return { ok: false, error: 'coordination_reconciliation_required' };
     if (!sessionExecutionCurrent(plan)) return { ok: false, error: 'execution_revision_stale' };
     if (plan.resultAcceptance?.acceptedAt) {
       return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
@@ -856,6 +859,7 @@ export function createSessionSupervisor({
   async function confirmLocked(sessionId) {
     const plan = findBySession(text(sessionId));
     if (!plan) return null;
+    if (recoveryHeld(plan)) return { ok: false, error: 'coordination_reconciliation_required' };
     if (plan.resultAcceptance?.acceptedAt) {
       return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
     }
@@ -881,6 +885,7 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input?.sessionId));
     const body = text(input?.text);
     if (!plan || !body) return null;
+    if (recoveryHeld(plan)) return { error: 'coordination_reconciliation_required' };
     const origin = plan.delegationOrigin;
     if (!context || context.role !== 'project_agent' || context.workspaceId !== origin.workspaceId
       || context.conversationId !== origin.parentConversationId || !canManageWorkspace(origin.workspaceId)) {
@@ -996,6 +1001,7 @@ export function createSessionSupervisor({
     if (!planId) return { ok: false, reason: 'missing_plan' };
     const current = goalPlanStore.getPlan(planId) || plan;
     if (!current) return { ok: false, reason: 'missing_plan' };
+    if (recoveryHeld(current)) return { ok: false, reason: 'coordination_reconciliation_required', planId };
     if (['paused', 'superseded'].includes(current.delegationOrigin?.phase)) return { ok: false, reason: 'session_not_paused_by_approval', planId };
     if (current.delegationOrigin?.phase === 'awaiting_approval') {
       const decision = readLocalPlanApproval(current, approvalStore);
@@ -1024,6 +1030,7 @@ export function createSessionSupervisor({
     const plan = goalPlanStore.getPlan(planId);
     const origin = plan?.delegationOrigin;
     if (!origin?.sessionId || !origin.workspaceId) return { ok: false, reason: 'not_delegated' };
+    if (recoveryHeld(plan)) return { ok: false, reason: 'coordination_reconciliation_required' };
     if (occupiesRunningSlot(plan)) return { ok: false, reason: 'still_running' };
     if (origin.phase !== 'running' || !settled(plan)) return { ok: false, reason: 'not_slot_holder' };
     if (isolationPlanner) await isolationPlanner.cleanup(plan);
@@ -1052,6 +1059,7 @@ export function createSessionSupervisor({
   async function reconcilePersistedQueues() {
     for (const plan of delegatedPlans()) {
       if (canManageWorkspace(plan.delegationOrigin.workspaceId) !== true || !executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)) continue;
+      if (recoveryHeld(plan)) continue;
       if (plan.delegationOrigin.phase === 'awaiting_approval' && readLocalPlanApproval(plan, approvalStore)) {
         await resumeFromApprovalLocked({ sessionId: plan.delegationOrigin.sessionId, planId: plan.planId });
       }
@@ -1101,6 +1109,7 @@ export function createSessionSupervisor({
       return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)).then(() => coordination.recover(workspaceId)).then(() => exclusive(async () => {
         if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
+          if (executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required') continue;
           if (isHostHandoffPause(plan)) {
             const { pausedFromPhase, pausedRunnerIntent, ...origin } = plan.delegationOrigin;
             goalPlanStore.revisePlan(plan.planId, {delegationOrigin:{...origin, phase:pausedFromPhase}},
@@ -1202,6 +1211,7 @@ export function createSessionSupervisor({
     cancel(input) {
       return cancellation.cancel(input || {});
     },
+    waitForCoordinationIdle: workspaceId => coordination.waitForIdle(workspaceId),
     requestCancel: input => cancellation.request(input || {}),
     recoverCancellations: workspaceId => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)),
     message(input, context) {
@@ -1233,6 +1243,7 @@ export function createSessionSupervisor({
       return exclusive(async () => {
         const plan = findBySession(text(input?.sessionId));
         if (!plan || !canManageWorkspace(plan.delegationOrigin.workspaceId)) return { ok: false, error: 'not_found' };
+        if (recoveryHeld(plan)) return { ok: false, error: 'coordination_reconciliation_required' };
         try {
           const report = buildSessionReport(plan, project(plan), conversationStore.getPersistedConversationHistory(plan.conversationId));
           return await confirmCompletionReview({ plan, report, review: projectCompletionReview(plan, report),

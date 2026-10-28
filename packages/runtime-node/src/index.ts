@@ -652,3 +652,5 @@ export * from './project-agent/input-draft-store.mjs';
 export * from './project-agent/resource-edit-storage.mjs';
 
 export { inspectCoordinationFork, recoverCoordinationForkBackup } from './project-agent/coordination-fork-recovery.mjs';
+export { createCoordinationRecoveryService } from './project-agent/coordination-recovery-service.mjs';
+export { executionOwnershipOf } from './project-agent/session-facts.mjs';

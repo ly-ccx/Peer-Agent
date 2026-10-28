@@ -4,6 +4,7 @@ import path from 'node:path';
 import { journalLines } from './journal-lines.mjs';
 import { readLegacySeal } from './coordination-legacy-integrity.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
+import { historyCheckpointBindings } from './history-resumption.mjs';
 
 const failure = code => Object.assign(new Error(code), { code });
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -22,7 +23,7 @@ function containedTree(root, relative) {
   return current;
 }
 function regular(file) {
-  if (!lstatSync(file).isFile()) throw failure('coordination_repair_path_invalid');
+  if (!lstatSync(file).isFile() || lstatSync(file).isSymbolicLink()) throw failure('coordination_repair_path_invalid');
 }
 function hashFile(file, end, seed = '') {
   regular(file); const fd = openSync(file, 'r'), hash = createHash('sha256').update(seed);
@@ -51,13 +52,15 @@ function inventory(directory, additional = []) {
   walk('coordination-v2');
   return Object.fromEntries(files.sort().map(file => [file, !existsSync(containedTree(directory, file)) ? { missing: true } : hashFile(containedTree(directory, file))]));
 }
-function replay(file, state, { start = 0, end, v2 = false, hash = '' , blobs } = {}) {
+function replay(file, state, { start = 0, end, v2 = false, hash = '', blobs, allowPartialTail = false, onRecord = () => {} } = {}) {
   regular(file); const fd = openSync(file, 'r');
   try {
     const size = end ?? fstatSync(fd).size;
     for (const line of journalLines(fd, { start, end: size })) if (line.text) {
-      if (!line.terminated) throw failure('coordination_repair_partial_tail');
-      let entry = JSON.parse(line.text);
+      if (!line.terminated && !allowPartialTail) throw failure('coordination_repair_partial_tail');
+      let entry;
+      try { entry = JSON.parse(line.text); }
+      catch (error) { if (!line.terminated && allowPartialTail) break; throw error; }
       if (v2) {
         const { hash: actual, ...body } = entry;
         if (entry.storageVersion !== 2 || entry.previousHash !== hash || digest(JSON.stringify(body)) !== actual) throw failure('coordination_hash_mismatch');
@@ -71,6 +74,7 @@ function replay(file, state, { start = 0, end, v2 = false, hash = '' , blobs } =
         }
       }
       state = reduceCoordination(state, entry);
+      onRecord(state.revision, hash);
     }
     return { state, hash };
   } finally { closeSync(fd); }
@@ -98,12 +102,11 @@ export function inspectCoordinationFork(directory) {
   const old = replay(legacy, base, { start: bytes }).state, conflicts = [], merged = blank();
   const checkpoints = [], refs = new Set();
   for (const [branch, state] of [['baseline', base], ['current', current.state], ['legacy', old]]) {
-    for (const work of Object.values(state.works)) if (work.checkpointRef) {
-      const ref = work.checkpointRef;
+    for (const work of Object.values(state.works)) for (const { ref, owner } of historyCheckpointBindings(work)) {
       if (!/^[a-f0-9]{64}\.json$/.test(ref)) { checkpoints.push({ branch, workId: work.workId, ref, status: 'invalid_ref' }); continue; }
       const relative = 'checkpoints/' + ref, file = containedTree(directory, relative); refs.add(relative);
       if (!existsSync(file)) { checkpoints.push({ branch, workId: work.workId, ref, status: 'missing' }); continue; }
-      const proof = hashFile(file), bound = hashFile(file, undefined, work.workId + '\n');
+      const proof = hashFile(file), bound = hashFile(file, undefined, owner + '\n');
       checkpoints.push({ branch, workId: work.workId, ref, status: bound.sha256 + '.json' === ref ? 'verified' : 'hash_mismatch', ...proof });
     }
   }
@@ -127,6 +130,7 @@ export function inspectCoordinationFork(directory) {
   for (const work of Object.values(merged.works)) {
     if (['cancelled', 'delivered', 'coalesced'].includes(work.state)) continue;
     heldWorkIds.push(work.workId);
+    work.historyRecovery = { disposition: 'held', previousState: work.state, previousRecovery: work.recovery ?? null };
     work.recovery = { ...work.recovery, retryable: false, retryAt: undefined, reservationId: undefined,
       blockedCode: 'COORDINATION_RECONCILIATION_REQUIRED' };
   }
@@ -138,19 +142,48 @@ export function inspectCoordinationFork(directory) {
   if (stable(sources) !== stable(inventory(directory, [...refs]))) throw failure('coordination_read_changed');
   return result;
 }
+
+/** Read the published recovery journal directly; inspection never repairs a cache or a torn tail. */
+export function readRecoveredCoordination(directory, generation, { includeProof = false } = {}) {
+  directory = realpathSync(directory);
+  const v2 = containedTree(directory, 'coordination-v2');
+  const manifestFile = containedTree(directory, 'coordination-v2/manifest.json');
+  const headFile = containedTree(directory, 'coordination-v2/head.json');
+  const segments = () => readdirSync(containedTree(directory, 'coordination-v2/segments')).sort()
+    .filter(name => /^\d{12}\.jsonl$/.test(name)).map(name => `coordination-v2/segments/${name}`);
+  const files = ['coordination-v2/manifest.json', 'coordination-v2/head.json', 'coordination-v2/baseline.jsonl', ...segments()];
+  const proof = () => Object.fromEntries(files.map(file => [file, hashFile(containedTree(directory, file))]));
+  const before = proof(), manifest = JSON.parse(readFileSync(manifestFile)), head = JSON.parse(readFileSync(headFile));
+  const fence = containedTree(directory, 'coordination.jsonl');
+  if (manifest.schemaVersion !== 2 || ![3, 4].includes(manifest.minimumReaderVersion)
+    || manifest.minimumWriterVersion !== manifest.minimumReaderVersion || manifest.frozenLegacyFile !== 'baseline.jsonl'
+    || manifest.generation !== generation || head.generation !== generation || manifest.legacyVersion !== head.legacyVersion
+    || !lstatSync(fence).isDirectory()) throw failure('coordination_repair_plan_changed');
+  let result = replay(containedTree(directory, 'coordination-v2/baseline.jsonl'), blank());
+  let observedHead = result.state.revision === head.revision && result.hash === head.hash;
+  for (const file of files.slice(3)) result = replay(containedTree(directory, file), result.state,
+    { v2: true, hash: result.hash, blobs: containedTree(directory, 'coordination-v2/blobs'), allowPartialTail: file === files.at(-1),
+      onRecord: (revision, hash) => { if (revision === head.revision && hash === head.hash) observedHead = true; } });
+  if (!observedHead || result.state.revision < head.revision) throw failure('coordination_journal_missing');
+  if (stable(before) !== stable(proof()) || stable(files.slice(3)) !== stable(segments())) throw failure('coordination_read_changed');
+  return includeProof ? { state: result.state, sourceFingerprint: digest(stable(before)) } : result.state;
+}
 function durable(file, bytes) {
   const tmp = file + '.' + randomUUID() + '.tmp'; writeFileSync(tmp, bytes, { mode: 0o600, flag: 'wx' });
   const fd = openSync(tmp, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
   renameSync(tmp, file); const parent = openSync(path.dirname(file), 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
 }
-function offline(directory) {
+function assertOffline(directory) {
   if (existsSync(path.join(directory, 'host.lease'))) throw failure('coordination_repair_active');
 }
 
 /** Explicit maintenance only. Caller reviews the prefix digest, including absent historical seal.
  * Re-entry resumes only this bound intent. Original journals remain byte-for-byte archived.
  */
-export function recoverCoordinationForkBackup({ directory, sourceFingerprint, reviewedPrefixSha256, onStep = () => {} }) {
+export function recoverCoordinationForkBackup({ directory, sourceFingerprint, reviewedPrefixSha256, onStep = () => {}, assertMaintenanceOwner = null }) {
+  // An online caller must drain the project and retain the same real lease epoch.
+  // CLI/default callers retain the stricter offline-only interface.
+  const offline = target => typeof assertMaintenanceOwner === 'function' ? assertMaintenanceOwner() : assertOffline(target);
   directory = realpathSync(directory); offline(directory);
   const intentFile = path.join(directory, 'coordination-recovery.json');
   let intent;
