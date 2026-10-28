@@ -146,7 +146,7 @@ export function BotConversation({
           {conversation.runtimeRecovery ? <>
             <p>{i18n.t(conversation.runtimeRecovery.reason === 'history_conflict' ? 'projectAgent.chat.recoveryConflict'
               : conversation.runtimeRecovery.reason === 'reconciliation_required' ? 'projectAgent.chat.recoveryReconcile' : 'projectAgent.chat.recoveryBlocked')}</p>
-            <details><summary>{i18n.t('projectAgent.chat.recoveryDiagnostics')}</summary>
+            <details><summary>{i18n.t('projectAgent.chat.recoveryDiagnostics')}<PeerIcon name="chevronDown" size={12} /></summary>
               <p><code>{conversation.runtimeRecovery.code}</code> · {conversation.runtimeRecovery.phase}</p>
             </details>
           </> : conversation.cardsError ? <p>{i18n.t('projectAgent.chat.cardsUnavailable')}</p> : null}
