@@ -121,7 +121,7 @@ describe('formatStreamErrorLabel', () => {
 });
 
 describe('restoreStreamErrorFromInterrupted', () => {
-  it('restores a readable network banner from an interrupted assistant turn', () => {
+  it('does not invent a network cause for a legacy interrupted assistant turn', () => {
     const messages = [
       message('u1', 'user', 'hello'),
       message('a1', 'assistant', 'partial', { interrupted: true }),
@@ -132,12 +132,22 @@ describe('restoreStreamErrorFromInterrupted', () => {
     );
     assert.equal(
       formatStreamErrorLabel(restoreStreamErrorFromInterrupted(messages, null)!, true),
-      '网络中断，回复未完成。',
+      '回复中断，原因未记录。',
     );
     assert.equal(
       canShowStreamResume(restoreStreamErrorFromInterrupted(messages, null), messages, false),
       true,
     );
+  });
+
+  it('restores the saved local failure over an old generic banner and withholds blind replay', () => {
+    const messages = [message('a1', 'assistant', 'partial', { interrupted: true,
+      streamFailure: { code: 'conversation_persistence_failed', causeCode: 'EIO', precedingCode: 'HTTP 429' } })];
+    const error = restoreStreamErrorFromInterrupted(messages, 'fetch failed');
+    assert.equal(error, 'conversation_persistence_failed: EIO');
+    assert.match(formatStreamErrorLabel(error!, true), /本地会话保存失败/);
+    assert.equal(canShowStreamResume(error, messages, false), false);
+    assert.match(formatStreamErrorLabel('HTTP 429: capacity', true), /限流/);
   });
 
   it('keeps a live network error when switching back to the same interrupted turn', () => {

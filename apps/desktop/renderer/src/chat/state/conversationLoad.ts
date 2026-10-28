@@ -116,6 +116,12 @@ export async function loadConversationMessages(conversationId: string): Promise<
       // (b) 长流中断保留：连接中断未自然收尾的 assistant 消息标记，重启后仍可见。
       if (m.interrupted === true) {
         msg.interrupted = true;
+        const failure = m.streamFailure as ChatMsg['streamFailure'];
+        if (failure && typeof failure.code === 'string') msg.streamFailure = {
+          code: failure.code,
+          ...(typeof failure.causeCode === 'string' ? { causeCode: failure.causeCode } : {}),
+          ...(typeof failure.precedingCode === 'string' ? { precedingCode: failure.precedingCode } : {}),
+        };
       }
       return msg;
     },

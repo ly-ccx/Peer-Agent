@@ -4,10 +4,23 @@ import { sessionFactsFromPlan, beginVerificationAttempt } from './session-facts.
 import { watchFactsFromPlan } from './watchdog.mjs';
 import { createRunnerCoordination } from './runner-coordination.mjs';
 import { mapDelegationEvents } from './event-mapper.mjs';
+import { repairOwnership, stateAfterReply } from './repair-ownership.mjs';
 
 const blocked = () => ({ planId: 'p', status: 'executing', tasks: [],
   delegationOrigin: { sessionId: 's', phase: 'running' },
   runner: { status: 'blocked', blockedReason: 'Verification gate failed: quality:criterion_unverified' } });
+
+test('a failed delegated stream retains parent responsibility after a public update', () => {
+  const plan = { planId: 'p', status: 'interrupted', delegationOrigin: { sessionId: 's', phase: 'running' },
+    runner: { status: 'failed', lastError: 'conversation_persistence_failed: EIO',
+      interruption: { source: 'stream_error', recoverable: false, reason: 'conversation_persistence_failed: EIO' } } };
+  const session = { sessionId: 's', ...sessionFactsFromPlan(plan) };
+  assert.deepEqual(repairOwnership([session]).repairSessionIds, ['s']);
+  assert.equal(stateAfterReply([session]), 'runnable');
+  const events = mapDelegationEvents({ sessions: [{ ...session, status: 'running' }] }, { sessions: [watchFactsFromPlan(plan)] });
+  assert.equal(events.find(row => row.kind === 'interrupted').payload.reason, 'conversation_persistence_failed: EIO');
+  assert.equal(events.some(row => row.kind === 'needs_user'), false);
+});
 
 test('technical verification blockers belong to the parent and cannot manufacture human questions', () => {
   const plan = blocked();

@@ -29,6 +29,7 @@ export function deriveSessionFacts(input: {
   blockedReason?: string;
   verificationActive?: boolean;
   interrupted?: boolean;
+  delegated?: boolean;
   cancellationPhase?: string;
   takeoverPhase?: string;
   executionOwnership?: ExecutionOwnership;
@@ -49,6 +50,7 @@ export function deriveSessionFacts(input: {
     ...(input.blockedReason ? { blockedReason: input.blockedReason } : {}),
     ...(input.verificationActive !== undefined ? { verificationActive: input.verificationActive } : {}),
     ...(input.interrupted !== undefined ? { interrupted: input.interrupted } : {}),
+    ...(input.delegated !== undefined ? { delegated: input.delegated } : {}),
     ...(input.cancellationPhase ? { cancellationPhase: input.cancellationPhase } : {}),
     ...(input.takeoverPhase ? { takeoverPhase: input.takeoverPhase } : {}),
   });

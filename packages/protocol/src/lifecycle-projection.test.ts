@@ -8,6 +8,21 @@ test('compatibility facts preserve an unconsumed interruption before completed',
   assert.equal(interrupted.needsUser, false);
 });
 
+test('an ended delegated failure belongs to the parent without reopening user pauses or unknown outcomes', () => {
+  const snapshot: GoalPlanProjectionSnapshot = { conversationId: 'c', planId: 'p', title: 'Retained work', status: 'interrupted',
+    runnerStatus: 'failed', interrupted: true, delegated: true };
+  const facts = decideLifecycle(snapshot, { executionOwnership: 'ended' });
+  assert.equal(facts.status, 'waiting_agent'); assert.equal(facts.needsUser, false);
+  assert.equal(facts.actionRight, 'peer_advancing'); assert.equal(facts.nextAction, 'none');
+  assert.equal(facts.statusLabel, '由主 Bot 跟进');
+  assert.equal(deriveSessionFacts({ ...snapshot }).status, 'waiting_agent');
+  assert.equal(decideLifecycle({ ...snapshot, delegated: false }).status, 'paused');
+  assert.equal(decideLifecycle(snapshot, { phase: 'paused' }).status, 'paused');
+  assert.equal(decideLifecycle({ ...snapshot, status: 'cancelled' }).status, 'cancelled');
+  assert.equal(decideLifecycle(snapshot, { takeoverPhase: 'awaiting_outcome' }).status, 'awaiting_outcome');
+  assert.equal(decideLifecycle(snapshot, { accepted: true }).status, 'accepted');
+});
+
 import {
   projectWorkSession,
   type WorkSessionConversationMeta,

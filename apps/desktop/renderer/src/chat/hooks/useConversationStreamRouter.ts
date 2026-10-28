@@ -147,6 +147,7 @@ function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void
       _compaction: m.compaction,
       attachments: m.attachments,
       interrupted: m.interrupted,
+      streamFailure: m.streamFailure,
     })),
   });
 }
@@ -577,7 +578,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       }));
     });
 
-    const offError = clientApi.onChatStreamError(({ streamId, conversationId, error, usage, lifetimeUsage }) => {
+    const offError = clientApi.onChatStreamError(({ streamId, conversationId, error, streamFailure, usage, lifetimeUsage }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
       if (isStaleStreamTerminal(conversationStore.getSnapshot(cid).streamId, streamId)) return;
@@ -633,7 +634,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             ...last,
             ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
             interrupted: true,
-            segments: markDanglingToolCallsInterrupted(last.segments, '工具调用已中断（连接错误）'),
+            streamFailure: streamFailure || { code: error },
+            segments: markDanglingToolCallsInterrupted(last.segments, '工具调用已中断'),
           };
           const updated = [...msgs.slice(0, -1), patched];
           persistMessages(cid, updated);

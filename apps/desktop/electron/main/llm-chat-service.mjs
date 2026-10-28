@@ -784,6 +784,7 @@ function wrapWebContentsForRuntimeEvents(
   // 流式期间按时间节流写 sidecar；终态在 worker 准备后提交，落盘完成才通知并释放 turn。
   const PERSIST_THROTTLE_MS = 500;
   let lastPersistAt = 0;
+  let terminalPatch;
   const persistStreamRecord = ({ final = false, interrupted = false } = {}) => {
     if (final && streamRecord.finalPersistence) return streamRecord.finalPersistence;
     // 终态收口：accounting 落盘是节流的，窗口内最后一次观测值可能还挂在 pending 上。
@@ -825,13 +826,17 @@ function wrapWebContentsForRuntimeEvents(
     }
     if (final && interrupted) {
       patch.interrupted = true;
+      patch.streamFailure = { code: streamRecord.failureReason || 'reply_interrupted' };
+      streamRecord.streamFailure = patch.streamFailure;
     } else if (final && streamRecord.resumedFromMessageId) {
       // 续写成功收尾：清掉种子消息上的 interrupted 残留，否则 updateMessageById 的
       // spread 合并会保留旧标记，UI 永远显示「已中断」。普通（非续写）流的新消息
       // 本来就没有该字段，不受影响。
       patch.interrupted = false;
+      patch.streamFailure = null;
     }
     try {
+      if (final) terminalPatch = patch;
       // 这里只计提交入队成本；异步终态的完成以 finalPersistence 为准。
       const committed = streamProfiler.measure(final ? 'main.persist.write.final' : 'main.persist.write', () => {
         if (final && typeof conversationStore.commitStreamingMessage === 'function') {
@@ -864,11 +869,19 @@ function wrapWebContentsForRuntimeEvents(
       if (committed?.then) { streamRecord.finalPersistence = committed; return committed; }
     } catch (err) {
       console.warn('[llm-chat] persist stream record failed:', err?.message || err);
+      if (final) return Promise.reject(err);
     }
   };
   streamRecord.persist = persistStreamRecord;
   const deliverTerminal = createStreamTerminalDelivery({ record: streamRecord,
-    send: (channel, payload) => realWebContents.send(channel, payload), failRuntimeTurn });
+    send: (channel, payload) => realWebContents.send(channel, payload), failRuntimeTurn,
+    onPersistenceFailure: streamFailure => {
+      if (!streamRecord.ephemeral && streamRecord.conversationId && streamRecord.assistantMessageId) {
+        conversationStore?.patchStreamingMessage?.(streamRecord.conversationId, streamRecord.assistantMessageId, {
+          ...terminalPatch, interrupted: true, streamFailure,
+        });
+      }
+    } });
 
   const emitStreamRuntimeEvent = (event) => {
     if (typeof emitRuntimeEvent !== 'function') return null;
