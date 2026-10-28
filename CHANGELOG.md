@@ -2,6 +2,22 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.28 - 2026-10-28
+
+### 修复与优化
+
+- 修复子任务核验停滞，沿原任务补齐有界验收修复，保留历史与成果。
+- 新增用户可操作的实例交接、只读检查、保全恢复和安全续跑；原输入、已完成操作及未知结果均不重放。
+- 隔离历史任务、回复、交接和子任务，支持保留工作树与报告后结束旧执行；补齐中断重入、停止超时和防止旁路重启。
+- 改善证据卡片排版、版本展示和更新入口，同步中英文文档及生成式网站更新日志。
+
+### Improvements (English)
+
+- Recover stalled child verification through bounded repair of the original task.
+- Add user-operated handoff, source-bound history preservation and safe continuation without replaying historical inputs or completed/unknown operations.
+- Isolate uncertain work, deliveries and handoffs; preserve worktrees and reports when ending earlier execution, with resumable maintenance and enforced stop boundaries.
+- Improve evidence cards and update controls, with bilingual release and website documentation.
+
 ## 0.1.0-rc.27 - 2026-10-27
 
 ### 新功能与优化

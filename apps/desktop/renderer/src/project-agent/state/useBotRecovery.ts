@@ -47,8 +47,13 @@ export function useBotRecovery(workspaceId: string) {
       watching.current = result.ok && result.view.canContinue && !result.view.runtimeReady;
       if (result.ok) setView(result.view); else { setError(result.code); setView(current => current ? { ...current, phase: 'failed' } : current); }
     } catch { if (ticket === generation.current) { watching.current = false; setError('RECOVERY_UNAVAILABLE'); } }
-    finally { if (ticket === generation.current) { mutating.current = false; setBusy(false); } }
-  }, [workspaceId, view?.planToken]);
+    finally { if (ticket === generation.current) {
+      mutating.current = false; setBusy(false);
+      // A ready notification can race the command receipt and be discarded by
+      // its read fence. Recheck once after publication, then follow host events.
+      if (watching.current) void inspect();
+    } }
+  }, [workspaceId, view?.planToken, inspect]);
   const takeover = useCallback(async () => {
     if (mutating.current) return;
     const ticket = generation.current;
