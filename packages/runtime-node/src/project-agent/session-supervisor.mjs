@@ -1239,7 +1239,7 @@ export function createSessionSupervisor({
     },
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
-    cancel(input, context) {
+    cancel(input, context = {}) {
       return cancellation.cancel(input || {}, context);
     },
     waitForCoordinationIdle: workspaceId => coordination.waitForIdle(workspaceId),
