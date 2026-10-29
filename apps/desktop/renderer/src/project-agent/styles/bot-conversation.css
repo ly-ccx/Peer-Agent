@@ -501,42 +501,82 @@
   transition: color var(--za-motion-fast) var(--za-ease-standard);
 }
 
-/* Reply context belongs to the message, with one quiet horizontal reading line. */
+/* Source metadata and one exact excerpt; the whole preview locates its original. */
 .bot-reply-anchors {
+  display: grid;
+  gap: var(--space-2);
   min-width: 0;
-  max-width: min(680px, 100%);
+  max-width: 100%;
 }
 
-.bot-reply-anchors > .bot-reply-bar {
+.bot-reply-source {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  min-height: 28px;
-  padding: 4px 0;
-  border-radius: var(--ui-radius-chip);
-  background: transparent;
+  padding: var(--space-3);
 }
 
-.bot-reply-anchors .bot-reply-bar-copy {
-  display: grid;
-  grid-template-columns: fit-content(30%) minmax(0, 1fr);
+.bot-reply-source .bot-reply-bar-copy {
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.bot-reply-bar-header {
+  display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.bot-reply-anchors .bot-reply-bar-label {
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  min-width: 0;
   color: var(--graphite-soft);
+  font-size: var(--ui-font-meta);
   font-weight: 400;
+  line-height: var(--ui-line-control);
 }
 
-.bot-reply-anchors > .bot-reply-bar:is(:hover, :focus-visible) {
-  background: color-mix(in srgb, var(--graphite-base) 5%, transparent);
+.bot-reply-bar-source {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.bot-reply-source .bot-reply-bar-label {
+  flex-shrink: 1;
+  color: var(--graphite-soft);
+  font-size: inherit;
+  font-weight: 400;
+  line-height: inherit;
+}
+
+.bot-reply-bar-source time {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.bot-reply-bar-action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+.bot-reply-source .bot-reply-bar-excerpt {
+  display: block;
+  width: 100%;
+  color: var(--graphite-base);
+  font-size: var(--ui-font-control);
+  font-weight: 400;
+  line-height: var(--ui-line-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .bot-reply-body > .bot-reply-anchors {
-  margin-bottom: 10px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--chrome-hairline);
+  margin-bottom: var(--space-4);
 }
 
 .bot-reply > .bot-reply-body:has(> .bot-reply-anchors) {
