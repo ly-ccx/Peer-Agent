@@ -52,9 +52,14 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
             reason: 'execution_outcome_unknown' });
           return { ...project(goalPlanStore.getPlan(plan.planId)), error: 'execution_outcome_unknown', cancellationPending: true };
         }
-        goalPlanStore.revisePlan(plan.planId, { status: 'cancelled', delegationOrigin: { ...plan.delegationOrigin,
-          cancellation: { ...registration.receipt, ...(['completed', 'failed'].includes(plan.status) ? { preserveArtifacts: true } : {}),
-            phase: 'completed', completedAt: now(), cleanupPending: true } } },
+        const interruption = plan.runner?.interruption;
+        // An unconsumed interruption derives the plan back to interrupted (ADR 73); cancelling consumes it in
+        // the same revision, so no intermediate state is derived, and the receipt keeps the fact.
+        goalPlanStore.revisePlan(plan.planId, { status: 'cancelled', ...(interruption ? { runner: { ...plan.runner, interruption: undefined } } : {}),
+          delegationOrigin: { ...plan.delegationOrigin,
+            cancellation: { ...registration.receipt, ...(['completed', 'failed'].includes(plan.status) ? { preserveArtifacts: true } : {}),
+              ...(interruption ? { retainedInterruption: interruption } : {}),
+              phase: 'completed', completedAt: now(), cleanupPending: true } } },
         { reason: registration.receipt.reason, changedBy: 'session-cancellation' });
         await isolationPlanner?.cleanup(goalPlanStore.getPlan(plan.planId));
         const cleaned = goalPlanStore.getPlan(plan.planId);

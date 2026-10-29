@@ -263,8 +263,14 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
           return await mutate(request, epoch);
         } catch (error) {
           const code = /^[A-Za-z0-9_:-]{1,120}$/.test(error?.code || error?.message || '') ? error.code || error.message : 'RECOVERY_FAILED';
-          if (request.action !== 'inspect' && holdsLease(id)) { try { status(id, { phase: 'failed', code }); } catch { /* Keep the original failure. */ } }
-          return { ok: false, code };
+          if (request.action === 'inspect' || !holdsLease(id)) return { ok: false, code };
+          try { status(id, { phase: 'failed', code }); } catch { /* Keep the original failure. */ }
+          // The host stays paused; the next step starts from this re-check, never from the token that just failed.
+          try {
+            const view = { ...(await inspectOwned(id, epoch)).view, phase: 'failed', code };
+            views.set(id, view);
+            return { ok: false, code, view };
+          } catch { return { ok: false, code }; }
         }
       })().finally(() => flights.delete(id));
       flights.set(id, { key, action: request.action, promise: run }); return run;

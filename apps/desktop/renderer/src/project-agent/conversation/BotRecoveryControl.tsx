@@ -45,8 +45,9 @@ export function BotRecoveryControl({ workspaceId, status, settled, i18n, onRetry
   const continuable = view && view.phase !== 'occupied' && (!view.canContinue || resumable.length > 0 || !view.runtimeReady);
   const errorKey = error === 'coordination_resume_plan_changed' ? 'recovery.stale'
     : error === 'coordination_recovery_stop_pending' ? 'recovery.stopPending'
+    : error === 'coordination_recovery_stop_failed' ? 'recovery.stopFailed'
     : error === 'RECOVERY_BUSY' ? 'recovery.busy'
-      : ['coordination_recovery_identity_conflict', 'coordination_recovery_unbound_delivery'].includes(error || '') ? 'recovery.unsupported' : 'recovery.failed';
+      : ['coordination_recovery_identity_conflict', 'coordination_recovery_unbound_delivery'].includes(error || '') ? 'recovery.unsupported' : 'recovery.retry';
   const title = view?.phase === 'failed' ? 'recovery.failed' : status?.code === 'lease_unavailable' || view?.phase === 'occupied' ? 'recovery.occupied'
     : status?.reason === 'history_conflict' ? 'projectAgent.chat.recoveryConflict'
       : status?.reason === 'reconciliation_required' ? 'projectAgent.chat.recoveryReconcile'
