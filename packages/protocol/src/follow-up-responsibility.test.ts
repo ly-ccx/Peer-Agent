@@ -192,7 +192,7 @@ test('交叉事实：停止以回执为准，未知执行体不冒充结束', ()
 // Historical interruption and takeover remain evidence, not a new execution owner.
 test('completed cancellation dominates stale recovery and takeover without hiding live execution', () => {
  for(const takeoverPhase of ['stopping','awaiting_outcome'] as const){
-  const snapshot={status:'interrupted' as const,runnerStatus:'paused' as const,interrupted:true};
+  const snapshot={planId:'withdrawn',title:'Withdrawn task',status:'interrupted' as const,runnerStatus:'paused' as const,interrupted:true};
   const facts:LifecycleFacts={delegated:true,cancellationPhase:'completed',cancellationDisposition:'user_withdrawn',takeoverPhase};
   for(const executionOwnership of ['ended','unknown'] as const){
    const row=decideLifecycle(snapshot,{...facts,executionOwnership});
