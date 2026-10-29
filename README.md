@@ -11,7 +11,7 @@ Peer is a local work delegation system for people moving code, documents and res
 
 You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, currently **0.1.0-rc.28**. The stable **0.0.18** release uses the classic interface. Recent durable-supervision and withdrawal fixes are on the development line; merging a PR does not publish a new RC. Release and npm channel facts were checked on 2026-10-29.
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, currently beta channel **`0.1.0-rc.29`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`), which uses the classic interface. RC29 includes the recent durable-supervision and withdrawal fixes. Release and npm channel facts were checked on 2026-10-29.
 
 ![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 
@@ -37,7 +37,7 @@ The screenshot is from the actual 0.1 Desktop renderer, using fictional project 
 
 Ordinary work questions should return to the main Bot for coordination. Technical interruptions, a paused task and an unknown tool outcome remain different facts. Recovery preserves context and existing work; unknown operations are not blindly replayed.
 
-Development-line improvements strengthen durable supervision and withdrawal settlement. Withdrawing a delegation preserves its history and may retain an unknown historical outcome; it does not prove that an external effect was rolled back. Consult the release notes for what your installed build contains.
+RC29 strengthens durable supervision and withdrawal settlement. Withdrawing a delegation preserves its history and may retain an unknown historical outcome; it does not prove that an external effect was rolled back. Consult the release notes for what your installed build contains.
 
 ## What you can delegate
 
@@ -55,7 +55,7 @@ In the 0.1 preview, the Workspace beside the conversation opens web pages, docum
 
 ### Project Bot Desktop preview
 
-1. Open the [0.1.0-rc.28 release](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.28), choose an available platform asset and read its upgrade notes.
+1. Open the [0.1.0-rc.29 release](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.29), choose an available platform asset and read its upgrade notes.
 2. Add a model service in Settings and select a model suited to the work.
 3. Bind a folder or create a managed project Bot.
 4. Give it a goal and boundaries. Start with a read-only project question if you want to understand the folder first.
@@ -190,8 +190,8 @@ peer_agent/
 | Stage | What it means |
 | --- | --- |
 | Stable 0.0.18 | Classic Desktop and terminal workflows on the shared local runtime |
-| Preview 0.1.0-rc.28 | Project Bots, delegated work, memory, goals and the side-by-side workspace |
-| Development line | Recent supervision, continuity and withdrawal-settlement improvements; not an installer release claim |
+| Preview 0.1.0-rc.29 | Project Bots, delegated work, memory, goals and the side-by-side workspace |
+| Development line | Changes merged after the latest preview; not an installer release claim |
 
 Current work focuses on dependable personal project delegation: clear ownership, bounded execution, recoverable interruptions and evidence-backed delivery. Future collaboration or automation ideas are not a promise that those capabilities are available in the stable release.
 

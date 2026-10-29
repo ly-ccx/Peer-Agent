@@ -87,7 +87,7 @@ export const copy = {
   'copy': ['Copy', '复制'],
   'copied': ['Copied', '已复制'],
   'copy.failed': ['Copy unavailable. Select the command to copy it.', '无法自动复制，请选中命令复制。'],
-  'release.status': ['Release facts checked on 2026-10-29: stable 0.0.18; preview 0.1.0-rc.28. Recent supervision and withdrawal fixes are on the development line; merging them does not publish a new RC.', '版本事实核对于 2026-10-29：正式版 0.0.18，预览版 0.1.0-rc.28。近期监督与撤回补正位于开发线；代码合并不等于已发布新的 RC。'],
+  'release.status': ['Release facts checked on 2026-10-29: stable 0.0.18; preview 0.1.0-rc.29, which includes the recent supervision and withdrawal fixes.', '版本事实核对于 2026-10-29：正式版 0.0.18，预览版 0.1.0-rc.29，已包含近期监督与撤回收口补正。'],
   'release.all': ['All releases and current assets', '查看全部发布与当前安装包'],
   'footer.copy': ['Peer · open source under MIT', 'Peer · MIT 完全开源'],
   'footer.notes': ['Release notes', '更新日志'],
@@ -125,9 +125,9 @@ export const stories = [
     owner: ['Review the result or make the decision that is still required. Git integration and external actions retain their own authorization boundaries.', '查看结果或处理仍需你的决定；Git 合回与外部操作保留各自的授权边界。'],
   },
   {
-    title: 'story.4', development: true,
+    title: 'story.4',
     request: ['The work was interrupted. Or: I no longer need this delegation; keep its history.', '工作中断了。或者：这条委托不再需要，保留历史。'],
-    bot: ['The development line strengthens durable supervision and withdrawal settlement. It keeps context and evidence, checks whether execution has stopped, and preserves unknown historical outcomes rather than inventing success.', '开发线正在强化持久监督与撤回收口：保留上下文和证据，核对执行是否停止；历史未知结果如实保留，不把撤回说成执行成功。'],
-    owner: ['Stop requests take priority. Uncertain side effects and real authorization decisions are not silently skipped. These latest improvements are not claimed as part of RC28.', '停止要求优先；未知副作用和真实授权决定不会被静默跳过。这些近期补正不宣称已随 RC28 发布。'],
+    bot: ['RC29 strengthens durable supervision and withdrawal settlement. The Bot keeps context and evidence, checks whether execution has stopped, and preserves unknown historical outcomes rather than inventing success.', 'RC29 强化了持久监督与撤回收口：保留上下文和证据，核对执行是否停止；历史未知结果如实保留，不把撤回说成执行成功。'],
+    owner: ['Stop requests take priority. Uncertain side effects and real authorization decisions are not silently skipped.', '停止要求优先；未知副作用和真实授权决定不会被静默跳过。'],
   },
 ];
