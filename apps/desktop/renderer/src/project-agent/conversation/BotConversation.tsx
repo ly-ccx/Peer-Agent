@@ -179,7 +179,10 @@ export function BotConversation({
           focusTaskRequest={taskRequest?.draft ? null : taskRequest}
           i18n={i18n}
           onJump={(messageId) => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }}
-          onQuote={(messageId, excerpt) => setQuote({ messageId, text: excerpt })}
+          onQuote={(messageId, excerpt) => {
+            const [sourceId, text] = quoteRefsFor(messageId, excerpt);
+            if (sourceId && text) setQuote({ messageId: sourceId, text });
+          }}
           onRetry={(inputId) => {
             void conversation.retry(inputId);
           }}
