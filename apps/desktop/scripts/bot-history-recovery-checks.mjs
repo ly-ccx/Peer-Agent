@@ -38,7 +38,7 @@ export async function checkHistoryRecovery({ page, until, report, captureDirecto
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: `project-${String(index).padStart(3, '0')}` }) }).click();
     const control = page.locator('.bot-recovery-control'); await control.waitFor();
     await page.locator('.bot-composer textarea').fill('这份草稿必须保留');
-    await control.locator(':scope > details > summary').focus(); await page.keyboard.press('Enter');
+    await control.locator('.bot-recovery-toggle').focus(); await page.keyboard.press('Enter');
     await control.getByText('核对已有修改与报告', { exact: true }).waitFor();
     const capture = stage => page.screenshot({ path: path.join(captureDirectory, `recovery-${stage}-${width}-${theme}.png`) });
     await capture('inspection');
