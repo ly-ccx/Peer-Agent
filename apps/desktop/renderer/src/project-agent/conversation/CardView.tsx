@@ -69,7 +69,12 @@ function CardItem({
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [retired, setRetired] = useState<{ key: string; source: BotChatCard } | null>(null);
   const key = `${workspaceId}:${cardDecisionKey(sourceCard)}`;
-  const card = sourceCard.resolvedState === 'resolved' ? sourceCard : receipt?.key === key && receipt.source === sourceCard ? receipt.card : sourceCard;
+  // A terminal host receipt remains valid for an identical challenge after a refresh.
+  // Scope or challenge changes invalidate key; newer terminal source facts win.
+  const sameApprovalReceipt = receipt?.card.kind === sourceCard.kind
+    && ['approval', 'plan_approval'].includes(sourceCard.kind) && receipt.card.resolvedState === 'resolved';
+  const card = sourceCard.resolvedState === 'resolved' ? sourceCard
+    : receipt?.key === key && (receipt.source === sourceCard || sameApprovalReceipt) ? receipt.card : sourceCard;
   const waitingForFacts = submitted === key && card.resolvedState !== 'resolved';
   const sending = useRef(false);
   const submitInput = useContext(BotInputContext);
