@@ -11,7 +11,7 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     await until(() => page.locator('.model-selection-popover[data-surface-state="open"]').evaluate(node =>
       node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity)
         .every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
-    await until(() => page.locator('.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel').evaluateAll(nodes =>
+    await until(() => page.locator('.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock:not([inert]), .pa-overlay-panel.bot-drawer-panel').evaluateAll(nodes =>
       nodes.every(node => node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState)))), Boolean);
     const baseline = await page.evaluate(selector => {
       const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height }; };
@@ -25,7 +25,7 @@ export async function checkEffortStability({ page, slider, strength, until, getB
         const frames = [];
         const slider = document.querySelector('.model-selection-popover[data-surface-state="open"] .reasoning-effort-slider');
         const popover = document.querySelector('.model-selection-popover[data-surface-state="open"]');
-        const drawerSelector = '.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock, .pa-overlay-panel.bot-drawer-panel';
+        const drawerSelector = '.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock:not([inert]), .pa-overlay-panel.bot-drawer-panel';
         const drawer = document.querySelector(drawerSelector);
         let start = 0;
         const finish = () => { clearTimeout(deadline); slider.removeEventListener('keyup', begin); resolve(frames); };
