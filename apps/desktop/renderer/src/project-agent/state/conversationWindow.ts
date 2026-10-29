@@ -1,6 +1,6 @@
 import type { ConversationDisplayRow } from './botConversationState';
 import type { BotReplyRow } from './botReplyContinuity';
-import { agentActivityPresentationId } from './agentActivityState';
+import { agentActivityPresentationId } from './agentActivityState.ts';
 
 /** A receipt may replace a provisional message ID, but it is still the same input. */
 export const conversationRowKey = (row: ConversationDisplayRow | BotReplyRow) => row.type === 'reply' ? row.id : row.type === 'message'

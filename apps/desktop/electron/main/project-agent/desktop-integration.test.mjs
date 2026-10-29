@@ -735,14 +735,18 @@ test('actual SDK reports survive restart and suppress repeated wake delivery whi
     const args={text:'Verified project',replyTo:[`lifecycle-research-${current.bot.workspaceId}`],sources:[sessionId],statusClaims:[{sessionId,status:current.api.supervisor.get({sessionId}).status}]};
     const result=await tool({...current,turnId:input.streamId,currentInputAnchors:input.turnProfile.context.inputAnchors?.map(a=>a.messageId)||[]},'post_reply',args);
     assert.equal(result.execution.result.status,'success');
-    input.webContents.send('chat:stream:tool-call',{toolCallId:'report',tool:'post_reply',args});
-    input.webContents.send('chat:stream:tool-result',{toolCallId:'report',result:JSON.parse(result.output)});
+    const toolCallId=result.execution.call.toolCallId;
+    input.webContents.send('chat:stream:tool-call',{toolCallId,tool:'post_reply',args});
+    input.agentProgress.onToolExecution(result.execution);
+    input.webContents.send('chat:stream:tool-result',{toolCallId,result:JSON.parse(result.output)});
     return {terminalStatus:'done'};
   };
   env=harness({send,verify:async()=>({passed:true,evidenceRefs:['ev'],verifierModel:provider.id})});current=env;
   try{
     sessionId=(await env.invoke('start-familiarize')).profile.familiarize.sessionId;
     const planId=env.api.supervisor.get({sessionId}).planId;
+    env.plans.recordEvidenceRefs({planId,evidenceRef:'ev',toolName:'read_file',capabilityId:'local.file.read',
+      bodyPreview:{kind:'file',text:'Verified project',truncated:false}});
     env.plans.revisePlan(planId,{tasks:[{taskId:'read',title:'Read',status:'completed',evidenceRefs:['ev']}]},{reason:'read',changedBy:'test'});
     assert.equal(env.plans.getPlan(planId).successCriteria.every(row=>row.kind==='model_review'),true);
     env.plans.setPlanStatus(planId,'completed');
