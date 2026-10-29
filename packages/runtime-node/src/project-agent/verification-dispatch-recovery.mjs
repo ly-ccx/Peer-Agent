@@ -1,5 +1,8 @@
 import { historyExecutionHeld } from './history-resumption.mjs';
 const VERIFICATION = new Set(['verify_session', 'local.delegation.verify_session']);
+const SESSION_QUERY = new Set(['get_session', 'local.delegation.get_session',
+  'get_verification_detail', 'local.delegation.get_verification_detail']);
+const reconcilable = id => VERIFICATION.has(id) || SESSION_QUERY.has(id);
 const argsOf = value => { try { return typeof value === 'string' ? JSON.parse(value) : value; } catch { return null; } };
 const keyOf = row => `${row.attemptId}:${row.toolCallId}`;
 
@@ -17,7 +20,8 @@ function legacyTarget(work, row, messages, unsettled, origin) {
     if (message.kind !== 'agent_turn' || message.meta?.workId && message.meta.workId !== work.workId
       || (origin ? message.id !== origin.turnId && message.turnId !== origin.turnId : message.meta?.workId !== work.workId)) continue;
     for (const round of message.rounds || []) for (const call of round.toolCalls || []) {
-      if (!VERIFICATION.has(call.name) || call.toolCallId && call.toolCallId !== row.toolCallId) continue;
+      if (!reconcilable(call.name) || call.name.replace(/^local\.delegation\./, '') !== row.capabilityId.replace(/^local\.delegation\./, '')
+        || call.toolCallId && call.toolCallId !== row.toolCallId) continue;
       const result = argsOf(call.result);
       if (!['cancelled_outcome_unknown', 'execution_outcome_unknown'].includes(result?.error)) continue;
       const sessionId = argsOf(call.input)?.sessionId;
@@ -40,10 +44,15 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
       activeAttempts()?.has(attemptId) ? [] : (attempt.pendingTools || []).map(row => ({ ...row, attemptId, role: attempt.role })))];
     const seen = new Set();
     for (const row of unsettled) {
-      if (!row.toolCallId || !row.attemptId || seen.has(keyOf(row)) || !VERIFICATION.has(row.capabilityId)
+      if (!row.toolCallId || !row.attemptId || seen.has(keyOf(row)) || !reconcilable(row.capabilityId)
         || row.role !== 'project_agent' || activeAttempts()?.has(row.attemptId)) continue;
       seen.add(keyOf(row));
-      const sessionId = row.verificationSessionId || legacyTarget(work, row, readMessages(), unsettled, store.dispatchOrigin?.(workId, row.attemptId, row.toolCallId));
+      const origin = store.dispatchOrigin?.(workId, row.attemptId, row.toolCallId);
+      // Queries need the original dispatch/turn as well as their fixed read-only
+      // capability. A session ID supplied in prose is never recovery evidence.
+      if (SESSION_QUERY.has(row.capabilityId) && !origin?.turnId) continue;
+      const sessionId = VERIFICATION.has(row.capabilityId) && row.verificationSessionId
+        || legacyTarget(work, row, readMessages(), unsettled, origin);
       if (!sessionId || !work.sessionIds?.includes(sessionId)) continue;
       store.assertOwner();
       let receipt;
@@ -68,7 +77,8 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
       if (budget.attempts?.[row.attemptId]) budget.attempts[row.attemptId].pendingTools =
         (budget.attempts[row.attemptId].pendingTools || []).filter(item => item.toolCallId !== row.toolCallId);
       budget.reconciledDispatches = [...(budget.reconciledDispatches || []), { ...row, sessionId,
-        planId: receipt.planId, sourceRevision: receipt.sourceRevision, outcome: 'verification_interrupted', at: now() }].slice(-64);
+        planId: receipt.planId, sourceRevision: receipt.sourceRevision,
+        outcome: SESSION_QUERY.has(row.capabilityId) ? 'query_interrupted' : 'verification_interrupted', at: now() }].slice(-64);
       const remaining = budget.uncertainDispatches.length || Object.entries(budget.attempts || {}).some(([id, item]) => item.pendingTools?.length && !activeAttempts()?.has(id));
       const cleared = !remaining && current.recovery?.failureKind === 'execution_outcome_unknown';
       store.saveWork({ ...current, budget, ...(cleared ? { recovery: { ...current.recovery, failureKind: 'cancelled', retryable: false,
@@ -82,7 +92,7 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
         const pending = [...(work.budget?.uncertainDispatches || []),
           ...Object.entries(work.budget?.attempts || {}).flatMap(([attemptId, attempt]) =>
             activeAttempts()?.has(attemptId) ? [] : (attempt.pendingTools || []).map(row => ({ ...row, role: attempt.role })))];
-        if (pending.some(row => VERIFICATION.has(row.capabilityId) && row.role === 'project_agent')) reconcile(work.workId);
+        if (pending.some(row => reconcilable(row.capabilityId) && row.role === 'project_agent')) reconcile(work.workId);
       }
     },
     facts(workId) { return (readWork(workId)?.budget?.reconciledDispatches || []).slice(-8).map(row => ({

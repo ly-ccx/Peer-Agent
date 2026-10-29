@@ -79,6 +79,20 @@ test('a public progress reply transfers event custody while retaining runnable r
   assert.equal(f.coordination.recoverJob().workId, 'w');
 });
 
+test('a delivered related reply retains follow-up in its user work until the original session settles', () => {
+  const f = coordinationFixture();
+  f.work().sessionIds = [];
+  const job = { workId: 'w', events: [] };
+  f.coordination.finish(job, { rounds: [], reportedSessionIds: ['s'] }, f.roster);
+  assert.deepEqual(f.work().sessionIds, ['s']);
+  assert.equal(f.work().state, 'runnable');
+  assert.deepEqual(f.work().repairSessionIds, ['s']);
+  f.roster[0] = { sessionId: 's', status: 'accepted', followUp: { owner: 'none', inCurrentList: false, reason: 'settled' } };
+  f.coordination.finish(job, { rounds: [], reportedSessionIds: ['s'] }, f.roster);
+  assert.equal(f.work().state, 'delivered');
+  assert.deepEqual(f.work().repairSessionIds, []);
+});
+
 test('legacy false waiting_user recovers from current facts without a fresh allowance', () => {
   const f = coordinationFixture('waiting_user');
   assert.equal(f.coordination.recoverJob().workId, 'w');

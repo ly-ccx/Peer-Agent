@@ -693,15 +693,24 @@ export function createSessionSupervisor({
 
   function summaries(input = {}) {
     const ids = new Set(input.sessionIds || []), anchors = new Set(input.anchorMessageIds || []);
-    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId
-      && (input.all === true || ids.has(plan.delegationOrigin.sessionId) || input.workId && plan.delegationOrigin.workId === input.workId
-        || anchors.has(plan.delegationOrigin.anchorMessageId))).slice(0, 24).map(plan => {
-      const origin = plan.delegationOrigin;
-      return { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
-        acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
-        conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}) }),
-        metadataRevision: plan.updatedAt || plan.createdAt || '' };
-    });
+    const related = plan => input.all === true || ids.has(plan.delegationOrigin.sessionId)
+      || input.workId && plan.delegationOrigin.workId === input.workId || anchors.has(plan.delegationOrigin.anchorMessageId);
+    const userFollowUp = plan => input.kind === 'user' && input.conversationId === plan.delegationOrigin.parentConversationId;
+    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId && (related(plan) || userFollowUp(plan)))
+      .map(plan => {
+        const origin = plan.delegationOrigin;
+        const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
+          acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
+          conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
+          ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
+          ...(origin.phase === 'paused' ? { phase: 'paused' } : {}) }),
+          ...(sessionFactsFromPlan(plan).blockedReason ? { blockedReason: sessionFactsFromPlan(plan).blockedReason } : {}),
+          metadataRevision: plan.updatedAt || plan.createdAt || '' };
+        return { plan, summary };
+      }).filter(({plan,summary}) => related(plan) || userFollowUp(plan) && summary.followUp.inCurrentList)
+      .sort((a,b) => Number(Boolean(related(b.plan))) - Number(Boolean(related(a.plan)))
+        || String(b.plan.updatedAt || '').localeCompare(String(a.plan.updatedAt || '')))
+      .slice(0, 24).map(({summary}) => summary);
   }
 
   function list(input = {}) {

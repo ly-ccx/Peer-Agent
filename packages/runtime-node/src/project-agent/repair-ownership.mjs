@@ -19,9 +19,10 @@ export function stateAfterReply(sessions) {
     : owner.waiting.length ? 'waiting_children' : 'delivered';
 }
 
-export function ownedSessions(work, job, roster) {
+export function ownedSessions(work, job, roster, reportedSessionIds = []) {
   return (Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []).filter(row =>
-    work.sessionIds.includes(row.sessionId) || (job.events || []).some(event => event.sessionId === row.sessionId)
+    work.sessionIds.includes(row.sessionId) || reportedSessionIds.includes(row.sessionId)
+    || (job.events || []).some(event => event.sessionId === row.sessionId)
     || row.origin?.anchorMessageId && work.anchorInputIds.some(id => `input-${id}` === row.origin.anchorMessageId));
 }
 

@@ -2554,3 +2554,22 @@ test('related turn summaries never load child transcripts or reports', async () 
     assert.deepEqual(env.supervisor.summaries({workspaceId:'ws-1',sessionIds:['unrelated']}),[]);
   } finally { await env.cleanup(); }
 });
+
+test('new user turns see unresolved work from the same Bot; wakes and other parents stay scoped', async () => {
+  const env = await harness({ goalRunner: { async start() {}, pause() {}, async waitForIdle() {} } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ kind: 'research', readOnly: true }), contextOf(env));
+    const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+    env.goalPlanStore.setRunnerState(plan.planId, { status: 'blocked', blockedReason: 'Verification gate failed: c1:criterion_unverified' });
+    const scope = { workspaceId: 'ws-1', conversationId: env.parent.id, kind: 'user', workId: 'new-work', anchorMessageIds: ['new-question'] };
+    const rows = env.supervisor.summaries(scope);
+    assert.deepEqual(rows.map(row => row.sessionId), [opened.sessionId]);
+    assert.equal(rows[0].followUp.owner, 'bot');
+    assert.match(rows[0].blockedReason, /Verification gate failed/);
+    assert.deepEqual(env.supervisor.summaries({ ...scope, kind: 'wake' }), []);
+    assert.deepEqual(env.supervisor.summaries({ ...scope, conversationId: 'other-parent' }), []);
+    env.goalPlanStore.revisePlan(plan.planId, { status: 'completed', runner: { status: 'completed' },
+      resultAcceptance: { acceptedAt: '2026-10-29T00:00:00Z', acceptedBy: 'policy', verdictRef: 'real' } });
+    assert.deepEqual(env.supervisor.summaries(scope), []);
+  } finally { await env.cleanup(); }
+});
