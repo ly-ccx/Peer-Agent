@@ -5,6 +5,7 @@ export const copy = {
   'nav.product': ['Product', '产品'],
   'nav.how': ['How it works', '工作方式'],
   'nav.docs': ['Docs', '文档'],
+  'nav.changelog': ['Changelog', '更新日志'],
   'nav.download': ['Download', '下载'],
   'theme': ['Change appearance', '切换外观'],
   'theme.system': ['System', '跟随系统'],
