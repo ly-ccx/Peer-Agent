@@ -33,11 +33,11 @@
 <th data-i18n="docs.version.version" >Verified version</th>
 <th data-i18n="docs.version.experience" >Experience</th>
 </tr></thead><tbody><tr><td data-i18n="docs.version.preview" >0.1 preview</td>
-<td><a href="https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.28">0.1.0-rc.28</a></td><td data-i18n="docs.version.preview.body" >Project Bots, delegated work, project memory, goals and the workspace.</td>
+<td><a href="https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.29">0.1.0-rc.29</a></td><td data-i18n="docs.version.preview.body" >Project Bots, delegated work, project memory, goals and the workspace.</td>
 </tr><tr><td data-i18n="docs.version.stable" >0.0 stable</td>
 <td><a href="https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18">0.0.18</a></td><td data-i18n="docs.version.stable.body" >Classic Agent / Plan / Goal workflows.</td>
 </tr><tr><td data-i18n="docs.version.dev" >Development line</td>
-<td><a href="https://github.com/ly-ccx/Peer-Agent/tree/PeerAgent/dev/0.1.0">PeerAgent/dev/0.1.0</a></td><td data-i18n="docs.version.dev.body" >Recent durable-supervision and withdrawal fixes. A merged PR is not a published RC.</td>
+<td><a href="https://github.com/ly-ccx/Peer-Agent/tree/PeerAgent/dev/0.1.0">PeerAgent/dev/0.1.0</a></td><td data-i18n="docs.version.dev.body" >Changes merged after the latest preview. A merged PR is not a published RC.</td>
 </tr></tbody></table><p data-i18n="docs.version.checked" class="reference-note">Checked on 2026-10-29 against GitHub Releases and npm dist-tags. The GitHub release page lists actual platform assets; it is the download source.</p>
 <p><a class="button primary" href="./index.html#get" data-i18n="docs.install.download">Open download options</a></p><p data-i18n="docs.install.cli" >For the preview CLI, install the rc channel. Without @rc, npm installs the stable 0.0 release. The beta tag is an older beta channel, not the current RC.</p>
 <pre><code>npm install -g @peer-agent/cli@rc
@@ -63,8 +63,8 @@ peer</code></pre><p data-i18n="docs.install.compat" class="callout">Upgrade Desk
 <p data-i18n="docs.working.questions.body" >Ordinary work questions should return to the main Bot for coordination. Missing authorization, material business choices and genuine requests for your input stay with you. A Bot cannot approve a permission card for you.</p>
 <h3 data-i18n="docs.working.states" >Read the kind of interruption</h3>
 <p data-i18n="docs.working.states.body" >A stopped reply, a paused task, a failed attempt and an unknown tool outcome are different facts. Keep the original goal and inspect what happened before continuing. Resuming work must not blindly repeat unknown operations.</p>
-<p data-i18n="docs.working.recovery" >RC28 provides a recovery inspection entry when startup recovery is blocked. Follow the visible recovery choices and preserve existing reports and worktrees.</p>
-<p data-i18n="docs.working.dev" class="callout">Development-line changes strengthen durable supervision, context continuity and withdrawal settlement after old interrupted attempts. They are not described here as already shipped in RC28.</p>
+<p data-i18n="docs.working.recovery" >When startup recovery needs attention, a recovery entry appears. Since RC29 it shows only while something still needs handling, and it can end all earlier executions after confirmation. Follow the visible recovery choices and preserve existing reports and worktrees.</p>
+<p data-i18n="docs.working.dev" class="callout">RC29 strengthens durable supervision, context continuity and withdrawal settlement after old interrupted attempts.</p>
 <p data-i18n="docs.working.withdraw" >Withdrawing a delegation ends follow-up responsibility after host settlement. It preserves history and may retain an unknown historical outcome; it does not prove that an external effect was rolled back.</p>
 </article>
 
