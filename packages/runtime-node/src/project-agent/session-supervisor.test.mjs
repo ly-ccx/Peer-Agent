@@ -2155,6 +2155,7 @@ test('current user withdraws stopped work while retaining the original unknown B
     ...supervisor.summaries({workspaceId:'ws-1',all:true}),...supervisor.listByWorkspaceIds(['ws-1']).get('ws-1')];
    for(const row of reads){
     assert.equal(row.status,'cancelled');assert.equal(row.followUp.inCurrentList,false);
+    assert.equal(row.actionRight,'terminal');assert.equal(row.nextAction,'none');assert.equal(row.statusLabel,'已取消');
    }
    const disk=JSON.parse(readFileSync(path.join(plans.getStoreDir(),`${planId}.json`),'utf8'));
    assert.equal(disk.status,'cancelled');assert.deepEqual(disk.runner.interruption,interruption);

@@ -93,7 +93,8 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
         goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...cleaned.delegationOrigin, cancellation: { ...cleaned.delegationOrigin.cancellation, cleanupPending: false } } },
           { reason: 'cancellation cleanup settled', changedBy: 'session-cancellation' });
         const settled = project(goalPlanStore.getPlan(plan.planId));
-        if (settled.status !== 'cancelled' || settled.followUp?.inCurrentList !== false) {
+        if (settled.status !== 'cancelled' || settled.actionRight !== 'terminal' || settled.nextAction !== 'none'
+          || settled.followUp?.inCurrentList !== false) {
           return { ...settled, error: 'cancellation_not_settled', cancellationPending: true };
         }
         emit({ kind: 'cancelled', sessionId: registration.sessionId, planId: plan.planId, workspaceId: registration.workspaceId, reason: registration.receipt.reason,

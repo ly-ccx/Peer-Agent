@@ -731,6 +731,13 @@ function lifecyclePresentation(
   },
 ): ProjectionDecision {
   switch (status) {
+    case 'cancelled':
+      return {
+        actionRight: 'terminal',
+        nextAction: 'none',
+        statusLabel: '已取消',
+        actionLabel: '查看 →',
+      };
     case 'waiting_user':
       // completed 只说明计划已落库完成，不等于没有待你消费的决策：旧规则表把
       // completed 放在最前（rule 16），会把预算门/待确认门吞成「已完成 / terminal」。

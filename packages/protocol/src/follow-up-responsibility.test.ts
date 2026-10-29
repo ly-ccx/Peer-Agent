@@ -198,6 +198,7 @@ test('completed cancellation dominates stale recovery and takeover without hidin
    const row=decideLifecycle(snapshot,{...facts,executionOwnership});
    assert.equal(row.status,'cancelled');assert.equal(row.followUp.inCurrentList,false);
    assert.equal(row.followUp.reason,'user_withdrawn');assert.equal(row.cancelable,false);
+   assert.equal(row.actionRight,'terminal');assert.equal(row.nextAction,'none');assert.equal(row.statusLabel,'已取消');
   }
   assert.equal(decideLifecycle(snapshot,{...facts,executionOwnership:'live'}).followUp.inCurrentList,true);
  }
