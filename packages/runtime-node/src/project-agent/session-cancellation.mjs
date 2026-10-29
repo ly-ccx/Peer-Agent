@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 
+/** Execution return is not cancellation settlement; accepted results stay immutable. */
+export function sessionNeedsCancellation(session) {
+  if (!session || session.status === 'accepted') return false;
+  if (session.status === 'superseded') return session.followUp?.inCurrentList === true;
+  return session.status !== 'cancelled' || session.origin?.cancellation?.phase !== 'completed'
+    || session.origin?.cancellation?.cleanupPending === true || session.followUp?.inCurrentList === true;
+}
+
 /** Register under the project writer, settle outside it, then conditionally commit. */
 export function createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
   abortStream, isolationPlanner, exclusive, project, emit, promote, now }) {
@@ -10,17 +18,16 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     if (!plan) return { error: 'session_not_found' };
     const origin = plan.delegationOrigin;
     if (!canManageWorkspace(origin.workspaceId)) return { error: 'lease_unavailable' };
-    if (plan.status === 'completed' || plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
-    if (plan.status === 'cancelled' && !origin.cancellation?.cleanupPending) return { completed: project(plan) };
-    const receipt = { ...(origin.cancellation || { operationId: input.operationId || `cancel-${randomUUID()}`, reason: input.reason || 'cancelled', phase: 'stopping', requestedAt: now() }),
-      ...(input.preserveArtifacts === true ? { preserveArtifacts: true } : {}) };
+    if (plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
+    if (plan.status === 'cancelled' && !sessionNeedsCancellation(project(plan))) return { completed: project(plan) };
+    const receipt = { ...(origin.cancellation || { operationId: input.operationId || `cancel-${randomUUID()}`, reason: input.reason || 'cancelled', requestedAt: now() }),
+      phase: 'stopping',
+      ...(input.preserveArtifacts === true || ['completed', 'failed'].includes(plan.status) ? { preserveArtifacts: true } : {}) };
     // pause() closes the runner pump before cancellation returns any acknowledgement.
-    if (plan.status !== 'cancelled') {
-      goalRunner?.pause?.(plan.planId, receipt.reason);
-      const fresh = goalPlanStore.getPlan(plan.planId);
-      goalPlanStore.revisePlan(plan.planId, { status: 'paused', delegationOrigin: { ...fresh.delegationOrigin, phase: 'paused', cancellation: receipt } },
-        { reason: receipt.reason, changedBy: 'session-cancellation' });
-    }
+    goalRunner?.pause?.(plan.planId, receipt.reason);
+    const fresh = goalPlanStore.getPlan(plan.planId);
+    goalPlanStore.revisePlan(plan.planId, { status: 'paused', delegationOrigin: { ...fresh.delegationOrigin, phase: 'paused', cancellation: receipt } },
+      { reason: receipt.reason, changedBy: 'session-cancellation' });
     executionScheduler.cancelPlan(plan.planId);
     return { planId: plan.planId, sessionId: input.sessionId, workspaceId: origin.workspaceId, conversationId: plan.conversationId, receipt };
   }
@@ -33,7 +40,7 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
         const plan = goalPlanStore.getPlan(registration.planId);
         if (!canManageWorkspace(registration.workspaceId)) return { error: 'lease_unavailable' };
         if (plan?.delegationOrigin?.cancellation?.operationId !== registration.receipt.operationId) return { error: 'cancellation_superseded' };
-        if (plan.status === 'completed' || plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
+        if (plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
         const work = workBudgetBinding(registration.workspaceId)?.store.read().works[plan.delegationOrigin.workId];
         const unknown = work?.budget?.uncertainDispatches?.filter(row => row.planId === plan.planId || !row.planId);
         if (unknown?.length) {
@@ -46,7 +53,8 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
           return { ...project(goalPlanStore.getPlan(plan.planId)), error: 'execution_outcome_unknown', cancellationPending: true };
         }
         goalPlanStore.revisePlan(plan.planId, { status: 'cancelled', delegationOrigin: { ...plan.delegationOrigin,
-          cancellation: { ...registration.receipt, phase: 'completed', completedAt: now(), cleanupPending: true } } },
+          cancellation: { ...registration.receipt, ...(['completed', 'failed'].includes(plan.status) ? { preserveArtifacts: true } : {}),
+            phase: 'completed', completedAt: now(), cleanupPending: true } } },
         { reason: registration.receipt.reason, changedBy: 'session-cancellation' });
         await isolationPlanner?.cleanup(goalPlanStore.getPlan(plan.planId));
         const cleaned = goalPlanStore.getPlan(plan.planId);

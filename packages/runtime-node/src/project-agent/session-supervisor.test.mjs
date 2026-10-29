@@ -2057,13 +2057,11 @@ test('legacy queue input anchors remain usable without rewriting their message r
   } finally { await env.cleanup(); }
 });
 
-test('cancellation preserves completed results and workspace shutdown cancels only unfinished work', async () => {
+test('workspace shutdown preserves completed results and cancels only unfinished work', async () => {
   const env = await harness();
   try {
     const completed = await env.supervisor.spawn(spawnInput({ title: 'ready' }), contextOf(env));
     const completedPlan = planIdOf(env, completed.sessionId); env.goalPlanStore.setPlanStatus(completedPlan, 'completed');
-    assert.equal((await env.supervisor.cancel({ sessionId: completed.sessionId })).error, 'session_not_running');
-    assert.equal(env.goalPlanStore.getPlan(completedPlan).status, 'completed');
     const first = await env.supervisor.spawn(spawnInput({ title: 'first' }), contextOf(env));
     const queued = await env.supervisor.spawn(spawnInput({ title: 'child', brief: 'dependent', dependsOn: [first.sessionId] }), contextOf(env));
     await env.supervisor.cancel({ sessionId: first.sessionId });
@@ -2072,6 +2070,84 @@ test('cancellation preserves completed results and workspace shutdown cancels on
     assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).status, 'cancelled');
     assert.equal(env.goalPlanStore.getPlan(completedPlan).status, 'completed');
   } finally { await env.cleanup(); }
+});
+
+test('native work cancellation releases returned results after settlement without accepting or deleting their facts', async () => {
+ const calls=[];
+ let releaseIdle;
+ const idle=new Promise(resolve=>{releaseIdle=resolve;});
+ const env=await harness({readPlanApproval:()=> 'always',goalRunner:{async start(){},pause(){calls.push('pause');},async waitForIdle(){await idle;calls.push('idle');}}});
+ const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+ store.saveWork({workId:'returned',parentConversationId:env.parent.id,state:'waiting_children'});
+ const release=registerWorkBudget('ws-1',store);
+ try{
+  const context=contextOf(env,{workId:'returned',currentInputAnchors:['anchor-1']});
+  const opened=await env.supervisor.spawn(spawnInput(),context),planId=planIdOf(env,opened.sessionId);
+  env.goalPlanStore.revisePlan(planId,{status:'completed',runner:{status:'running',verifierRuns:[{verifierRunId:'old-failure',status:'failed',evidenceRefs:['tool-result://prior']}]}});
+  const before=env.goalPlanStore.getPlan(planId);
+  const history=env.conversationStore.getPersistedConversationHistory(before.conversationId);
+  store.saveWork({workId:'returned',state:'delivered'});
+  const input={sessionId:opened.sessionId,action:'cancel',anchorMessageId:'anchor-1'};
+  assert.equal((await env.supervisor.controlWork(input,{...context,currentInputAnchors:[]})).error,'current_user_required');
+  const cancelling=env.supervisor.controlWork(input,context);
+  await until(()=>calls.includes('pause'));
+  const stopping=env.supervisor.get({sessionId:opened.sessionId});
+  assert.equal(stopping.status,'stopping');assert.equal(stopping.followUp.inCurrentList,true);
+  releaseIdle();const result=await cancelling;
+  assert.equal(result.ok,true);
+  const after=env.goalPlanStore.getPlan(planId),session=env.supervisor.get({sessionId:opened.sessionId});
+  assert.equal(session.status,'cancelled');assert.equal(session.followUp.inCurrentList,false);
+  assert.equal(after.delegationOrigin.cancellation.phase,'completed');
+  assert.equal(after.delegationOrigin.cancellation.preserveArtifacts,true);
+  assert.equal(after.resultAcceptance?.acceptedAt,undefined);
+  assert.deepEqual(after.runner.verifierRuns,before.runner.verifierRuns);
+  assert.deepEqual(after.criterionResults,before.criterionResults);
+  assert.deepEqual(env.conversationStore.getPersistedConversationHistory(before.conversationId),history);
+  assert.deepEqual(calls,['pause','idle']);assert.equal(env.aborts.length,1);
+  const reloaded=createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()});
+  assert.equal(reloaded.getPlan(planId).delegationOrigin.cancellation.phase,'completed');
+  assert.equal((await env.supervisor.controlWork(input,context)).replayed,true);
+  assert.deepEqual(calls,['pause','idle']);
+ }finally{releaseIdle();release();await env.cleanup();}
+});
+
+test('returned work with an uncertain side effect remains current until the same user cancellation settles', async () => {
+ const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
+ const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+ store.saveWork({workId:'uncertain',parentConversationId:env.parent.id,state:'waiting_children'});
+ const release=registerWorkBudget('ws-1',store);
+ try{
+  const context=contextOf(env,{workId:'uncertain',currentInputAnchors:['anchor-1']});
+  const opened=await env.supervisor.spawn(spawnInput(),context),planId=planIdOf(env,opened.sessionId);
+  env.goalPlanStore.revisePlan(planId,{status:'completed',runner:{status:'completed'}});
+  store.saveWork({workId:'uncertain',state:'delivered',budget:{uncertainDispatches:[{toolCallId:'uncertain-call',planId}]}});
+  const input={sessionId:opened.sessionId,action:'cancel',anchorMessageId:'anchor-1'};
+  assert.equal((await env.supervisor.controlWork(input,context)).error,'execution_outcome_unknown');
+  const pending=env.supervisor.get({sessionId:opened.sessionId});
+  assert.equal(pending.status,'awaiting_outcome');assert.equal(pending.followUp.inCurrentList,true);
+  assert.deepEqual(pending.origin.cancellation.evidenceCalls,['uncertain-call']);
+  assert.ok(store.read().works.uncertain.pendingControl);
+  // Reconciliation supplies the missing outcome; retry does not execute the original work.
+  store.saveWork({workId:'uncertain',budget:{uncertainDispatches:[]}});
+  assert.equal((await env.supervisor.controlWork(input,context)).ok,true);
+  assert.equal(env.supervisor.get({sessionId:opened.sessionId}).followUp.inCurrentList,false);
+  assert.equal(env.goalPlanStore.getPlan(planId).resultAcceptance?.acceptedAt,undefined);
+ }finally{release();await env.cleanup();}
+});
+
+test('single-session cancellation settles failed results and old cancelled records without inventing acceptance', async () => {
+ const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
+ try{
+  for(const status of ['failed','cancelled']){
+   const opened=await env.supervisor.spawn(spawnInput({title:status}),contextOf(env,{inputId:status}));
+   const planId=planIdOf(env,opened.sessionId);env.goalPlanStore.setPlanStatus(planId,status);
+   const result=await env.supervisor.cancel({sessionId:opened.sessionId,reason:'user no longer needs this'});
+   assert.equal(result.status,'cancelled');assert.equal(result.followUp.inCurrentList,false);
+   assert.equal(result.origin.cancellation.phase,'completed');
+   assert.equal(env.goalPlanStore.getPlan(planId).resultAcceptance?.acceptedAt,undefined);
+   if(status==='failed')assert.equal(result.origin.cancellation.preserveArtifacts,true);
+  }
+ }finally{await env.cleanup();}
 });
 
 test('failed isolation and runner startup leave no deleted task linked to the durable objective',async()=>{

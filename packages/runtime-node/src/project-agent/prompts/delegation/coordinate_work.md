@@ -6,3 +6,5 @@ The receipt reports a transition phase: stopping is a request, completed confirm
 
 
 `resume` continues the selected existing task after a known technical interruption. Query current facts first and supply its expectedRevision. It retains task/artifact identity, budget and verification obligations, binds a new execution epoch, and never consumes a native user/permission/manual acceptance request. User pauses require a current canonical user instruction. Unknown tool effects must be reconciled first. A completed coordination phase or queued admission is not proof of execution: inspect executionAdmission/executionEffect and the actual bound attempt.
+
+Cancelling an already returned or failed result withdraws follow-up responsibility and requires current canonical user input; an ordinary event wake cannot abandon it. Cancellation retains prior result, verification and Evidence facts and never accepts the result. Unknown execution outcomes remain pending.

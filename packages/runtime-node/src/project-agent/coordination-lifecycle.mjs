@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
+import { sessionNeedsCancellation } from './session-cancellation.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
@@ -76,6 +77,9 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       const blocked = checkTakeover?.(target.sessionId);
       if (blocked) return { ok: false, error: blocked };
     }
+    if (input.action === 'cancel' && ['result_ready', 'failed'].includes(target?.status) && !current.length) {
+      return { ok: false, error: 'current_user_required' };
+    }
     const workId = input.workId || target?.origin?.workId || Object.values(state.mandates || {}).find(row => row.sessionIds.includes(target?.sessionId))?.workId || context.workId;
     const mandate = state.mandates?.[workId];
     if (!current.length && mandate && lifecycleOf(state,mandate) !== 'active') return {ok:false,error:'mandate_inactive'};
@@ -134,11 +138,15 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const payload = decision.payload, context = { ...payload.context, workId: mandate.workId, coordinationBinding: binding, coordinationOperationId: transition.operationId, deliveryKey: transition.operationId };
     const old = transition.oldSessionId ? readSession({ sessionId: transition.oldSessionId, detail: 'report' }) : null;
     if (transition.phase === 'recorded') {
+      if (transition.action === 'cancel' && ['result_ready', 'failed'].includes(old?.status) && !decision.sourceInputIds.length) {
+        move('blocked', { error: 'current_user_required' }); return;
+      }
       if (payload.task && ['parallel', 'replace'].includes(transition.action)) {
         const admission = await admitTask(payload.task, context);
         if (!admission.ok) { move('blocked', { error: admission.error, diagnostic: admission.diagnostic }); return; }
       }
-      if (['replace', 'cancel', 'handoff', 'revise', 'resume'].includes(transition.action) && old && !ended.has(old.status)) {
+      const needsStop = transition.action === 'cancel' ? sessionNeedsCancellation(old) : old && !ended.has(old.status);
+      if (['replace', 'cancel', 'handoff', 'revise', 'resume'].includes(transition.action) && needsStop) {
         move('stopping');
         if (['replace', 'cancel'].includes(transition.action)) {
           const requested = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false });
@@ -157,7 +165,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       }
       const fresh = readSession({ sessionId: old.sessionId, detail: 'report' });
       if (fresh?.origin?.cancellation?.phase === 'awaiting_outcome') { move('awaiting_outcome', { error: 'execution_outcome_unknown' }); return; }
-      if (fresh?.status !== 'cancelled' && !ended.has(fresh?.status)) {
+      if (transition.action === 'cancel' ? sessionNeedsCancellation(fresh) : fresh?.status !== 'cancelled' && !ended.has(fresh?.status)) {
         const result = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false });
         if (result?.error) move('blocked', { error: result.error });
         return;

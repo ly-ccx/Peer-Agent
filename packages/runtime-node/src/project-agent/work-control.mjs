@@ -1,4 +1,5 @@
 import { workBudgetBinding } from './work-budget.mjs';
+import { sessionNeedsCancellation } from './session-cancellation.mjs';
 
 /** Scope commands close host admission before touching any associated execution. */
 export async function controlProjectWork({ session, action, anchorMessageId, context, sessions, pause, cancel, resume }) {
@@ -8,15 +9,20 @@ export async function controlProjectWork({ session, action, anchorMessageId, con
   const work = store?.read().works[session?.origin?.workId];
   if (!work || work.parentConversationId !== context.parentConversationId) return { error: 'work_not_found' };
   const receiptKey = `${action}:${anchorMessageId}`;
-  if (work.lastControl?.receiptKey === receiptKey) return { ok: true, replayed: true, workId: work.workId, state: work.state };
+  const replayed = work.lastControl?.receiptKey === receiptKey;
+  if (replayed && action !== 'cancel') return { ok: true, replayed: true, workId: work.workId, state: work.state };
   const pendingSame = work.pendingControl?.action === action && work.pendingControl?.anchorMessageId === anchorMessageId;
-  if (['cancelled', 'delivered', 'coalesced'].includes(work.state) && !pendingSame) return { error: 'work_already_ended' };
+  const ended = ['cancelled', 'delivered', 'coalesced'].includes(work.state);
+  if (ended && !pendingSame && (action !== 'cancel' || work.state === 'coalesced')) return { error: 'work_already_ended' };
   if (action === 'resume' && (work.state !== 'paused' || work.stopScope !== 'work')) return { error: 'work_not_paused' };
-  const targets = sessions().filter(row => row.origin?.workId === work.workId && !work.pendingControl?.completedSessionIds?.includes(row.sessionId)
-    && !['accepted', 'result_ready', 'cancelled', 'failed', 'superseded'].includes(row.status));
+  const completedSessionIds = pendingSame ? work.pendingControl.completedSessionIds || [] : [];
+  const targets = sessions().filter(row => row.origin?.workId === work.workId && !completedSessionIds.includes(row.sessionId)
+    && (action === 'cancel' ? sessionNeedsCancellation(row) : !['accepted', 'result_ready', 'cancelled', 'failed', 'superseded'].includes(row.status)));
+  if (replayed && !pendingSame && !targets.length) return { ok: true, replayed: true, workId: work.workId, state: work.state };
+  if (action === 'cancel' && ended && !pendingSame && !targets.length) return { ok: true, alreadySettled: true, workId: work.workId, state: work.state };
   const state = action === 'cancel' ? 'cancelled' : 'paused';
   // A partial failure keeps the gate closed; the same command can finish its remaining targets.
-  store.saveWork({ ...work, state, stopScope: 'work', pendingControl: { action, anchorMessageId, completedSessionIds: pendingSame ? work.pendingControl.completedSessionIds || [] : [] } }, { returnState: false });
+  store.saveWork({ ...work, state, stopScope: 'work', pendingControl: { action, anchorMessageId, completedSessionIds } }, { returnState: false });
   for (const target of targets) {
     const result = await (action === 'pause' ? pause(target.sessionId) : action === 'cancel' ? cancel(target.sessionId) : resume(target.sessionId, anchorMessageId));
     if (result?.error || result?.ok === false) return { error: result.error || 'work_control_failed' };
