@@ -75,6 +75,40 @@ async function world(t) {
   return { rootDir, store, open, epoch, loseLease: () => { held = false; } };
 }
 
+test('one completed attempt settles its observed command batch durably and never settles an unseen command', async t => {
+  const w=await world(t), delivery=createAgentDelivery({storeFor:()=>w.store});
+  for (const id of ['one','two','unseen']) delivery.commit(command(id));
+  delivery.observed('w','parent',['one','two']);
+  delivery.executed('w','parent',['one','two','unseen'],'actual-attempt');
+  const reloaded=w.open();
+  for (const id of ['one','two']) {
+    assert.equal(reloaded.readSupervision('agentCommands',id).effect,'applied');
+    assert.equal(reloaded.readSupervision('agentCommands',id).attemptRef,'actual-attempt');
+  }
+  assert.equal(reloaded.readSupervision('agentCommands','unseen').effect,'pending');
+  const revision=w.store.read().revision;
+  delivery.executed('w','parent',['one','two'],'actual-attempt');
+  assert.equal(w.store.read().revision,revision);
+  assert.equal(JSON.parse(readFileSync(path.join(w.rootDir,'w/coordination-v2/manifest.json'))).minimumWriterVersion,6);
+});
+
+test('an unanswered parent question survives a handled turn and a busy mailbox until its correlated answer',async t=>{
+  const w=await world(t),delivery=createAgentDelivery({storeFor:()=>w.store});
+  delivery.commit(command(),{request});
+  delivery.observed('w','parent',['q']);
+  delivery.executed('w','parent',['q'],'parent-turn');
+  assert.equal(delivery.receipt('w','q').effect,'applied');
+  assert.equal(delivery.request('w','q').status,'open');
+  for(let n=0;n<60;n++) delivery.commit({...command(`update-${n}`),purpose:'update',deliveryIntent:'mailbox_only'});
+  const pending=agentMessagesForContext([],'parent','w').find(row=>row.messageId==='q');
+  assert.equal(pending.decisionRequest.requestId,'q');
+  assert.equal(pending.decisionRequest.revision,1);
+  delivery.commit({...command('answer','parent_to_child'),purpose:'answer',replyTo:'q'},
+    {answer:{requestId:'q',expectedRequestRevision:1,optionIds:['one']}});
+  assert.equal(delivery.request('w','q').status,'answered');
+  assert.equal(agentMessagesForContext([],'parent','w').some(row=>row.messageId==='q'),false);
+});
+
 test('indexed outbox survives cache and manifest loss without downgrading the writer fence', async t => {
   const w = await world(t), delivery = createAgentDelivery({ storeFor: () => w.store });
   const message = command(); delivery.commit(message, { request });

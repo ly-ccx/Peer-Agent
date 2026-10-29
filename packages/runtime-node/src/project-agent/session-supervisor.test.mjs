@@ -42,6 +42,25 @@ test('a task without a real review has progress and a report but no invented ver
   } finally { await env.cleanup(); }
 });
 
+test('a legacy lifecycle task without workId remains readable with an active coordination-v2 journal', async () => {
+  const env = await harness({ goalRunner: { async start() {}, pause() {}, async waitForIdle() {} } });
+  const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1',
+    holdsLease: () => true, leaseEpoch: () => 'lifecycle-owner', formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare();
+  const release = registerWorkBudget('ws-1', store);
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ kind: 'research', readOnly: true }), contextOf(env));
+    const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+    assert.equal(plan.delegationOrigin.workId, undefined);
+    env.conversationStore.appendMessage(plan.conversationId, { id: 'lifecycle-report', role: 'assistant', content: 'Read-only report' });
+    const detail = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' });
+    assert.equal(detail.report.summary, 'Read-only report');
+    assert.ok(detail.report.agentSupervision.recovery);
+    assert.equal(env.goalPlanStore.getPlan(plan.planId).delegationOrigin.workId, undefined);
+    assert.deepEqual(Object.keys(store.readLifecycleFacts().mandates || {}), []);
+  } finally { release(); await env.cleanup(); }
+});
+
 test('verification reads canonical report content without reentering acceptance projection', async () => {
   let authorityReads = 0;
   const env = await harness({readPlanApproval:()=> 'always',readSessionFacts:()=>{
@@ -2519,6 +2538,42 @@ test('actual Supervisor replaces only the corrected task and recovers its durabl
   } finally {release();await env.cleanup();}
 });
 
+test('actual Supervisor repairs a returned unaccepted task in place and delivers its feedback before admission',async()=>{
+  let starts=0;
+  const env=await harness({goalRunner:{async start(){starts++;},pause(){},async waitForIdle(){}}});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'repair-owner',formatVersion:2,fenceLegacyWrites:true});
+  await store.prepare(); store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try {
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const opened=await env.supervisor.coordinateWork({action:'parallel',reason:'original goal',task:spawnInput({kind:'research',readOnly:true})},context);
+    const planId=planIdOf(env,opened.sessionId),before=env.goalPlanStore.getPlan(planId);
+    env.goalPlanStore.revisePlan(planId,{tasks:[{taskId:'prior',title:'Existing result',status:'completed',result:'Existing analysis',evidenceRefs:[]}]});
+    env.goalPlanStore.setRunnerState(planId,{status:'completed',intent:'synthesize'});
+    env.goalPlanStore.setPlanStatus(planId,'completed');
+    const receipt=await env.supervisor.coordinateWork({action:'resume',sessionId:opened.sessionId,expectedRevision:1,
+      reason:'Correct the missing section',text:'Preserve existing findings; add the missing failure analysis.'},{...context,deliveryKey:'repair'});
+    assert.equal(receipt.error,undefined,JSON.stringify(receipt));
+    await until(()=>store.read().transitions.repair.phase==='completed');
+    const after=env.goalPlanStore.getPlan(planId);
+    assert.equal(after.planId,before.planId); assert.equal(after.conversationId,before.conversationId);
+    assert.deepEqual(after.successCriteria,before.successCriteria); assert.equal(after.goal,before.goal);
+    assert.equal(after.resultAcceptance?.acceptedAt,undefined);
+    assert.equal(after.delegationOrigin.takeover.repair,true);
+    assert.notEqual(after.delegationOrigin.coordinationBinding.executionEpoch,before.delegationOrigin.coordinationBinding.executionEpoch);
+    const feedback=store.querySupervision('agentMessages','recipientConversationId',after.conversationId,{limit:10});
+    assert.equal(feedback.some(row=>row.text.includes('missing failure analysis')),true);
+    assert.equal(store.read().transitions.repair.executionEffect,'pending');
+    assert.equal(starts,2);
+    assert.equal(env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length,1);
+    let repairTurns=0;
+    const actualRunner=createGoalRunner({goalPlanStore:env.goalPlanStore,canRunPlan:()=>true,logger:{warn(){}},
+      chatRuntime:{async runGoalTurn(){repairTurns++;return{requestedUserInput:true,blockedReason:'scripted-hold',terminalStatus:'done'};}}});
+    await actualRunner.start(planId,{awaitIdle:true});
+    assert.equal(repairTurns,1,'completed old leaves must not bypass the actual repair turn');
+  }finally{release();await env.cleanup();}
+});
+
 test('actual executor takeover retains GoalPlan, changes epoch, and does not consume a human question',async()=>{
   const env=await harness();
   const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner',formatVersion:2,fenceLegacyWrites:true});
@@ -2656,6 +2711,26 @@ test('related turn summaries never load child transcripts or reports', async () 
   } finally { await env.cleanup(); }
 });
 
+test('new user turns see unresolved work from the same Bot; wakes and other parents stay scoped', async () => {
+  const env = await harness({ goalRunner: { async start() {}, pause() {}, async waitForIdle() {} } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ kind: 'research', readOnly: true }), contextOf(env));
+    const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+    env.goalPlanStore.setRunnerState(plan.planId, { status: 'blocked', blockedReason: 'Verification gate failed: c1:criterion_unverified' });
+    const scope = { workspaceId: 'ws-1', conversationId: env.parent.id, kind: 'user', workId: 'new-work', anchorMessageIds: ['new-question'] };
+    const rows = env.supervisor.summaries(scope);
+    assert.deepEqual(rows.map(row => row.sessionId), [opened.sessionId]);
+    assert.equal(rows[0].followUp.owner, 'bot');
+    assert.match(rows[0].blockedReason, /Verification gate failed/);
+    assert.deepEqual(env.supervisor.summaries({ ...scope, kind: 'wake' }), []);
+    assert.deepEqual(env.supervisor.summaries({ ...scope, conversationId: 'other-parent' }), []);
+    env.goalPlanStore.revisePlan(plan.planId, hostPassPatch(), { reason: 'host evidence', changedBy: 'test' });
+    env.goalPlanStore.recordEvidenceRefs({ planId: plan.planId, evidenceRefs: ['ev-1'] });
+    env.goalPlanStore.revisePlan(plan.planId, { status: 'completed', runner: { status: 'completed' },
+      resultAcceptance: { acceptedAt: '2026-10-29T00:00:00Z', acceptedBy: 'policy', verdictRef: 'real' } });
+    assert.deepEqual(env.supervisor.summaries(scope), []);
+  } finally { await env.cleanup(); }
+});
 
 test('cancellation cannot report success if execution reappears during cleanup',async()=>{
  let endExecution=()=>{},inject=true;
@@ -2672,5 +2747,5 @@ test('cancellation cannot report success if execution reappears during cleanup',
   assert.equal(env.events.some(event=>event.kind==='cancelled'),false);
   endExecution();
   assert.equal((await env.supervisor.cancel({sessionId:opened.sessionId},context)).followUp.inCurrentList,false);
- }finally{endExecution();await env.cleanup();}
+  }finally{endExecution();await env.cleanup();}
 });

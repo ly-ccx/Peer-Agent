@@ -8,7 +8,7 @@ export function reduceCoordination(state, entry) {
   if (entry.schemaVersion !== undefined && entry.schemaVersion !== 1) throw new Error('coordination_schema_unsupported');
   if (entry.kind === 'coordination_decision' && (entry.transition?.schemaVersion !== 1
     || !Number.isSafeInteger(entry.transition?.minimumExecutorVersion)
-    || ![1, 2].includes(entry.transition.minimumExecutorVersion))) throw new Error('coordination_executor_unsupported');
+    || ![1, 2, 3].includes(entry.transition.minimumExecutorVersion))) throw new Error('coordination_executor_unsupported');
   const previous = state || { revision: 0, events: {}, works: {}, deliveries: {} };
   let next = { ...previous, events: { ...previous.events }, works: { ...previous.works }, deliveries: { ...previous.deliveries } };
   if (entry.revision !== next.revision + 1) throw new Error('coordination_revision_gap');

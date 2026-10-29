@@ -84,6 +84,33 @@ test('archived or replaced parent cannot inherit its old Full authority', t => {
   assert.equal(f.authority.read('b').code, 'NOT_FOUND');
 });
 
+test('ephemeral verifier/explorer inherit only through an explicit live plan/session and persisted ancestry', t => {
+  const f = fixture(t);
+  f.conversations.set('child', { role: 'work_session', workspaceId: 'a', parentConversationId: 'bot-a' });
+  const plan = { planId: 'p', conversationId: 'child', status: 'executing', delegationOrigin: {
+    workspaceId: 'a', sessionId: 's', parentConversationId: 'bot-a', phase: 'running',
+  } };
+  f.plans.set('p', plan);
+  const identity = { role: 'work_session', conversationId: null, workspaceId: 'a', planId: 'p', sessionId: 's' };
+  const result = f.authority.resolve(identity);
+  assert.equal(result.ok, true);
+  assert.equal(result.inherited, true);
+  assert.equal(result.policy.conversationId, 'bot-a');
+  for (const patch of [{ sessionId: 'other' }, { sessionId: undefined }, { planId: undefined },
+    { workspaceId: 'b' }, { conversationId: 'bot-b' }, { role: 'user_chat' }]) {
+    assert.notEqual(f.authority.resolve({ ...identity, ...patch })?.ok, true);
+  }
+  assert.notEqual(f.authority.resolve(identity, { presentation: true })?.ok, true);
+  f.authority.update({ workspaceId: 'a', expectedRevision: result.policy.revision, accessLevel: 'restricted_local' });
+  assert.equal(f.authority.valid(result.policy, identity), false);
+  assert.equal(f.authority.resolve(identity).policy.accessLevel, 'restricted_local');
+  f.conversations.get('child').parentConversationId = 'bot-b';
+  assert.equal(f.authority.resolve(identity).ok, false);
+  f.conversations.get('child').parentConversationId = 'bot-a';
+  plan.status = 'paused';
+  assert.equal(f.authority.resolve(identity).ok, false);
+});
+
 test('corrupt authority is unavailable and is never replaced by the global Full default', t => {
   const f = fixture(t);
   mkdirSync(path.join(f.dataHome, 'project-runtime'), { recursive: true });

@@ -4,6 +4,7 @@ import type { BotReplyRow } from './botReplyContinuity';
 export interface ReplyAnchor {
   readonly author: string | null;
   readonly excerpt: string;
+  readonly createdAt?: string;
 }
 
 /** Loaded source facts only. Visual clamping never truncates the stored quote. */
@@ -12,6 +13,7 @@ export function replyAnchorsForMessages(messages: readonly BotChatMessage[], lab
     author: message.kind === 'user_input' && message.role === 'user' ? labels.user
       : message.kind === 'agent_reply' && message.role === 'assistant' ? labels.bot : null,
     excerpt: message.content.replace(/\s+/g, ' ').trim(),
+    ...(message.createdAt && Number.isFinite(Date.parse(message.createdAt)) ? { createdAt: message.createdAt } : {}),
   }]));
 }
 

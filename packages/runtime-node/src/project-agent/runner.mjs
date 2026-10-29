@@ -392,6 +392,7 @@ export function createProjectAgentRunner({
       if (disposed) return 'disposed';
       acceptingStop = false;
       let deliveryPending = false;
+      const reportedSessionIds = new Set();
       if (coordination) {
         const replies = finished.messages.filter(message => message.kind === 'agent_reply' && message.meta?.surfacing !== 'digest');
         for (const message of replies) message.meta = { ...message.meta, workId: job.workId };
@@ -416,7 +417,10 @@ export function createProjectAgentRunner({
         }
         if (coordination && message?.kind === 'agent_reply') {
           message.meta = { ...message.meta, workId: job.workId };
-          try { await coordination.deliver(message); } catch { deliveryPending = true; }
+          try {
+            const delivered = await coordination.deliver(message);
+            if (delivered?.delivered) for (const id of message.sources || []) reportedSessionIds.add(id);
+          } catch { deliveryPending = true; }
           continue;
         }
         remember(message);
@@ -424,7 +428,8 @@ export function createProjectAgentRunner({
           try { await onReplied(message); } catch { /* 回复已落盘，签收失败留待后续重试，不重跑用户任务。 */ }
         }
       }
-      if (coordination) coordination.finish(job, { ...outcome, failed: outcome.failed || finished.failed, deliveryPending, budgetLimited: exhausted }, readSlot(resolveRoster, job.kind));
+      if (coordination) coordination.finish(job, { ...outcome, reportedSessionIds: [...reportedSessionIds],
+        failed: outcome.failed || finished.failed, deliveryPending, budgetLimited: exhausted }, readSlot(resolveRoster, job.kind));
       activity.finish(outcome.failed || finished.failed ? 'error' : 'done');
       if ((outcome.failed || finished.failed) && !exhausted) return 'error';
       if (!exhausted && !outcome.silentWait) circuitBreaker?.success();
@@ -503,6 +508,7 @@ export function createProjectAgentRunner({
     const rounds = [];
     let toolCallsUsed = 0;
     let memoryIds = [];
+    let deliveryRepairUsed = false;
     while (rounds.length < plan.limits.maxRounds && toolCallsUsed < plan.limits.maxToolCalls) {
       if (disposed) return { turnId, plan, rounds, disposed: true };
       if (coordination && rounds.length && userInputs.length) return { turnId, plan, rounds, yielded: true, memoryIds };
@@ -538,6 +544,12 @@ export function createProjectAgentRunner({
       const keepGoing = result.hasPostReply
         ? false
         : result.continued === true && result.toolCallCount > 0;
+      if (!keepGoing && !result.hasPostReply && plan.requiresStructuredReply && !deliveryRepairUsed) {
+        deliveryRepairUsed = true;
+        plan.turnProfile.context = { ...plan.turnProfile.context,
+          retryContinuity: readRetryContinuity([{ id: turnId, kind: 'agent_turn', rounds }], turnId) };
+        continue;
+      }
       if (!keepGoing) break;
     }
     return { turnId, plan, rounds, failed: false, memoryIds };

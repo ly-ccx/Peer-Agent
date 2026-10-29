@@ -129,7 +129,10 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   const next = reduceCoordination(before, record);
   const supervision = record.kind.startsWith('agent_') || ['work_note_written', 'context_window_opened'].includes(record.kind)
     || SUPERVISION_BUCKETS.some(bucket => Object.keys(next[bucket] || {}).length);
-  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
+  const closure = record.kind === 'agent_execution_completed' || record.transition?.minimumExecutorVersion === 3
+    || Object.values(next.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
+    || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
+  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
     let value = original;
     if (bucket === 'works' && value.budget?.observations) {
@@ -254,7 +257,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (existsSync(path.join(directory, 'coordination-fence.json')) && readMetadata(path.join(directory, 'coordination-fence.json')).status !== 'complete') throw fail('coordination_fence_incomplete');
     if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
     const next = readMetadata(manifestFile);
-    if (next.schemaVersion !== 2 || ![2, 3, 4, 5].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
     if (next.minimumReaderVersion >= 3) {
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
@@ -442,12 +445,13 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     }
   }
   return { active, prepare,
-    enableSupervision() {
+    enableSupervision(minimumVersion = 5) {
       assertOwner(); load();
-      if (manifest.minimumWriterVersion === 5) return;
+      if (![5,6].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
+      if (manifest.minimumWriterVersion >= minimumVersion) return;
       if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
-      const next = { ...manifest, minimumReaderVersion: 5, minimumWriterVersion: 5 };
-      durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: 5 }));
+      const next = { ...manifest, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion };
+      durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: minimumVersion }));
       durable(manifestFile, JSON.stringify(next)); manifest = next;
     },
     readSupervision(bucket, id) {

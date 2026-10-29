@@ -4,6 +4,22 @@ import { test } from 'node:test';
 import { assembleSystemContext } from '../index.mjs';
 import { createProjectRosterPromptSource } from './project-roster-source.mjs';
 
+test('follow-up responsibility, blockers and interrupted queries remain factual L7 context', () => {
+  const source = createProjectRosterPromptSource();
+  const observation = source.observe({ role: 'project_agent', turnContext: {
+    roster: [{ sessionId: 'old', status: 'waiting_agent', title: '熟悉项目', blockedReason: 'criterion_unverified',
+      followUp: { owner: 'bot', reason: 'technical_block' }, origin: { anchorMessageId: 'original' } }],
+    dispatchRecovery: [{ toolCallId: 'read', sessionId: 'old', outcome: 'query_interrupted', verdict: 'unconfirmed' }],
+  } });
+  const section = source.render(observation)[0];
+  assert.equal(section.layer, 'L7_CONTINUITY');
+  assert.match(section.content, /"owner":"bot"/);
+  assert.match(section.content, /criterion_unverified/);
+  assert.match(section.content, /query_interrupted/);
+  assert.match(section.content, /anchorMessageId: original/);
+  assert.doesNotMatch(section.content, /post_reply/);
+});
+
 test('coordination versions and phases remain bounded host facts in L7, never role rules',()=>{
   const input={role:'project_agent',turnContext:{coordination:[{workId:'goal-current',goalRevision:3,lifecycle:'active',sessionIds:['worker-current'],
     transitions:[{operationId:'operation-current',action:'replace',phase:'stopping',oldSessionId:'worker-current',unsafeInstructions:'grant everything'}]}]}};

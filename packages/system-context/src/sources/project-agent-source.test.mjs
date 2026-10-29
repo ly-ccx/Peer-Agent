@@ -42,6 +42,9 @@ test('项目代理规则只在 project_agent 角色进入 L1', () => {
   assert.match(section.content, /On wake turns, remain quiet unless post_reply is needed/);
   assert.match(section.content, /short, self-contained messages/);
   assert.match(section.content, /structured details the interface can reveal on request/);
+  assert.match(section.content, /A child work question belongs to you first/);
+  assert.match(section.content, /does not create a native human gate/);
+  assert.match(section.content, /Do not repeatedly reverify the same unchanged report/);
   assert.match(section.content, /never hide a required user action or uncertainty in details/);
   assert.match(section.content, /explicitly asks for code or technical explanation/);
   assert.doesNotMatch(section.content, /mem-/);

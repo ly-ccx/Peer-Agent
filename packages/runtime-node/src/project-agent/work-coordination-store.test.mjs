@@ -43,7 +43,7 @@ test('restart after reply append and failed acceptance only retries acceptance',
 });
 
 test('an unsupported future executor or schema cannot recover or mutate the journal',()=>{
-  for (const future of [{schemaVersion:2}, {schemaVersion:1,kind:'coordination_decision',transition:{schemaVersion:1,minimumExecutorVersion:3}}]) {
+  for (const future of [{schemaVersion:2}, {schemaVersion:1,kind:'coordination_decision',transition:{schemaVersion:1,minimumExecutorVersion:4}}]) {
     const env=world();
     try {
       env.store.saveWork({workId:'root',state:'runnable'});
