@@ -9,12 +9,15 @@ async function assertQuoteInsideColumn(quote) {
     const column = node.closest('.bot-thread-row')?.getBoundingClientRect();
     const box = node.getBoundingClientRect();
     const excerpt = node.querySelector('.bot-reply-bar-excerpt');
+    const excerptBox = excerpt?.getBoundingClientRect();
+    const style = excerpt ? getComputedStyle(excerpt) : null;
     return {
       inside: Boolean(column) && box.left >= column.left - 1 && box.right <= column.right + 1,
-      excerpt: Boolean(excerpt) && excerpt.scrollWidth <= excerpt.clientWidth + 1,
+      excerptInside: Boolean(excerptBox) && excerptBox.left >= box.left - 1 && excerptBox.right <= box.right + 1,
+      ellipsis: style?.whiteSpace === 'nowrap' && style.textOverflow === 'ellipsis' && (style.overflowX === 'hidden' || style.overflowX === 'clip'),
     };
   });
-  assert.deepEqual(fit, { inside: true, excerpt: true });
+  assert.deepEqual(fit, { inside: true, excerptInside: true, ellipsis: true });
 }
 
 /** Production reply rendering and callbacks; no model, tool or Evidence claims. */
