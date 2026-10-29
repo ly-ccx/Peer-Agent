@@ -11,12 +11,12 @@ function ruleBody(css: string, selector: string): string {
   return match[1];
 }
 
-test('plugin toolbar segmented tracks, inner buttons, and fields share the same radius tokens', async () => {
+test('plugin toolbar segmented tracks, inner buttons, and fields use panel tracks and smaller control tokens', async () => {
   const css = await readFile(cssUrl, 'utf8');
 
-  const trackRadius = /border-radius:\s*var\(--za-radius\)/;
+  const trackRadius = /border-radius:\s*var\(--ui-radius-panel\)/;
   const buttonRadius = /rounded-\[var\(--ui-radius-control\)\]/;
-  const fieldRadius = /border-radius:\s*var\(--za-radius\)/;
+  const fieldRadius = /border-radius:\s*var\(--ui-radius-control\)/;
 
   assert.match(ruleBody(css, '.skill-view-tabs'), trackRadius);
   assert.match(ruleBody(css, '.capability-tabs'), trackRadius);
@@ -30,10 +30,10 @@ test('plugin toolbar segmented tracks, inner buttons, and fields share the same 
 
   assert.match(
     css,
-    /\.skill-marketplace-toolbar input,\s*\.skill-marketplace-category-select \.pa-dropdown-trigger,\s*\.skill-marketplace-toolbar \.skill-marketplace-install \{\s*border-radius:\s*var\(--za-radius\);\s*\}/,
+    /\.skill-marketplace-toolbar input,\s*\.skill-marketplace-category-select \.pa-dropdown-trigger,\s*\.skill-marketplace-toolbar \.skill-marketplace-install \{\s*border-radius:\s*var\(--ui-radius-control\);\s*\}/,
   );
   assert.doesNotMatch(
     css,
-    /\.skill-marketplace-toolbar input,[\s\S]*?border-radius:\s*var\(--ui-radius-control\)/,
+    /\.skill-marketplace-toolbar input,[\s\S]*?border-radius:\s*var\(--ui-radius-panel\)/,
   );
 });

@@ -46,7 +46,7 @@ test('automation and plugins use the same clipped primary page shell as workbenc
   assert.match(shell, /height:\s*100%/);
   assert.match(shell, /overflow:\s*hidden/);
   assert.match(shell, /background:\s*var\(--za-app-bg\)/);
-  assert.match(shell, /border-radius:\s*var\(--radius-lg\)/);
+  assert.match(shell, /border-radius:\s*var\(--ui-radius-panel\)/);
 
   // 共享壳直接约束 capability-workbench，而不是中间 tools-page。
   assert.match(

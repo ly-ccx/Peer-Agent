@@ -1,4 +1,4 @@
-import type { GoalCriterionResult, GoalManualConfirmation, GoalSuccessCriterion } from './goal.ts';
+import type { GoalCriterionResult, GoalManualConfirmation, GoalSuccessCriterion, GoalModelReview } from './goal.ts';
 
 const AUTO_CRITERION_KINDS = new Set(['command', 'test', 'file-contains', 'file-exists']);
 
@@ -25,6 +25,10 @@ export interface AcceptanceCloseTaskLike {
 
 export interface AcceptanceClosePlanLike {
   readonly successCriteria?: readonly GoalSuccessCriterion[] | null;
+  /** Current content revision derived by the host store, never admitted from a model patch. */
+  readonly modelReviewSourceRevision?: string;
+  readonly modelReviews?: readonly GoalModelReview[];
+  readonly runner?: { readonly verifierRuns?: readonly { readonly verifierRunId: string; readonly status: string }[] };
   readonly criterionResults?: readonly GoalCriterionResult[] | null;
   readonly manualConfirmations?: readonly GoalManualConfirmation[] | null;
   readonly evidenceRefs?: readonly string[] | null;
@@ -137,6 +141,16 @@ export function evaluateAcceptanceCloseGate(
     const description = criterion.description?.trim() || id;
     const isAuto = AUTO_CRITERION_KINDS.has(criterion.kind);
     const result = results.get(id) ?? null;
+
+    if (criterion.kind === 'model_review') {
+      const review = plan?.modelReviews?.slice().reverse().find(row => row.criterionId === id);
+      const current = review && plan?.modelReviewSourceRevision && review.sourceRevision === plan.modelReviewSourceRevision;
+      const verified = current && plan?.runner?.verifierRuns?.some(run => run.verifierRunId === review.verifierRunId && run.status === 'passed');
+      if (!current || !verified) gaps.push({ criterionId: id, description, reason: 'missing' });
+      else if (!review.passed) gaps.push({ criterionId: id, description, reason: 'failed' });
+      else if (!review.evidenceRefs.length || !review.evidenceRefs.every(ref => known.has(ref))) gaps.push({ criterionId: id, description, reason: 'unresolved' });
+      continue;
+    }
 
     if (!isAuto && latestManualApproval(plan ?? {}, id)) continue;
 

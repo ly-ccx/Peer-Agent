@@ -81,6 +81,18 @@ test('encodes explicit reasoning effort without overriding provider defaults', a
   assert.equal('reasoning_effort' in (bodies[1] ?? {}), false);
 });
 
+test('tool history is paired by call id without unsupported message-level names', async () => {
+  let body: any;
+  const model = provider(async (_input, init) => { body = JSON.parse(String(init?.body)); return sseResponse(['[DONE]']); });
+  await model.stream({model:'glm-5.3-flash',messages:[
+    {role:'assistant',content:null,toolCalls:[{id:'read-1',name:'read_file',arguments:'{}'}]},
+    {role:'tool',name:'read_file',toolCallId:'read-1',content:'real output'},
+  ]});
+  assert.equal(body.messages[1].name, undefined);
+  assert.equal(body.messages[1].tool_call_id, 'read-1');
+  assert.equal(body.messages[0].tool_calls[0].function.name, 'read_file');
+});
+
 test('assembles streamed tool calls and serializes tools', async () => {
   const events: ModelStreamEvent[] = [];
   let body: Record<string, unknown> = {};

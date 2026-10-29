@@ -1,3 +1,5 @@
+import { createI18n } from '@peer-agent/i18n';
+import { PeerIcon } from '../ui/icons';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ManagedShellTask } from '@peer-agent/protocol';
 import type { BackgroundRunStops } from './useBackgroundRunStops';
@@ -20,6 +22,9 @@ export function BackgroundRuntimePanel({ anchor, snapshot, error, reload, source
   /** 由外部（任务上下文栏）指定要直接展开的运行；仍走同一个详情视图。 */
   readonly initialTaskId?: string | null;
 }) {
+  let locale = 'en-US';
+  if (isZh) locale = 'zh-CN';
+  const i18n = createI18n(locale);
   const [selected, setSelected] = useState<string | null>(initialTaskId);
   const listScroll = useRef(0);
   const lastRow = useRef<string | null>(null);
@@ -65,28 +70,28 @@ export function BackgroundRuntimePanel({ anchor, snapshot, error, reload, source
     <span className="background-run-row-heading"><span>{run.description?.trim() || run.command}</span><small>{backgroundTaskStatus(run, isZh)}</small></span>
     <span className="background-run-meta">{backgroundRunSource(run, sources, isZh).label} · {(run.cwd ?? '').split(/[\\/]/).filter(Boolean).pop()}</span>
   </button>;
-  return <Overlay anchor={anchor} id={id} ariaLabel={isZh ? '后台运行' : 'Background runs'} panelClassName="background-runtime-panel" onClose={onClose}
+  return <Overlay anchor={anchor} id={id} ariaLabel={i18n.t('projectAgent.background.title')} panelClassName="background-runtime-panel" onClose={onClose}
     onEscape={() => { if (request?.phase === 'confirm') { setRequest(null); return true; } return false; }}>
     {({ requestClose }) => <>
       <header className="background-runtime-header" data-testid="background-runtime-state" data-read-state={readState}>
-        {selected ? <button type="button" onClick={() => { setRequest(null); setSelected(null); }}>‹ {isZh ? '后台运行' : 'Background runs'}</button> : <h2>{isZh ? '后台运行' : 'Background runs'}</h2>}
-        <span className="background-run-meta">{isZh ? '本机' : 'This device'}</span>
-        <button type="button" aria-label={isZh ? '关闭' : 'Close'} onClick={requestClose}>×</button>
+        {selected ? <button type="button" onClick={() => { setRequest(null); setSelected(null); }}><PeerIcon name="back" size={14} /> {i18n.t('projectAgent.background.title')}</button> : <h2>{i18n.t('projectAgent.background.title')}</h2>}
+        <span className="background-run-meta">{i18n.t('projectAgent.background.device')}</span>
+        <button type="button" aria-label={i18n.t('projectAgent.background.close')} onClick={requestClose}><PeerIcon name="close" size={14} /></button>
       </header>
-      {(readState === 'error' || readState === 'stale') && <p role="alert">{isZh ? '暂时无法读取后台运行' : 'Unable to read background runs'}{readState === 'stale' ? (isZh ? ' · 显示上次结果' : ' · Previous snapshot') : ''}<button type="button" onClick={() => void reload()}>{isZh ? '重试' : 'Retry'}</button></p>}
-      {readState === 'loading' ? <p role="status">{isZh ? '正在读取…' : 'Loading…'}</p> : selected ? task
+      {(readState === 'error' || readState === 'stale') && <p role="alert">{i18n.t('projectAgent.background.readFailed')}{readState === 'stale' ? (i18n.t('projectAgent.background.previous')) : ''}<button type="button" onClick={() => void reload()}>{i18n.t('projectAgent.background.retry')}</button></p>}
+      {readState === 'loading' ? <p role="status">{i18n.t('projectAgent.background.loading')}</p> : selected ? task
         ? <BackgroundRunDetails key={task.taskId} task={task} sources={sources} isZh={isZh} request={request?.taskId === task.taskId ? request : null}
           onConfirm={() => setRequest({ taskId: task.taskId, phase: 'confirm' })} onCancel={() => setRequest(null)} onStop={() => void stop()}
           onSource={onSource ? (sourceId) => { onClose(); onSource(sourceId); } : undefined} />
-        : <p>{isZh ? '此运行记录已不可用' : 'Run record unavailable'}</p>
+        : <p>{i18n.t('projectAgent.background.unavailable')}</p>
         : <div ref={list} className="background-runtime-list">
           {visible.primary.map(row)}
-          {snapshot !== null && !runs.length && !error && <p>{isZh ? '暂无后台运行' : 'No background runs'}</p>}
-          {visible.historyCount > 0 && <><button type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>{isZh ? '最近结束' : 'Recently ended'} ({visible.historyCount})</button>
+          {snapshot !== null && !runs.length && !error && <p>{i18n.t('projectAgent.background.empty')}</p>}
+          {visible.historyCount > 0 && <><button type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>{i18n.t('projectAgent.background.history')} ({visible.historyCount})</button>
             {visible.history.map(row)}
-            {historyOpen && historyLimit < visible.historyCount && <button type="button" onClick={() => setHistoryLimit(historyLimit + 20)}>{isZh ? '显示更多' : 'Show more'}</button>}</>}
+            {historyOpen && historyLimit < visible.historyCount && <button type="button" onClick={() => setHistoryLimit(historyLimit + 20)}>{i18n.t('projectAgent.background.more')}</button>}</>}
         </div>}
-      {request?.phase === 'unconfirmed' && <button type="button" onClick={() => void reload()}>{isZh ? '刷新状态' : 'Refresh status'}</button>}
+      {request?.phase === 'unconfirmed' && <button type="button" onClick={() => void reload()}>{i18n.t('projectAgent.background.refresh')}</button>}
     </>}
   </Overlay>;
 }

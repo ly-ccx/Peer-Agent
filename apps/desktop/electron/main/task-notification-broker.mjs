@@ -8,6 +8,9 @@
  * 4. 弹出 Electron Notification
  * 5. 点击回流：激活主窗口并打开对应会话
  *
+ * 带 delegationOrigin 的计划是项目代理任务。系统通知改由送达策略决定，
+ * 这里不再弹出，也不把它们种进回执。
+ *
  * 决策逻辑在 task-notification-policy.mjs；回执在 receipt-store。
  */
 
@@ -18,6 +21,7 @@ import {
   projectPlanToNotificationTask,
   DEFAULT_NOTIFICATION_SETTINGS,
 } from './task-notification-policy.mjs';
+import { isDelegatedWorkSession } from './agent-host/work-session-profile.mjs';
 import { createTaskNotificationReceiptStore } from './task-notification-receipt-store.mjs';
 
 /**
@@ -96,6 +100,7 @@ export function createTaskNotificationBroker(deps) {
     const plans = typeof deps.listPlans === 'function' ? deps.listPlans() || [] : [];
     const seeds = [];
     for (const plan of plans) {
+      if (isDelegatedWorkSession(plan)) continue;
       const task = snapshotFromPlan(plan);
       if (!task || !isNotifiableStatus(task.status)) continue;
       const receipt = receiptStore.get(task.taskId);
@@ -119,6 +124,9 @@ export function createTaskNotificationBroker(deps) {
    */
   function evaluatePlan(plan, options = {}) {
     bootstrapExisting();
+    if (isDelegatedWorkSession(plan)) {
+      return { action: 'skip', reason: 'delegated_plan' };
+    }
     const task = snapshotFromPlan(plan);
     if (!task) return { action: 'skip', reason: 'invalid_plan' };
 

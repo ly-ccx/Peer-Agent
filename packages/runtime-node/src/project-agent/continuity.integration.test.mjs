@@ -1,0 +1,440 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, appendFileSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { createProjectAgentRunner } from './runner.mjs';
+import { createProjectInbox } from './project-inbox.mjs';
+import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
+import { createReplyDelivery } from './reply-delivery.mjs';
+import { createDelegationProvider } from './delegation-provider.mjs';
+import { createDesktopProjectFacts } from './project-facts.mjs';
+function world(executeTurn, extra = {}) {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'r88-flow-'));
+  const inbox = createProjectInbox({ rootDir: root });
+  const messages = [];
+  const opts = { rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'test-owner' };
+  const store = createWorkCoordinationStore(opts);
+  const ports = { workspaceId: 'w', conversationId: 'c', inbox, coordinationStore: store,
+    executeTurn, appendMessage: (_id, message) => messages.push(message), readMessages: () => messages,
+    resolveModel: () => ({ modelProviderId: 'm' }), retryDelays: [], ...extra };
+  let runner = createProjectAgentRunner(ports);
+  return { root, inbox, messages, store, get runner() { return runner; }, restart() { runner.dispose(); runner = createProjectAgentRunner({ ...ports, coordinationStore: createWorkCoordinationStore(opts) }); },
+    close() { runner.dispose(); rmSync(root, { recursive: true, force: true }); } };
+}
+const event = (id, kind, sessionId = 's') => ({ eventId: id, kind, sessionId, workspaceId: 'w', at: '2026-10-07T00:00:00Z', payload: {} });
+
+test('main reply failure, continuing child, quiet restart and successful delivery remain separate', async () => {
+  let requests = 0, fail = false;
+  const roster = [{ sessionId: 's', status: 'running', sourceRevision: 'r1', origin: { anchorMessageId: 'input-i' } }];
+  const env = world(async () => {
+    requests++;
+    return fail ? { ok: false, error: 'empty_model_response', retryable: false }
+      : { toolCalls: [{ name: 'post_reply', input: { text: '工作进展已核对。', replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => roster });
+  const facts = createDesktopProjectFacts({ runtimeRoot: env.root,
+    supervisor: { sessionsForProject: () => roster, acceptance: () => null }, approvalStore: { list: () => [] },
+    profileStore: { read: () => ({ agentConversationId: 'c' }) },
+    conversationStore: { getPersistedConversationHistory: () => ({ messages: env.messages }) }, readCoordination: () => env.store.read() });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '推进工作' }]);
+    assert.equal(requests, 1); assert.equal(Object.values(env.store.read().works)[0].state, 'waiting_children');
+    env.inbox.append('w', [event('resumed', 'session_resumed'), event('running', 'session_running')]);
+    await env.runner.kick(); assert.equal(requests, 1, 'routine wake requires no model response');
+    assert.equal(env.messages.at(-1).meta.silentWait.source, 'host');
+    assert.equal(env.runner.activity(), null, 'a quiet wake must retire the previous visible reply activity');
+    assert.equal(env.messages.at(-1).publicUpdates, undefined, 'a quiet wake must not persist the previous turn public narration');
+    assert.deepEqual(Object.values(env.store.read().works)[0].waitFor, [{ kind: 'session', id: 's' }]);
+    env.restart(); await env.runner.kick(); assert.equal(requests, 1, 'restart preserves waiting without polling');
+    fail = true;
+    env.inbox.append('w', [event('exception', 'report_available')]); await env.runner.kick();
+    assert.equal(requests, 2); assert.equal(roster[0].status, 'running');
+    let cards = facts.cards('w').filter(row => row.kind === 'agent_unavailable');
+    assert.equal(cards.length, 1); assert.equal(cards[0].failureStatus.phase, 'current');
+    assert.deepEqual(cards[0].failureStatus.activeSessionIds, ['s']);
+    const firstTurn = env.messages.findLast(row => row.kind === 'agent_turn');
+    env.inbox.append('w', [event('after-failure-running', 'session_running')]); await env.runner.kick();
+    assert.equal(requests, 2, 'child acknowledgements cannot trigger another failed reply attempt');
+    assert.equal(facts.cards('w').find(row => row.kind === 'agent_unavailable').failureStatus.phase, 'current');
+    await env.runner.retry(firstTurn.id);
+    cards = facts.cards('w').filter(row => row.kind === 'agent_unavailable');
+    assert.equal(cards.length, 2); assert.equal(cards.find(card => card.refs.turnId === firstTurn.id).failureStatus.phase, 'superseded');
+    assert.equal(cards.find(card => card.refs.turnId !== firstTurn.id).failureStatus.phase, 'current');
+    fail = false; roster[0] = { ...roster[0], status: 'accepted', sourceRevision: 'r2' };
+    env.inbox.append('w', [event('done', 'result_ready')]); await env.runner.kick();
+    cards = facts.cards('w').filter(row => row.kind === 'agent_unavailable');
+    assert.ok(cards.every(card => card.failureStatus.phase === 'recovered'));
+    assert.ok(cards.every(card => env.store.read().deliveries[card.failureStatus.recoveredByReplyId].state === 'delivered'));
+    assert.equal(Object.values(env.store.read().works)[0].state, 'delivered');
+  } finally { env.close(); }
+});
+
+test('a model can end observation with a real waiting Tool Result and the result event wakes it later', async () => {
+  let requests = 0;
+  const roster = [{ sessionId: 's', workspaceId: 'w', status: 'running', origin: { parentConversationId: 'c' } }];
+  const provider = createDelegationProvider({ supervisor: { get: () => roster[0] } });
+  const env = world(async ({ turnProfile }) => {
+    requests++;
+    if (requests === 1) {
+      roster[0].origin.workId = turnProfile.workId;
+      const receipt = await provider.executeCapability({ call: { toolCallId: 'real-wait', capabilityId: 'local.delegation.wait_for_sessions', arguments: { sessionIds: ['s'] } } },
+        { mode: 'project_agent', workspaceId: 'w', conversationId: 'c', currentInputAnchors: [], turnProfile });
+      assert.equal(receipt.grant.granted, true);
+      return { continued: true, toolCalls: [{ name: 'wait_for_sessions', input: { sessionIds: ['s'] }, result: receipt.result }] };
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: '结果已核对。', replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => roster });
+  try {
+    env.inbox.append('w', [event('observation', 'report_available')]); await env.runner.kick();
+    assert.equal(requests, 1); assert.equal(env.messages.at(-1).meta.silentWait.source, 'tool');
+    assert.equal(env.messages.some(row => row.card === 'agent_unavailable' || row.kind === 'agent_reply'), false);
+    env.restart(); await env.runner.kick(); assert.equal(requests, 1);
+    roster[0].status = 'accepted'; env.inbox.append('w', [event('done', 'result_ready')]); await env.runner.kick();
+    assert.equal(requests, 2); assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+  } finally { env.close(); }
+});
+test('a public progress reply automatically advances to the next reasoning step and closes its verified result', async () => {
+  let requests = 0;
+  const roster = [{ sessionId: 's', status: 'waiting_agent', sourceRevision: 'r1' }];
+  const env = world(async input => {
+    requests++;
+    if (requests === 2) {
+      assert.equal(input.turnProfile.providerCheckpoint, undefined, 'a finished update uses fresh current facts');
+      roster[0] = { sessionId: 's', status: 'accepted', sourceRevision: 'r2' };
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: requests === 1 ? '复核还未完成，我继续检查原因。' : '复核已通过，结果已交付。', replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => roster });
+  try {
+    env.inbox.append('w', [event('repair', 'report_available')]);
+    await env.runner.kick();
+    const work = Object.values(env.store.read().works)[0];
+    assert.equal(env.store.read().events.repair.handled, true, 'event custody moved into the unfinished receipt');
+    assert.equal(requests, 2);
+    assert.equal(work.state, 'delivered');
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 2);
+    await env.runner.kick(); assert.equal(requests, 2);
+  } finally { env.close(); }
+});
+
+test('repeated paraphrases of a stalled repair produce one explicit stop receipt instead of silent idleness', async () => {
+  let requests = 0;
+  const env = world(async () => ({ toolCalls: [{ name: 'post_reply', input: { text: `仍在检查 ${++requests}`, replyTo: [] }, result: { ok: true } }] }),
+    { resolveRoster: () => [{ sessionId: 's', status: 'waiting_agent', sourceRevision: 'r1' }] });
+  try {
+    env.inbox.append('w', [event('repair', 'report_available')]); await env.runner.kick();
+    assert.equal(requests, 3);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'blocked_system');
+    const cards = env.messages.filter(row => row.card === 'agent_unavailable');
+    assert.equal(cards.length, 1); assert.match(cards[0].content, /agent_no_progress/);
+    await env.runner.kick(); assert.equal(requests, 3);
+  } finally { env.close(); }
+});
+
+test('user progress survives a cooperative yield, a quiet wake and restart until the anchored answer', async () => {
+  let userSlices = 0;
+  const env = world(async ({ plan, sink, streamId }) => {
+    if (plan.kind === 'wake') {
+      sink.send('chat:stream:delta', { streamId, content: 'PRIVATE_WAKE_TEXT' });
+      return { toolCalls: [] };
+    }
+    if (++userSlices === 1) {
+      sink.send('chat:stream:delta', { streamId, content: '我先核对最新进展。' });
+      return { turnEnd: 'yielded', text: '我先核对最新进展。',
+        toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'waiting_user' } }],
+        providerCheckpoint: { messages: [{ thinking: 'PRIVATE_REASONING' }] } };
+    }
+    return { toolCalls: [{ name: 'post_reply', input: { text: '当前等待稳定源码后补验收，无需重复授权。', replyTo: ['input-i'] }, result: { ok: true } }] };
+  });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '现在进展如何？' }]);
+    const yielded = env.messages.find(row => row.kind === 'agent_turn');
+    assert.deepEqual(yielded.publicUpdates, [{ id: 'text-1', text: '我先核对最新进展。' }]);
+    assert.deepEqual(yielded.replyTo, ['input-i']);
+    assert.equal(yielded.meta.diagnosticTiming.outcome, 'yielded');
+    assert.equal(env.messages.some(row => row.kind === 'agent_reply'), false, 'a scheduling yield cannot deliver an answer');
+    env.restart();
+    env.inbox.append('w', [event('unrelated-result', 'result_ready', 'other')]);
+    await env.runner.kick();
+    assert.deepEqual(env.messages.find(row => row.id === yielded.id).publicUpdates, yielded.publicUpdates);
+    const wake = env.messages.find(row => row.kind === 'agent_turn' && row.turnKind === 'wake');
+    assert.equal(wake.publicUpdates, undefined);
+    const replies = env.messages.filter(row => row.kind === 'agent_reply');
+    assert.equal(replies.length, 1);
+    assert.deepEqual(replies[0].replyTo, ['input-i']);
+    assert.doesNotMatch(JSON.stringify(env.messages.map(row => row.publicUpdates)), /PRIVATE_WAKE_TEXT|PRIVATE_REASONING/);
+    assert.equal(Object.values(env.store.read().works).find(row => row.anchorInputIds?.includes('i')).state, 'delivered');
+  } finally { env.close(); }
+});
+test('routine events never call a model; completed result wakes once without fresh user input', async () => {
+  let requests = 0;
+  const env = world(async () => { requests++; return { toolCalls: [] }; });
+  try {
+    env.inbox.append('w', [event('started', 'session_started'), event('progress', 'progress')]);
+    await env.runner.kick(); assert.equal(requests, 0);
+    env.inbox.append('w', [event('done', 'result_ready')]);
+    await env.runner.kick(); assert.equal(requests, 1);
+    env.restart(); env.inbox.append('w', [event('done', 'result_ready')]);
+    await env.runner.kick(); assert.equal(requests, 1);
+  } finally { env.close(); }
+});
+test('more than twenty useful tools continue across slices and restart; native history stays private', async () => {
+  let slice = 0;
+  const env = world(async input => {
+    const index = ++slice;
+    if (index > 1) assert.equal(input.turnProfile.providerCheckpoint.messages[0].thinking, 'private');
+    return index <= 3 ? { turnEnd: 'yielded', toolCalls: Array.from({ length: 9 }, (_, n) => ({ name: 'read_file', input: { path: `file-${index}-${n}` }, result: { content: `finding-${index}-${n}` } })),
+      providerCheckpoint: { messages: [{ thinking: 'private' }] } } : { text: '看完了，共核对了 27 项。' };
+  });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '检查项目' }]);
+    env.restart(); await env.runner.kick(); await env.runner.kick(); await env.runner.kick();
+    assert.equal(slice, 4); assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+    assert.equal(JSON.stringify(env.messages).includes('private'), false);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'delivered');
+    await env.runner.kick(); assert.equal(slice, 4);
+  } finally { env.close(); }
+});
+test('same facts with fresh UUIDs stop on the third slice across restart', async () => {
+  let requests = 0;
+  const env = world(async () => ({ turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: `id-${++requests}` }, result: JSON.stringify({ status: 'blocked', requestId: `uuid-${requests}`, updatedAt: Date.now() }) }], providerCheckpoint: {} }));
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '核对' }]);
+    await env.runner.kick(); env.restart(); await env.runner.kick();
+    assert.equal(requests, 3); assert.equal(Object.values(env.store.read().works)[0].state, 'blocked_system');
+    await env.runner.kick(); assert.equal(requests, 3);
+  } finally { env.close(); }
+});
+test('reordered and repeated observations cannot reset the no-progress guard', async () => {
+  let requests = 0;
+  const observations = [
+    { name: 'read_file', input: { path: 'README.md' }, result: { content: 'unchanged' } },
+    { name: 'get_session', input: { sessionId: 's' }, result: { status: 'blocked' } },
+  ];
+  const env = world(async () => {
+    requests++;
+    return { turnEnd: 'yielded', toolCalls: requests % 2 ? observations : [...observations].reverse().concat(observations), providerCheckpoint: {} };
+  });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '核对' }]);
+    env.restart(); await env.runner.kick(); await env.runner.kick();
+    assert.equal(requests, 3);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'blocked_system');
+    await env.runner.kick(); assert.equal(requests, 3);
+  } finally { env.close(); }
+});
+test('a new child result bypasses a failed parent attempt', async () => {
+  let requests = 0;
+  const env = world(async () => ++requests === 1 ? { ok: false, error: 'agent_loop_exhausted', retryable: false } : { toolCalls: [] });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '检查' }]);
+    env.inbox.append('w', [event('done', 'result_ready')]);
+    await env.runner.kick(); assert.equal(requests, 2);
+    assert.equal(env.store.pendingEvents().length, 0);
+  } finally { env.close(); }
+});
+test('journal truncated tail has an audited recovery; protected checkpoints are immutable', () => {
+  const env = world(async () => ({}));
+  try {
+    env.store.transfer([event('a', 'result_ready')]);
+    const old = env.store.checkpoint('work', { native: 'first' });
+    const fresh = env.store.checkpoint('work', { native: 'second' });
+    assert.notEqual(old, fresh); assert.equal(env.store.readCheckpoint(old).native, 'first');
+    assert.equal(statSync(path.join(env.root, 'w', 'checkpoints', old)).mode & 0o777, 0o600);
+    appendFileSync(path.join(env.root, 'w', 'coordination.jsonl'), '{"kind":');
+    assert.throws(() => env.store.read()); env.store.recover();
+    assert.equal(env.store.pendingEvents()[0].eventId, 'a');
+    assert.ok(env.store.read().lastRecovery.backup);
+    assert.match(readFileSync(path.join(env.root, 'w', env.store.read().lastRecovery.backup), 'utf8'), /\{"kind":$/);
+  } finally { env.close(); }
+});
+test('stale prepared reply is invalidated without signing a changed report', async () => {
+  const env = world(async () => ({})); let signed = 0;
+  try {
+    env.store.append({ kind: 'reply_prepared', message: { id: 'r' } });
+    await createReplyDelivery({ store: env.store, readMessages: () => [], appendMessage: () => assert.fail('must not append'),
+      validate: () => false, accept: () => signed++ }).recover();
+    assert.equal(signed, 0); assert.equal(env.store.read().deliveries.r.state, 'invalidated');
+  } finally { env.close(); }
+});
+test('shared hard request/tool budgets survive restart, charge roles and keep unknown usage', () => {
+  const env = world(async () => ({}));
+  env.store.saveWork({ workId: 'work', state: 'runnable' });
+  const release = registerWorkBudget('w', env.store, { maxModelRequests: 2, maxToolCalls: 1 });
+  try {
+    const parent = createWorkBudgetGuard({ workspaceId: 'w', workId: 'work', role: 'project_agent' });
+    const child = createWorkBudgetGuard({ workspaceId: 'w', workId: 'work', role: 'work_session' });
+    parent.beforeRequest(); child.beforeRequest(); parent.beforeTool();
+    assert.throws(() => child.beforeRequest(), /budget_limited/); assert.throws(() => child.beforeTool(), /budget_limited/);
+    parent.finish({ totalTokens: 15 }); child.finish(undefined);
+    const budget = env.store.read().works.work.budget;
+    assert.equal(budget.modelRequests, 2); assert.equal(budget.tokens, 15); assert.equal(budget.unknownUsage, true);
+    env.restart(); assert.equal(env.store.read().works.work.budget.modelRequests, 2);
+  } finally { release(); env.close(); }
+});
+
+test('runner restarts only a prepared acceptance, with no new model request or duplicate reply', async () => {
+  let requested=0,accepted=0;
+  const env=world(async()=>{requested++;return{text:'已经看完了。'};},{onReplied:()=>{if(++accepted===1)throw Error('disk temporarily unavailable');}});
+  try{
+    await env.runner.enqueueUserInputs([{inputId:'i',text:'看项目'}]);
+    assert.equal(requested,1);assert.equal(env.runner.hasContinuation(),true);
+    env.restart();await env.runner.kick();
+    assert.equal(requested,1);assert.equal(accepted,2);
+    assert.equal(env.messages.filter(row=>row.kind==='agent_reply').length,1);
+    assert.equal(Object.values(env.store.read().works)[0].state,'delivered');
+    assert.equal(env.runner.hasContinuation(),false);
+  }finally{env.close();}
+});
+
+
+test('a crash after delivered but before handled/work receipts never repeats cognition', async () => {
+  let requests = 0;
+  const env = world(async () => { requests++; return { text: '完成了。' }; });
+  try {
+    const save = env.store.saveWork;
+    env.store.saveWork = work => {
+      if (Object.values(env.store.read().deliveries).some(row => row.state === 'delivered')) throw Error('crash before work receipt');
+      return save(work);
+    };
+    await env.runner.enqueueUserInputs([{ inputId: 'i', text: '查看项目' }]);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'runnable');
+    env.restart(); await env.runner.kick();
+    assert.equal(requests, 1);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'delivered');
+  } finally { env.close(); }
+});
+
+
+test('a dispatch without a paired native checkpoint blocks restart instead of repeating its side effect', () => {
+  const env = world(async () => ({}));
+  env.store.saveWork({ workId: 'work', state: 'runnable' });
+  const release = registerWorkBudget('w', env.store);
+  let nextRelease;
+  try {
+    const original = createWorkBudgetGuard({ workspaceId: 'w', workId: 'work', role: 'project_agent' });
+    original.beforeRequest(); original.beforeTool({ toolCallId: 'write-once', capabilityId: 'local.file.write' });
+    release(); env.restart(); nextRelease = registerWorkBudget('w', env.store);
+    const recovered = createWorkBudgetGuard({ workspaceId: 'w', workId: 'work', role: 'project_agent' });
+    assert.throws(() => recovered.beforeRequest(), /execution_outcome_unknown/);
+    assert.equal(env.store.read().works.work.budget.toolCalls, 1);
+    recovered.finish();
+  } finally { nextRelease?.(); release(); env.close(); }
+});
+
+test('explicit retry transfers the persisted legacy wake batch before acknowledging it and settles activity', async () => {
+  const env = world(async () => ({ toolCalls: [{ name: 'post_reply', input: { text: '重试完成。', replyTo: [] }, result: { ok: true } }] }));
+  try {
+    env.messages.push({ id: 'old', turnId: 'old', kind: 'agent_turn', turnKind: 'wake', userInputs: [], rounds: [],
+      meta: { recovery: { throughSeq: 0, events: [event('old-result', 'session_verified')] } } });
+    env.messages.push({ id: 'old-failed', turnId: 'old', kind: 'system_card', card: 'agent_unavailable',
+      content: 'agent_tool_budget_exhausted' });
+    env.restart();
+    assert.equal(env.store.read().events['old-result'].handled, false);
+    await env.runner.retry();
+    assert.equal(env.runner.status(), 'idle');
+    assert.equal(env.runner.activity().phase, 'done');
+    assert.equal(env.store.read().events['old-result'].handled, true);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+  } finally { env.close(); }
+});
+
+// These report slices have already been accepted by the host; result_ready now retains Bot settlement responsibility.
+test('a later result preserves the earlier report slice until both batches settle', async () => {
+  let requests = 0;
+  const env = world(async () => ++requests === 1
+    ? { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'result_ready' } }], providerCheckpoint: { messages: [] } }
+    : { toolCalls: [{ name: 'post_reply', input: { text: '核对好了。', replyTo: [] }, result: { ok: true } }] },
+  { resolveRoster: () => [{ sessionId: 's', status: 'accepted', sourceRevision: 'r1' }] });
+  try {
+    env.inbox.append('w', [event('readable', 'report_available')]); await env.runner.kick();
+    const initial = Object.values(env.store.read().works)[0];
+    assert.deepEqual(initial.sessionIds, ['s']); assert.equal(initial.state, 'runnable');
+    env.inbox.append('w', [event('verified', 'result_ready')]); await env.runner.kick();
+    const works = Object.values(env.store.read().works);
+    assert.equal(works.length, 2); assert.equal(works[0].workId, initial.workId);
+    assert.ok(works.every(work => work.state === 'delivered'));
+    assert.equal(env.runner.hasContinuation(), false);
+    assert.equal(requests, 3);
+    await env.runner.kick(); assert.equal(requests, 3);
+  } finally { env.close(); }
+});
+
+test('a child question cannot park a yielded parent before the question reaches the main conversation', async () => {
+  let requests = 0;
+  const env = world(async () => ++requests === 1
+    ? { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'waiting_user', question: '使用可读记录，还是补充缺失记录？' } }], providerCheckpoint: { messages: [] } }
+    : { toolCalls: [{ name: 'post_reply', input: { text: '有两条记录无法读取。使用可读记录，还是补充缺失记录？', replyTo: [] }, result: { ok: true } }] },
+  { resolveRoster: () => [{ sessionId: 's', status: 'waiting_user', sourceRevision: 'r1' }] });
+  try {
+    env.inbox.append('w', [event('question', 'needs_user')]);
+    await env.runner.kick();
+    const work = Object.values(env.store.read().works)[0];
+    assert.equal(work.state, 'runnable'); assert.equal(work.end, 'yielded');
+    assert.equal(env.messages.some(row => row.card === 'agent_unavailable'), false);
+    env.restart(); await env.runner.kick();
+    assert.equal(requests, 2);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 1);
+    assert.equal(Object.values(env.store.read().works)[0].state, 'waiting_user');
+    assert.equal(Object.values(env.store.read().works)[0].end, 'awaiting_user');
+    await env.runner.kick(); assert.equal(requests, 2);
+  } finally { env.close(); }
+});
+
+
+test('new result batches never overwrite a yielded result checkpoint; each survives restart and reports once', async () => {
+  const seen = [];
+  const env = world(async input => {
+    const checkpoint = input.turnProfile.providerCheckpoint;
+    const id = checkpoint?.result || input.plan.events[0].sessionId;
+    seen.push([id, Boolean(checkpoint)]);
+    if (!checkpoint) return { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: id }, result: { status: 'result_ready', report: id } }], providerCheckpoint: { result: id } };
+    return { toolCalls: [{ name: 'post_reply', input: { text: `${id} 已核对并交付。`, replyTo: [] }, result: { ok: true } }] };
+  }, { resolveRoster: () => [{ sessionId: 'B', status: 'accepted' }, { sessionId: 'C', status: 'accepted' }] });
+  try {
+    env.inbox.append('w', [event('done-B', 'result_ready', 'B')]);
+    await env.runner.kick();
+    assert.equal(env.store.read().events['done-B'].handled, false);
+    const first = Object.values(env.store.read().works)[0];
+    env.inbox.append('w', [event('done-C', 'result_ready', 'C')]);
+    await env.runner.kick();
+    const works = Object.values(env.store.read().works);
+    assert.equal(works.length, 2);
+    assert.equal(env.store.read().works[first.workId].checkpointRef, first.checkpointRef);
+    assert.equal(env.store.read().events['done-C'].handled, false);
+    env.restart();
+    await env.runner.kick();
+    await env.runner.kick();
+    assert.deepEqual(seen, [['B', false], ['C', false], ['B', true], ['C', true]]);
+    assert.equal(env.store.read().events['done-B'].handled, true);
+    assert.equal(env.store.read().events['done-C'].handled, true);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 2);
+    env.restart(); await env.runner.kick();
+    assert.equal(seen.length, 4);
+  } finally { env.close(); }
+});
+
+test('a suppressed delivered report waits without polling; a new user and changed result still receive replies', async () => {
+ let requests = 0;
+ const roster = [{ sessionId:'s',status:'waiting_agent',sourceRevision:'r1' }];
+ const old = {id:'old-report',kind:'agent_reply',role:'assistant',content:'Already explained',sources:['s'],meta:{sessionStates:[{...roster[0]}]}};
+ const env=world(async ({plan})=>{
+  requests++;
+  if (plan.kind==='wake' && roster[0].sourceRevision==='r1') return {toolCalls:[{name:'post_reply',input:{replyTo:[]},
+   result:{ok:true,suppressed:true,reportedReplyIds:['old-report'],sessionStates:[{...roster[0]}]}}]};
+  return {text:'NEW_REPLY',toolCalls:[{name:'post_reply',input:{text:'NEW_REPLY',replyTo:plan.kind==='user'?['input-query']:[]},result:{ok:true}}]};
+ },{resolveRoster:()=>roster});
+ try {
+  env.messages.push(old); env.store.append({kind:'reply_prepared',message:old});env.store.append({kind:'reply_delivered',messageId:old.id});
+  env.inbox.append('w',[event('same-report','report_available')]);await env.runner.kick();
+  assert.equal(requests,1);let work=Object.values(env.store.read().works)[0];
+  assert.equal(work.state,'waiting_children');assert.deepEqual(work.reportedWait.replyIds,['old-report']);
+  env.restart();await env.runner.kick();await env.runner.kick();assert.equal(requests,1,'no model polling after restart');
+  await env.runner.enqueueUserInputs([{inputId:'query',text:'What is happening?'}]);
+  assert.equal(requests,2);assert.ok(env.messages.some(row=>row.kind==='agent_reply'&&row.replyTo?.includes('input-query')));
+  roster[0]={...roster[0],status:'accepted',sourceRevision:'r2'};
+  env.inbox.append('w',[event('changed','report_available')]);await env.runner.kick();
+  assert.equal(requests,3);assert.equal(Object.values(env.store.read().works).find(row=>row.workId===work.workId).state,'delivered');
+ } finally {env.close();}
+});

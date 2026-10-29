@@ -36,6 +36,7 @@ extraResources:
       - "icon-macos-dock-dark.png"
       - "trayTemplate.png"
       - "trayTemplate@2x.png"
+      - "trayTemplate.LICENSE"
   # Rust native binary (must be pre-built for target platform)
   - from: "../../target/release/"
     to: "bin/"

@@ -1,0 +1,358 @@
+/**
+ * 待批准项的持久记录。
+ *
+ * 执行由 permission-gate / Provider 负责。保存待批准事实及明确签发的图片资源授权：
+ * 每个 workspaceId 一个 jsonl，没有 workspaceId 的会话写到 _unscoped。
+ * 读取时按 approvalId 折叠为最新状态。压缩保留待处理项、计划授权和未过期图片授权。
+ * 普通批准历史不构成可继承许可；图片授权由 PermissionInheritance 核验。
+ *
+ * PendingApproval 的协议类型由 B1-07 定义。在那之前，形状以本文件的 JSDoc 为准。
+ *
+ * @typedef {'open' | 'approved' | 'denied' | 'expired' | 'stale' | 'cancelled'} ApprovalState
+ * @typedef {'local_ui' | 'policy'} ApprovalDecider
+ * @typedef {Object} PendingApproval
+ * @property {string} approvalId 权限请求的 toolCallId
+ * @property {string | null} workspaceId
+ * @property {string | null} conversationId
+ * @property {string | null} streamId
+ * @property {string | null} planId
+ * @property {string | null} [sessionId]
+ * @property {string} capabilityId
+ * @property {string} summary 展示文本，已脱敏
+ * @property {string | null} riskLevel
+ * @property {string} argsDigest 参数的 sha256
+ * @property {string} [policyRevision] Host-bound access policy version
+ * @property {string} createdAt
+ * @property {ApprovalState} state
+ * @property {string} [decidedAt]
+ * @property {ApprovalDecider} [decidedBy]
+ */
+import { randomUUID } from 'node:crypto';
+import { digestApprovalArgs } from './permission-operation.mjs';
+import { normalizeImageReadGrant } from './permission-inheritance.mjs';
+export { digestApprovalArgs } from './permission-operation.mjs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
+import { pathOf } from '../data-store.mjs';
+
+const STATES = new Set(['open', 'approved', 'denied', 'expired', 'stale', 'cancelled']);
+const DECIDERS = new Set(['local_ui', 'policy']);
+const KINDS = new Set(['approval', 'plan_approval', 'image_read_grant']);
+const KEPT_ON_COMPACT = new Set(['open', 'stale']);
+const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const UNSCOPED_DIR = '_unscoped';
+const DEFAULT_COMPACT_BYTES = 5 * 1024 * 1024;
+const SUMMARY_LIMIT = 240;
+
+function redactSummary(value) {
+  const text = typeof value === 'string' ? value : '';
+  return text
+    .replace(/\b(?:sk|pk|rk)-[A-Za-z0-9]{8,}\b/g, '[redacted]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    .replace(/\b((?:api[_-]?key|token|secret|password)\s*[:=]\s*)(\S+)/gi, '$1[redacted]')
+    .slice(0, SUMMARY_LIMIT);
+}
+
+function nullableString(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function workspaceDir(workspaceId) {
+  return typeof workspaceId === 'string' && WORKSPACE_DIR.test(workspaceId)
+    ? workspaceId
+    : UNSCOPED_DIR;
+}
+
+/**
+ * @param {{ rootDir?: string | null, now?: () => Date, compactBytes?: number }} [options]
+ */
+export function createApprovalStore({
+  rootDir = null,
+  now = () => new Date(),
+  compactBytes = DEFAULT_COMPACT_BYTES,
+  onChanged = null,
+} = {}) {
+  const limit = Number.isFinite(compactBytes) && compactBytes > 0
+    ? compactBytes
+    : DEFAULT_COMPACT_BYTES;
+
+  function root() {
+    return rootDir || pathOf('projectRuntime');
+  }
+
+  function fileFor(workspaceId) {
+    return path.join(root(), workspaceDir(workspaceId), 'approvals.jsonl');
+  }
+
+  function normalize(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    const approvalId = nullableString(input.approvalId);
+    if (!approvalId || approvalId.length > 200) return null;
+    if (!STATES.has(input.state)) return null;
+    const record = {
+      approvalId,
+      workspaceId: workspaceDir(input.workspaceId) === UNSCOPED_DIR ? null : input.workspaceId,
+      conversationId: nullableString(input.conversationId),
+      streamId: nullableString(input.streamId),
+      planId: nullableString(input.planId),
+      ...(nullableString(input.sessionId) ? { sessionId: nullableString(input.sessionId) } : {}),
+      capabilityId: nullableString(input.capabilityId) || 'unknown',
+      summary: redactSummary(input.summary),
+      riskLevel: nullableString(input.riskLevel),
+      argsDigest: typeof input.argsDigest === 'string' && /^[a-f0-9]{64}$/i.test(input.argsDigest)
+        ? input.argsDigest.toLowerCase()
+        : digestApprovalArgs(null),
+      createdAt: nullableString(input.createdAt) || now().toISOString(),
+      state: input.state,
+      ...(nullableString(input.policyRevision) ? { policyRevision: nullableString(input.policyRevision) } : {}),
+    };
+    if (typeof input.deadlineAt === 'string' && Number.isFinite(Date.parse(input.deadlineAt))) record.deadlineAt = input.deadlineAt;
+    if (['permission_cancelled', 'permission_timeout', 'permission_unavailable', 'local_user_denied', 'permission_policy_changed'].includes(input.decisionReason)) record.decisionReason = input.decisionReason;
+    const decidedAt = nullableString(input.decidedAt);
+    if (decidedAt) record.decidedAt = decidedAt;
+    if (DECIDERS.has(input.decidedBy)) record.decidedBy = input.decidedBy;
+    if (KINDS.has(input.kind)) record.kind = input.kind;
+    const taskName = nullableString(input.taskName);
+    if (taskName && taskName.length <= 200) record.taskName = taskName;
+    const imageReadScope = normalizeImageReadGrant({ schemaVersion: 1, grantId: 'scope', conversationId: 'scope', expiresAt: 0,
+      scope: input.imageReadScope })?.scope;
+    if (imageReadScope && record.capabilityId === 'local.image.read') record.imageReadScope = imageReadScope;
+    const imageReadGrant = normalizeImageReadGrant(input.imageReadGrant);
+    if (imageReadGrant && record.kind === 'image_read_grant' && record.capabilityId === 'local.image.read') record.imageReadGrant = imageReadGrant;
+    return record;
+  }
+
+  function readLines(file) {
+    if (!existsSync(file)) return [];
+    let text = '';
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      return [];
+    }
+    const records = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const record = normalize(JSON.parse(line));
+        if (record) records.push(record);
+      } catch {
+        // 坏行跳过，不让一行损坏挡住其余事实。
+      }
+    }
+    return records;
+  }
+
+  function foldRecords(records) {
+    const byId = new Map();
+    for (const record of records) byId.set(record.approvalId, record);
+    return [...byId.values()];
+  }
+
+  function approvalFiles() {
+    const dir = root();
+    if (!existsSync(dir)) return [];
+    const files = [];
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const file = path.join(dir, entry.name, 'approvals.jsonl');
+      if (existsSync(file)) files.push(file);
+    }
+    return files;
+  }
+
+  function foldAll() {
+    const records = [];
+    for (const file of approvalFiles()) records.push(...readLines(file));
+    return foldRecords(records);
+  }
+
+  function replaceFile(file, text) {
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, text, 'utf8');
+    renameSync(temporary, file);
+  }
+
+  function maybeCompact(file) {
+    let size = 0;
+    try {
+      size = statSync(file).size;
+    } catch {
+      return;
+    }
+    if (size <= limit) return;
+    const kept = foldRecords(readLines(file)).filter((record) => KEPT_ON_COMPACT.has(record.state)
+      || record.state === 'approved' && (record.kind === 'plan_approval' && record.capabilityId === 'goal.plan'
+        || record.imageReadGrant?.expiresAt > now().getTime()));
+    const text = kept.length ? `${kept.map((record) => JSON.stringify(record)).join('\n')}\n` : '';
+    replaceFile(file, text);
+  }
+
+  function latestInFile(file, approvalId) {
+    const records = readLines(file);
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      if (records[index].approvalId === approvalId) return records[index];
+    }
+    return null;
+  }
+
+  /**
+   * 追加一条状态变化。同一 approvalId 再次写入相同 state 时不落盘。
+   * @param {Partial<PendingApproval>} input
+   * @returns {PendingApproval | null}
+   */
+  function append(input) {
+    const record = normalize(input);
+    if (!record) return null;
+    const file = fileFor(record.workspaceId);
+    const current = latestInFile(file, record.approvalId);
+    if (current && current.state === record.state) return current;
+    mkdirSync(path.dirname(file), { recursive: true });
+    appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+    maybeCompact(file);
+    try { onChanged?.({ workspaceId: record.workspaceId, approvalId: record.approvalId, state: record.state, record: { ...record } }); } catch {}
+    return record;
+  }
+
+  function list(filter = {}) {
+    return foldAll().filter((record) => {
+      if (filter.state && record.state !== filter.state) return false;
+      if (filter.streamId && record.streamId !== filter.streamId) return false;
+      if (filter.conversationId && record.conversationId !== filter.conversationId) return false;
+      if (Object.prototype.hasOwnProperty.call(filter, 'workspaceId')
+        && filter.workspaceId !== undefined
+        && record.workspaceId !== filter.workspaceId) return false;
+      return true;
+    });
+  }
+
+  /** A fresh presentation snapshot; approval decisions still use their existing live reads. */
+  function listByWorkspaceIds(ids) {
+    const result = new Map((Array.isArray(ids) ? ids : [])
+      .filter(id => workspaceDir(id) !== UNSCOPED_DIR).map(id => [id, []]));
+    if (!result.size) return result;
+    for (const record of foldAll()) {
+      result.get(record.workspaceId)?.push(record);
+    }
+    return result;
+  }
+
+  /** 进程启动：所有 open 变成 stale。没有 open 时不写盘。 */
+  function markStaleOnStartup({ canRecover = () => true } = {}) {
+    const decidedAt = now().toISOString();
+    const changed = [];
+    for (const record of list({ state: 'open' })) {
+      if (!canRecover(record)) continue;
+      const next = append({
+        ...record,
+        state: record.deadlineAt && Date.parse(record.deadlineAt) <= now().getTime() ? 'expired' : 'stale',
+        ...(record.deadlineAt && Date.parse(record.deadlineAt) <= now().getTime() ? { decisionReason: 'permission_timeout', decidedBy: 'policy' } : {}),
+        decidedAt,
+      });
+      if (next) changed.push(next);
+    }
+    return changed;
+  }
+
+  return {
+    append,
+    list,
+    listByWorkspaceIds,
+    markStaleOnStartup,
+    fileFor,
+  };
+}
+
+function runningLeafIds(tasks, out = []) {
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (!task || typeof task !== 'object') continue;
+    const children = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (children.length > 0) {
+      runningLeafIds(children, out);
+      continue;
+    }
+    if (task.status === 'running' && typeof task.taskId === 'string' && task.taskId) {
+      out.push(task.taskId);
+    }
+  }
+  return out;
+}
+
+/**
+ * 启动装配：open 转 stale；仍在执行的 GoalPlan 按 ADR 73 挂起。
+ * 没有 GoalPlan 的会话只标记，不恢复。stale 项的一次性放行在决定批准时写入。
+ * @param {{ approvalStore?: { markStaleOnStartup?: (options?: object) => PendingApproval[] }, goalPlanStore?: object, canRecover?: (record: PendingApproval) => boolean, now?: () => Date }} [deps]
+ */
+export function applyStartupApprovalRecovery({
+  canRecover = () => true,
+  approvalStore = null,
+  goalPlanStore = null,
+  now = () => new Date(),
+} = {}) {
+  if (!approvalStore || typeof approvalStore.markStaleOnStartup !== 'function') {
+    return { stale: [], interruptedPlanIds: [] };
+  }
+  let stale = [];
+  try {
+    stale = approvalStore.markStaleOnStartup({ canRecover }) || [];
+  } catch {
+    return { stale: [], interruptedPlanIds: [] };
+  }
+  const interruptedPlanIds = [];
+  const seen = new Set();
+  for (const row of stale) {
+    const planId = row?.planId;
+    if (!planId || seen.has(planId)) continue;
+    seen.add(planId);
+    try {
+      const plan = goalPlanStore?.getPlan?.(planId);
+      if (!plan || plan.status !== 'executing') continue;
+      if (typeof goalPlanStore.recordTaskEvidence === 'function') {
+        for (const taskId of runningLeafIds(plan.tasks)) {
+          try {
+            goalPlanStore.recordTaskEvidence(planId, taskId, { status: 'pending' });
+          } catch {
+            // 单片叶子写不进去时，计划级挂起仍然继续。
+          }
+        }
+      }
+      const interruptedAt = now().toISOString();
+      goalPlanStore.setRunnerState?.(planId, {
+        enabled: true,
+        status: 'paused',
+        intent: 'block',
+        phase: 'blocked',
+        interruption: {
+          source: 'approval_interrupted',
+          reason: 'approval_interrupted',
+          interruptedAt,
+        },
+      });
+      const updated = goalPlanStore.getPlan?.(planId);
+      if (updated && updated.status !== 'interrupted') {
+        goalPlanStore.setPlanStatus?.(planId, 'interrupted');
+      }
+      interruptedPlanIds.push(planId);
+    } catch {
+      // 一条计划写失败不挡住其余批准记录转 stale。
+    }
+  }
+  return { stale, interruptedPlanIds };
+}

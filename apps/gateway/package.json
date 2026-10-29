@@ -3,7 +3,7 @@
   "version": "0.0.12",
   "private": true,
   "type": "module",
-  "description": "ADR 75 account API backend; device routing and remote execution are not yet available.",
+  "description": "Authenticated device and project relay; execution and authorization remain on the device.",
   "engines": {
     "node": ">=22.18.0"
   },
@@ -13,6 +13,7 @@
     "check": "node --check src/device-store.mjs && node --check src/device-proof.mjs && node --check src/device-auth.mjs"
   },
   "dependencies": {
+    "@peer-agent/protocol": "workspace:*",
     "openid-client": "^6.8.8",
     "ws": "^8.21.0"
   }

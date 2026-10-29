@@ -37,6 +37,7 @@ const READ_MODE_SCOPES = Object.freeze([
   'plan',
   'goal',
   'explorer',
+  'project_agent',
 ] as const);
 const WRITE_MODE_SCOPES = Object.freeze(['chat', 'goal'] as const);
 
@@ -304,7 +305,7 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
                 metadata: { path: displayPath, operation: operationLabel },
               })
             : { granted: true, reason: 'host_policy_allow' };
-          if (!approval.granted) {
+          if (!approval.granted || typeof approval.validate === 'function' && !approval.validate()) {
             const reason = approval.reason || 'denied';
             return createNodeToolResult({
               clock, call, status: 'denied', summary: `File ${operationLabel} denied.`,
@@ -314,10 +315,11 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
           }
           if (context.signal?.aborted) return cancelledResult(call, clock);
           await mkdir(dirname(targetPath), { recursive: true });
+          if (typeof approval.validate === 'function' && !approval.validate()) throw new Error('permission_policy_changed');
           await writeFile(targetPath, content, 'utf8');
           readSnapshots.set(targetPath, hashContent(content));
           const operation = request.capabilityId.endsWith('.edit') ? 'edit' : 'write';
-          const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: approval.reason ?? 'approved' });
+          const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: approval.reason ?? 'approved', metadata: { policyRevision: approval.policyRevision } });
           return createNodeToolResult({
             clock, call, status: 'completed', summary: `${operation === 'edit' ? 'Edited' : 'Wrote'} ${displayPath}.`,
             output: { path: displayPath, bytes: Buffer.byteLength(content), contentHash: readSnapshots.get(targetPath) },

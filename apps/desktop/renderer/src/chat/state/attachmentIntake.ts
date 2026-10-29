@@ -1,4 +1,4 @@
-import type { ChatAttachment } from './types';
+import type { ProjectInputAttachment } from '@peer-agent/protocol';
 
 // 附件接收（intake）的纯逻辑与上限常量：判定文本类文件、把 File 读成 dataURL / 文本。
 // 从 ChatSurface.tsx 下沉而来，行为保持不变。
@@ -49,7 +49,7 @@ export function readAsText(file: File): Promise<string> {
 }
 
 export interface AttachmentIntakeResult {
-  readonly attachments: ChatAttachment[];
+  readonly attachments: ProjectInputAttachment[];
   readonly error: string | null;
 }
 
@@ -64,7 +64,7 @@ export async function intakeAttachments(
   createId: () => string = () => `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 ): Promise<AttachmentIntakeResult> {
   const incoming = Array.from(files ?? []);
-  const attachments: ChatAttachment[] = [];
+  const attachments: ProjectInputAttachment[] = [];
   let error: string | null = null;
 
   for (const file of incoming) {

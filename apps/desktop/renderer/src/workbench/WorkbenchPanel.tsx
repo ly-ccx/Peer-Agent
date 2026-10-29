@@ -1,16 +1,27 @@
-import { useEffect, useRef, type ReactElement } from 'react';
+import { useMotionAllowed } from '../app/hooks/useMotionAllowed';
+import { ComparisonNavigationProvider, ComparisonNavigator } from './ComparisonNavigation';
+import { useResourceNavigation } from './useResourceNavigation';
+import { PeerIcon } from '../ui/icons';
+import { usePointerResize } from '../app/hooks/usePointerResize';
+import { isImeKey } from '../chat/state/compositionGuard';
+import { selectionNavigation } from '../app/components/selectionNavigation';
+import { useEffect, useId, useRef, useState, type ReactElement } from 'react';
 import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
+import { useResourceWorkspace } from './ResourceWorkspaceContext';
+import { ResourceWorkspaceHeader } from './ResourceWorkspaceHeader';
+import { ResourceLauncher } from './ResourceLauncher';
+import { ScopedResourceNavigator } from './ScopedResourceNavigator';
+import { useResourcePresentation } from './useResourcePresentation';
+import { resourceTabIds } from './ResourceTabStrip';
 import {
   WORKBENCH_MIN_WIDTH,
-  WORKBENCH_MAX_WIDTH,
   WORKBENCH_DEFAULT_WIDTH,
 } from './WorkbenchContext';
 import { mountedBrowserConversations, stabilizeMountedBrowserOrder } from './browserPanelReveal';
 import {
-  WORKBENCH_MAXIMIZE_RATIO,
   clampWorkbenchWidth,
   resolveWorkbenchResizeStage,
 } from './workbenchResizeStages';
@@ -99,13 +110,18 @@ const TABS: readonly TabDef[] = [
 ];
 
 interface WorkbenchPanelProps {
+  readonly resourceMode?: boolean;
+  readonly resourceVisible?: boolean;
+  readonly resourceWidthLimit?: number;
+  readonly resourceExiting?: boolean;
+  readonly botWorkspaceId?: string;
   readonly isZh: boolean;
   readonly workspacePath: string | null;
 }
 
-export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
+export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, resourceVisible = true, resourceWidthLimit, resourceExiting = false, botWorkspaceId }: WorkbenchPanelProps) {
   const {
-    open,
+    open: requestedOpen,
     width,
     maximized,
     activeTab,
@@ -126,9 +142,22 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     setDocumentSession,
     layoutHost,
     preparedBrowserConversations,
+    requestedBrowserConversations,
   } = useWorkbench();
+  const workspace = useResourceWorkspace();
+  const auxiliaryMotion = useMotionAllowed();
+  const navigation = useResourceNavigation(resourceMode ? botWorkspaceId : undefined, activeTab, setActiveTab);
+  const filesVisible = activeTab === 'files' || navigation.mode === 'files';
+  const showingDetails = resourceMode && activeTab === 'details';
+  const interactiveOpen = requestedOpen && resourceVisible;
+  const open = (requestedOpen || resourceExiting) && resourceVisible;
+  const presentation = useResourcePresentation(resourceMode, isZh);
+  useEffect(() => {
+    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes' || activeTab === 'details')) setActiveTab('documents');
+  }, [resourceMode, activeTab, setActiveTab]);
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     registerGoalSlot(goalSlotRef.current);
     return () => registerGoalSlot(null);
@@ -144,178 +173,97 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
   const browserMountOrderRef = useRef<string[]>([]);
   const mountedBrowserIds = stabilizeMountedBrowserOrder(
     browserMountOrderRef.current,
-    rawMountedBrowserIds,
+    rawMountedBrowserIds.filter(id => !resourceMode || browserMountOrderRef.current.includes(id)
+      || requestedBrowserConversations.includes(id) || (id === conversationId && interactiveOpen && activeTab === 'browser')),
   );
   browserMountOrderRef.current = mountedBrowserIds;
 
-  // 拖拽分隔线。
-  // Electron <webview> 会在 guest 层吃掉 pointerup：分隔条停在 data-active，
-  // 跟手宽度也写不回去。拖拽会话必须 pointer capture + cancel 清理，
-  // 并关掉 width/grid 过渡、暂时禁用 webview 的 pointer-events。
-  const draggingRef = useRef(false);
-  const startXRef = useRef(0);
-  const startWidthRef = useRef(width);
-
-  const onPointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
-    ev.preventDefault();
-    const resizer = ev.currentTarget;
-    const pointerId = ev.pointerId;
-    resizer.dataset.active = 'true';
-    draggingRef.current = true;
-    startXRef.current = ev.clientX;
-    startWidthRef.current = maximized ? window.innerWidth : width;
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-    if (layoutHost === 'root') {
-      document.documentElement.dataset.workbenchResizing = 'true';
-    }
-    try {
-      resizer.setPointerCapture(pointerId);
-    } catch {
-      // pointer 可能已离开；后续仍靠 window 监听与 webview pointer-events 兜底。
-    }
-
-    // 上限跟全屏比例链走：至少能拖过 WORKBENCH_MAXIMIZE_RATIO（0.8）进全屏，实际允许拖满窗口。
-    const computeUpper = () =>
-      Math.max(WORKBENCH_MIN_WIDTH, Math.floor(window.innerWidth * Math.max(1, WORKBENCH_MAXIMIZE_RATIO)));
-
-    // 拖拽期间本地跟踪渐进阶段，避免每帧 setState；仅在阈值穿越时落 React 状态。
-    let autoCollapsed = sidebarAutoCollapsed;
-    let liveMaximized = maximized;
-    let rafId = 0;
-    let pendingWidth: number | null = null;
-
-    const applyWidth = (next: number) => {
-      if (layoutHost === 'root') {
-        document.documentElement.style.setProperty('--za-workbench-width', `${next}px`);
-      }
-      // 面板宽度走 inline style（抽屉/local host 不投影到 :root CSS 变量）。
-      const panel = resizer.parentElement;
-      if (panel) panel.style.width = `${next}px`;
-
-      const stage = resolveWorkbenchResizeStage({
-        viewportWidth: window.innerWidth,
-        workbenchWidth: next,
-        sidebarOpen,
-        sidebarAutoCollapsed: autoCollapsed,
-        maximized: liveMaximized,
-      });
-      // 仅当用户未「主动收起」左栏时，右侧拖拽才有权自动收/展左栏。
-      // 阶段切换会触发 React 重绘，必须同步 width，否则 inline 跟手宽度会被旧 state 冲掉。
-      if (sidebarOpen && stage.sidebarAutoCollapsed !== autoCollapsed) {
-        autoCollapsed = stage.sidebarAutoCollapsed;
-        setWidth(next);
-        setSidebarAutoCollapsed(autoCollapsed);
-      }
-      if (stage.maximized !== liveMaximized) {
-        liveMaximized = stage.maximized;
-        setWidth(next);
-        setMaximized(liveMaximized);
-      }
-    };
-
-    const flush = () => {
-      rafId = 0;
-      if (pendingWidth == null) return;
-      const next = pendingWidth;
-      pendingWidth = null;
-      applyWidth(next);
-    };
-
-    const onMove = (e: PointerEvent) => {
-      if (!draggingRef.current) return;
-      const dx = startXRef.current - e.clientX;
-      pendingWidth = clampWorkbenchWidth(
-        startWidthRef.current + dx,
-        computeUpper(),
-        WORKBENCH_MIN_WIDTH,
-      );
-      if (!rafId) rafId = requestAnimationFrame(flush);
-    };
-
-    const onUp = () => {
-      if (!draggingRef.current) return;
-      draggingRef.current = false;
-      if (rafId) {
-        cancelAnimationFrame(rafId);
-        rafId = 0;
-      }
-      flush();
-      delete resizer.dataset.active;
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-      delete document.documentElement.dataset.workbenchResizing;
-      try {
-        if (resizer.hasPointerCapture(pointerId)) {
-          resizer.releasePointerCapture(pointerId);
+  const resize = usePointerResize();
+  const resizeLimit = resourceMode ? resourceWidthLimit ?? WORKBENCH_MIN_WIDTH : window.innerWidth;
+  const displayedWidth = resourceMode ? Math.min(width, resizeLimit) : width;
+  const tabsId = useId();
+  const [focusedTab, setFocusedTab] = useState<WorkbenchTabId | null>(null);
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    const resizer = event.currentTarget, panel = panelRef.current;
+    const startX = event.clientX, startWidth = maximized ? window.innerWidth : displayedWidth;
+    const previousRootWidth = document.documentElement.style.getPropertyValue('--za-workbench-width');
+    let nextWidth = startWidth, autoCollapsed = sidebarAutoCollapsed, liveMaximized = maximized;
+    const started = resize.start(event, {
+      onMove: clientX => {
+        nextWidth = clampWorkbenchWidth(startWidth + startX - clientX, resizeLimit, WORKBENCH_MIN_WIDTH);
+        if (layoutHost === 'root') document.documentElement.style.setProperty('--za-workbench-width', `${nextWidth}px`);
+        if (panel) panel.style.width = `${nextWidth}px`;
+        if (resourceMode) return; // Resource expansion belongs to the explicit header button.
+        const stage = resolveWorkbenchResizeStage({ viewportWidth: window.innerWidth, workbenchWidth: nextWidth,
+          sidebarOpen, sidebarAutoCollapsed: autoCollapsed, maximized: liveMaximized });
+        if (sidebarOpen && stage.sidebarAutoCollapsed !== autoCollapsed) {
+          autoCollapsed = stage.sidebarAutoCollapsed; setWidth(nextWidth); setSidebarAutoCollapsed(autoCollapsed);
         }
-      } catch {
-        // already released
-      }
-      const panel = resizer.parentElement;
-      const fromPanel = panel ? parseInt(panel.style.width, 10) : NaN;
-      const fromVar = parseInt(
-        document.documentElement.style.getPropertyValue('--za-workbench-width'),
-        10,
-      );
-      const finalWidth = Number.isFinite(fromPanel) ? fromPanel : fromVar;
-      if (Number.isFinite(finalWidth)) setWidth(finalWidth);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      window.removeEventListener('blur', onUp);
-      resizer.removeEventListener('lostpointercapture', onUp);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-    window.addEventListener('blur', onUp);
-    resizer.addEventListener('lostpointercapture', onUp);
+        if (stage.maximized !== liveMaximized) { liveMaximized = stage.maximized; setWidth(nextWidth); setMaximized(liveMaximized); }
+      },
+      onEnd: committed => {
+        delete resizer.dataset.active;
+        if (layoutHost === 'root') delete document.documentElement.dataset.workbenchResizing;
+        if (committed) setWidth(nextWidth);
+        else {
+          if (panel) panel.style.width = maximized ? '100%' : `${displayedWidth}px`;
+          if (layoutHost === 'root') document.documentElement.style.setProperty('--za-workbench-width', previousRootWidth || `${width}px`);
+          setWidth(width); setMaximized(maximized); setSidebarAutoCollapsed(sidebarAutoCollapsed);
+        }
+      },
+    });
+    if (started) { resizer.dataset.active = 'true'; if (layoutHost === 'root') document.documentElement.dataset.workbenchResizing = 'true'; }
   };
 
   const onDoubleClick = () => {
-    setWidth(WORKBENCH_DEFAULT_WIDTH);
+    resize.cancel(); setWidth(WORKBENCH_DEFAULT_WIDTH); setMaximized(false);
+    if (!resourceMode) setSidebarAutoCollapsed(false);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const STEP = 16;
-    if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      setWidth(width + STEP);
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      setWidth(width - STEP);
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      setWidth(WORKBENCH_MAX_WIDTH);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      setWidth(WORKBENCH_MIN_WIDTH);
-    }
+    if (isImeKey(e.nativeEvent)) return;
+    const STEP = 16, current = maximized ? window.innerWidth : displayedWidth;
+    const next = e.key === 'ArrowLeft' ? current + STEP : e.key === 'ArrowRight' ? current - STEP
+      : e.key === 'Home' ? WORKBENCH_MIN_WIDTH : e.key === 'End' ? Math.max(WORKBENCH_MIN_WIDTH, resizeLimit) : null;
+    if (next === null) return;
+    e.preventDefault(); resize.cancel(); setMaximized(false); setWidth(clampWorkbenchWidth(next, resizeLimit, WORKBENCH_MIN_WIDTH));
   };
 
+  const resizer = open ? (
+    <div
+      className={`workbench-resizer${resourceMode ? ' resource-workspace-resizer' : ''}`}
+      role="separator"
+      aria-orientation="vertical"
+      aria-valuemin={WORKBENCH_MIN_WIDTH} aria-valuemax={Math.max(WORKBENCH_MIN_WIDTH, resizeLimit)} aria-valuenow={maximized ? window.innerWidth : displayedWidth}
+      aria-label={isZh ? '拖拽调整工作台宽度' : 'Resize workbench'}
+      aria-hidden={!interactiveOpen}
+      inert={!interactiveOpen}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
+      onKeyDown={onKeyDown}
+    />
+  ) : null;
+
+  // Resource handles live beside the clipped paper; classic workbenches retain their host.
   // 收起态：组件保持挂载用于 Goal portal target，整体不可见。
   return (
+    <ComparisonNavigationProvider workspaceId={botWorkspaceId ?? ''}>
+    {resourceMode ? resizer : null}
     <aside
-      className={`workbench-panel${open ? ' workbench-panel--open' : ''}${maximized ? ' workbench-panel--maximized' : ''}`}
-      aria-hidden={!open}
-      style={{ width: open ? (maximized ? '100%' : `${width}px`) : 0 }}
+      ref={node => { panelRef.current = node; navigation.ref.current = node; }}
+      className={`workbench-panel${resourceMode ? ' resource-workspace' : ''}${open ? ' workbench-panel--open' : ''}${maximized ? ' workbench-panel--maximized' : ''}`}
+      aria-hidden={!interactiveOpen}
+      inert={!interactiveOpen}
+      data-resource-aux-motion={auxiliaryMotion}
+      data-resource-exiting={resourceExiting}
+      style={{ width: open ? (maximized ? '100%' : `${displayedWidth}px`) : 0 }}
     >
-      {open ? (
-        <div
-          className="workbench-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={isZh ? '拖拽调整工作台宽度' : 'Resize workbench'}
-          tabIndex={0}
-          onPointerDown={onPointerDown}
-          onDoubleClick={onDoubleClick}
-          onKeyDown={onKeyDown}
-        />
-      ) : null}
+      {!resourceMode ? resizer : null}
 
-      <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal">
+      {resourceMode ? <ResourceWorkspaceHeader isZh={isZh} presentation={presentation} idPrefix={tabsId} navigation={navigation} /> : <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
+        onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedTab(null); }}>
         {TABS.map((tab) => {
           const disabled = tab.id === 'plan' && !hasGoalPlan;
           const selected = activeTab === tab.id;
@@ -327,13 +275,21 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
               key={tab.id}
               type="button"
               role="tab"
+              id={`${tabsId}-tab-${tab.id}`} aria-controls={`${tabsId}-panel-${tab.id}`}
+              onFocus={() => setFocusedTab(tab.id)}
+              onKeyDown={event => {
+                if (isImeKey(event.nativeEvent)) return;
+                const next = selectionNavigation(TABS.map(item => ({ disabled: item.id === 'plan' && !hasGoalPlan })), TABS.findIndex(item => item.id === tab.id), event.key, 'horizontal', getComputedStyle(event.currentTarget).direction === 'rtl');
+                if (next === null) return; event.preventDefault();
+                document.getElementById(`${tabsId}-tab-${TABS[next]!.id}`)?.focus({ preventScroll: true });
+              }}
               className={`workbench-tab${selected ? ' workbench-tab--active' : ''}${
                 disabled ? ' workbench-tab--disabled' : ''
               }`}
               aria-label={label}
               aria-selected={selected}
               aria-disabled={disabled}
-              tabIndex={selected ? 0 : -1}
+              tabIndex={!disabled && (focusedTab ?? (activeTab === 'plan' && !hasGoalPlan ? 'browser' : activeTab)) === tab.id ? 0 : -1}
               title={label}
               onClick={() => {
                 if (disabled) return;
@@ -354,12 +310,21 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         >
           <span aria-hidden="true">{maximized ? <RestoreIcon /> : <MaximizeIcon />}</span>
         </button>
-      </div>
+      </div>}
 
-      <div className="workbench-view-slot">
+      <div className="workbench-view-slot" data-resource-auxiliary={resourceMode ? navigation.mode ?? undefined : undefined} id={resourceMode ? `${tabsId}-content` : undefined}
+        role={resourceMode ? (!showingDetails && presentation.active ? 'tabpanel' : 'region') : undefined}
+        aria-labelledby={resourceMode && !showingDetails && presentation.active ? resourceTabIds(tabsId, presentation.active).tab : undefined}>
+        {resourceMode ? <div ref={workspace?.bindDetailTarget} className="workbench-view resource-details-slot"
+          data-active={showingDetails} inert={!showingDetails} aria-hidden={!showingDetails}
+          role="region" aria-label={workspace?.detail?.title || (isZh ? '详情' : 'Details')} /> : null}
+        {resourceMode ? <div className="workbench-view" data-active={activeTab === 'launcher'} inert={activeTab !== 'launcher'} aria-hidden={activeTab !== 'launcher'}>
+          <ResourceLauncher key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'launcher'} recent={presentation.recent} onChanges={() => setActiveTab('changes')} />
+        </div> : null}
         <div
           className="workbench-view workbench-view--goal"
           data-active={activeTab === 'plan'}
+          role="tabpanel" id={`${tabsId}-panel-plan`} aria-labelledby={`${tabsId}-tab-plan`} tabIndex={0} inert={activeTab !== 'plan'} aria-hidden={activeTab !== 'plan'}
           ref={goalSlotRef}
         />
         {mountedBrowserIds.map((id) => (
@@ -367,7 +332,10 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             key={`mounted-browser-${id}`}
             className={`workbench-view workbench-view--browser${id === conversationId ? '' : ' workbench-view--prepared-browser'}`}
             data-active={id === conversationId ? activeTab === 'browser' : false}
-            aria-hidden={id === conversationId ? undefined : true}
+            role={id === conversationId ? 'tabpanel' : undefined} id={id === conversationId ? `${tabsId}-panel-browser` : undefined}
+            aria-labelledby={id === conversationId ? `${tabsId}-tab-browser` : undefined}
+            tabIndex={0} inert={id !== conversationId || activeTab !== 'browser'}
+            aria-hidden={id !== conversationId || activeTab !== 'browser'}
           >
             <BrowserView
               isZh={isZh}
@@ -376,29 +344,48 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
               onSessionChange={id === conversationId
                 ? setBrowserSession
                 : (next) => setBrowserSessionFor(id, next)}
-              claimForeground={id === conversationId}
+              claimForeground={id === conversationId && (!resourceMode || interactiveOpen && activeTab === 'browser')}
+              hideTabStrip={resourceMode} lazyTabs={resourceMode} suspendBlank={resourceMode && activeTab !== 'browser'}
             />
           </div>
         ))}
         <div
-          className="workbench-view workbench-view--files"
-          data-active={activeTab === 'files'}
+          className={`workbench-view workbench-view--files${navigation.mode === 'files' ? ' resource-aux-pane' : ''}`}
+          data-active={filesVisible}
+          role={resourceMode ? 'region' : 'tabpanel'} aria-label={resourceMode ? (isZh ? '文件导航' : 'File navigation') : undefined} id={`${tabsId}-panel-files`} aria-labelledby={resourceMode ? undefined : `${tabsId}-tab-files`} tabIndex={0} inert={!filesVisible} aria-hidden={!filesVisible}
         >
-          <FilesView isZh={isZh} workspacePath={workspacePath} />
+          {navigation.mode === 'files' ? <AuxiliaryHeading isZh={isZh} onClose={navigation.close} /> : null}
+          {resourceMode ? <ScopedResourceNavigator key={botWorkspaceId} isZh={isZh} active={interactiveOpen && filesVisible} />
+            : <FilesView isZh={isZh} workspacePath={workspacePath} />}
         </div>
         <div
           className="workbench-view workbench-view--documents"
           data-active={activeTab === 'documents'}
+          role="tabpanel" id={`${tabsId}-panel-documents`} aria-labelledby={`${tabsId}-tab-documents`} tabIndex={0} inert={activeTab !== 'documents'} aria-hidden={activeTab !== 'documents'}
         >
-          <DocumentView
+          {(!resourceMode || !!botWorkspaceId && !!conversationId) ? <DocumentView
             isZh={isZh}
             session={documentSession}
             onSessionChange={setDocumentSession}
             onBrowseFiles={() => setActiveTab('files')}
-          />
+            hideTabStrip={resourceMode} botWorkspaceId={resourceMode ? botWorkspaceId : undefined}
+            visible={!resourceMode || interactiveOpen && activeTab === 'documents'}
+          /> : null}
         </div>
+        {resourceMode ? <div className="workbench-view" data-active={activeTab === 'changes'} inert={activeTab !== 'changes'} aria-hidden={activeTab !== 'changes'}>
+          <ScopedResourceNavigator key={botWorkspaceId} isZh={isZh} changes active={interactiveOpen && activeTab === 'changes'} />
+        </div> : null}
 
+        {resourceMode ? <aside className="resource-aux-pane resource-comparison-sidebar" data-active={navigation.mode === 'changes'}
+          hidden={navigation.mode !== 'changes'} inert={navigation.mode !== 'changes'} aria-label={isZh ? '变更导航' : 'Changes navigation'}>
+          <AuxiliaryHeading isZh={isZh} onClose={navigation.close} /><ComparisonNavigator isZh={isZh} />
+        </aside> : null}
       </div>
-    </aside>
+    </aside></ComparisonNavigationProvider>
   );
+}
+
+function AuxiliaryHeading({ isZh, onClose }: { readonly isZh: boolean; readonly onClose: () => void }) {
+  return <div className="resource-aux-heading"><span>{isZh ? '导航' : 'Navigation'}</span><button type="button" className="ui-button"
+    onClick={onClose} aria-label={isZh ? '收起辅助导航' : 'Collapse auxiliary navigation'}><PeerIcon name="close" size={14} /></button></div>;
 }

@@ -1,3 +1,4 @@
+import { MotionDetails } from '../app/components/MotionDetails';
 import { useEffect, useRef, useState } from 'react';
 import type { ManagedShellTask } from '@peer-agent/protocol';
 import { PeerIcon } from '../ui/icons';
@@ -42,7 +43,7 @@ export function BackgroundRunDetails({ task, sources, isZh, request, onConfirm, 
         : (isZh ? '未观测到监听地址' : 'No observed listener')}</p>
       {copyError && <p role="alert">{copyError}</p>}
     </div>}
-    <details className="background-run-disclosure"><summary><PeerIcon name="terminal" />{isZh ? '日志' : 'Logs'}<PeerIcon name="chevronRight" className="background-run-chevron" /></summary>
+    <MotionDetails className="background-run-disclosure"><summary><PeerIcon name="terminal" />{isZh ? '日志' : 'Logs'}<PeerIcon name="chevronRight" className="background-run-chevron" /></summary>
       <p className="background-run-meta">{isZh ? '最近输出（可能截断）' : 'Recent output (may be truncated)'}</p>
       <pre ref={output} className="background-run-output" onScroll={() => {
         const node = output.current;
@@ -50,15 +51,15 @@ export function BackgroundRunDetails({ task, sources, isZh, request, onConfirm, 
       }}>{[task.stdout && `stdout\n${task.stdout}`, task.stderr && `stderr\n${task.stderr}`].filter(Boolean).join('\n\n') || (isZh ? '尚无输出' : 'No output yet')}</pre>
       <button type="button" onClick={() => { following.current = true; if (output.current) output.current.scrollTop = output.current.scrollHeight; }}>{isZh ? '回到最新' : 'Latest output'}</button>
       <p className="background-run-meta">{task.artifactRef || (isZh ? '日志证据暂不可用' : 'Log evidence unavailable')}</p>
-    </details>
-    <details className="background-run-disclosure"><summary><PeerIcon name="info" />{isZh ? '技术信息' : 'Technical information'}<PeerIcon name="chevronRight" className="background-run-chevron" /></summary>
+    </MotionDetails>
+    <MotionDetails className="background-run-disclosure"><summary><PeerIcon name="info" />{isZh ? '技术信息' : 'Technical information'}<PeerIcon name="chevronRight" className="background-run-chevron" /></summary>
       <dl>{[
         [isZh ? '工作目录' : 'Working directory', task.cwd],
         [isZh ? '运行 ID' : 'Run ID', task.taskId], [isZh ? '工具调用' : 'Tool call', task.toolCallId],
         [isZh ? '结束时间' : 'Ended', task.completedAt], ['Exit code', task.exitCode],
         ['Evidence', task.artifactRef],
       ].map(([label, value]) => <div key={String(label)}><dt>{label}</dt><dd><pre>{value ?? '—'}</pre></dd></div>)}</dl>
-    </details>
+    </MotionDetails>
     <footer className="background-run-actions">
     {request?.phase === 'confirm' ? <div className="background-run-confirm">
       <p>{isZh ? `停止「${title}」？它可能仍被使用，停止不会撤销已写入的文件。` : `Stop “${title}”? It may still be in use. Written files will not be undone.`}</p>

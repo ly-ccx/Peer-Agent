@@ -22,6 +22,25 @@ function fixture(t) {
   };
 }
 
+const projectRequest = { ...request, type: 'project.submit', operation: 'project.input.submit', text: 'hello' };
+delete projectRequest.taskId;
+test('project input receipt persists its first acknowledgment across restart and re-admission', t => {
+  const open = fixture(t), first = open(), ack = { status: 'received', inputId: 'remote-input', createdAt: '2026-10-01T00:00:00.000Z' };
+  assert.equal(first.lookupProject(projectRequest), null);
+  assert.deepEqual(first.rememberProject(projectRequest, ack, 10_000), ack);
+  const restarted = open(), retry = { ...projectRequest, bindingVersion: 2, delegationVersion: 2, connectionEpoch: 4, expiresAt: 50_000 };
+  assert.deepEqual(restarted.lookupProject(retry), ack);
+  assert.deepEqual(restarted.rememberProject(retry, { ...ack, inputId: 'later' }, 30_000), ack);
+  for (const patch of [{ text: 'different' }, { workspaceId: 'different' }]) {
+    assert.throws(() => restarted.lookupProject({ ...retry, ...patch }), /REQUEST_CONFLICT/);
+    assert.throws(() => restarted.rememberProject({ ...retry, ...patch }, ack, 30_000), /REQUEST_CONFLICT/);
+  }
+  assert.equal(restarted.lookupProject({ ...retry, deviceId: 'other-device' }), null);
+  assert.throws(() => restarted.rememberProject(retry, { ...ack, evidence: 'invented' }, 30_000), /INVALID_RECEIPT/);
+  assert.throws(() => restarted.lookupProject({ ...retry, operation: 'project.list' }), /INVALID_REQUEST/);
+  assert.equal(first.lookup(request), null, 'input acknowledgment is not a tool execution receipt');
+});
+
 for (const fault of ['duplicate', 'ack-lost', 'reopen']) {
   for (const phase of ['accepted', 'started', 'succeeded']) {
     test(`receipt-${fault}-${phase}`, t => {

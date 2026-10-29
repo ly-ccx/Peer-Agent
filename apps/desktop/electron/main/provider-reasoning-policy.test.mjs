@@ -71,3 +71,7 @@ test('explicit maps stay closed and native OpenAI keeps xhigh', () => {
   assert.equal(encodeOpenAIChatRequest({ model: 'test', messages: [], supportsReasoning: true,
     effort: 'xhigh' }).reasoning_effort, 'xhigh');
 });
+
+test('DeepSeek v4.1 native max remains max on the wire, including stale legacy maps', () => {
+  for (const config of [{}, legacy]) assert.equal(chatBody('deepseek-v4.1-flash', 'max', config).reasoning_effort, 'max');
+});

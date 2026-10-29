@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { useFocusScope } from '../hooks/useFocusScope';
 import { positionAnchoredOverlay } from './anchoredOverlay';
 import { createPortal } from 'react-dom';
-import { isTopmostOverlay, OVERLAY_SELECTOR } from './overlayStack';
+import { interactionLayers } from './interactionLayers';
+import { InteractionLayerContext, useInteractionLayer } from '../hooks/useInteractionLayer';
+import { overlayCloseTarget } from './overlayCloseTarget';
+import { watchVisualMotion } from '../state/visualMotion';
+import { createClosePreparation } from '../state/closePreparation';
+import { useMotionSettled } from '../hooks/useMotionSettled';
 
 /**
  * Overlay —— 统一浮层基座（默认模态；anchor 为非模态，均仅负责表达）。
  *
- * 设计语言依据：peer-knowledge/knowledge/specifications/14-product-design-language.md §11.3「弹出层动效准入」。
+ * 设计语言依据：peer-knowledge/knowledge/specifications/peer-product-experience-standard.md、motion-system.md 与 transition-system.md。
  * 所有模态 / 浮层必须经由本组件挂载，避免每处手写 backdrop 而漏掉过渡动效。
  *
  * 统一职责：
@@ -29,13 +35,21 @@ export function Overlay({
   anchor,
   id,
   onEscape,
+  onRequestClose,
+  closeTarget,
+  restoreFocusRef,
   children,
 }: {
   /** Supplying an anchor selects the non-modal, viewport-clamped variant. */
   readonly anchor?: HTMLElement;
+  readonly restoreFocusRef?: RefObject<HTMLElement | null>;
   readonly id?: string;
   /** Return true when an inner confirmation consumed Escape. */
   readonly onEscape?: () => boolean;
+  /** Return false to retain the live layer while its editor resolves unsaved work. */
+  readonly onRequestClose?: () => boolean | Promise<boolean>;
+  /** Optional destination for an action that continues in another visible control. */
+  readonly closeTarget?: () => HTMLElement | null;
   readonly onClose?: () => void;
   readonly closeOnBackdrop?: boolean;
   readonly ariaLabel?: string;
@@ -52,9 +66,27 @@ export function Overlay({
   readonly children: ReactNode | ((api: { readonly requestClose: () => void }) => ReactNode);
 }) {
   const [closing, setClosing] = useState(false);
+  const [closingStyle, setClosingStyle] = useState<CSSProperties>();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const entrySettled = useMotionSettled(panelRef, !closing);
+  const requestGuard = useRef(onRequestClose); requestGuard.current = onRequestClose;
+  const closeRef = useRef(onClose); closeRef.current = onClose;
+  const closingRef = useRef(false), finished = useRef(false);
+  const closePreparation = useRef(createClosePreparation()).current;
+  const acceptedClose = useRef<(() => void) | null>(null);
+  useEffect(() => () => closePreparation.cancel(), [closePreparation]);
+  const anchorRef = useRef<HTMLElement | null>(anchor ?? null); anchorRef.current = anchor ?? null;
+  const layer = useInteractionLayer(true, { roots: [panelRef], trigger: restoreFocusRef ?? (anchor ? anchorRef : undefined), modal: !anchor, closeOnTriggerRemoval: Boolean(anchor), outside: closeOnBackdrop,
+    onClose: onClose ? () => requestClose() : undefined, onEscape });
+  useFocusScope(panelRef, !anchor, { trap: true, restoreFocus: false, ownsScope: () => Boolean(layer.current) && interactionLayers.topInteractive() === layer.current });
   const [placement, setPlacement] = useState<CSSProperties>({ visibility: 'hidden' });
+
+  useLayoutEffect(() => {
+    if (!closing || !closeTarget) return;
+    const panel = panelRef.current, target = closeTarget();
+    if (panel && target?.isConnected) setClosingStyle(overlayCloseTarget(panel.getBoundingClientRect(), target.getBoundingClientRect()));
+  }, [closing, closeTarget]);
 
   useLayoutEffect(() => {
     if (!anchor) return;
@@ -66,79 +98,45 @@ export function Overlay({
       { width: window.innerWidth, height: window.innerHeight },
     ));
     place();
-    const observer = new ResizeObserver(place);
-    observer.observe(panel);
-    observer.observe(anchor);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(panel);
+    observer?.observe(anchor);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
-    panel.focus({ preventScroll: true });
+    if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
-      // Outside clicks keep their new focus; keyboard/close-button dismissal restores the trigger.
-      if (anchor.isConnected && (panel.contains(document.activeElement) || document.activeElement === document.body)) {
-        anchor.focus({ preventScroll: true });
-      }
+
     };
   }, [anchor]);
-  // 退场动画兜底定时器：防止 animationend 事件因故丢失导致浮层卡死不卸载。
-  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 请求关闭：先进入退场态播动画，真正的 onClose 卸载交由 finishClose 收尾。
   const requestClose = useCallback(() => {
-    if (!onClose) return;
-    setClosing(true);
-  }, [onClose]);
-
-  // 退场动画结束（或兜底超时）后，执行调用方传入的真正卸载。
+    if (!closeRef.current || closingRef.current) return;
+    const close = closeRef.current;
+    closePreparation.request(() => requestGuard.current?.() ?? true, () => {
+      if (closingRef.current) return;
+      acceptedClose.current = close; closingRef.current = true; setClosing(true);
+    });
+  }, [closePreparation]);
   const finishClose = useCallback(() => {
-    if (fallbackTimer.current) {
-      clearTimeout(fallbackTimer.current);
-      fallbackTimer.current = null;
-    }
-    onClose?.();
-  }, [onClose]);
-
+    if (!closingRef.current || finished.current) return;
+    finished.current = true;
+    (acceptedClose.current ?? closeRef.current)?.();
+  }, []);
   useEffect(() => {
-    if (!onClose) return undefined;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      const overlays = Array.from(document.querySelectorAll(OVERLAY_SELECTOR));
-      if (!isTopmostOverlay(overlayRef.current, overlays)) return;
-      event.stopImmediatePropagation();
-      event.preventDefault();
-      if (!onEscape?.()) requestClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, onEscape, requestClose]);
+    if (!closing) return;
+    let animations: Animation[] = [];
+    try { animations = panelRef.current?.getAnimations?.() ?? []; } catch { /* Static close. */ }
+    const motion = watchVisualMotion(animations, finishClose, { durationMs: animations.length ? 240 : 0, preserveFinalFrame: true });
+    const panel = panelRef.current;
+    const cancel = (event: AnimationEvent) => { if (event.target === panel) motion.finish(); };
+    panel?.addEventListener('animationcancel', cancel);
+    return () => { panel?.removeEventListener('animationcancel', cancel); motion.cancel(); };
+  }, [closing, closingStyle, finishClose]);
 
-  useEffect(() => {
-    if (!anchor || !closeOnBackdrop) return;
-    const outside = (event: PointerEvent) => {
-      if (!isTopmostOverlay(overlayRef.current, Array.from(document.querySelectorAll(OVERLAY_SELECTOR)))) return;
-      const target = event.target;
-      if (target instanceof Node && !panelRef.current?.contains(target) && !anchor.contains(target)) requestClose();
-    };
-    document.addEventListener('pointerdown', outside, true);
-    return () => document.removeEventListener('pointerdown', outside, true);
-  }, [anchor, closeOnBackdrop, requestClose]);
-
-  // 进入退场态后启动兜底定时器；时长略大于退场动画（--za-motion-fast=120ms）。
-  useEffect(() => {
-    if (!closing) return undefined;
-    fallbackTimer.current = setTimeout(finishClose, 240);
-    return () => {
-      if (fallbackTimer.current) {
-        clearTimeout(fallbackTimer.current);
-        fallbackTimer.current = null;
-      }
-    };
-  }, [closing, finishClose]);
-
-  const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : 'pa-overlay-backdrop';
-  const panelBase = closing ? 'pa-overlay-panel is-closing' : 'pa-overlay-panel';
+  const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : `pa-overlay-backdrop${entrySettled ? ' is-settled' : ''}`;
+  const panelBase = closing ? `pa-overlay-panel is-closing${closingStyle ? ' is-minimizing' : ''}` : `pa-overlay-panel${entrySettled ? ' is-settled' : ''}`;
 
   const overlay = (
     <div
@@ -146,21 +144,23 @@ export function Overlay({
       data-peer-overlay="true"
       className={`${backdropBase}${anchor ? ' pa-overlay--anchored' : ''}${backdropClassName ? ` ${backdropClassName}` : ''}`}
       role="presentation"
-      onClick={closeOnBackdrop && onClose ? requestClose : undefined}
+      onClickCapture={closing ? event => { event.preventDefault(); event.stopPropagation(); } : undefined}
+      onKeyDownCapture={closing ? event => { if (event.key !== 'Tab' && event.key !== 'Escape') { event.preventDefault(); event.stopPropagation(); } } : undefined}
     >
       <div
         className={panelClassName ? `${panelBase} ${panelClassName}` : panelBase}
         ref={panelRef}
         id={id}
-        style={anchor ? placement : undefined}
-        tabIndex={anchor ? -1 : undefined}
+        style={closingStyle ?? (anchor ? placement : undefined)}
+        tabIndex={-1}
         role="dialog"
         aria-modal={anchor ? undefined : true}
         aria-label={ariaLabel}
+        inert={closing}
         onClick={(event) => event.stopPropagation()}
-        onAnimationEnd={closing ? finishClose : undefined}
+        onAnimationEnd={closing ? event => { if (event.target === event.currentTarget) finishClose(); } : undefined}
       >
-        {typeof children === 'function' ? children({ requestClose }) : children}
+        <InteractionLayerContext.Provider value={layer}>{typeof children === 'function' ? children({ requestClose }) : children}</InteractionLayerContext.Provider>
       </div>
     </div>
   );

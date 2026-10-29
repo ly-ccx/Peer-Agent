@@ -2,7 +2,7 @@ import type {
   AutomationChatProposal,
   AutomationProposalAction,
 } from '@peer-agent/protocol';
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { projectAutomationChatProposal } from '../../automations/automationChatProposal';
 import { scheduleLabel } from '../../automations/automationPresentation';
 
@@ -36,7 +36,9 @@ function accessLabel(preset: AutomationChatProposal['definition']['grant']['pres
   return preset;
 }
 
-export function AutomationProposalCard({
+interface ProposalCardProps { readonly proposal: AutomationChatProposal; readonly isZh: boolean; readonly onAction: (action: AutomationProposalAction) => Promise<void>; }
+export function AutomationProposalCard(props: ProposalCardProps) { return <ProposalCard key={props.proposal.proposalId} {...props} />; }
+function ProposalCard({
   proposal,
   isZh,
   onAction,
@@ -45,6 +47,7 @@ export function AutomationProposalCard({
   readonly isZh: boolean;
   readonly onAction: (action: AutomationProposalAction) => Promise<void>;
 }) {
+  const actionLock = useRef(false);
   const [pendingAction, setPendingAction] = useState<AutomationProposalAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const locale = isZh ? 'zh' : 'en';
@@ -52,16 +55,14 @@ export function AutomationProposalCard({
   // Terminal proposals default to a compact strip so the thread/composer keep the main visual space.
   // Users can expand once to re-read the body / receipt without keeping the full card permanently open.
   const [expanded, setExpanded] = useState(!prefersCompact);
-  useEffect(() => {
-    setExpanded(!prefersCompact);
-  }, [proposal.proposalId, prefersCompact, proposal.status]);
 
   const compact = prefersCompact && !expanded;
   const workspace = workspaceName(proposal.definition.workspacePath);
   const notifySuccess = proposal.definition.notifications.succeeded;
 
   const act = async (action: AutomationProposalAction) => {
-    if (pendingAction) return;
+    if (actionLock.current || !canAct) return;
+    actionLock.current = true;
     setPendingAction(action);
     setActionError(null);
     try {
@@ -69,7 +70,7 @@ export function AutomationProposalCard({
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
-      setPendingAction(null);
+      actionLock.current = false; setPendingAction(null);
     }
   };
 

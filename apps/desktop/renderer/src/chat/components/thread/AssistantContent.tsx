@@ -1,6 +1,6 @@
 import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
-import { prefersReducedMotion } from '../../../app/hooks/useMotionPresence';
+import { useMotionAllowed } from '../../../app/hooks/useMotionAllowed';
 import {
   useConversationCompactionState,
   useConversationToolProgress,
@@ -89,7 +89,7 @@ function LiveToolProgress({
   if (progress) return <ToolProgressInline progress={progress} isZh={isZh} />;
   // 压缩进行中由顶部压缩进度条表达「正在工作」，消息内的 ▍ 会误导为仍在输出正文。
   if (shouldHideStreamingCursorDuringCompaction(compactionState)) return null;
-  return showCursor ? <span className="streaming-cursor">▍</span> : null;
+  return showCursor ? <svg className="streaming-cursor" width="6" height="16" viewBox="0 0 6 16" aria-hidden="true" focusable="false"><rect x="1" y="1" width="4" height="14" fill="currentColor" /></svg> : null;
 }
 
 function useAutoCollapsingExpanded(isActive: boolean) {
@@ -305,6 +305,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
   readonly label: string;
   readonly isZh: boolean;
 }) {
+  const motionEnabled = useMotionAllowed();
   const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
   const [showAll, setShowAll] = useState(false);
   const processingWindow = useMemo(() => windowProcessingGroups(groups), [groups]);
@@ -326,7 +327,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
             state="weaving"
             size={20}
             aria-label={isZh ? '正在思考' : 'Thinking'}
-            paused={prefersReducedMotion()}
+            paused={!motionEnabled}
           />
         ) : null}
         <span className="thinking-label">{label}</span>

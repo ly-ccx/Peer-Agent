@@ -1,0 +1,450 @@
+/**
+ * 把 post_reply 整理成锚定回复。
+ * replyTo、sources、结论标记、记忆 id 和送达方式只来自宿主事实。
+ * 模型附在工具参数上的结论、标记和卡片不会进入结果。
+ */
+import { planDelivery } from './digest.mjs';
+import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
+
+const TEXT_MAX = 2000;
+const ID_MAX = 200;
+const LIST_MAX = 20;
+const MEMORY_LIST_MAX = 200;
+const ORIGINS = new Set(['user_request', 'objective_signal', 'agent_idea']);
+const EVENT_KINDS = new Set([
+  'needs_user',
+  'confirm',
+  'failure_needs_decision',
+  'result',
+  'observation',
+  'idea',
+  'objective_risk',
+]);
+const SEVERITIES = new Set(['info', 'notable', 'urgent']);
+const PROACTIVITY = new Set(['off', 'low', 'normal', 'high', 'quiet', 'standard', 'muted']);
+const OUTCOMES = new Set(['passed', 'failed', 'partial', 'unverifiable']);
+const SESSION_STATUSES = new Set(WORK_SESSION_STATUSES);
+
+/**
+ * @param {object} [input]
+ * @returns {{ ok: true, message: object, meta: object, marks: object[] } | { ok: false, error: string, message: string }}
+ */
+export function composeReply(input = {}) {
+  const messageId = boundedId(input.messageId, ID_MAX);
+  if (!messageId) return fail('invalid_input', 'messageId is required.');
+  if (input.kind !== 'user' && input.kind !== 'wake') {
+    return fail('invalid_input', 'kind must be user or wake.');
+  }
+  if (typeof input.text !== 'string') return fail('invalid_input', 'text is required and must be at most 2000 characters.');
+  const text = input.text.trim();
+  if (!text || text.length > TEXT_MAX) {
+    return fail('invalid_input', 'text is required and must be at most 2000 characters.');
+  }
+
+  const turnId = readOptionalId(input.turnId, 'turnId');
+  if (turnId && turnId.ok === false) return turnId;
+  const replyTo = readList(input.replyTo, 'replyTo must be a list of message ids.');
+  if (replyTo && replyTo.ok === false) return replyTo;
+  const sources = readList(input.sources, 'sources must be a list of session ids.');
+  if (sources && sources.ok === false) return sources;
+  const turnInputIds = readList(input.turnInputIds, 'turnInputIds must be a list of message ids.');
+  if (turnInputIds && turnInputIds.ok === false) return turnInputIds;
+  const question = readQuestion(input.question);
+  if (question && question.ok === false) return question;
+  const sessionIds = readIdSet(input.projectSessionIds, 'projectSessionIds must be a list of session ids.');
+  if (sessionIds && sessionIds.ok === false) return sessionIds;
+  const memoryUsed = readMemoryList(input.memoryUsed, 'memoryUsed must be a list of memory ids.');
+  if (memoryUsed && memoryUsed.ok === false) return memoryUsed;
+  const memoryLearned = readMemoryList(input.memoryLearned, 'memoryLearned must be a list of memory ids.');
+  if (memoryLearned && memoryLearned.ok === false) return memoryLearned;
+  const curatorLearned = readMemoryList(input.curatorLearned, 'curatorLearned must be a list of memory ids.');
+  if (curatorLearned && curatorLearned.ok === false) return curatorLearned;
+  const evidenceRefs = readEvidenceRefs(input.evidenceRefs);
+  if (evidenceRefs && evidenceRefs.ok === false) return evidenceRefs;
+  if (input.toolCalls != null && !Array.isArray(input.toolCalls)) {
+    return fail('invalid_input', 'toolCalls must be a list.');
+  }
+  if (input.userMessages != null && !Array.isArray(input.userMessages)) {
+    return fail('invalid_input', 'userMessages must be a list.');
+  }
+  if (input.verdicts != null && !Array.isArray(input.verdicts)) {
+    return fail('invalid_input', 'verdicts must be a list.');
+  }
+  const surfacing = readSurfacing(input.surfacing);
+  if (!surfacing.ok) return surfacing;
+
+  const fallback = input.fallback === true;
+  const proactive = input.proactive === true;
+  if (fallback && input.kind !== 'user') {
+    return fail('fallback_not_allowed', 'Only a user turn can fall back to an anchored reply.');
+  }
+
+  const anchors = fallback ? turnInputIds.ids : replyTo.ids;
+  const indexed = indexUserMessages(input.userMessages);
+  if (anchors.length === 0 && !proactive) {
+    return fail('reply_to_required', 'replyTo is required unless proactive is true.', {
+      availableReplyAnchors: replyAnchorCandidates(indexed),
+    });
+  }
+  const membership = checkAnchors(anchors, indexed);
+  if (!membership.ok) return membership;
+  const forged = sources.ids.filter((id) => !sessionIds.ids.has(id));
+  if (forged.length > 0) {
+    return fail('forged_sources', 'sources must be session ids of this project.', { sessionIds: forged });
+  }
+
+  const actualStates = new Map((Array.isArray(input.sessionStates) ? input.sessionStates : [])
+    .filter(item => item && typeof item.sessionId === 'string' && SESSION_STATUSES.has(item.status))
+    .map(item => [item.sessionId, { sessionId: item.sessionId, status: item.status, ...(item.sourceRevision ? { sourceRevision: item.sourceRevision } : {}),
+      ...(item.observationRevision ? { observationRevision: item.observationRevision } : {}) }]));
+  const missingSources = (Array.isArray(input.unreportedResults) ? input.unreportedResults : [])
+    .filter(item => anchors.includes(item?.anchorMessageId) && !sources.ids.includes(item.sessionId));
+  if (missingSources.length) {
+    return fail('result_source_required', 'Cite the completed tasks for this anchor before reporting their result.', {
+      sessionStates: missingSources.map(item => actualStates.get(item.sessionId)).filter(Boolean),
+    });
+  }
+  const sessionStates = sources.ids.map(id => actualStates.get(id)).filter(Boolean);
+  const claims = input.statusClaims;
+  if (sources.ids.length || claims != null) {
+    if (!Array.isArray(claims) || claims.length !== sources.ids.length
+      || new Set(claims.map(item => item?.sessionId)).size !== claims.length
+      || claims.some(item => !item || !sources.ids.includes(item.sessionId) || !SESSION_STATUSES.has(item.status))
+      || sessionStates.length !== sources.ids.length) {
+      return fail('status_claim_required', 'Declare exactly one current task status for each cited source.', { sessionStates });
+    }
+    if (claims.some(item => actualStates.get(item.sessionId)?.status !== item.status)) {
+      return fail('status_claim_mismatch', 'Task status differs from the persisted host state. Revise the explanation before posting.', { sessionStates });
+    }
+  }
+
+  const missingVerification = (Array.isArray(input.verdicts) ? input.verdicts : [])
+    .filter(verdict => sources.ids.includes(verdict?.sessionId)
+      && actualStates.get(verdict.sessionId)?.status === 'result_ready'
+      && verdict.outcome === 'passed' && verdict.independentVerifier === 'missing');
+  if (missingVerification.length) {
+    return fail('verification_required', 'Run verify_session for the completed sources, then retry with their current status.', {
+      sessionStates: missingVerification.map(verdict => actualStates.get(verdict.sessionId)),
+    });
+  }
+
+  const verdicts = indexVerdicts(input.verdicts);
+  const marks = marksFor(sources.ids, verdicts);
+  const verdictRef = latestVerdictRef(sources.ids, verdicts);
+  const learned = mergeIds(mergeIds(memoryLearned.ids, curatorLearned.ids), learnedFromTools(input.toolCalls));
+  const meta = {
+    replyTo: anchors,
+    sources: sources.ids,
+    ...(sessionStates.length ? { sessionStates } : {}),
+    ...(verdictRef ? { verdictRef } : {}),
+    memoryUsed: memoryUsed.ids,
+    memoryLearned: learned,
+    ...(evidenceRefs.ids.length > 0 ? { evidenceRefs: evidenceRefs.ids } : {}),
+    surfacing: surfacing.decision,
+  };
+  const message = {
+    id: messageId,
+    role: 'assistant',
+    kind: 'agent_reply',
+    content: text,
+    replyTo: meta.replyTo,
+    sources: meta.sources,
+    fallback,
+    ...(turnId.id ? { turnId: turnId.id } : {}),
+    ...(proactive ? { proactive: true } : {}),
+    ...(question.value ? { question: question.value } : {}),
+    meta,
+    marks,
+  };
+  return { ok: true, message, meta, marks };
+}
+
+function fail(error, message, extra = {}) {
+  return { ok: false, error, message, ...extra };
+}
+
+function boundedId(value, max) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > max || /[\r\n]/.test(trimmed)) return '';
+  return trimmed;
+}
+
+function readOptionalId(value, label) {
+  if (value == null) return { id: '' };
+  const id = boundedId(value, ID_MAX);
+  if (!id) return fail('invalid_input', `${label} is invalid.`);
+  return { id };
+}
+
+function readList(value, message) {
+  if (value == null) return { ids: [] };
+  const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: ID_MAX });
+  if (!ids) return fail('invalid_input', message);
+  return { ids };
+}
+
+function readMemoryList(value, message) {
+  if (value == null) return { ids: [] };
+  const ids = stringList(value, { min: 0, max: MEMORY_LIST_MAX, itemMax: ID_MAX });
+  if (!ids) return fail('invalid_input', message);
+  return { ids };
+}
+
+export function normalizeMemoryIds(value) {
+  return cleanIds(value);
+}
+
+export function memoryListsFromResult(result) {
+  let memoryUsed = [];
+  let memoryLearned = [];
+  for (const pile of pilesOf(result)) {
+    const meta = pile?.meta;
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) continue;
+    if (memoryUsed.length === 0) memoryUsed = cleanIds(meta.memoryUsed);
+    if (memoryLearned.length === 0) memoryLearned = cleanIds(meta.memoryLearned);
+    if (memoryUsed.length > 0 && memoryLearned.length > 0) break;
+  }
+  return { memoryUsed, memoryLearned };
+}
+
+export function learnedMemoryIds(toolCalls) {
+  const ids = [];
+  const seen = new Set();
+  for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
+    const name = call?.name || call?.toolName;
+    if (name !== 'memory_remember' && name !== 'local.memory.remember') continue;
+    const id = memoryIdIn(call?.result);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= MEMORY_LIST_MAX) break;
+  }
+  return ids;
+}
+
+function cleanIds(value) {
+  if (!Array.isArray(value)) return [];
+  const ids = [];
+  const seen = new Set();
+  for (const item of value) {
+    const id = boundedId(item, ID_MAX);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= MEMORY_LIST_MAX) break;
+  }
+  return ids;
+}
+
+function memoryIdIn(result) {
+  for (const pile of pilesOf(result)) {
+    if (pile?.ok === false || pile?.success === false) continue;
+    const id = boundedId(pile?.id ?? pile?.memoryId, ID_MAX);
+    if (id) return id;
+  }
+  return '';
+}
+
+function pilesOf(value, depth = 0) {
+  if (depth > 6 || value == null) return [];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return [];
+    try {
+      return pilesOf(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return [];
+    }
+  }
+  if (typeof value !== 'object') return [];
+  const piles = [value];
+  if (Array.isArray(value)) {
+    for (const item of value) piles.push(...pilesOf(item, depth + 1));
+    return piles;
+  }
+  for (const key of ['output', 'result', 'legacyResult']) {
+    if (value[key] != null) piles.push(...pilesOf(value[key], depth + 1));
+  }
+  if (value.outputPreview != null) piles.push(...pilesOf(value.outputPreview, depth + 1));
+  return piles;
+}
+
+function readEvidenceRefs(value) {
+  if (value == null) return { ids: [] };
+  const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: 500 });
+  if (!ids) return fail('invalid_input', 'evidenceRefs must be a list of evidence refs.');
+  const allowed = ids.filter((id) => !id.includes('..') && !/[\s\\]/.test(id));
+  return { ids: allowed };
+}
+
+function readIdSet(value, message) {
+  const list = readList(value, message);
+  if (list.ok === false) return list;
+  return { ids: new Set(list.ids) };
+}
+
+function readQuestion(question) {
+  if (question == null) return { value: null };
+  if (typeof question !== 'object' || Array.isArray(question)) {
+    return fail('invalid_input', 'question.options must contain 1 to 8 choices.');
+  }
+  const options = stringList(question.options, { min: 1, max: 8, itemMax: ID_MAX });
+  if (!options) return fail('invalid_input', 'question.options must contain 1 to 8 choices.');
+  if (question.expiresAt !== undefined && (typeof question.expiresAt !== 'string' || !Number.isFinite(Date.parse(question.expiresAt)))) return fail('invalid_input', 'question.expiresAt must be an ISO date.');
+  if (question.agentRequestId !== undefined && (!boundedId(question.agentRequestId, 200) || !Number.isSafeInteger(question.expectedRequestRevision) || question.expectedRequestRevision < 1)) return fail('invalid_input', 'Invalid linked Agent question.');
+  return { value: { options, ...(question.agentRequestId ? { agentRequestId: question.agentRequestId, expectedRequestRevision: question.expectedRequestRevision } : {}), ...(question.expiresAt ? { expiresAt: new Date(question.expiresAt).toISOString() } : {}) } };
+}
+
+function stringList(value, { min, max, itemMax }) {
+  if (!Array.isArray(value) || value.length > max) return null;
+  const ids = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (typeof item !== 'string') return null;
+    const trimmed = item.trim();
+    if (!trimmed || trimmed.length > itemMax) return null;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    ids.push(trimmed);
+  }
+  if (ids.length < min) return null;
+  return ids;
+}
+
+function indexUserMessages(messages) {
+  const byId = new Map();
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!message || typeof message !== 'object') continue;
+    const id = boundedId(message.id || message.messageId, ID_MAX);
+    if (!id || byId.has(id)) continue;
+    byId.set(id, message);
+  }
+  return byId;
+}
+
+function isUserInput(message) {
+  const kind = message?.kind || message?.type || message?.messageKind;
+  if (kind === 'user_input') return true;
+  if (typeof kind === 'string' && kind) return false;
+  return message?.role === 'user';
+}
+
+function checkAnchors(ids, byId) {
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    return fail('anchor_not_found', 'replyTo message was not found in this conversation.', {
+      messageIds: missing,
+      availableReplyAnchors: replyAnchorCandidates(byId),
+    });
+  }
+  const rejected = ids.filter((id) => !isUserInput(byId.get(id)));
+  if (rejected.length > 0) {
+    return fail('anchor_not_user_input', 'replyTo must be a user_input message.', {
+      messageIds: rejected,
+      availableReplyAnchors: replyAnchorCandidates(byId),
+    });
+  }
+  return { ok: true };
+}
+
+/** Recent conversation facts only. The caller must explicitly choose and validate an anchor again. */
+function replyAnchorCandidates(byId) {
+  return [...byId].filter(([, message]) => isUserInput(message)).slice(-5).map(([messageId, message]) => ({
+    messageId,
+    text: typeof message.content === 'string' ? message.content.slice(0, 120) : '',
+  }));
+}
+
+function readSurfacing(value) {
+  const input = value == null ? {} : value;
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    return fail('invalid_input', 'surfacing facts must be an object.');
+  }
+  const event = input.event == null ? {} : input.event;
+  if (typeof event !== 'object' || Array.isArray(event)) {
+    return fail('invalid_input', 'surfacing event must be an object.');
+  }
+  const origin = event.origin ?? 'user_request';
+  const kind = event.kind ?? 'result';
+  const severity = event.severity ?? 'info';
+  const novelty = event.novelty ?? true;
+  const proactivity = input.proactivity ?? 'normal';
+  const foreground = input.foreground ?? true;
+  const quietHours = input.quietHours ?? false;
+  const needsYou = input.needsYou ?? false;
+  if (!ORIGINS.has(origin) || !EVENT_KINDS.has(kind) || !SEVERITIES.has(severity) || !PROACTIVITY.has(proactivity)) {
+    return fail('invalid_input', 'surfacing facts are invalid.');
+  }
+  if (typeof novelty !== 'boolean' || typeof foreground !== 'boolean' || typeof quietHours !== 'boolean' || typeof needsYou !== 'boolean') {
+    return fail('invalid_input', 'surfacing facts are invalid.');
+  }
+  const decision = planDelivery({
+    event: {
+      origin,
+      kind,
+      novelty,
+      severity,
+      ...(event.deadlineImminent === true ? { deadlineImminent: true } : {}),
+    },
+    proactivity,
+    ...(typeof input.botLevel === 'string' ? { botLevel: input.botLevel } : {}),
+    foreground,
+    quietHours,
+    needsYou,
+  });
+  return { ok: true, decision: decision.decision };
+}
+
+function indexVerdicts(verdicts) {
+  const bySession = new Map();
+  for (const verdict of Array.isArray(verdicts) ? verdicts : []) {
+    if (!verdict || typeof verdict !== 'object') continue;
+    const sessionId = boundedId(verdict.sessionId, ID_MAX);
+    if (!sessionId || !OUTCOMES.has(verdict.outcome)) continue;
+    const verdictRef = boundedId(verdict.verdictRef, ID_MAX) || `verdict:${sessionId}`;
+    const computedAt = typeof verdict.computedAt === 'string' ? verdict.computedAt : '';
+    bySession.set(sessionId, { sessionId, outcome: verdict.outcome, verdictRef, computedAt });
+  }
+  return bySession;
+}
+
+function marksFor(sources, bySession) {
+  const marks = [];
+  for (const sessionId of sources) {
+    const verdict = bySession.get(sessionId);
+    if (!verdict) continue;
+    marks.push({
+      sessionId,
+      outcome: verdict.outcome,
+      verdictRef: verdict.verdictRef,
+    });
+  }
+  return marks;
+}
+
+function latestVerdictRef(sources, bySession) {
+  let latest = null;
+  for (const sessionId of sources) {
+    const verdict = bySession.get(sessionId);
+    if (!verdict) continue;
+    if (!latest || verdict.computedAt > latest.computedAt) latest = verdict;
+  }
+  return latest ? latest.verdictRef : '';
+}
+
+function learnedFromTools(toolCalls) {
+  return learnedMemoryIds(toolCalls);
+}
+
+function mergeIds(left, right) {
+  const ids = [];
+  const seen = new Set();
+  for (const id of [...left, ...right]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= MEMORY_LIST_MAX) break;
+  }
+  return ids;
+}

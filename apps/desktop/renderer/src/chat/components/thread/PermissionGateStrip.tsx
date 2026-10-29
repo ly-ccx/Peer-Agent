@@ -1,12 +1,12 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ClientToolCall } from '@peer-agent/protocol';
-import { useExitAnimation } from '../../hooks/useExitAnimation';
+import { useRef } from 'react';
 import { buildPermissionGateView } from '../../state/permissionGateView';
 
 interface PermissionGateStripProps {
   readonly pendingCalls: readonly ClientToolCall[];
   readonly onApprove: (call: ClientToolCall) => void;
-  /** 「一直允许」仍显式记 scope；「允许」对 shell/写文件也会按命令类型记住，后续同类不再问。 */
+  /** Scope decisions cover only the displayed operation; inheritance is host enforced. */
   readonly onApproveAlways: (call: ClientToolCall) => void;
   readonly onReject: (call: ClientToolCall) => void;
   readonly showApproveAlways?: boolean;
@@ -27,30 +27,24 @@ export function PermissionGateStrip({
   showApproveAlways = true,
   i18n,
 }: PermissionGateStripProps) {
-  const { exiting, exit } = useExitAnimation(180);
-
-  if (pendingCalls.length === 0 && !exiting) return null;
-  if (pendingCalls.length === 0) return null;
-
+  const sent = useRef<ClientToolCall | null>(null);
   const head = pendingCalls[0];
+  if (sent.current !== head) sent.current = null;
+
+  if (!head) return null;
+
   const extra = pendingCalls.length - 1;
   const view = buildPermissionGateView(head, i18n.locale);
 
   const handleAction = (action: (call: ClientToolCall) => void) => {
-    exit(() => action(head));
-  };
-
-  const handleApproveAlways = () => {
-    exit(() => {
-      for (const call of pendingCalls) {
-        onApproveAlways(call);
-      }
-    });
+    if (sent.current === head) return;
+    sent.current = head;
+    try { action(head); } catch (error) { sent.current = null; throw error; }
   };
 
   return (
     <aside
-      className={`permission-gate-strip permission-gate-strip--${view.variant}${exiting ? ' exiting' : ''}`}
+      className={`permission-gate-strip permission-gate-strip--${view.variant}`}
       role="region"
       aria-live="polite"
     >
@@ -69,8 +63,8 @@ export function PermissionGateStrip({
           {view.allowLabel ?? i18n.t('review.allow')}
         </button>
         {showApproveAlways && !view.isGoalConfirmation ? (
-          <button type="button" className="allow-always" onClick={handleApproveAlways}>
-            {i18n.t('review.allowAlways')}
+          <button type="button" className="allow-always" title={view.allowAlwaysHint} onClick={() => handleAction(onApproveAlways)}>
+            {view.allowAlwaysLabel ?? i18n.t('review.allowAlways')}
           </button>
         ) : null}
       </div>

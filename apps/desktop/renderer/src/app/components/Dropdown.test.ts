@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = readFileSync(new URL('./Dropdown.tsx', import.meta.url), 'utf8');
+const menuSource = readFileSync(new URL('./dropdownMenu.ts', import.meta.url), 'utf8');
 
 test('closed trigger can override option labels without changing menu items', () => {
   assert.match(source, /readonly triggerLabel\?: string;/);
@@ -21,13 +22,20 @@ test('open menus clamp against the open workbench and visible webviews', () => {
   assert.match(source, /width: menuRef\.current\?\.offsetWidth \?\? rect\.width/);
 });
 
-test('source menus can render local and remote tabs without filtering untagged options', () => {
+test('source menus can render local and remote filters without filtering untagged options', () => {
   assert.match(source, /readonly tabs\?: readonly DropdownTab\[\];/);
-  assert.match(source, /role="tablist"/);
-  assert.match(source, /role="tab"/);
+  assert.match(source, /role="radiogroup"/);
+  assert.match(source, /role="radio"/);
   assert.match(source, /filterDropdownOptions\(options, query, menuTab\)/);
   assert.match(source, /resolveDropdownActiveTab\(\{ tabs: tabList, options, value \}\)/);
   assert.match(source, /onClick=\{\(\) => setActiveTab\(tab\.id\)\}/);
+});
+
+test('disabled options stay visible but are not committed', () => {
+  assert.match(menuSource, /readonly disabled\?: boolean;/);
+  assert.match(source, /if \(!opt \|\| opt\.disabled\) return;/);
+  assert.match(source, /disabled=\{opt\.disabled === true\}/);
+  assert.match(source, /moveEnabledIndex\(visibleOptions, i, 1\)/);
 });
 
 test('footer actions never forward the hovered row to the callback', () => {

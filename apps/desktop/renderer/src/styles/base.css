@@ -10,7 +10,8 @@
   }
 
   body {
-    @apply m-0 min-h-[720px] min-w-[1024px] overflow-hidden antialiased;
+    /* Native window limits belong to the host; the document fits its viewport. */
+    @apply m-0 min-h-0 min-w-0 overflow-hidden antialiased;
     /*
      * 文档层必须有实色兜底。
      * Electron macOS 窗口本身可透明 + vibrancy，但 html/body/#root 若也透明，
@@ -32,14 +33,24 @@
    * bootstrap 失败时标记不存在 → 上方实色兜底仍然生效；
    * 非 macOS 不打标 → 保持实色回退。内容主区 (.main-panel) 自带实色纸面，不受影响。
    */
-  html[data-vibrancy='true'],
-  html[data-vibrancy='true'] body,
-  html[data-vibrancy='true'] #root {
+  html[data-vibrancy='true']:not([data-window-material='solid']),
+  html[data-vibrancy='true']:not([data-window-material='solid']) body,
+  html[data-vibrancy='true']:not([data-window-material='solid']) #root {
     background: transparent;
+  }
+
+  /* One material decision for every full-window page shell. */
+  html[data-vibrancy='true'] {
+    --window-chrome-fill: var(--glass-chrome);
+  }
+
+  html[data-vibrancy='true'][data-window-material='solid'] {
+    --window-chrome-fill: var(--chrome-raised);
   }
 
   /* 用户开启"降低透明度"时回到实色，与侧栏玻璃的降级策略一致。 */
   @media (prefers-reduced-transparency: reduce) {
+    html[data-vibrancy='true'] { --window-chrome-fill: var(--chrome-raised); }
     html[data-vibrancy='true'],
     html[data-vibrancy='true'] body,
     html[data-vibrancy='true'] #root {
@@ -108,7 +119,7 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  border-radius: var(--ui-radius-chip);
+  border-radius: var(--ui-radius-pill);
   background-color: transparent;
 }
 
@@ -119,4 +130,9 @@
 
 *::-webkit-scrollbar-thumb:active {
   background-color: var(--za-scrollbar-thumb);
+}
+@layer base {
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::marker { content: ""; }
 }

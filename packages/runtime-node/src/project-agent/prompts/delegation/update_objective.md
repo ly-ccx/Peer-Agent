@@ -1,0 +1,1 @@
+Update the owned project objective plan. Raising autonomy or expanding budget requires an actual current user_input anchor and user authorization. Keep factual session links; never mark milestones done without accepted tasks. expectedVersion prevents overwriting a newer user change.

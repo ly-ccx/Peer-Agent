@@ -60,6 +60,30 @@ test('appendUsageRequestLog writes request snapshot with estimated cost', () => 
   assert.equal(saved.providerRequestCount, 3);
 });
 
+test('append keeps role and workspaceId and leaves them off old-shaped rows', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'usage-request-log-role-'));
+  const logFile = path.join(dir, 'requests.jsonl');
+  const log = createUsageRequestLog({ logFile });
+  const recorded = log.append({
+    id: 'req-role',
+    modelProviderId: 'openai::gpt-4o',
+    model: 'gpt-4o',
+    role: 'verifier',
+    workspaceId: 'ws-9',
+    usage: { inputTokens: 10 },
+  });
+  assert.equal(recorded.role, 'verifier');
+  assert.equal(recorded.workspaceId, 'ws-9');
+  const plain = log.append({
+    id: 'req-plain',
+    modelProviderId: 'openai::gpt-4o',
+    model: 'gpt-4o',
+    usage: { inputTokens: 1 },
+  });
+  assert.equal(plain.role, undefined);
+  assert.equal(plain.workspaceId, undefined);
+});
+
 test('readAll returns trailing entries', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'usage-request-log-'));
   const logFile = path.join(dir, 'requests.jsonl');

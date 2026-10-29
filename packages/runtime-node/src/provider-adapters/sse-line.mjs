@@ -31,12 +31,45 @@ export function createSseAbortError() {
   return error;
 }
 
+/** Transport cleanup is best effort and must never hold a business terminal open. */
+export function cancelSseReader(reader, reason) {
+  try { Promise.resolve(reader?.cancel?.(reason)).catch(() => {}); } catch { /* already closed */ }
+}
+
+export function createSseIdleTimeoutError(ms) {
+  return Object.assign(new Error(`provider_stream_idle_timeout: no SSE data received for ${ms}ms`), { type: 'provider_stream_idle_timeout' });
+}
+
+/** Cancellation and idle deadlines also work with transports that ignore abort/cancel.
+ * @template T
+ * @param {{read: () => Promise<T>, cancel?: (reason?: any) => any}} reader
+ * @param {AbortSignal | null | undefined} signal
+ * @param {number} [idleTimeoutMs]
+ * @returns {Promise<T>}
+ */
+export function readSseChunk(reader, signal, idleTimeoutMs = 120_000) {
+  return new Promise((resolve, reject) => {
+    let settled = false, timer;
+    const finish = (settle, value, cancel = false) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); signal?.removeEventListener('abort', abort);
+      if (cancel) cancelSseReader(reader, value);
+      settle(value);
+    };
+    const abort = () => finish(reject, createSseAbortError(), true);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) { abort(); return; }
+    if (Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0) timer = setTimeout(() => {
+      const error = createSseIdleTimeoutError(idleTimeoutMs);
+      finish(reject, error, true);
+    }, idleTimeoutMs);
+    Promise.resolve().then(() => settled ? undefined : reader.read())
+      .then(value => finish(resolve, value), error => finish(reject, error));
+  });
+}
+
 export async function throwIfSseReaderAborted(signal, reader) {
   if (!signal?.aborted) return;
-  try {
-    await reader?.cancel?.();
-  } catch {
-    // Reader may already be closed by the underlying transport.
-  }
+  cancelSseReader(reader, signal.reason);
   throw createSseAbortError();
 }

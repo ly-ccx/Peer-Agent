@@ -1,3 +1,4 @@
+import { localImageContinuations } from '@peer-agent/runtime-node';
 import {
   sendOpenAIChatStream,
   shouldUsePublicOpenAIChatStream,
@@ -18,7 +19,7 @@ import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
   createDesktopAbortError,
-  runDesktopRuntimePipeline,
+  runDesktopRuntimePipeline, createNotExecutedToolCall,
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 import { createOpenAIVisualObservationMessage } from './visual-observation-projection.mjs';
@@ -60,6 +61,7 @@ export async function agentLoopOpenAI({
   fastMode = false,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
   agentProgress = null,
+  executionBudget = null,
   emitRuntimeEvent = null,
   runtimeEventState = undefined,
   providerId = null,
@@ -80,7 +82,17 @@ export async function agentLoopOpenAI({
       })
     : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages]);
+  const imageScope = { conversationId, workspacePath, planId: toolContext?.planId, provider: 'openai', providerId, model };
+  let nativeCheckpoint;
+  const saved = executionBudget?.providerCheckpoint;
+  if (saved && (saved.provider !== 'openai' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
+  if (saved && saved.provider === 'openai' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
+    // Native history preserves execution facts, never stale System Context.
+    const restored = localImageContinuations.restore(saved, imageScope);
+    apiMessages = [{ role: 'system', content: effectiveSystemPrompt }, ...restored.filter(message => message.role !== 'system')];
+  }
   const loop = createAgentLoopKernel({
+    executionBudget,
     webContents,
     streamId,
     conversationId,
@@ -115,6 +127,12 @@ export async function agentLoopOpenAI({
     providerId,
     modelId: model,
     maxTurns: loop.maxTurns,
+    maxToolCalls: executionBudget?.maxToolCalls,
+    sliceToolCalls: executionBudget?.sliceToolCalls,
+    yieldAtTurnLimit: executionBudget?.yieldAtTurnLimit,
+    shouldYield: executionBudget?.shouldYield,
+    maxToolBatchCalls: executionBudget?.maxToolBatchCalls,
+    budgetGuard: executionBudget?.guard,
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
@@ -122,6 +140,10 @@ export async function agentLoopOpenAI({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
+      checkpoint: (_state, executions) => {
+        nativeCheckpoint = localImageContinuations.checkpoint({ provider: 'openai', providerId, model, messages: apiMessages }, imageScope);
+        return executionBudget?.guard?.checkpoint?.(nativeCheckpoint, executions);
+      },
       initialize: () => ({ provider: 'openai' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -144,6 +166,7 @@ export async function agentLoopOpenAI({
             goalPlanStore: runtimeMode === 'goal' ? goalPlanStore : null,
             visualRequestHost: { goalPlanStore, workspacePath },
             runtimeUsageAccounting: loop.usageAccounting,
+            budgetGuard: executionBudget?.guard,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
             },
@@ -198,16 +221,29 @@ export async function agentLoopOpenAI({
               retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
-            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`, providerResponse.providerRecovery);
           } else {
-            loop.sendHttpError(providerResponse.status, text);
+            loop.sendHttpError(providerResponse.status, text, providerResponse.providerRecovery);
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
 
         const { content, thinkingContent, toolCalls } = providerResponse;
         if (!toolCalls.length) {
+          // A completed Responses stream can contain only opaque reasoning and
+          // an empty final message. Retry as a billed runtime round so the
+          // selected effort, completed tool results, cancellation and budget
+          // remain intact; transport success is not a usable model response.
           if (
+            useResponses &&
+            !String(content || '').trim() &&
+            !String(thinkingContent || '').trim() &&
+            loop.claimEmptyResponseRetry()
+          ) {
+            return { kind: 'continue', state };
+          }
+          if (
+            !useResponses &&
             effectiveSupportsReasoning &&
             (effort === 'high' || effort === 'xhigh') &&
             !String(content || '').trim() &&
@@ -233,6 +269,7 @@ export async function agentLoopOpenAI({
         apiMessages.push({
           role: 'assistant',
           content: content || null,
+          ...(!useResponses ? { reasoning_content: thinkingContent ?? '' } : {}),
           tool_calls: toolCalls.map((toolCall) => ({
             id: toolCall.id,
             type: 'function',
@@ -265,10 +302,20 @@ export async function agentLoopOpenAI({
         if (visualObservation) apiMessages.push(visualObservation);
         return state;
       },
-      onStopped: () => loop.sendDone(),
-      onExhausted: () => loop.sendLoopExhausted(),
+      onYield: (_state, context) => {
+        executionBudget?.onYield?.({ ...(nativeCheckpoint ?? localImageContinuations.checkpoint({ provider: 'openai', providerId, model, messages: apiMessages }, imageScope)),
+          turns: context.turn, usage: loop.usage });
+        loop.sendDone();
+      },
+      onStopped: (_state, executions) => {
+        const reason = executions.find(item => item.terminal)?.terminalReason || '';
+        if (/^(work_budget_limited|work_execution_stopped|.*outcome_unknown|batch_stopped|max_tool_calls_exceeded)$/.test(reason)) loop.sendError(reason);
+        else loop.sendDone();
+      },
+      onExhausted: (_state, _context, reason) => loop.sendLoopExhausted({ reason }),
     },
     tools: {
+      notExecuted: (call, reason) => createNotExecutedToolCall({ call, reason, webContents, streamId }),
       execute: async (call) => {
         const toolExecution = await executeModelToolCall({
           name: call.name,

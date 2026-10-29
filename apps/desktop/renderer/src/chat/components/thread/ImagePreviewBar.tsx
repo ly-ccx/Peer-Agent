@@ -26,14 +26,14 @@ export function ImagePreviewBar({
             onClick={() => onRemove(index)}
             aria-label="删除图片"
           >
-            ×
+            <PeerIcon name="close" size={14} />
           </button>
         </div>
       ))}
 
       {Array.from({ length: uploadingCount }).map((_, i) => (
         <div key={`uploading-${i}`} className="image-preview-item uploading">
-          <span className="image-preview-spinner" />
+          <PeerIcon name="loader" className="image-preview-spinner" />
         </div>
       ))}
 

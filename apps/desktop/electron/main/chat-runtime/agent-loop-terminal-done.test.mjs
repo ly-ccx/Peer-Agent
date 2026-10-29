@@ -22,7 +22,7 @@ test('terminal tools do not sendDone before applyToolResults', async () => {
       `${name} still early-sends done on terminal tools`,
     );
     // 仍由 pipeline onStopped 统一收尾。
-    assert.match(source, /onStopped:\s*\(\)\s*=>\s*loop\.sendDone\(\)/);
+    assert.match(source, /onStopped:\s*\(_state, executions\)\s*=>\s*\{/);
     assert.match(source, /不得在这里 sendDone/);
   }
 });

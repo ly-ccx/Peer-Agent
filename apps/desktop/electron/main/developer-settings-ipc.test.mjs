@@ -27,6 +27,9 @@ function noOpSettingsServices() {
       resetDeveloperSettings: noop,
       diagnostics: noop,
       updateLocale: noop,
+      describeModelRouting: noop,
+      updateModelRouting: noop,
+      previewModelRouting: noop,
     },
     permissions: { approve: noop, deny: noop },
   };

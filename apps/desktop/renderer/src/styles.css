@@ -11,7 +11,6 @@
 @import "./styles/fallback.css";
 @import "./styles/composer.css";
 @import "./appearance/appearance.css";
-@import "./capabilities/capability-workbench.css";
 @import "./chat/styles/sidebar.css";
 @import "./chat/styles/thread.css";
 @import "./chat/styles/message.css";
@@ -20,9 +19,6 @@
 @import "./chat/styles/code-highlight.css";
 @import "./chat/styles/chat-composer.css";
 @import "./chat/styles/permission-gate-strip.css";
-@import "./chat/styles/goal-panel.css";
-@import "./styles/llm-settings.css";
-@import "./styles/settings-page.css";
 @import "./styles/overlay.css";
 @import "./styles/conversation-search.css";
 @import "./styles/tooltip.css";
@@ -31,6 +27,8 @@
 @import "./styles/sidebar.css";
 @import "./styles/updater.css";
 @import "./styles/workbench.css";
-@import "./automations/automations.css";
 @import './styles/particle-shatter.css';
 @import "./styles/task-artifact-preview-overlay.css";
+
+@import "./ui/settings/frost-settings.css";
+@import "./ui/forms/forms.css";

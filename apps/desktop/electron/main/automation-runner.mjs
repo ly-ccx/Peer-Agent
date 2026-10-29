@@ -1,14 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-
-function createBackgroundWebContents(onEvent = null) {
-  return {
-    isDestroyed: () => false,
-    send(channel, payload) {
-      onEvent?.({ channel, payload });
-    },
-  };
-}
+import { createCallbackSink } from './agent-host/turn-sinks.mjs';
 
 function permissionPolicyFromGrant(grant) {
   return Object.freeze({
@@ -133,7 +125,7 @@ export function createAutomationRunner({
 
         const outcome = await llmChatService.sendMessage({
           messages: [{ role: 'user', content: initial.snapshot.prompt }],
-          webContents: createBackgroundWebContents(onBackgroundEvent),
+          webContents: createCallbackSink(onBackgroundEvent),
           streamId: `automation:${initial.runId}:${createId()}`,
           effort: 'default',
           mode: 'goal',

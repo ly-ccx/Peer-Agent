@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
+import fs, { mkdtempSync, writeFileSync, rmSync, utimesSync, statSync, renameSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
@@ -10,6 +11,73 @@ function createTempStore() {
   const store = createGoalPlanStore({ storeDir: dir });
   return { dir, store };
 }
+
+test('evidence projection parses an unchanged index once and isolates nested caller mutations', t => {
+  const { dir, store } = createTempStore();
+  const file = path.join(dir, 'evidence-index.jsonl');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  store.recordEvidenceRefs({ evidenceRef: 'capture', capabilityId: 'local.file.read', toolName: 'read_file',
+    bodyPreview: { kind: 'file', text: 'actual content' }, artifactRefs: ['file-ref'],
+    userArtifacts: [{ ref: 'file-ref', kind: 'file', label: 'file',
+      preview: { kind: 'code', additions: 1, deletions: 0, diffLines: ['+actual'] } }] });
+  const original = fs.readFileSync;
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (...args) => {
+    if (args[0] === file) reads++;
+    return original(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const first = store.listEvidenceIndex();
+  first[0].evidenceRef = 'forged';
+  first[0].artifactRefs.push('forged');
+  first[0].bodyPreview.text = 'forged';
+  first[0].userArtifacts[0].preview.diffLines[0] = '+forged';
+  first.splice(0);
+  for (let i = 0; i < 5; i++) {
+    const current = store.listEvidenceIndex();
+    assert.equal(current[0].evidenceRef, 'capture');
+    assert.deepEqual(current[0].artifactRefs, ['file-ref']);
+    assert.equal(current[0].bodyPreview.text, 'actual content');
+    assert.deepEqual(current[0].userArtifacts[0].preview.diffLines, ['+actual']);
+  }
+  assert.equal(reads, 1, 'completion projections must share parsing, not mutable evidence records');
+});
+
+test('evidence projection sees same-size rewrites, replacements, deletion and corruption', t => {
+  const { dir, store } = createTempStore();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'evidence-index.jsonl');
+  const row = ref => JSON.stringify({ evidenceRef: ref, createdAt: '2026-01-01T00:00:00Z' }) + '\n';
+  writeFileSync(file, row('old'));
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'old');
+  const originalStat = statSync(file);
+  writeFileSync(file, row('new'));
+  utimesSync(file, originalStat.atime, originalStat.mtime);
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'new', 'ctime invalidates an mtime-restored rewrite');
+  const replacement = path.join(dir, 'replacement.jsonl');
+  writeFileSync(replacement, row('alt'));
+  utimesSync(replacement, originalStat.atime, originalStat.mtime);
+  renameSync(replacement, file);
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'alt', 'file identity invalidates a same-size replacement');
+  writeFileSync(file, '{invalid\n');
+  assert.deepEqual(store.listEvidenceIndex(), [], 'corrupt records cannot retain an earlier valid snapshot');
+  rmSync(file);
+  assert.deepEqual(store.listEvidenceIndex(), []);
+  writeFileSync(file, row('end'));
+  assert.equal(store.listEvidenceIndex()[0].evidenceRef, 'end');
+});
+
+test('evidence projection sees local and cross-process appends immediately', t => {
+  const { dir, store } = createTempStore();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  assert.deepEqual(store.listEvidenceIndex(), []);
+  store.recordEvidenceRefs({ evidenceRef: 'local' });
+  assert.deepEqual(store.listEvidenceIndex().map(row => row.evidenceRef), ['local']);
+  const nextHost = createGoalPlanStore({ storeDir: dir });
+  nextHost.recordEvidenceRefs({ evidenceRef: 'remote' });
+  assert.deepEqual(store.listEvidenceIndex().map(row => row.evidenceRef), ['local', 'remote']);
+});
 
 test('listPlans 缓存命中：index 未变化时复用结果（不重复 normalize 全量索引）', async () => {
   const { dir, store } = createTempStore();
@@ -70,4 +138,74 @@ test('同进程 persist 后 listPlans 立即反映变更（writeJsonl 使缓存�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('旧宿主的待刷进度在新宿主写盘后失效，不覆盖接管状态', async () => {
+  const { dir, store } = createTempStore();
+  try {
+    const plan = store.createPlan({ title: 'handoff', goal: 'handoff' });
+    const nextHost = createGoalPlanStore({ storeDir: dir });
+    store.setRunnerState(plan.planId, { turnCount: 7 });
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 7);
+    nextHost.setRunnerState(plan.planId, { status: 'paused', turnCount: 11 });
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 11);
+    assert.equal(store.getPlan(plan.planId).runner.status, 'paused');
+    // Cover the pending flush without first reading from the old store.
+    store.setRunnerState(plan.planId, { turnCount: 12 });
+    nextHost.setRunnerState(plan.planId, { status: 'paused', turnCount: 23 });
+    await new Promise(resolve => setTimeout(resolve, 1150));
+    assert.equal(nextHost.getPlan(plan.planId).runner.turnCount, 23);
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 23);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('证据索引跨进程追加后，命中和缺失缓存均失效且保留已有字段', () => {
+  const { dir, store } = createTempStore();
+  try {
+    const nextHost = createGoalPlanStore({ storeDir: dir });
+    assert.deepEqual(store.findEvidenceIndexRecords(['tool-result://shared']), []);
+    nextHost.recordEvidenceRefs({ evidenceRefs: ['tool-result://shared'], toolName: 'read_file',
+      artifactRefs: ['local-file-artifact://snapshot'] });
+    assert.equal(store.findEvidenceIndexRecords(['tool-result://shared'])[0].toolName, 'read_file');
+    nextHost.recordEvidenceRefs({ evidenceRefs: ['tool-result://shared'], capabilityId: 'local.file.read', toolName: 'read_file', bodyPreview: { kind: 'file', text: 'snapshot body' } });
+    assert.equal(store.findEvidenceIndexRecords(['tool-result://shared'])[0].bodyPreview.text, 'snapshot body');
+    store.recordEvidenceRefs({ evidenceRefs: ['tool-result://shared'], capabilityId: 'local.file.read' });
+    const merged = nextHost.findEvidenceIndexRecords(['tool-result://shared'])[0];
+    assert.equal(merged.bodyPreview.text, 'snapshot body');
+    assert.deepEqual(merged.artifactRefs, ['local-file-artifact://snapshot']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('command evidence survives reload and cannot be supplied or overwritten by a goal wrapper', () => {
+  const { dir, store } = createTempStore();
+  try {
+    const evidenceRef = 'tool-result://shell-check';
+    const preview = { kind: 'command', text: '{"exitCode":0,"stdout":"observed","stderr":""}', truncated: false };
+    store.recordEvidenceRefs({ evidenceRef, capabilityId: 'local.shell.exec', toolName: 'Bash', bodyPreview: preview });
+    const reloaded = createGoalPlanStore({ storeDir: dir });
+    assert.deepEqual(reloaded.findEvidenceIndexRecords([evidenceRef])[0].bodyPreview, preview);
+    store.recordEvidenceRefs({ evidenceRef, capabilityId: 'local.shell.exec', toolName: 'goal_update_task',
+      bodyPreview: { ...preview, text: 'forged' } });
+    assert.deepEqual(reloaded.findEvidenceIndexRecords([evidenceRef])[0].bodyPreview, preview);
+    store.recordEvidenceRefs({ evidenceRef: 'tool-result://wrapper', capabilityId: 'local.goal.update_task',
+      toolName: 'goal_update_task', bodyPreview: preview });
+    assert.equal(reloaded.findEvidenceIndexRecords(['tool-result://wrapper'])[0].bodyPreview, undefined);
+    store.recordEvidenceRefs({ evidenceRef: 'tool-result://long-shell', capabilityId: 'local.shell.exec',
+      toolName: 'bash', bodyPreview: { ...preview, text: 'x'.repeat(5000) } });
+    const long = reloaded.findEvidenceIndexRecords(['tool-result://long-shell'])[0].bodyPreview;
+    assert.equal(long.text.length, 4000); assert.equal(long.truncated, true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('raw plan metadata does not hydrate UI completion and observes same-size external rewrites', t => {
+  const {dir,store}=createTempStore();t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const file=path.join(dir,'index.jsonl');
+  const meta={planId:'metadata-only',conversationId:'first',status:'completed',updatedAt:'2026-10-19T00:00:00Z'};
+  writeFileSync(file,JSON.stringify(meta)+'\n');
+  writeFileSync(path.join(dir,'metadata-only.json'),'{broken');
+  const first=store.listPlanMetadata();assert.equal(first[0].status,'completed');
+  first[0].conversationId='forged';assert.equal(store.listPlanMetadata()[0].conversationId,'first');
+  const before=statSync(file);meta.conversationId='other';writeFileSync(file,JSON.stringify(meta)+'\n');utimesSync(file,before.atime,before.mtime);
+  assert.equal(store.listPlanMetadata()[0].conversationId,'other');
+  rmSync(file);assert.deepEqual(store.listPlanMetadata(),[]);
 });

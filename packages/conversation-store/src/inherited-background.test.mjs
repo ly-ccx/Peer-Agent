@@ -45,6 +45,34 @@ test('background budget never silently truncates', () => {
   assert.throws(() => buildInheritedBackground(history, { ...options, maxCharacters: 1 }), { code: 'BACKGROUND_BUDGET_EXCEEDED' });
 });
 
+test('delegation scope admits named messages without inheriting unrelated missing history', () => {
+  const history = make([
+    { id: 'old-image', role: 'user', content: 'unrelated UI', attachments: [{ kind: 'image' }] },
+    { id: 't', role: 'tool', content: 'unrelated tool' },
+    { id: 'u', role: 'user', content: 'replace research' },
+    { id: 'context', role: 'assistant', content: 'specific context' },
+  ]);
+  const result = buildInheritedBackground(history, { ...options, messageIds: ['context', 'u'] });
+  assert.deepEqual(result.scope, { kind: 'delegation', messageIds: ['u', 'context'] });
+  assert.deepEqual(result.entries.map(entry => entry.sourceMessageId), ['u', 'context']);
+  assert.equal(result.requiresMissingConfirmation, false);
+  const missing = buildInheritedBackground(history, { ...options, messageIds: ['old-image', 'u', 't'] });
+  assert.equal(missing.requiresMissingConfirmation, true);
+  assert.deepEqual(missing.missingItems.map(item => item.sourceMessageId), ['old-image', 't']);
+  assert.equal(buildInheritedBackground(history, options).requiresMissingConfirmation, true);
+});
+
+test('delegation scope refuses invalid, stale and noncommitted selection', () => {
+  const history = make([{ id: 'u', role: 'user', content: 'first' }, { id: 'a', role: 'assistant', content: 'active' }]);
+  for (const messageIds of [[], ['u', 'u'], [''], 'u']) {
+    assert.throws(() => buildInheritedBackground(history, { ...options, messageIds }), { code: 'BACKGROUND_SCOPE_INVALID' });
+  }
+  assert.throws(() => buildInheritedBackground(history, { ...options, messageIds: ['absent'] }), { code: 'BACKGROUND_SCOPE_MISSING' });
+  assert.throws(() => buildInheritedBackground(history, { ...options, messageIds: ['u'], expectedRevision: 4 }), { code: 'BACKGROUND_VERSION_CHANGED' });
+  assert.throws(() => buildInheritedBackground(history, { ...options, messageIds: ['a'],
+    runtimeState: { ...options.runtimeState, status: 'running', activeMessageId: 'a' } }), { code: 'BACKGROUND_SCOPE_MISSING' });
+});
+
 test('background refuses stale revision, unknown liveness and missing active target', () => {
   const history = make([]);
   assert.throws(() => buildInheritedBackground(history, { ...options, expectedRevision: 4 }), { code: 'BACKGROUND_VERSION_CHANGED' });

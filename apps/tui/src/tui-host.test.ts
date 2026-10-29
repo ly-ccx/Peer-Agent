@@ -17,7 +17,8 @@ const workspaces: string[] = [];
 const liveHosts: TuiHost[] = [];
 
 function createHost(options: string | CreateTuiHostOptions): TuiHost {
-  const host = createTuiHost(options);
+  const resolved = typeof options === 'string' ? {workspaceRoot: options} : options;
+  const host = createTuiHost({ ...resolved, userDataPath: resolved.userDataPath ?? path.join(resolved.workspaceRoot, '.peer-agent-test') });
   liveHosts.push(host);
   return host;
 }
@@ -57,6 +58,16 @@ afterEach(async () => {
 });
 
 describe('TUI Runtime host', () => {
+  test('project Agent role cannot inherit chat-mode side effects even under full local access', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createHost({ workspaceRoot, accessLevel: 'full_local' });
+    const target = path.join(workspaceRoot, 'must-not-exist.txt');
+    const execution = await host.execute('local.file.write', { path: target, content: 'unexpected' }, {
+      ...sessionContext('bot-role'), mode: 'chat', toolContext: { turnRole: 'project_agent' },
+    });
+    expect(execution.result.status).not.toBe('completed');
+    expect(await readFile(target, 'utf8').catch(() => null)).toBeNull();
+  });
   test('uses the desktop ask level by default and updates the runtime permission truth', async () => {
     const workspaceRoot = await createWorkspace();
     const host = createHost(workspaceRoot);
@@ -254,6 +265,25 @@ describe('TUI Runtime host', () => {
     expect(approvals).toHaveLength(0);
   });
 
+  test('indexes a real successful shell result as immutable command evidence', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createHost({ workspaceRoot, accessLevel: 'full_local' });
+    const result = await host.execute('local.shell.exec', { command: 'echo RC_COMMAND_FACT' },
+      { ...sessionContext('shell-evidence-session'), mode: 'chat' });
+    expect(result.result.status).toBe('completed');
+    const ref = `tool-result://${result.result.toolCallId}`;
+    const record = host.goalBridge!.store.findEvidenceIndexRecords([ref])[0];
+    expect(record?.bodyPreview?.kind).toBe('command');
+    expect(JSON.parse(record!.bodyPreview!.text)).toEqual({ exitCode: 0, stdout: 'RC_COMMAND_FACT\n', stderr: '' });
+    expect(record?.toolName).toBe('bash');
+    const failed = await host.execute('local.shell.exec', { command: 'exit 1' },
+      { ...sessionContext('shell-evidence-session', 1), mode: 'chat' });
+    expect(failed.result.status).toBe('failed');
+    const failedRecord = host.goalBridge!.store.findEvidenceIndexRecords([`tool-result://${failed.result.toolCallId}`])[0];
+    expect(failedRecord?.bodyPreview).toBeUndefined();
+    expect(host.goalBridge!.store.findEvidenceIndexRecords([ref])[0]?.bodyPreview).toEqual(record?.bodyPreview);
+  });
+
   test('stops a chat background shell from goal through the shared task manager', async () => {
     const workspaceRoot = await createWorkspace();
     const userDataPath = await createWorkspace();
@@ -430,6 +460,23 @@ describe('TUI Runtime host', () => {
     expect(await Bun.file(path.join(workspaceRoot, 'full-shell.txt')).exists()).toBe(true);
   });
 
+  test('cancelling an approval never grants or executes the capability', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createHost(workspaceRoot);
+    const unsubscribe = host.subscribeApproval(approval => approval?.resolve('cancel'));
+    const execution = await host.executeShell('touch cancelled.txt', sessionContext('cancelled-approval'));
+    unsubscribe();
+    expect(execution.result.status).toBe('denied');
+    expect((execution.result.permissionGrant as {decision?: string} | undefined)?.decision).toBe('deny');
+    expect(await Bun.file(path.join(workspaceRoot,'cancelled.txt')).exists()).toBe(false);
+    // The persisted approval is cancellation; runtime denial means no execution, not a user rejection.
+    const { createApprovalStore } = await import('@peer-agent/runtime-node');
+    const approvalStore = createApprovalStore({rootDir:path.join(workspaceRoot,'.peer-agent-test/project-runtime')});
+    const saved = approvalStore.list({}).filter((row: any) => row.conversationId === 'cancelled-approval');
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.state).toBe('cancelled');
+  });
+
   test('denies a requested shell capability without executing it', async () => {
     const workspaceRoot = await createWorkspace();
     const host = createHost(workspaceRoot);
@@ -583,7 +630,7 @@ describe('TUI Runtime host', () => {
     expect(approvalIds).toEqual([first.result.toolCallId ?? '', second.result.toolCallId ?? '']);
   });
 
-  test('allow for session reuses a capability grant only in the matching session', async () => {
+  test('session grants require exact arguments and a matching session', async () => {
     const workspaceRoot = await createWorkspace();
     const host = createHost(workspaceRoot);
     let approvalCount = 0;
@@ -605,9 +652,9 @@ describe('TUI Runtime host', () => {
     unsubscribe();
 
     expect(first.result.status).toBe('completed');
-    expect(second.result.status).toBe('completed');
+    expect(second.result.status).toBe('denied');
     expect(isolated.result.status).toBe('denied');
-    expect(approvalCount).toBe(2);
+    expect(approvalCount).toBe(3);
     expect(await Bun.file(path.join(workspaceRoot, 'session-b.txt')).exists()).toBe(false);
   });
 
@@ -890,6 +937,10 @@ describe('TUI Runtime host', () => {
     }, context(2));
     expect(read.result.status).toBe('completed');
     const evidenceRef = `tool-result://${read.result.toolCallId}`;
+    await writeFile(path.join(workspaceRoot, 'evidence.txt'), 'changed after execution', 'utf8');
+    const indexed = host.goalBridge!.store.findEvidenceIndexRecords([evidenceRef]);
+    expect(indexed[0]?.bodyPreview?.text).toBe('governed evidence');
+    expect(indexed[0]?.toolName).toBe('read_file');
 
     const updated = await host.execute('local.goal.update', {
       planId,

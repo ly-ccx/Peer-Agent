@@ -485,7 +485,7 @@
                 <tr>
                   <td>macOS</td>
                   <td><code>.dmg</code> / app archive on Releases</td>
-                  <td data-i18n="install.macHow">Download → open → install to Applications. Developer ID signed and notarized; in-app updates replace the app on restart from 0.0.18 (0.0.17 and earlier: install 0.0.18 manually once).</td>
+                  <td data-i18n="install.macHow">Download → open → install to Applications. Developer ID signed and notarized. In RC10, Update shrinks the dialog toward the bottom-left version area; download progress remains there, followed by Install when ready. In-app updates start from 0.0.18; earlier versions must install 0.0.18 manually once.</td>
                 </tr>
                 <tr>
                   <td>Windows</td>
@@ -591,11 +591,21 @@ pnpm dist:linux
           <div class="crumb"><div class="crumb-left"><span data-i18n="group.getStarted">Get started</span><span>/</span><strong data-i18n="nav.desktop">Desktop</strong></div></div>
           <h1 data-i18n="desktop.title">Desktop workbench</h1>
           <p class="lede" data-i18n="desktop.lede">
-            Desktop is the Electron presentation shell over the same local Runtime as CLI. It is optimized for Thread reading,
-            permission decisions, and Evidence review — not for becoming an IM bubble wall.
+            Desktop lists one bot per project and shares the local Runtime with CLI. Read replies, follow delegated work,
+            handle decisions and inspect evidence from the conversation.
           </p>
 
-          <h2 id="desktop-layout" data-i18n="desktop.layoutTitle">Layout map</h2>
+          <h2 id="desktop-bots" data-i18n="desktop.botsTitle">Bot conversations and settings</h2>
+          <ul>
+            <li data-i18n="desktop.botsStream">Replies arrive in complete paragraph bubbles. Details opens process, supporting records and technical diagnostics in the right sidebar. Stop preserves partial text and your draft; selected-text quoting appears beside the selection.</li>
+            <li data-i18n="desktop.botsWork">The bot follows background work and delivers results in the main conversation. Reply bubbles follow the avatar color, and choosing an answer sends its message smoothly. Hover or focus a reply to open Reply details below the left edge of its bubble. The main bot coordinates independent Agents concurrently, forwards additions, cancels incorrect work and arranges replacements within existing authorization. Agents ask it questions and return results for verification and delivery. Independent tasks appear as peers, distinct icons identify Agents, and duplicate return events are consolidated. Cancel waiting tasks directly. Authorized local images can be inspected by vision-capable models. Task details show current progress and next steps; genuine decisions ask a specific question. Progress survives scheduling yields. Productive work continues without default lifetime caps; explicit budgets and permissions remain enforced. Main reply failures, active child work and historical interruptions have separate states. Equivalent background continuations share one owner; delivered results wait quietly until their facts change. Verification shows factual progress and settles after 10 minutes without new facts, returning its reason to the main Bot.</li>
+            <li data-i18n="desktop.botsProfile">Bot settings opens configuration directly, with Overview, Tasks, Objectives and Memory in adjacent tabs. Back up the complete data root before upgrading. RC18 adds coordination journal events that older versions may refuse to restore; rollback requires the complete pre-upgrade backup. RC19 retains complete local reply receipts and reduces large-history execution overhead. RC25 reads public interactions by default, loads child process details on demand and recovers large coordination journals in background workers. RC28 adds Check recovery above the conversation: request a safe handoff, preserve history and continue verified work, or keep reports and worktrees while ending an uncertain earlier execution. Completed and unknown operations are not replayed; new admission requires minimum reader/writer 4. Publishing does not restart the installed app; install only after active execution finishes. Once the new format is activated, older hosts cannot safely continue from the retained legacy journal; an incompatible downgrade requires the full pre-upgrade backup.</li>
+            <li data-i18n="desktop.botsReply">Waiting, public streamed text and the final answer stay in one continuous reply, with the avatar and Reply details in place. Internal verification verdicts and progress live in task details; the main Bot explains the result. Overdue unaccepted results prompt factual follow-up. On macOS, Settings → Appearance offers glass/solid window materials. A single neutral backdrop surrounds independent floating conversation, detail and Settings panels in both themes; reduced transparency keeps the layout. Complete data backups must include coordination content proofs; pre-seal RC25 backups need certification against the original source before relocation recovery.</li>
+          </ul>
+          <p data-i18n="desktop.resources">The conversation’s Workspace button opens browser, document/code, directory and diff tabs beside the conversation. Read actual Git revisions and preserve accepted content when files change. Save local document drafts and prepare source-bound selection feedback; applying a fixed draft follows local authorization and a fresh version check. Separate windows return to the same source; browser windows are address copies.</p>
+          <p data-i18n="desktop.classic">Settings → General → Interface returns to classic chat. Its layout is described below.</p>
+
+          <h2 id="desktop-layout" data-i18n="desktop.layoutTitle">Classic screen layout</h2>
           <div class="table-wrap">
             <table>
               <thead><tr><th data-i18n="desktop.thRegion">Region</th><th data-i18n="desktop.thJob">Job</th></tr></thead>
@@ -614,7 +624,7 @@ pnpm dist:linux
           <ol class="steps">
             <li data-i18n="desktop.s1">Open Peer Agent → choose or create a workspace (repo/folder you trust).</li>
             <li data-i18n="desktop.s2">Settings → Models / Providers → add provider + key/endpoint → set default model.</li>
-            <li data-i18n="desktop.s3">Create a New Task. Prefer a low-risk prompt first (read-only inspect).</li>
+            <li data-i18n="desktop.s3">Select the project's bot and send a message. Start with a read-only project question; the bot can delegate work when needed.</li>
             <li data-i18n="desktop.s4">When PermissionGrant UI appears, read the capability scope before approving.</li>
             <li data-i18n="desktop.s5">After the turn, expand Evidence/tool results and confirm the local side effects.</li>
           </ol>
@@ -717,6 +727,7 @@ peer</code></pre>
             <li data-i18n="model.s3">Store the key through the app credential flow when prompted.</li>
             <li data-i18n="model.s4">Pick a default model + reasoning effort for new threads.</li>
             <li data-i18n="model.s5">Send a trivial prompt to validate connectivity before real work.</li>
+            <li data-i18n="model.s6">Bot execution and independent review may use the same model and channel. Fixed selections are preserved; review failures should identify missing evidence or the recorded execution error.</li>
           </ol>
           <h2 id="model-cli" data-i18n="model.cliTitle">CLI</h2>
           <p data-i18n="model.cliBody">
@@ -798,10 +809,12 @@ Evidence owns governance.</code></pre>
           </p>
           <h2 id="perm-ask" data-i18n="perm.askTitle">Default posture: ask first</h2>
           <ul>
-            <li data-i18n="perm.a1">Sensitive writes / shell / automation should surface approval UI.</li>
+            <li data-i18n="perm.a1">In ask mode, operations that require authorization display approval UI. Bot tasks inherit the Bot access policy; change that policy from the main Bot.</li>
             <li data-i18n="perm.a2">Prefer workspace-scoped access over machine-wide access.</li>
             <li data-i18n="perm.a3">Deny is a first-class outcome — not an error to paper over in chat.</li>
           </ul>
+          <h2 id="perm-images" data-i18n="perm.imageTitle">Image approval</h2>
+          <p data-i18n="perm.imageBody">Full local access applies to the main Bot, its tasks and verification without a prompt for each image. In ask mode, images outside the project display an approval card in the main conversation. Allow once or allow this exact image for the current Bot and its tasks for 30 minutes; approval continues the original read. Reject or cancel directly, or stop the reply. Approval waits expire after five minutes, and ended cards cannot be reactivated by a late approval.</p>
           <h2 id="perm-cli" data-i18n="perm.cliTitle">CLI control</h2>
           <p data-i18n="perm.cliBody">
             Use <code>/permissions</code> to choose the session permission policy. Re-check policy before long Goal runs that may touch many files.
@@ -1263,6 +1276,7 @@ Evidence owns governance.</code></pre>
         // Dense i18n: English defaults are in HTML; ZH overrides + a few EN labels live here.
         var ui = {
           en: {
+            "desktop.botsReply": "Waiting, public streamed text and the final answer stay in one continuous reply, with the avatar and Reply details in place. Internal verification verdicts and progress live in task details; the main Bot explains the result. Overdue unaccepted results prompt factual follow-up. On macOS, Settings → Appearance offers glass/solid window materials. A single neutral backdrop surrounds independent floating conversation, detail and Settings panels in both themes; reduced transparency keeps the layout. Complete data backups must include coordination content proofs; pre-seal RC25 backups need certification against the original source before relocation recovery.",
             "nav.docs": "Docs", "nav.mechanisms": "Why Peer", "nav.changelog": "Changelog", "nav.github": "GitHub", "nav.download": "Download",
             "nav.prev": "Previous", "nav.next": "Next",
             "nav.welcome": "Welcome", "nav.install": "Install", "nav.desktop": "Desktop", "nav.cli": "CLI", "nav.model": "Connect a model",
@@ -1421,7 +1435,7 @@ Evidence owns governance.</code></pre>
             "install.desktopTitle": "Desktop（图形界面）",
             "install.desktopBody": "从 GitHub Releases 下载对应平台包。优先使用最新正式版（v0.0.9 及以后）。",
             "install.thPlat": "平台", "install.thArtifact": "典型产物", "install.thHow": "步骤",
-            "install.macHow": "下载 → 打开 → 安装到应用程序。Developer ID 签名并已公证；从 0.0.18 起应用内更新重启即完成替换（0.0.17 及更早需手动安装一次 0.0.18）。",
+            "install.macHow": "下载 → 打开 → 安装到应用程序。Developer ID 签名并已公证。RC10 点击更新后弹窗收向左下角版本区，下载进度在底部显示，完成后点击安装。从 0.0.18 起支持应用内更新；0.0.17 及更早需手动安装一次 0.0.18。",
             "install.winHow": "下载 → 运行安装器 → 启动 Peer Agent",
             "install.linuxHow": "下载 AppImage 后 chmod +x 再运行，或安装 .deb。应用内自动更新只支持 AppImage。",
             "install.linuxGaps": "Linux Desktop 阶段一缺口：仅 x64、未签名。Ubuntu 22+/24+ 跑 AppImage 可能需要 libfuse2。Wayland 下窗口起不来时改用 X11 或 ELECTRON_OZONE_PLATFORM_HINT=auto。linux-arm64 Desktop 仍待后续。",
@@ -1447,9 +1461,16 @@ Evidence owns governance.</code></pre>
             "install.sourceTitle": "从源码（开发者）",
             "install.monoNote": "Monorepo 说明：@peer-agent/tui 是 TUI 源码；@peer-agent/cli 只是公开安装器。",
             "desktop.title": "Desktop 工作台",
-            "desktop.lede": "Desktop 是同一本地 Runtime 上的 Electron 呈现层。它为 Thread 阅读、权限决策与 Evidence 审查优化，而不是做成 IM 气泡墙。",
-            "desktop.layoutTitle": "布局地图",
+            "desktop.lede": "Desktop 为每个项目列出一个机器人，与 CLI 共用本地 Runtime。可以在对话中阅读回复、跟进委派工作、处理决策与查看依据。",
+            "desktop.botsTitle": "机器人对话与设置",
+            "desktop.botsReply": "等待、公开流式内容与正式答复沿用同一条回复，头像与回复详情保留原位。内部核验结论和进度放入任务详情，由主 Bot 说明结果；超期未验收的结果会触发事实跟进。macOS 在“设置 → 外观”切换毛玻璃/实色，深浅主题都在统一中性底面上显示独立的对话、详情与设置浮层；减少透明度时保留布局。完整数据备份应携带协调日志内容证明；无证明的 RC25 旧备份须与原件认证后才能迁移恢复。",
+            "desktop.botsStream": "回复以完整段落气泡逐条到达。“查看详情”在右侧栏展示过程、依据与技术诊断。停止生成保留部分正文与草稿；选中文字后的引用按钮紧贴选区。",
+            "desktop.botsWork": "机器人在后台跟进工作，在主对话交付结果。回复气泡跟随头像颜色；点击回答选项后消息平滑发送。悬停回复或键盘聚焦后，气泡左下方的“回复详情”打开过程与依据。主机器人在已有授权内并行协调独立 Agent，转交补充、取消错误工作并安排替代任务。Agent 向它提问并返回结果，由它核对和交付；独立任务按同级展示，具名动态与不同形状的图标呈现实际进展，重复返回记录合并显示；等待任务可以直接取消。本地图片在授权范围内交给支持视觉的模型查看。任务详情说明当前进展与下一步，真正需要决定时提出具体问题。调度让出后保留公开进展；有新进展的工作不受默认累计上限限制，显式预算与权限继续生效。主回复失败、子任务运行与历史中断分别表达。同一任务的重复后台续接合并处理；已交付结果在事实变化前静默等待。核验显示事实进度，连续 10 分钟没有新事实时收口并将原因交回主 Bot。",
+            "desktop.botsProfile": "“机器人设置”直接打开配置，相邻页签保留概况、任务、目标和记忆。升级前备份完整数据根。RC18 新增协调日志事件，旧版可能拒绝恢复；回退须恢复完整升级前备份。RC19 保留完整本地回复回执，并降低大历史执行开销。RC25 默认读取公开交互，按需加载子链过程，后台恢复大协调日志。RC28 可在对话上方“检查并恢复”：安全交接、保全历史并续跑已核对的工作，或保留报告与工作树后结束不确定的旧执行。已完成和未知操作不重放；新准入要求最低 reader/writer 4。发布不会重启已安装应用；等待当前执行自然结束后再安装。启用新格式后，旧宿主不能用保留的旧日志安全续跑；不兼容降级须恢复完整升级前备份。",
+            "desktop.classic": "设置 → 通用 → 界面可以返回经典对话，下面介绍经典界面的布局。",
+            "desktop.layoutTitle": "经典界面布局",
             "desktop.thRegion": "区域", "desktop.thJob": "职责",
+            "desktop.resources": "对话右上角的工作区可并排打开网页、文档/代码、目录与 Diff，查看真实 Git 历史，文件变化时保留已有阅读。可保存本机文档草稿、准备带来源的选区反馈；明确提交固定稿沿本地授权并再次核对版本，冲突不覆盖、未知结果不重写。独立窗口返回同一来源，网页窗口为地址副本。",
             "desktop.r1a": "侧栏", "desktop.r1b": "工作区切换、新建任务、会话列表、设置入口",
             "desktop.r2a": "执行线程", "desktop.r2b": "当前任务的决策 + 执行流",
             "desktop.r3a": "Composer", "desktop.r3b": "输入框 + mode / access / model 控制",
@@ -1459,7 +1480,7 @@ Evidence owns governance.</code></pre>
             "desktop.firstTitle": "首次使用清单",
             "desktop.s1": "打开 Peer Agent → 选择或创建你信任的工作区（仓库 / 文件夹）。",
             "desktop.s2": "设置 → 模型 / 提供商 → 添加 provider + key/endpoint → 设定默认模型。",
-            "desktop.s3": "新建任务。先用低风险提示（只读检查）。",
+            "desktop.s3": "选择项目机器人并发送消息。先问只读的项目问题，需要工作时由机器人委派任务。",
             "desktop.s4": "出现 PermissionGrant UI 时，先读能力作用域再批准。",
             "desktop.s5": "回合结束后展开 Evidence / 工具结果，确认本机副作用。",
             "desktop.modesTitle": "你会看到的模式",
@@ -1505,6 +1526,7 @@ Evidence owns governance.</code></pre>
             "model.s3": "按提示通过应用凭证流保存 key。",
             "model.s4": "为新线程选择默认模型 + reasoning effort。",
             "model.s5": "先发一条极简提示验证连通，再做真实工作。",
+            "model.s6": "机器人的执行和独立复核可以使用同一模型、同一渠道，固定选择会保留。复核失败应说明缺失的证据或已记录的执行错误。",
             "model.cliTitle": "CLI",
             "model.cliBody": "TUI 里用 /model 选择模型与 reasoning effort；需要中英文回复策略时用 /language。Provider 凭证仍解析到同一本地 Runtime 主目录。",
             "model.qoderTitle": "Qoder 私有接口",
@@ -1532,9 +1554,11 @@ Evidence owns governance.</code></pre>
             "perm.whyTitle": "为什么需要",
             "perm.whyBody": "本地 Agent 能改文件、跑 shell。没有硬权限边界，“乐于助人”就会变成不可问责的机器访问。Peer Agent 把模型意图与本机权力分开。",
             "perm.askTitle": "默认姿态：先询问",
-            "perm.a1": "敏感写入 / shell / 自动化应弹出批准 UI。",
+            "perm.a1": "询问模式下，需要授权的操作显示批准界面。Bot 子任务继承主机器人的访问策略，在主 Bot 中统一修改。",
             "perm.a2": "优先工作区范围，而不是整机范围。",
             "perm.a3": "拒绝是一等结果 —— 不是要用聊天糊住的错误。",
+            "perm.imageTitle": "图片授权",
+            "perm.imageBody": "完全访问覆盖主机器人、其任务与核验者，连续看图无需逐张询问。询问模式下，项目外图片在主对话显示授权卡。可以仅允许这一次，或在 30 分钟内允许当前机器人及其任务使用此具体图片；批准后继续原读取。可以直接拒绝、取消或停止回复。等待授权最多 5 分钟；已结束的卡片不能被迟到批准重新激活。",
             "perm.cliTitle": "CLI 控制",
             "perm.cliBody": "用 /permissions 选择会话权限策略。长 Goal 跑很多文件前先复核策略。",
             "perm.warn": "实践：先授予完成任务所需的最小能力集；只有 Evidence 证明需要时再放宽。",

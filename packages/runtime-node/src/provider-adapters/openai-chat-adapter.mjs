@@ -3,7 +3,7 @@ import { consumeOpenAIChatStream } from '../openai-chat-stream.js';
 import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
+import { parseSseDataPayload, throwIfSseReaderAborted, readSseChunk, cancelSseReader } from './sse-line.mjs';
 import { hasLiteralToolCallSyntax } from '../chat-runtime/response-guard.mjs';
 
 export function shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses = false) {
@@ -134,36 +134,6 @@ function extractProviderTopLevelError(parsed) {
 /** Default SSE idle timeout for OpenAI-compatible chat streams (Grok etc.). */
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
-function streamIdleTimeoutError(ms) {
-  const error = new Error(`provider_stream_idle_timeout: no SSE data received for ${ms}ms`);
-  error.type = 'provider_stream_idle_timeout';
-  return error;
-}
-
-async function readStreamChunk(reader, signal, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS) {
-  const timeoutMs = Number(idleTimeoutMs);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return reader.read();
-  let timer = null;
-  try {
-    return await Promise.race([
-      reader.read(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(streamIdleTimeoutError(timeoutMs)), timeoutMs);
-      }),
-    ]);
-  } catch (error) {
-    if (error?.name === 'AbortError' || signal?.aborted) throw error;
-    try {
-      await reader.cancel(error);
-    } catch {
-      /* stream may already be closed */
-    }
-    throw error;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 function unwrapProviderStreamEnvelope(parsed) {
   if (!parsed || typeof parsed !== 'object') return parsed;
   if (typeof parsed.body !== 'string') return parsed;
@@ -219,6 +189,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
   }
   if (payload === '[DONE]') {
     trace?.recordDoneMarker?.();
+    state.done = true;
     return;
   }
   try {
@@ -233,6 +204,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
       state.streamError = streamError;
       return;
     }
+    if (parsed.type === 'message_stop') { state.done = true; return; }
     if (parsed.type === 'content_block_start') {
       if (parsed.content_block?.type === 'tool_use') {
         state.currentAnthropicToolIndex = state.toolCalls.length;
@@ -349,7 +321,7 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
     await throwIfSseReaderAborted(signal, reader);
     let chunk;
     try {
-      chunk = await readStreamChunk(
+      chunk = await readSseChunk(
         reader,
         signal,
         options.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS,
@@ -369,18 +341,14 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
 
     for (const line of lines) {
       consumeOpenAIStreamLine(line, state, webContents, streamId, trace, options);
-      if (state.streamError) {
+      if (state.streamError || state.done) {
         stopReading = true;
         break;
       }
       await throwIfSseReaderAborted(signal, reader);
     }
     if (stopReading) {
-      try {
-        await reader.cancel(state.streamError);
-      } catch {
-        /* stream may already be closed */
-      }
+      cancelSseReader(reader, state.streamError);
       break;
     }
   }

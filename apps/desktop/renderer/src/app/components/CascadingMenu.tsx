@@ -1,3 +1,7 @@
+import { MotionSurface } from './MotionSurface';
+import { selectionNavigation } from './selectionNavigation';
+import { useInteractionLayer } from '../hooks/useInteractionLayer';
+import { isImeKey } from '../../chat/state/compositionGuard';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -58,6 +62,7 @@ export function CascadingMenu({
   ariaLabel,
   className,
   title,
+  triggerLabel: customTriggerLabel,
   menuPlacement = 'down',
 }: {
   readonly value: string;
@@ -68,6 +73,8 @@ export function CascadingMenu({
   readonly ariaLabel?: string;
   readonly className?: string;
   readonly title?: string;
+  /** Compact surfaces can show the model alone; menu grouping remains unchanged. */
+  readonly triggerLabel?: string;
   readonly menuPlacement?: 'down' | 'up';
 }) {
   const [open, setOpen] = useState(false);
@@ -83,17 +90,21 @@ export function CascadingMenu({
   const groupRowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const listId = useId();
+  useInteractionLayer(open, { roots: [menuRef, submenuRef], trigger: triggerRef, outside: true, closeOnTriggerRemoval: true, dismissOnTab: true,
+    onClose: () => setOpen(false), onEnter: () => menuRef.current?.focus({ preventScroll: true }),
+    onEscape: () => { if (focusZone !== 'sub') return false; setFocusZone('root'); setActiveGroupIndex(-1); menuRef.current?.focus({ preventScroll: true }); return true; } });
   const [submenuScrollState, setSubmenuScrollState] = useState({ canUp: false, canDown: false });
   // 仅键盘 ↑↓ 导航时需要把“当前高亮项”滚进可视区；悬停切高亮绝不能触发回滚。
   const scrollActiveItemOnNavRef = useRef(false);
+  const focusSubmenu = useRef(false);
 
   // 查找当前选中项对应的分组和项目，用于触发器展示「分组 · 模型」。
   const selectedGroupIndex = groups.findIndex((g) => g.items.some((item) => item.id === value));
   const selectedGroup = selectedGroupIndex >= 0 ? groups[selectedGroupIndex] : undefined;
   const selectedItem = selectedGroup?.items.find((item) => item.id === value);
-  const triggerLabel = selectedGroup && selectedItem
+  const triggerLabel = customTriggerLabel ?? (selectedGroup && selectedItem
     ? `${selectedGroup.label} · ${selectedItem.label}`
-    : placeholder ?? value;
+    : placeholder ?? value);
 
   const activeGroup = activeGroupIndex >= 0 ? groups[activeGroupIndex] : undefined;
   const submenuItems = activeGroup?.items ?? [];
@@ -181,22 +192,15 @@ export function CascadingMenu({
 
   useEffect(() => {
     if (!open) return undefined;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      const inRoot = rootRef.current?.contains(target) ?? false;
-      const inMenu = menuRef.current?.contains(target) ?? false;
-      const inSub = submenuRef.current?.contains(target) ?? false;
-      if (!inRoot && !inMenu && !inSub) setOpen(false);
-    };
-    const onResize = () => {
+    const onReflow = () => {
       updatePosition();
       updateSubmenuPosition();
     };
-    window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onReflow, true);
+    window.addEventListener('resize', onReflow);
     return () => {
-      window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onReflow, true);
+      window.removeEventListener('resize', onReflow);
     };
   }, [open, updatePosition, updateSubmenuPosition]);
 
@@ -227,12 +231,18 @@ export function CascadingMenu({
 
   const enterSubmenu = useCallback((gi: number) => {
     const items = groups[gi]?.items ?? [];
-    if (items.length === 0) return;
+    if (groups[gi]?.disabled || items.length === 0) return;
     setActiveGroupIndex(gi);
-    setFocusZone('sub');
+    setFocusZone('sub'); focusSubmenu.current = true;
     const selIdx = items.findIndex((it) => it.id === value && !it.disabled);
     setActiveItemIndex(selIdx >= 0 ? selIdx : firstEnabledIndex(items));
   }, [groups, value]);
+
+  useLayoutEffect(() => {
+    if (open && submenuCoords && focusZone === 'sub' && focusSubmenu.current) {
+      focusSubmenu.current = false; submenuRef.current?.focus({ preventScroll: true });
+    }
+  }, [open, submenuCoords, focusZone]);
 
   // 打开/切换分组后，只把当前选中模型滚进可视区；悬停切换 activeItemIndex 时绝不回跳。
   // 键盘 ↑↓ 则额外把“当前高亮项”滚进可视区（由 scrollActiveItemOnNavRef 门控）。
@@ -262,6 +272,7 @@ export function CascadingMenu({
   }, [activeItemIndex, open, submenuCoords, activeGroupIndex, updateSubmenuScrollState]);
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.defaultPrevented || isImeKey(event.nativeEvent)) return;
     if (disabled) return;
     if (!open) {
       if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -272,18 +283,17 @@ export function CascadingMenu({
     }
     if (focusZone === 'root') {
       switch (event.key) {
-        case 'Escape':
-          event.preventDefault();
-          setOpen(false);
-          break;
         case 'ArrowDown':
           event.preventDefault();
-          setActiveGroupIndex((i) => (i < 0 ? 0 : Math.min(i + 1, groups.length - 1)));
+          setActiveGroupIndex(i => selectionNavigation(groups, i, 'ArrowDown', 'vertical') ?? -1);
           break;
         case 'ArrowUp':
           event.preventDefault();
-          setActiveGroupIndex((i) => (i < 0 ? groups.length - 1 : Math.max(i - 1, 0)));
+          setActiveGroupIndex(i => selectionNavigation(groups, i, 'ArrowUp', 'vertical') ?? -1);
           break;
+        case 'Home':
+        case 'End':
+          event.preventDefault(); setActiveGroupIndex(selectionNavigation(groups, activeGroupIndex, event.key, 'vertical') ?? -1); break;
         case 'ArrowRight':
         case 'Enter':
         case ' ':
@@ -297,14 +307,15 @@ export function CascadingMenu({
     }
     // focusZone === 'sub'
     switch (event.key) {
-      case 'Escape':
-        event.preventDefault();
-        setOpen(false);
-        break;
       case 'ArrowLeft':
         event.preventDefault();
         setFocusZone('root');
+        menuRef.current?.focus({ preventScroll: true });
         break;
+      case 'Home':
+      case 'End':
+        event.preventDefault(); scrollActiveItemOnNavRef.current = true;
+        setActiveItemIndex(selectionNavigation(submenuItems, activeItemIndex, event.key, 'vertical') ?? -1); break;
       case 'ArrowDown':
         event.preventDefault();
         scrollActiveItemOnNavRef.current = true;
@@ -355,13 +366,13 @@ export function CascadingMenu({
       }
     : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' };
 
-  const rootPanel = open
-    ? createPortal(
-        <div
+  const rootPanel = createPortal(<MotionSurface kind="fade">{open ? (<div
           ref={menuRef}
           className={`pa-cascading-menu-panel ${className ?? ''} ${coords?.placement === 'up' ? 'is-up' : 'is-down'}`}
           role="menu"
           id={listId}
+          tabIndex={-1}
+          aria-activedescendant={activeGroupIndex >= 0 ? `${listId}-group-${activeGroupIndex}` : undefined}
           aria-label={ariaLabel}
           style={menuStyle}
           onKeyDown={onKeyDown}
@@ -376,7 +387,10 @@ export function CascadingMenu({
                   groupRowRefs.current[gi] = el;
                 }}
                 type="button"
+                id={`${listId}-group-${gi}`}
+                tabIndex={-1}
                 role="menuitem"
+                disabled={group.disabled}
                 aria-haspopup="menu"
                 aria-expanded={isActive}
                 className={`pa-cascading-group-row ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${group.disabled ? 'group-disabled' : ''}`}
@@ -384,10 +398,8 @@ export function CascadingMenu({
                   setActiveGroupIndex(gi);
                   setFocusZone('root');
                 }}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  enterSubmenu(gi);
-                }}
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => enterSubmenu(gi)}
               >
                 <span className="pa-cascading-group-label">{group.label}</span>
                 <svg
@@ -407,14 +419,9 @@ export function CascadingMenu({
               </button>
             );
           })}
-        </div>,
-        document.body,
-      )
-    : null;
+        </div>) : null}</MotionSurface>, document.body);
 
-  const submenuPanel = open && activeGroup
-    ? createPortal(
-        <div
+  const submenuPanel = createPortal(<MotionSurface kind="fade">{open && activeGroup ? (<div
           ref={submenuRef}
           className={[
             'pa-cascading-submenu-panel',
@@ -426,6 +433,9 @@ export function CascadingMenu({
             .filter(Boolean)
             .join(' ')}
           role="menu"
+          id={`${listId}-sub`}
+          tabIndex={-1}
+          aria-activedescendant={activeItemIndex >= 0 ? `${listId}-item-${activeItemIndex}` : undefined}
           aria-label={activeGroup.label}
           style={submenuStyle}
           onKeyDown={onKeyDown}
@@ -442,6 +452,8 @@ export function CascadingMenu({
                   itemRefs.current[ii] = node;
                 }}
                 type="button"
+                id={`${listId}-item-${ii}`}
+                tabIndex={-1}
                 role="menuitemradio"
                 aria-checked={isSelected}
                 aria-disabled={itemDisabled}
@@ -453,10 +465,8 @@ export function CascadingMenu({
                     setActiveItemIndex(ii);
                   }
                 }}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  if (!itemDisabled) selectItem(item.id);
-                }}
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => { if (!itemDisabled) selectItem(item.id); }}
               >
                 <span className="pa-cascading-item-label">{item.label}</span>
                 {isSelected ? (
@@ -478,10 +488,7 @@ export function CascadingMenu({
               </button>
             );
           })}
-        </div>,
-        document.body,
-      )
-    : null;
+        </div>) : null}</MotionSurface>, document.body);
 
   return (
     <div className={rootClassName} ref={rootRef} title={title}>
@@ -492,7 +499,7 @@ export function CascadingMenu({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-controls={listId}
+        aria-controls={open ? listId : undefined}
         aria-label={ariaLabel}
         onClick={() => {
           if (disabled) return;

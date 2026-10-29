@@ -54,6 +54,32 @@ Starting a session in the knowledge repo does not make the knowledge repo the de
 
 Do not recreate, stage, or submit architecture / design knowledge under `docs/architecture/*` or other knowledge trees in this code repo unless the user explicitly asks. If a code change would normally require architecture documentation, explain the architecture impact in the response and write durable knowledge into `peer-knowledge` instead.
 
+## Product Experience Standard (2026-10-23)
+
+All future product design and implementation must follow Peer’s own experience standard. Resolve the companion knowledge root above, then read the relevant sections before changing a product surface, copy, input behavior, state feedback, keyboard/focus/scroll behavior, or animation:
+
+- `peer-knowledge/knowledge/specifications/peer-product-experience-standard.md` — the current Frost visual and component baseline.
+- `peer-knowledge/knowledge/specifications/peer-human-agent-interaction-contract.md` — the human/agent interaction contract.
+- `peer-knowledge/knowledge/specifications/motion-system.md` — motion semantics, shared primitives, interruption and reduced-motion behavior.
+- `peer-knowledge/knowledge/specifications/transition-system.md` — continuity of identity, drafts, focus, reading position and recovery across pages, layers and objects.
+- `peer-knowledge/playbook/product-experience-development.md` — implementation and review workflow.
+
+The product north star and architecture governance retain their respective authority. These standards supersede conflicting experience rules in older design documents; historical demos and source research are references, not competing standards. `peer-knowledge/design/product/open-claude-ui-study.md` records the upstream study and adoption decisions.
+
+Implementation rules:
+
+- Preserve six invariants: acknowledged intent, clear action ownership, bounded execution, evidence-backed results, recoverable interruption, and user control of attention.
+- Reuse existing Frost/`--ui-*` tokens, shared components, SVG icons, motion primitives and reducer/kernel seams. Do not import a second design system or copy upstream brand values and physics constants into components.
+- Protect IME composition, drafts, focus and reading position. Background progress must not steal focus or resume auto-scroll after the user has chosen to read history.
+- Render authorization, execution, verification and acceptance from existing structured facts. A click, timer, animation or assistant sentence must never create permission truth, successful execution or Evidence.
+- Treat motion as presentation: short, interruptible, semantically useful, and complete without animation. Preserve static end states and recovery when motion/transparency is reduced or APIs are unavailable.
+- Record the user goal, relevant states, fact source, controls and recovery for the changed flow. Migrate touched paths within scope; do not turn a small change into an unsolicited product rewrite.
+- Follow Validation Scope below: ordinary work receives content/diff review; tests and screenshot/interaction regression are deferred to release unless explicitly requested. This standard does not create a daily validation gate.
+
+Current surface/component coverage lives in `peer-knowledge/design/product/peer-interaction-standardization-matrix.md`; UI, motion and transition coverage lives in `peer-knowledge/design/product/peer-ui-motion-transition-matrix.md`. Follow `peer-knowledge/design/product/peer-product-renovation-plan.md` for scoped work packages. Update the relevant matrix entries when adding or changing pages, components or states; static implementation is not release acceptance.
+
+These are development instructions. They do not add runtime capabilities, change permission or acceptance policy, or authorize a new System Context injection path. Any such boundary change still requires A/B-level handling.
+
 ## Non-Negotiable Runtime Chain
 
 All local capabilities must flow through:
@@ -123,8 +149,41 @@ Before implementing a non-trivial change, classify it:
 
 Once a change is committed locally, push it to the tracked remote branch in the same turn. Multi-device work treats `origin` as the source of truth. Do not leave commits only on this machine.
 
+## Release Pull Request Gate
+
+User preference (2026-10-22): a new version or RC must include all open pull requests in this repository, not only the releasing agent's own changes.
+
+- Inventory every open PR, including drafts and PRs targeting other branches, before freezing a release. Review each PR, resolve conflicts, complete its required checks, and merge it; never silently omit another task's PR.
+- An unmerged or blocked PR blocks the release. Do not force through conflicts, bypass failing checks, or treat an excluded PR as merged. Report the concrete blocker if it cannot be resolved.
+- Freeze the candidate only after all PRs are merged, then run the release-wide build, tests, contract/type/architecture/IPC checks and complete product regression on that combined source. Earlier checks on a smaller candidate do not validate newly merged changes.
+- Check the open PR inventory again immediately before pushing the release tag; it must be empty. Include the merged PR list and final candidate identity in the release receipt.
+- Preserve uncommitted work and current runtime instances. The merge-all rule applies to submitted PRs; it does not authorize sweeping unrelated dirty files into a release or installing/restarting the app.
+
+## Validation Scope
+
+User clarification (2026-10-22): tests and product regression run before a version/RC release, not after every feature or fix. This supersedes the earlier daily-focused-testing preference.
+
+- During ordinary development and fixes, do not automatically run unit/integration tests, regressions, screenshot acceptance, or broad build/type/architecture/IPC check suites, including so-called focused batches. Complete the implementation and review the changed content/diff; do not expand a small change into a validation campaign.
+- Run tests early only when the user explicitly requests them for the current task. Do not infer that authorization from the task being A/B-level, a shared contract change, an old playbook, or an agent's own risk assessment.
+- Before a version or RC release, run the full build, test suite, typecheck, architecture/IPC checks and complete product regression on the final combined candidate. The release gate remains mandatory.
+- Do not invoke or wait for test workflows as a daily handoff prerequisite. Report any existing automatic CI separately; do not describe unrun checks as passed.
+- Documentation-only and instruction-only edits require content/diff review only. State clearly that testing is deferred to release unless explicitly requested.
+
+## Product Regression
+
+During ordinary UI development, do not automatically run screenshot or interaction regression. Use `peer-knowledge/playbook/product-regression.md` when preparing a release or when the user explicitly requests early validation.
+
+Before a version release or RC release, perform the complete product regression:
+
+- Run `pnpm qa:product:capture --output <temporary-directory-outside-repo>` for the standard isolated desktop interaction and screenshot packet.
+- The AI doing the work must inspect every required screenshot against the user goal and product north star, then write the packet's `review.json` with concrete observations. Machine success alone is not product acceptance.
+- Run `pnpm qa:product:verify --output <same-directory>`. Missing review, changed source/screenshots, incomplete cases, or unresolved blocking findings prevent acceptance.
+- State whether review was independent; implementer self-review is never called independent. State real-model, installed-build and accessibility coverage limits.
+- Existing CI runs the deterministic scenarios. The AI review is agent-driven; do not claim a scheduled or unattended model reviewer exists.
+
 ## Implementation Expectations
 
+- UI icons must use SVG components. Reuse the shared `PeerIcon` or an existing SVG icon; do not use text characters, emoji, icon fonts, or CSS-generated glyphs as icons, including arrows, checks, close buttons, and disclosure indicators.
 - Prefer existing protocol types, reducers, registries, providers, and stores.
 - Add a Provider adapter instead of adding `capabilityId` branches to central hosts.
 - Add reducer/kernel logic instead of growing a large React component.
@@ -158,7 +217,8 @@ This section captures non-obvious environment/runtime caveats for Cloud Agents. 
 
 - Automated tests import each workspace package's built `dist/`, so run a build before `pnpm test` (e.g. `pnpm build`, or the per-package `pnpm --filter <pkg> build` chain). A clean checkout without `dist/` fails tests with `ERR_MODULE_NOT_FOUND` for `@peer-agent/*`.
 - `pnpm test` runs every package's tests in parallel (`pnpm -r`). Timing-sensitive desktop tests (fake timers / readiness timeouts) can flake as `cancelledByParent` ("Promise resolution is still pending…") under that load. Re-run the single file/package in isolation (`node --test <file>`) to get a stable result.
-- Known pre-existing failures on `main` (NOT caused by the environment — do not chase them during setup): 5 desktop tests fail deterministically (`full-disk-access-drag-float`, `goal-plan-store` ×2, `qoder-private-adapter`, `task-overview-aggregator`); `pnpm typecheck` reports one error in `packages/protocol/src/goal.test.ts`; `pnpm architecture:check` reports 2 local `@keyframes` CSS violations.
+- Regression baseline (2026-09-26, `PeerAgent/dev/0.1.0`): on macOS with Node 25, `pnpm build`, `pnpm typecheck`, `pnpm architecture:check`, and `pnpm test` pass. The older list of five desktop failures, the `goal.test.ts` type error, and the two `@keyframes` violations is stale on this line — do not treat those names as expected failures. CI uses Node 25 as well: Node 22's test runner cancels async tests whose only timer is unref'd. Parallel load can still cancel timer tests; CI retries each failed file once. A failure that remains after that retry is a regression.
+- In progress: 0.1.0 bot list and project agent. Baseline branch is `PeerAgent/dev/0.1.0`. Before taking a task, read `peer-knowledge/design/product/v0.1.0-release-plan.md`, `peer-knowledge/playbook/project-agent-implementation-handbook.md`, and `peer-knowledge/playbook/v0.1.0/README.md`. Do only the assigned card, and follow the handbook's hard rules.
 
 ### Running the apps
 

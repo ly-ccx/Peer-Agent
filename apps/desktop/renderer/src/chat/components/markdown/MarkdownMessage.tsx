@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo, useState } from 'react';
+import { useHighlightLanguages } from './useHighlightLanguages';
 import { highlightCode } from './codeHighlighter';
 import { renderInlineLines } from './InlineMarkdown';
 import { parseMarkdownBlocks, markdownBlockSources } from './markdownParser';
@@ -105,7 +106,8 @@ function CodeBlockContent({ content, language }: {
   readonly content: string;
   readonly language?: string;
 }) {
-  const highlighted = useMemo(() => highlightCode(content, language), [content, language]);
+  const languageRevision = useHighlightLanguages();
+  const highlighted = useMemo(() => highlightCode(content, language), [content, language, languageRevision]);
 
   // dangerouslySetInnerHTML 的输入来自 highlight.js，已对源码做 HTML 转义，
   // 只包含 <span class="hljs-*"> 结构；未高亮时走纯文本分支，绝不注入原始内容。

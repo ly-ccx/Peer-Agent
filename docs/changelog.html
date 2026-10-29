@@ -173,6 +173,8 @@
       .lang button[aria-pressed="true"] {
         background: var(--chip-active-bg); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08);
       }
+      .channel-toggle { margin: 0 0 12px; }
+      .channel-toggle button { min-width: 64px; }
 
       main {
         width: min(var(--wide), calc(100% - 40px));
@@ -377,6 +379,10 @@
       </section>
       <section class="release-browser" aria-label="Release browser">
         <nav class="release-nav" aria-label="Releases">
+          <div class="lang channel-toggle" role="group" aria-label="Release channel">
+            <button type="button" id="channel-stable" data-channel="stable" aria-pressed="true" data-i18n="channel.stable">Stable</button>
+            <button type="button" id="channel-beta" data-channel="beta" aria-pressed="false" data-i18n="channel.beta">Pre-release</button>
+          </div>
           <p class="release-nav-title" data-i18n="nav.releases">稳定版本</p>
           <div id="version-list" class="version-list" aria-label="Versions"></div>
         </nav>
@@ -417,6 +423,9 @@
             "footer.download": "Download",
             "preview.note": "github pages",
             "latest": "Latest",
+            "prerelease": "Pre-release",
+            "channel.stable": "Stable",
+            "channel.beta": "Pre-release",
             "nav.releases": "Stable versions",
             "loading": "Loading release notes…",
             "loadError": "Release notes could not be loaded.",
@@ -439,6 +448,9 @@
             "footer.download": "下载",
             "preview.note": "GitHub Pages",
             "latest": "最新",
+            "prerelease": "预发布",
+            "channel.stable": "正式版",
+            "channel.beta": "预发布",
             "nav.releases": "正式版版本",
             "loading": "正在加载版本说明…",
             "loadError": "版本说明加载失败。",
@@ -447,7 +459,7 @@
             documentTitle: "Peer Agent — 更新日志"
           }
         };
-        var state = { manifest: null, selected: null, entry: null, lang: "en", request: 0 };
+        var state = { manifest: null, selected: null, entry: null, lang: "en", channel: "stable", request: 0 };
 
         function detectLang() {
           try {
@@ -467,12 +479,28 @@
           return esc.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
         }
 
+        function manifestChannels() {
+          return state.manifest && state.manifest.channels ? state.manifest.channels : {};
+        }
+
+        function allEntries() {
+          return (manifestChannels().stable || []).concat(manifestChannels().beta || []);
+        }
+
         function releaseEntries() {
-          return state.manifest && state.manifest.channels ? state.manifest.channels.stable || [] : [];
+          return manifestChannels()[state.channel] || [];
         }
 
         function findMetadata(version) {
-          return releaseEntries().find(function (entry) { return entry.version === version; }) || null;
+          return allEntries().find(function (entry) { return entry.version === version; }) || null;
+        }
+
+        function markChannel(channel) {
+          state.channel = channel === "beta" ? "beta" : "stable";
+          var stableButton = document.getElementById("channel-stable");
+          var betaButton = document.getElementById("channel-beta");
+          if (stableButton) stableButton.setAttribute("aria-pressed", state.channel === "stable" ? "true" : "false");
+          if (betaButton) betaButton.setAttribute("aria-pressed", state.channel === "beta" ? "true" : "false");
         }
 
         function updateUrl(version, replace) {
@@ -503,6 +531,12 @@
 
         function renderNavigation() {
           var list = document.getElementById("version-list");
+          var title = document.querySelector(".release-nav-title");
+          if (title) {
+            title.textContent = state.channel === "beta"
+              ? ui[state.lang]["channel.beta"]
+              : ui[state.lang]["nav.releases"];
+          }
           if (!list) return;
           list.innerHTML = "";
           releaseEntries().forEach(function (entry) {
@@ -531,10 +565,14 @@
           var h2 = document.createElement("h2");
           h2.textContent = entry.label;
           head.appendChild(h2);
-          if (state.manifest.latest.stable === entry.version) {
+          var latest = state.manifest.latest || {};
+          var badgeLabel = latest.stable === entry.version
+            ? ui[state.lang].latest
+            : latest.beta === entry.version ? ui[state.lang].prerelease : "";
+          if (badgeLabel) {
             var badge = document.createElement("span");
             badge.className = "badge";
-            badge.textContent = ui[state.lang].latest;
+            badge.textContent = badgeLabel;
             head.appendChild(badge);
           }
           card.appendChild(head);
@@ -586,6 +624,7 @@
         function selectVersion(version, replace) {
           var metadata = findMetadata(version);
           if (!metadata) return false;
+          markChannel(metadata.channel);
           state.selected = version;
           state.entry = null;
           renderNavigation();
@@ -624,6 +663,21 @@
             setLang(btn.getAttribute("data-lang"), true);
           });
         });
+        document.querySelectorAll(".channel-toggle button").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var channel = btn.getAttribute("data-channel") === "beta" ? "beta" : "stable";
+            markChannel(channel);
+            var entries = releaseEntries();
+            if (entries.some(function (entry) { return entry.version === state.selected; })) {
+              renderNavigation();
+              return;
+            }
+            var latest = state.manifest && state.manifest.latest ? state.manifest.latest[channel] : null;
+            var fallback = latest || (entries[0] && entries[0].version);
+            if (fallback) selectVersion(fallback, true);
+            else renderNavigation();
+          });
+        });
         window.addEventListener("popstate", function () {
           var requested = requestedVersion();
           if (requested && requested !== state.selected) selectVersion(requested, true);
@@ -643,7 +697,9 @@
             .then(function (manifest) {
               state.manifest = manifest;
               var requested = requestedVersion();
-              var initial = findMetadata(requested) ? requested : manifest.latest.stable;
+              var requestedMeta = findMetadata(requested);
+              var initial = requestedMeta ? requested : manifest.latest && manifest.latest.stable;
+              if (requestedMeta) markChannel(requestedMeta.channel);
               if (!initial) { renderStatus("empty", false); return; }
               selectVersion(initial, true);
             })

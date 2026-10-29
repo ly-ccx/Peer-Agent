@@ -100,6 +100,7 @@ function send(f, server, wire, messages = messagesFor(f, wire), extra = {}) {
 function run(f, wire, invoke, signal) {
   return executeDesktopProviderRequest({ request: { messages: messagesFor(f, wire),
     conversationId: f.options.conversationId, streamId: f.options.streamId, signal, contextWindow: 1_000_000,
+    requestRecoveryOptions: { waitImpl: async () => {} },
     providerConfig: { model: f.options.model }, visualRequestHost: { goalPlanStore: f.store, workspacePath: f.home, reviewToken: Object.freeze({}) } },
     buildCanonicalRequest: ({ messages }) => ({ messages }), send: invoke });
 }

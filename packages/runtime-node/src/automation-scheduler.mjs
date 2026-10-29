@@ -1,7 +1,7 @@
+import { inspectSchedule } from './scheduler-kernel.mjs';
 import { randomUUID } from 'node:crypto';
 import { automationRunIsTerminal } from './automation-store.mjs';
 import {
-  latestAutomationOccurrence,
   nextAutomationOccurrence,
   validateAutomationSchedule,
 } from './automation-schedule.mjs';
@@ -74,10 +74,12 @@ export function reconcileAutomationSchedules({ store, now = new Date().toISOStri
 
       const active = activeRunFor(store, definition.automationId);
       const cursor = definition.lastScheduledAt || definition.createdAt;
-      const due = latestAutomationOccurrence(definition.schedule, { after: cursor, at: now });
+      const inspected = inspectSchedule({schedule:definition.schedule,after:cursor,now,active:Boolean(active),
+        missedRunPolicy:definition.missedRunPolicy,overlapPolicy:definition.overlapPolicy});
+      const due = inspected.due;
 
       if (!due) {
-        const next = nextAutomationOccurrence(definition.schedule, now);
+        const next = inspected.next;
         if (definition.nextRunAt !== next) {
           store.updateDefinitionRuntimeFacts(definition.automationId, { nextRunAt: next || undefined }, { now });
           result.updatedAutomationIds.push(definition.automationId);
@@ -85,13 +87,13 @@ export function reconcileAutomationSchedules({ store, now = new Date().toISOStri
         continue;
       }
 
-      const missed = Date.parse(due) < Math.floor(Date.parse(now) / 60_000) * 60_000;
+      const missed = inspected.missed;
       let createdResult;
-      if (missed && definition.missedRunPolicy === 'skip') {
+      if (inspected.skippedReason === 'missed_policy') {
         createdResult = createScheduledRun(store, definition, due, {
           now, status: 'skipped', skippedReason: 'missed_policy', missedRecovery: true,
         });
-      } else if (active && definition.overlapPolicy === 'skip') {
+      } else if (inspected.skippedReason === 'overlap') {
         createdResult = createScheduledRun(store, definition, due, {
           now, status: 'skipped', skippedReason: 'overlap', missedRecovery: missed,
         });
@@ -99,7 +101,7 @@ export function reconcileAutomationSchedules({ store, now = new Date().toISOStri
         createdResult = createScheduledRun(store, definition, due, { now, missedRecovery: missed });
       }
 
-      const next = nextAutomationOccurrence(definition.schedule, due);
+      const next = inspected.next;
       const onceConsumed = definition.schedule.kind === 'once';
       store.updateDefinitionRuntimeFacts(definition.automationId, {
         lastScheduledAt: due,

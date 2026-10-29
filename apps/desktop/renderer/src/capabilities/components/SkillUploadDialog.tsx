@@ -50,12 +50,12 @@ export function SkillUploadDialog({
                 <>
                     <header>
                         <h3>上传技能</h3>
-                        <button type="button" className="skill-upload-close" onClick={requestClose}>×</button>
+                        <button type="button" className="skill-upload-close" aria-label="关闭" onClick={requestClose}><PeerIcon name="close" size={16} /></button>
                     </header>
 
                     {showBanner && (
                         <div className="skill-upload-banner">
-                            <span className="skill-upload-banner-icon">i</span>
+                            <span className="skill-upload-banner-icon"><PeerIcon name="info" size={14} /></span>
                             <span>个人技能为仅供个人在本地安装使用的技能</span>
                         </div>
                     )}

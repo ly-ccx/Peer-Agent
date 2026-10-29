@@ -1,0 +1,415 @@
+import { createPortal } from 'react-dom';
+import { useBotDetailWorkspace } from './useBotDetailWorkspace';
+import { BotDocumentPreview } from '../conversation/BotDocumentPreview';
+import { useMotionSettled } from '../../app/hooks/useMotionSettled';
+import type { I18nRuntime } from '@peer-agent/i18n';
+import type { BotProfile } from '@peer-agent/protocol';
+import { useEffect, useState, useRef, type RefObject } from 'react';
+import { collectFocusable } from '../../app/hooks/focusScope';
+import { useFocusScope } from '../../app/hooks/useFocusScope';
+import { Drawer } from '../../app/components/Drawer';
+import { InteractionLayerContext, useInteractionLayer } from '../../app/hooks/useInteractionLayer';
+import { interactionLayers } from '../../app/components/interactionLayers';
+import { useMotionAllowed } from '../../app/hooks/useMotionAllowed';
+import { watchVisualMotion } from '../../app/state/visualMotion';
+import { clientApi } from '../../clientApi';
+import { EvidenceView } from './EvidenceView';
+import { PeerIcon } from '../../ui/icons';
+import {
+  drawerLayout,
+  groupDrawerSessions,
+  readMemoryItems,
+  resizeDrawer,
+  type DrawerMemory,
+  type DrawerMemoryItem,
+  type DrawerSession,
+  type DrawerTab,
+} from '../state/drawerState';
+import { BotDrawerResizer } from './BotDrawerResizer';
+import { HistorySheet, type HistoryConversation } from '../HistorySheet';
+import { AgentProcessView } from './AgentProcessView';
+import type { BotModelsControlState } from '../state/useBotModels';
+import { BotDrawerSegments } from './BotDrawerSegments';
+import type { BotInspect } from './agentProcess';
+import { BotSettingsTab } from './BotSettingsTab';
+import { MemoryTab } from './MemoryTab';
+import { ObjectivesTab } from './ObjectivesTab';
+import { OverviewTab } from './OverviewTab';
+import { mergeTaskDetail } from '../state/taskDetailState';
+import { useTaskReport } from '../state/useTaskReport';
+import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
+import { ConversationSceneDrawer, SessionDetail } from './SessionDetail';
+import { TasksTab, type ClassicGoalRow } from './TasksTab';
+import '../styles/bot-drawer.css';
+
+const TABS: readonly { id: DrawerTab; key: 'projectAgent.drawer.tab.overview' | 'projectAgent.drawer.tab.tasks' | 'projectAgent.drawer.tab.objectives' | 'projectAgent.drawer.tab.memory' | 'projectAgent.drawer.tab.settings' }[] = [
+  { id: 'overview', key: 'projectAgent.drawer.tab.overview' },
+  { id: 'tasks', key: 'projectAgent.drawer.tab.tasks' },
+  { id: 'objectives', key: 'projectAgent.drawer.tab.objectives' },
+  { id: 'memory', key: 'projectAgent.drawer.tab.memory' },
+  { id: 'settings', key: 'projectAgent.drawer.tab.settings' },
+];
+
+export function BotProfileDrawer({
+  workspaceId,
+  profile,
+  modelControls,
+  memory,
+  locateSessionId,
+  inspect = null,
+  onReplyDetailsTarget,
+  sessions,
+  sessionsAvailable,
+  onRefreshSessions,
+  onCloseInspect,
+  triggerRef,
+  i18n,
+  isZh,
+  onMemory,
+  onProfile,
+  onDeleted,
+  onOpenConversation,
+  onOpenAutomations,
+  taskContext,
+  onTaskConversation,
+  replayEntrance = true,
+}: {
+  readonly workspaceId: string;
+  readonly profile: BotProfile;
+  readonly modelControls: BotModelsControlState;
+  readonly memory: DrawerMemory;
+  readonly locateSessionId: string | null;
+  readonly inspect?: BotInspect | null;
+  readonly onReplyDetailsTarget?: (node: HTMLDivElement | null) => void;
+  readonly sessions: readonly DrawerSession[];
+  readonly sessionsAvailable: boolean;
+  readonly onRefreshSessions: () => Promise<void>;
+  readonly onCloseInspect: () => void;
+  readonly triggerRef: RefObject<HTMLElement | null>;
+  readonly i18n: I18nRuntime;
+  readonly isZh: boolean;
+  readonly onMemory: (memory: DrawerMemory) => void;
+  readonly onProfile: (profile: BotProfile) => void;
+  readonly onDeleted: () => void;
+  readonly onOpenConversation?: (conversationId: string) => void;
+  readonly onOpenAutomations?: () => void;
+  readonly taskContext: TaskConversationContext | null;
+  readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
+  readonly replayEntrance?: boolean;
+}) {
+  const detailTitle = inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName;
+  const workspace = useBotDetailWorkspace(workspaceId, memory, inspect, detailTitle);
+  const embedded = !!workspace;
+  const visible = memory.open && (!embedded || workspace.detailsVisible);
+  const motionEnabled = useMotionAllowed();
+  const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
+  const [path, setPath] = useState('');
+  const [memories, setMemories] = useState<readonly DrawerMemoryItem[]>([]);
+  const modelRoute = modelControls.views.project_agent?.resolution;
+  const modelLabel = modelRoute?.ok
+    ? modelControls.models.find(model => model.id === modelRoute.selection.modelProviderId)?.label || modelRoute.selection.modelId : '';
+  const [history, setHistory] = useState<readonly HistoryConversation[]>([]);
+  const [goals, setGoals] = useState<readonly ClassicGoalRow[]>([]);
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
+  useEffect(() => { setClassicScene(null); }, [memory.tab, memory.sessionId, inspect?.replyId, inspect?.evidence?.evidenceRef]);
+  const layout = drawerLayout(width);
+  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(!memory.open ? 'off' : replayEntrance ? 'in' : 'on');
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLElement>(null), paneRef = useRef<HTMLDivElement>(null);
+  const paneSettled = useMotionSettled(paneRef, memory.open && !inspect, memory.tab);
+  const previousInspect = useRef(inspect);
+  useEffect(() => {
+    let frame: number | undefined;
+    if (visible && previousInspect.current !== inspect) {
+      if (previousInspect.current?.evidence && inspect?.replyId && !inspect.evidence) {
+        const restore = () => {
+          const reply = bodyRef.current?.querySelector<HTMLElement>('.bot-reply-details');
+          if (!reply) return false;
+          for (const target of [...reply.querySelectorAll<HTMLElement>('summary'), ...collectFocusable(reply)]) {
+            // Closed native disclosures can retain geometry. Native focus is
+            // the final check that this control can receive the return.
+            target.focus({ preventScroll: true });
+            if (document.activeElement === target) return true;
+          }
+          return false;
+        };
+        if (!restore()) frame = requestAnimationFrame(() => {
+          // A nested portal may commit after its parent effect. A later human
+          // focus choice wins; retry only while the removed Back left body active.
+          if (document.activeElement === document.body) restore();
+        });
+      } else if (inspect) {
+        bodyRef.current?.querySelector<HTMLElement>('.bot-drawer-head button')?.focus({ preventScroll: true });
+      } else if (previousInspect.current) {
+        bodyRef.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus({ preventScroll: true });
+      }
+    }
+    previousInspect.current = inspect;
+    return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
+  }, [inspect, visible]);
+  const close = () => {
+    // A live reply can become a durable message while the drawer is open.
+    // Restore its current footer, rather than a detached streaming button.
+    if (inspect?.replyId && !triggerRef.current?.isConnected) {
+      const replyId = bodyRef.current?.querySelector<HTMLElement>('[data-reply-id]')?.dataset.replyId;
+      if (replyId) triggerRef.current = document.querySelector<HTMLButtonElement>(`#${CSS.escape(`bot-msg-${replyId}`)} .bot-reply-context > button`);
+      if (!triggerRef.current) {
+        triggerRef.current = document.querySelector<HTMLElement>('.bot-thread');
+        if (triggerRef.current) triggerRef.current.tabIndex = -1;
+      }
+    }
+    onMemory({ ...memory, open: false });
+  };
+  const layer = useInteractionLayer(!embedded && layout === 'push' && memory.open && dockPhase !== 'off', { roots: [bodyRef], trigger: triggerRef, restoreFocus: false, onClose: close });
+  useFocusScope(bodyRef, !embedded && layout === 'push' && memory.open && dockPhase !== 'off', {
+    restore: triggerRef, ownsScope: () => Boolean(layer.current) && interactionLayers.topInteractive() === layer.current,
+  });
+  const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
+  const reportRead = useTaskReport(workspaceId, memory.sessionId, visible, selected?.status, sessionsAvailable,
+    `${selected?.sourceRevision || ''}:${selected?.observationRevision || ''}`);
+  const taskDetail = mergeTaskDetail(selected, reportRead.detail);
+
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    if (embedded || layout !== 'push') return undefined;
+    if (memory.open) {
+      if (!motionEnabled) {
+        setDockPhase('on');
+        return undefined;
+      }
+      // 入场必须先把「收起态」真正渲染出去，再加 is-open 触发 width 过渡。
+      // dock 是从 null 首次挂载的：setDockPhase('in') 与随后的终态更新若落在
+      // 同一批样式失效窗口内，过渡起点 width:0 从未被提交，浏览器直接画终态，
+      // 表现为面板瞬间蹦出。双 rAF 保证起始帧完成布局与绘制后再切终态。
+      setDockPhase(current => current === 'on' ? 'on' : 'in');
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setDockPhase('on'));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
+    }
+    setDockPhase((current) => (current === 'off' ? 'off' : 'out'));
+    return undefined;
+  }, [embedded, layout, memory.open, motionEnabled]);
+
+  useEffect(() => {
+    if (dockPhase !== 'out') return undefined;
+    if (!motionEnabled) {
+      setDockPhase('off');
+      return undefined;
+    }
+    let animations: Animation[] = [];
+    try { animations = dockRef.current?.getAnimations?.() ?? []; } catch { /* Static close. */ }
+    const motion = watchVisualMotion(animations, () => setDockPhase('off'));
+    return motion.cancel;
+  }, [dockPhase, motionEnabled]);
+
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const got = await clientApi.projectAgentGet({ workspaceId });
+      if (cancelled) return;
+      setPath(got?.ok && typeof got.path === 'string' ? got.path : '');
+      const memories = await clientApi.projectMemoryList({ workspaceId });
+      if (cancelled) return;
+      setMemories(readMemoryItems(memories?.items));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, memory.open]);
+
+  useEffect(() => {
+    if (!memory.open || !path) {
+      setHistory([]);
+      setGoals([]);
+      return undefined;
+    }
+    let cancelled = false;
+    void clientApi.projectAgentListHistory({ workspaceId, workspacePath: path }).then((result) => {
+      if (cancelled || !result?.ok) return;
+      setHistory(Array.isArray(result.history) ? result.history : []);
+      setGoals(Array.isArray(result.goals) ? result.goals : []);
+    }).catch(() => {
+      if (!cancelled) {
+        setHistory([]);
+        setGoals([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [memory.open, path, workspaceId]);
+
+  if (!embedded && (layout === 'cover' ? !memory.open : dockPhase === 'off')) return null;
+
+  const body = (requestClose = close) => (
+    <div className="bot-drawer-body" ref={bodyRef}>
+      <div className="bot-detail-content" hidden={embedded && !!classicScene} inert={embedded && !!classicScene}>
+      <div className="bot-drawer-chrome" hidden={embedded && !!inspect?.replyId && !inspect.evidence}>
+        {!embedded ? <header className="bot-drawer-head">
+          <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
+          <button
+            type="button"
+            onClick={requestClose}
+          >
+            {i18n.t('projectAgent.drawer.close')}
+          </button>
+        </header> : null}
+        {inspect && (inspect.evidence || !inspect.replyId) ? <button className="bot-inspect-back" type="button" onClick={onCloseInspect}>{i18n.t(inspect.replyId ? 'projectAgent.chat.context.back' : 'projectAgent.drawer.inspectBack')}</button> : !inspect ? <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
+          items={TABS.map(tab => ({ id: tab.id, label: i18n.t(tab.key) }))}
+          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} /> : null}
+      </div>
+      {inspect?.evidence ? <EvidenceView evidence={inspect.evidence} i18n={i18n} workspaceId={workspaceId} /> : null}
+      {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
+      {inspect?.replyId ? <div className="bot-reply-details-slot" hidden={Boolean(inspect.evidence)} ref={onReplyDetailsTarget} /> : null}
+      {!inspect ? <div ref={paneRef} key={memory.tab} id={`bot-pane-${workspaceId}`} role="tabpanel" aria-labelledby={`bot-tab-${workspaceId}-${memory.tab}`} tabIndex={0} className={`bot-drawer-pane${paneSettled ? '' : ' motion-enter-fade'}`}>
+      {memory.tab === 'overview' ? (
+        <OverviewTab
+          path={path}
+          profile={profile}
+          sessionsAvailable={sessionsAvailable}
+          onOpenTasks={() => onMemory({ open: true, tab: 'tasks', sessionId: null })}
+          brief={memories.find(item => item.kind === 'responsibility' && item.status === 'active')?.text ?? ''}
+          running={groupDrawerSessions(sessions).running}
+          modelLabel={modelLabel}
+          i18n={i18n}
+          onReveal={() => {
+            if (!path) return;
+            void clientApi.openPath(path, path, { mode: 'reveal', target: 'self' });
+          }}
+          onOpenSession={(sessionId) => onMemory({ open: true, tab: 'tasks', sessionId })}
+        />
+      ) : null}
+      {memory.tab === 'tasks' && !sessionsAvailable ? <p role="status">{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : null}
+      {memory.tab === 'tasks' && sessionsAvailable && !taskDetail ? (
+        <TasksTab
+          sessions={sessions}
+          onOpenObjective={(objectiveId) => onMemory({...memory,tab:'objectives',sessionId:null,objectiveId})}
+          history={history}
+          goals={goals}
+          onResume={async (sessionId) => {
+            const result = await clientApi.projectAgentResumeSession({ workspaceId, sessionId, requestId: crypto.randomUUID() });
+            if (!result.ok) throw new Error(result.code || 'resume failed');
+            await onRefreshSessions();
+          }}
+          selectedId={memory.sessionId}
+          i18n={i18n}
+          onSelect={(sessionId) => onMemory({ ...memory, open: true, tab: 'tasks', sessionId })}
+          onOpenHistory={setHistoryId}
+          onOpenClassic={(goal) => {
+            if (!goal.conversationId) return;
+            onOpenConversation?.(goal.conversationId);
+            setClassicScene({ conversationId: goal.conversationId, title: goal.title });
+          }}
+        />
+      ) : null}
+      {memory.tab === 'tasks' && memory.sessionId && taskDetail ? (
+        <SessionDetail key={memory.sessionId}
+          embedded={embedded}
+          onSelect={sessionId=>onMemory({...memory,open:true,tab:'tasks',sessionId})}
+          workspaceId={workspaceId}
+          workspacePath={path}
+          session={sessionsAvailable ? taskDetail! : { ...taskDetail!, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable') }}
+          reportState={reportRead.state}
+          hasReadReport={Boolean(reportRead.detail)}
+          onRetryReport={reportRead.refresh}
+          i18n={i18n}
+          isZh={isZh}
+          botName={profile.displayName}
+          context={taskContext?.sessionId === memory.sessionId ? taskContext : null}
+          onBack={() => onMemory({ ...memory, sessionId: null })}
+          onConversation={onTaskConversation}
+        />
+      ) : null}
+      {memory.tab === 'objectives' ? (
+        <ObjectivesTab key={workspaceId} workspaceId={workspaceId} workspacePath={path} i18n={i18n} selectedId={memory.objectiveId}
+          onOpenSession={(sessionId) => onMemory({...memory,tab:'tasks',sessionId})} onOpenAutomations={onOpenAutomations} />
+      ) : null}
+      {memory.tab === 'memory' ? (
+        <MemoryTab workspaceId={workspaceId} i18n={i18n} onItems={setMemories} />
+      ) : null}
+      {memory.tab === 'settings' ? (
+        <BotSettingsTab
+          workspaceId={workspaceId}
+          profile={profile}
+          modelControls={modelControls}
+          i18n={i18n}
+          onProfile={onProfile}
+          onDeleted={onDeleted}
+        />
+      ) : null}
+      </div> : null}
+      {locateSessionId ? <span className="bot-drawer-sr" data-locate-session={locateSessionId} /> : null}
+      </div>
+      <HistorySheet
+        open={historyId !== null}
+        workspaceId={workspaceId}
+        items={history}
+        i18n={i18n}
+        onClose={() => setHistoryId(null)}
+        onContinued={() => setHistoryId(null)}
+      />
+      {classicScene ? (
+        <ConversationSceneDrawer
+          embedded={embedded}
+          workspaceId={workspaceId}
+          workspacePath={path}
+          conversationId={classicScene.conversationId}
+          title={classicScene.title}
+          i18n={i18n}
+          isZh={isZh}
+          onClose={() => setClassicScene(null)}
+          onOpenBot={() => { setClassicScene(null); onTaskConversation({}); }}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (embedded) return workspace.detailTarget ? createPortal(
+    <BotDocumentPreview workspaceId={workspaceId} i18n={i18n}>{body()}</BotDocumentPreview>, workspace.detailTarget,
+  ) : null;
+
+  if (layout === 'cover') {
+    return (
+      <Drawer
+        onClose={close}
+        restoreFocusRef={triggerRef}
+        ariaLabel={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
+        panelClassName="bot-drawer-panel"
+      >
+        {({ requestClose }) => body(requestClose)}
+      </Drawer>
+    );
+  }
+
+  return (
+    <div className={`bot-drawer-dock-frame${dockPhase === 'on' ? ' is-open' : ''}`} inert={!memory.open}>
+      <BotDrawerResizer
+        enabled={memory.open && dockPhase === 'on'}
+        width={memory.width}
+        isZh={isZh}
+        onResize={(next) => onMemory(resizeDrawer(memory, next))}
+      />
+      <aside ref={dockRef}
+        className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
+        style={memory.width === undefined ? undefined : { ['--pa-drawer-width' as string]: `${memory.width}px` }}
+        aria-label={i18n.t(inspect?.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.drawer.title')}
+        inert={!memory.open}
+        aria-hidden={!memory.open}
+      >
+        <InteractionLayerContext.Provider value={layer}>{body()}</InteractionLayerContext.Provider>
+      </aside>
+    </div>
+  );
+}

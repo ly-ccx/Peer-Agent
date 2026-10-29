@@ -247,4 +247,91 @@ describe('TuiGoalBridge', () => {
       await rm(storeDir, { recursive: true, force: true });
     }
   });
+
+  test('projects the shared goal contract instead of a local-loose schema', () => {
+    const bridge = createTuiGoalBridge({ storeDir: '/tmp/tui-goal-contract-probe' });
+    const createPlan = bridge.toolDefinitions.find((tool: any) => tool.name === GOAL_TOOL_NAMES.createPlan) as any;
+
+    // 回归点：TUI 曾把 title 声明为可选且无 description，模型漏传后 store 落成「未命名任务」。
+    expect(createPlan.inputSchema.required).toContain('title');
+    expect(typeof createPlan.inputSchema.properties.title.description).toBe('string');
+    expect(createPlan.inputSchema.properties.title.description.length).toBeGreaterThan(0);
+    expect(createPlan.inputSchema.additionalProperties).toBe(false);
+
+    // 关系字段必须同时出现在 schema 与执行层，否则就是“看得见但不生效”。
+    expect(createPlan.inputSchema.properties).toHaveProperty('parentPlanId');
+    expect(createPlan.inputSchema.properties).toHaveProperty('sourceTaskId');
+
+    // description 也来自共享契约，不再是 TUI 自己的一行简写。
+    expect(String(createPlan.description)).toContain('Plan mode');
+  });
+
+  test('creates plans with a store-legal workflowKind in every mode', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-kind-'));
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      // store 只接受 plan_approval / goal_self_driven；TUI 曾传非法值 'plan'。
+      for (const [mode, expected] of [['plan', 'plan_approval'], ['goal', 'goal_self_driven']] as const) {
+        const created: any = await bridge.execute({
+          capabilityId: GOAL_TOOL_NAMES.createPlan,
+          conversationId: `conv-kind-${mode}`,
+          mode,
+          workspaceRoot: process.cwd(),
+          args: { title: `Kind ${mode}`, goal: 'workflowKind must be legal', tasks: [{ title: 't' }] },
+        });
+        expect(created.result.status).toBe('success');
+        expect((created.result.output as any).plan.workflowKind).toBe(expected);
+      }
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('derives parentPlanId/sourceTaskId for a follow-up but not for an explicit new request', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-rel-'));
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const store = (bridge as any).store ?? null;
+      // 直接落一条已完成父计划：追问派生只认 completed 计划。
+      const parent = store
+        ? store.createPlan({
+            conversationId: 'conv-rel',
+            title: 'Parent',
+            goal: 'parent goal',
+            originWorkspacePath: process.cwd(),
+            targetWorkspacePath: process.cwd(),
+            tasks: [{ taskId: 'task-a', title: 'A' }],
+            status: 'completed',
+            workflowKind: 'goal_self_driven',
+            createdBy: 'agent',
+          })
+        : null;
+
+      expect(parent?.planId).toBeTruthy();
+
+      const followUp: any = await bridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.createPlan,
+        conversationId: 'conv-rel',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: { title: '继续打磨', goal: '在上一件事基础上再改一点', tasks: [{ title: 'B' }] },
+      });
+      const followed = (followUp.result.output as any).plan;
+      expect(followed.parentPlanId).toBe(parent.planId);
+      expect(followed.sourceTaskId).toBe('task-a');
+
+      const explicitNew: any = await bridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.createPlan,
+        conversationId: 'conv-rel-new',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: { title: '新需求：完全无关的任务', goal: '另一件独立的事', tasks: [{ title: 'C' }] },
+      });
+      const fresh = (explicitNew.result.output as any).plan;
+      expect(fresh.parentPlanId).toBeUndefined();
+      expect(fresh.sourceTaskId).toBeUndefined();
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
 });

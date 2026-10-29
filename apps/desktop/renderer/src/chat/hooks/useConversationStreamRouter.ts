@@ -565,10 +565,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offPermissionRequest = clientApi.onChatStreamPermissionRequest(({ streamId, call }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
-      conversationStore.setState(cid, (prev) => {
-        if (prev.pendingPermissionCalls.some((item) => item.toolCallId === call.toolCallId)) return {};
-        return { pendingPermissionCalls: [...prev.pendingPermissionCalls, call] };
-      });
+      conversationStore.restorePendingPermissions(cid, [{ streamId, call }]);
     });
 
     const offPermissionSettled = clientApi.onChatStreamPermissionSettled(({ streamId, toolCallIds }) => {

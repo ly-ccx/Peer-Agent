@@ -16,6 +16,7 @@ import {
 import { createTuiWebContentsBridge } from './tui-web-contents-bridge.ts';
 
 export interface CreateAnthropicMessagesProviderOptions {
+  readonly extraHeaders?: Readonly<Record<string, string>>;
   readonly providerId: string;
   readonly baseUrl?: string;
   readonly getApiKey: () => Promise<string>;
@@ -191,6 +192,7 @@ export function createAnthropicMessagesProvider(
       const result = await sendStream({
         baseUrl: options.baseUrl,
         apiKey,
+        ...(options.extraHeaders ? {headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01',...options.extraHeaders}} : {}),
         model: request.model,
         system,
         messages,

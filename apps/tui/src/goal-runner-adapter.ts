@@ -25,6 +25,7 @@
 import {
   createGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  delegatedPlanRunsWithLease,
 } from '@peer-agent/runtime-node';
 
 import type { ChatController } from './chat-controller.ts';
@@ -89,6 +90,7 @@ export function createTuiSharedGoalRunner(options: {
   readonly getConversationId: () => string | undefined;
   /** 是否订阅 store onChange 并自动 kick（仅真实运行时开启；测试可注入禁用）。 */
   readonly autoStart?: boolean;
+  readonly holdsLease?: (workspaceId: string) => boolean;
   readonly logger?: Pick<Console, 'warn' | 'error'>;
 }): TuiSharedGoalRunner {
   const { bridge, chat, getConversationId } = options;
@@ -116,6 +118,10 @@ export function createTuiSharedGoalRunner(options: {
       && runtimeConversationId.length > 0
       && ownerConversationId === runtimeConversationId;
   };
+  const canRunPlan = (plan: any): boolean => {
+    const delegated = delegatedPlanRunsWithLease(plan, options.holdsLease);
+    return delegated == null ? ownsPlan(plan) : delegated && ownsPlan(plan);
+  };
 
   const runtime: TuiGoalTurnRuntime = {
     whenIdle,
@@ -124,7 +130,7 @@ export function createTuiSharedGoalRunner(options: {
 
   const runner = createGoalRunner({
     goalPlanStore: store,
-    canRunPlan: ownsPlan,
+    canRunPlan,
     chatRuntime: {
       async runGoalTurn({ plan, turnNumber }: { plan: any; turnNumber: number }) {
         try {
@@ -174,7 +180,7 @@ export function createTuiSharedGoalRunner(options: {
     const planId = typeof payload?.planId === 'string' ? payload.planId : null;
     if (!planId) return;
     const plan = typeof store?.getPlan === 'function' ? store.getPlan(planId) : null;
-    if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, plan) || !ownsPlan(plan)) return;
+    if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, plan) || !canRunPlan(plan)) return;
     void (async () => {
       try {
         // 等 intake turn 结束再 kick，避免与当前活跃 turn 冲突
@@ -182,7 +188,7 @@ export function createTuiSharedGoalRunner(options: {
         await runtime.whenIdle();
         const latest = typeof store?.getPlan === 'function' ? store.getPlan(planId) : null;
         // 等待期间 TUI 可能已经切换 conversation，必须重新确认 plan 仍归当前 runtime。
-        if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, latest) || !ownsPlan(latest)) return;
+        if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, latest) || !canRunPlan(latest)) return;
         await runner.start(planId);
       } catch (error) {
         logger.error?.(

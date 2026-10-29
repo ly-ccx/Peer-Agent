@@ -9,7 +9,8 @@
 
 import { createUsageRequestLog } from './usage-request-log.mjs';
 
-const TOKENS_PER_MILLION = 1_000_000;
+export { estimateUsageCostUsd } from './usage-pricing.mjs';
+import { estimateUsageCostUsd } from './usage-pricing.mjs';
 
 function finiteNumber(value) {
   const n = Number(value);
@@ -59,30 +60,28 @@ export function addTokenBuckets(a, b) {
   };
 }
 
-/**
- * @param {object} usage token bucket
- * @param {{ inputPrice?: number|null, outputPrice?: number|null, cacheReadPrice?: number|null, cacheWritePrice?: number|null }} pricing
- * @returns {{ estimatedCostUsd: number|null, hasPricing: boolean }}
- */
-export function estimateUsageCostUsd(usage, pricing = {}) {
-  const inputPrice = optionalPrice(pricing.inputPrice);
-  const outputPrice = optionalPrice(pricing.outputPrice);
-  const cacheReadPrice = optionalPrice(pricing.cacheReadPrice);
-  const cacheWritePrice = optionalPrice(pricing.cacheWritePrice);
-  const hasPricing = [inputPrice, outputPrice, cacheReadPrice, cacheWritePrice]
-    .some((price) => price != null);
-  if (!hasPricing) {
-    return { estimatedCostUsd: null, hasPricing: false };
+export function startOfLocalDayMs(now = Date.now()) {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+export function usageRole(row) {
+  return typeof row?.role === 'string' && row.role.trim() ? row.role.trim() : 'unknown';
+}
+
+export function sumRoleSpendUsd(rows, { role, sinceMs } = {}) {
+  let total = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (role && usageRole(row) !== role) continue;
+    if (Number.isFinite(sinceMs)) {
+      const at = Date.parse(row?.at);
+      if (!Number.isFinite(at) || at < sinceMs) continue;
+    }
+    const cost = Number(row?.estimatedCostUsd);
+    if (Number.isFinite(cost)) total += cost;
   }
-
-  const cost =
-    (finiteNumber(usage.inputTokens) * (inputPrice ?? 0)
-      + finiteNumber(usage.outputTokens) * (outputPrice ?? 0)
-      + finiteNumber(usage.cacheReadTokens) * (cacheReadPrice ?? 0)
-      + finiteNumber(usage.cacheWriteTokens) * (cacheWritePrice ?? 0))
-    / TOKENS_PER_MILLION;
-
-  return { estimatedCostUsd: cost, hasPricing: true };
+  return total;
 }
 
 const UNBOUND_PROVIDER_KEY = 'unbound';
@@ -301,6 +300,8 @@ export function aggregateRequestUsage(requests = [], { providerIndex = null } = 
   const byProvider = new Map();
   /** @type {Map<string, any>} */
   const byModel = new Map();
+  /** @type {Map<string, any>} */
+  const byRole = new Map();
   let estimatedCostUsd = 0;
   let hasAnyPricing = false;
   let requestCount = 0;
@@ -423,13 +424,32 @@ export function aggregateRequestUsage(requests = [], { providerIndex = null } = 
     }
     byModel.set(mKey, modelRow);
 
+    const rKey = usageRole(row);
+    const roleRow = byRole.get(rKey) || {
+      key: rKey,
+      label: rKey,
+      conversationCount: 0,
+      requestCount: 0,
+      ...emptyTokenBucket(),
+      estimatedCostUsd: 0,
+      hasPricing: false,
+    };
+    roleRow.conversationCount += 1;
+    roleRow.requestCount += 1;
+    Object.assign(roleRow, { ...roleRow, ...addTokenBuckets(roleRow, bucket) });
+    if (priced) {
+      roleRow.hasPricing = true;
+      roleRow.estimatedCostUsd += cost;
+    }
+    byRole.set(rKey, roleRow);
+
     if (priced) {
       hasAnyPricing = true;
       estimatedCostUsd += cost;
     }
   }
 
-  return { totals, byProvider, byModel, estimatedCostUsd, hasAnyPricing, requestCount };
+  return { totals, byProvider, byModel, byRole, estimatedCostUsd, hasAnyPricing, requestCount };
 }
 
 /**
@@ -461,6 +481,7 @@ export function buildUsageStatsSnapshot({
       },
       byProvider: sortGroupRows([...aggregated.byProvider.values()].map(finalizeRow)),
       byModel: sortGroupRows([...aggregated.byModel.values()].map(finalizeRow)),
+      byRole: sortGroupRows([...aggregated.byRole.values()].map(finalizeRow)),
       notes: {
         unpricedConversationCount: 0,
         missingProviderCount: 0,
@@ -581,6 +602,7 @@ export function buildUsageStatsSnapshot({
     },
     byProvider: sortGroupRows([...byProvider.values()].map(finalizeRow)),
     byModel: sortGroupRows([...byModel.values()].map(finalizeRow)),
+    byRole: [],
     notes: {
       unpricedConversationCount,
       missingProviderCount,

@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../../ui/icons';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { GoalPlan, GoalSuccessCriterion } from '@peer-agent/protocol';
 import { clientApi } from '../../../clientApi';
@@ -94,7 +95,7 @@ export const SuccessCriteriaEditor = forwardRef<SuccessCriteriaEditorHandle, {
                 void persist(next);
               }}
             >
-              ×
+              <PeerIcon name="close" size={14} />
             </button>
           </li>
         ))}

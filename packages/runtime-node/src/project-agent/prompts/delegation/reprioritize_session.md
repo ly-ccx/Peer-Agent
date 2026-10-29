@@ -1,0 +1,1 @@
+Change an unfinished task priority to high, normal, or low. For high, provide anchorMessageId from this user turn explicitly requesting urgency or high priority. The host rejects wake turns, historical anchors, negated urgency and quoted urgency. Respect quoted task scope. This does not bypass dependencies, approval, isolation, or slot limits.

@@ -15,6 +15,8 @@ export interface PermissionGateView {
   readonly preview: string;
   readonly allowLabel?: string;
   readonly denyLabel?: string;
+  readonly allowAlwaysLabel?: string;
+  readonly allowAlwaysHint?: string;
 }
 
 const PREVIEW_MAX = 80;
@@ -84,6 +86,13 @@ function isIrreversibleConfirmation(call: ClientToolCall): boolean {
 
 export function buildPermissionGateView(call: ClientToolCall, locale?: string): PermissionGateView {
   const zh = isZhLocale(locale);
+  if (call.capabilityId === 'local.image.read') {
+    return { variant: 'default', isGoalConfirmation: false,
+      capabilityLabel: zh ? '读取图片并交给当前模型' : 'Read image for the current model',
+      preview: extractPathPreview(call), allowLabel: zh ? '仅这一次' : 'Allow once',
+      allowAlwaysLabel: zh ? '本轮允许此图片' : 'Allow this image for this session',
+      allowAlwaysHint: zh ? '仅此图片，供当前机器人及其任务读取，30 分钟内有效。' : 'Only this image, for this bot and its tasks, valid for 30 minutes.' };
+  }
   if (isHookApproval(call)) {
     return {
       variant: 'hook-approval',
@@ -133,5 +142,7 @@ export function buildPermissionGateView(call: ClientToolCall, locale?: string): 
     isGoalConfirmation: false,
     capabilityLabel: call.capabilityId,
     preview: extractCommandPreview(call),
+    allowAlwaysLabel: zh ? '本轮允许此操作' : 'Allow this operation for this session',
+    allowAlwaysHint: zh ? '仅相同操作和参数，30 分钟内有效。' : 'Only the same operation and arguments, valid for 30 minutes.',
   };
 }

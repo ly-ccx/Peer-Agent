@@ -8,6 +8,7 @@ import {
   DRAFT_CONVERSATION_ID,
   EMPTY_CONVERSATION_STATE,
   resolveConversationBucketId,
+  restorePendingPermissionCalls,
 } from './conversationStore.ts';
 import type { ChatMsg, QueuedMessage } from './types.ts';
 
@@ -609,5 +610,38 @@ describe('conversationStore', () => {
     assert.equal(store.getSnapshot('real-child').draft, 'child question');
     assert.equal(store.getSnapshot('real-child').loadStatus, 'ready');
     assert.equal(store.getSnapshot('real-child').messages[0]?.id, 'u1');
+  });
+
+  it('restores permission cards from a reattach snapshot without duplicating them', () => {
+    const call = {
+      toolCallId: 'chat-permission:1',
+      capabilityId: 'local.shell.exec',
+      displayName: 'bash',
+      reason: 'confirm',
+      argumentsPreview: { command: 'echo hi' },
+      riskLevel: 'L1_local_read' as const,
+      dataLevel: 'D0_public' as const,
+      requestedAt: '2026-09-26T00:00:00.000Z',
+    };
+    const restored = restorePendingPermissionCalls(
+      [{ toolCallId: call.toolCallId, streamId: 's1', call }],
+      [],
+    );
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0]?.toolCallId, call.toolCallId);
+    assert.equal(
+      restorePendingPermissionCalls([{ toolCallId: call.toolCallId, streamId: 's1', call }], restored),
+      restored,
+    );
+    assert.equal(restorePendingPermissionCalls(null, restored), restored);
+    assert.equal(restorePendingPermissionCalls([{ call: null }], restored), restored);
+
+    const store = new ConversationStore();
+    store.restorePendingPermissions('c1', [{ streamId: 's1', call }]);
+    assert.equal(store.getSnapshot('c1').pendingPermissionCalls.length, 1);
+    store.restorePendingPermissions('c1', [{ streamId: 's1', call }]);
+    assert.equal(store.getSnapshot('c1').pendingPermissionCalls.length, 1);
+    store.restorePendingPermissions('c1', []);
+    assert.equal(store.getSnapshot('c1').pendingPermissionCalls.length, 1);
   });
 });

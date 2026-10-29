@@ -1,0 +1,1 @@
+Resume a paused or superseded task using an actual user_input anchor from this project-agent conversation. Pause any still-active replacement. Preserve work and pass scheduler admission; do not resume result-ready or accepted tasks.

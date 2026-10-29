@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test, beforeEach, afterEach } from 'node:test';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +28,24 @@ afterEach(() => {
   delete process.env.PEER_AGENT_HOME;
   rmSync(tmpRoot, { recursive: true, force: true });
 });
+
+function waitUntil(predicate, { timeoutMs = 8_000, intervalMs = 10, message = 'timed out' } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (settle) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      clearTimeout(deadline);
+      settle();
+    };
+    const poll = setInterval(() => {
+      if (!predicate()) return;
+      finish(resolve);
+    }, intervalMs);
+    const deadline = setTimeout(() => finish(() => reject(new Error(message))), timeoutMs);
+  });
+}
 
 function draftWithTasks() {
   return {
@@ -1184,6 +1204,33 @@ test('onChange: 不传回调时所有写操作正常（向后兼容）', () => {
   assert.equal(store.getPlan(plan.planId)?.version, 1);
 });
 
+test('subscribeChanges delivers complete tail records when filesystem notifications are lost and stops after unsubscribe', async (t) => {
+  let closed = false;
+  const stub = t.mock.method(fs, 'watch', () => ({ close() { closed = true; } }));
+  syncBuiltinESMExports();
+  const events = [];
+  let unsubscribe = () => {};
+  try {
+    unsubscribe = store.subscribeChanges(event => events.push(event));
+    const file = path.join(store.getStoreDir(), '.changes.jsonl');
+    const event = { revision: 'lost-notification', planId: 'external-plan' };
+    const row = `${JSON.stringify(event)}\n`, split = Math.floor(row.length / 2);
+    appendFileSync(file, row.slice(0, split));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(events, [], 'incomplete records never notify');
+    appendFileSync(file, row.slice(split));
+    await waitUntil(() => events.length === 1, { message: 'missed filesystem notification was not recovered' });
+    assert.deepEqual(events, [event]);
+    unsubscribe();
+    assert.equal(closed, true);
+    appendFileSync(file, `${JSON.stringify({ revision: 'after-close' })}\n`);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(events, [event], 'unsubscribe stops fallback delivery');
+  } finally {
+    unsubscribe(); stub.mock.restore(); syncBuiltinESMExports();
+  }
+});
+
 test('subscribeChanges 增量拼接半行并忽略订阅前历史记录', async () => {
   const changeFile = path.join(store.getStoreDir(), '.changes.jsonl');
   mkdirSync(path.dirname(changeFile), { recursive: true });
@@ -1191,25 +1238,20 @@ test('subscribeChanges 增量拼接半行并忽略订阅前历史记录', async 
   const events = [];
   const unsubscribe = store.subscribeChanges((event) => events.push(event));
 
-  const event = { revision: 'incremental', planId: 'plan-incremental' };
-  const row = `${JSON.stringify(event)}\n`;
-  const splitAt = Math.floor(row.length / 2);
-  appendFileSync(changeFile, row.slice(0, splitAt), 'utf8');
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.deepEqual(events, []);
-  appendFileSync(changeFile, row.slice(splitAt), 'utf8');
+  try {
+    const event = { revision: 'incremental', planId: 'plan-incremental' };
+    const row = `${JSON.stringify(event)}\n`;
+    const splitAt = Math.floor(row.length / 2);
+    appendFileSync(changeFile, row.slice(0, splitAt), 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.deepEqual(events, []);
+    appendFileSync(changeFile, row.slice(splitAt), 'utf8');
 
-  await new Promise((resolve, reject) => {
-    const deadline = setTimeout(() => reject(new Error('incremental event timeout')), 1_000);
-    const poll = setInterval(() => {
-      if (events.length !== 1) return;
-      clearInterval(poll);
-      clearTimeout(deadline);
-      resolve();
-    }, 10);
-  });
-  unsubscribe();
-  assert.deepEqual(events, [event]);
+    await waitUntil(() => events.length === 1, { message: 'incremental event timeout' });
+    assert.deepEqual(events, [event]);
+  } finally {
+    unsubscribe();
+  }
 });
 
 test('subscribeChanges 在 journal 截断后从头读取新事件', async () => {
@@ -1218,22 +1260,17 @@ test('subscribeChanges 在 journal 截断后从头读取新事件', async () => 
   writeFileSync(changeFile, `${JSON.stringify({ revision: 'historical-padding', value: 'x'.repeat(200) })}\n`, 'utf8');
   const events = [];
   const unsubscribe = store.subscribeChanges((event) => events.push(event));
-  const replacement = { revision: 'after-truncate', planId: 'plan-truncated' };
-  writeFileSync(changeFile, '', 'utf8');
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  appendFileSync(changeFile, `${JSON.stringify(replacement)}\n`, 'utf8');
+  try {
+    const replacement = { revision: 'after-truncate', planId: 'plan-truncated' };
+    writeFileSync(changeFile, '', 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    appendFileSync(changeFile, `${JSON.stringify(replacement)}\n`, 'utf8');
 
-  await new Promise((resolve, reject) => {
-    const deadline = setTimeout(() => reject(new Error('truncated journal event timeout')), 1_000);
-    const poll = setInterval(() => {
-      if (events.length !== 1) return;
-      clearInterval(poll);
-      clearTimeout(deadline);
-      resolve();
-    }, 10);
-  });
-  unsubscribe();
-  assert.deepEqual(events, [replacement]);
+    await waitUntil(() => events.length === 1, { message: 'truncated journal event timeout' });
+    assert.deepEqual(events, [replacement]);
+  } finally {
+    unsubscribe();
+  }
 });
 
 test('subscribeChanges: 已运行的 Desktop store 能收到独立 CLI 进程的持久化变更', async () => {
@@ -1241,11 +1278,13 @@ test('subscribeChanges: 已运行的 Desktop store 能收到独立 CLI 进程的
   const desktopStore = createGoalPlanStore({ storeDir });
   const conversationId = 'shared-conversation-uuid';
   let unsubscribe = () => {};
+  let eventTimer = null;
   const eventPromise = new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('timed out waiting for external goal change')), 10_000);
+    eventTimer = setTimeout(() => reject(new Error('timed out waiting for external goal change')), 10_000);
     unsubscribe = desktopStore.subscribeChanges((event) => {
       if (event.writerPid === process.pid || event.conversationId !== conversationId) return;
-      clearTimeout(timeout);
+      clearTimeout(eventTimer);
+      eventTimer = null;
       resolve(event);
     });
   });
@@ -1265,13 +1304,22 @@ test('subscribeChanges: 已运行的 Desktop store 能收到独立 CLI 进程的
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let childStderr = '';
+  child.stdout.on('data', () => {});
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => { childStderr += chunk; });
   const childExit = new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`CLI writer timed out: ${childStderr}`));
+    }, 15_000);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`CLI writer exited ${code}: ${childStderr}`));
+      else reject(new Error(`CLI writer exited ${code ?? signal}: ${childStderr}`));
     });
   });
 
@@ -1284,7 +1332,9 @@ test('subscribeChanges: 已运行的 Desktop store 能收到独立 CLI 进程的
     assert.equal(plans.length, 1);
     assert.equal(plans[0].title, 'CLI goal');
   } finally {
+    if (eventTimer) clearTimeout(eventTimer);
     unsubscribe();
+    if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL');
   }
 });
 
@@ -3059,4 +3109,3 @@ test('revisePlan 无成功标准时允许验收（空标准集合）', () => {
   }, { reason: 'workbench_one_click_accept', changedBy: 'user' });
   assert.equal(accepted.resultAcceptance?.acceptedAt, '2026-08-22T00:00:00.000Z');
 });
-

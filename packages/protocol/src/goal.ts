@@ -386,6 +386,8 @@ export interface EvidenceIndexRecord {
   readonly toolName?: string;
   readonly createdAt: string;
   readonly artifactRefs?: readonly string[];
+  /** Redacted, bounded execution-time snapshot of a successful local Tool Result. */
+  readonly bodyPreview?: { readonly kind: 'file' | 'command' | 'observation'; readonly text: string; readonly truncated: boolean };
 }
 
 /** 批准事实（Evidence）。 */
@@ -835,15 +837,33 @@ export type GoalSuccessCriterionKind =
   | 'test'
   | 'file-contains'
   | 'file-exists'
+  | 'model_review'
   | 'manual';
 
 export interface GoalSuccessCriterion {
+  readonly requiredCapabilities?: readonly string[];
   readonly id: string;
   readonly kind: GoalSuccessCriterionKind;
   readonly description: string;
   readonly command?: string;
   readonly path?: string;
   readonly expect?: string;
+  readonly authority?: {
+    readonly source: 'model' | 'user' | 'project_policy' | 'legacy_unknown';
+    readonly sourceRef?: string;
+    readonly version: number;
+    readonly verifier: 'mechanical' | 'host_model' | 'human';
+    readonly rationale: string;
+  };
+}
+
+export interface GoalModelReview {
+  readonly criterionId: string;
+  readonly sourceRevision: string;
+  readonly verifierRunId: string;
+  readonly passed: boolean;
+  readonly evidenceRefs: readonly string[];
+  readonly checkedAt: string;
 }
 
 export interface GoalCriterionResult {
@@ -992,6 +1012,33 @@ export interface GoalExecutionCheckpoint {
 
 /** GoalPlan 内嵌的轻量 runner 状态；不代表工具执行事实，任务完成仍必须由 Evidence 回写。 */
 export interface GoalRunnerState {
+  /** Host-owned readonly review continuity. Native messages stay in registered checkpoint storage. */
+  readonly verificationContinuation?: {
+    readonly schemaVersion: 1;
+    readonly policyVersion?: 2;
+    readonly planId: string;
+    readonly continuationId: string;
+    readonly sourceRevision: string;
+    readonly modelKey: string;
+    readonly workId?: string;
+    readonly phase: 'ready' | 'requesting' | 'tools' | 'completed';
+    /** Current slice deadline; legacy review-wide deadlines are renewed only on safe admission. */
+    readonly deadlineAt: string;
+    readonly modelRequests: number;
+    readonly toolCalls: number;
+    readonly formatAttempt: number;
+    readonly previousText?: string;
+    readonly checkpointRef?: string;
+    readonly evidenceRefs: readonly string[];
+    readonly fingerprint?: string;
+    readonly repeats?: number;
+    readonly progressFacts?: readonly string[];
+    readonly startedAt?: string;
+    readonly lastProgressAt?: string;
+    readonly observationCount?: number;
+    readonly observationFacts?: readonly string[];
+    readonly formatRequests?: number;
+  };
   readonly enabled: boolean;
   readonly status: GoalRunnerStatus;
   readonly intent?: GoalRunnerIntent;
@@ -1041,6 +1088,7 @@ export interface GoalRunnerState {
    * 中断在计划状态重派生时被误判为完成。
    */
   readonly interruption?: {
+    readonly origin?: import('./agent-supervision.ts').InterruptionOrigin;
     readonly source: string;
     readonly reason: string;
     readonly interruptedAt: string;
@@ -1107,6 +1155,9 @@ export interface GoalPlan {
   readonly successCriteria: readonly GoalSuccessCriterion[];
   readonly criterionResults: readonly GoalCriterionResult[];
   readonly manualConfirmations?: readonly GoalManualConfirmation[];
+  readonly modelReviews?: readonly GoalModelReview[];
+  /** Host-derived current revision for checking semantic review freshness. */
+  readonly modelReviewSourceRevision?: string;
   readonly boundaries: GoalBoundaries;
   readonly exceptionPolicies: ExceptionPolicy[];
   /** 顶层汇总（来源于子任务） */

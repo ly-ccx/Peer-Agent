@@ -1,0 +1,21 @@
+.llm-settings-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.llm-settings-header button {
+  background: none;
+  border: none;
+  color: var(--graphite-soft);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: var(--space-1);
+  border-radius: var(--ui-radius-control);
+  transition: color var(--za-motion-fast);
+}
+.llm-settings-header button:hover { color: var(--graphite-base); }
+.llm-settings-header strong {
+  font-family: var(--font-serif-zh);
+  font-size: 1.1rem;
+  color: var(--graphite-base);
+}

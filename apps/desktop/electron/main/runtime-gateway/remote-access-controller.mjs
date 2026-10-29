@@ -17,6 +17,22 @@
 const GATEWAY_PATTERN = /^https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?$/;
 const WORKSPACE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
+function normalizeProjectGrants(value) {
+  if (!Array.isArray(value) || value.length > 200) throw new Error('INVALID_PROJECT_GRANTS');
+  const seen = new Set();
+  return value.map(row => {
+    if (!row || Object.keys(row).sort().join(',') !== 'allowProjectMessage,allowProjectRead,workspaceId'
+        || typeof row.workspaceId !== 'string' || !WORKSPACE_PATTERN.test(row.workspaceId)
+        || seen.has(row.workspaceId) || typeof row.allowProjectRead !== 'boolean'
+        || typeof row.allowProjectMessage !== 'boolean' || row.allowProjectMessage && !row.allowProjectRead) {
+      throw new Error('INVALID_PROJECT_GRANTS');
+    }
+    seen.add(row.workspaceId);
+    return { workspaceId: row.workspaceId, allowProjectRead: row.allowProjectRead, allowProjectMessage: row.allowProjectMessage };
+  }).sort((a,b) => a.workspaceId.localeCompare(b.workspaceId));
+}
+const policySignature = settings => JSON.stringify([settings.enabled,settings.gatewayOrigin,settings.workspaceId,settings.projectGrants]);
+
 /** Normalize + validate a settings patch. Throws on anything malformed so the
  * UI gets an error instead of silently persisting a value that cannot work. */
 export function normalizeRemoteSettings(input, current = {}) {
@@ -25,7 +41,7 @@ export function normalizeRemoteSettings(input, current = {}) {
     gatewayOrigin: typeof current.gatewayOrigin === 'string' ? current.gatewayOrigin : '',
     workspaceId: typeof current.workspaceId === 'string' ? current.workspaceId : '',
   };
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return next;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) input = {};
   if ('enabled' in input) {
     if (typeof input.enabled !== 'boolean') throw new Error('INVALID_ENABLED');
     next.enabled = input.enabled;
@@ -45,7 +61,16 @@ export function normalizeRemoteSettings(input, current = {}) {
     if (value && !WORKSPACE_PATTERN.test(value)) throw new Error('INVALID_WORKSPACE_ID');
     next.workspaceId = value;
   }
-  if (next.enabled && (!next.gatewayOrigin || !next.workspaceId)) {
+  const explicitProjects = Object.hasOwn(input,'projectGrants')
+    || Object.hasOwn(current,'projectGrants') && (current.enabled === true || current.projectGrants?.length > 0);
+  next.projectGrants = normalizeProjectGrants(Object.hasOwn(input,'projectGrants') ? input.projectGrants
+    : Object.hasOwn(current,'projectGrants') ? current.projectGrants
+      : next.workspaceId ? [{workspaceId:next.workspaceId,allowProjectRead:true,allowProjectMessage:false}] : []);
+  next.workspaceIds = next.projectGrants.filter(row=>row.allowProjectRead).map(row=>row.workspaceId);
+  const version = current.delegationVersion ?? input.delegationVersion ?? 1;
+  if (!Number.isSafeInteger(version) || version < 1) throw new Error('INVALID_DELEGATION_VERSION');
+  next.delegationVersion = version;
+  if (next.enabled && (!next.gatewayOrigin || !next.workspaceId && !explicitProjects)) {
     throw new Error('INCOMPLETE_REMOTE_SETTINGS');
   }
   return next;
@@ -62,6 +87,7 @@ export function normalizeRemoteSettings(input, current = {}) {
 export function createRemoteAccessController({
   settingsStore, settingsKey = 'remoteAccess', deviceName,
   createSession, logger = { info() {}, warn() {}, error() {} },
+  readLastAccess = () => null,
 }) {
   if (!settingsStore || typeof settingsStore.getAll !== 'function' || typeof settingsStore.merge !== 'function') {
     throw new Error('INVALID_SETTINGS_STORE');
@@ -73,6 +99,7 @@ export function createRemoteAccessController({
   let queue = Promise.resolve();
   // Remember what the live session was created for, to make apply() idempotent.
   let sessionFor = null;
+  let sessionPolicy = null;
 
   function readSettings() {
     try {
@@ -82,8 +109,36 @@ export function createRemoteAccessController({
     } catch {
       // External edits or migration artifacts can leave invalid data; a status
       // query must never throw — the UI depends on it.
-      return { enabled: false, gatewayOrigin: '', workspaceId: '' };
+      return normalizeRemoteSettings({});
     }
+  }
+
+  /** 远程没填 workspaceId 时，用当前项目的稳定 id，不再要求手写一串标识。 */
+  function projectWorkspaceId() {
+    try {
+      const all = settingsStore.getAll();
+      const list = Array.isArray(all?.workspaces) ? all.workspaces : [];
+      const active = typeof all?.activeWorkspace === 'string' ? all.activeWorkspace : '';
+      const current = list.find((item) => item?.path === active)
+        ?? list.find((item) => typeof item?.id === 'string');
+      const id = typeof current?.id === 'string' ? current.id.trim() : '';
+      return WORKSPACE_PATTERN.test(id) ? id : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function patchWithWorkspaceDefault(patch, current) {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch;
+    const next = { ...patch };
+    const explicit = Object.prototype.hasOwnProperty.call(next, 'workspaceId')
+      ? (typeof next.workspaceId === 'string' ? next.workspaceId.trim() : '')
+      : null;
+    const missing = explicit === null ? current.workspaceId === '' : explicit === '';
+    if (!missing) return next;
+    const fallback = projectWorkspaceId();
+    if (fallback) next.workspaceId = fallback;
+    return next;
   }
 
   /** The live truth: configured values plus what the connection is actually doing. */
@@ -91,6 +146,8 @@ export function createRemoteAccessController({
     const settings = readSettings();
     let live = { online: false, deviceId: null, connectionEpoch: 0 };
     try { live = { ...live, ...(session?.status?.() ?? {}) }; } catch { /* status must never throw */ }
+    let lastAccess=live.lastAccess??null;
+    if(!lastAccess)try{lastAccess=readLastAccess();}catch{}
     return {
       settings,
       active: session !== null,
@@ -102,6 +159,7 @@ export function createRemoteAccessController({
       lastFailure: live.lastFailure ?? null,
       // Present only while the server is waiting for this device to be claimed.
       pairing: live.pairing ?? null,
+      lastAccess,
     };
   }
 
@@ -110,16 +168,19 @@ export function createRemoteAccessController({
     try { session.stop(); } catch (error) { logger.warn('[remote] stop failed: %s', error?.message ?? error); }
     session = null;
     sessionFor = null;
+    sessionPolicy = null;
     logger.info('[remote] stopped (%s)', reason);
   }
 
   function startSession(settings) {
     session = createSession({
+      ...settings,
       gatewayOrigin: settings.gatewayOrigin,
       workspaceId: settings.workspaceId,
       deviceName,
     });
     sessionFor = { gatewayOrigin: settings.gatewayOrigin, workspaceId: settings.workspaceId };
+    sessionPolicy = policySignature(settings);
     logger.info('[remote] started against %s (workspace %s)', settings.gatewayOrigin, settings.workspaceId);
   }
 
@@ -129,8 +190,8 @@ export function createRemoteAccessController({
     if (!settings.enabled) { stopSession('disabled'); return status(); }
     const unchanged = sessionFor
       && sessionFor.gatewayOrigin === settings.gatewayOrigin
-      && sessionFor.workspaceId === settings.workspaceId;
-    if (unchanged) return status();
+      && sessionFor.workspaceId === settings.workspaceId && sessionPolicy === policySignature(settings);
+    if (unchanged && !status().lastFailure) return status();
     // Anything that changes the target requires a fresh session: the connector
     // pins origin and delegation at construction.
     if (session) stopSession('settings changed');
@@ -155,7 +216,13 @@ export function createRemoteAccessController({
     /** Persist a patch, then reconcile. Returns the resulting status. */
     update(patch) {
       return enqueue(async () => {
-        const merged = normalizeRemoteSettings(patch, readSettings());
+        const current = readSettings();
+        if (patch && Object.hasOwn(patch,'delegationVersion')) throw new Error('INVALID_DELEGATION_VERSION');
+        const merged = normalizeRemoteSettings(patchWithWorkspaceDefault(patch, current), current);
+        if (policySignature(merged) !== policySignature(current)) {
+          if (current.delegationVersion === Number.MAX_SAFE_INTEGER) throw new Error('INVALID_DELEGATION_VERSION');
+          merged.delegationVersion = current.delegationVersion + 1;
+        }
         settingsStore.merge({ [settingsKey]: merged });
         return applyInternal();
       });

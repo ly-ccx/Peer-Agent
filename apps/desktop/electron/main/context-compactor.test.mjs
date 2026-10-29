@@ -1078,6 +1078,51 @@ describe('context compactor · streaming progress (0007)', () => {
     assert.equal(events[1].payload.connection, 'electron-net-fetch');
   });
 
+  it('charges compaction physical attempts and retains unknown usage before success', async () => {
+    let sends = 0;
+    const admissions = [];
+    const observations = [];
+    const result = await compactIfNeeded({
+      messages: buildMessages(12, 20), systemPrompt: 'fixture', contextWindow: 100_000, force: true,
+      providerConfig: { provider: 'openai', wire: 'openai-responses', baseUrl: 'https://fixture.invalid', model: 'fixture' },
+      budgetGuard: { beforeRequest: metadata => admissions.push(metadata), observeUsage: (usage, key) => observations.push({ usage, key }) },
+      connectionRecoveryOptions: { requireElectronTransport: false, fetchImpl: async () => {
+        sends++;
+        if (sends === 1) throw Object.assign(new Error('connect timeout after 20000ms (ConnectTimeoutError)'), { code: 'ConnectTimeoutError' });
+        return makeSseResponse([
+          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'fixture summary' })}\n\n`,
+          `data: ${JSON.stringify({ type: 'response.completed', response: { usage: { input_tokens: 10, output_tokens: 2 } } })}\n\n`,
+          'data: [DONE]\n\n',
+        ]);
+      } },
+    });
+    assert.equal(result.compacted, true);
+    assert.equal(result.messages[1]._compaction.method, 'llm');
+    assert.equal(sends, 2);
+    assert.equal(admissions.length, 2);
+    assert.equal(observations.length, 2);
+    assert.equal(observations[0].usage, null);
+    assert.equal(observations[1].usage.totalTokens, 12);
+    assert.notEqual(observations[0].key, observations[1].key);
+  });
+
+  it('does not swallow compaction budget admission into structural fallback after unknown usage', async () => {
+    let sends = 0;
+    let unknown = false;
+    await assert.rejects(compactIfNeeded({
+      messages: buildMessages(12, 20), systemPrompt: 'fixture', contextWindow: 100_000, force: true,
+      providerConfig: { provider: 'openai', wire: 'openai-responses', baseUrl: 'https://fixture.invalid', model: 'fixture' },
+      budgetGuard: { beforeRequest() { if (unknown) throw new Error('work_budget_limited'); },
+        observeUsage(usage) { if (usage === null) unknown = true; } },
+      connectionRecoveryOptions: { requireElectronTransport: false, fetchImpl: async () => {
+        sends++;
+        throw Object.assign(new Error('connect timeout after 20000ms (ConnectTimeoutError)'), { code: 'ConnectTimeoutError' });
+      } },
+    }), error => error.message === 'work_budget_limited' && error.providerRecovery?.kind === 'budget_exhausted');
+    assert.equal(sends, 1);
+    assert.equal(unknown, true);
+  });
+
   it('falls back to structural when the stream errors', async () => {
     // body 不可读 → readSseStream 抛错 → catch 走 structural 兜底。
     globalThis.fetch = async () => ({ ok: true, body: null });

@@ -1,18 +1,31 @@
+import { randomUUID } from 'node:crypto';
 import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/protocol';
 import {
   createChatGptResponsesProvider,
   createOpenAICompatibleProvider,
-  effectiveFastMode,
   refreshChatGptOAuthTokens,
   type ModelProviderRequest,
-} from '@peer-agent/runtime-node';
+  resolveOpenCodeGoBaseUrl,
+  GROK_SUBSCRIPTION_HEADERS
+} from "@peer-agent/runtime-node/models";
+import {
+  effectiveFastMode
+} from "@peer-agent/runtime-node/providers";
+import {
+  createGoalPlanStore
+} from "@peer-agent/runtime-node/storage";
 
 import {
   missingModelConfigurationMessage,
   resolveTuiModelConfig,
   type TuiModelConfig,
 } from './model-config.ts';
-import { createTuiContextSelectionControl, createTuiModelSelectionControl, type TuiContextSelectionControl, type TuiModelSelectionControl } from './tui-model-selection.ts';
+import {
+  createTuiContextSelectionControl,
+  createTuiModelSelectionControl,
+  type TuiContextSelectionControl,
+  type TuiModelSelectionControl,
+} from './tui-model-selection.ts';
 import {
   createProviderChatModel,
   createUnavailableChatModel,
@@ -29,9 +42,10 @@ import {
   loadQoderAccessTokenFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { denyInteractiveTools, restrictTuiHostTools } from './cli-host-filter.ts';
-import { createTuiHost, type TuiHost } from './tui-host.ts';
+import { createTuiHost, type TuiHost, type TuiCapabilityProvider } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
-import { buildTuiSystemPrompt, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
+import { buildTuiSystemContext, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
+import { agentMessagesForContext, readWorkingContext, recordAgentContextAdmission } from '@peer-agent/runtime-node/project-agent';
 import { createTuiThemeStore, type TuiThemeStore } from './tui-theme.ts';
 import type { ChatModelPort } from './chat-controller.ts';
 
@@ -43,6 +57,10 @@ export interface CreateTuiRuntimeOptions {
   readonly toolAllowlist?: readonly string[];
   readonly denyInteractiveTools?: boolean;
   readonly initialFastMode?: boolean;
+  readonly providers?: readonly TuiCapabilityProvider[];
+  readonly oneTimeApprovals?: { match(input: object): boolean };
+  readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
+  readonly sessionApprovals?: Set<string>;
 }
 
 export interface TuiRuntime {
@@ -61,6 +79,7 @@ export interface TuiRuntime {
 export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
   const { workspaceRoot, userDataPath } = options;
   const providerFetch = createTuiProviderFetch();
+  const providerSessionId = `peer-${randomUUID()}`;
   const languageStore = createTuiLanguageStore({ userDataPath });
   const themeStore = createTuiThemeStore({ userDataPath });
   let host = createTuiHost({
@@ -68,6 +87,10 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     userDataPath,
     accessLevel: options.accessLevel,
     persistAccessLevel: options.persistAccessLevel,
+    providers: options.providers,
+    oneTimeApprovals: options.oneTimeApprovals,
+    goalPlanStore: options.goalPlanStore,
+    sessionApprovals: options.sessionApprovals,
   });
   if (options.toolAllowlist) {
     host = restrictTuiHostTools(host, options.toolAllowlist);
@@ -102,26 +125,29 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
           authMethod: metadata.authMethod,
           providerId: metadata.providerId,
           displayName: metadata.displayName,
+          model: request.model,
+          wireOverride: metadata.wireOverride,
         });
         if (decision.kind === 'unsupported') {
           throw new Error(decision.reason);
+        }
+        const baseUrl = metadata.channelId?.startsWith('opencode-go')
+          ? resolveOpenCodeGoBaseUrl(decision.wire, metadata.baseUrl) : metadata.baseUrl;
+        const channelHeaders = metadata.channelId?.startsWith('opencode-go')
+          ? {'x-opencode-session': providerSessionId} : undefined;
+
+        if (decision.wire === 'openai-responses' && metadata.authMethod === 'api_key') {
+          if (!selection.apiKey) throw new Error('desktop_model_credential_unavailable');
+          return createChatGptResponsesProvider({baseUrl, tokens:{access:selection.apiKey}, fetch:providerFetch, extraHeaders:channelHeaders}).stream(request);
         }
 
         // ChatGPT / Grok OAuth use OpenAI Responses.
         if (decision.wire === 'openai-responses') {
           return createChatGptResponsesProvider({
-            baseUrl: metadata.baseUrl,
+            baseUrl,
             fetch: providerFetch,
-            // Match desktop provider-channels Grok identity so CLI does not hit HTTP 426
-            // "Grok CLI version (none) is outdated" without requiring a local grok CLI.
             ...(metadata.authMethod === 'oauth_grok'
-              ? {
-                  extraHeaders: {
-                    'X-XAI-Token-Auth': 'xai-grok-cli',
-                    'x-grok-client-surface': 'grok-build',
-                    'x-grok-client-version': '0.1.202',
-                  },
-                }
+              ? { extraHeaders: GROK_SUBSCRIPTION_HEADERS }
               : {}),
             resolveTokens() {
               const current = modelConfig.resolveSharedSelection?.(credentialId);
@@ -162,7 +188,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         if (decision.wire === 'qoder-private') {
           return createQoderPrivateProvider({
             providerId: credentialId,
-            baseUrl: metadata.baseUrl,
+            baseUrl,
             async getAccessToken() {
               const current = modelConfig.resolveSharedSelection?.(credentialId);
               if (current?.apiKey) return current.apiKey;
@@ -175,7 +201,8 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         if (decision.wire === 'anthropic-messages') {
           return createAnthropicMessagesProvider({
             providerId: credentialId,
-            baseUrl: metadata.baseUrl,
+            extraHeaders: channelHeaders,
+            baseUrl,
             async getApiKey() {
               const current = modelConfig.resolveSharedSelection?.(credentialId);
               if (!current?.apiKey) {
@@ -190,7 +217,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         if (decision.wire === 'gemini') {
           return createGeminiProvider({
             providerId: credentialId,
-            baseUrl: metadata.baseUrl,
+            baseUrl,
             authMethod: metadata.authMethod || decision.authMethod || 'api_key',
             async getApiKey() {
               const current = modelConfig.resolveSharedSelection?.(credentialId);
@@ -225,7 +252,8 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
             config: {
               providerId: credentialId,
               apiKey,
-              baseUrl: metadata.baseUrl,
+              baseUrl,
+              headers: channelHeaders,
             },
             fetch: providerFetch,
           }).stream(request);
@@ -280,10 +308,13 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     const providerMetadata = modelConfig.sharedProviders?.find(
       (item) => item.credentialId === selection.providerId,
     );
-    return buildTuiSystemPrompt(
+    const assembled = buildTuiSystemContext(
       languageStore.getPromptSettings(),
       {
         ...(context.systemContextInput ?? {}),
+        ...(context.systemContextInput?.role === 'project_agent' ? { agentMessages: agentMessagesForContext(((context.systemContextInput?.turnContext as any)?.events || []).filter((event: any) => event.kind === 'agent_message').map((event: any) => ({ kind: 'agent_message', agentMessage: event.payload?.agentMessage })), context.conversationId, context.systemContextInput?.workspaceId) } : {}),
+        workingContext: readWorkingContext({ workspaceId: context.systemContextInput?.workspaceId,
+          workId: context.systemContextInput?.workId, conversationId: context.conversationId }),
         workspacePath: workspaceRoot,
         provider: providerMetadata?.channelId ?? selection.providerId,
         model: selection.modelId,
@@ -304,6 +335,8 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         ],
       },
     );
+    recordAgentContextAdmission(context.systemContextInput?.workspaceId, context.conversationId, assembled);
+    return assembled.rendered;
   };
   const model = provider
     ? createProviderChatModel({

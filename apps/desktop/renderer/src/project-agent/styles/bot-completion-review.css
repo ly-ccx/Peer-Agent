@@ -1,0 +1,16 @@
+.bot-card .bot-completion-title { margin: 0; font-weight: 600; }
+.bot-card .bot-completion-hint {
+  margin: 6px 0;
+  line-height: 1.55;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--graphite-soft);
+}
+.bot-completion-criteria { margin: 10px 0; padding-left: 20px; font-size: 13px; line-height: 1.6; }
+.bot-completion-open { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 12px; padding: 4px 0; border: 0; background: transparent; color: var(--graphite-soft); font-size: 12px; cursor: pointer; }
+.bot-completion-drawer { --pa-drawer-width: 560px; display: flex; flex-direction: column; min-height: 0; background: var(--paper-sheet); color: var(--graphite-base); }
+.bot-completion-drawer > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 24px; border-bottom: 1px solid var(--chrome-hairline); }
+.bot-completion-drawer h2 { margin: 0; font-size: 17px; }
+.bot-completion-drawer > header button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.bot-completion-report { flex: 1; min-height: 0; overflow: auto; padding: 16px 24px 24px; overflow-wrap: anywhere; font-size: 14px; }
+.bot-completion-report .bot-completion-hint { font-size: 12px; color: var(--graphite-soft); }

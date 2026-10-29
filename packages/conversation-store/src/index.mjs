@@ -1,12 +1,17 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, watchFile, unwatchFile } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
+import { createHistoryProjectionReader } from './history-projection-reader.mjs';
+import { createInteractionReader } from './interaction-reader.mjs';
+import { createHistorySourceReader } from './history-source-reader.mjs';
 import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
+import { withFileLock, withFileLockAsync } from './conversation-file-lock.mjs';
+import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -68,24 +73,6 @@ function writeChangeEvent(storeDir, event) {
     writerPid: process.pid,
     changedAt: new Date().toISOString(),
   }), 'utf8');
-}
-
-function withFileLock(filePath, operation) {
-  const lockDir = `${filePath}.lock`;
-  const deadline = Date.now() + 5_000;
-  while (true) {
-    try {
-      mkdirSync(lockDir);
-      break;
-    } catch (error) {
-      if (error?.code !== 'EEXIST' || Date.now() >= deadline) throw error;
-    }
-  }
-  try {
-    return operation();
-  } finally {
-    rmSync(lockDir, { recursive: true, force: true });
-  }
 }
 
 // 对话模式归一化。wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:
@@ -378,7 +365,7 @@ function normalizeMeta(meta) {
   const lastReadAt = typeof meta?.lastReadAt === 'string' && meta.lastReadAt.trim()
     ? meta.lastReadAt.trim()
     : null;
-  return {
+  const normalized = {
     ...normalizedBase,
     mode: normalizeMode(meta?.mode),
     fastMode: meta?.fastMode === true,
@@ -395,6 +382,18 @@ function normalizeMeta(meta) {
     ...(messageCount === undefined ? {} : { messageCount }),
     ...(automationOrigin ? { automationOrigin } : {}),
   };
+  if (!SPECIAL_CONVERSATION_ROLES.has(normalized.role)) delete normalized.role;
+  if (typeof normalized.parentConversationId !== 'string' || !normalized.parentConversationId.trim()) {
+    delete normalized.parentConversationId;
+  } else {
+    normalized.parentConversationId = normalized.parentConversationId.trim();
+  }
+  if (typeof normalized.workspaceId !== 'string' || !normalized.workspaceId.trim()) delete normalized.workspaceId;
+  else normalized.workspaceId = normalized.workspaceId.trim();
+  const delegation = normalizeDelegation(normalized.delegation);
+  if (delegation) normalized.delegation = delegation;
+  else delete normalized.delegation;
+  return normalized;
 }
 
 // 一次性数据迁移（wire 值迁移，见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:
@@ -423,6 +422,29 @@ function migrateLegacyGoalMode(storeDir, indexFile) {
   }
 }
 
+
+const SPECIAL_CONVERSATION_ROLES = new Set(['project_agent', 'work_session']);
+
+function conversationRole(meta) {
+  return SPECIAL_CONVERSATION_ROLES.has(meta?.role) ? meta.role : 'default';
+}
+
+function acceptsConversationRole(meta, roles) {
+  const requested = Array.isArray(roles)
+    ? roles.filter((role) => role === 'default' || SPECIAL_CONVERSATION_ROLES.has(role))
+    : [];
+  if (Array.isArray(roles) && roles.length > 0 && requested.length === 0) return false;
+  return (requested.length ? requested : ['default']).includes(conversationRole(meta));
+}
+
+function normalizeDelegation(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const sessionId = typeof value.sessionId === 'string' ? value.sessionId.trim() : '';
+  const anchorMessageId = typeof value.anchorMessageId === 'string' ? value.anchorMessageId.trim() : '';
+  const inputId = typeof value.inputId === 'string' ? value.inputId.trim() : '';
+  if (!sessionId || !anchorMessageId || !inputId) return null;
+  return { sessionId, anchorMessageId, inputId };
+}
 
 function normalizeSearchQuery(query) {
   return String(query || '').trim().toLowerCase();
@@ -480,10 +502,12 @@ export function createConversationStore(options = {}) {
   if (typeof storeDir !== 'string' || !storeDir.trim()) {
     throw new TypeError('createConversationStore(options): storeDir must be a non-empty string.');
   }
+  const historySources = createHistorySourceReader({ load: readPersistedHistoryFiles });
   const usageLogFile = options.usageLogFile === undefined
     ? path.join(path.dirname(storeDir), 'usage', 'requests.jsonl')
     : options.usageLogFile;
   const indexFile = path.join(storeDir, 'index.jsonl');
+  const interactions = createInteractionReader({ storeDir, readMeta: id => readIndex().find(row => row.id === id) });
   const contextSnapshotDir = path.join(storeDir, '.context-snapshots');
 
   // 撤销 'goal'→'plan' 兼容映射前,先对存量数据做一次性迁移,避免历史 'goal' 被误判为自驱语义。
@@ -647,7 +671,8 @@ export function createConversationStore(options = {}) {
   function listConversations(params = {}) {
     const statuses = normalizeStatuses(params?.status);
     const filtered = readIndex()
-      .filter((meta) => !statuses || statuses.has(normalizeStatus(meta.status)));
+      .filter((meta) => (!statuses || statuses.has(normalizeStatus(meta.status)))
+        && acceptsConversationRole(meta, params?.roles));
     const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
 
     // 显式 backfill 仅用于迁移工具/测试；默认 list 热路径永不读正文。
@@ -681,6 +706,7 @@ export function createConversationStore(options = {}) {
       const automationWorkspace = meta.automationOrigin?.originWorkspacePath || null;
       if (executionWorkspace !== requestedWorkspace && automationWorkspace !== requestedWorkspace) return false;
       if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
+      if (!acceptsConversationRole(meta, params?.roles)) return false;
       return true;
     });
     const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
@@ -727,6 +753,7 @@ export function createConversationStore(options = {}) {
     let items = readIndex().filter((meta) => {
       if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
       if (workspaceFilter !== undefined && (meta.workspacePath || null) !== workspaceFilter) return false;
+      if (!acceptsConversationRole(meta, params?.roles)) return false;
       return true;
     });
 
@@ -749,9 +776,13 @@ export function createConversationStore(options = {}) {
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function createConversation({ title, workspacePath, mode, fastMode, preferredExecutionIsolation, automationCreateContext, automationOrigin } = {}) {
+  function createConversation({ title, workspacePath, mode, fastMode, preferredExecutionIsolation, automationCreateContext, automationOrigin, role, workspaceId } = {}) {
+    if (role != null && !SPECIAL_CONVERSATION_ROLES.has(role)) {
+      throw Object.assign(new Error('CONVERSATION_ROLE_INVALID'), { code: 'CONVERSATION_ROLE_INVALID' });
+    }
     const now = new Date().toISOString();
     const normalizedOrigin = normalizeAutomationOrigin(automationOrigin);
+    const storedWorkspaceId = typeof workspaceId === 'string' && workspaceId.trim() ? workspaceId.trim() : undefined;
     const meta = {
       id: randomUUID(),
       title: title || '',
@@ -774,6 +805,8 @@ export function createConversationStore(options = {}) {
       contextSnapshot: null,
       ...(automationCreateContext ? { automationCreateContext: structuredClone(automationCreateContext) } : {}),
       ...(normalizedOrigin ? { automationOrigin: structuredClone(normalizedOrigin) } : {}),
+      ...(role ? { role } : {}),
+      ...(storedWorkspaceId ? { workspaceId: storedWorkspaceId } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -805,8 +838,98 @@ export function createConversationStore(options = {}) {
     });
   }
 
-  function createSelectionChild({ parentConversationId, requestId, selection, runtimeState, capturedAt, confirmMissing = false }) {
+  function createSelectionChild(input = {}) {
+    return createChildConversation({
+      parentConversationId: input.parentConversationId,
+      anchorMessageId: input.selection?.messageId,
+      snapshotPolicy: 'inherited',
+      runtimeState: input.runtimeState,
+      capturedAt: input.capturedAt,
+      confirmMissing: input.confirmMissing === true,
+      requestId: input.requestId,
+      selection: input.selection,
+    });
+  }
+
+  function historyThroughAnchor(history, anchorMessageId, fail) {
+    if (!history || !Array.isArray(history.messages)) fail('SOURCE_MISSING');
+    const index = history.messages.findIndex((row) => row.id === anchorMessageId);
+    if (index < 0) fail('CHILD_ANCHOR_MISSING');
+    return { ...history, messages: history.messages.slice(0, index + 1) };
+  }
+
+  function createChildConversation(input = {}) {
     const fail = (code) => { throw Object.assign(new Error(code), { code }); };
+    if (input.snapshotPolicy === 'inherited' || input.selection || input.requestId != null) {
+      return openSelectionChild(input, fail);
+    }
+    const parentConversationId = typeof input.parentConversationId === 'string' ? input.parentConversationId : '';
+    const anchorMessageId = typeof input.anchorMessageId === 'string' ? input.anchorMessageId.trim() : '';
+    if (!parentConversationId) fail('CHILD_PARENT_MISSING');
+    if (!anchorMessageId) fail('CHILD_ANCHOR_MISSING');
+    if (input.role != null && !SPECIAL_CONVERSATION_ROLES.has(input.role)) fail('CONVERSATION_ROLE_INVALID');
+    const delegation = input.delegation == null ? undefined : normalizeDelegation(input.delegation);
+    if (input.delegation != null && !delegation) fail('CHILD_DELEGATION_INVALID');
+    const workspaceId = typeof input.workspaceId === 'string' && input.workspaceId.trim() ? input.workspaceId.trim() : undefined;
+    return withFileLock(indexFile, () => {
+      const index = readIndex();
+      const parent = index.find((row) => row.id === parentConversationId);
+      if (!parent) fail('CHILD_PARENT_MISSING');
+      const history = getPersistedConversationHistory(parentConversationId);
+      const throughAnchor = historyThroughAnchor(history, anchorMessageId, fail);
+      const scoped = input.backgroundMessageIds !== undefined;
+      if (scoped && (input.role !== 'work_session' || !delegation
+        || delegation.anchorMessageId !== anchorMessageId
+        || !Array.isArray(input.backgroundMessageIds)
+        || !input.backgroundMessageIds.includes(anchorMessageId))) fail('BACKGROUND_SCOPE_INVALID');
+      const source = scoped ? history : throughAnchor;
+      const presetSnapshotId = typeof input.backgroundSnapshotId === 'string'
+        ? input.backgroundSnapshotId.trim()
+        : '';
+      const snapshots = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds'));
+      let backgroundSnapshotId = presetSnapshotId;
+      if (backgroundSnapshotId) {
+        const existing = snapshots.read(backgroundSnapshotId);
+        if (existing?.requiresMissingConfirmation && input.confirmMissing !== true) {
+          fail('BACKGROUND_CONFIRMATION_REQUIRED');
+        }
+      } else {
+        const snapshot = buildInheritedBackground(source, {
+          expectedRevision: input.runtimeState?.contentRevision,
+          runtimeState: input.runtimeState,
+          capturedAt: input.capturedAt,
+          ...(scoped ? { messageIds: input.backgroundMessageIds } : {}),
+        });
+        if (snapshot.requiresMissingConfirmation && input.confirmMissing !== true) fail('BACKGROUND_CONFIRMATION_REQUIRED');
+        backgroundSnapshotId = snapshots.put(snapshot);
+      }
+      if (JSON.stringify(getPersistedConversationHistory(parentConversationId)) !== JSON.stringify(history)) fail('BACKGROUND_VERSION_CHANGED');
+      const now = new Date().toISOString();
+      const child = normalizeMeta({
+        id: randomUUID(),
+        title: typeof input.title === 'string' ? input.title : '',
+        workspacePath: input.workspacePath ?? parent.workspacePath ?? null,
+        mode: input.mode || 'chat',
+        fastMode: false,
+        modelProviderId: input.modelProviderId ?? parent.modelProviderId,
+        effort: input.effort ?? parent.effort,
+        status: 'active',
+        messageCount: 0,
+        contentRevision: 0,
+        createdAt: now,
+        updatedAt: now,
+        ...(input.role ? { role: input.role } : {}),
+        parentConversationId,
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(delegation ? { delegation } : {}),
+        backgroundSnapshotId,
+      });
+      writeJsonl(indexFile, [...index, child]);
+      return withMessageCount(child);
+    });
+  }
+
+  function openSelectionChild({ parentConversationId, requestId, selection, runtimeState, capturedAt, confirmMissing = false }, fail) {
     if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200) fail('CHILD_REQUEST_INVALID');
     if (!selection || typeof selection !== 'object' || Array.isArray(selection)) fail('INVALID_SELECTION');
     // Fixed field order makes retry identity independent of object insertion order.
@@ -841,6 +964,7 @@ export function createConversationStore(options = {}) {
         workspacePath: parent.workspacePath, mode: 'chat', fastMode: false,
         modelProviderId: parent.modelProviderId, model: parent.model, effort: parent.effort,
         status: 'active', messageCount: 0, contentRevision: 0, createdAt: now, updatedAt: now,
+        parentConversationId,
         selectionOrigin: { schemaVersion: 1, parentConversationId, requestId,
           requestSelection: structuredClone(requestSelection), reference, snapshotId, createdAt: now },
         selectionDraft: { text: '', references: [reference] },
@@ -857,6 +981,24 @@ export function createConversationStore(options = {}) {
       .map(({ selectionOrigin, selectionDraft, ...meta }) => ({ ...withMessageCount(meta),
         parentConversationId, sourceReference: selectionOrigin.reference,
         hasDraft: Boolean(selectionDraft?.text || selectionDraft?.references?.length) }));
+  }
+
+  function childParentId(row) {
+    if (typeof row?.parentConversationId === 'string' && row.parentConversationId.trim()) {
+      return row.parentConversationId;
+    }
+    return typeof row?.selectionOrigin?.parentConversationId === 'string'
+      ? row.selectionOrigin.parentConversationId
+      : '';
+  }
+
+  function listChildren(parentConversationId, params = {}) {
+    const role = params?.role;
+    if (role != null && role !== 'default' && !SPECIAL_CONVERSATION_ROLES.has(role)) return [];
+    return readIndex()
+      .filter((row) => childParentId(row) === parentConversationId
+        && (role == null || conversationRole(row) === role))
+      .map((row) => withMessageCount({ ...row }));
   }
 
   /** Internal draft write. Only references already owned by this session can be retained. */
@@ -985,14 +1127,49 @@ export function createConversationStore(options = {}) {
    * Never use this read as an authorization check.
    */
   function getPersistedConversationHistory(id) {
-    const meta = readIndex().find((entry) => entry.id === id);
-    if (!meta) return null;
-    return readPersistedHistoryFiles({
-      historyFile: convFile(id),
-      sidecarFile: streamPatchFile(id),
-      conversationId: meta.id,
-      contentRevision: meta.contentRevision,
+    return getPersistedConversationHistories([id]).get(id) ?? null;
+  }
+
+  /** Presentation facts only; execution and authority reads retain their existing strict APIs. */
+  function createHistoryProjection(project, options = {}) {
+    let metadataVersion, metadata = new Map();
+    const fileVersion = file => {
+      try { return conversationFileVersion(file); }
+      catch (error) { if (error.code === 'ENOENT') return 'missing'; throw error; }
+    };
+    const describe = id => {
+      const token = fileVersion(indexFile);
+      if (token !== metadataVersion) {
+        const next = new Map(readIndex().map(row => [row.id, row]));
+        if (fileVersion(indexFile) !== token) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED'), { code: 'BACKGROUND_VERSION_CHANGED' });
+        metadata = next; metadataVersion = token;
+      }
+      const meta = metadata.get(id);
+      if (!meta) return null;
+      const historyFile = convFile(id), sidecarFile = streamPatchFile(id);
+      return { conversationId: id, contentRevision: meta.contentRevision, createdAt: meta.createdAt, historyFile, sidecarFile,
+        version: JSON.stringify([meta.contentRevision, meta.createdAt, fileVersion(historyFile), fileVersion(sidecarFile)]) };
+    };
+    return createHistoryProjectionReader({ ...options, project, describe,
+      load: description => historySources(description, { immutableInput: options.immutableInput === true,
+        isCurrent: () => describe(description.conversationId)?.version === description.version }),
     });
+  }
+
+  function getPersistedConversationHistories(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).filter(id => typeof id === 'string' && id));
+    const result = new Map();
+    if (!wanted.size) return result;
+    const metadata = new Map();
+    for (const meta of readIndex()) if (wanted.has(meta.id) && !metadata.has(meta.id)) metadata.set(meta.id, meta);
+    for (const id of wanted) {
+      const meta = metadata.get(id);
+      result.set(id, meta ? readPersistedHistoryFiles({
+        historyFile: convFile(id), sidecarFile: streamPatchFile(id),
+        conversationId: meta.id, contentRevision: meta.contentRevision,
+      }) : null);
+    }
+    return result;
   }
 
   /** Internal capture API: runtimeState must be resolved by the authorized host.
@@ -1164,7 +1341,7 @@ export function createConversationStore(options = {}) {
     return messages.filter((message) => !isEmptyUserMessage(message));
   }
 
-  function appendMessage(id, message) {
+  function appendMessage(id, message, { returnMessages = true } = {}) {
     return withFileLock(indexFile, () => {
       const index = readIndex();
       const meta = index.find((c) => c.id === id);
@@ -1200,7 +1377,7 @@ export function createConversationStore(options = {}) {
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
-      return { ...meta, messages: readJsonl(convFile(id)) };
+      return returnMessages ? { ...meta, messages: readJsonl(convFile(id)) } : { ...meta };
     });
   }
 
@@ -1273,6 +1450,27 @@ export function createConversationStore(options = {}) {
     }
     return meta ? { ...meta, messages } : null;
   }
+
+  const terminalCommitter = createTerminalMessageCommitter({ storeDir,
+    commitPrepared: async prepared => {
+      const result = await withFileLockAsync(indexFile, () => withFileLockAsync(prepared.historyFile, () => {
+      const index = readIndex(), meta = index.find(row => row.id === prepared.id);
+      if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
+      if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
+      renameSync(prepared.temporaryFile, prepared.historyFile);
+      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+      meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
+      writeJsonl(indexFile, index);
+      if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
+      return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
+      }));
+      if (result === false) return false;
+      // Subscribers may write again. Notify only after both locks have been released.
+      publishChange(result.meta, 'messages-updated');
+      return result.receipt;
+    },
+  });
+  const messageWrite = operation => (...args) => withFileLock(indexFile, () => withFileLock(convFile(args[0]), () => operation(...args)));
 
   // 会话级累计用量账本。独立挂在 index meta 上（不在消息 jsonl 里），
   // 因此压缩（replaceMessages 仅重写消息文件）不会触及它 —— 这是修复
@@ -1446,6 +1644,8 @@ export function createConversationStore(options = {}) {
           + tokens.cacheWriteTokens,
         estimatedCostUsd: Number.isFinite(estimatedCost) ? estimatedCost : null,
         pricingSource: optionalText(attribution.pricingSource),
+        ...(optionalText(attribution.role) ? { role: optionalText(attribution.role) } : {}),
+        ...(optionalText(attribution.workspaceId) ? { workspaceId: optionalText(attribution.workspaceId) } : {}),
       };
       appendJsonl(usageLogFile, ledgerRow);
       return {
@@ -1637,22 +1837,33 @@ export function createConversationStore(options = {}) {
     };
   }
 
+  function readChangeEvent(changeFile) {
+    try {
+      const event = JSON.parse(readFileSync(changeFile, 'utf8'));
+      return event?.revision ? event : null;
+    } catch {
+      // 文件可能还不存在，或正处在一次写入的中间。
+      return null;
+    }
+  }
+
   function subscribeChanges(listener, { interval = 200 } = {}) {
     const changeFile = path.join(storeDir, '.changes.json');
     mkdirSync(storeDir, { recursive: true });
-    let lastRevision = null;
+    // fs.watchFile 走 libuv fs_poll：第一次成功 stat 只当作基线，不会回调。
+    // 订阅之后、这次 stat 返回之前写入的变更会被吞掉，后续没有第二次修改就永远看不到。
+    // 改为按内容轮询。订阅当下的 revision 记为已读，避免把历史变更重放给新订阅者。
+    const period = Number.isFinite(interval) && interval >= 1 ? interval : 200;
+    let lastRevision = readChangeEvent(changeFile)?.revision ?? null;
     const handleChange = () => {
-      try {
-        const event = JSON.parse(readFileSync(changeFile, 'utf8'));
-        if (!event?.revision || event.revision === lastRevision) return;
-        lastRevision = event.revision;
-        listener(event);
-      } catch {
-        // The journal may not exist yet or may be between atomic observations.
-      }
+      const event = readChangeEvent(changeFile);
+      if (!event || event.revision === lastRevision) return;
+      lastRevision = event.revision;
+      listener(event);
     };
-    watchFile(changeFile, { interval, persistent: false }, handleChange);
-    return () => unwatchFile(changeFile, handleChange);
+    const timer = setInterval(handleChange, period);
+    timer.unref?.();
+    return () => clearInterval(timer);
   }
 
   return {
@@ -1664,9 +1875,16 @@ export function createConversationStore(options = {}) {
     createConversation: changed(createConversation, 'created'),
     getConversation,
     getPersistedConversationHistory,
+    readInteractionPage: interactions.readPage,
+    readInteractionContext: interactions.readContext,
+    readInteractionProcess: interactions.readProcess,
+    createHistoryProjection,
+    getPersistedConversationHistories,
     resolveSelectionReference,
     createSelectionChild: changed(createSelectionChild, 'created'),
+    createChildConversation: changed(createChildConversation, 'created'),
     listSelectionChildren,
+    listChildren,
     updateSelectionChildDraft,
     captureInheritedBackground,
     readInheritedBackground,
@@ -1680,12 +1898,14 @@ export function createConversationStore(options = {}) {
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
     updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),
     appendMessage: changed(appendMessage, 'messages-updated'),
-    updateLastMessage: changed(updateLastMessage, 'messages-updated'),
-    updateMessageById: changed(updateMessageById, 'messages-updated'),
+    updateLastMessage: changed(messageWrite(updateLastMessage), 'messages-updated'),
+    updateMessageById: changed(messageWrite(updateMessageById), 'messages-updated'),
+    commitStreamingMessage: terminalCommitter.commit,
+    drainPendingCommits: terminalCommitter.drain,
     // 流式 sidecar 通道：高频、无广播（终态由 updateMessageById 收口并清理）。
     patchStreamingMessage,
     clearStreamPatch,
-    replaceMessages: changed(replaceMessages, 'messages-updated'),
+    replaceMessages: changed(messageWrite(replaceMessages), 'messages-updated'),
     addUsage: changed(addUsage, 'metadata-updated'),
     recordRuntimeTurnUsage: changed(recordRuntimeTurnUsage, 'metadata-updated'),
     archiveConversation: changed(archiveConversation, 'metadata-updated'),
@@ -1694,8 +1914,8 @@ export function createConversationStore(options = {}) {
     unpinConversation: changed(unpinConversation, 'metadata-updated'),
     reorderPinnedConversations,
     autoArchiveConversations,
-    deleteConversation: changed(deleteConversation, 'deleted'),
-    deleteConversationsByWorkspace,
+    deleteConversation: changed(messageWrite(deleteConversation), 'deleted'),
+    deleteConversationsByWorkspace: (...args) => withFileLock(indexFile, () => deleteConversationsByWorkspace(...args)),
     subscribeChanges,
   };
 }

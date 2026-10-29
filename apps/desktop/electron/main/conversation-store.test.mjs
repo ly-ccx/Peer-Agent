@@ -1064,6 +1064,10 @@ test('searchConversations empty query returns recent active conversations with l
     const newer = store.createConversation({ title: 'Newer', workspacePath: '/ws/b' });
     const archived = store.createConversation({ title: 'Archived recent', workspacePath: '/ws/c' });
     store.archiveConversation(archived.id);
+    const stampedAt = new Date().toISOString();
+    while (new Date().toISOString() === stampedAt) {
+      // updatedAt is millisecond ISO. A same-millisecond bump does not sort newer first.
+    }
     store.updateTitle(newer.id, 'Newer');
 
     const results = store.searchConversations({ query: '  ', limit: 1 });

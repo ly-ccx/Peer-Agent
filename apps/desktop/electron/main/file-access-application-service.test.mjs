@@ -1,7 +1,32 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
+
+test('Bot filename search uses only the host-resolved directory and fails closed on denial', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'peer-bot-search-'));
+  try {
+    fs.writeFileSync(path.join(root, 'visible.md'), 'body is not returned');
+    const seen = [];
+    const { service } = createHarness({ resolveBotDocument: async reference => {
+      seen.push(reference);
+      return reference.path === '.' ? { ok: true, target: root } : { ok: false, status: 'scope_denied' };
+    } });
+    const result = await service.searchWorkspaceFiles({ workspacePath: '/forged-root', query: 'visible', documentReference: { workspaceId: 'bot', path: '.' } });
+    assert.equal(result.scoped, true);
+    assert.equal(result.workspacePath, root);
+    assert.deepEqual(result.files, [{ relPath: 'visible.md', name: 'visible.md', kind: 'file' }]);
+    assert.deepEqual(seen[0], { workspaceId: 'bot', path: '.', kind: 'directory' });
+    const denied = await service.searchWorkspaceFiles({ workspacePath: root, documentReference: { workspaceId: 'bot', path: '../outside' } });
+    assert.deepEqual(denied, { ok: false, status: 'scope_denied', scoped: true, files: [] });
+    const unavailable = await createHarness().service.searchWorkspaceFiles({ workspacePath: root, documentReference: { workspaceId: 'bot', path: '.' } });
+    assert.equal(unavailable.status, 'workspace_unavailable');
+    assert.deepEqual(unavailable.files, []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 class FakeWatcher extends EventEmitter {
   constructor(onChange) {
@@ -59,8 +84,10 @@ function createHarness(overrides = {}) {
   const watchers = [];
   const written = [];
   const created = [];
+  const reads = [];
 
   const service = createFileAccessApplicationService({
+    resolveBotDocument: overrides.resolveBotDocument,
     getSettings: () => settings,
     pathExists: (candidate) => nodes.has(candidate),
     statPath: (candidate) => {
@@ -80,7 +107,13 @@ function createHarness(overrides = {}) {
         isDirectory: () => entry.isDir,
       }));
     },
+    readDirectoryBounded: overrides.disableBounded ? undefined : overrides.readDirectoryBounded ?? ((candidate, limit) => {
+      const node = nodes.get(candidate);
+      if (!node || node.kind !== 'directory') throw new Error('ENOTDIR');
+      return { entries: node.entries.slice(0, limit).map(entry => ({ name: entry.name, isDirectory: () => entry.isDir })), truncated: node.entries.length > limit };
+    }),
     readFile: (candidate) => {
+      reads.push(candidate);
       const node = nodes.get(candidate);
       if (!node || node.kind !== 'file') throw new Error('ENOENT');
       return node.buffer;
@@ -108,7 +141,7 @@ function createHarness(overrides = {}) {
     },
   });
 
-  return { service, nodes, gitCalls, watchers, written, created };
+  return { service, nodes, gitCalls, watchers, written, created, reads };
 }
 
 test('read-directory hides node_modules so file-tree watch cannot follow isolate symlinks', () => {
@@ -202,10 +235,10 @@ test('exists and read-directory recover by relative path across known workspaces
 test('git diff applies working, staged, and last-commit fallbacks in order', async () => {
   const responses = new Map([
     ['rev-parse --show-toplevel', '/repo\n'],
-    ['ls-files --error-unmatch -- src/file.txt', 'src/file.txt\n'],
-    ['diff -- src/file.txt', ''],
-    ['diff --staged -- src/file.txt', ''],
-    ['diff HEAD~1 HEAD -- src/file.txt', 'last diff'],
+    ['ls-files --error-unmatch -- :(literal)src/file.txt', 'src/file.txt\n'],
+    ['diff --no-ext-diff --no-textconv --no-color -- :(literal)src/file.txt', ''],
+    ['diff --no-ext-diff --no-textconv --no-color --staged -- :(literal)src/file.txt', ''],
+    ['diff --no-ext-diff --no-textconv --no-color HEAD~1 HEAD -- :(literal)src/file.txt', 'last diff'],
   ]);
   const harness = createHarness({
     nodes: [
@@ -230,10 +263,10 @@ test('git diff applies working, staged, and last-commit fallbacks in order', asy
   });
   assert.deepEqual(harness.gitCalls.map(([, args]) => args), [
     ['rev-parse', '--show-toplevel'],
-    ['ls-files', '--error-unmatch', '--', 'src/file.txt'],
-    ['diff', '--', 'src/file.txt'],
-    ['diff', '--staged', '--', 'src/file.txt'],
-    ['diff', 'HEAD~1', 'HEAD', '--', 'src/file.txt'],
+    ['ls-files', '--error-unmatch', '--', ':(literal)src/file.txt'],
+    ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--', ':(literal)src/file.txt'],
+    ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--staged', '--', ':(literal)src/file.txt'],
+    ['diff', '--no-ext-diff', '--no-textconv', '--no-color', 'HEAD~1', 'HEAD', '--', ':(literal)src/file.txt'],
   ]);
 });
 
@@ -248,8 +281,9 @@ test('git diff handles recovered untracked files and non-repositories', async ()
       const key = args.join(' ');
       if (key === 'rev-parse --show-toplevel') return { stdout: '/ws-b\n' };
       if (key.startsWith('ls-files ')) throw new Error('untracked');
-      if (key === 'diff --no-index -- /dev/null /ws-b/new.txt') {
+      if (key === 'diff --no-ext-diff --no-textconv --no-color --no-index -- /dev/null /ws-b/new.txt') {
         const error = new Error('different');
+        error.code = 1;
         error.stdout = 'new file diff';
         throw error;
       }
@@ -287,7 +321,7 @@ test('git range diff and branch list stay inside a known repository', async () =
     executeGit: async (_cwd, args) => {
       const key = args.join(' ');
       if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
-      if (key === 'diff --no-color abc def') return { stdout: 'range diff' };
+      if (key === 'diff --no-ext-diff --no-textconv --no-color abc def') return { stdout: 'range diff' };
       if (key === 'branch --show-current') return { stdout: 'develop\n' };
       if (key === 'for-each-ref --format=%(refname:short) refs/heads') return { stdout: 'develop\nmain\n' };
       if (key === 'for-each-ref --format=%(refname:short) refs/remotes') {
@@ -307,6 +341,7 @@ test('git range diff and branch list stay inside a known repository', async () =
     diffText: 'range diff',
     fromRef: 'abc',
     toRef: 'def',
+    workspaceRoot: '/repo',
   });
   assert.deepEqual(await harness.service.getGitRangeDiff({
     workspaceRoot: '/repo',
@@ -732,3 +767,202 @@ test('readImageDataUrl returns base64 dataUrl for image files', () => {
   });
 });
 
+
+test('scoped Bot references reuse the bounded text reader and fail closed before legacy fallback', async () => {
+  const h = createHarness({ nodes: [['/ws-a/report.md', file('# Read-only report')]],
+    resolveBotDocument: async reference => reference.path === 'report.md'
+      ? { ok: true, root: '/ws-a', target: '/ws-a/report.md' }
+      : { ok: false, status: 'scope_denied', content: '' } });
+  const documentReference = { workspaceId: 'bot', path: 'report.md' };
+  const result = await h.service.readFile({ absPath: '', documentReference });
+  assert.equal(result.ok, true);
+  assert.equal(result.content, '# Read-only report');
+  assert.equal(result.resolvedPath, '/ws-a/report.md');
+  assert.equal(result.resolvedFrom, '/ws-a');
+  const denied = await h.service.readFile({ absPath: '/ws-a/report.md', documentReference: { ...documentReference, path: '/outside/secret.md' } });
+  assert.deepEqual(denied, { ok: false, status: 'scope_denied', content: '' });
+  assert.equal(h.written.length, 0);
+});
+
+test('source selection is returned without reading a legacy fallback file or losing the confirmed candidates', async () => {
+  const choice = { ok: false, status: 'relative_base_required', content: '',
+    candidates: [{ path: '/ws-b/report.md', root: '/ws-b' }] };
+  const h = createHarness({ nodes: [['/ws-a/report.md', file('must not read')]], resolveBotDocument: async () => choice });
+  const result = await h.service.readFile({ absPath: '/ws-a/report.md', documentReference: { workspaceId: 'bot', path: 'report.md' } });
+  assert.deepEqual(result, choice); assert.equal(result.content, ''); assert.equal(h.written.length, 0);
+});
+
+test('R1/R3 Bot metadata/stat, directory and Diff deny access before legacy reads or Git', async () => {
+  const harness = createHarness({ resolveBotDocument: async () => ({ ok: false, status: 'scope_denied' }) });
+  const documentReference = { workspaceId: 'bot', path: '/private' };
+  for (const result of [await harness.service.readFile({ documentReference }), await harness.service.readDirectory({ documentReference }),
+    await harness.service.readImageDataUrl({ documentReference }), await harness.service.getGitDiff({ documentReference }),
+    await harness.service.getGitRangeDiff({ documentReference, fromRef: 'HEAD' })]) assert.equal(result.ok, false);
+  assert.equal(harness.gitCalls.length, 0);
+  assert.equal(harness.written.length, 0);
+  assert.equal(harness.created.length, 0);
+});
+
+test('R1 metadata-only directory resolution does not materialize file content or directory children', async () => {
+  const harness = createHarness({ resolveBotDocument: async () => ({ ok: true, target: '/ws-a', root: '/ws-a' }) });
+  const result = await harness.service.readFile({ documentReference: { workspaceId: 'bot', path: '.', kind: 'directory', metadataOnly: true } });
+  assert.equal(result.ok, true);
+  assert.equal(result.metadataOnly, true);
+  assert.equal(result.content, '');
+  assert.equal(result.resolvedPath, '/ws-a');
+  assert.equal(result.entries, undefined);
+});
+
+test('R4 scoped directory listing signals its bound and creates no watcher', async () => {
+  const entries = Array.from({ length: 1001 }, (_, i) => ({ name: `${i}.md`, isDir: false }));
+  const harness = createHarness({ nodes: [['/ws-a', directory(entries)]], resolveBotDocument: async () => ({ ok: true, target: '/ws-a', root: '/ws-a' }) });
+  const result = await harness.service.readDirectory({ documentReference: { workspaceId: 'bot', path: '.', kind: 'directory' } });
+  assert.equal(result.ok, true);
+  assert.equal(result.resolvedPath, '/ws-a');
+  assert.equal(result.resolvedFrom, '/ws-a');
+  assert.equal(result.entries.length, 1000);
+  assert.equal(result.truncated, true);
+  assert.equal(harness.watchers.length, 0);
+});
+
+test('scoped directory reads require the bounded port and preserve exact permission/missing failures', async () => {
+  const resolveBotDocument = async () => ({ ok: true, target: '/ws-a', root: '/ws-a' });
+  const missing = createHarness({ resolveBotDocument, disableBounded: true });
+  assert.equal((await missing.service.readDirectory({ documentReference: { workspaceId: 'bot', path: '.' } })).status, 'workspace_unavailable');
+  for (const [code, status] of [['EACCES', 'permission_denied'], ['ENOENT', 'not_found'], ['ENOTDIR', 'not_dir']]) {
+    const h = createHarness({ resolveBotDocument, readDirectoryBounded(target, limit) {
+      assert.equal(target, '/ws-a'); assert.equal(limit, 1000);
+      throw Object.assign(new Error('read failed'), { code });
+    } });
+    const result = await h.service.readDirectory({ absPath: '/forged', documentReference: { workspaceId: 'bot', path: '.' } });
+    assert.equal(result.ok, false); assert.equal(result.status, status); assert.deepEqual(result.entries, []);
+    assert.equal(h.written.length, 0);
+  }
+});
+
+test('R4 range comparison freezes revisions, constrains scope and disables executable diff helpers', async () => {
+  const harness = createHarness({ nodes: [['/ws-a/docs', directory()]], resolveBotDocument: async () => ({ ok: true, target: '/ws-a/docs', root: '/ws-a' }),
+    executeGit: async (_cwd, args) => {
+      if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return { stdout: '/ws-a\n' };
+      if (args[0] === 'rev-parse') return { stdout: `${args.at(-1).startsWith('base') ? 'a' : 'b'}`.repeat(40) + '\n' };
+      return { stdout: 'diff --git a/docs/a.md b/docs/a.md\n' };
+    } });
+  const result = await harness.service.getGitRangeDiff({ documentReference: { workspaceId: 'bot', path: 'docs', kind: 'directory' }, fromRef: 'base', toRef: 'topic' });
+  assert.equal(result.ok, true);
+  assert.equal(result.fromRef, 'a'.repeat(40));
+  assert.equal(result.toRef, 'b'.repeat(40));
+  const diff = harness.gitCalls.find(([, args]) => args[0] === 'diff')[1];
+  assert.ok(diff.includes('--no-ext-diff')); assert.ok(diff.includes('--no-textconv'));
+  assert.deepEqual(diff.slice(-2), ['--', ':(literal)docs']);
+  assert.equal(harness.written.length, 0);
+});
+
+test('R4 an incomplete/failed Git buffer is a failure, not a successful partial Diff', async () => {
+  const harness = createHarness({ executeGit: async (_cwd, args) => {
+    if (args[0] === 'rev-parse') return { stdout: '/ws-a\n' };
+    throw Object.assign(new Error('maxBuffer exceeded'), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', stdout: 'partial diff' });
+  } });
+  const result = await harness.service.getGitRangeDiff({ workspaceRoot: '/ws-a', fromRef: 'HEAD' });
+  assert.equal(result.ok, false);
+  assert.equal(result.diffText, '');
+});
+
+test('R4 explicit working comparison never falls through to staged or old commit content', async () => {
+  const harness = createHarness({ nodes: [['/ws-a/a.md', file('text')]], executeGit: async (_cwd, args) => {
+    if (args[0] === 'rev-parse') return { stdout: '/ws-a\n' };
+    if (args[0] === 'ls-files') return { stdout: 'a.md\n' };
+    if (args.includes('--staged') || args.includes('HEAD~1')) throw new Error('unexpected fallback');
+    return { stdout: '' };
+  } });
+  const result = await harness.service.getGitDiff({ absPath: '/ws-a/a.md', comparison: 'working' });
+  assert.equal(result.status, 'no_changes');
+  assert.equal(harness.gitCalls.filter(([, args]) => args[0] === 'diff').length, 1);
+});
+
+test('scoped observations bind exact bytes and physical source; metadata remains a stat-only read', async () => {
+  let target = '/ws-a/report.md';
+  const h = createHarness({ nodes: [[target, file('old!')]], resolveBotDocument: async () => ({ ok: true, root: path.dirname(target), target }) });
+  const reference = { workspaceId: 'bot', path: 'report.md' };
+  const metadata = await h.service.readFile({ documentReference: { ...reference, metadataOnly: true } });
+  assert.equal(metadata.content, ''); assert.equal(metadata.observation, undefined);
+  assert.equal(h.reads.length, 0);
+  const first = await h.service.readFile({ documentReference: reference });
+  assert.match(first.observation.contentVersion, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(first.observation.resourceId, metadata.identity.resourceId);
+  h.nodes.set(target, file('new!')); // Identical length and no timestamp signal.
+  const changed = await h.service.readFile({ documentReference: { ...reference, expectedObservation: first.observation } });
+  assert.equal(changed.status, 'version_changed'); assert.equal(changed.content, '');
+  assert.notEqual(changed.observation.contentVersion, first.observation.contentVersion);
+  const adopted = await h.service.readFile({ documentReference: { ...reference, expectedObservation: { resourceId: first.observation.resourceId } } });
+  assert.equal(adopted.content, 'new!');
+  target = '/ws-b/report.md'; // Not present: source mismatch must fail before any byte read.
+  const beforeMove = h.reads.length;
+  const moved = await h.service.readFile({ documentReference: { ...reference, expectedObservation: first.observation } });
+  assert.equal(moved.status, 'source_changed'); assert.equal(moved.content, '');
+  assert.equal(h.reads.length, beforeMove);
+  assert.equal(h.written.length, 0); assert.equal(h.gitCalls.length, 0);
+});
+
+test('image observations use the same conditional source/version rules and legacy calls remain unchanged', async () => {
+  const h = createHarness({ nodes: [['/ws-a/shot.png', file(Buffer.from([1, 2, 3]))]],
+    resolveBotDocument: async () => ({ ok: true, root: '/ws-a', target: '/ws-a/shot.png' }) });
+  const reference = { workspaceId: 'bot', path: 'shot.png' };
+  const first = await h.service.readImageDataUrl({ documentReference: reference });
+  h.nodes.set('/ws-a/shot.png', file(Buffer.from([3, 2, 1])));
+  const changed = await h.service.readImageDataUrl({ documentReference: { ...reference, expectedObservation: first.observation } });
+  assert.equal(changed.status, 'version_changed'); assert.equal(changed.dataUrl, '');
+  assert.notEqual(changed.observation.contentVersion, first.observation.contentVersion);
+  const legacy = h.service.readImageDataUrl({ absPath: '/ws-a/shot.png' });
+  assert.equal(legacy.ok, true); assert.equal(legacy.observation, undefined);
+  assert.equal((await h.service.readFile({ documentReference: { ...reference, expectedObservation: {} } })).status, 'invalid_path');
+  assert.equal((await h.service.readImageDataUrl({ documentReference: { ...reference, expectedObservation: null } })).status, 'invalid_path');
+});
+
+test('historical file/image entry points cannot fall through to live reads or live Diff', async () => {
+  const h = createHarness({ resolveBotDocument: async () => ({ ok: false, status: 'scope_denied' }) });
+  const documentReference = { workspaceId: 'bot', path: 'a.md', revision: { kind: 'git', commit: 'a'.repeat(40) } };
+  assert.equal((await h.service.readFile({ absPath: '/ws-a/a.md', documentReference })).status, 'scope_denied');
+  assert.equal((await h.service.readImageDataUrl({ absPath: '/ws-a/shot.png', documentReference })).status, 'scope_denied');
+  assert.equal((await h.service.getGitDiff({ absPath: '/ws-a/a.md', documentReference })).ok, false);
+  assert.equal(h.reads.length, 0); assert.equal(h.gitCalls.length, 0); assert.equal(h.written.length, 0);
+});
+
+test('R5-03 sequential directory recovery rechecks the Bot scope on each read and never creates watchers or writes', async () => {
+  const refs = []; let allowed = true;
+  const harness = createHarness({ nodes: [['/ws-a', directory([{ name: 'src', isDir: true }])]],
+    resolveBotDocument: async reference => {
+      refs.push(reference);
+      return allowed ? { ok: true, target: '/ws-a', root: '/ws-a' } : { ok: false, status: 'permission_denied' };
+    } });
+  const first = await harness.service.readDirectory({ documentReference: { workspaceId: 'botA', path: '.' } });
+  assert.equal(first.ok, true); allowed = false;
+  const second = await harness.service.readDirectory({ documentReference: { workspaceId: 'botA', path: '/ws-a/src' } });
+  assert.equal(second.ok, false); assert.equal(second.status, 'permission_denied');
+  assert.equal(refs.length, 2); assert.ok(refs.every(ref => ref.workspaceId === 'botA' && ref.kind === 'directory'));
+  assert.equal(harness.watchers.length, 0); assert.equal(harness.written.length, 0); assert.equal(harness.created.length, 0);
+});
+
+test('R5a task directory navigation preserves its exact task binding at the existing host boundary', async () => {
+  const seen = []; const task = { sessionId: 'work', planId: 'plan' };
+  const harness = createHarness({ nodes: [['/ws-a', directory()]], resolveBotDocument: async reference => {
+    seen.push(reference);
+    return reference.task?.sessionId === task.sessionId && reference.task?.planId === task.planId
+      ? { ok: true, root: '/ws-a', target: '/ws-a' } : { ok: false, status: 'scope_denied' };
+  } });
+  const result = await harness.service.readDirectory({ documentReference: { workspaceId: 'A', path: '.', kind: 'directory', task } });
+  assert.equal(result.ok, true); assert.deepEqual(seen[0].task, task);
+  const rejected = await harness.service.readDirectory({ documentReference: { workspaceId: 'A', path: '.', task: { ...task, planId: 'other' } } });
+  assert.equal(rejected.status, 'scope_denied'); assert.equal(harness.written.length, 0); assert.equal(harness.watchers.length, 0);
+});
+
+test('scoped native comparison keeps wildcard directory names literal and returns the actual subdirectory receipt', async () => {
+  const harness = createHarness({ nodes: [['/ws-a/docs[1]', directory()]],
+    resolveBotDocument: async () => ({ ok: true, target: '/ws-a/docs[1]', root: '/ws-a' }),
+    executeGit: async (_cwd, args) => args[0] === 'rev-parse' ? { stdout: '/ws-a\n' } : args[0] === 'ls-files' ? { stdout: 'docs[1]/new.md\0' } : { stdout: '' },
+  });
+  const result = await harness.service.getGitRangeDiff({ documentReference: { workspaceId: 'bot', path: '/ws-a/docs[1]', kind: 'directory' }, fromRef: 'HEAD', comparison: 'working' });
+  assert.equal(result.ok, true); assert.equal(result.resolvedPath, '/ws-a/docs[1]');
+  assert.deepEqual(result.untracked, ['/ws-a/docs[1]/new.md']);
+  for (const [, args] of harness.gitCalls.filter(([, args]) => ['diff', 'ls-files'].includes(args[0]))) assert.equal(args.at(-1), ':(literal)docs[1]');
+  assert.equal(harness.written.length, 0); assert.equal(harness.watchers.length, 0);
+});

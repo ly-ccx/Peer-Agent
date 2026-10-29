@@ -164,7 +164,7 @@ export function createNodeResultFactory(clock: NodeProviderRuntimeClock) {
       return createNodeToolResult({
         clock,
         call,
-        status: reason.includes('denied') ? 'denied' : 'failed',
+        status: reason.includes('denied') || reason === 'ephemeral_no_approver' ? 'denied' : 'failed',
         summary: `Node capability failed: ${reason}.`,
         error: { code: reason, message: reason, recoverable: true },
         dataLevel: typeof dataLevel === 'string' ? dataLevel : 'D1_internal',

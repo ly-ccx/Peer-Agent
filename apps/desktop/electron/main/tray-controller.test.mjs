@@ -1,16 +1,98 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   TRAY_MENU_INPUT_CACHE_TTL_MS,
   TRAY_RECENT_EXPANDED_LIMIT,
   TRAY_RECENT_LIMIT,
   TRAY_SUBSCRIPTION_REFRESH_DELAY_MS,
+  applyTrayBadge,
   buildTrayMenuFingerprint,
   buildTrayMenuTemplate,
+  createTrayController,
+  trayBadgeTitle,
   truncateTrayTitle,
   workspaceShortName,
 } from './tray-controller.mjs';
+
+function liveTrayHarness(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const state = { count: 1, reads: 0, shell: 'bots', fail: false, titles: [] };
+  class Tray {
+    setToolTip() {}
+    setIgnoreDoubleClickEvents() {}
+    setContextMenu() {}
+    setTitle(value) { state.titles.push(value); }
+    on() {}
+    destroy() {}
+  }
+  const controller = createTrayController({ Tray, Menu: { buildFromTemplate: rows => rows },
+    nativeImage: { createFromBuffer: () => ({ isEmpty: () => false, setTemplateImage() {} }) },
+    workspaceRoot: fileURLToPath(new URL('../../../../', import.meta.url)), isPackaged: false,
+    isProjectAgentEnabled: () => true, shellMode: () => state.shell,
+    getNeedsYouCount: () => { state.reads++; if (state.fail) throw Error('unavailable'); return state.count; },
+    listRecentConversations: async () => [],
+  });
+  assert.equal(controller.isActive(), true);
+  t.after(() => controller.destroy());
+  return { controller, state };
+}
+
+describe('tray badge subscription', () => {
+  it('coalesces event storms without a synchronous roster read or starvation', async t => {
+    const { controller, state } = liveTrayHarness(t);
+    await controller.refresh({ force: true }); state.reads = 0; state.titles = [];
+    for (let i = 0; i < 200; i++) controller.refreshBadge();
+    assert.equal(state.reads, 0, 'broadcast must not synchronously scan Bot facts');
+    t.mock.timers.tick(60); state.count = 3;
+    for (let i = 0; i < 200; i++) controller.refreshBadge();
+    t.mock.timers.tick(39); assert.equal(state.reads, 0);
+    t.mock.timers.tick(1); assert.equal(state.reads, 1);
+    assert.deepEqual(state.titles, ['3'], 'bounded callback reads latest count');
+    state.count = 4; controller.refreshBadge(); t.mock.timers.tick(100);
+    assert.equal(state.reads, 2); assert.deepEqual(state.titles, ['3', '4']);
+  });
+
+  it('explicit refresh is immediate and cancels its duplicate; destroy removes queued work', async t => {
+    const { controller, state } = liveTrayHarness(t);
+    await controller.refresh({ force: true }); state.reads = 0;
+    controller.refreshBadge(); state.count = 7;
+    await controller.refresh({ force: true });
+    assert.equal(state.reads, 1); assert.equal(state.titles.at(-1), '7');
+    t.mock.timers.tick(100); assert.equal(state.reads, 1);
+    controller.refreshBadge(); controller.destroy();
+    t.mock.timers.tick(1000); controller.refreshBadge();
+    await controller.refresh({ force: true }); t.mock.timers.tick(1000);
+    assert.equal(state.reads, 1, 'disposed tray may not read project facts');
+  });
+
+  it('uses current shell and clears stale titles after failed counts', async t => {
+    const { controller, state } = liveTrayHarness(t);
+    await controller.refresh({ force: true }); state.reads = 0;
+    controller.refreshBadge(); state.shell = 'classic'; t.mock.timers.tick(100);
+    assert.equal(state.reads, 0); assert.equal(state.titles.at(-1), '');
+    state.shell = 'bots'; controller.refreshBadge(); t.mock.timers.tick(100);
+    assert.equal(state.titles.at(-1), '1');
+    controller.refreshBadge(); state.fail = true; t.mock.timers.tick(100);
+    assert.equal(state.reads, 2); assert.equal(state.titles.at(-1), '');
+  });
+});
+
+describe('trayBadgeTitle', () => {
+  it('stays empty while the project agent switch is off', () => {
+    const tray = { titles: [], setTitle(value) { this.titles.push(value); } };
+    assert.equal(trayBadgeTitle(0), '');
+    assert.equal(trayBadgeTitle(4), '4');
+    assert.equal(trayBadgeTitle(120), '99+');
+    assert.equal(applyTrayBadge(tray, { enabled: false, count: 4, previous: '' }), '');
+    assert.deepEqual(tray.titles, []);
+    assert.equal(applyTrayBadge(tray, { enabled: true, count: 4, previous: '' }), '4');
+    assert.equal(applyTrayBadge(tray, { enabled: true, count: 120, previous: '4' }), '99+');
+    assert.equal(applyTrayBadge(tray, { enabled: false, count: 4, previous: '99+' }), '');
+    assert.deepEqual(tray.titles, ['4', '99+', '']);
+  });
+});
 
 describe('truncateTrayTitle', () => {
   it('falls back to 新任务 for empty titles', () => {
@@ -177,6 +259,36 @@ describe('buildTrayMenuTemplate', () => {
   });
 });
 
+
+describe('bot shell tray', () => {
+  it('lists bots that need you and keeps the classic recent menu otherwise', () => {
+    let opened = null;
+    const bots = buildTrayMenuTemplate({
+      mode: 'bots',
+      needsYou: [
+        { workspaceId: 'quiet', profile: { displayName: '安静' }, state: { needsYou: 0 } },
+        { workspaceId: 'ws-1', profile: { displayName: '发布' }, state: { needsYou: 2 } },
+      ],
+      recent: [{ id: 'classic', title: '旧会话' }],
+      handlers: { onOpenBot: (payload) => { opened = payload; } },
+    });
+    assert.equal(bots.some((item) => item.label === '需要你'), true);
+    assert.equal(bots.some((item) => item.label === '旧会话'), false);
+    assert.equal(bots.some((item) => item.label === '安静'), false);
+    const row = bots.find((item) => item.id === 'tray-recent:ws-1');
+    assert.equal(row.label, '发布');
+    assert.equal(row.sublabel, '2');
+    row.click();
+    assert.deepEqual(opened, { workspaceId: 'ws-1' });
+
+    const classic = buildTrayMenuTemplate({
+      recent: [{ id: 'classic', title: '旧会话', workspacePath: '/repo' }],
+    });
+    assert.equal(classic.some((item) => item.label === '最近任务'), true);
+    assert.equal(classic.some((item) => item.label === '旧会话'), true);
+    assert.equal(classic.some((item) => item.label === '需要你'), false);
+  });
+});
 
 describe('buildTrayMenuFingerprint', () => {
   it('is stable for equivalent menu inputs and changes when content changes', () => {

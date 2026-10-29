@@ -36,6 +36,12 @@
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
 
+  .pa-overlay-panel.is-closing.is-minimizing {
+    transform-origin: top left;
+    animation: motion-exit-to-target var(--za-motion-slow) var(--za-ease-standard) both;
+    pointer-events: none;
+  }
+
   /* Anchored content keeps unified admission without blocking the work surface. */
   .pa-overlay-backdrop.pa-overlay--anchored {
     display: block;
@@ -51,7 +57,7 @@
     width: min(360px, calc(100vw - 24px));
     max-height: min(480px, calc(100vh - 24px));
     overflow: auto;
-    border-radius: var(--radius-xl);
+    border-radius: var(--ui-radius-modal);
     border-color: var(--ui-border-subtle);
     box-shadow: var(--shadow-popover);
     background: var(--ui-surface-elevated);
@@ -106,11 +112,18 @@
 
   /* 退场态：onClose 时先播退场动画，动画结束后才真正卸载（详见 Overlay.tsx 状态机）。
      退场比入场更利落（fast 档），位移与入场对称（下移淡出）。 */
+  .pa-overlay-backdrop.is-settled:not(.is-closing),
+  .pa-overlay-panel.is-settled:not(.is-closing) {
+    animation: none;
+  }
+
   .pa-overlay-backdrop.is-closing {
+    opacity: 0;
     animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 
   .pa-overlay-panel.is-closing {
+    opacity: 0;
     animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 
@@ -139,7 +152,7 @@
     align-self: stretch;
     border-radius: 0;
     /* 抽屉布局；磨砂仍由 ::before 提供，避免面板自身 overflow 废掉 blur。 */
-    border-left: 1px solid var(--chrome-hairline);
+    border-inline-start: 1px solid var(--chrome-hairline);
     box-shadow: var(--shadow-drag), var(--glass-edge-highlight);
     display: flex;
     flex-direction: column;
@@ -150,6 +163,11 @@
 
   .pa-overlay-backdrop--drawer .pa-overlay-panel.is-closing {
     animation: motion-exit-slide-inline var(--za-motion-fast) var(--za-ease-accelerate) both;
+  }
+
+  .pa-overlay-backdrop--drawer:dir(rtl) .pa-overlay-panel {
+    --motion-enter-inline-from: calc(-1 * var(--za-motion-shift-lg));
+    --motion-exit-inline-to: calc(-1 * var(--za-motion-shift-lg));
   }
 
   .mcp-drawer-body {
@@ -165,7 +183,7 @@
     max-height: min(86vh, 720px);
     overflow: auto;
     padding: 20px 20px 16px;
-    border-radius: 16px;
+    border-radius: var(--ui-radius-modal);
   }
 
   .fda-startup-gate-body {
@@ -222,7 +240,7 @@
     display: grid;
     gap: 10px;
     padding: 12px;
-    border-radius: 14px;
+    border-radius: var(--ui-radius-panel);
     border: 1px dashed color-mix(in srgb, var(--chrome-hairline, #0002) 80%, transparent);
     background: color-mix(in srgb, var(--paper-sheet, #fff) 92%, transparent);
   }
@@ -237,13 +255,13 @@
     text-align: left;
     cursor: grab;
     padding: 4px;
-    border-radius: 12px;
+    border-radius: var(--ui-radius-panel);
   }
   .fda-permission-drag:active { cursor: grabbing; }
   .fda-permission-logo {
     width: 48px;
     height: 48px;
-    border-radius: 12px;
+    border-radius: var(--ui-radius-panel);
     object-fit: contain;
     background: #fff;
     box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(0,0,0,0.04);
@@ -277,7 +295,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--ui-radius-row);
   border: 1px solid color-mix(in srgb, var(--chrome-hairline, #0002) 85%, transparent);
   background: color-mix(in srgb, var(--paper-sheet, #fff) 94%, transparent);
 }
@@ -294,7 +312,7 @@
 .fda-permission-row-icon .fda-permission-logo {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
 }
 .fda-permission-row-text {
   display: flex;
@@ -315,7 +333,7 @@
   font-size: 12px;
   font-weight: 600;
   padding: 4px 8px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: color-mix(in srgb, #f59e0b 16%, transparent);
   color: color-mix(in srgb, #b45309 90%, #000);
 }
@@ -331,7 +349,7 @@
 .fda-complete-in-settings {
   width: 100%;
   min-height: 40px;
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   border: 1px dashed color-mix(in srgb, var(--chrome-hairline, #0003) 90%, transparent);
   background: transparent;
   color: inherit;

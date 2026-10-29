@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createQuickChatWindowController,
+  pickQuickChatBot,
+  quickChatShell,
+  quickChatSubmission,
   resolveQuickChatBounds,
   resolveQuickChatExpandedBounds,
   resolveQuickChatPopoverSize,
@@ -519,3 +522,46 @@ test('destroy closes owned windows once and clears controller references', () =>
   assert.equal(controller.getWindow(), null);
 });
 
+test('quick chat send branches on the shell', () => {
+  assert.equal(quickChatShell({ projectAgent: { shell: 'classic' } }), 'classic');
+  assert.equal(quickChatShell({}), 'bots');
+  assert.equal(quickChatShell({ projectAgent: { shell: 'bots' } }), 'bots');
+  const bot = pickQuickChatBot([
+    { workspaceId: 'old', lastActiveAt: '2026-09-27T00:00:00.000Z' },
+    { workspaceId: 'new', lastActiveAt: '2026-09-28T00:00:00.000Z' },
+  ]);
+  assert.equal(bot.workspaceId, 'new');
+  assert.deepEqual(quickChatSubmission({ shell: 'classic', workspaceId: 'ws', text: ' 你好 ' }), {
+    mode: 'classic',
+    text: '你好',
+  });
+  assert.deepEqual(quickChatSubmission({ shell: 'bots', workspaceId: 'new', text: ' 继续 ' }), {
+    mode: 'bots',
+    ok: true,
+    workspaceId: 'new',
+    text: '继续',
+    surface: 'quick_chat',
+  });
+  assert.equal(quickChatSubmission({ shell: 'bots', workspaceId: '', text: '继续' }).ok, false);
+});
+
+
+
+test('retire the independent popover content on selection and native-menu handoff before reopening', () => {
+  const parent = createFakeWindow(), popover = createFakeWindow(), menu = createFakeMenu();
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent,
+    createPopoverWindow: () => popover, Menu: menu });
+  const state = { kind: 'model', selectedValue: 'one', items: [{ value: 'one', label: 'One' }, { value: 'two', label: 'Two' }] };
+  const sends = () => popover.calls.filter(([name]) => name === 'send').map(call => call.slice(1));
+  controller.show(); controller.showPopover(state);
+  assert.equal(controller.selectPopoverValue('two'), true);
+  assert.equal(popover.isVisible(), false);
+  assert.deepEqual(sends().at(-1), ['quick-chat:popover-closed']);
+  controller.showPopover({ ...state, selectedValue: 'two' });
+  assert.equal(popover.isVisible(), true);
+  assert.equal(sends().at(-1)[0], 'quick-chat-popover:state');
+  assert.equal(sends().at(-1)[1].selectedValue, 'two');
+  controller.showPopover({ kind: 'effort', selectedValue: 'high', items: [{ value: 'high', label: 'High' }] });
+  assert.equal(popover.isVisible(), false);
+  assert.deepEqual(sends().at(-1), ['quick-chat:popover-closed']);
+});

@@ -1,105 +1,46 @@
+import './settings-section-header.css';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useCallback, useEffect, useState } from 'react';
+import { useId } from 'react';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
+import { SettingsGroup } from '../../ui/settings/SettingsGroup';
+import { FormFeedback } from '../../ui/forms/FormFeedback';
+import { useEditableResource } from '../../ui/forms/useEditableResource';
+import { useGuardedNavigation, useUnsavedChanges } from '../../ui/forms/UnsavedChanges';
 
 function readSystemInstructions(settings: Record<string, unknown> | null | undefined): string {
   return typeof settings?.systemInstructions === 'string' ? settings.systemInstructions : '';
 }
 
-/**
- * SystemInstructionsPanel 是「系统指令」这一 System Context 输入的独立表达层。
- *
- * 系统指令属于 System Context 装配(模型认知的上下文输入),与模型 Provider
- * 连接配置(LlmSettingsPanel)是不同职责,因此从模型配置面板拆出为独立分区。
- * 本面板只负责该项的本地编辑与读写,数据仍走既有的 clientApi.updateSettings 契约,
- * 不新增任何能力执行路径。
- */
-export function SystemInstructionsPanel({
-  i18n,
-  onBack,
-  onSystemInstructionsChanged,
-}: {
-  readonly i18n: I18nRuntime;
-  readonly onBack?: () => void;
-  readonly onSystemInstructionsChanged?: (value: string) => void;
+/** Editing only; System Context admission continues through the existing settings contract. */
+export function SystemInstructionsPanel({ i18n, onBack, onSystemInstructionsChanged }: {
+  readonly i18n: I18nRuntime; readonly onBack?: () => void; readonly onSystemInstructionsChanged?: (value: string) => void;
 }) {
-  const isZh = i18n.locale === 'zh-CN';
-  const [systemInstructions, setSystemInstructions] = useState(() => readSystemInstructions(clientApi.initialSettings));
-  const [systemInstructionsDraft, setSystemInstructionsDraft] = useState(() => readSystemInstructions(clientApi.initialSettings));
-  const [savingInstructions, setSavingInstructions] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void clientApi.getSettings().then((settings) => {
-      if (cancelled) return;
-      const value = readSystemInstructions(settings);
-      setSystemInstructions(value);
-      setSystemInstructionsDraft(value);
-      onSystemInstructionsChanged?.(value);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [onSystemInstructionsChanged]);
-
-  const handleSave = useCallback(async () => {
-    setSavingInstructions(true);
-    try {
-      const next = await clientApi.updateSettings({ systemInstructions: systemInstructionsDraft });
-      const saved = readSystemInstructions(next);
-      setSystemInstructions(saved);
-      setSystemInstructionsDraft(saved);
-      onSystemInstructionsChanged?.(saved);
-    } catch { /* silent */ } finally {
-      setSavingInstructions(false);
-    }
-  }, [systemInstructionsDraft, onSystemInstructionsChanged]);
-
-  return (
-    <div className="system-instructions-panel">
-      {onBack ? (
-        <header className="llm-settings-header">
-          <button type="button" onClick={onBack} aria-label="Back">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M19 12H5" />
-              <path d="m12 19-7-7 7-7" />
-            </svg>
-          </button>
-          <strong>{isZh ? '个性化设置' : 'Personalization'}</strong>
-        </header>
-      ) : null}
-
-      <section className="llm-instructions-card">
-        <header className="llm-instructions-header">
-          <strong>{isZh ? '个性化设置' : 'Personalization'}</strong>
-        </header>
-        <p className="llm-instructions-hint">
-          {isZh
-            ? '这些设置会作为 System Context 注入对话,影响模型的回答偏好与约束。'
-            : 'These settings enter the conversation as System Context, shaping the model’s response preferences and constraints.'}
-        </p>
-        <textarea
-          value={systemInstructionsDraft}
-          rows={8}
-          placeholder={isZh ? '回答偏好、代码风格或项目约束' : 'Response preferences, code style, or project constraints'}
-          onChange={(event) => setSystemInstructionsDraft(event.target.value)}
-        />
-        <div className="llm-instructions-actions">
-          <button
-            type="button"
-            onClick={() => setSystemInstructionsDraft(systemInstructions)}
-            disabled={savingInstructions || systemInstructionsDraft === systemInstructions}
-          >
-            {isZh ? '还原' : 'Reset'}
-          </button>
-          <button
-            type="button"
-            className="primary"
-            onClick={handleSave}
-            disabled={savingInstructions || systemInstructionsDraft === systemInstructions}
-          >
-            {savingInstructions ? '...' : (isZh ? '保存设置' : 'Save Settings')}
-          </button>
+  const isZh = i18n.locale.startsWith('zh');
+  const id = useId(), hintId = `${id}-hint`, statusId = `${id}-status`;
+  const navigate = useGuardedNavigation();
+  const form = useEditableResource('settings.instructions', readSystemInstructions(clientApi.initialSettings), {
+    read: async () => { const saved = readSystemInstructions(await clientApi.getSettings()); onSystemInstructionsChanged?.(saved); return saved; },
+    write: async draft => {
+      const saved = readSystemInstructions(await clientApi.updateSettings({ systemInstructions: draft }));
+      onSystemInstructionsChanged?.(saved); return saved;
+    },
+  });
+  useUnsavedChanges({ dirty: form.dirty, busy: form.saving, save: form.save, discard: form.reset });
+  return <div className="system-instructions-panel">
+    {onBack ? <header className="llm-settings-header"><button type="button" className="ui-button is-icon" onClick={() => navigate(onBack)} aria-label={i18n.t('forms.back')}><PeerIcon name="back" size={18} /></button><strong>{isZh ? '个性化设置' : 'Personalization'}</strong></header>
+      : <header className="frost-page-heading"><h1>{isZh ? '个性化' : 'Personalization'}</h1></header>}
+    <SettingsGroup title={isZh ? '个性化设置' : 'Personalization'}>
+      <div className="ui-editor-body" aria-busy={form.loading || form.saving}>
+        <label htmlFor={id}>{isZh ? '回答偏好与项目约束' : 'Response preferences and project constraints'}</label>
+        <p id={hintId}>{isZh ? '用于后续对话；保存不会改写正在进行的回复。' : 'Applies to future conversations; saving does not rewrite a running reply.'}</p>
+        <textarea id={id} className="ui-input" rows={8} value={form.draft} disabled={!form.loaded || form.saving} aria-describedby={`${hintId} ${statusId}`} aria-invalid={form.saveError || undefined} onChange={event => form.edit(event.target.value)} />
+        <FormFeedback id={statusId} i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
+        <div className="ui-form-actions">
+          <button type="button" className="ui-button" disabled={!form.dirty || form.saving} onClick={form.reset}>{i18n.t('forms.reset')}</button>
+          <button type="button" className="ui-button is-primary" disabled={!form.loaded || !form.dirty || form.saving} onClick={() => { void form.save(); }}>{i18n.t(form.saving ? 'forms.saving' : 'forms.save')}</button>
         </div>
-      </section>
-    </div>
-  );
+      </div>
+    </SettingsGroup>
+  </div>;
 }

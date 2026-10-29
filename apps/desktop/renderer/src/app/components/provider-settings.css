@@ -1,0 +1,161 @@
+/* Connected services: Frost unified card groups; technical detail disclosed on demand.
+   Overrides the base llm-settings card styles scoped to the settings provider page. */
+.settings-content > .settings-provider-page .llm-settings-panel { margin: 0; gap: 18px; }
+.settings-content .settings-provider-page .llm-page-heading {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 8px;
+}
+.settings-content .settings-provider-page .llm-add-channel-btn {
+  flex: none; min-height: 34px; padding: 7px 12px; gap: 8px; border-radius: var(--ui-radius-control); font-size: .8125rem;
+}
+
+/* ── Card group shell, shared by the connected list and fallback vision ── */
+.settings-content .settings-provider-page .llm-connected-group {
+  padding: 0;
+  border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel);
+  background: var(--paper-sheet); box-shadow: none;
+}
+.settings-content .settings-provider-page .llm-connected-band {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 12px var(--settings-group-inset);
+  background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline);
+  border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0;
+}
+.settings-content .settings-provider-page .llm-connected-band h2 {
+  margin: 0; color: var(--graphite-base); font-size: .9375rem; font-weight: 500; line-height: 1.4;
+}
+.settings-content .settings-provider-page .llm-connected-meta { flex: none; font-size: .75rem; color: var(--graphite-soft); }
+
+/* ── Service rows inside the connected group ── */
+.settings-content .settings-provider-page .llm-provider-list { gap: 0; }
+.settings-content .settings-provider-page .llm-provider-list .llm-empty { margin: 16px var(--settings-group-inset); }
+.settings-content .settings-provider-page .llm-provider-group {
+  border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible;
+}
+.settings-content .settings-provider-page .llm-provider-group + .llm-provider-group { border-top: 1px solid var(--chrome-hairline); }
+.settings-content .settings-provider-page .llm-provider-group.is-highlight { background: var(--paper-hover); animation: none; }
+.settings-content .settings-provider-page .llm-group-header {
+  display: flex; flex-direction: row; align-items: center; gap: 18px; min-height: 72px;
+  padding: 12px var(--settings-group-inset); border: 0; border-radius: 0; background: transparent;
+}
+/* Whole-row hover/expanded highlight; the header spans the full row width. */
+.settings-content .settings-provider-page .llm-provider-group:is(:has(.llm-group-toggle:hover), :has(.llm-group-toggle[aria-expanded='true'])) > .llm-group-header { background: var(--paper-hover); }
+/* Keep the last closed row's highlight inside the card's rounded bottom corners. */
+.settings-content .settings-provider-page .llm-provider-list > .llm-provider-group:last-child:not(:has(.llm-group-toggle[aria-expanded='true'])) > .llm-group-header {
+  border-radius: 0 0 var(--ui-radius-panel) var(--ui-radius-panel);
+}
+.settings-content .settings-provider-page .llm-group-toggle { flex: 1; align-self: stretch; gap: 18px; text-align: left; }
+.settings-content .settings-provider-page .llm-group-toggle > .llm-brand-icon { width: 32px; height: 32px; border: 0; border-radius: var(--ui-radius-control); box-shadow: none; }
+.settings-content .settings-provider-page .llm-service-copy { display: grid; gap: 3px; min-width: 0; }
+.settings-content .settings-provider-page .llm-service-copy strong {
+  font-size: .875rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere;
+}
+.settings-content .settings-provider-page .llm-group-count { font-size: .75rem; line-height: 1.45; color: var(--graphite-soft); }
+.settings-content .settings-provider-page .llm-group-caret { opacity: 0; transition: transform var(--za-motion-medium), opacity var(--za-motion-fast); }
+.settings-content .settings-provider-page .llm-group-toggle:is(:hover, :focus-visible) .llm-group-caret,
+.settings-content .settings-provider-page .llm-group-toggle[aria-expanded='true'] .llm-group-caret { opacity: 1; }
+.settings-content .settings-provider-page .llm-group-header > .llm-connection-status {
+  display: inline-flex; align-items: center; gap: 8px; flex: none; font-size: .8125rem;
+  color: var(--graphite-soft); white-space: nowrap;
+}
+.llm-service-status-dot { fill: currentColor; }
+.settings-provider-page .tone-ok .llm-service-status-dot { color: var(--state-success); }
+.settings-provider-page .tone-warn .llm-service-status-dot { color: var(--state-warn); }
+.settings-provider-page .tone-bad .llm-service-status-dot { color: var(--state-danger); }
+.settings-content .settings-provider-page .llm-group-actions { margin: 0; }
+.settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0;
+  border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-soft);
+}
+.settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger:hover { background: var(--chrome-hover); color: var(--graphite-base); }
+
+/* ── Disclosed body: sunken connection details strip + model manager ── */
+.settings-content .settings-provider-page .llm-group-body {
+  padding: 2px var(--settings-group-inset) 18px; border: 0;
+}
+.settings-content .settings-provider-page .llm-service-connection-details {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  padding: 10px 14px; border-radius: var(--ui-radius-control); background: var(--chrome-sunken);
+  font-size: .75rem; color: var(--graphite-soft); overflow-wrap: anywhere;
+}
+.settings-content .settings-provider-page .llm-group-section-head,
+.settings-content .settings-provider-page .llm-group-models,
+.settings-content .settings-provider-page .account-usage-toolbar,
+.settings-content .settings-provider-page .account-usage-body {
+  padding-inline: 0;
+}
+.settings-content .settings-provider-page .llm-configured-model-row,
+.settings-content .settings-provider-page .llm-configured-model-row:is(:hover, [open]) {
+  background: var(--paper-sheet);
+}
+.settings-content .settings-provider-page .llm-configured-model-summary:hover {
+  background: var(--paper-hover);
+}
+.settings-content .settings-provider-page .llm-configured-model-details {
+  background: var(--paper-sheet);
+  border-radius: 0 0 var(--ui-radius-row) var(--ui-radius-row);
+}
+.settings-content .settings-provider-page .llm-configured-model-row[open][data-motion-settled='true'] {
+  overflow: visible;
+}
+.settings-content .settings-provider-page .llm-configured-model-summary {
+  border-radius: var(--ui-radius-row);
+}
+.settings-content .settings-provider-page .llm-configured-model-row[open] > .llm-configured-model-summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.settings-content .settings-provider-page .llm-group-section-title,
+.settings-content .settings-provider-page .llm-configured-model-metadata small,
+.settings-content .settings-provider-page .llm-configured-model-chevron {
+  color: var(--graphite-soft);
+}
+.settings-content .settings-provider-page .llm-configured-model-metadata small.llm-configured-model-provenance {
+  display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3);
+  color: var(--settings-help-color);
+}
+.settings-content .settings-provider-page .llm-configured-model-actions > button,
+.settings-content .settings-provider-page .llm-configured-model-actions .pa-overflow-trigger {
+  min-height: 32px;
+}
+.settings-content .settings-provider-page .llm-configured-model-actions .pa-overflow-trigger {
+  width: 32px; height: 32px; padding: 0;
+}
+.llm-settings-disclosure { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden;
+  transition: grid-template-rows var(--za-motion-medium) var(--za-ease-standard, ease), opacity var(--za-motion-medium), visibility 0s var(--za-motion-medium); }
+.llm-settings-disclosure[data-expanded='true'] { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }
+.llm-settings-disclosure-inner { min-height: 0; overflow: hidden; }
+.llm-settings-disclosure[data-settled='true'] > .llm-settings-disclosure-inner { overflow: visible; }
+
+/* ── Fallback vision group ── */
+/* Base styles lay the old single-row section out as a flex row; the band + row group needs block flow. */
+.settings-content .settings-provider-page .llm-fallback-vision { display: block; padding: 0; }
+.llm-fallback-vision-toggle {
+  display: flex; align-items: center; gap: 20px; width: 100%; min-height: 76px;
+  padding: 12px var(--settings-group-inset);
+  border: 0; border-radius: 0; background: transparent; color: var(--graphite-base); text-align: left; cursor: pointer;
+}
+.llm-fallback-vision-toggle:hover { background: var(--paper-hover); }
+.settings-content .settings-provider-page .llm-fallback-vision:not(:has(.llm-settings-disclosure[data-expanded='true'])) .llm-fallback-vision-toggle {
+  border-radius: 0 0 var(--ui-radius-panel) var(--ui-radius-panel);
+}
+.settings-content .settings-provider-page .llm-fallback-vision-copy { flex: 1; min-width: 0; }
+.settings-content .settings-provider-page .llm-fallback-vision-copy strong { font-size: .875rem; font-weight: 600; line-height: 1.4; }
+.llm-fallback-vision-help { display: block; margin-top: 4px; font-size: .75rem; font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
+.llm-fallback-vision-summary { display: grid; gap: 4px; flex: 0 1 auto; min-width: 0; max-width: 45%; }
+.llm-fallback-vision-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; line-height: 1.4; }
+.llm-fallback-vision-service { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; line-height: 1.4; color: var(--graphite-soft); }
+.llm-fallback-vision-caret { flex: none; color: var(--graphite-soft); transition: transform var(--za-motion-medium); }
+.llm-fallback-vision-toggle[aria-expanded='true'] .llm-fallback-vision-caret { transform: rotate(90deg); }
+.settings-content .settings-provider-page .llm-fallback-vision-select { display: block; width: 280px; max-width: 100%; min-width: 0; margin: 0 var(--settings-group-inset) 16px auto; }
+@container settings (max-width: 560px) {
+  .settings-content .settings-provider-page .llm-page-heading { gap: 14px; }
+  .settings-content .settings-provider-page .llm-page-heading h1 { font-size: 1.625rem; }
+  .settings-content .settings-provider-page .llm-group-header { gap: 12px; }
+  .settings-content .settings-provider-page .llm-group-toggle { gap: 12px; }
+  .llm-fallback-vision-toggle { gap: 12px; }
+  .llm-fallback-vision-summary { max-width: 40%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .llm-settings-disclosure, .llm-fallback-vision-caret,
+  .settings-content .settings-provider-page .llm-group-caret { transition: none; }
+}

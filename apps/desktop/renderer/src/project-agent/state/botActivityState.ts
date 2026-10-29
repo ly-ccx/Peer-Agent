@@ -1,0 +1,99 @@
+import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { normalizeBotMessage, conversationRows } from './botConversationState.ts';
+import type { BotChatMessage, BotToolRound, ConversationRow, ConversationDisplayRow } from './botConversationState';
+import { botNarration } from './botNarrationState.ts';
+
+const TERMINAL = new Set(['done', 'error', 'stopped', 'disposed']);
+export const isActivityRunning = (activity: ProjectAgentActivity | null) => Boolean(activity && !TERMINAL.has(activity.phase));
+
+/** Push and read snapshots share this ordering boundary; late reads cannot rewind a turn. */
+export function mergeBotActivity(current: ProjectAgentActivity | null, incoming: ProjectAgentActivity | null | undefined, workspaceId: string): ProjectAgentActivity | null {
+  if (!incoming || incoming.workspaceId !== workspaceId || !incoming.turnId || !Number.isFinite(incoming.revision)) return current;
+  if (!current) return incoming;
+  if (current.turnId === incoming.turnId) return incoming.revision > current.revision ? incoming : current;
+  if (incoming.startedAt < current.startedAt) return current;
+  if (incoming.startedAt === current.startedAt && incoming.revision <= current.revision && current.phase !== 'disposed') return current;
+  return incoming;
+}
+
+/** A read may retire activity only alongside its messages and before any newer push. */
+export function activityFromConversationSnapshot(current: ProjectAgentActivity | null, incoming: ProjectAgentActivity | null | undefined,
+  workspaceId: string, readRevision: number | undefined, pushRevision: number): ProjectAgentActivity | null {
+  if (incoming === null && readRevision !== undefined && readRevision === pushRevision) return null;
+  return mergeBotActivity(current, incoming, workspaceId);
+}
+
+export function visibleBotActivity(activity: ProjectAgentActivity | null, messages: readonly BotChatMessage[]): ProjectAgentActivity | null {
+  if (!activity || activity.phase === 'disposed') return null;
+  if (messages.some(message => message.turnId === activity.turnId && (message.kind === 'agent_reply'
+    || message.kind === 'system_card' && message.cards.some(card => ['agent_stopped', 'agent_unavailable'].includes(card.kind))))) return null;
+  const delivering = activity.phase === 'done' && Boolean(activity.replyText.trim());
+  if (!delivering && TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
+  return activity;
+}
+
+/** Folding a historical failure changes the thread, never the identity of its detail record. */
+export function replyDetailsRow(id: string | null, rows: readonly ConversationDisplayRow[], messages: readonly BotChatMessage[]): ConversationDisplayRow | undefined {
+  if (!id) return undefined;
+  const exact = rows.find(row => row.type === 'message' && row.message.id === id);
+  if (exact) return exact;
+  const canonical = messages.find(message => message.id === id && message.kind !== 'agent_turn');
+  if (canonical) return attachBotProcesses([{ type: 'message', message: canonical }], messages, null)[0];
+  const handoff = [...rows].reverse().find(row => row.type === 'activity' ? row.activity.turnId === id
+    : row.type === 'message' && row.message.turnId === id);
+  if (handoff) return handoff;
+  const delivered = [...messages].reverse().find(message => message.turnId === id && message.kind !== 'agent_turn');
+  return delivered ? attachBotProcesses([{ type: 'message', message: delivered }], messages, null)[0] : undefined;
+}
+
+/** A selected page keeps current interrupted Activity alongside complete durable rounds. */
+export function replyDetailsFromPage(id: string, page: { readonly ok: boolean; readonly messages?: readonly Record<string, unknown>[];
+  readonly activity?: ProjectAgentActivity | null; readonly processMessageId?: string | null }): ConversationDisplayRow | undefined {
+  const messages = (page.ok ? page.messages ?? [] : []).map(normalizeBotMessage).filter((message): message is BotChatMessage => message !== null);
+  const rows = attachBotProcesses(conversationRows(messages), messages, page.activity ?? null);
+  return replyDetailsRow(page.processMessageId || id, rows, messages);
+}
+
+/** Durable receipt, internal slices and unrelated wakes cannot answer a user input. */
+export function hasReplyForInput(messages: readonly BotChatMessage[], inputId: string): boolean {
+  return answeredInputIds(messages).has(`input-${inputId}`);
+}
+
+/** Explicit answer anchors take precedence over the full batch admitted to a turn. */
+export function answeredInputIds(messages: readonly BotChatMessage[]): ReadonlySet<string> {
+  const turns = new Map(messages.filter(message => message.kind === 'agent_turn').map(message => [message.id, message.replyTo]));
+  return new Set(messages.filter(message => message.kind === 'agent_reply' || message.kind === 'system_card'
+    && message.cards.some(card => ['question', 'agent_stopped', 'agent_unavailable'].includes(card.kind)))
+    .flatMap(message => message.replyTo.length ? message.replyTo : !message.proactive && message.turnId ? turns.get(message.turnId) ?? [] : []));
+}
+
+/** Linear handoff projection: streaming updates must not scan history once per reply. */
+export function attachBotProcesses(rows: readonly ConversationRow[], messages: readonly BotChatMessage[], activity: ProjectAgentActivity | null): ConversationRow[] {
+  const byTurn = new Map(messages.filter(message => message.kind === 'agent_turn').map(message => [message.id, message]));
+  const legacy = new Map<string, readonly BotToolRound[]>();
+  let preceding: readonly BotToolRound[] = [];
+  for (const message of messages) {
+    if (message.kind === 'user_input') preceding = [];
+    else if (message.kind === 'agent_turn') preceding = message.rounds;
+    else if (message.kind === 'agent_reply' && !message.turnId) legacy.set(message.id, preceding);
+  }
+  const narrated = new Set<string>();
+  return rows.filter(row => row.type !== 'message' || row.message.kind !== 'agent_turn'
+    || row.message.id !== activity?.turnId || !isActivityRunning(activity)).map(row => {
+    if (row.type !== 'message' || row.message.kind === 'user_input') return row;
+    const turn = row.message.turnId ? byTurn.get(row.message.turnId) : undefined;
+    const processRounds = turn?.rounds ?? legacy.get(row.message.id) ?? [];
+    // Completed calls carry host clocks in history. Interrupted activity may also
+    // contain a preparing call that never reached dispatch or persisted rounds.
+    const persistedProcess = Boolean(turn?.rounds.length) && activity?.phase === 'done';
+    const live = activity && !persistedProcess && row.message.turnId === activity.turnId && activity.phase !== 'disposed' ? activity : undefined;
+    // Internal rounds never become public text, including legacy user turns.
+    const eligible = Boolean(live) || turn?.publicUpdates !== undefined;
+    const updates = turn?.publicUpdates !== undefined ? turn.publicUpdates
+      : live?.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []) ?? [];
+    const first = row.message.turnId && !narrated.has(row.message.turnId);
+    if (first) narrated.add(row.message.turnId!);
+    return { ...row, processRounds, ...(live ? { activity: live } : {}),
+      narration: eligible && first ? botNarration(updates, row.message.content) : [] };
+  });
+}

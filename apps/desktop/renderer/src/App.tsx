@@ -1,8 +1,21 @@
+import { ResourceEditAppFrame } from './workbench/editing/ResourceEditContinuity';
+import { useResourceFeedbackPreparations } from './workbench/feedback/useResourceFeedbackPreparations';
+import { NativeBrowserWindow } from './workbench/NativeBrowserWindow';
+import { NativeResourceWindow } from './workbench/NativeResourceWindow';
+import { useSettingsAwarePage, requestSettingsNavigation } from './ui/forms/settingsNavigation';
+import { isImeKey } from './chat/state/compositionGuard';
 import { createI18n } from '@peer-agent/i18n';
 import type { AcceptanceCloseVerdict, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
-import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
+import type { SettingsSection } from './app/components/SettingsPage';
+import {
+  SettingsPage,
+  CapabilitiesPanel,
+  AutomationCenter,
+  WorkbenchPanel,
+  QuickChatWindow,
+  QuickChatPopoverHost,
+} from './app/components/deferredPanels';
 import { Drawer } from './app/components/Drawer';
 import { ConversationResultView } from './app/components/ConversationResultView';
 import { continueTaskInConversation } from './app/taskContinuation';
@@ -20,12 +33,9 @@ import {
   MISSING_WORKBENCH_CONVERSATION_NOTICE,
   resolveWorkbenchConversationId,
 } from './app/state/openWorkbenchConversation';
-import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { FullDiskAccessStartupGate } from './app/components/FullDiskAccessStartupGate';
-import { QuickChatPopoverHost } from './app/components/QuickChatPopoverHost';
-import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { displayShortcut } from './app/components/ShortcutsPanel';
 import { useConfirm } from './app/components/ConfirmProvider';
 import {
@@ -33,13 +43,13 @@ import {
   shouldRefreshQuickChatConversationList,
 } from './app/state/quickChatSubmission';
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
-import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
-import { ChatSurface } from './chat/components/ChatSurface';
+import { ResourceFeedback } from './ui/resources/ResourceFeedback';
+import { ChatSurface } from './app/components/deferredPanels';
 import { SelectionChatWorkspace } from './chat/components/SelectionChatWorkspace';
 import { BackgroundRunsProvider } from './workbench/GlobalBackgroundTasksButton';
 import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
 import { Sidebar } from './chat/components/Sidebar';
-import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
+import { ConversationSearchPalette, type ProjectSearchHit, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
 import { normalizeConversationListPage } from './chat/state/conversationListPagination';
 import {
@@ -55,8 +65,12 @@ import { readGitBranchPrefixFromSettings } from './app/gitBranchPrefix';
 import type { CompactionState } from './chat/state/types';
 import { registeredWorkspacePath } from './chat/state/registeredWorkspace';
 import { clientApi } from './clientApi';
-import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
+import { BotResourceLayout, type BotResourceOwner } from './workbench/ResourceWorkspaceContext';
+import { BotListShell } from './project-agent/BotListShell';
+import { ClassicShellNotice } from './project-agent/onboarding/ClassicShellNotice';
+import { publishProjectAgentShell } from './project-agent/onboarding/botShell';
+import { useBotListShell } from './project-agent/state/useBotList';
 
 const DEFAULT_NEW_TASK_SHORTCUT = 'CommandOrControl+N';
 
@@ -128,21 +142,24 @@ function readGitBranchPrefix(settings: Record<string, unknown> | null | undefine
 
 export function App() {
   const windowView = new URLSearchParams(window.location.search).get('window');
+  if (windowView === 'browser-resource') return <NativeBrowserWindow />;
+  if (windowView === 'resource') return <ResourceEditAppFrame><NativeResourceWindow /></ResourceEditAppFrame>;
   if (windowView === 'quick-chat') return <QuickChatWindow />;
   if (windowView === 'quick-chat-popover') return <QuickChatPopoverHost />;
 
-  return <MainApp />;
+  return <ResourceEditAppFrame><MainApp /></ResourceEditAppFrame>;
 }
 
 function MainApp() {
-  const { availableLocales, initError, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
-  // LOGO 过渡页保留：bootstrap 再快也要播完品牌入场动画，再进入主界面。
-  const brandStartupHoldDone = useBrandStartupMinHold(!initError);
-  const showMainShell = Boolean(session) && brandStartupHoldDone;
+  useResourceFeedbackPreparations();
+  const { availableLocales, initError, loading: bootstrapLoading, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
+  const botListShell = useBotListShell();
+  const [botResourceOwner, setBotResourceOwner] = useState<BotResourceOwner | null>(null);
+  const showMainShell = Boolean(session);
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [activePage, setActivePage] = useState<AppPage>('chat');
+  const [activePage, setActivePage] = useSettingsAwarePage<AppPage>('chat');
   /** 工作台数据范围：顶部入口=全部；下方工作区入口=当前区。 */
   const [homeScope, setHomeScope] = useState<'all' | 'workspace'>('all');
   const [collectionDrawer, setCollectionDrawer] = useState<CollectionDrawer>(null);
@@ -286,6 +303,17 @@ function MainApp() {
     requestId: number;
   } | null>(null);
   const notificationMessageRequestRef = useRef(0);
+  const [botNotificationFocus, setBotNotificationFocus] = useState<{
+    workspaceId: string;
+    messageId: string | null;
+    sessionId?: string | null;
+    drawerTab?: 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings' | null;
+    requestId: number;
+  } | null>(null);
+  const botNotificationRequestRef = useRef(0);
+  const botShellActiveRef = useRef(botListShell.active);
+  botShellActiveRef.current = botListShell.active;
+  const [classicShellNotice, setClassicShellNotice] = useState(false);
   const focusTaskRelatedMessage = useCallback((item: TaskOverviewItem) => {
     if (!item.conversationId) return;
     const conversationId = String(item.conversationId);
@@ -454,7 +482,24 @@ function MainApp() {
   }), [activeWorkspace, conversationView, refreshConversations]);
 
   useEffect(() => {
-    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId, messageId }) => {
+    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId, messageId, source, workspaceId }) => {
+      if (source === 'project-agent-notification') {
+        if (workspaceId) {
+          botNotificationRequestRef.current += 1;
+          setBotNotificationFocus({
+            workspaceId,
+            messageId: messageId ?? null,
+            requestId: botNotificationRequestRef.current,
+          });
+        }
+        if (!botShellActiveRef.current) {
+          setClassicShellNotice(true);
+          return;
+        }
+        setCollectionDrawer(null);
+        setActivePage('chat');
+        return;
+      }
       void (async () => {
         await navigateToQuickChatConversation(
           { conversationId, workspacePath },
@@ -513,10 +558,22 @@ function MainApp() {
     }).catch(() => undefined);
   }, [applyConversationListPage, refreshProviders, refreshSettings, startupSnapshot]);
 
+  const switchToBotShell = useCallback(async () => {
+    try {
+      await clientApi.updateSettings({ projectAgent: { shell: 'bots' } });
+      publishProjectAgentShell('bots');
+      setClassicShellNotice(false);
+      setCollectionDrawer(null);
+      setActivePage('chat');
+    } catch {
+      setClassicShellNotice(true);
+    }
+  }, []);
+
   const openSettings = useCallback((section: SettingsSection = 'general') => {
-    setCollectionDrawer(null);
-    setSettingsInitialSection(section);
-    setActivePage('settings');
+    requestSettingsNavigation(() => {
+      setCollectionDrawer(null); setSettingsInitialSection(section); setActivePage('settings');
+    });
   }, []);
   // setupModelAutoOpened used to auto-open Settings once. First-run now stays
   // on the empty chat path and no longer uses that preference to steal focus.
@@ -804,7 +861,7 @@ function MainApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing) return;
+      if (isImeKey(event)) return;
       const key = event.key.toLowerCase();
       // ⌘K / Ctrl+K toggles Search Chats palette.
       if ((event.metaKey && key === 'k') || (event.ctrlKey && key === 'k')) {
@@ -931,7 +988,13 @@ function MainApp() {
 
   return (
     <BackgroundRunsProvider isZh={isZh} sources={conversations} onSource={handleSelectConversation}>
-    <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
+    <main className={`app-shell${isFullscreen ? ' is-fullscreen' : ''}${!showMainShell ? ' is-starting' : ''}`}>
+      <ClassicShellNotice
+        open={classicShellNotice}
+        i18n={i18n}
+        onClose={() => setClassicShellNotice(false)}
+        onSwitch={() => { void switchToBotShell(); }}
+      />
       {showMainShell ? (
         <>
           <section
@@ -940,9 +1003,44 @@ function MainApp() {
             inert={activePage === 'settings'}
           >
             <WorkbenchProvider
-              conversationId={activeConversationId}
-              isPageActive={activePage === 'chat'}
+              conversationId={botListShell.active ? botResourceOwner?.conversationId ?? null : activeConversationId}
+              resourceMode={botListShell.active}
+              isPageActive={activePage === 'chat' && (!botListShell.active || !!botResourceOwner?.conversationId)}
             >
+              {botListShell.active ? (
+                <BotResourceLayout owner={botResourceOwner} active={activePage === 'chat'} isZh={isZh}>
+                <BotListShell
+                  onResourceOwnerChange={setBotResourceOwner}
+                  i18n={i18n}
+                  isZh={isZh}
+                  activePage={activePage}
+                  workspacePath={activeWorkspace ?? ''}
+                  automationRunTarget={automationRunTarget}
+                  onOpenSettings={() => openSettings('general')}
+                  onOpenProviders={() => openSettings('providers')}
+                  hasModel={providers.some((provider) => provider.apiKeyConfigured)}
+                  onOpenAutomations={() => {
+                    setCollectionDrawer(null);
+                    setActivePage('automations');
+                  }}
+                  onOpenCapabilities={() => {
+                    setCollectionDrawer(null);
+                    setActivePage('tools');
+                  }}
+                  onOpenConversation={(conversationId) => {
+                    setConversationView('active');
+                    setActiveConversationId(String(conversationId));
+                    setCollectionDrawer(null);
+                    setActivePage('chat');
+                  }}
+                  onClosePage={() => {
+                    setCollectionDrawer(null);
+                    setActivePage('chat');
+                  }}
+                  notificationFocus={botNotificationFocus}
+                />
+                </BotResourceLayout>
+              ) : (
               <div className="app-layout">
             <Sidebar
               conversations={conversations}
@@ -1181,6 +1279,7 @@ function MainApp() {
             </section>
                 {activePage === 'chat' ? <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} /> : null}
               </div>
+              )}
             </WorkbenchProvider>
           </section>
           {activePage === 'settings' ? (
@@ -1212,8 +1311,23 @@ function MainApp() {
           open={searchOpen}
           i18n={i18n}
           activeWorkspace={activeWorkspace}
+          mode={botListShell.active ? 'bots' : 'classic'}
           onClose={handleCloseSearch}
           onSelectConversation={handleSearchSelectConversation}
+          onSelectHit={(hit: ProjectSearchHit) => {
+            if (!hit.workspaceId && hit.kind !== 'memory') return;
+            botNotificationRequestRef.current += 1;
+            setBotNotificationFocus({
+              workspaceId: hit.workspaceId,
+              messageId: hit.kind === 'message' ? (hit.messageId ?? null) : null,
+              sessionId: hit.kind === 'task' ? (hit.sessionId ?? null) : null,
+              drawerTab: hit.kind === 'memory' ? 'memory' : hit.kind === 'task' ? 'tasks' : null,
+              requestId: botNotificationRequestRef.current,
+            });
+            setCollectionDrawer(null);
+            setActivePage('chat');
+            setSearchOpen(false);
+          }}
           onNewTask={async () => {
             setSearchOpen(false);
             await handleNewChat();
@@ -1385,6 +1499,7 @@ function MainApp() {
               panelClassName="conversation-result-drawer conversation-chat-drawer conversation-chat-drawer--nested"
               softBackdrop
             >
+              {({ requestClose }) => <>
               <WorkbenchProvider
                 conversationId={activeConversationId}
                 isPageActive={conversationDrawerOpen}
@@ -1393,6 +1508,7 @@ function MainApp() {
                 <div className="conversation-chat-drawer-shell">
                   <div className="conversation-chat-drawer__body">
                     <ChatSurface
+                      onOpenPermissionBot={workspaceId => { setConversationDrawerOpen(false); setActivePage('chat'); setBotNotificationFocus({ workspaceId, messageId: null, requestId: ++botNotificationRequestRef.current }); }}
                       i18n={i18n}
                       providers={providers}
                       conversationId={activeConversationId}
@@ -1413,7 +1529,7 @@ function MainApp() {
                       onRenameConversation={handleRenameConversation}
                       onArchiveConversation={handleArchiveConversation}
                       onOpenAutomationRun={openAutomationRun}
-                      onClose={() => setConversationDrawerOpen(false)}
+                      onClose={requestClose}
                       workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                       workspaces={workspaces}
                       onWorkspaceChange={async (workspacePath) => {
@@ -1435,18 +1551,18 @@ function MainApp() {
                   <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
                 </div>
               </WorkbenchProvider>
+              </>}
             </Drawer>
           ) : null}
         </>
       ) : (
-        <section className="main-panel">
-          <section className="thread">
-            {initError ? <p className="running-note">{initError}</p> : null}
-            {!initError ? <BrandStartupLoader /> : null}
-          </section>
+        <section className="startup-surface">
+          {initError ? <ResourceFeedback i18n={i18n} loading={bootstrapLoading} error onReload={refreshBootstrap} /> : null}
+          {!initError ? <BrandStartupLoader /> : null}
         </section>
       )}
 
+      {showMainShell && initError ? <ResourceFeedback i18n={i18n} error loading={bootstrapLoading} onReload={refreshBootstrap} /> : null}
       {/* 开屏完全磁盘访问检测：暂存档关闭。
           等 Apple 开发者账号就绪、正式签名/公证链路可用后再打开。
           相关实现仍保留：FullDiskAccessStartupGate / startup-os-permissions / full-disk-access-drag-float

@@ -40,8 +40,8 @@ export function createRemoteAccessIpcRegistrations({ getRemoteAccess } = {}) {
   }
 
   const IDLE_STATUS = {
-    settings: { enabled: false, gatewayOrigin: '', workspaceId: '' },
-    active: false, online: false, deviceId: null, connectionEpoch: 0,
+    settings: { enabled: false, gatewayOrigin: '', workspaceId: '',projectGrants:[],workspaceIds:[],delegationVersion:1 },
+    active: false, online: false, deviceId: null, connectionEpoch: 0,lastAccess:null,
   };
 
   return Object.freeze([
@@ -50,7 +50,15 @@ export function createRemoteAccessIpcRegistrations({ getRemoteAccess } = {}) {
         const controller = resolveController();
         return { ok: true, status: controller ? controller.status() : IDLE_STATUS };
       });
-      ipc.handle('remote-access:update', (_event, patch) => guarded(c => c.update(patch)));
+      ipc.handle('remote-access:update', (_event, patch) => {
+        if(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).length===0
+            ||Object.keys(patch).some(key=>!['enabled','gatewayOrigin','workspaceId','projectGrants'].includes(key))
+            ||'enabled' in patch&&typeof patch.enabled!=='boolean'
+            ||'gatewayOrigin' in patch&&(typeof patch.gatewayOrigin!=='string'||patch.gatewayOrigin.length>2048)
+            ||'workspaceId' in patch&&(typeof patch.workspaceId!=='string'||patch.workspaceId.length>128)
+            ||'projectGrants' in patch&&(!Array.isArray(patch.projectGrants)||patch.projectGrants.length>200))return {ok:false,error:'INVALID_REMOTE_PATCH'};
+        return guarded(c=>c.update(patch));
+      });
       ipc.handle('remote-access:apply', () => guarded(c => c.apply()));
     }),
   ]);

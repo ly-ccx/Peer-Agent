@@ -17,6 +17,27 @@ export const TRAY_SUBSCRIPTION_REFRESH_DELAY_MS = 5_000;
  * 指纹未变时跳过 listConversations/listRuns 等同步加载。
  */
 export const TRAY_MENU_INPUT_CACHE_TTL_MS = 5_000;
+/** Bound presentation-only badge work without postponing it during event storms. */
+export const TRAY_BADGE_REFRESH_DELAY_MS = 100;
+
+/** 菜单栏角标。开关关闭或没有「需要你」时为空，调用方据此保持 beta.1 不写 title。 */
+export function trayBadgeTitle(count) {
+  const value = Number(count);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const rounded = Math.trunc(value);
+  return rounded > 99 ? '99+' : String(rounded);
+}
+
+/**
+ * 只在角标变化时写 Tray title。开关关闭且从未写过时不调用 setTitle。
+ * @returns {string} 这次应显示的角标
+ */
+export function applyTrayBadge(tray, { enabled = false, count = 0, previous = '' } = {}) {
+  const next = enabled === true ? trayBadgeTitle(count) : '';
+  if (next === previous) return next;
+  if (typeof tray?.setTitle === 'function') tray.setTitle(next);
+  return next;
+}
 
 export function truncateTrayTitle(title, maxChars = TRAY_TITLE_MAX_CHARS) {
   const text = String(title ?? '').replace(/\s+/g, ' ').trim();
@@ -36,8 +57,16 @@ export function buildTrayMenuFingerprint({
   recent = [],
   recentAutomationRuns = [],
   automationRuntime = null,
+  mode = 'classic',
+  needsYou = [],
 } = {}) {
   return JSON.stringify({
+    mode: mode === 'bots' ? 'bots' : 'classic',
+    needsYou: (Array.isArray(needsYou) ? needsYou : []).map((item) => ({
+      id: item?.workspaceId ?? item?.id ?? null,
+      needsYou: item?.state?.needsYou ?? null,
+      title: item?.profile?.displayName ?? item?.title ?? null,
+    })),
     recent: (Array.isArray(recent) ? recent : []).map((item) => ({
       id: item?.id ?? null,
       title: item?.title ?? null,
@@ -74,10 +103,28 @@ export function buildTrayMenuTemplate({
   expandedLimit = TRAY_RECENT_EXPANDED_LIMIT,
   automationRuntime = null,
   recentAutomationRuns = [],
+  mode = 'classic',
+  needsYou = [],
 } = {}) {
+  const botMode = mode === 'bots';
+  const menuRecent = botMode
+    ? (Array.isArray(needsYou) ? needsYou : [])
+      .filter((bot) => bot && typeof bot.workspaceId === 'string' && Number(bot?.state?.needsYou) > 0)
+      .map((bot) => ({
+        id: bot.workspaceId,
+        title: bot.profile?.displayName || bot.workspaceId,
+        subtitle: `${Number(bot.state.needsYou)}`,
+      }))
+    : recent;
+  const menuHandlers = botMode
+    ? {
+      ...handlers,
+      onOpenConversation: (payload) => handlers.onOpenBot?.({ workspaceId: payload?.conversationId }),
+    }
+    : handlers;
   const L = {
-    recent: labels.recent ?? '最近任务',
-    empty: labels.empty ?? '暂无任务',
+    recent: botMode ? (labels.needsYou ?? '需要你') : (labels.recent ?? '最近任务'),
+    empty: botMode ? (labels.needsYouEmpty ?? '没有需要你的机器人') : (labels.empty ?? '暂无任务'),
     more: labels.more ?? '更多',
     newChat: labels.newChat ?? '新任务',
     open: labels.open ?? '打开 Peer Agent',
@@ -87,8 +134,8 @@ export function buildTrayMenuTemplate({
   const items = [];
   items.push({ label: L.recent, enabled: false });
 
-  const all = Array.isArray(recent)
-    ? recent.filter((c) => typeof c?.id === 'string' && c.id)
+  const all = Array.isArray(menuRecent)
+    ? menuRecent.filter((c) => typeof c?.id === 'string' && c.id)
     : [];
   const primaryLimit = Math.max(1, Number(collapsedLimit) || TRAY_RECENT_LIMIT);
   const totalLimit = Math.max(primaryLimit, Number(expandedLimit) || TRAY_RECENT_EXPANDED_LIMIT);
@@ -101,13 +148,13 @@ export function buildTrayMenuTemplate({
     const title = truncateTrayTitle(conversation.title);
     // macOS native menus ignore "\n" in label; use Electron MenuItem.sublabel
     // (darwin >= 14.4) so workspace appears as a second line like Codex.
-    const subtitle = workspaceShortName(conversation.workspacePath);
+    const subtitle = conversation.subtitle || workspaceShortName(conversation.workspacePath);
     return {
       label: title,
       ...(subtitle ? { sublabel: subtitle } : {}),
       id: `tray-recent:${id}`,
       click: () => {
-        handlers.onOpenConversation?.({
+        menuHandlers.onOpenConversation?.({
           conversationId: id,
           workspacePath: typeof conversation.workspacePath === 'string'
             ? conversation.workspacePath
@@ -239,11 +286,16 @@ export function createTrayController({
   getAutomationRuntime = null,
   handlers = {},
   platform = process.platform,
+  isProjectAgentEnabled = () => false,
+  getNeedsYouCount = () => 0,
+  shellMode = () => 'classic',
+  listNeedsYouBots = async () => [],
 } = {}) {
   if (typeof Tray !== 'function' || typeof Menu?.buildFromTemplate !== 'function') {
     return {
       isActive: () => false,
       refresh: async () => {},
+      refreshBadge: () => {},
       destroy: () => {},
     };
   }
@@ -256,6 +308,7 @@ export function createTrayController({
     return {
       isActive: () => false,
       refresh: async () => {},
+      refreshBadge: () => {},
       destroy: () => {},
     };
   }
@@ -263,6 +316,7 @@ export function createTrayController({
   let tray = null;
   let destroyed = false;
   let refreshTimer = null;
+  let badgeRefreshTimer = null;
 
   const boundHandlers = {
     onOpenConversation: (payload) => handlers.onOpenConversation?.(payload),
@@ -272,11 +326,40 @@ export function createTrayController({
     onOpenAutomationRun: (target) => handlers.onOpenAutomationRun?.(target),
     onToggleAutomations: (paused) => handlers.onToggleAutomations?.(paused),
     onQuit: () => handlers.onQuit?.(),
+    onOpenBot: (payload) => handlers.onOpenBot?.(payload),
   };
 
   let lastMenuFingerprint = null;
   let cachedMenuInputs = null;
   let cachedMenuInputsAt = 0;
+  let badgeTitle = '';
+
+  function currentShell() {
+    try {
+      return shellMode() === 'bots' ? 'bots' : 'classic';
+    } catch {
+      return 'classic';
+    }
+  }
+
+  function updateBadge() {
+    if (destroyed || !tray) return;
+    let enabled = false;
+    try {
+      enabled = currentShell() === 'bots' && isProjectAgentEnabled() !== false;
+    } catch {
+      enabled = false;
+    }
+    let count = 0;
+    if (enabled) {
+      try {
+        count = getNeedsYouCount();
+      } catch {
+        count = 0;
+      }
+    }
+    badgeTitle = applyTrayBadge(tray, { enabled, count, previous: badgeTitle });
+  }
 
   async function loadTrayMenuInputs({ force = false } = {}) {
     const now = Date.now();
@@ -287,14 +370,26 @@ export function createTrayController({
     ) {
       return cachedMenuInputs;
     }
+    const mode = currentShell();
     let recent = [];
-    try {
-      // 一次取到 expanded 上限，模板把溢出项放进「更多」二级菜单。
-      const listed = await listRecentConversations?.({ limit: TRAY_RECENT_EXPANDED_LIMIT });
-      recent = Array.isArray(listed) ? listed : [];
-    } catch (err) {
-      console.warn('[tray] listRecentConversations failed:', err);
-      recent = [];
+    let needsYou = [];
+    if (mode === 'bots') {
+      try {
+        const listed = await listNeedsYouBots?.();
+        needsYou = Array.isArray(listed) ? listed : [];
+      } catch (err) {
+        console.warn('[tray] listNeedsYouBots failed:', err);
+        needsYou = [];
+      }
+    } else {
+      try {
+        // 一次取到 expanded 上限，模板把溢出项放进「更多」二级菜单。
+        const listed = await listRecentConversations?.({ limit: TRAY_RECENT_EXPANDED_LIMIT });
+        recent = Array.isArray(listed) ? listed : [];
+      } catch (err) {
+        console.warn('[tray] listRecentConversations failed:', err);
+        recent = [];
+      }
     }
     let recentAutomationRuns = [];
     try {
@@ -306,14 +401,28 @@ export function createTrayController({
     const automationRuntime = typeof getAutomationRuntime === 'function'
       ? await getAutomationRuntime()
       : null;
-    const inputs = { recent, recentAutomationRuns, automationRuntime };
+    const inputs = { recent, recentAutomationRuns, automationRuntime, mode, needsYou };
     cachedMenuInputs = inputs;
     cachedMenuInputsAt = now;
     return inputs;
   }
 
+  function refreshBadge() {
+    if (destroyed || !tray || badgeRefreshTimer !== null) return;
+    badgeRefreshTimer = setTimeout(() => {
+      badgeRefreshTimer = null;
+      updateBadge();
+    }, TRAY_BADGE_REFRESH_DELAY_MS);
+    badgeRefreshTimer.unref?.();
+  }
+
   async function refresh({ force = false } = {}) {
     if (destroyed || !tray) return;
+    if (badgeRefreshTimer !== null) {
+      clearTimeout(badgeRefreshTimer);
+      badgeRefreshTimer = null;
+    }
+    updateBadge();
     try {
       const inputs = await loadTrayMenuInputs({ force });
       const fingerprint = buildTrayMenuFingerprint(inputs);
@@ -327,6 +436,8 @@ export function createTrayController({
         collapsedLimit: TRAY_RECENT_LIMIT,
         expandedLimit: TRAY_RECENT_EXPANDED_LIMIT,
         automationRuntime: inputs.automationRuntime,
+        mode: inputs.mode,
+        needsYou: inputs.needsYou,
       });
       const menu = Menu.buildFromTemplate(template);
       tray.setContextMenu(menu);
@@ -375,9 +486,14 @@ export function createTrayController({
   return {
     isActive: () => Boolean(tray) && !destroyed,
     refresh,
+    refreshBadge,
     scheduleRefresh,
     destroy: () => {
       destroyed = true;
+      if (badgeRefreshTimer !== null) {
+        clearTimeout(badgeRefreshTimer);
+        badgeRefreshTimer = null;
+      }
       if (refreshTimer) {
         clearTimeout(refreshTimer);
         refreshTimer = null;

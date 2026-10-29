@@ -6,6 +6,13 @@ import {
 } from './anthropic-messages-provider.ts';
 
 describe('createAnthropicMessagesProvider', () => {
+  test('channel session headers preserve Anthropic authentication', async () => {
+    let sent: any;
+    const provider = createAnthropicMessagesProvider({providerId:'go',getApiKey:async()=> 'fixture-key',
+      extraHeaders:{'x-opencode-session':'fixture-session'},sendStream:async args=>{sent=args;return {ok:true,textContent:'ok'};}});
+    await provider.stream({model:'claude',messages:[{role:'user',content:'test'}]});
+    expect(sent.headers).toEqual({'Content-Type':'application/json','x-api-key':'fixture-key','anthropic-version':'2023-06-01','x-opencode-session':'fixture-session'});
+  });
   test('counts and sends the same canonical system, history, tools, and cache shape', async () => {
     let counted: Record<string, unknown> | undefined;
     let sent: Record<string, unknown> | undefined;

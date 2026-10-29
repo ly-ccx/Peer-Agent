@@ -104,6 +104,7 @@ function requestBody(request: ModelProviderRequest): Record<string, unknown> {
       name: normalizeFunctionName(tool.name),
       description: tool.description,
       parameters: tool.parameters ?? {},
+      strict: typeof tool.strict === 'boolean' ? tool.strict : false,
     })),
     tool_choice: 'auto',
     parallel_tool_calls: true,

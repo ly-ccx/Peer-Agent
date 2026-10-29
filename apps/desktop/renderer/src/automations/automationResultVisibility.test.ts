@@ -21,6 +21,11 @@ test('Run receipt displays the bounded comparison with the previous result', asy
 
 test('Automation Center refreshes Runs and the selected receipt on update broadcasts', async () => {
   const center = await read('./AutomationCenter.tsx');
-  assert.match(center, /clientApi\.automationRunsList\(\{ automationId: selectedId, limit: 100 \}\)/);
-  assert.match(center, /clientApi\.automationRunsGet\(\{ runId: selectedRun\.runId \}\)/);
+  const resources = await read('./useAutomationResources.ts');
+  assert.match(center, /useAutomationResources\(selectedId, selectedRun\?\.runId \?\? initialRunTarget\?\.runId \?\? null\)/);
+  assert.match(resources, /clientApi\.automationRunsList\(\{ automationId, limit: 100 \}\)/);
+  assert.match(resources, /clientApi\.automationRunsGet\(\{ runId \}\)/);
+  assert.match(resources, /onAutomationsChanged/);
+  assert.match(resources, /if \(automationId\) void runs\.reload\(\)/);
+  assert.match(resources, /if \(runId\) void run\.reload\(\)/);
 });

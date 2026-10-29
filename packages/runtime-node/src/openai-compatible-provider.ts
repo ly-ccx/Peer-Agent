@@ -1,3 +1,4 @@
+import { stripOpenAIMessageName } from './provider-encoders/request-encoder.mjs';
 import type {
   ModelMessage,
   ModelProvider,
@@ -43,7 +44,7 @@ function serializeMessage(message: ModelMessage): Record<string, unknown> {
       function: { name: call.name, arguments: call.arguments },
     }));
   }
-  return serialized;
+  return stripOpenAIMessageName(serialized);
 }
 
 async function errorDetail(response: Response): Promise<string | undefined> {

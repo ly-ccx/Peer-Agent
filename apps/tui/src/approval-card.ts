@@ -17,7 +17,7 @@ export const TUI_APPROVAL_OPTIONS = [
   },
   {
     decision: 'allow-session',
-    label: 'Allow similar this session',
+    label: 'Allow this operation this session',
     shortcut: '2',
     color: COLOR.diffHunk,
   },

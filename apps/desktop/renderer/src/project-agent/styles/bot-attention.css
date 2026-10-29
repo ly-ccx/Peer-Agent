@@ -1,0 +1,26 @@
+.bot-attention-sheet.bot-sheet { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--paper-sheet); border-radius: var(--ui-radius-modal); }
+.bot-attention-sheet .bot-sheet-head { padding: 24px; margin: 0; gap: 20px; align-items: flex-start; }
+.bot-attention-sheet .bot-sheet-head h2 { margin: 0; font-size: 1.125rem; }
+.bot-attention-sheet .bot-sheet-head p { color: var(--graphite-soft); font-size: .8125rem; margin: 8px 0 0; line-height: 1.6; }
+.bot-attention-sheet .bot-sheet-close { flex-shrink: 0; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: var(--ui-radius-control); }
+.bot-attention-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; min-height: 120px; }
+.bot-attention-group + .bot-attention-group { margin-top: 24px; }
+.bot-attention-group > h3 { display: flex; gap: 8px; align-items: center; color: var(--graphite-soft); font-size: .8125rem; margin: 0 0 12px; }
+.bot-attention-group > h3 span { font-variant-numeric: tabular-nums; }
+.bot-attention-item { padding: 16px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--control-fill); overflow-wrap: anywhere; }
+.bot-attention-item + .bot-attention-item { margin-top: 12px; }
+.bot-attention-kind { margin: 0 0 6px; font-size: .6875rem; color: var(--graphite-soft); }
+.bot-attention-title { margin: 0; font-size: .875rem; line-height: 1.65; white-space: pre-wrap; }
+.bot-attention-item .bot-card { background: transparent; padding: 0; border: 0; margin-top: 12px; }
+.bot-attention-item .bot-cards { margin: 0; }
+.bot-attention-item .bot-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bot-attention-source { display: flex; align-items: center; gap: 5px; margin: 12px 0 0 auto; font-size: .75rem; color: var(--graphite-soft); }
+.bot-attention-empty { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--graphite-soft); gap: 12px; }
+.bot-attention-empty h3, .bot-attention-empty p { margin: 0; }
+.bot-attention-empty h3 { color: var(--graphite-base); font-size: 1rem; }
+.bot-attention-empty p { font-size: .8125rem; line-height: 1.6; }
+.bot-badge:is(button) { border: 0; padding: 0; cursor: pointer; font: inherit; font-size: .6875rem; }
+
+.bot-attention-item .bot-card-actions button { padding: 8px 12px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); background: var(--control-fill-hover); color: var(--graphite-base); font-size: .8125rem; line-height: 1.5; cursor: pointer; }
+.bot-attention-item .bot-card-actions button:hover { background: var(--control-fill); }
+.bot-attention-item .bot-card-actions button:disabled { cursor: default; opacity: .55; }

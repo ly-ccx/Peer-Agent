@@ -1,0 +1,53 @@
+.bot-access-control { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.bot-composer-bar .bot-access-picker > button { width: auto; min-width: 0; height: 32px; padding: 5px 6px; color: var(--graphite-soft); background: transparent; border: 0; border-radius: var(--ui-radius-control); font-size: 12px; }
+.bot-access-picker .dropdown-trigger-label { overflow: hidden; text-overflow: ellipsis; }
+.bot-access-picker .pa-dropdown-prefix { display: inline-flex; align-items: center; flex-shrink: 0; }
+.bot-composer-bar .bot-access-picker.pa-dropdown-danger > button { color: var(--state-danger); }
+
+.pa-dropdown-menu.bot-access-picker {
+  width: min(380px, calc(100vw - 2 * var(--space-2)));
+  min-width: 0;
+  max-width: calc(100vw - 2 * var(--space-2));
+  max-height: min(360px, calc(100dvh - 2 * var(--space-2)));
+  padding: var(--space-2);
+  border-radius: var(--ui-radius-panel);
+  background: var(--paper-sheet);
+}
+
+.bot-access-picker .pa-dropdown-heading {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-meta);
+  font-weight: 500;
+  line-height: var(--ui-line-control);
+}
+
+.bot-access-picker .pa-dropdown-list { display: grid; gap: var(--space-1); }
+.pa-dropdown-menu.bot-access-picker .pa-dropdown-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 16px;
+  grid-template-areas: "icon label check" "icon description check";
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  min-height: 64px;
+  padding: var(--space-3);
+  border-radius: var(--ui-radius-control);
+  color: var(--graphite-base);
+  font-weight: 500;
+  line-height: var(--ui-line-control);
+}
+
+.pa-dropdown-menu.bot-access-picker .pa-dropdown-item.selected { background: var(--paper-hover); }
+.pa-dropdown-menu.bot-access-picker .pa-dropdown-item:hover,
+.pa-dropdown-menu.bot-access-picker .pa-dropdown-item.active { background: var(--paper-active); }
+.bot-access-picker .pa-dropdown-item-icon { grid-area: icon; display: inline-flex; color: var(--graphite-soft); }
+.bot-access-picker .pa-dropdown-item-label { grid-area: label; min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: var(--ui-font-body); }
+.bot-access-picker .pa-dropdown-item-description { grid-area: description; min-width: 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); font-weight: 400; line-height: var(--ui-line-body); overflow-wrap: anywhere; }
+.bot-access-picker .pa-dropdown-check { grid-area: check; justify-self: end; width: 16px; color: var(--graphite-base); }
+.bot-access-picker .pa-dropdown-check svg { display: block; }
+.pa-dropdown-menu.bot-access-picker .pa-dropdown-item.danger,
+.pa-dropdown-menu.bot-access-picker .pa-dropdown-item.danger :is(.pa-dropdown-item-icon, .pa-dropdown-item-description, .pa-dropdown-check) { color: var(--state-danger); }
+.bot-composer-bar .bot-access-retry { width: auto; height: auto; padding: 4px; font-size: 11px; color: var(--graphite-base); background: transparent; }
+.conversation-access-inherited { display: flex; align-items: center; min-width: 0; color: var(--graphite-soft); font-size: 12px; }
+.conversation-access-inherited > span { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

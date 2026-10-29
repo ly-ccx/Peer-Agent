@@ -336,3 +336,15 @@ describe('recovering provider fetch', () => {
     ]);
   });
 });
+
+it('caller cancellation still reaches the response body after headers have resolved', async () => {
+  const controller = new AbortController(); let transportSignal;
+  const response = { ok: true, headers: new Headers(), body: {} };
+  const actual = await fetchWithConnectionRecovery('https://example.test/v1', { signal: controller.signal }, {
+    requireElectronTransport: false, fetchImpl: async (_url, init) => { transportSignal=init.signal;return response; },
+    retryDelaysMs: [], connectTimeoutMs: 1000,
+  });
+  assert.equal(actual,response); assert.equal(transportSignal.aborted,false);
+  controller.abort('user-stop');
+  assert.equal(transportSignal.aborted,true);
+});

@@ -1,6 +1,11 @@
+import { MotionDetails } from './MotionDetails';
+import { PeerIcon } from '../../ui/icons';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView, LlmProviderTestResult } from '@peer-agent/protocol';
 import { LlmBrandIcon } from './LlmBrandIcon';
+import { useConfirm } from './ConfirmProvider';
+import { OverflowMenu } from './OverflowMenu';
+import { usageTime } from './accountUsagePresentation';
 import { modelConnectionBadge } from './llmConnectionStatus';
 import { modelMetadataCompletion, selectedModelContextWindow } from './llmModelConfiguration';
 
@@ -36,6 +41,20 @@ export function ConfiguredModelRow({
   readonly onDelete: () => void;
 }) {
   const zh = i18n.locale === 'zh-CN';
+  const confirm = useConfirm();
+  const handleDelete = async () => {
+    const label = model.modelLabel || model.model;
+    const ok = await confirm({
+      title: zh ? '删除模型' : 'Delete model',
+      message: zh
+        ? `确认删除模型「${label}」的配置？此操作不可撤销。`
+        : `Delete the configuration for model “${label}”? This cannot be undone.`,
+      confirmText: zh ? '删除模型' : 'Delete model',
+      cancelText: zh ? '取消' : 'Cancel',
+      tone: 'danger',
+    });
+    if (ok) onDelete();
+  };
   const completion = modelMetadataCompletion(model);
   const connectionBadge = modelConnectionBadge(model.connectionState, zh);
   const context = compactTokens(selectedModelContextWindow(model));
@@ -64,7 +83,7 @@ export function ConfiguredModelRow({
   ];
 
   return (
-    <details className={`llm-configured-model-row ${model.isDefault ? 'is-default' : ''}`}>
+    <MotionDetails className={`llm-configured-model-row ${model.isDefault ? 'is-default' : ''}`}>
       <summary className="llm-configured-model-summary">
         <LlmBrandIcon
           className="llm-brand-icon-model"
@@ -108,19 +127,27 @@ export function ConfiguredModelRow({
               return <span key={capability.key} className={`llm-capability-state is-${state}`}>{capability.label}: {value}</span>;
             })}
           </div>
-          <small>{zh ? '元数据来源' : 'Metadata source'}: {metadataSource}{model.metadataSyncedAt ? ` · ${model.metadataSyncedAt}` : ''}</small>
+          <small className="llm-configured-model-provenance">
+            <span>{zh ? '来源' : 'Source'}: {metadataSource}</span>
+            {model.metadataSyncedAt ? (
+              <time dateTime={model.metadataSyncedAt} title={model.metadataSyncedAt}>
+                {zh ? '同步于' : 'Synced'} {usageTime(model.metadataSyncedAt, zh)}
+              </time>
+            ) : null}
+          </small>
           {result ? (
             <div className={`llm-test-result ${result.success ? 'success' : 'fail'}`}>
               <small>
+                <PeerIcon name={result.success ? "check" : "close"} size={14} className="inline-icon" />
                 {result.success
-                  ? `✓ ${result.model || model.model}${result.latencyMs != null ? ` (${result.latencyMs}ms)` : ''}`
-                  : `✗ ${result.connectionStateReason || result.error || 'connection_failed'}`}
+                  ? `${result.model || model.model}${result.latencyMs != null ? ` (${result.latencyMs}ms)` : ''}`
+                  : `${result.connectionStateReason || result.error || 'connection_failed'}`}
               </small>
               {result.stages && result.stages.length > 0 ? (
                 <ul className="llm-test-stages">
                   {result.stages.map((stage) => (
                     <li key={stage.id} className={`stage-${stage.status}`}>
-                      {stage.status === 'passed' ? '✓' : stage.status === 'failed' ? '×' : '–'} {stage.title}
+                      <PeerIcon name={stage.status === 'passed' ? 'check' : stage.status === 'failed' ? 'close' : 'minus'} size={12} className="inline-icon" />{stage.title}
                     </li>
                   ))}
                 </ul>
@@ -131,16 +158,20 @@ export function ConfiguredModelRow({
             </div>
           ) : null}
         </div>
-        
-
         <div className="llm-configured-model-actions">
           {!model.isDefault ? <button type="button" onClick={onSetDefault} disabled={oauthNotConnected}>{zh ? '设为默认' : 'Set default'}</button> : null}
-          <button type="button" onClick={onTest} disabled={testing || duplicating}>{testing ? '…' : (zh ? '测试' : 'Test')}</button>
-          <button type="button" onClick={onDuplicate} disabled={testing || duplicating}>{duplicating ? '…' : (zh ? '复制' : 'Duplicate')}</button>
+          <button type="button" onClick={onTest} disabled={testing || duplicating}>{testing ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{testing ? (zh ? '测试中' : 'Testing') : (zh ? '测试' : 'Test')}</button>
           <button type="button" onClick={onEdit} disabled={duplicating}>{zh ? '设置' : 'Settings'}</button>
-          <button type="button" className="danger" onClick={onDelete} disabled={duplicating}>{zh ? '删除' : 'Delete'}</button>
+          <OverflowMenu
+            zh={zh}
+            label={zh ? `${model.modelLabel || model.model} 的更多操作` : `More actions for ${model.modelLabel || model.model}`}
+            items={[
+              { key: 'duplicate', label: duplicating ? (zh ? '复制中' : 'Duplicating') : (zh ? '复制' : 'Duplicate'), disabled: testing || duplicating, onSelect: onDuplicate },
+              { key: 'delete', label: zh ? '删除' : 'Delete', danger: true, disabled: duplicating, onSelect: () => { void handleDelete(); } },
+            ]}
+          />
         </div>
       </div>
-    </details>
+    </MotionDetails>
   );
 }

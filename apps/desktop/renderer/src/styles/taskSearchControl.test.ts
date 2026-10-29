@@ -22,7 +22,7 @@ test('task and history search controls share a clear icon and non-pill geometry'
   const searchIcon = ruleBody(css, '.task-search-box__icon');
 
   assert.match(searchBox, /min-height:\s*2\.75rem/);
-  assert.match(searchBox, /border-radius:\s*1rem/);
+  assert.match(searchBox, /border-radius:\s*var\(--ui-radius-control\)/);
   assert.doesNotMatch(searchBox, /rounded-full/);
   assert.match(searchIcon, /width:\s*1rem/);
   assert.match(searchIcon, /height:\s*1rem/);

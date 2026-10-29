@@ -29,6 +29,35 @@ import type {
   ContextAccountingSnapshot,
 } from '@peer-agent/protocol';
 
+/** reattach 快照里的一条仍开放的权限请求。 */
+export interface ReattachPendingPermission {
+  readonly toolCallId?: string;
+  readonly streamId?: string;
+  readonly call?: ClientToolCall | null;
+}
+
+/**
+ * 用重连快照补回权限卡。已在列表里的 toolCallId 不重复加入。
+ * 没有可恢复项时返回原来的数组，避免无意义的状态写入。
+ */
+export function restorePendingPermissionCalls(
+  pending: readonly ReattachPendingPermission[] | null | undefined,
+  existing: readonly ClientToolCall[] = [],
+): readonly ClientToolCall[] {
+  if (!pending?.length) return existing;
+  const seen = new Set(existing.map((item) => item.toolCallId));
+  let next: ClientToolCall[] | null = null;
+  for (const item of pending) {
+    const call = item?.call;
+    const toolCallId = call?.toolCallId;
+    if (!call || typeof toolCallId !== 'string' || !toolCallId || seen.has(toolCallId)) continue;
+    seen.add(toolCallId);
+    if (!next) next = [...existing];
+    next.push(call);
+  }
+  return next ?? existing;
+}
+
 import type { ChatMode, EffortLevel } from './preferences';
 import { getStreamProfiler } from './streamProfiler.ts';
 import { IDLE_COMPACTION_STATE } from './types.ts';
@@ -411,6 +440,18 @@ export class ConversationStore {
       providerRecoveryNotice: null,
       turnStartedAt: null,
       streamId: null,
+    });
+  }
+
+  /** 窗口重开后，用 reattach 快照把仍开放的权限卡放回这个会话。 */
+  restorePendingPermissions(
+    conversationId: string | null,
+    pending: readonly ReattachPendingPermission[] | null | undefined,
+  ): void {
+    this.setState(conversationId, (prev) => {
+      const pendingPermissionCalls = restorePendingPermissionCalls(pending, prev.pendingPermissionCalls);
+      if (pendingPermissionCalls === prev.pendingPermissionCalls) return {};
+      return { pendingPermissionCalls };
     });
   }
 

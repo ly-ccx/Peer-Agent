@@ -1,0 +1,153 @@
+import { useMemo } from 'react';
+import type { I18nRuntime } from '@peer-agent/i18n';
+import type { BotRoleModelView, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy, ProjectAgentActivity } from '@peer-agent/protocol';
+import { AnchoredModelSelectionMenu } from '../chat/components/thread/ModelSelectionPanel';
+import { isEffortLevel, type EffortLevel } from '../chat/state/preferences';
+import type { SelectionProviderGroup } from '../chat/components/thread/modelSelection';
+import { botConfiguredModelSelection, botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './state/botModelControls';
+import type { BotModelsControlState } from './state/useBotModels';
+import { botModelPolicyKey } from './state/botModelState';
+import { BotModelFeedback } from './BotModelFeedback';
+import '../chat/styles/chat-surface.css';
+import './styles/bot-model-controls.css';
+
+const TIERS = ['strong', 'fast', 'economy', 'vision'] as const;
+
+function botPanelGroups(
+  models: readonly ModelRoutingMenuOption[],
+  view: BotRoleModelView | undefined,
+  isZh: boolean,
+  defaultsLabel: string,
+  inheritLabel: string,
+  tierLabel: (tier: typeof TIERS[number]) => string,
+): readonly SelectionProviderGroup[] {
+  const providers = botModelMenuGroups(models, view, isZh).map((group) => ({
+    id: group.id,
+    label: group.label,
+    disabled: group.disabled === true,
+    models: group.items.map((item) => {
+      const source = models.find((model) => model.id === item.id);
+      const levels = source?.reasoningEffortLevels ?? [];
+      return {
+        id: item.id,
+        label: item.label,
+        disabled: item.disabled === true,
+        supportsVision: source?.supportsVision === true,
+        authMethod: source?.authMethod ?? '',
+        supportsReasoning: levels.length > 1,
+        reasoningEffortLevels: levels,
+        reasoningDefaultEffort: source?.defaultReasoningEffort,
+      };
+    }),
+  }));
+  return [
+    ...providers,
+    {
+      id: 'bot-model-defaults',
+      label: defaultsLabel,
+      disabled: false,
+      models: [
+        { id: 'inherit', label: inheritLabel, disabled: false, supportsVision: false, authMethod: '', supportsReasoning: false },
+        ...TIERS.map((tier) => ({
+          id: `tier:${tier}`,
+          label: tierLabel(tier),
+          disabled: false,
+          supportsVision: false,
+          authMethod: '',
+          supportsReasoning: false,
+        })),
+      ],
+    },
+  ];
+}
+
+export function BotModelControls({ role, policy, models, view, busy, compact = false, activeSelection, feedback, i18n, onChange }: {
+  readonly role: ModelRole;
+  readonly policy?: ProjectModelPolicy | null;
+  readonly models: readonly ModelRoutingMenuOption[];
+  readonly view?: BotRoleModelView;
+  readonly busy: boolean;
+  readonly compact?: boolean;
+  readonly activeSelection?: ProjectAgentActivity['modelSelection'];
+  readonly feedback?: BotModelsControlState;
+  readonly i18n: I18nRuntime;
+  readonly onChange: (policy: ProjectModelPolicy) => void | Promise<unknown>;
+}) {
+  const isZh = i18n.locale.startsWith('zh');
+  const selection = botConfiguredModelSelection(policy, role, models, view)
+    ?? (view?.resolution.ok ? view.resolution.selection : undefined);
+  const model = models.find(item => item.id === selection?.modelProviderId);
+  const effort = selection?.reasoningEffort ?? model?.defaultReasoningEffort;
+  const setting = policy?.overrides?.[role];
+  const groups = useMemo(() => botPanelGroups(
+    models,
+    view,
+    isZh,
+    i18n.t('projectAgent.model.defaults'),
+    i18n.t('projectAgent.policy.inherit'),
+    (tier) => i18n.t(`modelRouting.tier.${tier}`),
+  ), [i18n, isZh, models, view]);
+  const changeModel = (id: string) => {
+    if (id === 'inherit') return onChange(botInheritModelPolicy(policy, role));
+    else if (id.startsWith('tier:')) return onChange({ ...policy, overrides: { ...policy?.overrides,
+      [role]: { mode: 'tier', tier: id.slice(5) as 'strong' | 'fast' | 'economy' | 'vision' } } });
+    else {
+      const next = models.find(item => item.id === id);
+      if (next && view?.eligibleModelIds.includes(id)) {
+        return onChange(botFixedModelPolicy(policy, role, next, effort, setting?.mode === 'fixed' && setting.fastMode === true));
+      }
+    }
+  };
+  const source = !setting ? i18n.t('projectAgent.policy.inherit') : setting.mode === 'tier'
+    ? i18n.t(`modelRouting.tier.${setting.tier}`) : setting.mode === 'auto'
+      ? i18n.t('projectAgent.policy.autoPool') : i18n.t('projectAgent.model.botOnly');
+  const selectedId = !setting ? 'inherit' : setting.mode === 'tier' ? `tier:${setting.tier}` : setting.mode === 'fixed' ? setting.modelProviderId : model?.id ?? 'inherit';
+  const label = setting?.mode === 'tier'
+    ? i18n.t(`modelRouting.tier.${setting.tier}`)
+    : (model?.label ?? i18n.t('projectAgent.model.unavailable'));
+  const effortLevel: EffortLevel = isEffortLevel(effort) ? effort : 'default';
+  const fastMode = setting?.fastMode ?? (view?.resolution.ok ? view.resolution.selection.fastMode === true : false);
+  const pendingRole = Boolean(feedback?.pending
+    && botModelPolicyKey({ overrides: { [role]: feedback.pending.overrides?.[role] } })
+      !== botModelPolicyKey({ overrides: { [role]: policy?.overrides?.[role] } }));
+  const saving = Boolean(feedback?.busy && pendingRole);
+  const updating = saving || Boolean(feedback && !feedback.loaded && feedback.reading);
+  const feedbackKey = feedback?.saveError && pendingRole ? 'forms.saveFailed' : feedback?.readError ? 'forms.loadFailed'
+    : pendingRole && !feedback?.busy ? 'forms.pendingSelection'
+      : feedback?.loaded && !feedback.models.length ? 'forms.noModels' : null;
+  const runningModel = activeSelection
+    ? models.find(item => item.id === activeSelection.modelProviderId)?.label ?? i18n.t('projectAgent.model.unavailable') : null;
+  const modelTitle = [label, source, model && !model.reasoningEffortLevels?.length ? i18n.t('projectAgent.model.noEffort') : null,
+    runningModel ? `${i18n.t('projectAgent.model.runningReply')}: ${runningModel}` : null,
+    i18n.t('projectAgent.model.nextReply')].filter(Boolean).join(' · ');
+  return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={updating}>
+    <div className="bot-model-control-row">
+      <AnchoredModelSelectionMenu
+        className="bot-model-picker"
+        groups={groups}
+        selectedModelId={selectedId}
+        effort={effortLevel}
+        fastMode={fastMode}
+        isZh={isZh}
+        disabled={!feedback && (busy || !view)}
+        selectionDisabled={busy || !view}
+        busy={updating}
+        statusLabel={feedbackKey ? i18n.t(feedbackKey) : updating ? i18n.t(saving ? 'forms.saving' : 'forms.loading') : undefined}
+        feedback={feedback && (pendingRole || feedback.readError || !feedback.loaded || !feedback.models.length)
+          ? <BotModelFeedback state={feedback} i18n={i18n} showLoading={false} showSaving={false} /> : undefined}
+        label={label}
+        title={modelTitle}
+        onSelectModel={changeModel}
+        onEffortChange={(value) => {
+          if (!model || !view?.eligibleModelIds.includes(model.id)) return;
+          return onChange(botFixedModelPolicy(policy, role, model, value, fastMode));
+        }}
+        onFastModeChange={(enabled) => {
+          if (!model || !view?.eligibleModelIds.includes(model.id)) return;
+          return onChange(botFixedModelPolicy(policy, role, model, effort, enabled));
+        }}
+      />
+    </div>
+    {!compact && view?.resolution.ok && setting?.mode !== 'fixed' ? <p className="bot-model-source">{source}</p> : null}
+  </div>;
+}

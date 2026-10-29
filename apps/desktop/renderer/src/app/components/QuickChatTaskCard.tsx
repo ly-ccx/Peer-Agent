@@ -82,7 +82,7 @@ export function QuickChatTaskCard({
                   disabled={submitting || selected !== null}
                   onClick={() => { setSelected(option); onSelect(option); }}
                 >
-                  {selected === option ? '✓ ' : ''}{option}
+                  {selected === option ? <PeerIcon name="check" size={14} className="inline-icon" /> : null}{option}
                 </button>
               ))}
             </div>

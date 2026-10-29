@@ -20,6 +20,7 @@ function createFakeChat(options: {
   /** pump 经 TUI adapter 转换后调用：runGoalTurn(tickMessage 字符串)。按调用序号编排剧本。 */
   onTurn?: (callIndex: number) => unknown | Promise<unknown>;
   verifierPassed?: boolean;
+  verifierEvidenceRefs?: string[];
 } = {}) {
   const listeners = new Set<(snapshot: { status: string }) => void>();
   let status = 'idle';
@@ -46,7 +47,7 @@ function createFakeChat(options: {
       return {
         passed: options.verifierPassed ?? true,
         summary: 'fake verifier',
-        evidenceRefs: ['tool-result://exec-goal-verifier'],
+        evidenceRefs: options.verifierEvidenceRefs ?? ['tool-result://exec-goal-verifier'],
       };
     },
   };
@@ -152,6 +153,7 @@ describe('driveNewGoalPlansToSettled', () => {
 
       // Runner 轮：模型用 goal_update_task 完成带 evidence 的子任务，再声明完成。
       const chat = createFakeChat({
+        verifierEvidenceRefs: ['local-shell-artifact://exec-goal-test/stdout'],
         async onTurn(turnNumber: number) {
           if (turnNumber === 1) {
             const taskId = bridge.getPlan(planId)?.tasks?.[0]?.taskId;

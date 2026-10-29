@@ -1,0 +1,40 @@
+.resource-edit-library {
+  min-width: 0;
+  margin-block: var(--space-6);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+  color: var(--graphite-base);
+  font-size: var(--ui-font-control);
+  line-height: var(--ui-line-body);
+}
+
+.resource-library-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: var(--space-8); }
+.resource-edit-library .resource-library-heading h2 { margin: 0; font-size: var(--ui-font-meta); font-weight: 500; color: var(--graphite-secondary); }
+.resource-edit-library .resource-library-refresh { flex: none; width: var(--space-8); height: var(--space-8); min-height: var(--space-8); padding: var(--space-2); background: transparent; }
+.resource-edit-library .resource-library-refresh:hover:not(:disabled) { background: var(--control-fill-hover); }
+.resource-edit-library p { margin-block: var(--space-2); font-size: var(--ui-font-control); line-height: var(--ui-line-body); overflow-wrap: anywhere; }
+.resource-edit-library .resource-library-empty { margin-block: var(--space-2) var(--space-4); color: var(--graphite-secondary); }
+.resource-library-notice, .resource-edit-library [role='alert'] { color: var(--graphite-base); }
+.resource-edit-library ul { list-style: none; padding: 0; margin: 0; }
+.resource-edit-library li { min-width: 0; padding-block: var(--space-2); border-bottom: 1px solid var(--chrome-hairline); overflow-wrap: anywhere; }
+.resource-edit-library li:last-child { border-bottom: 0; }
+.resource-edit-library .resource-library-open { width: 100%; }
+.resource-library-open:disabled { opacity: .55; cursor: default; }
+.resource-library-open:disabled:hover { background: transparent; }
+.resource-edit-library .resource-library-file { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; }
+.resource-library-file-name { display: block; color: var(--graphite-base); font-size: var(--ui-font-control); line-height: var(--ui-line-control); overflow-wrap: anywhere; }
+.resource-library-path, .resource-library-meta { display: block; color: var(--graphite-secondary); font-size: var(--ui-font-meta); line-height: var(--ui-line-body); overflow-wrap: anywhere; }
+.resource-edit-library .resource-library-history { margin-block-start: var(--space-2); }
+.resource-edit-library .resource-library-history > summary { justify-content: space-between; gap: var(--space-3); min-height: var(--space-10); padding: var(--space-2) var(--space-3); border-radius: var(--ui-radius-panel); font-size: var(--ui-font-control); line-height: var(--ui-line-control); color: var(--graphite-base); }
+.resource-library-history-label { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.resource-library-history-label > svg, .resource-library-history > summary > svg { flex: none; color: var(--graphite-secondary); }
+.resource-library-history > summary:hover { background: var(--control-fill-hover); }
+.resource-edit-library summary:focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
+.resource-library-history-body { min-width: 0; padding: var(--space-2) var(--space-3); }
+.resource-library-history-body h3 { margin-block: var(--space-4) var(--space-2); color: var(--graphite-secondary); font-size: var(--ui-font-meta); font-weight: 500; }
+.resource-library-history-body h3:first-child { margin-block-start: var(--space-2); }
+.resource-library-history-body details > summary { min-height: var(--space-8); font-size: var(--ui-font-meta); color: var(--graphite-secondary); }
+.resource-library-history-body code { font-size: var(--ui-font-meta); overflow-wrap: anywhere; }
+.resource-library-history-body pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-3); border-radius: var(--ui-radius-control); background: var(--paper-sunken); font-size: var(--ui-font-meta); }
+.resource-library-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-block: var(--space-2); }
+.resource-library-snapshot { min-width: 0; padding-block-start: var(--space-2); }

@@ -1,0 +1,504 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { createConversationStore } from '../../../conversation-store/src/index.mjs';
+import { createMemoryStore } from '../memory/memory-store.mjs';
+import { createProjectRegistry } from '../project-registry.mjs';
+import { createBotDirectory } from './bot-directory.mjs';
+import { createBotLifecycle } from './bot-lifecycle.mjs';
+import { projectCards } from './card-projection.mjs';
+
+function tempRoot() {
+  return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
+}
+
+test('directory count and detail include the same open child decision without reading full cards', () => {
+  const root = tempRoot();
+  let answered = false;
+  try {
+    const { directory } = harness(root, {
+      readCards: () => { throw Error('List must not load the full card surface'); },
+      readQuestionCards: () => projectCards('w', { questions: [{ sessionId: 'sess-1', questionId: 'q', prompt: 'Choose format', options: ['CSV'], answered }] }),
+    });
+    assert.equal(directory.list()[0].state.needsYou, 4);
+    assert.equal(directory.attention().length, 4);
+    assert.equal(directory.attention().find(i => i.sessionId === 'sess-1').title, 'Choose format');
+    answered = true;
+    assert.equal(directory.list()[0].state.needsYou, 3);
+    assert.equal(directory.attention().length, 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('legacy freeform replies remove conversational needs-you while approval and confirmation remain', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 3);
+    conversationStore.appendMessage(conversationId, { id: 'legacy-answer', kind: 'user_input', role: 'user', content: '我的回答' });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    assert.equal(directory.list()[0].state.needsYou, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('moving on after another bot reply clears stale choices across list, search and restart', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    conversationStore.appendMessage(conversationId, { id: 'extra', kind: 'agent_reply', role: 'assistant', content: '补充说明' });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    conversationStore.appendMessage(conversationId, { id: 'new-topic', kind: 'user_input', role: 'user',
+      content: '先讨论别的问题', quoteRefs: ['user-1'] });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    assert.equal(directory.list()[0].state.needsYou, 2);
+    assert.equal(directory.query('').catalog[0].state.needsYou, 2);
+    const reopened = createBotDirectory({ rootDir: root,
+      readMessages: id => createConversationStore({ storeDir: path.join(root, 'conversations') }).getPersistedConversationHistory(id)?.messages || [] });
+    assert.equal(reopened.get(entry.workspaceId).item.state.needsYou, 0);
+    assert.equal(conversationStore.getPersistedConversationHistory(conversationId).messages.find(message => message.id === 'reply-1').question.answered, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('回复选择卡跟随所属消息与历史页，不追加到最新消息末尾', () => {
+  const root = tempRoot();
+  try {
+    const question = { cardId: 'card:question:reply:reply-1', kind: 'question', resolvedState: 'open',
+      refs: { replyMessageId: 'reply-1' }, actions: [{ id: 'answer' }] };
+    const { entry, directory, conversationId, conversationStore } = harness(root, { readCards: () => [question] });
+    conversationStore.appendMessage(conversationId, { id: 'later', kind: 'user_input', role: 'user', content: '我的回答' });
+    const latest = directory.readConversation(entry.workspaceId, { latest: true, limit: 1 });
+    assert.deepEqual(latest.messages.map(message => message.id), ['later']);
+    const older = directory.readConversation(entry.workspaceId, { latest: true, limit: 1, before: 'later' });
+    assert.deepEqual(older.messages.map(message => message.id), ['reply-1']);
+    assert.deepEqual(older.messages[0].cards, [question]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+function harness(root, directoryOptions = {}) {
+  const folder = path.join(root, 'demo-project');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(path.join(folder, 'README.md'), 'hello');
+  const registry = createProjectRegistry({ filePath: path.join(root, 'projects', 'registry.json') });
+  const entry = registry.ensureForPath(folder);
+  const conversationStore = createConversationStore({ storeDir: path.join(root, 'conversations') });
+  const life = createBotLifecycle({
+    rootDir: root,
+    registry,
+    conversationStore,
+    memoryStore: createMemoryStore({ rootDir: root }),
+    now: () => new Date('2026-09-27T00:00:00.000Z'),
+  });
+  const created = life.ensureBot(entry.workspaceId);
+  const conversationId = created.profile.agentConversationId;
+  conversationStore.appendMessage(conversationId, {
+    id: 'user-1',
+    role: 'user',
+    kind: 'user_input',
+    content: '看一下目录',
+    createdAt: '2026-09-27T01:00:00.000Z',
+  });
+  conversationStore.appendMessage(conversationId, {
+    id: 'card-1',
+    role: 'assistant',
+    kind: 'system_card',
+    content: '需要确认',
+    createdAt: '2026-09-27T02:00:00.000Z',
+  });
+  conversationStore.appendMessage(conversationId, {
+    id: 'reply-1',
+    role: 'assistant',
+    kind: 'agent_reply',
+    content: '项'.repeat(100),
+    createdAt: '2026-09-27T03:00:00.000Z',
+    question: { prompt: '用哪种方案', options: ['方案一', '方案二'], answered: false },
+  });
+  conversationStore.appendMessage(conversationId, {
+    id: 'hidden-1',
+    role: 'assistant',
+    kind: 'tool_result',
+    content: '工具原文不进预览',
+    createdAt: '2026-09-27T04:00:00.000Z',
+  });
+  const sessions = [{
+    sessionId: 'sess-1',
+    status: 'running',
+    title: '发布说明',
+    updatedAt: '2026-09-27T05:00:00.000Z',
+  }];
+  const approvals = [{ approvalId: 'ap-1', state: 'open' }, { approvalId: 'ap-2', state: 'denied' }];
+  const confirmations = [{ sessionId: 'confirm-1', accepted: false }];
+  const directory = createBotDirectory({
+    rootDir: root,
+    registry,
+    readMessages: (id) => conversationStore.getPersistedConversationHistory(id)?.messages || [],
+    listSessions: () => sessions,
+    getSession: (sessionId) => sessions.find((session) => session.sessionId === sessionId) || null,
+    listApprovals: () => approvals,
+    listConfirmations: () => confirmations,
+    now: () => new Date('2026-09-27T06:00:00.000Z'),
+    ...directoryOptions,
+  });
+  return { entry, directory, conversationId, conversationStore };
+}
+
+test('unchanged read receipt does not rewrite its cursor; same-time new message still advances its identity', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationStore, conversationId } = harness(root);
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    const file = path.join(root, 'project-runtime', entry.workspaceId, 'read-cursor.json');
+    const before = statSync(file, { bigint: true });
+    assert.equal(directory.markRead(entry.workspaceId).changed, false);
+    assert.equal(statSync(file, { bigint: true }).ino, before.ino, 'no atomic rewrite for an unchanged receipt');
+    conversationStore.appendMessage(conversationId, { id: 'same-time-new', role: 'assistant', kind: 'agent_reply', content: 'new', createdAt: '2026-09-27T03:00:00.000Z' });
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).messageId, 'same-time-new');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('an empty conversation retains its read receipt across clock changes', () => {
+  const root = tempRoot();
+  let time = '2026-09-27T07:00:00.000Z';
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => [], now: () => new Date(time) });
+    assert.equal(directory.markRead(entry.workspaceId).changed, true);
+    time = '2026-09-27T08:00:00.000Z';
+    assert.deepEqual(directory.markRead(entry.workspaceId), { ok: true, at: '2026-09-27T07:00:00.000Z', messageId: null, changed: false });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('列表项截断最后一条可见消息，并计入批准、提问、确认和进行中', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory } = harness(root);
+    const [item] = directory.list();
+    assert.equal(item.workspaceId, entry.workspaceId);
+    assert.equal(item.profile.displayName, 'demo-project');
+    assert.equal(Array.from(item.preview).length, 80);
+    assert.equal(item.preview, '项'.repeat(80));
+    assert.equal(item.state.needsYou, 3);
+    assert.equal(item.state.running, 1);
+    assert.equal(item.state.unread, 1);
+    assert.equal(item.lastActiveAt, '2026-09-27T05:00:00.000Z');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('query returns a complete catalog and matched items from one current projection', () => {
+  const root = tempRoot();
+  let reads = 0;
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => { reads++; return []; } });
+    const result = directory.query('demo-project');
+    assert.equal(reads, 1, 'one history read per bot for the entire query snapshot');
+    assert.deepEqual(result.items, result.catalog);
+    assert.equal(result.catalog[0].workspaceId, entry.workspaceId);
+    const missing = directory.query('no matching bot');
+    assert.deepEqual(missing.items, []);
+    assert.equal(missing.catalog.length, 1, 'message/memory corpus still needs unmatched bots');
+    assert.equal(reads, 2, 'a new query obtains current facts rather than retaining a stale snapshot');
+    assert.deepEqual(directory.search('demo-project'), directory.query('demo-project').items);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('list/query use a current message batch, while details and unavailable adapters use single reads', () => {
+  const root = tempRoot();
+  let singles = 0, batches = 0, unavailable = false;
+  const message = content => ({ id: content, role: 'assistant', kind: 'agent_reply', content, createdAt: '2026-09-27T09:00:00.000Z' });
+  try {
+    const { entry, directory } = harness(root, {
+      readMessages: () => { singles++; return [message('single current')]; },
+      readMessagesBatch: ids => { batches++; if (unavailable) throw Error('unavailable'); return new Map(ids.map(id => [id, [message('batch current')]])); },
+    });
+    assert.equal(directory.query('batch current').items[0].preview, 'batch current');
+    assert.equal(batches, 1); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.preview, 'single current');
+    assert.equal(singles, 1);
+    unavailable = true;
+    assert.equal(directory.list()[0].preview, 'single current');
+    assert.equal(singles, 2); assert.equal(batches, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('approval batch is current and scoped; details and unavailable adapters retain live single reads', () => {
+  const root = tempRoot();
+  let singles = 0, batches = 0, state = 'open', unavailable = false;
+  try {
+    const { entry, directory } = harness(root, {
+      listConfirmations: () => [], readMessages: () => [],
+      listApprovals: () => { singles++; return [{ approvalId: 'single', state: 'open' }]; },
+      readApprovalsBatch: ids => {
+        batches++; if (unavailable) throw Error('unavailable');
+        return new Map(ids.map(id => [id, [{ approvalId: id, state }]]));
+      },
+    });
+    assert.equal(directory.list()[0].state.needsYou, 1);
+    state = 'approved';
+    assert.equal(directory.list()[0].state.needsYou, 0);
+    assert.equal(batches, 2); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 1);
+    unavailable = true;
+    assert.equal(directory.query('').catalog[0].state.needsYou, 1);
+    assert.equal(singles, 2); assert.equal(batches, 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('task batch refreshes list facts while details and failed batches retain the single port', () => {
+  const root = tempRoot();
+  let batches = 0, singles = 0, status = 'waiting_user', unavailable = false;
+  try {
+    const { entry, directory } = harness(root, { readMessages: () => [], listConfirmations: () => [], listApprovals: () => [],
+      listSessions: () => { singles++; return [{ title: 'single task', status: 'waiting_user' }]; },
+      readSessionsBatch: ids => { batches++; if (unavailable) throw Error('unavailable');
+        return new Map(ids.map(id => [id, [{ title: 'fresh batch task', status }]])); },
+    });
+    assert.equal(directory.query('fresh batch task').items.length, 1);
+    assert.equal(directory.list()[0].state.needsYou, 0);
+    status = 'completed'; assert.equal(directory.list()[0].state.needsYou, 0);
+    assert.equal(batches, 3); assert.equal(singles, 0);
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 0);
+    unavailable = true; assert.equal(directory.list()[0].state.needsYou, 0);
+    assert.equal(singles, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('读游标之后未读清零，对话按 kind 分页', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory } = harness(root);
+    const marked = directory.markRead(entry.workspaceId);
+    assert.equal(marked.messageId, 'reply-1');
+    const cursor = JSON.parse(readFileSync(
+      path.join(root, 'project-runtime', entry.workspaceId, 'read-cursor.json'),
+      'utf8',
+    ));
+    assert.equal(cursor.at, '2026-09-27T03:00:00.000Z');
+    assert.equal(directory.list()[0].state.unread, 0);
+    const page = directory.readConversation(entry.workspaceId, { kinds: ['agent_reply'], limit: 1 });
+    assert.equal(page.messages.length, 1);
+    assert.equal(page.messages[0].id, 'reply-1');
+    assert.equal(page.nextCursor, null);
+    const mixed = directory.readConversation(entry.workspaceId, { limit: 2 });
+    assert.deepEqual(mixed.messages.map((message) => message.id), ['user-1', 'card-1']);
+    assert.equal(mixed.nextCursor, 'card-1');
+    const rest = directory.readConversation(entry.workspaceId, { limit: 2, before: 'card-1' });
+    assert.deepEqual(rest.messages.map((message) => message.id), ['reply-1']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('未落盘提示卡只在首页投影，分页游标仍指向持久化消息', () => {
+  const root = tempRoot();
+  try {
+    const pendingCard = { cardId: 'projected-card', resolvedState: 'open' };
+    const { entry, directory } = harness(root, {
+      readCards: () => [pendingCard, { cardId: 'resolved-card', resolvedState: 'resolved' }],
+    });
+    const first = directory.readConversation(entry.workspaceId, { limit: 2 });
+    assert.deepEqual(first.messages.map((message) => message.id), ['user-1', 'card-1', 'projected-card']);
+    assert.deepEqual(first.messages[2].cards, [pendingCard]);
+    assert.equal(first.nextCursor, 'card-1');
+    const second = directory.readConversation(entry.workspaceId, { limit: 2, before: first.nextCursor });
+    assert.deepEqual(second.messages.map((message) => message.id), ['reply-1']);
+    assert.equal(second.nextCursor, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('对话读取刷新当前签收状态且不改写历史消息，不采信跨项目状态', () => {
+  const root=tempRoot();let status='result_ready';let workspaceId;
+  try {
+    const {entry,directory,conversationId,conversationStore}=harness(root,{
+      getSession:id=>({sessionId:id,workspaceId:id==='sess-1'?workspaceId:'foreign',status}),
+    });
+    workspaceId=entry.workspaceId;
+    conversationStore.appendMessage(conversationId,{id:'report',role:'assistant',kind:'agent_reply',content:'Reviewed',
+      sources:['sess-1','foreign'],meta:{sessionStates:[{sessionId:'sess-1',status:'result_ready'}]}});
+    assert.deepEqual(directory.readConversation(workspaceId).messages.at(-1).meta.sessionStates,[{sessionId:'sess-1',status:'result_ready'}]);
+    status='accepted';
+    assert.deepEqual(directory.readConversation(workspaceId).messages.at(-1).meta.sessionStates,[{sessionId:'sess-1',status:'accepted'}]);
+    const stored=conversationStore.getPersistedConversationHistory(conversationId).messages.at(-1);
+    assert.equal(stored.meta.sessionStates[0].status,'result_ready');
+    assert.equal(stored.content,'Reviewed');
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('默认对话页保留 agent_turn，列表预览仍不显示它', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    conversationStore.appendMessage(conversationId, {
+      id: 'turn-1',
+      role: 'assistant',
+      kind: 'agent_turn',
+      content: '',
+      createdAt: '2026-09-27T04:30:00.000Z',
+      rounds: [{ text: '', toolCalls: [{ name: 'cancel_session', input: { sessionId: 'sess-1' }, result: { sessionId: 'sess-1' } }] }],
+    });
+    const page = directory.readConversation(entry.workspaceId, { limit: 10 });
+    assert.equal(page.messages.some((message) => message.id === 'turn-1'), true);
+    assert.equal(page.messages.some((message) => message.id === 'hidden-1'), false);
+    assert.equal(directory.list()[0].preview.includes('cancel_session'), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('搜索命中名字、预览和任务标题', () => {
+  const root = tempRoot();
+  try {
+    const { directory } = harness(root);
+    assert.equal(directory.search('demo').length, 1);
+    assert.equal(directory.search('项项').length, 1);
+    assert.equal(directory.search('发布说明').length, 1);
+    assert.equal(directory.search('工具原文').length, 0);
+    assert.equal(directory.search('没有').length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('没熟悉过的机器人在第一页给出熟悉提议，翻页不带上它', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory } = harness(root);
+    const page = directory.readConversation(entry.workspaceId, { limit: 10 });
+    assert.equal(page.familiarizeOffer.text, '要我先熟悉一下这个项目吗？');
+    assert.equal(page.familiarizeOffer.action, '先熟悉一下');
+    assert.equal(page.messages.some((message) => message.content === page.familiarizeOffer.text), false);
+    const rest = directory.readConversation(entry.workspaceId, { limit: 2, before: 'card-1' });
+    assert.equal(rest.familiarizeOffer, undefined);
+    assert.deepEqual(rest.messages.map((message) => message.id), ['reply-1']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('没有当前用户动作的经典目标不占用待处理名额', () => {
+  const root = tempRoot();
+  try {
+    const { directory } = harness(root, {
+      listClassicGoals: () => [{
+        planId: 'plan-wait',
+        waitingUser: true,
+        updatedAt: '2026-09-27T07:00:00.000Z',
+      }, {
+        planId: 'plan-run',
+        waitingUser: false,
+        updatedAt: '2026-09-27T07:00:00.000Z',
+      }],
+    });
+    const [item] = directory.list();
+    assert.equal(item.state.needsYou, 3);
+    assert.equal(item.state.running, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('latest conversation pages include new replies while default forward paging stays compatible',()=>{
+  const root=tempRoot();try{
+    const {directory,conversationStore,conversationId,entry}=harness(root),workspaceId=entry.workspaceId;
+    for(let n=0;n<120;n++)conversationStore.appendMessage(conversationId,{id:`later-${n}`,role:'assistant',kind:'agent_reply',content:`reply ${n}`});
+    const latest=directory.readConversation(workspaceId,{latest:true,limit:50});
+    assert.equal(latest.messages.at(-1).id,'later-119');assert.equal(latest.messages[0].id,'later-70');
+    const earlier=directory.readConversation(workspaceId,{latest:true,limit:50,before:latest.nextCursor});
+    assert.equal(earlier.messages[0].id,'later-20');assert.equal(earlier.messages.at(-1).id,'later-69');
+    assert.equal(directory.readConversation(workspaceId,{limit:2}).messages[0].id,'user-1');
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('an attachment-only user message previews its filename instead of an empty conversation', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    conversationStore.appendMessage(conversationId, { id: 'upload-only', kind: 'user_input', role: 'user',
+      content: '', attachments: [{ id: 'img', kind: 'image', name: 'diagram.png', dataUrl: 'data:image/png;base64,AA==' }] });
+    assert.equal(directory.get(entry.workspaceId).item.preview, 'diagram.png');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('list and cursor use summary messages while conversation details retain complete rounds', () => {
+  const root=tempRoot();let fullReads=0,summaryReads=0,batchReads=0;let history;
+  try {
+    const summary=()=>{summaryReads++;return history.map(({rounds,segments,...row})=>row);};
+    const env=harness(root,{readMessages:()=>{fullReads++;return history;},readSummaryMessages:summary,
+      readSummaryMessagesBatch:ids=>{batchReads++;return new Map(ids.map(id=>[id,summary()]));}});
+    history=env.conversationStore.getPersistedConversationHistory(env.conversationId).messages;
+    history.push({id:'internal',kind:'agent_turn',role:'assistant',rounds:[{text:'complete original details'}],createdAt:'2026-09-27T02:30:00Z'});
+    env.directory.get(env.entry.workspaceId);env.directory.list();env.directory.markRead(env.entry.workspaceId);
+    assert.equal(fullReads,0,'metadata requests must not clone complete rounds');assert.ok(summaryReads>=3);assert.equal(batchReads,1);
+    const page=env.directory.readConversation(env.entry.workspaceId,{latest:true,limit:100});
+    assert.equal(fullReads,1);assert.equal(page.messages.find(m=>m.id==='internal').rounds[0].text,'complete original details');
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('presentation pages omit internal rounds while targeted details retain exact and legacy process identities', () => {
+  const root=tempRoot();
+  try {
+    let store;
+    const env=harness(root,{readConversationMessages:id=>store.getPersistedConversationHistory(id).messages.map(({rounds,...message})=>message)});
+    store=env.conversationStore;
+    const messages=[
+      {id:'i1',role:'user',kind:'user_input',content:'first'},
+      {id:'t1',role:'assistant',kind:'agent_turn',rounds:[{toolCalls:[{name:'read_file',result:'FULL_RESULT'}]}]},
+      {id:'r1',role:'assistant',kind:'agent_reply',content:'legacy'},
+      {id:'i2',role:'user',kind:'user_input',content:'second'},
+      {id:'t2',role:'assistant',kind:'agent_turn',rounds:[{text:'FOREIGN_PROCESS'}]},
+      {id:'r2',role:'assistant',kind:'agent_reply',turnId:'t1',content:'exact'},
+    ];
+    store.replaceMessages(env.conversationId,messages);
+    const normal=env.directory.readConversation(env.entry.workspaceId,{presentationOnly:true});
+    assert.ok(normal.messages.every(message=>message.rounds===undefined));
+    assert.equal(normal.messages.find(message=>message.id==='r2').content,'exact');
+    assert.equal(env.directory.readConversation(env.entry.workspaceId).messages.find(message=>message.id==='t1').rounds[0].toolCalls[0].result,'FULL_RESULT','legacy callers retain complete pages');
+    for(const id of ['r1','r2']) {
+      const detail=env.directory.readConversation(env.entry.workspaceId,{processFor:id});
+      assert.deepEqual(detail.messages.map(message=>message.id),['t1',id]);
+      assert.equal(detail.messages[0].rounds[0].toolCalls[0].result,'FULL_RESULT');
+    }
+    assert.deepEqual(env.directory.readConversation(env.entry.workspaceId,{processFor:'missing'}).messages,[]);
+    assert.equal(env.directory.readConversation(env.entry.workspaceId,{processFor:'r1',presentationOnly:true}).code,'INVALID_INPUT');
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('projected failure cards resolve the canonical error message and exact original process', () => {
+ const root=tempRoot();
+ try {
+  const card={cardId:'projected-failure',kind:'agent_unavailable',content:'CURRENT_STATUS',refs:{turnId:'failed'},actions:[]};
+  const env=harness(root,{readCards:()=>[card]});
+  env.conversationStore.replaceMessages(env.conversationId,[
+   {id:'failed',kind:'agent_turn',role:'assistant',rounds:[{toolCalls:[{name:'read_file',result:'ORIGINAL_RESULT'}]}]},
+   {id:'failed-card',kind:'system_card',role:'assistant',turnId:'failed',card:'agent_unavailable',content:'ORIGINAL_ERROR'},
+  ]);
+  const result=env.directory.readConversation(env.entry.workspaceId,{processFor:'projected-failure'});
+  assert.equal(result.processMessageId,'failed-card');assert.deepEqual(result.messages.map(message=>message.id),['failed','failed-card']);
+  assert.equal(result.messages[0].rounds[0].toolCalls[0].result,'ORIGINAL_RESULT');
+  assert.equal(result.messages[1].content,'ORIGINAL_ERROR');
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('legacy verdict cards cannot become the bot preview or public messages; exact process reads preserve them', () => {
+  const root = tempRoot();
+  try {
+    const env = harness(root);
+    env.conversationStore.replaceMessages(env.conversationId, [
+      { id: 'user', kind: 'user_input', role: 'user', content: '核对结果' },
+      { id: 'reply', kind: 'agent_reply', role: 'assistant', content: '结果仍有一项尚未核验。' },
+      { id: 'verdict', kind: 'system_card', role: 'assistant', content: 'passed',
+        cards: [{ cardId: 'card:verdict:session', kind: 'verdict', content: 'passed', resolvedState: 'resolved' }] },
+    ]);
+    const file = path.join(root, 'conversations', `${env.conversationId}.jsonl`);
+    const before = readFileSync(file);
+    assert.deepEqual(env.directory.readConversation(env.entry.workspaceId).messages.map(row => row.id), ['user', 'reply']);
+    assert.equal(env.directory.get(env.entry.workspaceId).item.preview, '结果仍有一项尚未核验。');
+    const detail = env.directory.readConversation(env.entry.workspaceId, { processFor: 'verdict' });
+    assert.equal(detail.messages[0].cards[0].content, 'passed');
+    assert.deepEqual(readFileSync(file), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

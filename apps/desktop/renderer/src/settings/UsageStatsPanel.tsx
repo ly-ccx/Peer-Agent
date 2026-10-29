@@ -14,6 +14,7 @@ import type {
   UsageStatsSnapshot,
 } from '../preload/contracts/bootstrapPreloadApi';
 import { formatTokenCount, formatTokenYiApprox } from '../chat/state/format';
+import { roleTranslationKey } from '../app/components/settings/modelRoutingPanelState';
 
 /** 设置分区：使用统计（跨会话汇总 + 请求日志热力图/趋势）。 */
 
@@ -703,6 +704,7 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   const [dayDetail, setDayDetail] = useState<UsageDaySnapshot | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
   const [dayError, setDayError] = useState<string | null>(null);
+  const [showByRole, setShowByRole] = useState(false);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -773,17 +775,27 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
           <h2>{i18n.t('settings.usage')}</h2>
           <p>{i18n.t('settings.usage.description')}</p>
         </div>
-        <button
-          type="button"
-          className="settings-btn"
-          onClick={() => {
-            void loadStats();
-            void loadDaily(range);
-          }}
-          disabled={loading || dailyLoading}
-        >
-          {i18n.t('settings.usage.refresh')}
-        </button>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="settings-btn"
+            aria-pressed={showByRole}
+            onClick={() => setShowByRole((value) => !value)}
+          >
+            {i18n.t('settings.usage.showByRole')}
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
+            onClick={() => {
+              void loadStats();
+              void loadDaily(range);
+            }}
+            disabled={loading || dailyLoading}
+          >
+            {i18n.t('settings.usage.refresh')}
+          </button>
+        </div>
       </header>
 
       {error ? <p className="settings-status settings-status--error">{error || i18n.t('settings.usage.loadFailed')}</p> : null}
@@ -959,6 +971,17 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             nameHeader={i18n.t('settings.usage.col.model')}
             i18n={i18n}
           />
+          {showByRole ? (
+            <GroupTable
+              title={i18n.t('settings.usage.byRole')}
+              rows={(snapshot?.byRole || []).map((row) => {
+                const key = roleTranslationKey(row.key);
+                return key ? { ...row, label: i18n.t(key) } : row;
+              })}
+              nameHeader={i18n.t('settings.usage.col.role')}
+              i18n={i18n}
+            />
+          ) : null}
         </>
       ) : null}
     </div>

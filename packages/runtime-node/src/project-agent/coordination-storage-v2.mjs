@@ -1,0 +1,488 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { DatabaseSync } from '../sqlite/connection.mjs';
+import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { copyFile, truncate } from 'node:fs/promises';
+import { mkdirSync, readFileSync, renameSync, existsSync, statSync, lstatSync, openSync, closeSync, fsyncSync, writeSync, fstatSync, readSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { prepareLegacyIntegrity, acceptsLegacyIntegrity } from './coordination-legacy-integrity.mjs';
+import { journalLines } from './journal-lines.mjs';
+import { reduceCoordination } from './work-coordination.mjs';
+import { encodeWorkUpdate } from './work-delta.mjs';
+import { COORDINATION_WORKER_SOURCE } from './coordination-worker-source.generated.mjs';
+import { withCoordinationRebuild } from './coordination-rebuild-queue.mjs';
+import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
+
+const buckets = ['events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', ...SUPERVISION_BUCKETS];
+const empty = () => ({ revision: 0, events: {}, works: {}, deliveries: {} });
+const token = file => { try { const s = statSync(file, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; } catch (e) { if (e.code === 'ENOENT') return 'missing'; throw e; } };
+const fail = code => Object.assign(new Error(code), { code });
+const corruptIndex = error => error.code === 'coordination_index_corrupt' || [11, 26].includes(Number(error.errcode) & 255);
+const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function writeAll(fd, value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  for (let offset = 0; offset < bytes.length;) {
+    const count = writeSync(fd, bytes, offset, bytes.length - offset);
+    if (!count) throw fail('coordination_write_incomplete'); offset += count;
+  }
+}
+function syncPath(file) { const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
+function readHead(file, generation, read = file => JSON.parse(readFileSync(file, 'utf8'))) {
+  let proof; try { proof = read(file); } catch (error) { throw fail(error.code === 'ENOENT' ? 'coordination_head_missing' : 'coordination_head_invalid'); }
+  if (!proof || typeof proof.generation !== 'string' || !proof.generation || !Number.isSafeInteger(proof.revision) || proof.revision < 0
+    || typeof proof.hash !== 'string' || !/^(?:[a-f0-9]{64})?$/.test(proof.hash)
+    || typeof proof.legacyVersion !== 'string' || !proof.legacyVersion) throw fail('coordination_head_invalid');
+  if (generation !== undefined && proof.generation !== generation) throw fail('coordination_head_generation_mismatch');
+  return proof;
+}
+const freeze = value => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const x of Object.values(value)) freeze(x); } return value; };
+const statements = new WeakMap();
+function statement(db, sql) { let cache = statements.get(db); if (!cache) statements.set(db, cache = new Map()); if (!cache.has(sql)) cache.set(sql, db.prepare(sql)); return cache.get(sql); }
+
+function database(file, { derived = false } = {}) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  try {
+  db.exec(`PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=${derived ? 'NORMAL' : 'FULL'};`);
+  db.exec('CREATE TABLE IF NOT EXISTS objects (bucket TEXT, id TEXT, value TEXT NOT NULL, PRIMARY KEY(bucket,id));'
+    + 'CREATE TABLE IF NOT EXISTS meta (id TEXT PRIMARY KEY, value TEXT NOT NULL);'
+    + 'CREATE TABLE IF NOT EXISTS observations (workId TEXT, id TEXT, PRIMARY KEY(workId,id));'
+    + 'CREATE TABLE IF NOT EXISTS dispatches (workId TEXT, attemptId TEXT, callId TEXT, value TEXT, PRIMARY KEY(workId,attemptId,callId));');
+  db.exec('CREATE TABLE IF NOT EXISTS supervision_index (bucket TEXT NOT NULL,id TEXT NOT NULL,recipientConversationId TEXT,sessionId TEXT,workId TEXT,conversationId TEXT,parentConversationId TEXT,sequence INTEGER NOT NULL,pending INTEGER NOT NULL,PRIMARY KEY(bucket,id))');
+  for (const field of ['recipientConversationId', 'sessionId', 'workId', 'conversationId', 'parentConversationId']) {
+    db.exec(`CREATE INDEX IF NOT EXISTS supervision_${field} ON supervision_index(bucket,${field},sequence DESC,id DESC)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS supervision_pending_${field} ON supervision_index(bucket,${field},sequence DESC,id DESC) WHERE pending=1`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS supervision_work_conversation ON supervision_index(bucket,workId,conversationId,sequence DESC,id DESC)');
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS supervision_open_request ON supervision_index(sessionId) WHERE bucket='agentRequests' AND pending=1");
+  return db;
+  } catch (error) { db.close(); throw error; }
+}
+const getMeta = (db, id) => { const row = statement(db, 'SELECT value FROM meta WHERE id=?').get(id); return row ? JSON.parse(row.value) : undefined; };
+const putMeta = (db, id, value) => statement(db, 'INSERT OR REPLACE INTO meta VALUES (?,?)').run(id, JSON.stringify(value));
+const get = (db, bucket, id) => { const row = statement(db, 'SELECT value FROM objects WHERE bucket=? AND id=?').get(bucket, id); return row ? JSON.parse(row.value) : undefined; };
+const all = (db, bucket) => Object.fromEntries(statement(db, 'SELECT id,value FROM objects WHERE bucket=?').all(bucket).map(row => [row.id, JSON.parse(row.value)]));
+function head(db, id) { return get(db, 'works', id); }
+function snapshot(db, receipts = false) {
+  const state = { revision: getMeta(db, 'revision') || 0 };
+  for (const bucket of buckets) { const rows = all(db, bucket); if (Object.keys(rows).length || ['works', 'events', 'deliveries'].includes(bucket)) state[bucket] = rows; }
+  if (receipts) for (const row of db.prepare('SELECT workId,id FROM observations').iterate()) {
+    const work = state.works[row.workId]; if (work?.budget) (work.budget.observations ||= {})[row.id] = true;
+  }
+  if (getMeta(db, 'lastRecovery')) state.lastRecovery = getMeta(db, 'lastRecovery');
+  return state;
+}
+
+function apply(db, record, { blobs, receiptCache } = {}) {
+  if (record.storageVersion === 2) {
+    const { hash, ...body } = record;
+    if (record.previousHash !== (getMeta(db, 'eventHash') || '') || digest(body) !== hash) throw fail('coordination_hash_mismatch');
+  }
+  const envelope = record;
+  if (record.kind === 'payload_ref') {
+    if (!/^[a-f0-9]{64}$/.test(record.payloadRef?.hash || '')) throw fail('coordination_payload_invalid');
+    const file = path.join(blobs, record.payloadRef.hash + '.json');
+    if (!existsSync(file)) throw fail('coordination_payload_missing');
+    const bytes = readFileSync(file);
+    if (bytes.length !== record.payloadRef.bytes || createHash('sha256').update(bytes).digest('hex') !== record.payloadRef.hash) throw fail('coordination_payload_invalid');
+    record = { ...JSON.parse(bytes), revision: envelope.revision, schemaVersion: 1 };
+  }
+  const before = record.kind.startsWith('history_') ? snapshot(db, true) : empty(); before.revision = getMeta(db, 'revision') || 0;
+  if (record.kind.startsWith('agent_') || record.kind === 'work_note_written' || record.kind === 'context_window_opened') {
+    for (const bucket of SUPERVISION_BUCKETS) before[bucket] = {};
+    const messageIds = [record.message?.messageId, ...(record.messageIds || [])].filter(Boolean);
+    for (const id of messageIds) {
+      const message = get(db, 'agentMessages', id);
+      if (message) {
+        before.agentMessages[id] = message;
+        const receipt = get(db, 'agentCommands', message.operationId);
+        if (receipt) before.agentCommands[message.operationId] = receipt;
+      }
+    }
+    if (record.request?.sessionId) {
+      const open = statement(db, "SELECT id FROM supervision_index WHERE bucket='agentRequests' AND sessionId=? AND pending=1").get(record.request.sessionId);
+      if (open) before.agentRequests[open.id] = get(db, 'agentRequests', open.id);
+    }
+    for (const [bucket, id] of [['agentCommands', record.operationId], ['agentRequests', record.answer?.requestId || record.requestId || record.request?.requestId],
+      ['workNotes', record.note?.noteId], ['contextWindows', record.window?.windowId], ['contextWindows', record.window?.previousWindowId]]) {
+      if (!id) continue;
+      const value = get(db, bucket, id); if (value) before[bucket][id] = value;
+    }
+  }
+  if (record.kind === 'journal_recovered') before.lastRecovery = getMeta(db, 'lastRecovery');
+  const ids = [record.workId, record.work?.workId, record.owner?.workId, ...(record.retired || []).map(w => w.workId)].filter(Boolean);
+  if (!record.kind.startsWith('history_')) for (const id of ids) { const work = head(db, id); if (work) before.works[id] = work; }
+  if (['transfer', 'handled'].includes(record.kind)) before.events = all(db, 'events');
+  if (record.kind.startsWith('reply_')) {
+    const id = record.message?.id || record.messageId, value = get(db, 'deliveries', id);
+    if (value) before.deliveries[id] = value;
+    const requestId = record.message?.question?.agentRequestId || value?.message?.question?.agentRequestId;
+    if (requestId) {
+      before.agentRequests = {};
+      const request = get(db, 'agentRequests', requestId);
+      if (request) before.agentRequests[requestId] = request;
+    }
+  }
+  if (record.kind.startsWith('coordination_')) for (const key of ['mandates', 'decisions', 'transitions', 'inputBindings']) before[key] = all(db, key);
+  if (record.kind === 'usage_observed' && db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(record.workId, record.observationId)) {
+    const work = before.works[record.workId]; if (work?.budget) work.budget.observations = { [record.observationId]: true };
+  }
+  const next = reduceCoordination(before, record);
+  const supervision = record.kind.startsWith('agent_') || ['work_note_written', 'context_window_opened'].includes(record.kind)
+    || SUPERVISION_BUCKETS.some(bucket => Object.keys(next[bucket] || {}).length);
+  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
+  for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
+    let value = original;
+    if (bucket === 'works' && value.budget?.observations) {
+      if (receiptCache && receiptCache.workId !== id) { receiptCache.workId = id; receiptCache.ids.clear(); }
+      for (const key of Object.keys(value.budget.observations)) {
+        if (receiptCache?.ids.has(key)) continue;
+        statement(db, 'INSERT OR IGNORE INTO observations VALUES (?,?)').run(id, key);
+        if (receiptCache && receiptCache.ids.size < 65536) receiptCache.ids.add(key);
+      }
+      const { observations, ...budget } = value.budget; value = { ...value, budget };
+    }
+    if (bucket === 'works') for (const [attemptId, attempt] of Object.entries(value.budget?.attempts || {})) {
+      if (attempt.role !== 'project_agent' || !value.attemptId) continue;
+      for (const call of attempt.pendingTools || []) if (call.toolCallId) db.prepare('INSERT OR IGNORE INTO dispatches VALUES (?,?,?,?)').run(id, attemptId, call.toolCallId,
+        JSON.stringify({ turnId: value.attemptId, epoch: record.epoch, at: record.at }));
+    }
+    if (JSON.stringify(before[bucket]?.[id]) !== JSON.stringify(value)) {
+      db.prepare('INSERT OR REPLACE INTO objects VALUES (?,?,?)').run(bucket, id, JSON.stringify(value));
+      if (SUPERVISION_BUCKETS.includes(bucket)) db.prepare('INSERT OR REPLACE INTO supervision_index VALUES (?,?,?,?,?,?,?,?,?)').run(bucket, id,
+        value.recipientConversationId ?? null, value.sessionId ?? null, value.workId ?? null,
+        value.conversationId ?? null, value.parentConversationId ?? null, value.sequence ?? record.revision,
+        bucket === 'agentMessages' && value.deliveryIntent === 'ensure_turn'
+          || bucket === 'agentCommands' && (value.admission === 'pending' || ['pending', 'unknown'].includes(value.effect))
+          || bucket === 'agentRequests' && value.status === 'open' ? 1 : 0);
+      if (bucket === 'agentCommands') {
+        const message = get(db, 'agentMessages', value.messageId);
+        statement(db, "UPDATE supervision_index SET pending=? WHERE bucket='agentMessages' AND id=?")
+          .run(message?.deliveryIntent === 'ensure_turn' && value.delivery === 'queued' ? 1 : 0, value.messageId);
+      }
+    }
+  }
+  putMeta(db, 'revision', next.revision);
+  if (envelope.storageVersion === 2) putMeta(db, 'eventHash', envelope.hash);
+  if (next.lastRecovery) putMeta(db, 'lastRecovery', next.lastRecovery);
+}
+
+function replay(db, file, start = 0, onRead, requireV2 = false, options) {
+  if (!existsSync(file)) return 0;
+  const before = token(file), fd = openSync(file, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    for (const line of journalLines(fd, { start, end: size, onRead })) if (line.text) {
+      let record;
+      try { record = JSON.parse(line.text); }
+      catch (error) {
+        if (!line.terminated) throw Object.assign(fail('coordination_partial_tail'), { file, validEnd: line.start, sourceToken: before });
+        throw error;
+      }
+      if (requireV2 && record.storageVersion !== 2) throw fail('coordination_schema_unsupported');
+      apply(db, record, options);
+    }
+    if (token(file) !== before) throw fail('coordination_read_changed');
+    return size;
+  } finally { closeSync(fd); }
+}
+
+function sourceFiles(dir, legacy) {
+  const segments = path.join(dir, 'segments');
+  return [legacy, ...(existsSync(segments) ? readdirSync(segments).filter(x => /^\d{12}\.jsonl$/.test(x)).sort().map(x => path.join(segments, x)) : [])];
+}
+function anchor(file, size) {
+  if (!existsSync(file)) return 'missing';
+  const fd = openSync(file, 'r'), digest = createHash('sha256');
+  try {
+    for (const offset of [0, Math.max(0, size - 192)]) {
+      const bytes = Buffer.alloc(Math.min(size, 192));
+      if (readSync(fd, bytes, 0, bytes.length, offset) !== bytes.length) throw fail('coordination_read_changed');
+      digest.update(bytes);
+    }
+    return digest.digest('hex');
+  } finally { closeSync(fd); }
+}
+function rebuild({ dir, legacy, target, generation, requireHead = false, legacyIntegrity }) {
+  const db = database(target), versions = {}, options = { blobs: path.join(dir, 'blobs'), receiptCache: { workId: null, ids: new Set() } };
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    for (const file of sourceFiles(dir, legacy)) {
+      const size = replay(db, file, 0, undefined, file !== legacy, options); versions[file] = token(file);
+      putMeta(db, `offset:${file}`, size); putMeta(db, `anchor:${file}`, anchor(file, size));
+      if (existsSync(file)) syncPath(file);
+    }
+    const headFile = path.join(dir, 'head.json');
+    if (requireHead && !existsSync(headFile)) throw fail('coordination_head_missing');
+    if (existsSync(headFile)) {
+      const expected = readHead(headFile, generation);
+      if (!acceptsLegacyIntegrity(path.dirname(dir), legacy, expected, legacyIntegrity)) throw fail('coordination_legacy_changed');
+      if ((getMeta(db, 'revision') || 0) < expected.revision
+        || (getMeta(db, 'revision') || 0) === expected.revision && (getMeta(db, 'eventHash') || '') !== expected.hash) throw fail('coordination_journal_missing');
+    }
+    if (legacyIntegrity) {
+      if (token(legacy) !== legacyIntegrity.version) throw fail('coordination_read_changed');
+      putMeta(db, 'legacyIntegrity', legacyIntegrity);
+    }
+    putMeta(db, 'generation', generation); putMeta(db, 'sources', versions); db.exec('COMMIT');
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    for (const directory of new Set([path.dirname(dir), path.dirname(path.dirname(dir)), ...Object.keys(versions).filter(existsSync).map(file => path.dirname(file))])) syncPath(directory);
+  } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+  finally { db.close(); }
+}
+
+/** Journal authority and derived SQL state share one commit/recovery seam. */
+export function createCoordinationStorageV2({ directory, legacyFile, assertOwner, onRead = () => {}, segmentBytes = 32 * 1024 * 1024 }) {
+  const dir = path.join(directory, 'coordination-v2'), manifestFile = path.join(dir, 'manifest.json');
+  const headFile = path.join(dir, 'head.json');
+  const indexDirectory = path.join(directory, '.read-models'), pointerFile = path.join(indexDirectory, 'coordination-current.json');
+  const originalLegacyFile = legacyFile;
+  let db, dbIdentity, indexFile, manifest, cached, cachedRevision, preparing;
+  const metadata = new Map();
+  function readMetadata(file) {
+    const version = token(file), previous = metadata.get(file);
+    if (previous?.version === version) return previous.value;
+    metadata.delete(file);
+    const text = readFileSync(file, 'utf8'), value = JSON.parse(text);
+    if (token(file) !== version) throw fail('coordination_read_changed');
+    if (Buffer.byteLength(text) <= 64 * 1024) {
+      if (metadata.size >= 8) metadata.delete(metadata.keys().next().value);
+      metadata.set(file, { version, value: freeze(value) });
+    }
+    return value;
+  }
+  function load() {
+    if (existsSync(path.join(directory, 'coordination-fence.json')) && readMetadata(path.join(directory, 'coordination-fence.json')).status !== 'complete') throw fail('coordination_fence_incomplete');
+    if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
+    const next = readMetadata(manifestFile);
+    if (next.schemaVersion !== 2 || ![2, 3, 4, 5].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.minimumReaderVersion >= 3) {
+      if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
+      legacyFile = path.join(dir, next.frozenLegacyFile);
+    } else legacyFile = originalLegacyFile;
+    if (manifest && next.generation !== manifest.generation) { db?.close(); db = undefined; cached = undefined; }
+    manifest = next;
+    if (!existsSync(headFile)) throw fail('coordination_head_missing');
+    if (!existsSync(pointerFile)) throw fail('coordination_recovery_pending');
+    let pointer;
+    try { pointer = readMetadata(pointerFile); } catch { throw fail('coordination_index_corrupt'); }
+    if (pointer.schemaVersion !== 1 || pointer.generation !== manifest.generation || !/^coordination-[a-f0-9-]{36}\.sqlite$/.test(pointer.file || '')) throw fail('coordination_index_corrupt');
+    const nextFile = path.join(indexDirectory, pointer.file);
+    if (indexFile !== nextFile) { db?.close(); db = undefined; cached = undefined; indexFile = nextFile; }
+    if (!existsSync(indexFile)) throw fail('coordination_recovery_pending');
+    const identity = token(indexFile).split(':').slice(0, 2).join(':');
+    if (db && identity !== dbIdentity) { db.close(); db = undefined; cached = undefined; }
+    if (!db) {
+      // The journal and durable head are the receipts; an atomic cache commit
+      // may be lost on power failure and is caught up from its source offset.
+      db = database(indexFile, { derived: true }); dbIdentity = identity;
+      if (db.prepare('PRAGMA quick_check(1)').get().quick_check !== 'ok') throw fail('coordination_index_corrupt');
+    }
+    if (!acceptsLegacyIntegrity(directory, legacyFile, manifest, getMeta(db, 'legacyIntegrity'))) throw fail('coordination_legacy_changed');
+    if (getMeta(db, 'generation') !== manifest.generation) throw fail('coordination_recovery_pending');
+    const previous = getMeta(db, 'sources') || {}, files = sourceFiles(dir, legacyFile);
+    if (Object.keys(previous).some(file => !files.includes(file))) throw fail('coordination_read_changed');
+    for (const file of files) if (token(file) !== previous[file]) {
+      // Only the active append-only segment may advance without a rebuild.
+      if (file === legacyFile || file !== files.at(-1)) throw fail('coordination_read_changed');
+      const offset = getMeta(db, `offset:${file}`) || 0;
+      const size = existsSync(file) ? statSync(file).size : 0;
+      if (size <= offset) throw fail('coordination_read_changed');
+      if (previous[file] && (token(file).split(':').slice(0, 2).join(':') !== previous[file].split(':').slice(0, 2).join(':')
+        || anchor(file, offset) !== getMeta(db, `anchor:${file}`))) throw fail('coordination_read_changed');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        replay(db, file, offset, onRead, true, { blobs: path.join(dir, 'blobs') }); putMeta(db, `offset:${file}`, size);
+        putMeta(db, `anchor:${file}`, anchor(file, size));
+        previous[file] = token(file); putMeta(db, 'sources', previous); db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+    }
+    {
+      const expected = readHead(headFile, manifest.generation, readMetadata);
+      if (expected.legacyVersion !== manifest.legacyVersion) throw fail('coordination_legacy_changed');
+      if ((getMeta(db, 'revision') || 0) < expected.revision
+        || (getMeta(db, 'revision') || 0) === expected.revision && (getMeta(db, 'eventHash') || '') !== expected.hash) throw fail('coordination_journal_missing');
+    }
+    return db;
+  }
+  async function prepare() {
+    if (preparing) return preparing;
+    preparing = (async () => {
+      assertOwner();
+      if (existsSync(path.join(directory, 'coordination-recovery.json')) && JSON.parse(readFileSync(path.join(directory, 'coordination-recovery.json'), 'utf8')).status !== 'complete') throw fail('coordination_repair_incomplete');
+      try {
+        load();
+        // A matching derived receipt was already checked by load. Only the
+        // original pre-seal baseline needs a one-time proof on this fast path.
+        if (manifest.legacyVersion === token(legacyFile)) await prepareLegacyIntegrity({ directory, legacyFile, baseline: manifest, assertOwner, onRead });
+        assertOwner(); load(); finishRecovery(); return;
+      } catch (error) {
+        if (!['coordination_recovery_pending', 'coordination_read_changed', 'coordination_partial_tail', 'coordination_legacy_changed'].includes(error.code) && !corruptIndex(error)) throw error;
+      }
+      const priorHead = existsSync(headFile) ? readHead(headFile) : null;
+      const fenced = existsSync(originalLegacyFile) && lstatSync(originalLegacyFile).isDirectory();
+      if (fenced) legacyFile = path.join(dir, 'baseline.jsonl');
+      const generation = existsSync(manifestFile) ? JSON.parse(readFileSync(manifestFile, 'utf8')).generation
+        : priorHead?.generation ?? randomUUID();
+      const baseline = existsSync(manifestFile) ? JSON.parse(readFileSync(manifestFile, 'utf8')) : priorHead;
+      const legacyIntegrity = baseline ? await prepareLegacyIntegrity({ directory, legacyFile, baseline, assertOwner, onRead }) : null;
+      assertOwner();
+      mkdirSync(indexDirectory, { recursive: true });
+      const filename = `coordination-${randomUUID()}.sqlite`, published = path.join(indexDirectory, filename);
+      const target = `${published}.tmp`;
+      const requireHead = existsSync(manifestFile) || existsSync(headFile);
+      const build = () => withCoordinationRebuild(() => {
+        assertOwner();
+        return new Promise((resolve, reject) => {
+        const worker = new Worker(COORDINATION_WORKER_SOURCE, { eval: true, ...(!process.versions.bun ? { resourceLimits: { maxOldGenerationSizeMb: 192 } } : {}), workerData: { coordinationRebuild: { dir, legacy: legacyFile, target, generation, requireHead, legacyIntegrity } } });
+        let settled = false;
+        const finish = error => { if (settled) return; settled = true; clearTimeout(timer); void worker.terminate().then(() => error ? reject(error) : resolve(), reject); };
+        const timer = setTimeout(() => finish(fail('coordination_recovery_timeout')), 300000);
+        worker.once('message', result => finish(result.ok ? null : Object.assign(new Error(result.message), result)));
+        worker.once('error', finish); worker.once('exit', code => finish(fail(`coordination_worker_exit:${code}`)));
+        });
+      });
+      try { await build(); }
+      catch (error) {
+        const files = sourceFiles(dir, legacyFile);
+        if (error.code !== 'coordination_partial_tail' || error.file !== files.at(-1) || token(error.file) !== error.sourceToken) throw error;
+        assertOwner();
+        const backup = `${error.file}.damaged-${randomUUID()}`, repaired = `${error.file}.repair-${randomUUID()}`;
+        await copyFile(error.file, backup); await copyFile(backup, repaired); await truncate(repaired, error.validEnd);
+        for (const file of [backup, repaired]) { const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
+        mkdirSync(dir, { recursive: true });
+        durable(path.join(dir, 'recovery.json'), JSON.stringify({ backup: path.relative(directory, backup), source: path.relative(directory, error.file), validEnd: error.validEnd, sourceToken: error.sourceToken }));
+        assertOwner(); if (token(error.file) !== error.sourceToken) throw fail('coordination_read_changed');
+        renameSync(repaired, error.file);
+        const parent = openSync(path.dirname(error.file), 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
+        // A new build has no accepted rows from the failed candidate transaction.
+        await build();
+      }
+      assertOwner(); db?.close(); db = undefined;
+      // An old client may still have its SQLite file and sidecars open. Publish
+      // a distinct basename so its commit/close cannot touch the new cache.
+      renameSync(target, published);
+      durable(pointerFile, JSON.stringify({ schemaVersion: 1, generation, file: filename }));
+      if (!existsSync(manifestFile)) {
+        mkdirSync(path.join(dir, 'segments'), { recursive: true });
+        const candidate = database(published);
+        let legacyVersion, version;
+        try {
+          legacyVersion = getMeta(candidate, 'sources')?.[legacyFile] || 'missing';
+          if (!priorHead && legacyVersion !== token(legacyFile)) throw fail('coordination_legacy_changed');
+          // Preserve an earlier activation marker when only its manifest was lost.
+          legacyVersion = priorHead?.legacyVersion ?? legacyVersion;
+          await prepareLegacyIntegrity({ directory, legacyFile, baseline: { generation, legacyVersion }, assertOwner, onRead });
+          assertOwner();
+          version = Math.max(priorHead?.minimumWriterVersion || 2, getMeta(candidate, 'minimumFormatVersion') || 2, fenced ? 3 : 2);
+          durable(headFile, JSON.stringify({ generation, legacyVersion, minimumWriterVersion: version, revision: getMeta(candidate, 'revision') || 0, hash: getMeta(candidate, 'eventHash') || '' }));
+        }
+        finally { candidate.close(); }
+        const value = { schemaVersion: 2, minimumReaderVersion: version, minimumWriterVersion: version, generation, legacyFile: path.basename(originalLegacyFile), legacyVersion, ...(fenced ? { frozenLegacyFile: 'baseline.jsonl' } : {}) };
+        durable(manifestFile, JSON.stringify(value));
+        syncPath(directory); syncPath(path.dirname(directory));
+      }
+      load();
+      finishRecovery();
+    })().finally(() => { preparing = undefined; });
+    return preparing;
+  }
+  function finishRecovery() {
+      const recoveryFile = path.join(dir, 'recovery.json');
+      if (existsSync(recoveryFile)) {
+        const recovery = JSON.parse(readFileSync(recoveryFile, 'utf8'));
+        if (getMeta(db, 'lastRecovery')?.backup !== recovery.backup) write({ kind: 'journal_recovered', ...recovery, epoch: 'storage-recovery', at: new Date().toISOString() }, { returnState: false });
+      }
+  }
+  function active() { return existsSync(dir); }
+  function write(entry, { returnState = true } = {}) {
+    assertOwner(); load();
+    const raw = typeof entry === 'function' ? entry() : entry;
+    const encoded = raw.kind === 'work' ? { ...raw, ...encodeWorkUpdate(head(db, raw.work.workId), raw.work) } : raw;
+    let payload = encoded;
+    const encodedBytes = Buffer.from(JSON.stringify(encoded));
+    if (encodedBytes.length > 64 * 1024 * 1024) throw fail('coordination_record_too_large');
+    if (encoded.kind === 'work_note_written' || encodedBytes.length > 60 * 1024) {
+      const hash = createHash('sha256').update(encodedBytes).digest('hex'), blobs = path.join(dir, 'blobs');
+      mkdirSync(blobs, { recursive: true });
+      const file = path.join(blobs, hash + '.json');
+      if (!existsSync(file)) durable(file, encodedBytes);
+      payload = { kind: 'payload_ref', payloadRef: { hash, bytes: encodedBytes.length } };
+    }
+    const record = JSON.parse(JSON.stringify({ ...payload, schemaVersion: 1, storageVersion: 2,
+      previousHash: getMeta(db, 'eventHash') || '', revision: (getMeta(db, 'revision') || 0) + 1 }));
+    record.hash = digest(record);
+    const bytes = Buffer.from(JSON.stringify(record) + '\n');
+    if (bytes.length > 64 * 1024) throw fail('coordination_record_too_large');
+    db.exec('BEGIN IMMEDIATE');
+    let persisted = false;
+    try {
+      // Validate before appending any bytes. Rollback keeps this a private candidate.
+      apply(db, record, { blobs: path.join(dir, 'blobs') }); assertOwner();
+      const files = sourceFiles(dir, legacyFile).filter(file => file !== legacyFile);
+      let file = files.at(-1);
+      if (!file || statSync(file).size + bytes.length > segmentBytes) file = path.join(dir, 'segments', `${String(files.length + 1).padStart(12, '0')}.jsonl`);
+      const fd = openSync(file, 'a', 0o600);
+      try {
+        const size = fstatSync(fd).size;
+        if (size) { const readFd = openSync(file, 'r'), tail = Buffer.alloc(1); try { readSync(readFd, tail, 0, 1, size - 1); } finally { closeSync(readFd); }
+          if (tail[0] !== 10) writeAll(fd, '\n'); }
+        writeAll(fd, bytes); fsyncSync(fd); persisted = true;
+      } finally { closeSync(fd); }
+      const directoryFd = openSync(path.dirname(file), 'r'); try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+      durable(headFile, JSON.stringify({ generation: manifest.generation, legacyVersion: manifest.legacyVersion, minimumWriterVersion: manifest.minimumWriterVersion, revision: record.revision, hash: record.hash }));
+      const sources = getMeta(db, 'sources') || {}; sources[file] = token(file);
+      putMeta(db, 'sources', sources); putMeta(db, `offset:${file}`, statSync(file).size);
+      putMeta(db, `anchor:${file}`, anchor(file, statSync(file).size)); assertOwner(); db.exec('COMMIT');
+      cached = undefined;
+      return returnState ? snapshot(db, true) : undefined;
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      if (persisted) throw Object.assign(fail('durable_pending_projection'), { operationId: raw.operationId, cause: error });
+      throw error;
+    }
+  }
+  return { active, prepare,
+    enableSupervision() {
+      assertOwner(); load();
+      if (manifest.minimumWriterVersion === 5) return;
+      if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
+      const next = { ...manifest, minimumReaderVersion: 5, minimumWriterVersion: 5 };
+      durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: 5 }));
+      durable(manifestFile, JSON.stringify(next)); manifest = next;
+    },
+    readSupervision(bucket, id) {
+      if (!SUPERVISION_BUCKETS.includes(bucket)) throw fail('supervision_query_invalid');
+      load(); return get(db, bucket, id);
+    },
+    querySupervision(bucket, field, value, { limit = 50, after = 0, pendingOnly = false, conversationId, oldestFirst = false } = {}) {
+      if (!SUPERVISION_BUCKETS.includes(bucket) || !['recipientConversationId', 'sessionId', 'workId', 'conversationId', 'parentConversationId'].includes(field)) throw fail('supervision_query_invalid');
+      load();
+      const size = Math.min(100, Math.max(1, Math.trunc(Number(limit) || 50)));
+      const scope = conversationId === undefined ? '' : 'AND i.conversationId=?';
+      const order = oldestFirst ? 'ASC' : 'DESC';
+      const args = [bucket, value, after, ...(conversationId === undefined ? [] : [conversationId]), size];
+      return db.prepare(`SELECT o.value FROM supervision_index i JOIN objects o ON o.bucket=i.bucket AND o.id=i.id WHERE i.bucket=? AND i.${field}=? AND i.sequence>=? ${pendingOnly ? 'AND i.pending=1' : ''} ${scope} ORDER BY i.sequence ${order},i.id ${order} LIMIT ?`)
+        .all(...args).map(row => JSON.parse(row.value));
+    },
+    read() { load(); return snapshot(db, true); },
+    readSnapshot() { load(); const revision = getMeta(db, 'revision') || 0; if (!cached || cachedRevision !== revision) { cached = freeze(snapshot(db)); cachedRevision = revision; } return cached; },
+    readWork(id) { load(); return head(db, id); },
+    readLifecycleFacts() { load(); const state = { revision: getMeta(db, 'revision') || 0 }; for (const key of ['mandates', 'transitions', 'decisions']) state[key] = all(db, key);
+      state.workStates = Object.fromEntries(Object.entries(all(db, 'works')).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])); return state; },
+    commitEntry: (entry, _persist, options) => write(entry, options),
+    hasObservation(workId, id) { load(); return Boolean(db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(workId, id)); },
+    dispatchOrigin(workId, attemptId, callId) { load(); const row = db.prepare('SELECT value FROM dispatches WHERE workId=? AND attemptId=? AND callId=?').get(workId, attemptId, callId); return row ? JSON.parse(row.value) : null; },
+    close() { db?.close(); db = undefined; metadata.clear(); },
+  };
+}
+
+function durable(file, text) {
+  const temporary = `${file}.${randomUUID()}.tmp`, fd = openSync(temporary, 'w', 0o600);
+  try { writeAll(fd, text); fsyncSync(fd); } finally { closeSync(fd); }
+  renameSync(temporary, file); const dir = openSync(path.dirname(file), 'r'); try { fsyncSync(dir); } finally { closeSync(dir); }
+}
+
+if (!isMainThread && workerData?.coordinationRebuild) {
+  try { rebuild(workerData.coordinationRebuild); parentPort.postMessage({ ok: true }); }
+  catch (error) { parentPort.postMessage({ ok: false, code: error.code, message: error.message, file: error.file, validEnd: error.validEnd, sourceToken: error.sourceToken }); }
+}

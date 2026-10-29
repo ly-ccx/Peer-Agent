@@ -146,6 +146,9 @@ function emitConnectionRecovery(webContents, payload) {
 }
 
 import { observeVisualTransportAttempt } from './visual-request-context.mjs';
+import { grokSubscriptionTransport } from '@peer-agent/runtime-node';
+import { dispatchProviderRequest, hasManagedProviderRequest,
+  providerRequestDispatchIndex } from '../chat-runtime/provider-request-recovery.mjs';
 
 export async function fetchWithConnectionRecovery(url, init = {}, {
   webContents = null,
@@ -168,7 +171,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   // server does not reject the recovery attempt as a duplicate request.
   buildInit = null,
 } = {}) {
-  const maxRetries = retryDelaysMs.length;
+  const maxRetries = hasManagedProviderRequest() ? 0 : retryDelaysMs.length;
   let lastError = null;
   const baseInit = init || {};
   const transport = await resolveProviderTransport({
@@ -199,7 +202,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   // ConnectTimeoutError so it enters the backoff loop instead of blocking forever.
   const callWithConnectTimeout = async (impl, attemptInit) => {
     if (!connectTimeoutMs || connectTimeoutMs <= 0) {
-      return impl(url, attemptInit);
+      return dispatchProviderRequest(() => impl(url, attemptInit), { connection: transport.label });
     }
     const controller = new AbortController();
     let timedOut = false;
@@ -208,29 +211,29 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
       controller.abort();
     }, connectTimeoutMs);
     const upstreamSignal = attemptInit?.signal;
-    const onUpstreamAbort = () => controller.abort();
-    if (upstreamSignal) {
-      if (upstreamSignal.aborted) controller.abort();
-      else upstreamSignal.addEventListener('abort', onUpstreamAbort, { once: true });
-    }
+    // The caller owns the entire response body, not just the headers. Removing
+    // a manually forwarded listener here used to detach cancellation mid-stream.
+    const requestSignal = upstreamSignal ? AbortSignal.any([upstreamSignal, controller.signal]) : controller.signal;
     try {
-      return await impl(url, { ...attemptInit, signal: controller.signal });
+      return await dispatchProviderRequest(() => impl(url, { ...attemptInit, signal: requestSignal }), { connection: transport.label });
     } catch (error) {
-      if (timedOut) throw makeConnectTimeoutError(connectTimeoutMs);
+      if (timedOut && !upstreamSignal?.aborted) throw makeConnectTimeoutError(connectTimeoutMs);
       throw error;
     } finally {
       cancelTimer();
-      if (upstreamSignal) upstreamSignal.removeEventListener('abort', onUpstreamAbort);
     }
   };
 
   for (let round = 0; round <= maxRetries; round += 1) {
     if (baseInit?.signal?.aborted) throw createAbortError();
-    const attemptInit = await resolveAttemptInit(round);
+    const attemptInit = await resolveAttemptInit(providerRequestDispatchIndex() ?? round);
 
     try {
       const response = await observeVisualTransportAttempt(attemptInit, { provider, model, streamId },
-        () => callWithConnectTimeout(transport.fetch, attemptInit));
+        () => grokSubscriptionTransport.fetch(
+          (target, options) => target === url
+            ? callWithConnectTimeout(transport.fetch, options) : transport.fetch(target, options),
+          url, attemptInit));
       if (round > 0) {
         emitConnectionRecovery(webContents, {
           streamId,

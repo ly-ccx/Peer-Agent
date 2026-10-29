@@ -1,7 +1,8 @@
+import { PeerIcon } from '../../ui/icons';
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { ThinkingOrb } from 'thinking-orbs';
-import { prefersReducedMotion } from '../hooks/useMotionPresence';
+import { useMotionAllowed } from '../hooks/useMotionAllowed';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
@@ -59,6 +60,7 @@ export function GlobalWorkbenchPage({
   readonly onOpenPinnedConversation?: (id: string, workspacePath?: string | null) => void;
   readonly enabled?: boolean;
 }) {
+  const motionEnabled = useMotionAllowed();
   // Background runs are application status, not another user task card.
   const overview = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
   const items = useMemo(() => overview.filter((item) => item.source !== 'shell_background'
@@ -214,7 +216,7 @@ export function GlobalWorkbenchPage({
                             state="weaving"
                             size={20}
                             aria-label="Peer 正在推进"
-                            paused={prefersReducedMotion()}
+                            paused={!motionEnabled}
                           />
                         </span>
                         <span className="gwb-run-copy">
@@ -405,7 +407,7 @@ function InboxRow({
       ? submitting
         ? '正在合进源头…'
         : celebrating
-          ? '已归档 ✓'
+          ? '已归档'
           : '查看进度'
       : sourceBlock
         ? '去对话'
@@ -474,8 +476,8 @@ function InboxRow({
             onClick={() => { void onOpen(); }}
             disabled={kind === 'accept' && acceptBusy}
           >
-            {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
-            <ActionLabel label={cta} />
+            {kind === 'accept' && submitting ? <PeerIcon name="loader" className="gwb-accept-spinner" /> : null}
+            <ActionLabel label={cta} />{kind === 'accept' && celebrating ? <PeerIcon name="check" size={14} /> : null}
             {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
           </button>
         </div>

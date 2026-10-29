@@ -30,7 +30,7 @@ export const SEARCH_TOOL_DEFINITIONS = [
     capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.batchSearch.capabilityId,
     prompt: () => readPromptAsset('batch_search.txt'),
     // 只读聚合检索对齐到 chat / plan / goal / explorer。
-    availableInModes: ['chat', 'plan', 'goal', 'explorer'],
+    availableInModes: ['chat', 'plan', 'goal', 'explorer', 'project_agent'],
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-search-aggregate-provider',
       executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.batchSearch.capabilityId,

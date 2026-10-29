@@ -4,10 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { createCollectingSink } from './agent-host/turn-sinks.mjs';
 import { executeProjectedModelTool } from './chat-runtime/projected-tool-executor.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import { resetCircuitBreaker } from './context-compactor.mjs';
 import { disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
+import { installDelegation } from './project-agent/delegation-port.mjs';
 
 let tmpDir;
 
@@ -601,9 +603,9 @@ describe('llm chat service tool materialization', () => {
             model: 'test-model',
             isDefault: true,
             apiKeyConfigured: true,
-            // 32k 窗口为当前 System Context、checkpoint 和增长预算留出压后空间。
-            // 配套 29k observed usage 与两条 32k 字符旧历史，确保真实触发压缩而非跳过。
-            contextWindow: 32_000,
+            // 48k 窗口为当前 System Context、checkpoint 和增长预算留出压后空间。
+            // 配套 44k observed usage 与两条 48k 字符旧历史，确保真实触发压缩而非跳过。
+            contextWindow: 48_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -632,8 +634,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-continue',
               modelKey: 'p1::test-model',
-              inputTokens: 29_000,
-              contextWindow: 32_000,
+              inputTokens: 44_000,
+              contextWindow: 48_000,
             }),
           }),
         },
@@ -641,8 +643,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(32_000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(32_000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(48_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(48_000)}` },
           { role: 'user', content: latestUser },
         ],
         streamId: 's-compact-continue',
@@ -721,7 +723,7 @@ describe('llm chat service tool materialization', () => {
             isDefault: true,
             apiKeyConfigured: true,
             // 保持与上一个自动压缩集成场景相同的可实现预算。
-            contextWindow: 32_000,
+            contextWindow: 48_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -731,8 +733,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-persist-fail',
               modelKey: 'p1::test-model',
-              inputTokens: 29_000,
-              contextWindow: 32_000,
+              inputTokens: 44_000,
+              contextWindow: 48_000,
             }),
           }),
         },
@@ -743,8 +745,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(32_000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(32_000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(48_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(48_000)}` },
           { role: 'user', content: 'latest user survives only if compaction persists' },
         ],
         streamId: 's-compact-persist-fail',
@@ -1612,6 +1614,7 @@ describe('llm chat service tool materialization', () => {
     const previousFetch = globalThis.fetch;
     const events = [];
     const urls = [];
+    const charges = [];
     const providers = [
       {
         id: 'p-chatgpt',
@@ -1676,6 +1679,7 @@ describe('llm chat service tool materialization', () => {
         messages: [{ role: 'user', content: 'hello' }],
         streamId: 's1',
         conversationId: 'c1',
+        executionBudget: { guard: { beforeRequest: metadata => charges.push(metadata) } },
         webContents: {
           send: (channel, payload) => events.push({ channel, payload }),
         },
@@ -1688,6 +1692,8 @@ describe('llm chat service tool materialization', () => {
       'https://chatgpt.com/backend-api/codex/responses',
       'https://compatible.example/v1/chat/completions',
     ]);
+    assert.equal(charges.length, 2);
+    assert.ok(charges.every(charge => charge.accounting === 'physical_dispatch'));
     const recovery = events.find((event) => event.channel === 'chat:stream:provider-recovery');
     assert.ok(recovery);
     assert.equal(recovery.payload.conversationId, 'c1');
@@ -1697,6 +1703,46 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'same model ok');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('keeps ordinary 403 and protected native recovery on the original provider', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const providers = [
+      { id: 'primary', provider: 'openai', baseUrl: 'https://primary.example/v1', model: 'fixture-model',
+        isDefault: true, apiKeyConfigured: true },
+      { id: 'fallback', provider: 'openai', baseUrl: 'https://fallback.example/v1', model: 'fixture-model',
+        apiKeyConfigured: true },
+    ];
+    const checkpoint = { provider: 'openai', providerId: 'primary', model: 'fixture-model', messages: [
+      { role: 'user', content: 'fixture request' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'completed-fixture', type: 'function',
+        function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'completed-fixture', content: 'confirmed tool result' },
+    ] };
+    try {
+      for (const scenario of [
+        { name: 'ordinary-auth', error: 'HTTP 403: invalid credentials' },
+        { name: 'turn-profile-native', error: 'HTTP 403: Domain Blocking.',
+          turnProfile: { role: 'project_agent', modelSelection: { modelProviderId: 'primary' }, providerCheckpoint: checkpoint } },
+        { name: 'execution-native', error: 'HTTP 403: Domain Blocking.', executionBudget: { providerCheckpoint: checkpoint } },
+      ]) {
+        const urls = [], events = [];
+        globalThis.fetch = async url => { urls.push(String(url));
+          return new Response(scenario.error, { status: 403, statusText: 'Forbidden' }); };
+        const service = createLlmChatService({ llmConfigStore: {
+          listProviders: () => providers, getDecryptedApiKey: () => 'fixture-key',
+        } });
+        await service.sendMessage({ messages: [{ role: 'user', content: 'fixture request' }],
+          streamId: `protected-${scenario.name}`, conversationId: `protected-${scenario.name}`,
+          turnProfile: scenario.turnProfile, executionBudget: scenario.executionBudget,
+          webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        });
+        assert.deepEqual(urls, ['https://primary.example/v1/chat/completions'], scenario.name);
+        assert.equal(events.some(event => event.channel === 'chat:stream:provider-recovery'), false, scenario.name);
+        assert.equal(events.some(event => event.channel === 'chat:stream:error'), true, scenario.name);
+      }
+    } finally { globalThis.fetch = previousFetch; }
   });
 
   it('does not replay a provider failure after model output has reached the stream', async () => {
@@ -1757,7 +1803,7 @@ describe('llm chat service tool materialization', () => {
     assert.match(error.payload.error, /provider_stream_error/);
   });
 
-  it('reuses scope permission grants in the main runtime without renderer auto-approval state', async () => {
+  it('reuses exact operation scope in the main runtime while asking for another file write', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const workspaceDir = path.join(tmpDir, 'workspace');
@@ -1792,6 +1838,7 @@ describe('llm chat service tool materialization', () => {
 
     const responses = [
       () => toolStream('tool-1', { path: firstPath, content: 'one\n' }),
+      () => toolStream('tool-1-repeat', { path: firstPath, content: 'one\n' }),
       () => toolStream('tool-2', { path: secondPath, content: 'two\n' }),
       () => textStream('done'),
     ];
@@ -1839,7 +1886,7 @@ describe('llm chat service tool materialization', () => {
       globalThis.fetch = previousFetch;
     }
 
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
     assert.equal(requests[0].capabilityId, 'local.file.write');
     assert.equal(readFileSync(firstPath, 'utf8'), 'one\n');
     assert.equal(readFileSync(secondPath, 'utf8'), 'two\n');
@@ -1933,6 +1980,141 @@ describe('llm chat service tool materialization', () => {
       String(event.payload.result).includes('"stdoutPreview": "ok"')
     )), true);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('reattach snapshot includes open permissions and drops them after settle', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const command = 'node -e "process.stdout.write(\'ok\')"';
+    const settled = [];
+    let during = null;
+
+    function toolStream() {
+      const frame = JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'tool-shell',
+              type: 'function',
+              function: { name: 'bash', arguments: JSON.stringify({ command }) },
+            }],
+          },
+        }],
+      });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    function textStream(content) {
+      const frame = JSON.stringify({ choices: [{ delta: { content } }] });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    const responses = [() => toolStream(), () => textStream('done')];
+    globalThis.fetch = async () => responses.shift()();
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        broadcast(channel, payload) {
+          if (channel === 'chat:stream:permission-settled') settled.push(payload);
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'run command' }],
+        streamId: 's-reattach',
+        conversationId: 'c-reattach',
+        webContents: {
+          send(channel, payload) {
+            if (channel !== 'chat:stream:permission-request') return;
+            during = service.reattach({ streamId: 's-reattach' });
+            service.resolvePermissionGrant(payload.call.toolCallId, {
+              grantId: 'grant-reattach',
+              toolCallId: payload.call.toolCallId,
+              granted: true,
+              duration: 'once',
+              scope: payload.call.capabilityId,
+              decidedAt: new Date().toISOString(),
+            });
+          },
+        },
+      });
+      assert.equal(during?.pendingPermissions?.length, 1);
+      assert.equal(during.pendingPermissions[0].call.capabilityId, 'local.shell.exec');
+      assert.equal(during.pendingPermissions[0].streamId, 's-reattach');
+      const after = service.reattach({ conversationId: 'c-reattach' });
+      assert.deepEqual(after.pendingPermissions, []);
+      assert.equal(settled.some((payload) => payload.toolCallIds.includes(during.pendingPermissions[0].toolCallId)), true);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('collecting sink denies an ask immediately so the turn does not hang', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const command = 'node -e "process.stdout.write(\'ok\')"';
+    const sink = createCollectingSink();
+    const responses = [
+      () => new Response(`data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'tool-shell',
+              type: 'function',
+              function: { name: 'bash', arguments: JSON.stringify({ command }) },
+            }],
+          },
+        }],
+      })}\n\ndata: [DONE]\n\n`, { status: 200 }),
+      () => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: 'denied' } }] })}\n\ndata: [DONE]\n\n`, { status: 200 }),
+    ];
+    globalThis.fetch = async () => responses.shift()();
+    let timer;
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+      const outcome = await Promise.race([
+        service.sendMessage({
+          messages: [{ role: 'user', content: 'run command' }],
+          streamId: 's-collect',
+          conversationId: 'c-collect',
+          webContents: sink,
+        }),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('permission ask hung')), 2000);
+        }),
+      ]);
+      assert.equal(outcome.terminalStatus, 'done');
+      assert.equal(sink.getEvents().some((event) => event.channel === 'chat:stream:permission-request'), false);
+      assert.equal(JSON.stringify(sink.getEvents()).includes('ephemeral_no_approver'), true);
+      assert.equal(service.reattach({ conversationId: 'c-collect' }).pendingPermissions.length, 0);
+    } finally {
+      clearTimeout(timer);
+      globalThis.fetch = previousFetch;
+    }
   });
 
   it('returns requestedUserInput in AgentRunOutcome when request_user_input ends the turn', async () => {
@@ -2130,6 +2312,45 @@ describe('llm chat service tool materialization', () => {
     assert.equal(service.hasUnsupportedToolClaim('[Tool call: read_file {"path":"/tmp/a.txt"}]'), true);
   });
 
+  it('records turnProfile.role on the active stream projection', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const snapshots = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'hi' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        broadcast: (channel, payload) => {
+          if (channel === 'chat:stream:active-changed') snapshots.push(payload.streams);
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-role',
+        conversationId: 'c-role',
+        webContents: { send: () => {} },
+        turnProfile: { role: 'goal_runner', workspaceId: 'ignored-this-card' },
+      });
+      assert.equal(snapshots[0]?.[0]?.role, 'goal_runner');
+      assert.equal(snapshots[0][0].conversationId, 'c-role');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   it('broadcasts active conversation ids while streaming and clears them after done', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
@@ -2229,6 +2450,7 @@ describe('llm chat service tool materialization', () => {
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c1',
         streamId: 's1',
+        role: null,
         workspacePath: '/ws/alpha',
         originWorkspacePath: '/ws/alpha',
       });
@@ -2299,6 +2521,7 @@ describe('llm chat service tool materialization', () => {
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c-goal',
         streamId: 's-goal',
+        role: null,
         workspacePath: originWs,
         originWorkspacePath: originWs,
       });
@@ -2307,6 +2530,287 @@ describe('llm chat service tool materialization', () => {
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+
+  it('uses turnProfile.modelSelection instead of the default provider', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(sse([
+        { choices: [{ delta: { content: 'selected' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [
+            {
+              id: 'p-default',
+              provider: 'openai',
+              baseUrl: 'https://default.example/v1',
+              model: 'default-model',
+              isDefault: true,
+              apiKeyConfigured: true,
+            },
+            {
+              id: 'p-selected',
+              provider: 'openai',
+              baseUrl: 'https://selected.example/v1',
+              model: 'selected-model',
+              isDefault: false,
+              apiKeyConfigured: true,
+            },
+          ],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-select',
+        conversationId: 'c-select',
+        webContents: { send: () => {} },
+        turnProfile: {
+          role: 'explorer',
+          modelSelection: { modelProviderId: 'p-selected' },
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+    assert.equal(urls.some((url) => url.startsWith('https://selected.example/')), true);
+    assert.equal(urls.some((url) => url.includes('default.example')), false);
+  });
+
+  it('carries host goal identity and Agent messages through the real desktop tool pipeline',async()=>{
+    const {createLlmChatService}=await loadService();
+    const previousFetch=globalThis.fetch, calls=[], executions=[];
+    const release=installDelegation({supervisor:{
+      coordinationFacts:()=>[{workId:'root-goal',goalRevision:1,lifecycle:'active',sessionIds:['child']}],
+      coordinateWork:async(input,context)=>{calls.push({input,context});return {ok:true,sessionId:'child',phase:'completed'};},
+      spawn:()=>{throw Error('Goal identity was lost before coordination');},
+      sendAgentMessage:async(input,context)=>{calls.push({input,context});return {ok:true,messageId:'question-one'};},
+    }});
+    const task={anchorMessageIds:['canonical-user'],title:'Inspect fixture',brief:'Inspect only fixture',kind:'research',readOnly:true,
+      successCriteria:[{kind:'model_review',description:'Report the fixture facts'}]};
+    const user={id:'canonical-user',kind:'user_input',role:'user',content:'Inspect fixture'};
+    const { createBotAccessPolicyAuthority } = await import('@peer-agent/runtime-node');
+    const policyConversations = {getConversation:id=>({workspacePath:tmpDir,workspaceId:'workspace',
+      role:id==='worker-fixture-context'?'work_session':'project_agent',parentConversationId:id==='worker-fixture-context'?'same-cached-context':undefined}),
+      getPersistedConversationHistory:()=>({messages:[user]})};
+    const hostPlan={planId:'plan-one',conversationId:'worker-fixture-context',status:'executing',delegationOrigin:{workspaceId:'workspace',sessionId:'child',parentConversationId:'same-cached-context',phase:'running'}};
+    const policyPlans={getPlan:()=>hostPlan,getActivePlanByConversation:id=>id==='worker-fixture-context'?hostPlan:null};
+    const accessPolicyAuthority=createBotAccessPolicyAuthority({dataHome:tmpDir,conversationStore:policyConversations,goalPlanStore:policyPlans,
+      profileStore:{read:id=>id==='workspace'?{workspaceId:id,agentConversationId:'same-cached-context',status:'active'}:null}});
+    const service=createLlmChatService({preferredAccessLevel:'restricted_local',accessPolicyAuthority,goalPlanStore:policyPlans,
+      conversationStore:policyConversations,
+      llmConfigStore:{listProviders:()=>[{id:'fixture',provider:'openai',baseUrl:'https://fixture.example/v1',model:'fixture',isDefault:true,apiKeyConfigured:true}],getDecryptedApiKey:()=> 'fixture-key'},
+    });
+    try {
+      for(const scenario of [
+        {tool:'spawn_session',input:task,profile:{role:'project_agent',workId:'root-goal',workspaceId:'workspace',context:{inputAnchors:[{messageId:user.id}]}}},
+        {tool:'coordinate_work',input:{action:'query',sessionId:'child',expectedRevision:1,reason:'check progress'},profile:{role:'project_agent',workId:'root-goal',workspaceId:'workspace',context:{events:[{eventId:'real-event',sessionId:'child'}]}}},
+        {tool:'send_agent_message',input:{purpose:'question',text:'Which fixture should I inspect?'},profile:{role:'work_session',agentKind:'worker',workId:'root-goal',workspaceId:'workspace',sessionId:'child',planId:'plan-one'}},
+      ]) {
+        let requests=0;
+        globalThis.fetch=async()=>new Response(sse(requests++===0?[
+          {choices:[{delta:{tool_calls:[{index:0,id:'host-fixture',type:'function',function:{name:scenario.tool,arguments:JSON.stringify(scenario.input)}}]},finish_reason:'tool_calls'}]},'[DONE]',
+        ]:[{choices:[{delta:{content:'Fixture complete'}}]},'[DONE]']),{status:200});
+        const outcome=await service.sendMessage({mode:scenario.profile.role==='project_agent'?'project_agent':'goal',conversationId:scenario.profile.role==='work_session'?'worker-fixture-context':'same-cached-context',
+          streamId:`identity-${scenario.tool}`,workspacePath:tmpDir,agentProgress:{onToolExecution:value=>executions.push(value)},messages:[{role:'user',content:'Inspect fixture'}],turnProfile:scenario.profile,webContents:{send() {}}});
+        assert.equal(outcome.terminalStatus,'done',JSON.stringify(outcome));
+      }
+      assert.equal(calls.length,3);
+      assert.equal(executions.length,3);
+      assert.ok(executions.every(execution=>execution.grant?.policyRevision==='bot:workspace:same-cached-context:1'));
+      assert.equal(calls[0].input.action,'parallel');
+      assert.equal(calls[0].context.workId,'root-goal');
+      assert.deepEqual(calls[0].context.currentInputAnchors,['canonical-user']);
+      assert.deepEqual(calls[1].context.events,[{eventId:'real-event',sessionId:'child'}]);
+      assert.deepEqual(calls[1].context.currentInputAnchors,[],'cached tool context cannot reuse a prior user grant');
+      assert.equal(calls[2].context.agentKind,'worker');
+      assert.equal(calls[2].context.sessionId,'child');
+      assert.equal(calls[2].context.planId,'plan-one');
+    } finally {accessPolicyAuthority.close();release();globalThis.fetch=previousFetch;}
+  });
+
+  it('does not fail over outside turnProfile.recoveryCandidateIds', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const urls = [];
+    const providers = [
+      {
+        id: 'p-chatgpt',
+        provider: 'openai',
+        authMethod: 'oauth_chatgpt',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        model: 'gpt-5.5',
+        name: 'ChatGPT 订阅',
+        isDefault: true,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-compatible',
+        provider: 'openai',
+        baseUrl: 'https://compatible.example/v1',
+        model: 'gpt-5.5',
+        name: 'Compatible GPT-5.5',
+        isDefault: false,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-anthropic',
+        provider: 'anthropic',
+        baseUrl: 'https://anthropic.example',
+        model: 'claude-test',
+        name: 'Anthropic',
+        isDefault: false,
+        apiKeyConfigured: true,
+      },
+    ];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      if (String(url).includes('anthropic.example')) {
+        return new Response(sse([
+          {
+            type: 'message_start',
+            message: { usage: { input_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+          },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'in set' } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+        ]), { status: 200 });
+      }
+      return new Response('HTTP 403: Domain Blocking.', { status: 403, statusText: 'Forbidden' });
+    };
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => providers,
+          getDecryptedApiKey: (id) => `key-${id}`,
+          getCredential: () => ({
+            tokens: {
+              access: 'oauth-access',
+              refresh: 'oauth-refresh',
+              expires: Date.now() + 3_600_000,
+              accountId: 'acct-1',
+            },
+          }),
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-closed',
+        conversationId: 'c-closed',
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        turnProfile: {
+          role: 'verifier',
+          modelSelection: { modelProviderId: 'p-chatgpt' },
+          recoveryCandidateIds: ['p-chatgpt', 'p-anthropic'],
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+    assert.equal(urls.some((url) => url.includes('compatible.example')), false);
+    assert.equal(urls.some((url) => url.includes('anthropic.example')), true);
+    const recovery = events.find((event) => event.channel === 'chat:stream:provider-recovery');
+    assert.equal(recovery?.payload?.toProviderId, 'p-anthropic');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('writes role and workspaceId onto the usage ledger when the turn profile has them', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const usageWrites = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'ok' } }] },
+      {
+        choices: [{ delta: {} }],
+        usage: { prompt_tokens: 12, completion_tokens: 3 },
+      },
+      '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          recordRuntimeTurnUsage: (id, input) => {
+            usageWrites.push({ id, ...input });
+            return { lifetimeUsage: { usageScope: 'conversation_lifetime', totalTokens: 1 }, ledgerRow: { id: 's-role-usage' } };
+          },
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-role-usage',
+        conversationId: 'c-role-usage',
+        webContents: { send: () => {} },
+        turnProfile: { role: 'explorer', workspaceId: 'ws-1' },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+    assert.equal(usageWrites.length, 1);
+    assert.equal(usageWrites[0].attribution.role, 'explorer');
+    assert.equal(usageWrites[0].attribution.workspaceId, 'ws-1');
+  });
+
+  it('resolveGoalRole picks a vision model and blocks a capped explorer', async () => {
+    const { createLlmChatService } = await loadService();
+    let settings = {};
+    const service = createLlmChatService({
+      llmConfigStore: {
+        listProviders: () => [
+          {
+            id: 'text-default',
+            provider: 'openai',
+            groupId: 'openai-group',
+            model: 'text',
+            isDefault: true,
+            enabled: true,
+            apiKeyConfigured: true,
+            supportsVision: false,
+            contextWindow: 32_000,
+          },
+          {
+            id: 'vision-model',
+            provider: 'anthropic',
+            groupId: 'anthropic-group',
+            model: 'vision',
+            isDefault: false,
+            enabled: true,
+            apiKeyConfigured: true,
+            supportsVision: true,
+            contextWindow: 32_000,
+          },
+        ],
+        getDecryptedApiKey: () => 'test-key',
+      },
+      getSettings: () => settings,
+    });
+    const visual = service.resolveGoalRole({ role: 'visual_verifier', spentUsd: 0 });
+    assert.equal(visual.ok, true);
+    assert.equal(visual.selection.modelProviderId, 'vision-model');
+    const explorer = service.resolveGoalRole({ role: 'explorer', spentUsd: 0 });
+    assert.equal(explorer.selection.modelProviderId, 'text-default');
+    settings = { modelRouting: { dailySpendCapUsd: 1 } };
+    const blocked = service.resolveGoalRole({ role: 'explorer', spentUsd: 1 });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.reason, 'spend_cap_reached');
+    assert.equal(blocked.missing, '该角色已达到今日花费上限');
   });
 });
 
@@ -2911,5 +3415,46 @@ describe('force-complete final persist', () => {
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+});
+
+// Exercise the actual chat adapter, rather than only the terminal seam in isolation.
+describe('asynchronous terminal commit barrier', () => {
+  for (const fail of [false, true]) it(`waits for storage before SDK/UI completion (${fail ? 'disk failure' : 'success'})`, async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch, events = [];
+    let finish, admitted;
+    const admission = new Promise(resolve => { admitted = resolve; });
+    const pending = new Promise((resolve, reject) => { finish = fail ? () => reject(Object.assign(Error('disk full'), { code: 'ENOSPC' })) : resolve; });
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'durable answer' } }] }, '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({ llmConfigStore: { listProviders: () => [{ id: 'p1', provider: 'openai', baseUrl: 'https://example.test/v1', model: 'test-model', isDefault: true, apiKeyConfigured: true }], getDecryptedApiKey: () => 'test-key' },
+        emitRuntimeEvent: event => events.push(event.type),
+        conversationStore: { addUsage: () => null, updateMessageById() {}, patchStreamingMessage() {},
+          commitStreamingMessage(id, messageId, patch) { assert.equal(patch.content, 'durable answer'); admitted(); return pending; } },
+      });
+      let released = false;
+      const turn = service.sendMessage({ messages: [{ role: 'user', content: 'hi' }],
+        conversationId: 'async-terminal', assistantMessageId: 'answer', streamId: 'async-terminal',
+        webContents: { send: channel => events.push(channel) },
+      }).then(outcome => { released = true; return outcome; });
+      await admission;
+      assert.equal(released, false);
+      assert.equal(events.includes('message.completed'), false);
+      assert.equal(events.includes('chat:stream:done'), false);
+      finish(); const outcome = await turn;
+      assert.equal(released, true);
+      if (fail) {
+        assert.equal(outcome.terminalStatus, 'error');
+        assert.equal(events.includes('message.completed'), false);
+        assert.equal(events.includes('chat:stream:done'), false);
+        assert.ok(events.includes('chat:stream:error'));
+      } else {
+        assert.equal(outcome.terminalStatus, 'done');
+        assert.ok(events.indexOf('message.completed') < events.indexOf('chat:stream:done'));
+      }
+    } finally { finish(); globalThis.fetch = previousFetch; }
   });
 });

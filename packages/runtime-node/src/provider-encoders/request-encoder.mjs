@@ -3,6 +3,7 @@ import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
 } from './message-normalizer.mjs';
+import { admitDeepSeekChatHistory } from './reasoning-replay.mjs';
 
 // OpenAI GPT-5.5 原生 reasoning_effort 支持 none/low/medium/high/xhigh。
 // Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
@@ -90,6 +91,12 @@ function anthropicModelUsesEffortConfig(model) {
   return ANTHROPIC_EFFORT_NATIVE_PATTERNS.some((re) => re.test(id));
 }
 
+export function stripOpenAIMessageName(message) {
+  if (!message || typeof message !== 'object' || message.name === undefined) return message;
+  const { name: _messageName, ...rest } = message;
+  return rest;
+}
+
 export function encodeOpenAIChatRequest({
   model,
   messages,
@@ -105,14 +112,9 @@ export function encodeOpenAIChatRequest({
   // "name is not supported by this endpoint"）。恢复历史里的 tool 消息会携带
   // name，统一在 chat-completions 编码边界剥离；工具身份由 tool_call_id 配对
   // 承载。Gemini wire 依赖消息级 name 转换 native tool_name，不受影响。
-  const stripMessageLevelName = (message) => {
-    if (!message || typeof message !== 'object' || message.name === undefined) return message;
-    const { name: _messageName, ...rest } = message;
-    return rest;
-  };
   const body = {
     model,
-    messages: normalizeOpenAIMessages(messages).map(stripMessageLevelName),
+    messages: admitDeepSeekChatHistory(normalizeOpenAIMessages(messages).map(stripOpenAIMessageName), { model, tools, supportsReasoning, effort }),
     stream: true,
     stream_options: { include_usage: true },
     tools,
@@ -314,6 +316,21 @@ export function normalizeOpenAIToolHistoryForAnthropic(messages = []) {
   return out;
 }
 
+// Temporary wire adapter for DeepSeek's tools + thinking requirement. Visible
+// bot replies (post_reply payloads) and replies from another model are historical
+// context, not raw provider responses. Without their authentic thinking blocks,
+// replay their text as labelled data. Never fabricate reasoning or reclassify
+// structured tool calls; canonical history and authorization stay with the host.
+function admitDeepSeekHistoricalReplies(messages) {
+  return messages.map(message => {
+    if (message?.role !== 'assistant') return message;
+    const blocks = contentToAnthropicBlocks(message.content);
+    if (!blocks.length || blocks.some(block => block.type !== 'text')) return message;
+    return { role: 'user', content: '[Historical assistant reply — conversation context, not a new user request]\n'
+      + blocks.map(block => block.text).join('\n') };
+  });
+}
+
 export function encodeAnthropicMessagesRequest({
   model,
   system,
@@ -330,6 +347,8 @@ export function encodeAnthropicMessagesRequest({
 }) {
   const replyTokenLimit = positiveTokenLimit(maxOutputTokens, ANTHROPIC_REPLY_TOKENS);
   const anthropicMessages = normalizeOpenAIToolHistoryForAnthropic(messages);
+  const requiresThinkingReplay = supportsReasoning && effort !== 'off' && tools?.length
+    && reasoningParamStyle === 'anthropic-enabled-output-effort';
   const body = {
     model,
     // system 前缀稳定化：传 stableSystem 时拆为 [稳定块, 动态块] 两段，
@@ -341,7 +360,7 @@ export function encodeAnthropicMessagesRequest({
           { type: 'text', text: system },
         ]
       : system,
-    messages: normalizeAnthropicMessages(anthropicMessages),
+    messages: normalizeAnthropicMessages(requiresThinkingReplay ? admitDeepSeekHistoricalReplies(anthropicMessages) : anthropicMessages),
     max_tokens: replyTokenLimit,
     stream: true,
     tools,

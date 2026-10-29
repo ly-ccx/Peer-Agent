@@ -9,6 +9,7 @@ import {
 
 import {
   createChatController,
+  discardPendingStreamDraft,
   formatCompactingStatusLabel,
   latestCompactProgressPercent,
   renderCompactProgressBar,
@@ -2052,5 +2053,37 @@ describe('compact progress presentation helpers', () => {
     expect(formatCompactingStatusLabel({ label: '压缩中…', percent: 48 })).toBe(
       `压缩中… ${renderCompactProgressBar(48)} 48%`,
     );
+  });
+});
+
+describe('discardPendingStreamDraft', () => {
+  test('removes only the failed attempt and keeps the completed tool', () => {
+    const tool = {
+      capabilityId: 'local.shell.exec',
+      toolName: 'bash',
+      argumentSummary: 'echo',
+      status: 'completed' as const,
+      detail: 'ok',
+      detailLines: ['ok'],
+      toolCallId: 'call-1',
+    };
+    const next = discardPendingStreamDraft([
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '先看一下',
+        pending: true,
+        segments: [
+          { type: 'text', content: '先看一下' },
+          { type: 'tool-call', tool },
+          { type: 'thinking', content: '接着想' },
+          { type: 'text', content: '半截' },
+        ],
+      },
+    ], { textChars: 2, reasoningChars: 3 });
+    expect(next).toHaveLength(1);
+    expect(next[0]?.content).toBe('先看一下');
+    expect(next[0]?.thinkingContent).toBeUndefined();
+    expect(next[0]?.tools?.map((item) => item.toolCallId)).toEqual(['call-1']);
   });
 });

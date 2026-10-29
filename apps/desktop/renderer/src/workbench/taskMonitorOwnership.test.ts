@@ -125,7 +125,7 @@ test('卡片开关与挂载分离，关闭后播退场再卸载，快速重开�
   assert.match(chatSurface, /key=\{taskMonitorEpoch\}/);
   assert.match(chatSurface, /visible=\{taskMonitorOpen\}/);
   assert.match(chatSurface, /onExitComplete=\{\(\) => setTaskMonitorPresent\(false\)\}/);
-  assert.match(monitorView, /if \(!visible\) \{\s*if \(prefersReducedMotion\(\)\) onExitComplete\(\);\s*else startExit\(\)/);
+  assert.match(monitorView, /if \(visible\) cancelExit\(\); else startExit\(\)/);
   assert.match(monitorView, /event\.target === event\.currentTarget && event\.animationName === 'motion-exit-slide-inline'/);
 });
 
@@ -136,7 +136,9 @@ test('横向进入/退出动效复用通用基元，减少动态效果时立即�
   assert.doesNotMatch(workbenchStyles, /task-monitor-card-in/);
   assert.match(motionStyles, /\.motion-enter-slide-inline \{\s*animation: motion-enter-slide-inline/);
   assert.match(motionStyles, /\.motion-exit-slide-inline \{\s*animation: motion-exit-slide-inline/);
-  assert.match(monitorView, /if \(prefersReducedMotion\(\)\) onExitComplete\(\)/);
+  const presence = readFileSync(new URL('../app/hooks/useMotionPresence.ts', import.meta.url), 'utf8');
+  assert.match(presence, /watchVisualMotion/);
+  assert.match(presence, /motion\.current\?\.cancel\(\)/);
 });
 
 test('监控栏分行投影当前工作区 HEAD 与任务源头', () => {

@@ -1,7 +1,12 @@
+import { withFileMutationLock } from './file-mutation-lock.mjs';
+import { evaluateObjectiveProbeCall,objectiveProbeDenial } from '../chat-runtime/objective-probe-gate.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import {
   existsSync,
+  openSync,
+  readSync,
+  closeSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -12,6 +17,7 @@ import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import {
   FileReadRangeError,
+  detectLocalImageMediaType,
   parseFileReadLineRange,
   sliceFileReadLines,
 } from '@peer-agent/runtime-node';
@@ -79,6 +85,11 @@ function throwIfAborted(signal) {
   throw error;
 }
 
+function recheckFileAuthority(toolContext, pathPermission) {
+  return toolContext?.checkAccessPolicy?.()
+    || (typeof pathPermission.approval?.validate === 'function' && !pathPermission.approval.validate() ? 'permission_policy_changed' : null);
+}
+
 async function hasRipgrep() {
   if (process.env.PEER_AGENT_DISABLE_RIPGREP === '1') return false;
   if (ripgrepResolved !== null) return ripgrepResolved;
@@ -139,7 +150,7 @@ async function ensureWritablePathAllowed({ tool, args, filePath, workspacePath, 
     };
   }
   const approval = await requestPermission({ tool, args, filePath, workspacePath });
-  if (approval?.granted) {
+  if (approval?.granted && (typeof approval.validate !== 'function' || approval.validate())) {
     return { granted: true, approval };
   }
   return {
@@ -162,7 +173,7 @@ async function ensureReadablePathAllowed({ tool, args, filePath, workspacePath, 
     };
   }
   const approval = await requestPermission({ tool, args, filePath, workspacePath });
-  if (approval?.granted) {
+  if (approval?.granted && (typeof approval.validate !== 'function' || approval.validate())) {
     return { granted: true, approval };
   }
   return {
@@ -600,11 +611,27 @@ export async function runFileSearch({ args = {}, cwd, requestPermission, signal 
   });
 }
 
-async function runFileTool({ name, args, cwd, toolContext, requestPermission }) {
+async function runFileTool(options) {
+  if (!['write_file', 'edit_file'].includes(options.name)) return runUnlockedFileTool(options);
+  try { return await withFileMutationLock(resolveToolPath(options.args.path, options.cwd), () => runUnlockedFileTool(options), { signal: options.signal }); }
+  catch (error) { return formatToolFailure(options.name, 'blocked', error.code ?? 'FILE_MUTATION_UNAVAILABLE'); }
+}
+
+async function runUnlockedFileTool({ name, args, cwd, toolContext, requestPermission, signal }) {
   try {
     if (name === 'read_file') {
       const filePath = resolveToolPath(args.path, cwd);
       if (!existsSync(filePath)) return { success: false, error: `File not found: ${filePath}` };
+      const fd = openSync(filePath, 'r');
+      const prefix = Buffer.alloc(12);
+      let mediaType;
+      try { mediaType = detectLocalImageMediaType(prefix.subarray(0, readSync(fd, prefix, 0, prefix.length, 0))); }
+      finally { closeSync(fd); }
+      if (mediaType) {
+        return formatToolFailure('read_file', 'failed', 'This is an image. Use view_image to read its pixels.', {
+          path: filePath, code: 'image_requires_view_image', retrievalHint: `view_image(${JSON.stringify({ path: filePath })})`,
+        });
+      }
       const fullContent = readFileSync(filePath, 'utf8');
       let slice;
       try {
@@ -710,6 +737,11 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
           permission: pathPermission.approval?.reason || 'not_granted',
         });
       }
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      if (accessDenial) return formatToolFailure('edit_file', 'blocked', accessDenial, { path: filePath });
+      const latest = validateFreshReadState(toolContext, filePath);
+      if (!latest.ok) return formatToolFailure('edit_file', 'blocked', latest.reason, { path: filePath });
+      if (signal?.aborted) return formatToolFailure('edit_file', 'cancelled', 'execution_cancelled', { path: filePath });
       writeFileSync(filePath, after, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: after, fullRead: true });
       return {
@@ -777,6 +809,13 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
         });
       }
 
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      if (accessDenial) return formatToolFailure('write_file', 'blocked', accessDenial, { path: filePath });
+      if (exists) {
+        const latest = validateFreshReadState(toolContext, filePath);
+        if (!latest.ok) return formatToolFailure('write_file', 'blocked', latest.reason, { path: filePath });
+      } else if (existsSync(filePath)) return formatToolFailure('write_file', 'blocked', 'File appeared while awaiting permission; read it before replacing it.', { path: filePath });
+      if (signal?.aborted) return formatToolFailure('write_file', 'cancelled', 'execution_cancelled', { path: filePath });
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, args.content, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: args.content, fullRead: true });
@@ -936,12 +975,15 @@ export function createLocalFileProvider({ workspaceRoot } = {}) {
     if (!name) return null;
     const args = readArgs(call);
     const cwd = context.workspaceRoot || workspaceRoot || process.cwd();
+    const probeGate=evaluateObjectiveProbeCall({policy:context.toolContext?.permissionPolicy,call,workspacePath:cwd});
+    if(!probeGate.allowed)return objectiveProbeDenial(call,probeGate.reason,context.locale).execution;
     const fileResult = await runFileTool({
       name,
       args,
       cwd,
       toolContext: context.toolContext,
       requestPermission: context.requestPermission,
+      signal: context.signal,
     });
     const status = statusFromFileResult(fileResult);
     const grant = createPermissionGrant({

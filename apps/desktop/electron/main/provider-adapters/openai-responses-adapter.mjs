@@ -17,8 +17,10 @@ import { encodeOpenAIResponsesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
+import { hasManagedProviderRequest } from '../chat-runtime/provider-request-recovery.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
+import { parseSseDataPayload, throwIfSseReaderAborted, readSseChunk, cancelSseReader, createSseIdleTimeoutError as streamIdleTimeoutError } from './sse-line.mjs';
+import { formatGrokSubscriptionHttpError } from '@peer-agent/runtime-node';
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
@@ -94,6 +96,7 @@ export async function sendOpenAIResponsesStreamWithResilience(sendOnce, {
   transientRetryDelaysMs = OPENAI_RESPONSES_TRANSIENT_RETRY_DELAYS_MS,
   waitImpl = sleepMs,
 } = {}) {
+  if (hasManagedProviderRequest()) return sendOnce();
   const delays = Array.isArray(transientRetryDelaysMs) ? transientRetryDelaysMs : [];
   let lastResult = null;
   let transientAttempts = 0;
@@ -140,43 +143,8 @@ function extractCacheWriteTokens(usage) {
   return Number.isFinite(n) ? n : null;
 }
 
-function streamIdleTimeoutError(ms) {
-  const error = new Error(`provider_stream_idle_timeout: no SSE data received for ${ms}ms`);
-  error.type = 'provider_stream_idle_timeout';
-  return error;
-}
-
-async function readStreamChunk(reader, signal, idleTimeoutMs) {
-  const timeoutMs = Number(idleTimeoutMs);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return reader.read();
-  let timer = null;
-  try {
-    return await Promise.race([
-      reader.read(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(streamIdleTimeoutError(timeoutMs)), timeoutMs);
-      }),
-    ]);
-  } catch (error) {
-    if (error?.name === 'AbortError' || signal?.aborted) throw error;
-    try {
-      await reader.cancel(error);
-    } catch {
-      /* stream may already be closed */
-    }
-    throw error;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-async function cancelResponsesReader(reader, reason) {
-  try {
-    await reader.cancel(reason);
-  } catch {
-    /* stream may already be closed */
-  }
-}
+const readStreamChunk = readSseChunk;
+const cancelResponsesReader = cancelSseReader;
 
 function consumeResponsesEvent(parsed, state, webContents, streamId) {
   const type = parsed?.type;
@@ -446,7 +414,7 @@ async function sendOpenAIResponsesStreamOnce({
     return {
       ok: false,
       status: res.status,
-      errorText,
+      errorText: formatGrokSubscriptionHttpError(res.status, errorText, headers),
       messages,
       providerTracePath: tracePath,
     };

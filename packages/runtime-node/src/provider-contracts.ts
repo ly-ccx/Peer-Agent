@@ -23,7 +23,7 @@ import type { NodeShellArtifactStore } from './shell-artifact-store.ts';
 import type { NodeShellSessionManager } from './shell-session.ts';
 import type { NodeShellTaskManager } from './shell-task-manager.ts';
 
-export type NodeCapabilityApprovalKind = 'file-write' | 'shell-exec' | 'web-fetch';
+export type NodeCapabilityApprovalKind = 'file-read' | 'file-write' | 'shell-exec' | 'web-fetch';
 
 export interface NodeCapabilityPermissionPrompt
   extends NodeRuntimeCapabilityPermissionPrompt {
@@ -69,10 +69,13 @@ export interface CreateNodeProviderBundleOptions {
   readonly requestPermission?: NodeRuntimeExecutionContext['requestPermission'];
   readonly requestCapabilityApproval?: NodeCapabilityApprovalPort;
   readonly hookRunner?: RuntimeSdkHookRunner | null;
+  /** Recheck local host authority after asynchronous hooks, immediately before dispatch. */
+  readonly executionGate?: (call: { readonly capabilityId: string }) => string | null;
   readonly now?: () => string;
   readonly idFactory?: () => string;
   readonly mode?: string;
   readonly file?: Omit<NodeFileProviderOptions, 'workspaceRoot' | 'requestApproval' | 'now' | 'idFactory'> | false;
+  readonly git?: { readonly artifactRoot?: string } | false;
   readonly shell?: Omit<NodeShellProviderOptions, 'workspaceRoot' | 'requestApproval' | 'now' | 'idFactory'> | false;
   readonly web?: { readonly artifactRoot?: string } | false;
   /** Pass false to omit request_user_input from the bundle. */

@@ -75,6 +75,9 @@ describe('createTuiLanguageStore', () => {
     );
     const store = createTuiLanguageStore({ userDataPath });
     expect(store.getLocale()).toBe('en-US');
+    const migrated = JSON.parse(readFileSync(path.join(userDataPath, 'settings.json'), 'utf8')) as Record<string, unknown>;
+    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.projectAgent).toEqual({ shell: 'bots' });
     expect(store.getReplyLanguage()).toBe('zh-CN');
     expect(store.getPromptSettings()).toEqual({
       replyLanguage: 'zh-CN',

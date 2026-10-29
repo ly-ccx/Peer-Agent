@@ -21,3 +21,21 @@ export function createTuiShutdown(dependencies: TuiShutdownDependencies): () => 
     }
   };
 }
+
+/** Keep the terminal alive until local execution drains, then restore it once. */
+export function createAsyncTuiShutdown(dependencies: TuiShutdownDependencies & {
+  readonly dispose: () => Promise<void>;
+  readonly onError: (error: unknown) => void;
+}): () => Promise<void> {
+  let flight: Promise<void> | null = null;
+  return () => {
+    if (flight) return flight;
+    flight = (async () => {
+      let exitCode = 0;
+      try { await dependencies.dispose(); }
+      catch (error) { exitCode = 1; dependencies.onError(error); }
+      createTuiShutdown({ ...dependencies, exitProcess: () => dependencies.exitProcess(exitCode) })();
+    })();
+    return flight;
+  };
+}

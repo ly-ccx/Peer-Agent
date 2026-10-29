@@ -66,7 +66,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   process.umask(0o077);
   try {
     const gateway = await startGateway();
-    console.log(`Gateway account API listening on loopback port ${gateway.address.port}; device routing is not yet available.`);
+    console.log(`Gateway account and device relay listening on loopback port ${gateway.address.port}.`);
     const stop = () => { gateway.close().catch(() => { process.exitCode = 1; }); };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);

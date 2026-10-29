@@ -1,4 +1,8 @@
+import { recoveryZh, recoveryEn, type RecoveryTranslationKey } from './recovery.ts';
+import { resourcesZh, resourcesEn, type ResourcesTranslationKey } from './resources.ts';
+import { formsZh, formsEn, type FormsTranslationKey } from './forms.ts';
 import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
+import {remoteAccessZh,remoteAccessEn,type RemoteAccessTranslationKey} from './remote-access.ts';
 
 export type { LocaleCode };
 
@@ -7,6 +11,10 @@ export const DEFAULT_LOCALE: LocaleCode = 'zh-CN';
 export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly LocaleCode[];
 
 export type TranslationKey =
+  | RecoveryTranslationKey
+  | RemoteAccessTranslationKey
+  | ResourcesTranslationKey
+  | FormsTranslationKey
   | 'app.newTask'
   | 'searchChats.open'
   | 'searchChats.placeholder'
@@ -50,6 +58,717 @@ export type TranslationKey =
   | 'developer.saveFailed'
   | 'developer.probeFailed'
   | 'developer.ipcUnavailable'
+  | "projectAgent.chat.taskFallback"
+  | "projectAgent.chat.inputTooLong"
+  | "projectAgent.quick.title"
+  | "projectAgent.quick.content"
+  | "projectAgent.quick.placeholder"
+  | "projectAgent.quick.chooseBot"
+  | "projectAgent.quick.effort"
+  | "projectAgent.quick.loadFailed"
+  | "projectAgent.quick.noBots"
+  | "projectAgent.quick.textOnly"
+  | "projectAgent.quick.empty"
+  | "projectAgent.quick.workspace"
+  | "projectAgent.quick.attach"
+  | "projectAgent.quick.attachmentLimit"
+  | "projectAgent.quick.imageLimit"
+  | "projectAgent.quick.fileLimit"
+  | "projectAgent.quick.sending"
+  | "projectAgent.quick.failed"
+  | "projectAgent.background.title"
+  | "projectAgent.background.device"
+  | "projectAgent.background.close"
+  | "projectAgent.background.readFailed"
+  | "projectAgent.background.previous"
+  | "projectAgent.background.retry"
+  | "projectAgent.background.loading"
+  | "projectAgent.background.unavailable"
+  | "projectAgent.background.empty"
+  | "projectAgent.background.history"
+  | "projectAgent.background.more"
+  | "projectAgent.background.refresh"
+  | "projectAgent.settings.quietStart"
+  | "projectAgent.settings.quietEnd"
+  | "projectAgent.settings.hour"
+  | "projectAgent.settings.minute"
+  | 'projectAgent.host.title'
+  | 'projectAgent.host.hint'
+  | 'projectAgent.host.action'
+  | 'projectAgent.host.requested'
+  | 'projectAgent.host.ready'
+  | 'projectAgent.host.failed'
+  | 'projectAgent.host.notOwnerAction'
+  | 'developer.projectAgent.nav'
+  | 'developer.projectAgent.title'
+  | 'developer.projectAgent.description'
+  | 'developer.projectAgent.switch'
+  | 'developer.projectAgent.diagnostics'
+  | 'developer.projectAgent.inactive'
+  | 'developer.diagnostics.description'
+  | 'developer.diagnostics.refresh'
+  | 'developer.diagnostics.export'
+  | 'developer.diagnostics.busy'
+  | 'developer.diagnostics.saved'
+  | 'developer.diagnostics.cancelled'
+  | 'developer.diagnostics.failed'
+  | 'developer.diagnostics.unknown'
+  | 'developer.diagnostics.generated'
+  | 'developer.diagnostics.bots'
+  | 'developer.diagnostics.slots'
+  | 'developer.diagnostics.waiting'
+  | 'developer.diagnostics.errors'
+  | 'developer.diagnostics.preview'
+  | 'projectAgent.list.brand'
+  | 'projectAgent.list.newBot'
+  | 'projectAgent.list.searchPlaceholder'
+  | 'projectAgent.attention.title'
+  | 'projectAgent.attention.subtitle'
+  | 'projectAgent.attention.close'
+  | 'projectAgent.attention.failed'
+  | 'projectAgent.attention.retry'
+  | 'projectAgent.attention.empty'
+  | 'projectAgent.attention.emptyHint'
+  | 'projectAgent.attention.question'
+  | 'projectAgent.attention.approval'
+  | 'projectAgent.attention.confirmation'
+  | 'projectAgent.attention.openSource'
+  | 'projectAgent.attention.closed'
+  | 'projectAgent.list.needsYou'
+  | 'projectAgent.list.empty'
+  | 'projectAgent.list.emptyHint'
+  | 'projectAgent.list.emptyNeedsYou'
+  | 'projectAgent.list.emptySearch'
+  | 'projectAgent.list.me'
+  | 'projectAgent.list.settings'
+  | 'projectAgent.list.automations'
+  | 'projectAgent.list.capabilities'
+  | 'projectAgent.list.capabilitiesHint'
+  | 'projectAgent.list.history'
+  | 'projectAgent.history.hint'
+  | 'projectAgent.history.search'
+  | 'projectAgent.history.clear'
+  | 'projectAgent.history.loading'
+  | 'projectAgent.history.unavailable'
+  | 'projectAgent.history.retry'
+  | 'projectAgent.history.noMatch'
+  | 'projectAgent.history.untitled'
+  | 'projectAgent.history.group.today'
+  | 'projectAgent.history.group.yesterday'
+  | 'projectAgent.history.group.week'
+  | 'projectAgent.history.group.earlier'
+  | 'projectAgent.history.group.other'
+  | 'projectAgent.history.more'
+  | 'projectAgent.history.count'
+  | 'projectAgent.history.back'
+  | 'projectAgent.history.loadingPreview'
+  | 'projectAgent.history.previewUnavailable'
+  | 'projectAgent.history.noPreview'
+  | 'projectAgent.history.user'
+  | 'projectAgent.history.assistant'
+  | 'projectAgent.history.attachmentOnly'
+  | 'projectAgent.history.continueFailed'
+  | 'projectAgent.history.submitting'
+  | 'projectAgent.shell.classicNotice'
+  | 'projectAgent.shell.banner'
+  | 'projectAgent.shell.bannerTitle'
+  | 'projectAgent.shell.bannerWhere'
+  | 'projectAgent.shell.bannerPath'
+  | 'projectAgent.shell.bannerSwitch'
+  | 'projectAgent.shell.bannerDismiss'
+  | 'projectAgent.onboarding.connectTitle'
+  | 'projectAgent.onboarding.connectBody'
+  | 'projectAgent.onboarding.connectAction'
+  | 'projectAgent.onboarding.createTitle'
+  | 'projectAgent.onboarding.createBody'
+  | 'projectAgent.onboarding.createAction'
+  | 'projectAgent.search.placeholder'
+  | 'projectAgent.search.empty'
+  | 'projectAgent.search.section.bots'
+  | 'projectAgent.search.section.messages'
+  | 'projectAgent.search.section.tasks'
+  | 'projectAgent.search.section.memory'
+  | 'projectAgent.list.loading'
+  | 'projectAgent.list.unavailable'
+  | 'projectAgent.list.loadFailed'
+  | 'projectAgent.list.noPreview'
+  | 'projectAgent.list.mainEmptyTitle'
+  | 'projectAgent.list.mainEmptyBody'
+  | 'projectAgent.list.recentBots'
+  | 'projectAgent.list.openBot'
+  | 'projectAgent.list.mainPlaceholder'
+  | 'projectAgent.list.profile'
+  | 'projectAgent.list.unread'
+  | 'projectAgent.list.running'
+  | 'projectAgent.list.needsYouBadge'
+  | 'projectAgent.list.newSheetTitle'
+  | 'projectAgent.list.bindFolder'
+  | 'projectAgent.list.bindFolderHint'
+  | 'projectAgent.list.blankBot'
+  | 'projectAgent.list.blankBotHint'
+  | 'projectAgent.list.namePlaceholder'
+  | 'projectAgent.list.nameInvalid'
+  | 'projectAgent.list.nameWillUse'
+  | 'projectAgent.list.create'
+  | 'projectAgent.list.creating'
+  | 'projectAgent.list.createFailed'
+  | 'projectAgent.list.nameExhausted'
+  | 'projectAgent.list.columnResize'
+  | 'projectAgent.list.backToBots'
+  | 'projectAgent.list.close'
+  | 'projectAgent.chat.empty'
+  | 'projectAgent.chat.loadFailed'
+  | 'projectAgent.chat.cardsUnavailable'
+  | 'projectAgent.chat.recoveryDiagnostics'
+  | 'projectAgent.chat.recoveryBlocked'
+  | 'projectAgent.chat.recoveryReconcile'
+  | 'projectAgent.chat.recoveryConflict'
+  | 'projectAgent.chat.refreshFailed'
+  | 'projectAgent.chat.thinking'
+  | 'projectAgent.chat.waiting'
+  | 'projectAgent.chat.generating'
+  | 'projectAgent.chat.reply.reconnecting'
+  | 'projectAgent.chat.reply.unconfirmed'
+  | 'projectAgent.chat.reply.interrupted'
+  | 'projectAgent.chat.reply.synchronizing'
+  | 'projectAgent.chat.reply.received'
+  | 'projectAgent.chat.reply.waitingModel'
+  | 'projectAgent.chat.recoveryReasoning'
+  | 'projectAgent.chat.reply.refresh'
+  | 'projectAgent.chat.reply.related'
+  | 'projectAgent.chat.reply.relatedTurn'
+  | 'projectAgent.chat.reply.deliveryIssue'
+  | 'projectAgent.chat.activity.preparing'
+  | 'projectAgent.chat.activity.thinking'
+  | 'projectAgent.chat.activity.responding'
+  | 'projectAgent.chat.activity.settling'
+  | 'projectAgent.chat.activity.advancing'
+  | 'projectAgent.chat.activity.prepareRead'
+  | 'projectAgent.chat.activity.readFile'
+  | 'projectAgent.chat.activity.reading'
+  | 'projectAgent.chat.activity.image'
+  | 'projectAgent.chat.activity.command'
+  | 'projectAgent.chat.activity.search'
+  | 'projectAgent.chat.activity.edit'
+  | 'projectAgent.chat.activity.verification'
+  | 'projectAgent.chat.activity.delegating'
+  | 'projectAgent.chat.activity.work'
+  | 'projectAgent.chat.activity.memory'
+  | 'projectAgent.chat.activity.memoryUpdate'
+  | 'projectAgent.chat.activity.directory'
+  | 'projectAgent.chat.toolLabel.read'
+  | 'projectAgent.chat.toolLabel.search'
+  | 'projectAgent.chat.toolLabel.edit'
+  | 'projectAgent.chat.toolLabel.command'
+  | 'projectAgent.chat.toolRunning'
+  | 'projectAgent.chat.toolDone'
+  | 'projectAgent.chat.toolFailed'
+  | 'projectAgent.chat.stop'
+  | 'projectAgent.chat.stopHint'
+  | 'projectAgent.chat.stopping'
+  | 'projectAgent.chat.stopped'
+  | 'projectAgent.chat.stopFailed'
+  | 'projectAgent.chat.latest'
+  | 'projectAgent.chat.restoringReading'
+  | 'projectAgent.chat.readingUnavailable'
+  | 'projectAgent.chat.restoreReading'
+  | 'projectAgent.chat.received'
+  | 'projectAgent.chat.loadOlder'
+  | 'projectAgent.chat.loadingOlder'
+  | 'projectAgent.chat.olderFailed'
+  | 'projectAgent.chat.sending'
+  | 'projectAgent.chat.failed'
+  | 'projectAgent.chat.retry'
+  | 'projectAgent.chat.continueRetry'
+  | 'projectAgent.chat.recoveryScheduled'
+  | 'projectAgent.chat.agent.open'
+  | 'projectAgent.chat.agent.queued'
+  | 'projectAgent.chat.agent.started'
+  | 'projectAgent.chat.agent.update'
+  | 'projectAgent.chat.agent.question'
+  | 'projectAgent.chat.agent.answer'
+  | 'projectAgent.chat.agent.reported'
+  | 'projectAgent.chat.agent.verified'
+  | 'projectAgent.chat.agent.verifying'
+  | 'projectAgent.chat.agent.verificationProgress'
+  | 'projectAgent.chat.agent.ended'
+  | 'projectAgent.chat.agent.cancelled'
+  | 'projectAgent.chat.agent.blocked'
+  | 'projectAgent.chat.recoveryContinuing'
+  | 'projectAgent.chat.recoveryExhausted'
+  | 'projectAgent.chat.recoveryAuthentication'
+  | 'projectAgent.chat.recoveryConfiguration'
+  | 'projectAgent.chat.recoveryInvalidRequest'
+  | 'projectAgent.chat.recoveryPermission'
+  | 'projectAgent.chat.recoveryUnknownOutcome'
+  | 'projectAgent.chat.recoveryHistory'
+  | 'projectAgent.chat.recoveryEarlierReply'
+  | 'projectAgent.chat.recoveryCancelled'
+  | 'projectAgent.chat.recoveryPaused'
+  | 'projectAgent.chat.childWorkContinues'
+  | 'projectAgent.chat.recoveryAttemptFailed'
+  | 'projectAgent.chat.recoveryEmptyResponse'
+  | 'projectAgent.chat.recoveryModelChanged'
+  | 'projectAgent.chat.recoveryEnded'
+  | 'projectAgent.chat.recoveryStale'
+  | 'projectAgent.chat.recoveryMissingCheckpoint'
+  | 'projectAgent.chat.unavailable'
+  | 'projectAgent.chat.noProgress'
+  | 'projectAgent.chat.budgetExhausted'
+  | 'projectAgent.chat.budgetUsageUnknown'
+  | 'projectAgent.chat.budgetRequests'
+  | 'projectAgent.chat.budgetTools'
+  | 'projectAgent.chat.budgetTokens'
+  | 'projectAgent.chat.budgetCost'
+  | 'projectAgent.chat.budgetReady'
+  | 'projectAgent.chat.budgetReserved'
+  | 'projectAgent.chat.budgetAvailable'
+  | 'projectAgent.chat.recoveryLegacyLimit'
+  | 'projectAgent.chat.budgetSourceSettings'
+  | 'projectAgent.chat.budgetSourceStored'
+  | 'projectAgent.chat.budgetUnconfirmed'
+  | 'projectAgent.chat.budgetCostUnknown'
+  | 'projectAgent.chat.budgetTokensUnknown'
+  | 'projectAgent.chat.context.error'
+  | 'projectAgent.chat.replied'
+  | 'projectAgent.chat.disposition.answered'
+  | 'projectAgent.chat.disposition.merged'
+  | 'projectAgent.chat.disposition.stopped'
+  | 'projectAgent.chat.disposition.superseded'
+  | 'projectAgent.chat.disposition.parallel'
+  | 'projectAgent.chat.disposition.queued'
+  | 'projectAgent.chat.disposition.outOfScope'
+  | 'projectAgent.chat.quote'
+  | 'projectAgent.chat.quoteRemove'
+  | 'projectAgent.chat.placeholder'
+  | 'projectAgent.chat.attach'
+  | 'projectAgent.chat.previewAttachment'
+  | 'projectAgent.chat.removeAttachment'
+  | 'projectAgent.chat.attachmentMetadataOnly'
+  | 'projectAgent.chat.readingAttachments'
+  | 'projectAgent.chat.dropAttachments'
+  | 'projectAgent.chat.send'
+  | 'projectAgent.chat.hint'
+  | 'projectAgent.chat.source'
+  | 'projectAgent.chat.evidenceMore'
+  | 'projectAgent.chat.evidenceCollapse'
+  | 'projectAgent.chat.evidence'
+  | 'projectAgent.chat.process'
+  | 'projectAgent.chat.chooseAnswer'
+  | 'projectAgent.chat.you'
+  | 'projectAgent.process.reply'
+  | 'projectAgent.process.heading'
+  | 'projectAgent.process.steps'
+  | 'projectAgent.process.sessions'
+  | 'projectAgent.process.session'
+  | 'projectAgent.process.start'
+  | 'projectAgent.process.resume'
+  | 'projectAgent.process.cancel'
+  | 'projectAgent.process.update'
+  | 'projectAgent.process.verification'
+  | 'projectAgent.process.memory'
+  | 'projectAgent.process.objective'
+  | 'projectAgent.process.tool'
+  | 'projectAgent.process.runningTitle'
+  | 'projectAgent.process.preparingTitle'
+  | 'projectAgent.process.organizing'
+  | 'projectAgent.process.preparingReply'
+  | 'projectAgent.process.preparing'
+  | 'projectAgent.process.running'
+  | 'projectAgent.process.stopped'
+  | 'projectAgent.process.awaitingContent'
+  | 'projectAgent.process.receiving'
+  | 'projectAgent.process.preparingNote'
+  | 'projectAgent.process.runningNote'
+  | 'projectAgent.process.parameters'
+  | 'projectAgent.process.output'
+  | 'projectAgent.process.truncated'
+  | 'projectAgent.process.redacted'
+  | 'projectAgent.process.previewLimit'
+  | 'projectAgent.process.seconds'
+  | 'projectAgent.process.lessThanSecond'
+  | 'projectAgent.process.minutes'
+  | 'projectAgent.process.done'
+  | 'projectAgent.process.failed'
+  | 'projectAgent.process.cancelled'
+  | 'projectAgent.process.noOutput'
+  | 'projectAgent.process.suppressed'
+  | 'projectAgent.process.unknown'
+  | 'projectAgent.process.sent'
+  | 'projectAgent.process.count'
+  | 'projectAgent.process.technical'
+  | 'projectAgent.process.input'
+  | 'projectAgent.process.result'
+  | 'projectAgent.process.empty'
+  | 'projectAgent.chat.openProcess'
+  | 'projectAgent.chat.memoryUsed'
+  | 'projectAgent.chat.memoryLearned'
+  | 'projectAgent.chat.digest'
+  | 'projectAgent.chat.today'
+  | 'projectAgent.chat.earlierDay'
+  | 'projectAgent.chat.replyTo'
+  | 'projectAgent.chat.sessionState.stopping'
+  | 'projectAgent.chat.sessionState.awaiting_outcome'
+  | 'projectAgent.task.coordination.heading'
+  | 'projectAgent.task.coordination.replacement'
+  | 'projectAgent.task.coordination.prior'
+  | 'projectAgent.task.coordination.applied'
+  | 'projectAgent.task.coordination.executionQueued'
+  | 'projectAgent.task.coordination.executionObserved'
+  | 'projectAgent.task.coordination.pending'
+  | 'projectAgent.task.coordination.unknown'
+  | 'projectAgent.task.coordination.blocked'
+  | 'projectAgent.task.coordination.handoff'
+  | 'projectAgent.chat.sessionState.paused'
+  | 'projectAgent.chat.sessionState.queued'
+  | 'projectAgent.chat.sessionState.starting'
+  | 'projectAgent.chat.work.heading'
+  | 'projectAgent.chat.work.more'
+  | 'projectAgent.chat.work.related'
+  | 'projectAgent.chat.work.unavailable'
+  | 'projectAgent.chat.work.unavailableHint'
+  | 'projectAgent.chat.work.waiting'
+  | 'projectAgent.chat.work.resultSettling'
+  | 'projectAgent.chat.work.resultReady'
+  | 'projectAgent.chat.work.handoff'
+  | 'projectAgent.chat.work.verifyingHint'
+  | 'projectAgent.chat.work.open'
+  | 'projectAgent.task.cancel'
+  | 'projectAgent.task.cancelling'
+  | 'projectAgent.task.cancelFailed'
+  | 'projectAgent.chat.work.background'
+  | 'projectAgent.chat.context.basis'
+  | 'projectAgent.chat.originalMessage'
+  | 'projectAgent.chat.context.details'
+  | 'projectAgent.chat.context.title'
+  | 'projectAgent.chat.context.back'
+  | 'projectAgent.chat.context.rounds'
+  | 'projectAgent.chat.context.unavailable'
+  | 'projectAgent.chat.context.memoryUnavailable'
+  | 'projectAgent.drawer.inspectBack'
+  | 'projectAgent.drawer.evidenceUnavailable'
+  | 'projectAgent.evidence.title'
+  | 'projectAgent.evidence.record'
+  | 'projectAgent.evidence.listHelp'
+  | 'projectAgent.evidence.historical'
+  | 'projectAgent.evidence.bodyMissing'
+  | 'projectAgent.evidence.notFound'
+  | 'projectAgent.evidence.readFailed'
+  | 'projectAgent.evidence.cannotVerify'
+  | 'projectAgent.evidence.tryLater'
+  | 'projectAgent.evidence.emptyOutput'
+  | 'projectAgent.drawer.botDescription'
+  | 'projectAgent.drawer.acceptance.confirm'
+  | 'projectAgent.drawer.memory.details'
+  | 'projectAgent.chat.sessionState.running'
+  | 'projectAgent.chat.sessionState.waiting_user'
+  | 'projectAgent.chat.sessionState.waiting_agent'
+  | 'projectAgent.chat.sessionState.verifying'
+  | 'projectAgent.chat.sessionState.result_ready'
+  | 'projectAgent.chat.sessionState.accepted'
+  | 'projectAgent.chat.sessionState.failed'
+  | 'projectAgent.chat.sessionState.cancelled'
+  | 'projectAgent.chat.sessionState.superseded'
+  | 'projectAgent.chat.verdict.passed'
+  | 'projectAgent.chat.verdict.failed'
+  | 'projectAgent.chat.verdict.partial'
+  | 'projectAgent.chat.verdict.unverifiable'
+  | 'projectAgent.chat.surfacingLabel'
+  | 'projectAgent.chat.surfacing.interrupt'
+  | 'projectAgent.chat.surfacing.message'
+  | 'projectAgent.chat.surfacing.digest'
+  | 'projectAgent.chat.surfacing.silent'
+  | 'projectAgent.chat.approve'
+  | 'projectAgent.chat.allowOnce'
+  | 'projectAgent.chat.allowTask'
+  | 'projectAgent.chat.allowImage'
+  | 'projectAgent.chat.activity.permission'
+  | 'projectAgent.process.awaiting_permission'
+  | 'projectAgent.process.permissionTitle'
+  | 'projectAgent.process.permissionNote'
+  | 'projectAgent.process.image'
+  | 'projectAgent.chat.cancelImageRead'
+  | 'projectAgent.chat.imageWaitLimit'
+  | 'projectAgent.chat.imageTimeout'
+  | 'projectAgent.chat.imageCancelled'
+  | 'projectAgent.chat.imageDenied'
+  | 'projectAgent.chat.imageApproved'
+  | 'projectAgent.chat.approvalReceipt.title'
+  | 'projectAgent.chat.approvalReceipt.approved'
+  | 'projectAgent.chat.approvalReceipt.denied'
+  | 'projectAgent.chat.approvalReceipt.cancelled'
+  | 'projectAgent.chat.approvalReceipt.expired'
+  | 'projectAgent.chat.approvalReceipt.closed'
+  | 'projectAgent.chat.imageUnavailable'
+  | 'projectAgent.chat.imageReadNotice'
+  | 'projectAgent.chat.approveContinue'
+  | 'projectAgent.chat.reject'
+  | 'projectAgent.chat.answer'
+  | 'projectAgent.policy.planApproval'
+  | 'projectAgent.policy.planApproval.never'
+  | 'projectAgent.policy.planApproval.writes'
+  | 'projectAgent.policy.planApproval.always'
+  | 'projectAgent.policy.acceptance.auto'
+  | 'projectAgent.policy.acceptance.confirm'
+  | 'projectAgent.policy.models'
+  | 'projectAgent.model.defaults'
+  | 'projectAgent.model.botOnly'
+  | 'projectAgent.model.nextReply'
+  | 'projectAgent.model.runningReply'
+  | 'projectAgent.model.unavailable'
+  | 'projectAgent.model.select'
+  | 'projectAgent.model.noEffort'
+  | 'projectAgent.access.changed'
+  | 'projectAgent.access.label'
+  | 'projectAgent.access.scope'
+  | 'projectAgent.access.loading'
+  | 'projectAgent.access.failed'
+  | 'projectAgent.access.retry'
+  | 'projectAgent.model.saveFailed'
+  | 'projectAgent.policy.modelsHint'
+  | 'projectAgent.policy.inherit'
+  | 'projectAgent.policy.autoPool'
+  | 'projectAgent.policy.moreRoles'
+  | 'projectAgent.policy.fewerRoles'
+  | 'projectAgent.policy.scope'
+  | 'projectAgent.policy.scope.all'
+  | 'projectAgent.policy.scope.restricted'
+  | 'projectAgent.policy.localOnly'
+  | 'projectAgent.chat.confirmResult'
+  | 'projectAgent.chat.confirmCompletion'
+  | 'projectAgent.chat.reviewReport'
+  | 'projectAgent.chat.completionHint'
+  | 'projectAgent.chat.retryCompletion'
+  | 'projectAgent.chat.completionRetryHint'
+  | 'projectAgent.chat.resultChanged'
+  | 'projectAgent.chat.acceptReadme'
+  | 'projectAgent.chat.actionFailed'
+  | 'projectAgent.chat.draftLoading'
+  | 'projectAgent.chat.draftSaveFailed'
+  | 'projectAgent.chat.draftConflict'
+  | 'projectAgent.chat.inputUnconfirmed'
+  | 'projectAgent.chat.retrySameInput'
+  | 'projectAgent.chat.inputDeliveryIssue'
+  | 'projectAgent.chat.planDecisionRecord'
+  | 'projectAgent.chat.decisionUpdating'
+  | 'projectAgent.chat.verificationPending'
+  | 'projectAgent.drawer.title'
+  | 'projectAgent.drawer.close'
+  | 'projectAgent.drawer.back'
+  | 'projectAgent.drawer.sceneBack'
+  | 'projectAgent.drawer.missing'
+  | 'projectAgent.drawer.tab.overview'
+  | 'projectAgent.drawer.tab.tasks'
+  | 'projectAgent.drawer.tab.objectives'
+  | 'projectAgent.drawer.tab.memory'
+  | 'projectAgent.drawer.tab.settings'
+  | 'projectAgent.drawer.folder'
+  | 'projectAgent.drawer.noPath'
+  | 'projectAgent.drawer.reveal'
+  | 'projectAgent.drawer.brief'
+  | 'projectAgent.drawer.briefEmpty'
+  | 'projectAgent.drawer.running'
+  | 'projectAgent.drawer.runningEmpty'
+  | 'projectAgent.drawer.acceptance'
+  | 'projectAgent.drawer.acceptance.auto'
+  | 'projectAgent.drawer.acceptance.pending'
+  | 'projectAgent.drawer.model'
+  | 'projectAgent.drawer.modelEmpty'
+  | 'projectAgent.drawer.model.pending'
+  | 'projectAgent.drawer.tasksEmpty'
+  | 'projectAgent.drawer.showAll'
+  | 'projectAgent.drawer.collapse'
+  | 'projectAgent.drawer.group.needsYou'
+  | 'projectAgent.drawer.group.running'
+  | 'projectAgent.drawer.group.queued'
+  | 'projectAgent.drawer.group.done'
+  | 'projectAgent.drawer.group.paused'
+  | 'projectAgent.drawer.supersededBy'
+  | 'projectAgent.drawer.resume'
+  | 'projectAgent.drawer.resumeFailed'
+  | 'projectAgent.drawer.replacement'
+  | 'projectAgent.drawer.group.history'
+  | 'projectAgent.drawer.group.classic'
+  | 'projectAgent.drawer.historyEmpty'
+  | 'projectAgent.drawer.continueHistory'
+  | 'projectAgent.drawer.historyPartial'
+  | 'projectAgent.drawer.historyPartialConfirm'
+  | 'projectAgent.drawer.historyPickBot'
+  | 'projectAgent.drawer.classicOpen'
+  | 'projectAgent.drawer.legacyAutomations'
+  | 'projectAgent.drawer.legacyAutomationsEmpty'
+  | 'projectAgent.drawer.anchor'
+  | 'projectAgent.drawer.frozenModel'
+  | 'projectAgent.drawer.conclusion'
+  | 'projectAgent.drawer.evidence'
+  | 'projectAgent.drawer.progress'
+  | 'projectAgent.drawer.openScene'
+  | 'projectAgent.drawer.scene'
+  | 'projectAgent.drawer.sceneMissing'
+  | 'projectAgent.drawer.task.created'
+  | 'projectAgent.drawer.task.conversation'
+  | 'projectAgent.drawer.task.question'
+  | 'projectAgent.drawer.task.followUp'
+  | 'projectAgent.drawer.task.followUpEnded'
+  | 'projectAgent.drawer.task.endedQuestion'
+  | 'projectAgent.drawer.task.askEnded'
+  | 'projectAgent.drawer.task.askEndedDraft'
+  | 'projectAgent.drawer.task.noQuestion'
+  | 'projectAgent.drawer.task.answer'
+  | 'projectAgent.drawer.task.ask'
+  | 'projectAgent.drawer.task.askDraft'
+  | 'projectAgent.drawer.task.draftHint'
+  | 'projectAgent.drawer.task.update'
+  | 'projectAgent.drawer.task.viewUpdate'
+  | 'projectAgent.drawer.task.instructions'
+  | 'projectAgent.drawer.task.description'
+  | 'projectAgent.drawer.task.descriptionMissing'
+  | 'projectAgent.drawer.task.information'
+  | 'projectAgent.drawer.task.readingReport'
+  | 'projectAgent.drawer.task.reportUnavailable'
+  | 'projectAgent.drawer.task.reportStale'
+  | 'projectAgent.drawer.task.noReport'
+  | 'projectAgent.drawer.task.id'
+  | 'projectAgent.drawer.task.records'
+  | 'projectAgent.drawer.task.verification'
+  | 'projectAgent.drawer.task.verificationScope'
+  | 'projectAgent.drawer.task.verificationChecks'
+  | 'projectAgent.drawer.task.verificationEvidence'
+  | 'projectAgent.drawer.task.verificationIndependent'
+  | 'projectAgent.drawer.task.verificationHistory'
+  | 'projectAgent.drawer.task.verificationHistorical'
+  | 'projectAgent.drawer.task.verificationPassed'
+  | 'projectAgent.drawer.task.verificationFailed'
+  | 'projectAgent.drawer.task.verificationMissing'
+  | 'projectAgent.drawer.task.verificationOther'
+  | 'projectAgent.drawer.task.hint.confirm'
+  | 'projectAgent.drawer.task.hint.failed'
+  | 'projectAgent.drawer.task.hint.ended'
+  | 'projectAgent.drawer.task.hint.working'
+  | 'projectAgent.drawer.objective.source'
+  | 'projectAgent.drawer.objective.empty'
+  | 'projectAgent.drawer.objective.hint'
+  | 'projectAgent.drawer.objective.active'
+  | 'projectAgent.drawer.objective.paused'
+  | 'projectAgent.drawer.objective.achieved'
+  | 'projectAgent.drawer.objective.abandoned'
+  | 'projectAgent.drawer.objective.pending'
+  | 'projectAgent.drawer.objective.report_only'
+  | 'projectAgent.drawer.objective.propose'
+  | 'projectAgent.drawer.objective.act'
+  | 'projectAgent.drawer.objective.autonomy'
+  | 'projectAgent.drawer.objective.budget'
+  | 'projectAgent.drawer.objective.probes'
+  | 'projectAgent.drawer.objective.autoAccept'
+  | 'projectAgent.drawer.objective.autoUsage'
+  | 'projectAgent.drawer.objective.usage'
+  | 'projectAgent.drawer.objective.watch.unavailable'
+  | 'projectAgent.drawer.objective.watch.auth'
+  | 'projectAgent.drawer.objective.watch.cli'
+  | 'projectAgent.drawer.objective.watch.daily'
+  | 'projectAgent.drawer.objective.watch.hourly'
+  | 'projectAgent.drawer.objective.watch.scope'
+  | 'projectAgent.drawer.objective.watch.range'
+  | 'projectAgent.drawer.objective.watch.model'
+  | 'projectAgent.drawer.objective.watch.cancelled'
+  | 'projectAgent.drawer.objective.last'
+  | 'projectAgent.drawer.objective.next'
+  | 'projectAgent.drawer.objective.unchecked'
+  | 'projectAgent.drawer.objective.event'
+  | 'projectAgent.drawer.objective.edit'
+  | 'projectAgent.drawer.objective.save'
+  | 'projectAgent.drawer.objective.cancel'
+  | 'projectAgent.drawer.objective.pause'
+  | 'projectAgent.drawer.objective.resume'
+  | 'projectAgent.drawer.objective.reopen'
+  | 'projectAgent.drawer.objective.abandon'
+  | 'projectAgent.drawer.objective.failed'
+  | 'projectAgent.drawer.objective.loading'
+  | 'projectAgent.drawer.objective.title'
+  | 'projectAgent.drawer.objective.outcome'
+  | 'projectAgent.drawer.objective.tasks'
+  | 'projectAgent.drawer.objective.noTasks'
+  | 'projectAgent.drawer.objectives.body'
+  | 'projectAgent.drawer.objectives.hint'
+  | 'projectAgent.drawer.memory.empty'
+  | 'projectAgent.drawer.memory.emptyHint'
+  | 'projectAgent.drawer.memory.filterEmpty'
+  | 'projectAgent.drawer.memory.controls'
+  | 'projectAgent.drawer.memory.saved'
+  | 'projectAgent.drawer.memory.page'
+  | 'projectAgent.drawer.memory.previous'
+  | 'projectAgent.drawer.memory.next'
+  | 'projectAgent.drawer.memory.scope.project'
+  | 'projectAgent.drawer.memory.scope.global'
+  | 'projectAgent.drawer.memory.readonly'
+  | 'projectAgent.drawer.memory.filter.kind'
+  | 'projectAgent.drawer.memory.filter.trust'
+  | 'projectAgent.drawer.memory.filter.status'
+  | 'projectAgent.drawer.memory.filter.all'
+  | 'projectAgent.drawer.memory.kind.fact'
+  | 'projectAgent.drawer.memory.kind.preference'
+  | 'projectAgent.drawer.memory.kind.decision'
+  | 'projectAgent.drawer.memory.kind.procedure'
+  | 'projectAgent.drawer.memory.kind.responsibility'
+  | 'projectAgent.drawer.memory.trust.stated'
+  | 'projectAgent.drawer.memory.trust.verified'
+  | 'projectAgent.drawer.memory.status.active'
+  | 'projectAgent.drawer.memory.status.forgotten'
+  | 'projectAgent.drawer.memory.status.expired'
+  | 'projectAgent.drawer.memory.sources'
+  | 'projectAgent.drawer.memory.status.conflicted'
+  | 'projectAgent.drawer.memory.needsReverify'
+  | 'projectAgent.drawer.memory.keepThis'
+  | 'projectAgent.drawer.memory.pin'
+  | 'projectAgent.drawer.memory.unpin'
+  | 'projectAgent.drawer.memory.revoke'
+  | 'projectAgent.drawer.memory.restore'
+  | 'projectAgent.drawer.memory.edit'
+  | 'projectAgent.drawer.memory.save'
+  | 'projectAgent.drawer.memory.exportJson'
+  | 'projectAgent.drawer.memory.exportMarkdown'
+  | 'projectAgent.drawer.memory.projectSwitch'
+  | 'projectAgent.drawer.memory.useMemory'
+  | 'projectAgent.drawer.memory.learnPreferences'
+  | 'projectAgent.drawer.memory.learnLater'
+  | 'projectAgent.drawer.settings.name'
+  | 'projectAgent.drawer.settings.appearance'
+  | 'projectAgent.drawer.settings.workflow'
+  | 'projectAgent.drawer.settings.runtime'
+  | 'projectAgent.drawer.settings.globalScope'
+  | 'projectAgent.drawer.settings.advancedModels'
+  | 'projectAgent.drawer.settings.save'
+  | 'projectAgent.drawer.settings.avatar'
+  | 'projectAgent.drawer.settings.avatarNew'
+  | 'projectAgent.drawer.settings.avatarColor'
+  | 'projectAgent.drawer.settings.avatarColorImageHint'
+  | 'projectAgent.drawer.settings.avatarColor.0'
+  | 'projectAgent.drawer.settings.avatarColor.1'
+  | 'projectAgent.drawer.settings.avatarColor.2'
+  | 'projectAgent.drawer.settings.avatarColor.3'
+  | 'projectAgent.drawer.settings.avatarColor.4'
+  | 'projectAgent.drawer.settings.avatarColor.5'
+  | 'projectAgent.drawer.settings.avatarColor.6'
+  | 'projectAgent.drawer.settings.avatarColor.7'
+  | 'projectAgent.drawer.settings.delete'
+  | 'projectAgent.drawer.settings.deleteManaged'
+  | 'projectAgent.drawer.settings.deleteConfirm'
+  | 'projectAgent.drawer.settings.concurrency'
+  | 'projectAgent.drawer.settings.concurrencyHint'
+  | 'projectAgent.drawer.queuedBehind'
+  | 'projectAgent.drawer.dependencyFailed'
+  | 'projectAgent.drawer.dependencyMissing'
+  | 'projectAgent.drawer.diskSpace'
+  | 'projectAgent.drawer.isolationFailed'
+  | 'projectAgent.drawer.settings.autoHandoff'
+  | 'projectAgent.drawer.settings.autoHandoffHint'
+  | 'projectAgent.drawer.settings.proactivity'
+  | 'projectAgent.drawer.settings.proactivity.inherit'
+  | 'projectAgent.drawer.settings.proactivity.quiet'
+  | 'projectAgent.drawer.settings.proactivity.low'
+  | 'projectAgent.drawer.settings.proactivity.standard'
+  | 'projectAgent.drawer.settings.proactivity.high'
+  | 'projectAgent.drawer.settings.proactivity.muted'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -78,6 +797,9 @@ export type TranslationKey =
   | 'appearance.foreground'
   | 'appearance.uiFont'
   | 'appearance.codeFont'
+  | 'appearance.windowMaterial'
+  | 'appearance.windowMaterial.glass'
+  | 'appearance.windowMaterial.solid'
   | 'appearance.diffMarker'
   | 'appearance.diffMarker.color'
   | 'appearance.diffMarker.sign'
@@ -96,6 +818,10 @@ export type TranslationKey =
   | 'settings.search'
   | 'settings.searchEmpty'
   | 'settings.general'
+  | 'settings.shell.title'
+  | 'settings.shell.description'
+  | 'settings.shell.bots'
+  | 'settings.shell.classic'
   | 'settings.archived'
   | 'settings.archived.description'
   | 'settings.archived.loading'
@@ -113,11 +839,31 @@ export type TranslationKey =
   | 'settings.backToChat'
   | 'settings.appearance.description'
   | 'settings.language.description'
+  | 'settings.general.description'
+  | 'settings.general.loadFailed'
+  | 'settings.general.interfaceAndLanguage'
+  | 'settings.general.interfaceAndLanguage.description'
   | 'settings.replyLanguage'
+  | 'settings.bots.title'
+  | 'settings.bots.description'
+  | 'settings.bots.proactivity'
+  | 'settings.bots.proactivity.description'
+  | 'settings.bots.proactivity.quiet'
+  | 'settings.bots.proactivity.low'
+  | 'settings.bots.proactivity.standard'
+  | 'settings.bots.proactivity.high'
+  | 'settings.bots.quietHours'
+  | 'settings.bots.quietHours.description'
+  | 'settings.bots.quietFrom'
+  | 'settings.bots.quietUntil'
+  | 'settings.bots.digestTime'
+  | 'settings.bots.digestTime.description'
   | 'settings.replyLanguage.description'
   | 'settings.replyLanguage.followInterface'
   | 'settings.replyLanguage.auto'
+  | 'settings.replyLanguage.autoShort'
   | 'settings.git'
+  | 'settings.git.branchNaming'
   | 'settings.git.branchPrefix'
   | 'settings.git.branchPrefix.description'
   | 'settings.fallbackVision'
@@ -148,6 +894,71 @@ export type TranslationKey =
   | 'settings.usage.unpricedNote'
   | 'settings.usage.byProvider'
   | 'settings.usage.byModel'
+  | 'settings.usage.byRole'
+  | 'settings.usage.showByRole'
+  | 'settings.usage.col.role'
+  | 'modelRouting.nav'
+  | 'modelRouting.title'
+  | 'modelRouting.description'
+  | 'modelRouting.singleModel'
+  | 'modelRouting.noModel'
+  | 'modelRouting.tiers'
+  | 'modelRouting.roles'
+  | 'modelRouting.primary'
+  | 'modelRouting.modeLabel'
+  | 'modelRouting.targetLabel'
+  | 'modelRouting.chooseModel'
+  | 'modelRouting.modelUnavailable'
+  | 'modelRouting.followingTier'
+  | 'modelRouting.checkTier'
+  | 'modelRouting.checkFixed'
+  | 'modelRouting.parameters'
+  | 'modelRouting.channel'
+  | 'modelRouting.channelFast'
+  | 'modelRouting.channelNormal'
+  | 'modelRouting.channelUnavailable'
+  | 'modelRouting.inheritedValue'
+  | 'modelRouting.chooseCandidates'
+  | 'modelRouting.noSharedEffort'
+  | 'modelRouting.fastUnsupported'
+  | 'modelRouting.fallbacks'
+  | 'modelRouting.addFallback'
+  | 'modelRouting.moveUp'
+  | 'modelRouting.moveDown'
+  | 'modelRouting.remove'
+  | 'modelRouting.mode.tier'
+  | 'modelRouting.mode.fixed'
+  | 'modelRouting.mode.auto'
+  | 'modelRouting.pool'
+  | 'modelRouting.poolInvalid'
+  | 'modelRouting.resolved'
+  | 'modelRouting.reasoning'
+  | 'modelRouting.reasoningDefault'
+  | 'modelRouting.reasoningInvalid'
+  | 'modelRouting.reasoningNoCommon'
+  | 'modelRouting.unresolved'
+  | 'modelRouting.preferDifferentFamily'
+  | 'modelRouting.spendCap'
+  | 'modelRouting.spendExceeded'
+  | 'modelRouting.essentialSpend'
+  | 'modelRouting.tier.strong'
+  | 'modelRouting.tier.fast'
+  | 'modelRouting.tier.economy'
+  | 'modelRouting.tier.vision'
+  | 'modelRouting.role.project_agent'
+  | 'modelRouting.role.session_worker'
+  | 'modelRouting.role.explorer'
+  | 'modelRouting.role.verifier'
+  | 'modelRouting.role.visual_verifier'
+  | 'modelRouting.role.memory_curator'
+  | 'modelRouting.role.objective_probe'
+  | 'modelRouting.role.compactor'
+  | 'modelRouting.reason.vision'
+  | 'modelRouting.reason.tools'
+  | 'modelRouting.reason.structured'
+  | 'modelRouting.reason.context'
+  | 'modelRouting.loadFailed'
+  | 'modelRouting.saveFailed'
   | 'settings.usage.emptyGroup'
   | 'settings.usage.col.provider'
   | 'settings.usage.col.model'
@@ -589,6 +1400,9 @@ export type TranslationKey =
   | 'updater.settings.channel.auto'
   | 'updater.settings.channel.beta'
   | 'updater.settings.channel.stable'
+  | 'updater.badge.channel.auto'
+  | 'updater.badge.channel.beta'
+  | 'updater.badge.channel.stable'
   | 'updater.settings.currentVersion'
   | 'updater.settings.checkNow'
   | 'updater.settings.checking'
@@ -620,6 +1434,45 @@ type TranslationValues = Record<string, string | number>;
 
 const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
   'zh-CN': {
+    "projectAgent.chat.taskFallback": "这个任务",
+    "projectAgent.chat.inputTooLong": "消息最多支持 100000 个 UTF-16 单元，请缩短后发送。",
+    "projectAgent.quick.title": "快速会话",
+    "projectAgent.quick.content": "快速会话内容",
+    "projectAgent.quick.placeholder": "向 Peer Agent 发起任务…",
+    "projectAgent.quick.chooseBot": "选择机器人",
+    "projectAgent.quick.effort": "思考强度",
+    "projectAgent.quick.loadFailed": "暂时无法读取机器人配置，请重新打开。",
+    "projectAgent.quick.noBots": "还没有机器人",
+    "projectAgent.quick.textOnly": "机器人快捷对话先只发送文字",
+    "projectAgent.quick.empty": "先写一句话",
+    "projectAgent.quick.workspace": "选择工作区",
+    "projectAgent.quick.attach": "添加附件",
+    "projectAgent.quick.attachmentLimit": "最多只能添加 {count} 个附件",
+    "projectAgent.quick.imageLimit": "图片 {name} 超过 8 MB",
+    "projectAgent.quick.fileLimit": "文件 {name} 超过 512 KB",
+    "projectAgent.quick.sending": "正在发送",
+    "projectAgent.quick.failed": "发送失败",
+    "projectAgent.background.title": "后台运行",
+    "projectAgent.background.device": "本机",
+    "projectAgent.background.close": "关闭",
+    "projectAgent.background.readFailed": "暂时无法读取后台运行",
+    "projectAgent.background.previous": " · 显示上次结果",
+    "projectAgent.background.retry": "重试",
+    "projectAgent.background.loading": "正在读取…",
+    "projectAgent.background.unavailable": "此运行记录已不可用",
+    "projectAgent.background.empty": "暂无后台运行",
+    "projectAgent.background.history": "最近结束",
+    "projectAgent.background.more": "显示更多",
+    "projectAgent.background.refresh": "刷新状态",
+    "projectAgent.settings.quietStart": "免打扰开始时间",
+    "projectAgent.settings.quietEnd": "免打扰结束时间",
+    "projectAgent.settings.hour": "{label}：小时",
+    "projectAgent.settings.minute": "{label}：分钟",
+
+    ...remoteAccessZh,
+    ...resourcesZh,
+    ...formsZh,
+    ...recoveryZh,
     'app.newTask': '新任务',
     'searchChats.open': '搜索任务',
     'searchChats.placeholder': '搜索任务',
@@ -671,6 +1524,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': '文字',
     'appearance.uiFont': '界面字体',
     'appearance.codeFont': '代码字体',
+    'appearance.windowMaterial': '窗口材质',
+    'appearance.windowMaterial.glass': '毛玻璃',
+    'appearance.windowMaterial.solid': '实色',
     'appearance.diffMarker': '差异标记',
     'appearance.diffMarker.color': '颜色',
     'appearance.diffMarker.sign': '+/- 符号',
@@ -689,6 +1545,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.search': '搜索设置…',
     'settings.searchEmpty': '无匹配的设置项',
     'settings.general': '通用',
+    'settings.shell.title': '界面',
+    'settings.shell.description': '切换后立刻生效，不改动已有会话。',
+    'settings.shell.bots': '机器人列表',
+    'settings.shell.classic': '经典界面',
     'settings.archived': '已归档会话',
     'settings.archived.description': '查看和管理当前工作区中已归档的会话。',
     'settings.archived.loading': '正在加载已归档会话…',
@@ -705,18 +1565,38 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.archived.working': '处理中…',
     'settings.backToChat': '返回对话',
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
-    'settings.language.description': '选择界面显示语言。',
+    'settings.language.description': '菜单、按钮和设置使用的语言。',
+    'settings.general.description': '让 Peer 按照你的习惯工作。',
+    'settings.general.loadFailed': '无法读取当前设置，请重新打开设置页面。',
+    'settings.general.interfaceAndLanguage': '界面与语言',
+    'settings.general.interfaceAndLanguage.description': '选择熟悉的入口和表达方式。',
     'settings.replyLanguage': '回复语言',
-    'settings.replyLanguage.description': '选择 AI 回复时使用的语言，避免回复语言混乱。',
+    'settings.bots.title': '通知与节奏',
+    'settings.bots.description': '需要你时提醒，其他时候安静推进。',
+    'settings.bots.proactivity': '主动性',
+    'settings.bots.proactivity.description': '设置机器人主动汇报与跟进的频率。',
+    'settings.bots.proactivity.quiet': '安静',
+    'settings.bots.proactivity.low': '少',
+    'settings.bots.proactivity.standard': '标准',
+    'settings.bots.proactivity.high': '多',
+    'settings.bots.quietHours': '安静时段',
+    'settings.bots.quietHours.description': '普通通知收为未读，需要你处理的事项仍会提醒。',
+    'settings.bots.quietFrom': '开始',
+    'settings.bots.quietUntil': '结束',
+    'settings.bots.digestTime': '今日小结',
+    'settings.bots.digestTime.description': '到这个时间，把暂存的消息收成一条。',
+    'settings.replyLanguage.description': '机器人与你交流时使用的语言。',
     'settings.replyLanguage.followInterface': '跟随界面语言',
     'settings.replyLanguage.auto': '自动（跟随提问语言）',
+    'settings.replyLanguage.autoShort': '跟随提问语言',
     'settings.git': 'Git',
+    'settings.git.branchNaming': '分支命名',
     'settings.git.branchPrefix': '分支前缀',
     'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
-    'settings.fallbackVision': '兜底多模态模型',
-    'settings.fallbackVision.description': '当主模型不支持图像时，先用此模型识别本轮新图，再把文字结果静默交给主模型。未配置则剥离图片并给出弱提示。',
-    'settings.fallbackVision.none': '不使用（仅剥离图片）',
-    'settings.fallbackVision.strippedHint': '当前模型不支持图像，已剥离本轮图片。可在设置 → 模型中配置兜底多模态模型。',
+    'settings.fallbackVision': '图像识别设置',
+    'settings.fallbackVision.description': '主模型无法识别图片时使用。',
+    'settings.fallbackVision.none': '不使用备用模型',
+    'settings.fallbackVision.strippedHint': '当前模型不支持图片，本次仅发送文字。可在服务商设置中选择图像识别备用模型。',
     'settings.config': '配置管理',
     'settings.config.description': '导出技能、授权规则与界面设置，便于在其它设备恢复；登录态与设备身份不会被导出。',
     'settings.config.export': '导出配置',
@@ -741,6 +1621,71 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.unpricedNote': '有 {count} 个会话缺少有效单价，其成本未计入总计。',
     'settings.usage.byProvider': '按 Provider',
     'settings.usage.byModel': '按模型',
+    'settings.usage.byRole': '按角色',
+    'settings.usage.showByRole': '按角色查看',
+    'settings.usage.col.role': '角色',
+    'modelRouting.nav': '模型分工',
+    'modelRouting.title': '模型分工',
+    'modelRouting.description': '为不同工作选择档位或具体模型。普通对话仍使用会话里选中的模型。',
+    'modelRouting.singleModel': '只有一个模型时，各角色使用同一模型，仍可分别设置思考强度。',
+    'modelRouting.noModel': '没有可用的模型',
+    'modelRouting.tiers': '档位',
+    'modelRouting.roles': '角色',
+    'modelRouting.primary': '主模型',
+    'modelRouting.modeLabel': '选择方式',
+    'modelRouting.targetLabel': '档位 / 模型',
+    'modelRouting.chooseModel': '请选择模型',
+    'modelRouting.modelUnavailable': '原模型已不可用，请重新选择',
+    'modelRouting.followingTier': '跟随“{tier}”档位',
+    'modelRouting.checkTier': '该档位暂无符合要求的模型，请检查上方档位配置',
+    'modelRouting.checkFixed': '所选模型不可用或不满足角色要求，请重新选择',
+    'modelRouting.parameters': '思考强度 / 通道',
+    'modelRouting.channel': '请求通道',
+    'modelRouting.channelFast': '快速',
+    'modelRouting.channelNormal': '正常',
+    'modelRouting.channelUnavailable': '不可用',
+    'modelRouting.inheritedValue': '跟随档位 · {value}',
+    'modelRouting.chooseCandidates': '请先选择可用模型。',
+    'modelRouting.noSharedEffort': '所选模型未声明思考强度，或候选之间没有共同支持的强度。',
+    'modelRouting.fastUnsupported': '快速仅适用于支持的 ChatGPT / Grok 订阅连接；所选候选中有不支持的连接。',
+    'modelRouting.fallbacks': '备选',
+    'modelRouting.addFallback': '添加备选',
+    'modelRouting.moveUp': '上移',
+    'modelRouting.moveDown': '下移',
+    'modelRouting.remove': '移除',
+    'modelRouting.mode.tier': '跟随档位',
+    'modelRouting.mode.fixed': '固定模型',
+    'modelRouting.mode.auto': '自动',
+    'modelRouting.pool': '模型池',
+    'modelRouting.poolInvalid': '自动池里需要至少一个满足该角色能力的模型',
+    'modelRouting.resolved': '当前解析',
+    'modelRouting.reasoning': '思考强度',
+    'modelRouting.reasoningDefault': '跟随模型默认',
+    'modelRouting.reasoningInvalid': '当前候选不支持',
+    'modelRouting.reasoningNoCommon': '候选模型没有共同支持的强度，可固定模型后设置。',
+    'modelRouting.unresolved': '没有可用的模型',
+    'modelRouting.preferDifferentFamily': '复核优先不同源',
+    'modelRouting.spendCap': '日花费上限（美元）',
+    'modelRouting.spendExceeded': '该角色已达到今日花费上限',
+    'modelRouting.essentialSpend': '已超过今日上限。这是必达工作，仍会继续，并在需要你时提示',
+    'modelRouting.tier.strong': '强',
+    'modelRouting.tier.fast': '快',
+    'modelRouting.tier.economy': '省',
+    'modelRouting.tier.vision': '视觉',
+    'modelRouting.role.project_agent': '项目代理',
+    'modelRouting.role.session_worker': '任务执行',
+    'modelRouting.role.explorer': '探索',
+    'modelRouting.role.verifier': '复核',
+    'modelRouting.role.visual_verifier': '视觉复核',
+    'modelRouting.role.memory_curator': '记忆整理',
+    'modelRouting.role.objective_probe': '目标探查',
+    'modelRouting.role.compactor': '压缩',
+    'modelRouting.reason.vision': '不能看图',
+    'modelRouting.reason.tools': '不能使用工具',
+    'modelRouting.reason.structured': '不能输出结构化结果',
+    'modelRouting.reason.context': '上下文太短',
+    'modelRouting.loadFailed': '模型分工加载失败',
+    'modelRouting.saveFailed': '模型分工保存失败',
     'settings.usage.emptyGroup': '暂无分组数据',
     'settings.usage.col.provider': 'Provider',
     'settings.usage.col.model': '模型',
@@ -804,6 +1749,683 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.saveFailed': '开发者配置保存失败',
     'developer.probeFailed': '云端合约探测失败',
     'developer.ipcUnavailable': '开发者模式主进程通道未注册。请完全退出并重启客户端，确保 Electron main 已更新后再重试。',
+    'projectAgent.host.title': "执行宿主",
+    'projectAgent.host.notOwnerAction': '当前桌面未持有这个机器人的执行权。请在机器人设置的「运行与全局设置」中接管，再继续尝试。',
+    'projectAgent.host.hint': "桌面和终端共享同一机器人。接管会先停止旧宿主，再由桌面继续任务。",
+    'projectAgent.host.action': "在桌面接管",
+    'projectAgent.host.requested': "已请求接管，旧宿主停止后会继续任务。",
+    'projectAgent.host.ready': "桌面已可承载这个机器人。",
+    'projectAgent.host.failed': "接管失败，请检查机器人和宿主状态。",
+    'developer.projectAgent.nav': '开发者',
+    'developer.projectAgent.title': '开发者',
+    'developer.projectAgent.description': '界面在设置 → 通用里切换。这里不再读取旧的项目代理开关，原来的值会留着。',
+    'developer.projectAgent.switch': '界面在设置 → 通用里切换。项目代理会继续推进已有任务。',
+    'developer.projectAgent.diagnostics': '项目代理诊断',
+    'developer.projectAgent.inactive': '未启用',
+    'developer.diagnostics.description': '只读运行快照。标识与正文只保留长度和哈希，项目路径匿名化；每个机器人保留最近 200 条事件和 20 次回合，旧回合时长显示未知。',
+    'developer.diagnostics.refresh': '刷新诊断',
+    'developer.diagnostics.export': '导出 JSON',
+    'developer.diagnostics.busy': '正在读取诊断…',
+    'developer.diagnostics.saved': '诊断已导出',
+    'developer.diagnostics.cancelled': '已取消导出',
+    'developer.diagnostics.failed': '诊断读取或导出失败，请重试。',
+    'developer.diagnostics.unknown': '未知',
+    'developer.diagnostics.generated': '快照时间',
+    'developer.diagnostics.bots': '机器人',
+    'developer.diagnostics.slots': '使用中的回合槽位',
+    'developer.diagnostics.waiting': '等待回合',
+    'developer.diagnostics.errors': '不可用的来源',
+    'developer.diagnostics.preview': '查看脱敏 JSON',
+    'projectAgent.list.brand': 'Peer',
+    'projectAgent.list.newBot': '新建机器人',
+    'projectAgent.list.searchPlaceholder': '搜索机器人、消息、任务',
+    'projectAgent.attention.title': '需要你处理',
+    'projectAgent.attention.subtitle': '只显示当前需要你回答、授权或确认的事项。',
+    'projectAgent.attention.close': '关闭待处理事项',
+    'projectAgent.attention.failed': '暂时无法读取待处理事项，请重试。',
+    'projectAgent.attention.retry': '重新读取',
+    'projectAgent.attention.empty': '暂时没有需要你处理的事项',
+    'projectAgent.attention.emptyHint': '机器人会继续跟进执行中的工作。',
+    'projectAgent.attention.question': '等待你的回答',
+    'projectAgent.attention.approval': '等待你的授权',
+    'projectAgent.attention.confirmation': '等待你的确认',
+    'projectAgent.attention.openSource': '查看原文并处理',
+    'projectAgent.attention.closed': '这个问题已被回答或后续流程取代，已刷新待处理事项。',
+    'projectAgent.list.needsYou': '需要你 {count}',
+    'projectAgent.list.empty': '还没有机器人',
+    'projectAgent.list.emptyHint': '用左上角 + 给机器人起名，或绑定一个已有文件夹。',
+    'projectAgent.list.emptyNeedsYou': '现在没有需要你处理的事。',
+    'projectAgent.list.emptySearch': '没有匹配的机器人。',
+    'projectAgent.list.me': '我',
+    'projectAgent.list.settings': '设置',
+    'projectAgent.list.automations': '自动化',
+    'projectAgent.list.capabilities': '能力',
+    'projectAgent.list.capabilitiesHint': '插件、技能与 MCP',
+    'projectAgent.list.history': '历史对话',
+    'projectAgent.history.hint': '找回之前的讨论，继续推进。',
+    'projectAgent.history.search': '搜索对话标题',
+    'projectAgent.history.clear': '清除搜索',
+    'projectAgent.history.loading': '正在读取历史对话…',
+    'projectAgent.history.unavailable': '暂时无法读取历史对话。',
+    'projectAgent.history.retry': '重试',
+    'projectAgent.history.noMatch': '没有匹配的对话标题。',
+    'projectAgent.history.untitled': '未命名对话',
+    'projectAgent.history.group.today': '今天',
+    'projectAgent.history.group.yesterday': '昨天',
+    'projectAgent.history.group.week': '最近 7 天',
+    'projectAgent.history.group.earlier': '更早',
+    'projectAgent.history.group.other': '其他日期',
+    'projectAgent.history.more': '显示更多对话',
+    'projectAgent.history.count': '显示 {shown} / {count} 条对话',
+    'projectAgent.history.back': '返回历史列表',
+    'projectAgent.history.loadingPreview': '正在读取对话…',
+    'projectAgent.history.previewUnavailable': '暂时无法读取这段对话。',
+    'projectAgent.history.noPreview': '没有可预览的对话消息。',
+    'projectAgent.history.user': '你',
+    'projectAgent.history.assistant': '机器人',
+    'projectAgent.history.attachmentOnly': '附件消息',
+    'projectAgent.history.continueFailed': '暂时无法继续这段对话，请重试。',
+    'projectAgent.history.submitting': '正在提交…',
+    'projectAgent.shell.classicNotice': '切换到机器人界面查看',
+    'projectAgent.shell.banner': '这是新的机器人列表；原来的会话在各机器人的档案 → 任务 → 历史对话；可以在 设置 → 通用 切回经典界面',
+    'projectAgent.shell.bannerTitle': '新的机器人列表',
+    'projectAgent.shell.bannerWhere': '旧会话在各机器人的档案里',
+    'projectAgent.shell.bannerPath': '任务 → 历史对话',
+    'projectAgent.shell.bannerSwitch': '设置 → 通用 可切回经典界面',
+    'projectAgent.shell.bannerDismiss': '知道了',
+    'projectAgent.onboarding.connectTitle': '先接入模型',
+    'projectAgent.onboarding.connectBody': '接入之后才能新建机器人。',
+    'projectAgent.onboarding.connectAction': '接入模型',
+    'projectAgent.onboarding.createTitle': '新建机器人',
+    'projectAgent.onboarding.createBody': '先给机器人起名，或绑定一个已有文件夹。',
+    'projectAgent.onboarding.createAction': '新建机器人',
+    'projectAgent.search.placeholder': '搜索机器人、消息、任务、记忆',
+    'projectAgent.search.empty': '没有匹配',
+    'projectAgent.search.section.bots': '机器人',
+    'projectAgent.search.section.messages': '消息',
+    'projectAgent.search.section.tasks': '任务',
+    'projectAgent.search.section.memory': '记忆',
+    'projectAgent.list.loading': '正在读取机器人',
+    'projectAgent.list.unavailable': '项目代理没有打开',
+    'projectAgent.list.loadFailed': '机器人列表没有读出来',
+    'projectAgent.list.noPreview': '还没有消息',
+    'projectAgent.list.mainEmptyTitle': '从一个项目开始',
+    'projectAgent.list.mainEmptyBody': '选择机器人，继续对话或交代新的任务。',
+    'projectAgent.list.recentBots': '最近的机器人',
+    'projectAgent.list.openBot': '打开对话',
+    'projectAgent.list.mainPlaceholder': '和这个机器人的对话会显示在这里。',
+    'projectAgent.list.profile': '机器人设置',
+    'projectAgent.list.unread': '未读',
+    'projectAgent.list.running': '进行中',
+    'projectAgent.list.needsYouBadge': '需要你 {count}',
+    'projectAgent.list.newSheetTitle': '新建机器人',
+    'projectAgent.list.bindFolder': '选择文件夹',
+    'projectAgent.list.bindFolderHint': '绑定已有项目。机器人会先只读熟悉这个文件夹。',
+    'projectAgent.list.blankBot': '机器人名称',
+    'projectAgent.list.blankBotHint': '用这个名称，在本机受管目录里建一个空项目。',
+    'projectAgent.list.namePlaceholder': '机器人名称',
+    'projectAgent.list.nameInvalid': '这个名字不能用',
+    'projectAgent.list.nameWillUse': '将使用「{name}」',
+    'projectAgent.list.create': '建立',
+    'projectAgent.list.creating': '正在建立',
+    'projectAgent.list.createFailed': '没有建成',
+    'projectAgent.list.nameExhausted': '这个名字已经用得太多了',
+    'projectAgent.list.columnResize': '调整列表宽度',
+    'projectAgent.list.backToBots': '返回机器人',
+    'projectAgent.list.close': '关闭',
+    'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
+    'projectAgent.chat.loadFailed': '对话没有加载出来',
+    'projectAgent.chat.cardsUnavailable': '任务状态暂不可用，已有对话仍可阅读。',
+    'projectAgent.chat.recoveryDiagnostics': '诊断详情',
+    'projectAgent.chat.recoveryBlocked': '机器人恢复受阻，暂未开始回复；已接收的消息会保留。',
+    'projectAgent.chat.recoveryReconcile': '历史记录已恢复读取，执行仍暂停，需先核对已有任务与写入结果。',
+    'projectAgent.chat.recoveryConflict': '历史任务记录冲突，已暂停执行；已接收的消息会保留。',
+    'projectAgent.chat.refreshFailed': '新消息暂未刷新，已保留当前对话。',
+    'projectAgent.chat.thinking': '正在思考中',
+    'projectAgent.chat.waiting': '等待回复…',
+    'projectAgent.chat.generating': '正在回复',
+    'projectAgent.chat.reply.reconnecting': '正在恢复这次回复',
+    'projectAgent.chat.reply.unconfirmed': '尚未确认这条消息的回复状态',
+    'projectAgent.chat.reply.interrupted': '这次回复已中断',
+    'projectAgent.chat.reply.synchronizing': '正在同步回复',
+    'projectAgent.chat.reply.received': '消息已收到，等待处理进展',
+    'projectAgent.chat.reply.waitingModel': '等待模型响应',
+    'projectAgent.chat.recoveryReasoning': '本地模型配置校验未通过，尚未发起本次请求。请查看回复详情，核对模型与思考强度。',
+    'projectAgent.chat.reply.refresh': '刷新状态',
+    'projectAgent.chat.reply.related': '这次回复的其他过程（{count}）',
+    'projectAgent.chat.reply.relatedTurn': '查看过程 {number}',
+    'projectAgent.chat.reply.deliveryIssue': '消息已保存，后续处理尚未完成',
+    'projectAgent.chat.activity.preparing': '正在准备下一步',
+    'projectAgent.chat.activity.thinking': '正在整理思路',
+    'projectAgent.chat.activity.responding': '正在整理回复',
+    'projectAgent.chat.activity.settling': '正在整理结果',
+    'projectAgent.chat.activity.advancing': '正在一点一点推进',
+    'projectAgent.chat.activity.prepareRead': '准备阅读 {name}',
+    'projectAgent.chat.activity.readFile': '正在阅读 {name}',
+    'projectAgent.chat.activity.reading': '正在阅读文件',
+    'projectAgent.chat.activity.image': '正在查看图片',
+    'projectAgent.chat.activity.command': '正在执行命令',
+    'projectAgent.chat.activity.search': '正在查找相关内容',
+    'projectAgent.chat.activity.edit': '正在调整内容',
+    'projectAgent.chat.activity.verification': '正在核对结果',
+    'projectAgent.chat.activity.delegating': '正在安排执行',
+    'projectAgent.chat.activity.work': '正在查看工作进展',
+    'projectAgent.chat.activity.memory': '正在查阅项目记忆',
+    'projectAgent.chat.activity.memoryUpdate': '正在更新项目记忆',
+    'projectAgent.chat.activity.directory': '正在查看文件目录',
+    'projectAgent.chat.toolLabel.read': '读取文件',
+    'projectAgent.chat.toolLabel.search': '项目搜索',
+    'projectAgent.chat.toolLabel.edit': '编辑文件',
+    'projectAgent.chat.toolLabel.command': '执行命令',
+    'projectAgent.chat.toolRunning': '正在进行{tool}',
+    'projectAgent.chat.toolDone': '{tool}已结束',
+    'projectAgent.chat.toolFailed': '{tool} 未完成',
+    'projectAgent.chat.stop': '停止生成',
+    'projectAgent.chat.stopHint': '停止当前回复生成，已派发的任务继续运行',
+    'projectAgent.chat.stopping': '正在停止',
+    'projectAgent.chat.stopped': '生成已停止，以上内容未完成',
+    'projectAgent.chat.stopFailed': '停止失败，请再试一次。',
+    'projectAgent.chat.latest': '回到最新消息',
+    'projectAgent.chat.restoringReading': '正在恢复原阅读位置…',
+    'projectAgent.chat.readingUnavailable': '原阅读位置尚未找到或暂不可用；可继续分批查找，或回到最新消息。',
+    'projectAgent.chat.restoreReading': '继续恢复阅读位置',
+    'projectAgent.chat.received': '已收到',
+    'projectAgent.chat.loadOlder': '查看更早消息',
+    'projectAgent.chat.loadingOlder': '正在加载更早消息',
+    'projectAgent.chat.olderFailed': '加载失败，重试',
+    'projectAgent.chat.sending': '发送中',
+    'projectAgent.chat.failed': '没有发出去',
+    'projectAgent.chat.retry': '重发',
+    'projectAgent.chat.continueRetry': '继续尝试',
+    'projectAgent.chat.recoveryScheduled': '连接暂时中断，我会接着刚才的进度继续。',
+    'projectAgent.chat.agent.open': '查看 Agent 工作详情',
+    'projectAgent.chat.agent.queued': '已排队',
+    'projectAgent.chat.agent.started': '开始工作',
+    'projectAgent.chat.agent.update': '发来进展',
+    'projectAgent.chat.agent.question': '发来问题',
+    'projectAgent.chat.agent.answer': '发来答复',
+    'projectAgent.chat.agent.reported': '结果已返回',
+    'projectAgent.chat.agent.verified': '核验通过',
+    'projectAgent.chat.agent.verifying': '正在核对结果',
+    'projectAgent.chat.agent.verificationProgress': '正在核对结果 · 已检查 {count} 项事实',
+    'projectAgent.chat.agent.ended': '已结束',
+    'projectAgent.chat.agent.cancelled': '已取消',
+    'projectAgent.chat.agent.blocked': '执行受阻',
+    'projectAgent.chat.recoveryContinuing': '已安排继续主 Bot 的回复。',
+    'projectAgent.chat.recoveryExhausted': '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。',
+    'projectAgent.chat.recoveryAuthentication': '连接的身份验证未通过。请重新登录或检查连接配置，再继续尝试。',
+    'projectAgent.chat.recoveryConfiguration': '连接配置需要检查。修正后可以继续尝试，已有进展已保留。',
+    'projectAgent.chat.recoveryInvalidRequest': '服务未接受这次请求。需要先检查模型或连接配置，已有进展已保留。',
+    'projectAgent.chat.recoveryPermission': '继续处理需要的授权已失效。请先确认授权，已有进展已保留。',
+    'projectAgent.chat.recoveryUnknownOutcome': '有操作的结果尚未确认，需要先核对，已有进展已保留。',
+    'projectAgent.chat.recoveryEnded': '主 Bot 回复已恢复，新的回复已送达。',
+    'projectAgent.chat.recoveryEarlierReply': '此前一次主 Bot 回复未完成，已保留在历史记录中。',
+    'projectAgent.chat.recoveryCancelled': '这项工作的主 Bot 回复已取消。',
+    'projectAgent.chat.recoveryPaused': '这项工作的主 Bot 回复已暂停。',
+    'projectAgent.chat.childWorkContinues': '另有 {count} 项子任务仍在推进，其执行状态单独显示。',
+    'projectAgent.chat.recoveryHistory': '先前的中断',
+    'projectAgent.chat.recoveryAttemptFailed': '本次继续未完成，具体原因见最新进展。',
+    'projectAgent.chat.recoveryEmptyResponse': '模型未返回可用内容，已有进展已保留。你可以继续尝试。',
+    'projectAgent.chat.recoveryModelChanged': '当前模型或连接配置已变化，无法直接续接这次回复。已有进展已保留。',
+    'projectAgent.chat.recoveryStale': '这条回复的状态已更新，请查看最新进展。',
+    'projectAgent.chat.recoveryMissingCheckpoint': '已有进展缺少完整的恢复记录，需要先核对，无法直接重复执行。',
+    'projectAgent.chat.unavailable': '主 Bot 本次回复未完成。',
+    'projectAgent.chat.noProgress': '连续检查没有取得新进展，已停止重复执行。已有结果已保留。',
+    'projectAgent.chat.budgetExhausted': '这项工作已达到配置的预算限制，已有进展已保留。调整限制后可继续。',
+    'projectAgent.chat.budgetReady': '预算限制已调整，可以接着已有进展继续。',
+    'projectAgent.chat.budgetReserved': '预算暂由另一项执行占用，已有进展已保留。',
+    'projectAgent.chat.budgetAvailable': '预算占用已释放，可以接着已有进展继续。',
+    'projectAgent.chat.recoveryLegacyLimit': '旧版本的执行限制曾中断这次回复，已有进展已保留。',
+    'projectAgent.chat.budgetSourceSettings': '来源：执行预算设置。',
+    'projectAgent.chat.budgetSourceStored': '来源：保留的预算配置。',
+    'projectAgent.chat.budgetUnconfirmed': '暂时无法确认能否在配置的预算内继续，已有进展已保留。',
+    'projectAgent.chat.budgetCostUnknown': '费用上限为 {limit} 美元，当前用量无法准确确认；不会把未知用量当作零。',
+    'projectAgent.chat.budgetTokensUnknown': 'Token 上限为 {limit}，当前用量无法准确确认；不会把未知用量当作零。',
+    'projectAgent.chat.budgetUsageUnknown': '当前用量无法准确确认，暂不能在预算内继续；不会把未知用量当作零。',
+    'projectAgent.chat.budgetRequests': '模型请求：已用 {used} 次，上限 {limit} 次。',
+    'projectAgent.chat.budgetTools': '工具调用：已用 {used} 次，上限 {limit} 次。',
+    'projectAgent.chat.budgetTokens': 'Token：已用 {used}，上限 {limit}。',
+    'projectAgent.chat.budgetCost': '估算费用：已用 {used} 美元，上限 {limit} 美元。',
+    'projectAgent.chat.context.error': '原始报错',
+    'projectAgent.chat.replied': '已回复',
+    'projectAgent.chat.disposition.answered': '已回答',
+    'projectAgent.chat.disposition.merged': '已并入',
+    'projectAgent.chat.disposition.stopped': '已停止',
+    'projectAgent.chat.disposition.superseded': '已取代',
+    'projectAgent.chat.disposition.parallel': '已并行',
+    'projectAgent.chat.disposition.queued': '已排队',
+    'projectAgent.chat.disposition.outOfScope': '这句话针对的是『{title}』，没有影响其他任务',
+    'projectAgent.chat.quote': '引用',
+    'projectAgent.chat.quoteRemove': '取消引用',
+    'projectAgent.chat.placeholder': '给 {name} 发消息',
+    'projectAgent.chat.attach': '添加文件或图片',
+    'projectAgent.chat.previewAttachment': '预览图片',
+    'projectAgent.chat.removeAttachment': '移除附件',
+    'projectAgent.chat.attachmentMetadataOnly': '仅文件信息 · 正文未读取',
+    'projectAgent.chat.readingAttachments': '正在读取附件…',
+    'projectAgent.chat.dropAttachments': '松开以添加文件或图片',
+    'projectAgent.chat.send': '发送',
+    'projectAgent.chat.hint': '回车发送，Shift+回车换行',
+    'projectAgent.chat.source': '来源',
+    'projectAgent.chat.evidence': '证据',
+    'projectAgent.chat.evidenceMore': '还有 {count} 条证据',
+    'projectAgent.chat.evidenceCollapse': '收起证据',
+    'projectAgent.chat.process': '过程',
+    'projectAgent.chat.chooseAnswer': '选择一个回答，也可以直接输入',
+    'projectAgent.chat.you': '你',
+    'projectAgent.process.reply': '发送回复',
+    'projectAgent.process.heading': '回复过程',
+    'projectAgent.process.steps': '{count} 个步骤',
+    'projectAgent.process.sessions': '查询工作会话',
+    'projectAgent.process.session': '查看工作会话',
+    'projectAgent.process.start': '创建工作任务',
+    'projectAgent.process.resume': '恢复工作任务',
+    'projectAgent.process.cancel': '取消工作任务',
+    'projectAgent.process.update': '调整工作安排',
+    'projectAgent.process.verification': '检查验证结果',
+    'projectAgent.process.memory': '处理项目记忆',
+    'projectAgent.process.objective': '处理项目目标',
+    'projectAgent.process.tool': '调用工具',
+    'projectAgent.process.runningTitle': '正在{tool}',
+    'projectAgent.process.preparingTitle': '正在准备{tool}',
+    'projectAgent.process.organizing': '正在整理回复',
+    'projectAgent.process.preparingReply': '正在准备回复',
+    'projectAgent.process.preparing': '准备中',
+    'projectAgent.process.running': '进行中',
+    'projectAgent.process.stopped': '已停止',
+    'projectAgent.process.awaitingContent': '模型尚未返回可展示的内容；执行步骤会出现在这里。',
+    'projectAgent.process.receiving': '正在接收调用参数 · {count} 字符',
+    'projectAgent.process.preparingNote': '正在生成调用参数，尚未执行。',
+    'projectAgent.process.runningNote': '调用正在进行，返回内容到达后会显示在这里。',
+    'projectAgent.process.parameters': '调用参数',
+    'projectAgent.process.output': '返回内容',
+    'projectAgent.process.truncated': '已截断',
+    'projectAgent.process.redacted': '已脱敏',
+    'projectAgent.process.previewLimit': '内容超出预览上限。',
+    'projectAgent.process.seconds': '{seconds} 秒',
+    'projectAgent.process.lessThanSecond': '少于 1 秒',
+    'projectAgent.process.minutes': '{minutes} 分 {seconds} 秒',
+    'projectAgent.process.done': '已结束',
+    'projectAgent.process.failed': '未完成',
+    'projectAgent.process.cancelled': '已取消',
+    'projectAgent.process.noOutput': '没有返回内容。',
+    'projectAgent.process.suppressed': '未发送',
+    'projectAgent.process.unknown': '状态未记录',
+    'projectAgent.process.sent': '已发送',
+    'projectAgent.process.count': '返回 {count} 条记录',
+    'projectAgent.process.technical': '技术详情',
+    'projectAgent.process.input': '调用参数（最多显示 12,000 字符）',
+    'projectAgent.process.result': '返回记录（最多显示 12,000 字符）',
+    'projectAgent.process.empty': '本轮没有可用的过程记录',
+    'projectAgent.chat.openProcess': '查看过程',
+    'projectAgent.chat.memoryUsed': '参考了 {count} 条记忆',
+    'projectAgent.chat.memoryLearned': '新记住 {count} 条',
+    'projectAgent.chat.digest': '今日小结',
+    'projectAgent.chat.today': '今天 {time}',
+    'projectAgent.chat.earlierDay': '{date} {time}',
+    'projectAgent.chat.replyTo': '回复',
+    'projectAgent.chat.sessionState.stopping': '正在停止',
+    'projectAgent.chat.sessionState.awaiting_outcome': '执行结果待核实',
+    'projectAgent.task.coordination.heading': '调整记录',
+    'projectAgent.task.coordination.replacement': '后续任务：{title}',
+    'projectAgent.task.coordination.prior': '查看之前的任务',
+    'projectAgent.task.coordination.applied': '调整已应用，任务进度以当前状态为准。',
+    'projectAgent.task.coordination.executionQueued': '已安排继续，正在等待实际执行回执。',
+    'projectAgent.task.coordination.executionObserved': '已收到继续执行的回执，结果以任务进度和核验为准。',
+    'projectAgent.task.coordination.pending': '正在调整执行安排，已有工作会保留。',
+    'projectAgent.task.coordination.unknown': '停止后有操作尚未确认结果，核实前不会重复执行。',
+    'projectAgent.task.coordination.blocked': '本次调整未能应用，原有记录已保留。',
+    'projectAgent.task.coordination.handoff': '正在接手',
+    'projectAgent.chat.sessionState.paused': '已暂停',
+    'projectAgent.chat.sessionState.queued': '排队中',
+    'projectAgent.chat.sessionState.starting': '正在启动',
+    'projectAgent.chat.work.heading': '关联任务',
+    'projectAgent.chat.work.more': '另有 {count} 项任务',
+    'projectAgent.chat.work.related': '关联任务',
+    'projectAgent.chat.work.unavailable': '状态暂不可用',
+    'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
+    'projectAgent.chat.work.waiting': '等待跟进',
+    'projectAgent.chat.work.resultSettling': '正在核对结果',
+    'projectAgent.chat.work.resultReady': '结果待确认',
+    'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
+    'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
+    'projectAgent.chat.work.open': '查看任务详情',
+    'projectAgent.task.cancel': '取消任务',
+    'projectAgent.task.cancelling': '正在取消…',
+    'projectAgent.task.cancelFailed': '取消未完成，请重试。已有结果会保留。',
+    'projectAgent.chat.work.background': '当前任务（{count}）',
+    'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
+    'projectAgent.chat.originalMessage': '查看原消息',
+    'projectAgent.chat.context.details': '回复详情',
+    'projectAgent.chat.context.title': '回复详情',
+    'projectAgent.chat.context.back': '返回回复详情',
+    'projectAgent.chat.context.rounds': '完整调用记录',
+    'projectAgent.chat.context.unavailable': '这条回复的详情暂时无法读取。',
+    'projectAgent.chat.context.memoryUnavailable': '相关记忆暂不可用。',
+    'projectAgent.drawer.inspectBack': '返回 Bot 档案',
+    'projectAgent.drawer.evidenceUnavailable': '这条证据暂时无法读取。',
+    'projectAgent.evidence.title': '回复依据',
+    'projectAgent.evidence.record': '操作记录',
+    'projectAgent.evidence.listHelp': '查看这条回复参考的操作记录。',
+    'projectAgent.evidence.historical': '这是当时保存的操作内容。',
+    'projectAgent.evidence.bodyMissing': '保留了来源，未保存详细内容',
+    'projectAgent.evidence.notFound': '这条来源记录未找到',
+    'projectAgent.evidence.readFailed': '暂时无法加载这条记录',
+    'projectAgent.evidence.cannotVerify': '这条记录无法用于核对结论。可返回回复详情，查看其他依据。',
+    'projectAgent.evidence.tryLater': '可返回回复详情后再打开。持续无法读取时，这条记录不能用于核对结论。',
+    'projectAgent.evidence.emptyOutput': '这次操作没有文本输出。',
+    'projectAgent.drawer.botDescription': '负责这个项目的工作协调，持续跟进任务并交还结果。',
+    'projectAgent.drawer.acceptance.confirm': '由你确认',
+    'projectAgent.drawer.memory.details': '记忆详情',
+    'projectAgent.chat.sessionState.running': '正在运行中',
+    'projectAgent.chat.sessionState.waiting_user': '需要你处理',
+    'projectAgent.chat.sessionState.waiting_agent': '由主 Bot 跟进',
+    'projectAgent.chat.sessionState.verifying': '核验中',
+    'projectAgent.chat.sessionState.result_ready': '待你确认',
+    'projectAgent.chat.sessionState.accepted': '已签收',
+    'projectAgent.chat.sessionState.failed': '任务失败',
+    'projectAgent.chat.sessionState.cancelled': '已取消',
+    'projectAgent.chat.sessionState.superseded': '已取代',
+    'projectAgent.chat.verdict.passed': '结论：已验证',
+    'projectAgent.chat.verdict.failed': '结论：没通过',
+    'projectAgent.chat.verdict.partial': '结论：部分验证',
+    'projectAgent.chat.verdict.unverifiable': '结论：无法验证',
+    'projectAgent.chat.surfacingLabel': '通知方式：',
+    'projectAgent.chat.surfacing.interrupt': '即时提醒',
+    'projectAgent.chat.surfacing.message': '出现在对话里',
+    'projectAgent.chat.surfacing.digest': '收进小结',
+    'projectAgent.chat.surfacing.silent': '不打扰',
+    'projectAgent.chat.approve': '批准',
+    'projectAgent.chat.allowOnce': '仅这一次',
+    'projectAgent.chat.allowTask': '本任务重复此操作',
+    'projectAgent.chat.allowImage': '本轮允许此图片',
+    'projectAgent.chat.activity.permission': '等待你的授权',
+    'projectAgent.process.awaiting_permission': '等待授权',
+    'projectAgent.process.permissionTitle': '等待授权 · {tool}',
+    'projectAgent.process.permissionNote': '这一步需要你的授权，尚未读取图片。请在对话中的权限卡选择允许、拒绝或取消。',
+    'projectAgent.process.image': '查看图片',
+    'projectAgent.chat.cancelImageRead': '取消本次读取',
+    'projectAgent.chat.imageWaitLimit': '等待授权最多 5 分钟；允许后会继续这次读取。',
+    'projectAgent.chat.imageTimeout': '等待授权已超时，本次没有读取图片。需要查看时可以重新发起。',
+    'projectAgent.chat.imageCancelled': '本次图片读取已取消。',
+    'projectAgent.chat.imageDenied': '已拒绝本次图片读取。',
+    'projectAgent.chat.imageApproved': '已授权，继续本次图片读取。',
+    'projectAgent.chat.approvalReceipt.title': '操作授权记录',
+    'projectAgent.chat.approvalReceipt.approved': '已授权',
+    'projectAgent.chat.approvalReceipt.denied': '已拒绝',
+    'projectAgent.chat.approvalReceipt.cancelled': '已取消',
+    'projectAgent.chat.approvalReceipt.expired': '已失效',
+    'projectAgent.chat.approvalReceipt.closed': '已结束',
+    'projectAgent.chat.imageUnavailable': '本次授权请求已结束，没有读取图片。需要查看时可以重新发起。',
+    'projectAgent.chat.imageReadNotice': '读取这张图片并交给当前模型。选择“本轮允许”后，仅此图片可供当前机器人及其任务使用，30 分钟内有效。',
+    'projectAgent.chat.approveContinue': '批准并继续',
+    'projectAgent.chat.reject': '拒绝',
+    'projectAgent.chat.answer': '回答',
+    'projectAgent.policy.planApproval': '开工前批准计划',
+    'projectAgent.policy.planApproval.never': '直接开工',
+    'projectAgent.policy.planApproval.writes': '写入任务先批准',
+    'projectAgent.policy.planApproval.always': '所有任务先批准',
+    'projectAgent.policy.acceptance.auto': '符合条件时自动签收',
+    'projectAgent.policy.acceptance.confirm': '由我确认结果',
+    'projectAgent.policy.models': '机器人模型',
+    'projectAgent.model.defaults': '默认与档位',
+    'projectAgent.model.botOnly': '本机器人',
+    'projectAgent.model.nextReply': '修改用于后续回复或新任务',
+    'projectAgent.model.runningReply': '本轮正在使用的模型',
+    'projectAgent.model.unavailable': '选择模型',
+    'projectAgent.model.select': '选择机器人模型',
+    'projectAgent.model.noEffort': '无可调推理强度',
+    'projectAgent.access.changed': '主 Bot 的权限已变更，本次旧请求已关闭。后续操作按新权限处理。',
+    'projectAgent.access.label': 'Bot 及子任务权限',
+    'projectAgent.access.scope': '作用于此 Bot 及其所有子任务的后续操作；角色职责与显式拒绝规则仍生效。',
+    'projectAgent.access.loading': '读取权限…',
+    'projectAgent.access.failed': '权限未保存或无法读取，保留原权限。请重试。',
+    'projectAgent.access.retry': '重试权限',
+    'projectAgent.model.saveFailed': '模型设置未保存，请重试。',
+    'projectAgent.policy.modelsHint': '直接选择这个机器人的模型和推理强度。对话配置用于后续回复，任务配置用于新任务。',
+    'projectAgent.policy.inherit': '跟随全局',
+    'projectAgent.policy.autoPool': '已配置自动池',
+    'projectAgent.policy.moreRoles': '更多角色',
+    'projectAgent.policy.fewerRoles': '收起角色',
+    'projectAgent.policy.scope': '可用模型范围',
+    'projectAgent.policy.scope.all': '全部已配置模型',
+    'projectAgent.policy.scope.restricted': '仅所选模型',
+    'projectAgent.policy.localOnly': '只使用本地模型',
+    'projectAgent.chat.confirmResult': '确认结果',
+    'projectAgent.chat.confirmCompletion': '确认已达成',
+    'projectAgent.chat.reviewReport': '查看报告',
+    'projectAgent.chat.completionHint': '报告已生成，请核对以下内容。确认后继续检查；需要调整可以直接告诉我。',
+    'projectAgent.chat.retryCompletion': '重试检查',
+    'projectAgent.chat.completionRetryHint': '已保存你的核对结果，后续检查未能启动。可以重试检查。',
+    'projectAgent.chat.resultChanged': '任务状态已变化，暂时不能确认。已刷新，请查看最新进展。',
+    'projectAgent.chat.acceptReadme': '写 README',
+    'projectAgent.chat.actionFailed': '操作失败，请重试',
+    'projectAgent.chat.draftLoading': '正在恢复草稿…',
+    'projectAgent.chat.draftSaveFailed': '草稿暂未保存，内容仍保留在此窗口。请重试；未保存的输入不会发出。',
+    'projectAgent.chat.draftConflict': '另一个窗口更新了这份草稿。当前内容仍在此窗口，请复制保留后重新打开，避免覆盖另一份编辑。',
+    'projectAgent.chat.inputUnconfirmed': '发送结果尚未确认，原消息已保留。',
+    'projectAgent.chat.retrySameInput': '重试同一消息',
+    'projectAgent.chat.inputDeliveryIssue': '输入已收到，后续交接未完成。请回原任务处理。',
+    'projectAgent.chat.planDecisionRecord': '计划决定记录',
+    'projectAgent.chat.decisionUpdating': '决定已提交，正在读取当前状态…',
+    'projectAgent.chat.verificationPending': '核验尚未得出结论',
+    'projectAgent.drawer.title': '机器人设置',
+    'projectAgent.drawer.close': '关闭',
+    'projectAgent.drawer.back': '任务列表',
+    'projectAgent.drawer.sceneBack': '返回详情',
+    'projectAgent.drawer.missing': '还没有',
+    'projectAgent.drawer.tab.overview': '概况',
+    'projectAgent.drawer.tab.tasks': '任务',
+    'projectAgent.drawer.tab.objectives': '目标',
+    'projectAgent.drawer.tab.memory': '记忆',
+    'projectAgent.drawer.tab.settings': '设置',
+    'projectAgent.drawer.folder': '绑定文件夹',
+    'projectAgent.drawer.noPath': '还没有文件夹',
+    'projectAgent.drawer.reveal': '在访达中显示',
+    'projectAgent.drawer.brief': '项目简报',
+    'projectAgent.drawer.briefEmpty': '还没有项目简报',
+    'projectAgent.drawer.running': '在推进的任务',
+    'projectAgent.drawer.runningEmpty': '现在没有在推进的任务',
+    'projectAgent.drawer.acceptance': '签收策略',
+    'projectAgent.drawer.acceptance.auto': '自动',
+    'projectAgent.drawer.acceptance.pending': '签收策略还没有单独的保存接口，当前按自动处理。',
+    'projectAgent.drawer.model': '对话模型',
+    'projectAgent.drawer.modelEmpty': '跟随全局分工',
+    'projectAgent.drawer.model.pending': '项目级模型范围还没有单独的保存接口，这里显示全局对话模型。',
+    'projectAgent.drawer.tasksEmpty': '还没有任务',
+    'projectAgent.drawer.showAll': '查看全部',
+    'projectAgent.drawer.collapse': '收起',
+    'projectAgent.drawer.group.needsYou': '需要你',
+    'projectAgent.drawer.group.running': '进行中',
+    'projectAgent.drawer.group.queued': '排队',
+    'projectAgent.drawer.group.done': '已结束',
+    'projectAgent.drawer.group.paused': '已暂停',
+    'projectAgent.drawer.supersededBy': '被「{task}」取代',
+    'projectAgent.drawer.resume': '恢复',
+    'projectAgent.drawer.resumeFailed': '恢复失败，请稍后重试。',
+    'projectAgent.drawer.replacement': '后续任务',
+    'projectAgent.drawer.group.history': '历史对话',
+    'projectAgent.drawer.group.classic': '经典任务',
+    'projectAgent.drawer.historyEmpty': '没有可继续的历史对话',
+    'projectAgent.drawer.continueHistory': '交给这个机器人继续',
+    'projectAgent.drawer.historyPartial': '这段对话里有工具或附件材料，继续时不会带上。仍然交给机器人吗？',
+    'projectAgent.drawer.historyPartialConfirm': '仍然继续',
+    'projectAgent.drawer.historyPickBot': '选择机器人',
+    'projectAgent.drawer.classicOpen': '打开原来的会话',
+    'projectAgent.drawer.legacyAutomations': '自动化（旧）',
+    'projectAgent.drawer.legacyAutomationsEmpty': '这个项目没有旧的自动化',
+    'projectAgent.drawer.anchor': '来源消息标识',
+    'projectAgent.drawer.frozenModel': '执行模型',
+    'projectAgent.drawer.conclusion': '结论',
+    'projectAgent.drawer.evidence': '证据',
+    'projectAgent.drawer.progress': '最近进展',
+    'projectAgent.drawer.openScene': '查看工作会话',
+    'projectAgent.drawer.scene': '工作会话',
+    'projectAgent.drawer.sceneMissing': '尚无工作会话',
+    'projectAgent.drawer.task.created': '创建于 {time}',
+    'projectAgent.drawer.task.conversation': '回到对话',
+    'projectAgent.drawer.task.question': "需要你回答的问题",
+    'projectAgent.drawer.task.followUp': "下一步由 {name} 跟进",
+    'projectAgent.drawer.task.followUpEnded': "继续追问",
+    'projectAgent.drawer.task.endedQuestion': "可以在主对话中询问结果，或补充新的要求。",
+    'projectAgent.drawer.task.askEnded': "向 {name} 追问",
+    'projectAgent.drawer.task.askEndedDraft': "关于「{title}」，请说明结果和判断依据。",
+    'projectAgent.drawer.task.noQuestion': "需要你的决定时，{name} 会在对话中提出具体问题。这里可以查看情况，也可以询问进展。",
+    'projectAgent.drawer.task.answer': "在对话中回答",
+    'projectAgent.drawer.task.ask': "询问 {name} 进展",
+    'projectAgent.drawer.task.askDraft': "「{title}」现在进展如何？请说明卡住的原因和下一步；如果需要我决定，请提出具体问题。",
+    'projectAgent.drawer.task.draftHint': "点击后准备消息，由你确认发送。",
+    'projectAgent.drawer.task.update': "{name} 最近的说明",
+    'projectAgent.drawer.task.viewUpdate': "查看对话中的完整说明",
+    'projectAgent.drawer.task.instructions': "内部任务指令",
+    'projectAgent.drawer.task.description': '任务说明',
+    'projectAgent.drawer.task.descriptionMissing': '暂未读取到任务说明，可回到对话查看原始要求。',
+    'projectAgent.drawer.task.information': '任务信息',
+    'projectAgent.drawer.task.readingReport': '正在读取任务资料…',
+    'projectAgent.drawer.task.reportUnavailable': '任务资料暂时无法读取，请重试。',
+    'projectAgent.drawer.task.reportStale': '任务资料暂时无法更新，以下为上次读取的内容。',
+    'projectAgent.drawer.task.noReport': '暂无补充任务资料。',
+    'projectAgent.drawer.task.id': '任务标识',
+    'projectAgent.drawer.task.records': '执行记录 · {count} 条',
+    'projectAgent.drawer.task.verification': '核验结果',
+    'projectAgent.drawer.task.verificationScope': '仅表示本任务当前证据的核验结果，不等于结果已签收。',
+    'projectAgent.drawer.task.verificationChecks': '检查项',
+    'projectAgent.drawer.task.verificationEvidence': '任务结果与证据',
+    'projectAgent.drawer.task.verificationIndependent': '独立复核',
+    'projectAgent.drawer.task.verificationHistory': '历史核验记录',
+    'projectAgent.drawer.task.verificationHistorical': '历史记录仅供调查，不代表当前结论。',
+    'projectAgent.drawer.task.verificationPassed': '通过',
+    'projectAgent.drawer.task.verificationFailed': '未通过',
+    'projectAgent.drawer.task.verificationMissing': '尚未核验',
+    'projectAgent.drawer.task.verificationOther': '其他检查',
+    'projectAgent.drawer.task.hint.confirm': '{name} 在主对话中跟进这项工作。',
+    'projectAgent.drawer.task.hint.failed': '任务未能完成。后续安排由 {name} 在主对话中说明。',
+    'projectAgent.drawer.task.hint.ended': '可查看 {name} 的交付说明，或在主对话中继续追问。',
+    'projectAgent.drawer.task.hint.working': '进展和结果由 {name} 在主对话中汇报。',
+    'projectAgent.drawer.objective.source': '所属目标',
+    'projectAgent.drawer.objective.empty': '还没有持续目标',
+    'projectAgent.drawer.objective.hint': '告诉机器人你想持续推进或关注什么。',
+    'projectAgent.drawer.objective.active': '进行中',
+    'projectAgent.drawer.objective.paused': '已暂停',
+    'projectAgent.drawer.objective.achieved': '已达成',
+    'projectAgent.drawer.objective.abandoned': '已放弃',
+    'projectAgent.drawer.objective.pending': '等待你确认',
+    'projectAgent.drawer.objective.report_only': '只报告',
+    'projectAgent.drawer.objective.propose': '先提议',
+    'projectAgent.drawer.objective.act': '直接处理',
+    'projectAgent.drawer.objective.autonomy': '自主档位',
+    'projectAgent.drawer.objective.budget': '每日自动任务',
+    'projectAgent.drawer.objective.probes': '每日检查预算',
+    'projectAgent.drawer.objective.autoAccept': '允许自动签收',
+    'projectAgent.drawer.objective.autoUsage': '今日自动任务 {used}/{limit}',
+    'projectAgent.drawer.objective.usage': '今日检查 {used}/{limit}',
+    'projectAgent.drawer.objective.watch.unavailable': '暂时无法检查',
+    'projectAgent.drawer.objective.watch.auth': '登录 GitHub 后可检查 CI',
+    'projectAgent.drawer.objective.watch.cli': '需要 GitHub CLI 才能检查 CI',
+    'projectAgent.drawer.objective.watch.daily': '今日检查次数已达上限',
+    'projectAgent.drawer.objective.watch.hourly': '本小时检查次数已达上限',
+    'projectAgent.drawer.objective.watch.scope': '路径超出项目范围',
+    'projectAgent.drawer.objective.watch.range': '观察范围过大，请缩小路径范围',
+    'projectAgent.drawer.objective.watch.model': '未配置可用的观察模型',
+    'projectAgent.drawer.objective.watch.cancelled': '检查已停止',
+    'projectAgent.drawer.objective.last': '最近检查',
+    'projectAgent.drawer.objective.next': '下次检查',
+    'projectAgent.drawer.objective.unchecked': '尚未检查',
+    'projectAgent.drawer.objective.event': '事件变化时检查',
+    'projectAgent.drawer.objective.edit': '调整计划',
+    'projectAgent.drawer.objective.save': '保存',
+    'projectAgent.drawer.objective.cancel': '取消',
+    'projectAgent.drawer.objective.pause': '暂停',
+    'projectAgent.drawer.objective.resume': '恢复',
+    'projectAgent.drawer.objective.reopen': '重新打开',
+    'projectAgent.drawer.objective.abandon': '放弃',
+    'projectAgent.drawer.objective.failed': '操作失败，请刷新后重试。',
+    'projectAgent.drawer.objective.loading': '正在读取目标',
+    'projectAgent.drawer.objective.title': '目标名称',
+    'projectAgent.drawer.objective.outcome': '达成的样子',
+    'projectAgent.drawer.objective.tasks': '关联任务',
+    'projectAgent.drawer.objective.noTasks': '还没有关联任务',
+    'projectAgent.drawer.objectives.body': '目标将在后续版本开放',
+    'projectAgent.drawer.objectives.hint': '现在可以先通过对话交代具体任务。',
+    'projectAgent.drawer.memory.empty': '还没有记忆',
+    'projectAgent.drawer.memory.emptyHint': '机器人记下的项目事实、偏好和决定会显示在这里。',
+    'projectAgent.drawer.memory.filterEmpty': '没有符合筛选条件的记忆',
+    'projectAgent.drawer.memory.controls': '记忆设置',
+    'projectAgent.drawer.memory.saved': '已保存的记忆',
+    'projectAgent.drawer.memory.page': '{start}–{end} / {total}',
+    'projectAgent.drawer.memory.previous': '上一页',
+    'projectAgent.drawer.memory.next': '下一页',
+    'projectAgent.drawer.memory.scope.project': '当前项目',
+    'projectAgent.drawer.memory.scope.global': '所有项目',
+    'projectAgent.drawer.memory.readonly': '可以固定、撤销、恢复和导出这些记忆',
+    'projectAgent.drawer.memory.filter.kind': '种类',
+    'projectAgent.drawer.memory.filter.trust': '信任',
+    'projectAgent.drawer.memory.filter.status': '状态',
+    'projectAgent.drawer.memory.filter.all': '全部',
+    'projectAgent.drawer.memory.kind.fact': '事实',
+    'projectAgent.drawer.memory.kind.preference': '偏好',
+    'projectAgent.drawer.memory.kind.decision': '决定',
+    'projectAgent.drawer.memory.kind.procedure': '流程',
+    'projectAgent.drawer.memory.kind.responsibility': '职责',
+    'projectAgent.drawer.memory.trust.stated': '用户说明',
+    'projectAgent.drawer.memory.trust.verified': '已验证',
+    'projectAgent.drawer.memory.status.active': '生效中',
+    'projectAgent.drawer.memory.status.forgotten': '已撤销',
+    'projectAgent.drawer.memory.sources': '来源',
+    'projectAgent.drawer.memory.status.expired': '已过期',
+    'projectAgent.drawer.memory.status.conflicted': '有冲突',
+    'projectAgent.drawer.memory.needsReverify': '可能已过时 · 待核实',
+    'projectAgent.drawer.memory.keepThis': '保留这条',
+    'projectAgent.drawer.memory.pin': '固定',
+    'projectAgent.drawer.memory.unpin': '取消固定',
+    'projectAgent.drawer.memory.revoke': '撤销',
+    'projectAgent.drawer.memory.restore': '恢复',
+    'projectAgent.drawer.memory.edit': '编辑',
+    'projectAgent.drawer.memory.save': '保存',
+    'projectAgent.drawer.memory.exportJson': '导出 JSON',
+    'projectAgent.drawer.memory.exportMarkdown': '导出 Markdown',
+    'projectAgent.drawer.memory.projectSwitch': '启用记忆',
+    'projectAgent.drawer.memory.useMemory': '对话时使用记忆',
+    'projectAgent.drawer.memory.learnPreferences': '从我的习惯里学偏好',
+    'projectAgent.drawer.memory.learnLater': '学偏好会在后续阶段生效，这个开关现在就会记住。',
+    'projectAgent.drawer.settings.name': '名字',
+    'projectAgent.drawer.settings.appearance': '外观',
+    'projectAgent.drawer.settings.workflow': '工作方式',
+    'projectAgent.drawer.settings.runtime': '运行与全局设置',
+    'projectAgent.drawer.settings.globalScope': '影响所有机器人',
+    'projectAgent.drawer.settings.advancedModels': '更多角色与模型限制',
+    'projectAgent.drawer.settings.save': '保存',
+    'projectAgent.drawer.settings.avatar': '头像',
+    'projectAgent.drawer.settings.avatarNew': '重新生成',
+    'projectAgent.drawer.settings.avatarColor': '颜色',
+    'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
+    'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
+    'projectAgent.drawer.settings.avatarColor.1': '珊瑚红',
+    'projectAgent.drawer.settings.avatarColor.2': '琥珀橙',
+    'projectAgent.drawer.settings.avatarColor.3': '薄荷绿',
+    'projectAgent.drawer.settings.avatarColor.4': '丁香紫',
+    'projectAgent.drawer.settings.avatarColor.5': '玫瑰粉',
+    'projectAgent.drawer.settings.avatarColor.6': '湖水蓝',
+    'projectAgent.drawer.settings.avatarColor.7': '暖灰色',
+    'projectAgent.drawer.settings.delete': '删除机器人',
+    'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
+    'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
+    'projectAgent.drawer.settings.concurrency': '全局并发回合',
+    'projectAgent.drawer.settings.concurrencyHint': '所有机器人共享，范围 1–8；每个项目最多 1 个原地写任务、2 个只读任务。',
+    'projectAgent.drawer.queuedBehind': '等待 {tasks}',
+    'projectAgent.drawer.dependencyFailed': '前置任务需要处理：{tasks}',
+    'projectAgent.drawer.dependencyMissing': '前置任务已缺失，请重新安排',
+    'projectAgent.drawer.diskSpace': '排队中：可用磁盘不足 2 GB',
+    'projectAgent.drawer.isolationFailed': '排队中：隔离工作区暂不可用',
+    'projectAgent.drawer.settings.autoHandoff': '策略签收后自动合回',
+    'projectAgent.drawer.settings.autoHandoffHint': '默认关闭。开启后，已验证并签收的改动可自动合回本项目。',
+    'projectAgent.drawer.settings.proactivity': '主动性',
+    'projectAgent.drawer.settings.proactivity.inherit': '跟随全局',
+    'projectAgent.drawer.settings.proactivity.quiet': '安静',
+    'projectAgent.drawer.settings.proactivity.low': '少',
+    'projectAgent.drawer.settings.proactivity.standard': '标准',
+    'projectAgent.drawer.settings.proactivity.high': '多',
+    'projectAgent.drawer.settings.proactivity.muted': '静音',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -1203,6 +2825,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.channel.auto': '自动（跟随当前版本）',
     'updater.settings.channel.beta': 'Beta（尝鲜版）',
     'updater.settings.channel.stable': '正式（稳定版）',
+    'updater.badge.channel.auto': '自动',
+    'updater.badge.channel.beta': 'Beta',
+    'updater.badge.channel.stable': '正式',
     'updater.settings.currentVersion': '当前版本',
     'updater.settings.checkNow': '检查更新',
     'updater.settings.checking': '检查中…',
@@ -1231,6 +2856,45 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'header.capabilities.status.unavailable': '不可用',
   },
   'en-US': {
+    "projectAgent.chat.taskFallback": "that task",
+    "projectAgent.chat.inputTooLong": "Messages support up to 100000 UTF-16 units. Shorten the draft before sending.",
+    "projectAgent.quick.title": "Quick Chat",
+    "projectAgent.quick.content": "Quick Chat message",
+    "projectAgent.quick.placeholder": "Ask Peer Agent to help…",
+    "projectAgent.quick.chooseBot": "Choose bot",
+    "projectAgent.quick.effort": "Reasoning effort",
+    "projectAgent.quick.loadFailed": "Could not load bot settings. Please reopen Quick Chat.",
+    "projectAgent.quick.noBots": "No bots yet",
+    "projectAgent.quick.textOnly": "Bot Quick Chat currently supports text only",
+    "projectAgent.quick.empty": "Write a message first",
+    "projectAgent.quick.workspace": "Choose workspace",
+    "projectAgent.quick.attach": "Add attachment",
+    "projectAgent.quick.attachmentLimit": "Add up to {count} attachments",
+    "projectAgent.quick.imageLimit": "Image {name} exceeds 8 MB",
+    "projectAgent.quick.fileLimit": "File {name} exceeds 512 KB",
+    "projectAgent.quick.sending": "Sending",
+    "projectAgent.quick.failed": "Send failed",
+    "projectAgent.background.title": "Background runs",
+    "projectAgent.background.device": "This device",
+    "projectAgent.background.close": "Close",
+    "projectAgent.background.readFailed": "Unable to read background runs",
+    "projectAgent.background.previous": " · Previous snapshot",
+    "projectAgent.background.retry": "Retry",
+    "projectAgent.background.loading": "Loading…",
+    "projectAgent.background.unavailable": "Run record unavailable",
+    "projectAgent.background.empty": "No background runs",
+    "projectAgent.background.history": "Recently ended",
+    "projectAgent.background.more": "Show more",
+    "projectAgent.background.refresh": "Refresh status",
+    "projectAgent.settings.quietStart": "Quiet hours start",
+    "projectAgent.settings.quietEnd": "Quiet hours end",
+    "projectAgent.settings.hour": "{label}: hour",
+    "projectAgent.settings.minute": "{label}: minute",
+
+    ...remoteAccessEn,
+    ...resourcesEn,
+    ...formsEn,
+    ...recoveryEn,
     'app.newTask': 'New task',
     'searchChats.open': 'Search tasks',
     'searchChats.placeholder': 'Search tasks',
@@ -1282,6 +2946,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': 'Foreground',
     'appearance.uiFont': 'UI font',
     'appearance.codeFont': 'Code font',
+    'appearance.windowMaterial': 'Window material',
+    'appearance.windowMaterial.glass': 'Frosted glass',
+    'appearance.windowMaterial.solid': 'Solid',
     'appearance.diffMarker': 'Diff markers',
     'appearance.diffMarker.color': 'Color',
     'appearance.diffMarker.sign': '+/- signs',
@@ -1300,6 +2967,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.search': 'Search settings…',
     'settings.searchEmpty': 'No matching settings',
     'settings.general': 'General',
+    'settings.shell.title': 'Interface',
+    'settings.shell.description': 'Switching takes effect immediately and leaves existing chats in place.',
+    'settings.shell.bots': 'Bot list',
+    'settings.shell.classic': 'Classic',
     'settings.archived': 'Archived chats',
     'settings.archived.description': 'View and manage archived chats in the current workspace.',
     'settings.archived.loading': 'Loading archived chats…',
@@ -1316,18 +2987,38 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.archived.working': 'Working…',
     'settings.backToChat': 'Back to chat',
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',
-    'settings.language.description': 'Choose the display language for the interface.',
+    'settings.language.description': 'The language used in menus, buttons and settings.',
+    'settings.general.description': 'Make Peer work the way you do.',
+    'settings.general.loadFailed': 'Could not load current settings. Please reopen Settings.',
+    'settings.general.interfaceAndLanguage': 'Interface & language',
+    'settings.general.interfaceAndLanguage.description': 'Choose a familiar starting point and language.',
     'settings.replyLanguage': 'Reply language',
-    'settings.replyLanguage.description': 'Choose the language the AI replies in, to avoid mixed-language responses.',
+    'settings.bots.title': 'Notifications & rhythm',
+    'settings.bots.description': 'Hear from Peer when you are needed; let it work quietly otherwise.',
+    'settings.bots.proactivity': 'How often to speak up',
+    'settings.bots.proactivity.description': 'Choose how often bots report progress and follow up.',
+    'settings.bots.proactivity.quiet': 'Quiet',
+    'settings.bots.proactivity.low': 'Low',
+    'settings.bots.proactivity.standard': 'Standard',
+    'settings.bots.proactivity.high': 'High',
+    'settings.bots.quietHours': 'Quiet hours',
+    'settings.bots.quietHours.description': 'During these hours, notifications become unread messages unless something needs you.',
+    'settings.bots.quietFrom': 'From',
+    'settings.bots.quietUntil': 'Until',
+    'settings.bots.digestTime': 'Daily summary',
+    'settings.bots.digestTime.description': 'At this time, held notes become one message.',
+    'settings.replyLanguage.description': 'The language bots use when talking with you.',
     'settings.replyLanguage.followInterface': 'Follow interface language',
     'settings.replyLanguage.auto': 'Auto (match the question)',
+    'settings.replyLanguage.autoShort': 'Match the question',
     'settings.git': 'Git',
+    'settings.git.branchNaming': 'Branch naming',
     'settings.git.branchPrefix': 'Branch prefix',
     'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
-    'settings.fallbackVision': 'Fallback vision model',
-    'settings.fallbackVision.description': 'When the main model cannot read images, use this model to recognize new images in the current turn and silently pass text to the main model. If unset, images are stripped with a light notice.',
-    'settings.fallbackVision.none': 'None (strip images only)',
-    'settings.fallbackVision.strippedHint': 'Current model does not support images; new images were stripped. Configure a fallback vision model in Settings → Models.',
+    'settings.fallbackVision': 'Image recognition settings',
+    'settings.fallbackVision.description': 'Used when the main model cannot read images.',
+    'settings.fallbackVision.none': 'No fallback model',
+    'settings.fallbackVision.strippedHint': 'This model cannot read images; only text was sent. Choose an image fallback model in Providers settings.',
     'settings.config': 'Configuration',
     'settings.config.description': 'Export your skills, permission rules and UI settings to restore on another device. Login state and device identity are not exported.',
     'settings.config.export': 'Export',
@@ -1352,6 +3043,71 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.unpricedNote': '{count} conversation(s) lack pricing and are excluded from cost totals.',
     'settings.usage.byProvider': 'By provider',
     'settings.usage.byModel': 'By model',
+    'settings.usage.byRole': 'By role',
+    'settings.usage.showByRole': 'View by role',
+    'settings.usage.col.role': 'Role',
+    'modelRouting.nav': 'Model routing',
+    'modelRouting.title': 'Model routing',
+    'modelRouting.description': 'Choose a tier or a specific model for each kind of work. Ordinary chat still uses the model selected in the conversation.',
+    'modelRouting.singleModel': 'Roles share the available model, but can use different reasoning efforts.',
+    'modelRouting.noModel': 'No usable model',
+    'modelRouting.tiers': 'Tiers',
+    'modelRouting.roles': 'Roles',
+    'modelRouting.primary': 'Primary',
+    'modelRouting.modeLabel': 'Selection mode',
+    'modelRouting.targetLabel': 'Tier / model',
+    'modelRouting.chooseModel': 'Choose a model',
+    'modelRouting.modelUnavailable': 'Previous model unavailable. Choose again.',
+    'modelRouting.followingTier': 'Following the {tier} tier',
+    'modelRouting.checkTier': 'No eligible model in this tier. Check its configuration above.',
+    'modelRouting.checkFixed': 'The selected model is unavailable or ineligible. Choose again.',
+    'modelRouting.parameters': 'Reasoning / channel',
+    'modelRouting.channel': 'Request channel',
+    'modelRouting.channelFast': 'Fast',
+    'modelRouting.channelNormal': 'Normal',
+    'modelRouting.channelUnavailable': 'Unavailable',
+    'modelRouting.inheritedValue': 'Follow tier · {value}',
+    'modelRouting.chooseCandidates': 'Choose an available model first.',
+    'modelRouting.noSharedEffort': 'Selected models declare no shared reasoning effort.',
+    'modelRouting.fastUnsupported': 'Fast requires a supported ChatGPT / Grok subscription connection. Some selected candidates do not support it.',
+    'modelRouting.fallbacks': 'Fallbacks',
+    'modelRouting.addFallback': 'Add fallback',
+    'modelRouting.moveUp': 'Move up',
+    'modelRouting.moveDown': 'Move down',
+    'modelRouting.remove': 'Remove',
+    'modelRouting.mode.tier': 'Follow tier',
+    'modelRouting.mode.fixed': 'Fixed model',
+    'modelRouting.mode.auto': 'Automatic',
+    'modelRouting.pool': 'Pool',
+    'modelRouting.poolInvalid': 'An automatic pool needs at least one model that meets the role.',
+    'modelRouting.resolved': 'Resolved',
+    'modelRouting.reasoning': 'Reasoning effort',
+    'modelRouting.reasoningDefault': 'Model default',
+    'modelRouting.reasoningInvalid': 'Unsupported by current candidates',
+    'modelRouting.reasoningNoCommon': 'No shared effort level. Choose a fixed model to configure its effort.',
+    'modelRouting.unresolved': 'No usable model',
+    'modelRouting.preferDifferentFamily': 'Prefer a different family for verification',
+    'modelRouting.spendCap': 'Daily spend cap (USD)',
+    'modelRouting.spendExceeded': 'This role has reached its daily spend cap',
+    'modelRouting.essentialSpend': 'Over today’s cap. This work still continues, and you will be asked when it needs you',
+    'modelRouting.tier.strong': 'Strong',
+    'modelRouting.tier.fast': 'Fast',
+    'modelRouting.tier.economy': 'Economy',
+    'modelRouting.tier.vision': 'Vision',
+    'modelRouting.role.project_agent': 'Project agent',
+    'modelRouting.role.session_worker': 'Task worker',
+    'modelRouting.role.explorer': 'Explorer',
+    'modelRouting.role.verifier': 'Verifier',
+    'modelRouting.role.visual_verifier': 'Visual review',
+    'modelRouting.role.memory_curator': 'Memory curator',
+    'modelRouting.role.objective_probe': 'Objective probe',
+    'modelRouting.role.compactor': 'Compactor',
+    'modelRouting.reason.vision': 'Cannot see images',
+    'modelRouting.reason.tools': 'Cannot use tools',
+    'modelRouting.reason.structured': 'Cannot return structured output',
+    'modelRouting.reason.context': 'Context window is too short',
+    'modelRouting.loadFailed': 'Could not load model routing',
+    'modelRouting.saveFailed': 'Could not save model routing',
     'settings.usage.emptyGroup': 'No grouped usage yet',
     'settings.usage.col.provider': 'Provider',
     'settings.usage.col.model': 'Model',
@@ -1415,6 +3171,683 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.saveFailed': 'Failed to save developer settings',
     'developer.probeFailed': 'Cloud contract probe failed',
     'developer.ipcUnavailable': 'Developer mode IPC is not registered in the main process. Fully quit and restart the desktop client so the updated Electron main process is running.',
+    'projectAgent.host.title': "Execution host",
+    'projectAgent.host.notOwnerAction': 'This desktop does not hold execution ownership for this bot. Take over under Runtime and global settings in the bot settings, then try again.',
+    'projectAgent.host.hint': "Desktop and terminal share this bot. Takeover stops the old host before desktop continues its tasks.",
+    'projectAgent.host.action': "Take over on desktop",
+    'projectAgent.host.requested': "Takeover requested. Tasks continue after the old host stops.",
+    'projectAgent.host.ready': "Desktop can now host this bot.",
+    'projectAgent.host.failed': "Takeover failed. Check the bot and its host.",
+    'developer.projectAgent.nav': 'Developer',
+    'developer.projectAgent.title': 'Developer',
+    'developer.projectAgent.description': 'Choose the interface in Settings → General. The old project-agent switch is no longer read, and its stored value stays.',
+    'developer.projectAgent.switch': 'Choose the interface in Settings → General. The project agent keeps working on existing tasks.',
+    'developer.projectAgent.diagnostics': 'Project agent diagnostics',
+    'developer.projectAgent.inactive': 'Not enabled',
+    'developer.diagnostics.description': 'Read-only runtime snapshot. Identifiers and text retain only length and hash; project paths are anonymized. Keeps the latest 200 events and 20 turns per bot. Older turn timing is unknown.',
+    'developer.diagnostics.refresh': 'Refresh diagnostics',
+    'developer.diagnostics.export': 'Export JSON',
+    'developer.diagnostics.busy': 'Reading diagnostics…',
+    'developer.diagnostics.saved': 'Diagnostics exported',
+    'developer.diagnostics.cancelled': 'Export cancelled',
+    'developer.diagnostics.failed': 'Could not read or export diagnostics. Try again.',
+    'developer.diagnostics.unknown': 'Unknown',
+    'developer.diagnostics.generated': 'Snapshot time',
+    'developer.diagnostics.bots': 'Bots',
+    'developer.diagnostics.slots': 'Active turn slots',
+    'developer.diagnostics.waiting': 'Waiting turns',
+    'developer.diagnostics.errors': 'Unavailable sources',
+    'developer.diagnostics.preview': 'View redacted JSON',
+    'projectAgent.list.brand': 'Peer',
+    'projectAgent.list.newBot': 'New bot',
+    'projectAgent.list.searchPlaceholder': 'Search bots, messages, tasks',
+    'projectAgent.attention.title': 'Needs your attention',
+    'projectAgent.attention.subtitle': 'Current questions, permissions and confirmations.',
+    'projectAgent.attention.close': 'Close attention list',
+    'projectAgent.attention.failed': 'Could not load items. Please retry.',
+    'projectAgent.attention.retry': 'Reload',
+    'projectAgent.attention.empty': 'Nothing needs your attention',
+    'projectAgent.attention.emptyHint': 'Your bots will keep following up on ongoing work.',
+    'projectAgent.attention.question': 'Your answer is needed',
+    'projectAgent.attention.approval': 'Your permission is needed',
+    'projectAgent.attention.confirmation': 'Your confirmation is needed',
+    'projectAgent.attention.openSource': 'Open source and handle',
+    'projectAgent.attention.closed': 'This question was answered or superseded. The attention list has been refreshed.',
+    'projectAgent.list.needsYou': 'Needs you {count}',
+    'projectAgent.list.empty': 'No bots yet',
+    'projectAgent.list.emptyHint': 'Use + to name a bot, or bind an existing folder.',
+    'projectAgent.list.emptyNeedsYou': 'Nothing needs you right now.',
+    'projectAgent.list.emptySearch': 'No matching bots.',
+    'projectAgent.list.me': 'Me',
+    'projectAgent.list.settings': 'Settings',
+    'projectAgent.list.automations': 'Automations',
+    'projectAgent.list.capabilities': 'Capabilities',
+    'projectAgent.list.capabilitiesHint': 'Plugins, skills, and MCP',
+    'projectAgent.list.history': 'History',
+    'projectAgent.history.hint': 'Find an earlier discussion and pick up where you left off.',
+    'projectAgent.history.search': 'Search conversation titles',
+    'projectAgent.history.clear': 'Clear search',
+    'projectAgent.history.loading': 'Loading conversation history…',
+    'projectAgent.history.unavailable': 'Conversation history is temporarily unavailable.',
+    'projectAgent.history.retry': 'Retry',
+    'projectAgent.history.noMatch': 'No matching conversation titles.',
+    'projectAgent.history.untitled': 'Untitled conversation',
+    'projectAgent.history.group.today': 'Today',
+    'projectAgent.history.group.yesterday': 'Yesterday',
+    'projectAgent.history.group.week': 'Previous 7 days',
+    'projectAgent.history.group.earlier': 'Earlier',
+    'projectAgent.history.group.other': 'Other dates',
+    'projectAgent.history.more': 'Show more conversations',
+    'projectAgent.history.count': 'Showing {shown} of {count} conversations',
+    'projectAgent.history.back': 'Back to history',
+    'projectAgent.history.loadingPreview': 'Loading conversation…',
+    'projectAgent.history.previewUnavailable': 'This conversation is temporarily unavailable.',
+    'projectAgent.history.noPreview': 'No conversation messages to preview.',
+    'projectAgent.history.user': 'You',
+    'projectAgent.history.assistant': 'Assistant',
+    'projectAgent.history.attachmentOnly': 'Attachment message',
+    'projectAgent.history.continueFailed': 'Could not continue this conversation. Please try again.',
+    'projectAgent.history.submitting': 'Submitting…',
+    'projectAgent.shell.classicNotice': 'Switch to the bot list to view this',
+    'projectAgent.shell.banner': 'This is the new bot list. Older chats are in each bot’s profile → tasks → history. Switch back from Settings → General.',
+    'projectAgent.shell.bannerTitle': 'New bot list',
+    'projectAgent.shell.bannerWhere': 'Older chats are in each bot’s profile',
+    'projectAgent.shell.bannerPath': 'Tasks → History',
+    'projectAgent.shell.bannerSwitch': 'Settings → General switches back',
+    'projectAgent.shell.bannerDismiss': 'Got it',
+    'projectAgent.onboarding.connectTitle': 'Connect a model first',
+    'projectAgent.onboarding.connectBody': 'A bot needs a model before it can start.',
+    'projectAgent.onboarding.connectAction': 'Connect a model',
+    'projectAgent.onboarding.createTitle': 'New bot',
+    'projectAgent.onboarding.createBody': 'Name a bot first, or bind an existing folder.',
+    'projectAgent.onboarding.createAction': 'New bot',
+    'projectAgent.search.placeholder': 'Search bots, messages, tasks, and memory',
+    'projectAgent.search.empty': 'No matches',
+    'projectAgent.search.section.bots': 'Bots',
+    'projectAgent.search.section.messages': 'Messages',
+    'projectAgent.search.section.tasks': 'Tasks',
+    'projectAgent.search.section.memory': 'Memory',
+    'projectAgent.list.loading': 'Loading bots',
+    'projectAgent.list.unavailable': 'Project agent is off',
+    'projectAgent.list.loadFailed': 'The bot list did not load',
+    'projectAgent.list.noPreview': 'No messages yet',
+    'projectAgent.list.mainEmptyTitle': 'Start with a project',
+    'projectAgent.list.mainEmptyBody': 'Choose a bot to continue a conversation or assign a new task.',
+    'projectAgent.list.recentBots': 'Recent bots',
+    'projectAgent.list.openBot': 'Open conversation',
+    'projectAgent.list.mainPlaceholder': 'The conversation with this bot will show up here.',
+    'projectAgent.list.profile': 'Bot settings',
+    'projectAgent.list.unread': 'Unread',
+    'projectAgent.list.running': 'In progress',
+    'projectAgent.list.needsYouBadge': 'Needs you {count}',
+    'projectAgent.list.newSheetTitle': 'New bot',
+    'projectAgent.list.bindFolder': 'Choose a folder',
+    'projectAgent.list.bindFolderHint': 'Bind an existing project. The bot will familiarize itself by reading only.',
+    'projectAgent.list.blankBot': 'Bot name',
+    'projectAgent.list.blankBotHint': 'Use this name to create an empty project in the managed folder.',
+    'projectAgent.list.namePlaceholder': 'Bot name',
+    'projectAgent.list.nameInvalid': 'This name cannot be used',
+    'projectAgent.list.nameWillUse': 'Will use “{name}”',
+    'projectAgent.list.create': 'Create',
+    'projectAgent.list.creating': 'Creating',
+    'projectAgent.list.createFailed': 'Could not create it',
+    'projectAgent.list.nameExhausted': 'Too many folders already use this name',
+    'projectAgent.list.columnResize': 'Resize the bot list',
+    'projectAgent.list.backToBots': 'Back to bots',
+    'projectAgent.list.close': 'Close',
+    'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
+    'projectAgent.chat.loadFailed': 'The conversation did not load',
+    'projectAgent.chat.cardsUnavailable': 'Task status is unavailable. Your conversation is still readable.',
+    'projectAgent.chat.recoveryDiagnostics': 'Diagnostic details',
+    'projectAgent.chat.recoveryBlocked': 'Bot recovery is blocked; no reply has started. Received messages are preserved.',
+    'projectAgent.chat.recoveryReconcile': 'Task history is readable again. Execution remains paused until existing work and write results are reconciled.',
+    'projectAgent.chat.recoveryConflict': 'Task history conflicts have paused execution. Received messages are preserved.',
+    'projectAgent.chat.refreshFailed': 'New messages could not refresh. Your current conversation is preserved.',
+    'projectAgent.chat.thinking': 'Thinking',
+    'projectAgent.chat.waiting': 'Waiting for a response…',
+    'projectAgent.chat.generating': 'Replying',
+    'projectAgent.chat.reply.reconnecting': 'Resuming this reply',
+    'projectAgent.chat.reply.unconfirmed': 'The reply status has not been confirmed',
+    'projectAgent.chat.reply.interrupted': 'This reply was interrupted',
+    'projectAgent.chat.reply.synchronizing': 'Synchronizing the reply',
+    'projectAgent.chat.reply.received': 'Message received; waiting for progress',
+    'projectAgent.chat.reply.waitingModel': 'Waiting for the model',
+    'projectAgent.chat.recoveryReasoning': 'Local model validation blocked this request before dispatch. Check the reply details and the model and reasoning effort settings.',
+    'projectAgent.chat.reply.refresh': 'Refresh status',
+    'projectAgent.chat.reply.related': 'Other parts of this reply ({count})',
+    'projectAgent.chat.reply.relatedTurn': 'View part {number}',
+    'projectAgent.chat.reply.deliveryIssue': 'The message was saved, but follow-up processing did not finish',
+    'projectAgent.chat.activity.preparing': 'Getting ready for the next step',
+    'projectAgent.chat.activity.thinking': 'Thinking it through',
+    'projectAgent.chat.activity.responding': 'Putting the reply together',
+    'projectAgent.chat.activity.settling': 'Putting the results together',
+    'projectAgent.chat.activity.advancing': 'Working through the next step',
+    'projectAgent.chat.activity.prepareRead': 'Preparing to read {name}',
+    'projectAgent.chat.activity.readFile': 'Reading {name}',
+    'projectAgent.chat.activity.reading': 'Reading files',
+    'projectAgent.chat.activity.image': 'Looking at the image',
+    'projectAgent.chat.activity.command': 'Running a command',
+    'projectAgent.chat.activity.search': 'Looking for relevant information',
+    'projectAgent.chat.activity.edit': 'Making changes',
+    'projectAgent.chat.activity.verification': 'Checking the results',
+    'projectAgent.chat.activity.delegating': 'Arranging the work',
+    'projectAgent.chat.activity.work': 'Checking on the work',
+    'projectAgent.chat.activity.memory': 'Looking through project memory',
+    'projectAgent.chat.activity.memoryUpdate': 'Updating project memory',
+    'projectAgent.chat.activity.directory': 'Looking through the folder',
+    'projectAgent.chat.toolLabel.read': 'file reading',
+    'projectAgent.chat.toolLabel.search': 'project search',
+    'projectAgent.chat.toolLabel.edit': 'file editing',
+    'projectAgent.chat.toolLabel.command': 'command execution',
+    'projectAgent.chat.toolRunning': 'Running {tool}',
+    'projectAgent.chat.toolDone': '{tool} finished',
+    'projectAgent.chat.toolFailed': '{tool} did not complete',
+    'projectAgent.chat.stop': 'Stop generating',
+    'projectAgent.chat.stopHint': 'Stop this response; dispatched tasks keep running',
+    'projectAgent.chat.stopping': 'Stopping',
+    'projectAgent.chat.stopped': 'Generation stopped. The content above is incomplete.',
+    'projectAgent.chat.stopFailed': 'Could not stop. Please try again.',
+    'projectAgent.chat.latest': 'Jump to latest message',
+    'projectAgent.chat.restoringReading': 'Restoring your reading position…',
+    'projectAgent.chat.readingUnavailable': 'Your reading position is not loaded or is unavailable. Continue looking in batches, or jump to latest.',
+    'projectAgent.chat.restoreReading': 'Continue restoring reading position',
+    'projectAgent.chat.received': 'Received',
+    'projectAgent.chat.loadOlder': 'Earlier messages',
+    'projectAgent.chat.loadingOlder': 'Loading earlier messages',
+    'projectAgent.chat.olderFailed': 'Load failed, retry',
+    'projectAgent.chat.sending': 'Sending',
+    'projectAgent.chat.failed': 'Not sent',
+    'projectAgent.chat.retry': 'Retry',
+    'projectAgent.chat.continueRetry': 'Continue trying',
+    'projectAgent.chat.recoveryScheduled': 'The connection was interrupted. I will continue from the progress already made.',
+    'projectAgent.chat.agent.open': 'View Agent work details',
+    'projectAgent.chat.agent.queued': 'queued',
+    'projectAgent.chat.agent.started': 'started work',
+    'projectAgent.chat.agent.update': 'sent an update',
+    'projectAgent.chat.agent.question': 'asked a work question',
+    'projectAgent.chat.agent.answer': 'sent an answer',
+    'projectAgent.chat.agent.reported': 'returned a result',
+    'projectAgent.chat.agent.verified': 'verification passed',
+    'projectAgent.chat.agent.verifying': 'checking the results',
+    'projectAgent.chat.agent.verificationProgress': 'checking the results · {count} observations checked',
+    'projectAgent.chat.agent.ended': 'finished',
+    'projectAgent.chat.agent.cancelled': 'cancelled',
+    'projectAgent.chat.agent.blocked': 'blocked',
+    'projectAgent.chat.recoveryContinuing': 'The main bot reply is scheduled to continue.',
+    'projectAgent.chat.recoveryExhausted': 'The connection has not recovered yet. Progress was saved. You can continue trying or send a new message.',
+    'projectAgent.chat.recoveryAuthentication': 'The connection could not be authenticated. Sign in again or check the connection settings, then continue trying.',
+    'projectAgent.chat.recoveryConfiguration': 'The connection settings need attention. You can continue after correcting them. Progress was saved.',
+    'projectAgent.chat.recoveryInvalidRequest': 'The service did not accept this request. Check the model or connection settings first. Progress was saved.',
+    'projectAgent.chat.recoveryPermission': 'The authorization needed to continue is no longer valid. Confirm authorization first. Progress was saved.',
+    'projectAgent.chat.recoveryUnknownOutcome': 'The result of an operation has not been confirmed. It needs to be checked first. Progress was saved.',
+    'projectAgent.chat.recoveryEnded': 'The main bot has recovered and delivered a new reply.',
+    'projectAgent.chat.recoveryEarlierReply': 'An earlier main bot reply failed. Its diagnostic record has been kept.',
+    'projectAgent.chat.recoveryCancelled': 'The main bot reply for this work was cancelled.',
+    'projectAgent.chat.recoveryPaused': 'The main bot reply for this work is paused.',
+    'projectAgent.chat.childWorkContinues': '{count} child tasks are still advancing. Their execution status is shown separately.',
+    'projectAgent.chat.recoveryHistory': 'Earlier interruption',
+    'projectAgent.chat.recoveryAttemptFailed': 'This attempt did not finish. Check the latest progress for the reason.',
+    'projectAgent.chat.recoveryEmptyResponse': 'The model returned no usable content. Progress was saved. You can try again.',
+    'projectAgent.chat.recoveryModelChanged': 'The model or connection configuration has changed, so this reply cannot resume directly. Progress was saved.',
+    'projectAgent.chat.recoveryStale': 'The state of this reply has changed. Please check the latest progress.',
+    'projectAgent.chat.recoveryMissingCheckpoint': 'The saved progress has no complete recovery record. It needs to be checked before executing again.',
+    'projectAgent.chat.unavailable': 'This main bot reply could not be completed.',
+    'projectAgent.chat.noProgress': 'Repeated checks produced no new progress, so repetition has stopped. Existing results are saved.',
+    'projectAgent.chat.budgetExhausted': 'This work reached its configured budget limit. Progress was saved. Adjust the limit to continue.',
+    'projectAgent.chat.budgetReady': 'The budget limit was adjusted. You can continue from saved progress.',
+    'projectAgent.chat.budgetReserved': 'Another execution currently reserves the budget. Progress was saved.',
+    'projectAgent.chat.budgetAvailable': 'The budget reservation was released. You can continue from saved progress.',
+    'projectAgent.chat.recoveryLegacyLimit': 'An older execution limit interrupted this reply. Progress was saved.',
+    'projectAgent.chat.budgetSourceSettings': 'Source: execution budget settings.',
+    'projectAgent.chat.budgetSourceStored': 'Source: retained budget configuration.',
+    'projectAgent.chat.budgetUnconfirmed': 'Execution cannot yet be confirmed to fit the configured budget. Progress was saved.',
+    'projectAgent.chat.budgetCostUnknown': 'The cost limit is USD {limit}, but usage cannot be confirmed. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetTokensUnknown': 'The token limit is {limit}, but usage cannot be confirmed. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetUsageUnknown': 'Usage cannot be confirmed accurately, so execution cannot continue within the budget. Unknown usage is not treated as zero.',
+    'projectAgent.chat.budgetRequests': 'Model requests: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetTools': 'Tool calls: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetTokens': 'Tokens: {used} used, limit {limit}.',
+    'projectAgent.chat.budgetCost': 'Estimated cost: USD {used} used, limit USD {limit}.',
+    'projectAgent.chat.context.error': 'Original error',
+    'projectAgent.chat.replied': 'Replied',
+    'projectAgent.chat.disposition.answered': 'Answered',
+    'projectAgent.chat.disposition.merged': 'Merged',
+    'projectAgent.chat.disposition.stopped': 'Stopped',
+    'projectAgent.chat.disposition.superseded': 'Replaced',
+    'projectAgent.chat.disposition.parallel': 'In parallel',
+    'projectAgent.chat.disposition.queued': 'Queued',
+    'projectAgent.chat.disposition.outOfScope': 'This message was about “{title}” and did not affect the others',
+    'projectAgent.chat.quote': 'Quote',
+    'projectAgent.chat.quoteRemove': 'Remove quote',
+    'projectAgent.chat.placeholder': 'Message {name}',
+    'projectAgent.chat.attach': 'Attach files or images',
+    'projectAgent.chat.previewAttachment': 'Preview image',
+    'projectAgent.chat.removeAttachment': 'Remove attachment',
+    'projectAgent.chat.attachmentMetadataOnly': 'File information only · content not read',
+    'projectAgent.chat.readingAttachments': 'Reading attachments…',
+    'projectAgent.chat.dropAttachments': 'Drop to attach files or images',
+    'projectAgent.chat.send': 'Send',
+    'projectAgent.chat.hint': 'Enter to send, Shift+Enter for a new line',
+    'projectAgent.chat.source': 'Source',
+    'projectAgent.chat.evidence': 'Evidence',
+    'projectAgent.chat.evidenceMore': '{count} more evidence records',
+    'projectAgent.chat.evidenceCollapse': 'Collapse evidence',
+    'projectAgent.chat.process': 'Process',
+    'projectAgent.chat.chooseAnswer': 'Choose an answer, or type your own',
+    'projectAgent.chat.you': 'You',
+    'projectAgent.process.reply': 'Send reply',
+    'projectAgent.process.heading': 'Reply process',
+    'projectAgent.process.steps': '{count} steps',
+    'projectAgent.process.sessions': 'Find work sessions',
+    'projectAgent.process.session': 'Read work session',
+    'projectAgent.process.start': 'Create work task',
+    'projectAgent.process.resume': 'Resume work task',
+    'projectAgent.process.cancel': 'Cancel work task',
+    'projectAgent.process.update': 'Update work settings',
+    'projectAgent.process.verification': 'Check verification',
+    'projectAgent.process.memory': 'Manage project memory',
+    'projectAgent.process.objective': 'Manage project objective',
+    'projectAgent.process.tool': 'Call tool',
+    'projectAgent.process.runningTitle': 'Running · {tool}',
+    'projectAgent.process.preparingTitle': 'Preparing · {tool}',
+    'projectAgent.process.organizing': 'Preparing the reply',
+    'projectAgent.process.preparingReply': 'Preparing a response',
+    'projectAgent.process.preparing': 'Preparing',
+    'projectAgent.process.running': 'Running',
+    'projectAgent.process.stopped': 'Stopped',
+    'projectAgent.process.awaitingContent': 'The model has not returned visible content yet. Execution steps will appear here.',
+    'projectAgent.process.receiving': 'Receiving arguments · {count} characters',
+    'projectAgent.process.preparingNote': 'Arguments are being generated. Execution has not started.',
+    'projectAgent.process.runningNote': 'The call is running. Its returned content will appear here when available.',
+    'projectAgent.process.parameters': 'Arguments',
+    'projectAgent.process.output': 'Returned content',
+    'projectAgent.process.truncated': 'Truncated',
+    'projectAgent.process.redacted': 'Redacted',
+    'projectAgent.process.previewLimit': 'Content exceeds the preview limit.',
+    'projectAgent.process.seconds': '{seconds}s',
+    'projectAgent.process.lessThanSecond': 'Less than 1s',
+    'projectAgent.process.minutes': '{minutes}m {seconds}s',
+    'projectAgent.process.done': 'Finished',
+    'projectAgent.process.failed': 'Did not complete',
+    'projectAgent.process.cancelled': 'Cancelled',
+    'projectAgent.process.noOutput': 'No content was returned.',
+    'projectAgent.process.suppressed': 'Not delivered',
+    'projectAgent.process.unknown': 'Status not recorded',
+    'projectAgent.process.sent': 'Sent',
+    'projectAgent.process.count': 'Returned {count} records',
+    'projectAgent.process.technical': 'Technical details',
+    'projectAgent.process.input': 'Arguments (up to 12,000 characters)',
+    'projectAgent.process.result': 'Returned record (up to 12,000 characters)',
+    'projectAgent.process.empty': 'No process record is available for this turn',
+    'projectAgent.chat.openProcess': 'View process',
+    'projectAgent.chat.memoryUsed': 'Used {count} memories',
+    'projectAgent.chat.memoryLearned': 'Remembered {count} new',
+    'projectAgent.chat.digest': 'Daily digest',
+    'projectAgent.chat.today': 'Today {time}',
+    'projectAgent.chat.earlierDay': '{date} {time}',
+    'projectAgent.chat.replyTo': 'Reply',
+    'projectAgent.chat.sessionState.stopping': 'Stopping',
+    'projectAgent.chat.sessionState.awaiting_outcome': 'Execution outcome needs checking',
+    'projectAgent.task.coordination.heading': 'Work adjustments',
+    'projectAgent.task.coordination.replacement': 'Follow-up task: {title}',
+    'projectAgent.task.coordination.prior': 'View previous task',
+    'projectAgent.task.coordination.applied': 'Adjustment applied. Task progress is shown in its current status.',
+    'projectAgent.task.coordination.executionQueued': 'Continuation is scheduled; awaiting an execution receipt.',
+    'projectAgent.task.coordination.executionObserved': 'Continuation was observed. Results follow task progress and verification.',
+    'projectAgent.task.coordination.pending': 'Adjusting execution. Existing work is retained.',
+    'projectAgent.task.coordination.unknown': 'Some operations have an unconfirmed outcome. They will not be repeated before checking.',
+    'projectAgent.task.coordination.blocked': 'This adjustment could not be applied. Existing records are retained.',
+    'projectAgent.task.coordination.handoff': 'Taking over',
+    'projectAgent.chat.sessionState.paused': 'Paused',
+    'projectAgent.chat.sessionState.queued': 'Queued',
+    'projectAgent.chat.sessionState.starting': 'Starting',
+    'projectAgent.chat.work.heading': 'Related work',
+    'projectAgent.chat.work.more': '{count} more tasks',
+    'projectAgent.chat.work.related': 'Related task',
+    'projectAgent.chat.work.unavailable': 'Status unavailable',
+    'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
+    'projectAgent.chat.work.waiting': 'Awaiting follow-up',
+    'projectAgent.chat.work.resultSettling': 'Reviewing the result',
+    'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
+    'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
+    'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',
+    'projectAgent.chat.work.open': 'View task details',
+    'projectAgent.task.cancel': 'Cancel task',
+    'projectAgent.task.cancelling': 'Cancelling…',
+    'projectAgent.task.cancelFailed': 'Could not cancel. Please retry. Existing results are preserved.',
+    'projectAgent.chat.work.background': 'Tasks ({count})',
+    'projectAgent.chat.context.basis': 'Result basis · {count} records',
+    'projectAgent.chat.originalMessage': 'View original message',
+    'projectAgent.chat.context.details': 'Reply details',
+    'projectAgent.chat.context.title': 'Reply details',
+    'projectAgent.chat.context.back': 'Back to reply details',
+    'projectAgent.chat.context.rounds': 'Full call record',
+    'projectAgent.chat.context.unavailable': 'Details for this reply are currently unavailable.',
+    'projectAgent.chat.context.memoryUnavailable': 'The related memories are unavailable.',
+    'projectAgent.drawer.inspectBack': 'Back to bot profile',
+    'projectAgent.drawer.evidenceUnavailable': 'This evidence is unavailable.',
+    'projectAgent.evidence.title': 'Reply sources',
+    'projectAgent.evidence.record': 'Operation record',
+    'projectAgent.evidence.listHelp': 'Browse the saved operations referenced by this reply.',
+    'projectAgent.evidence.historical': 'This is the content saved at the time of the operation.',
+    'projectAgent.evidence.bodyMissing': 'Source recorded; detailed content was not saved',
+    'projectAgent.evidence.notFound': 'This source record was not found',
+    'projectAgent.evidence.readFailed': 'This record could not be loaded',
+    'projectAgent.evidence.cannotVerify': 'This record cannot be used to check the conclusion. Return to reply details to view other sources.',
+    'projectAgent.evidence.tryLater': 'Return to reply details and open it again. If it remains unavailable, it cannot be used to check the conclusion.',
+    'projectAgent.evidence.emptyOutput': 'This operation produced no text output.',
+    'projectAgent.drawer.botDescription': 'Coordinates work for this project, follows up on tasks and brings back results.',
+    'projectAgent.drawer.acceptance.confirm': 'Your confirmation',
+    'projectAgent.drawer.memory.details': 'Memory details',
+    'projectAgent.chat.sessionState.running': 'Running',
+    'projectAgent.chat.sessionState.waiting_user': 'Needs your input',
+    'projectAgent.chat.sessionState.waiting_agent': 'With the main Bot',
+    'projectAgent.chat.sessionState.verifying': 'Verifying',
+    'projectAgent.chat.sessionState.result_ready': 'Awaiting your confirmation',
+    'projectAgent.chat.sessionState.accepted': 'Accepted',
+    'projectAgent.chat.sessionState.failed': 'Failed',
+    'projectAgent.chat.sessionState.cancelled': 'Cancelled',
+    'projectAgent.chat.sessionState.superseded': 'Superseded',
+    'projectAgent.chat.verdict.passed': 'Verdict: verified',
+    'projectAgent.chat.verdict.failed': 'Verdict: failed',
+    'projectAgent.chat.verdict.partial': 'Verdict: partial',
+    'projectAgent.chat.verdict.unverifiable': 'Verdict: unverifiable',
+    'projectAgent.chat.surfacingLabel': 'Delivery: ',
+    'projectAgent.chat.surfacing.interrupt': 'Immediate',
+    'projectAgent.chat.surfacing.message': 'Show in the chat',
+    'projectAgent.chat.surfacing.digest': 'Keep for the digest',
+    'projectAgent.chat.surfacing.silent': 'Stay quiet',
+    'projectAgent.chat.approve': 'Approve',
+    'projectAgent.chat.allowOnce': 'Allow once',
+    'projectAgent.chat.allowTask': 'Repeat this operation for this task',
+    'projectAgent.chat.allowImage': 'Allow this image for this session',
+    'projectAgent.chat.activity.permission': 'Waiting for permission',
+    'projectAgent.process.awaiting_permission': 'Waiting for permission',
+    'projectAgent.process.permissionTitle': 'Waiting for permission · {tool}',
+    'projectAgent.process.permissionNote': 'This step needs permission and has not read the image. Allow, deny or cancel in the conversation permission card.',
+    'projectAgent.process.image': 'View image',
+    'projectAgent.chat.cancelImageRead': 'Cancel this read',
+    'projectAgent.chat.imageWaitLimit': 'Permission waits up to 5 minutes. Allowing continues this read.',
+    'projectAgent.chat.imageTimeout': 'Permission timed out. This request did not read the image. Start a new request if needed.',
+    'projectAgent.chat.imageCancelled': 'This image read was cancelled.',
+    'projectAgent.chat.imageDenied': 'This image read was denied.',
+    'projectAgent.chat.imageApproved': 'Permission granted. Continuing this image read.',
+    'projectAgent.chat.approvalReceipt.title': 'Operation permission record',
+    'projectAgent.chat.approvalReceipt.approved': 'Permission granted',
+    'projectAgent.chat.approvalReceipt.denied': 'Denied',
+    'projectAgent.chat.approvalReceipt.cancelled': 'Cancelled',
+    'projectAgent.chat.approvalReceipt.expired': 'Expired',
+    'projectAgent.chat.approvalReceipt.closed': 'Closed',
+    'projectAgent.chat.imageUnavailable': 'This permission request ended without reading the image. Start a new request if needed.',
+    'projectAgent.chat.imageReadNotice': 'Read this image for the current model. Allowing it for this session covers only this image, for this bot and its tasks, valid for 30 minutes.',
+    'projectAgent.chat.approveContinue': 'Approve and continue',
+    'projectAgent.chat.reject': 'Reject',
+    'projectAgent.chat.answer': 'Answer',
+    'projectAgent.policy.planApproval': 'Approve plans before starting',
+    'projectAgent.policy.planApproval.never': 'Start directly',
+    'projectAgent.policy.planApproval.writes': 'Approve write tasks',
+    'projectAgent.policy.planApproval.always': 'Approve every task',
+    'projectAgent.policy.acceptance.auto': 'Accept eligible results automatically',
+    'projectAgent.policy.acceptance.confirm': 'I confirm results',
+    'projectAgent.policy.models': 'Bot models',
+    'projectAgent.model.defaults': 'Defaults and tiers',
+    'projectAgent.model.botOnly': 'This bot',
+    'projectAgent.model.nextReply': 'Applies to future replies or new tasks',
+    'projectAgent.model.runningReply': 'Model used by the current reply',
+    'projectAgent.model.unavailable': 'Choose model',
+    'projectAgent.model.select': 'Choose bot model',
+    'projectAgent.model.noEffort': 'No adjustable effort',
+    'projectAgent.access.changed': 'The Bot access policy changed. This previous request is closed; future actions use the current policy.',
+    'projectAgent.access.label': 'Bot and task access',
+    'projectAgent.access.scope': 'Applies to future actions by this Bot and all its tasks. Role limits and explicit denials still apply.',
+    'projectAgent.access.loading': 'Loading access…',
+    'projectAgent.access.failed': 'Access could not be saved or read. The previous policy is retained. Retry.',
+    'projectAgent.access.retry': 'Retry access',
+    'projectAgent.model.saveFailed': 'Model settings were not saved. Please retry.',
+    'projectAgent.policy.modelsHint': 'Choose this bot’s model and reasoning effort directly. Conversation changes apply to future replies; task changes apply to new tasks.',
+    'projectAgent.policy.inherit': 'Use global routing',
+    'projectAgent.policy.autoPool': 'Configured automatic pool',
+    'projectAgent.policy.moreRoles': 'More roles',
+    'projectAgent.policy.fewerRoles': 'Fewer roles',
+    'projectAgent.policy.scope': 'Allowed models',
+    'projectAgent.policy.scope.all': 'All configured models',
+    'projectAgent.policy.scope.restricted': 'Selected models only',
+    'projectAgent.policy.localOnly': 'Use local models only',
+    'projectAgent.chat.confirmResult': 'Confirm result',
+    'projectAgent.chat.confirmCompletion': 'Confirm criteria met',
+    'projectAgent.chat.reviewReport': 'View report',
+    'projectAgent.chat.completionHint': 'The report is ready. Review these items before continuing checks. Tell me if changes are needed.',
+    'projectAgent.chat.retryCompletion': 'Retry checks',
+    'projectAgent.chat.completionRetryHint': 'Your review was saved, but checks could not start. You can retry.',
+    'projectAgent.chat.resultChanged': 'The task state changed and cannot be confirmed yet. The latest progress has been refreshed.',
+    'projectAgent.chat.acceptReadme': 'Write README',
+    'projectAgent.chat.actionFailed': 'Action failed. Please try again',
+    'projectAgent.chat.draftLoading': 'Restoring draft…',
+    'projectAgent.chat.draftSaveFailed': 'Draft not saved. Its contents remain in this window. Retry; unsaved input will not be sent.',
+    'projectAgent.chat.draftConflict': 'Another window changed this draft. Copy the contents in this window before reopening to preserve both edits.',
+    'projectAgent.chat.inputUnconfirmed': 'Delivery is unconfirmed. The original message is retained.',
+    'projectAgent.chat.retrySameInput': 'Retry same message',
+    'projectAgent.chat.inputDeliveryIssue': 'Input received; the subsequent handoff needs attention in the original task.',
+    'projectAgent.chat.planDecisionRecord': 'Plan decision record',
+    'projectAgent.chat.decisionUpdating': 'Decision submitted. Reading the current state…',
+    'projectAgent.chat.verificationPending': 'Verification has no conclusion yet',
+    'projectAgent.drawer.title': 'Bot settings',
+    'projectAgent.drawer.close': 'Close',
+    'projectAgent.drawer.back': 'Back to tasks',
+    'projectAgent.drawer.sceneBack': 'Back to details',
+    'projectAgent.drawer.missing': 'None yet',
+    'projectAgent.drawer.tab.overview': 'Overview',
+    'projectAgent.drawer.tab.tasks': 'Tasks',
+    'projectAgent.drawer.tab.objectives': 'Objectives',
+    'projectAgent.drawer.tab.memory': 'Memory',
+    'projectAgent.drawer.tab.settings': 'Settings',
+    'projectAgent.drawer.folder': 'Bound folder',
+    'projectAgent.drawer.noPath': 'No folder yet',
+    'projectAgent.drawer.reveal': 'Show in Finder',
+    'projectAgent.drawer.brief': 'Project brief',
+    'projectAgent.drawer.briefEmpty': 'No project brief yet',
+    'projectAgent.drawer.running': 'Tasks in progress',
+    'projectAgent.drawer.runningEmpty': 'Nothing is in progress',
+    'projectAgent.drawer.acceptance': 'Sign-off',
+    'projectAgent.drawer.acceptance.auto': 'Automatic',
+    'projectAgent.drawer.acceptance.pending': 'Sign-off does not have its own save path yet. It stays automatic.',
+    'projectAgent.drawer.model': 'Conversation model',
+    'projectAgent.drawer.modelEmpty': 'Follow the global routing',
+    'projectAgent.drawer.model.pending': 'A per-project model scope does not have its own save path yet. This shows the global conversation model.',
+    'projectAgent.drawer.tasksEmpty': 'No tasks yet',
+    'projectAgent.drawer.showAll': 'Show all',
+    'projectAgent.drawer.collapse': 'Show less',
+    'projectAgent.drawer.group.needsYou': 'Needs you',
+    'projectAgent.drawer.group.running': 'In progress',
+    'projectAgent.drawer.group.queued': 'Queued',
+    'projectAgent.drawer.group.done': 'Ended',
+    'projectAgent.drawer.group.paused': 'Paused',
+    'projectAgent.drawer.supersededBy': 'Replaced by “{task}”',
+    'projectAgent.drawer.resume': 'Resume',
+    'projectAgent.drawer.resumeFailed': 'Could not resume. Please retry.',
+    'projectAgent.drawer.replacement': 'a later task',
+    'projectAgent.drawer.group.history': 'History',
+    'projectAgent.drawer.group.classic': 'Classic tasks',
+    'projectAgent.drawer.historyEmpty': 'No history to continue',
+    'projectAgent.drawer.continueHistory': 'Hand this to the bot',
+    'projectAgent.drawer.historyPartial': 'This chat has tool or attachment material that will not come along. Hand it to the bot anyway?',
+    'projectAgent.drawer.historyPartialConfirm': 'Continue anyway',
+    'projectAgent.drawer.historyPickBot': 'Choose a bot',
+    'projectAgent.drawer.classicOpen': 'Open the original conversation',
+    'projectAgent.drawer.legacyAutomations': 'Automations (legacy)',
+    'projectAgent.drawer.legacyAutomationsEmpty': 'This project has no legacy automations',
+    'projectAgent.drawer.anchor': 'Source message ID',
+    'projectAgent.drawer.frozenModel': 'Execution model',
+    'projectAgent.drawer.conclusion': 'Conclusion',
+    'projectAgent.drawer.evidence': 'Evidence',
+    'projectAgent.drawer.progress': 'Latest progress',
+    'projectAgent.drawer.openScene': 'View work conversation',
+    'projectAgent.drawer.scene': 'Work conversation',
+    'projectAgent.drawer.sceneMissing': 'No work conversation yet',
+    'projectAgent.drawer.task.created': 'Created {time}',
+    'projectAgent.drawer.task.conversation': 'Back to conversation',
+    'projectAgent.drawer.task.question': "A question for you",
+    'projectAgent.drawer.task.followUp': "{name} handles the next step",
+    'projectAgent.drawer.task.followUpEnded': "Ask a follow-up",
+    'projectAgent.drawer.task.endedQuestion': "Ask about the result or add a new requirement in the main conversation.",
+    'projectAgent.drawer.task.askEnded': "Follow up with {name}",
+    'projectAgent.drawer.task.askEndedDraft': "Please explain the result and supporting evidence for “{title}”.",
+    'projectAgent.drawer.task.noQuestion': "When your decision is needed, {name} will ask a specific question in the conversation. You can review the task or ask for an update here.",
+    'projectAgent.drawer.task.answer': "Answer in the conversation",
+    'projectAgent.drawer.task.ask': "Ask {name} for an update",
+    'projectAgent.drawer.task.askDraft': "How is “{title}” progressing? Please explain any blocker and the next step. If you need my decision, ask a specific question.",
+    'projectAgent.drawer.task.draftHint': "Prepares a message for you to review and send.",
+    'projectAgent.drawer.task.update': "Latest note from {name}",
+    'projectAgent.drawer.task.viewUpdate': "View the full note in the conversation",
+    'projectAgent.drawer.task.instructions': "Internal task instructions",
+    'projectAgent.drawer.task.description': 'Task description',
+    'projectAgent.drawer.task.descriptionMissing': 'The task description is unavailable. Return to the conversation to see the original request.',
+    'projectAgent.drawer.task.information': 'Task information',
+    'projectAgent.drawer.task.readingReport': 'Reading task information…',
+    'projectAgent.drawer.task.reportUnavailable': 'Task information is unavailable. Please retry.',
+    'projectAgent.drawer.task.reportStale': 'Task information could not be refreshed. The last read is shown below.',
+    'projectAgent.drawer.task.noReport': 'No additional task information yet.',
+    'projectAgent.drawer.task.id': 'Task ID',
+    'projectAgent.drawer.task.records': 'Execution records · {count}',
+    'projectAgent.drawer.task.verification': 'Verification',
+    'projectAgent.drawer.task.verificationScope': 'Applies to the current task evidence; verification does not imply acceptance.',
+    'projectAgent.drawer.task.verificationChecks': 'Checks',
+    'projectAgent.drawer.task.verificationEvidence': 'Task results and evidence',
+    'projectAgent.drawer.task.verificationIndependent': 'Independent review',
+    'projectAgent.drawer.task.verificationHistory': 'Review history',
+    'projectAgent.drawer.task.verificationHistorical': 'Historical diagnostics do not establish the current verdict.',
+    'projectAgent.drawer.task.verificationPassed': 'Passed',
+    'projectAgent.drawer.task.verificationFailed': 'Failed',
+    'projectAgent.drawer.task.verificationMissing': 'Not reviewed',
+    'projectAgent.drawer.task.verificationOther': 'Other check',
+    'projectAgent.drawer.task.hint.confirm': '{name} follows up on this task in the main conversation.',
+    'projectAgent.drawer.task.hint.failed': 'The task could not finish. {name} explains the next steps in the main conversation.',
+    'projectAgent.drawer.task.hint.ended': 'Review {name}’s delivery or ask a follow-up in the main conversation.',
+    'projectAgent.drawer.task.hint.working': '{name} reports progress and results in the main conversation.',
+    'projectAgent.drawer.objective.source': 'Objective',
+    'projectAgent.drawer.objective.empty': 'No ongoing objectives',
+    'projectAgent.drawer.objective.hint': 'Tell this bot what to work on or watch over time.',
+    'projectAgent.drawer.objective.active': 'Active',
+    'projectAgent.drawer.objective.paused': 'Paused',
+    'projectAgent.drawer.objective.achieved': 'Achieved',
+    'projectAgent.drawer.objective.abandoned': 'Abandoned',
+    'projectAgent.drawer.objective.pending': 'Awaiting your confirmation',
+    'projectAgent.drawer.objective.report_only': 'Report only',
+    'projectAgent.drawer.objective.propose': 'Propose first',
+    'projectAgent.drawer.objective.act': 'Act directly',
+    'projectAgent.drawer.objective.autonomy': 'Autonomy',
+    'projectAgent.drawer.objective.budget': 'Automatic tasks per day',
+    'projectAgent.drawer.objective.probes': 'Checks per day',
+    'projectAgent.drawer.objective.autoAccept': 'Allow automatic acceptance',
+    'projectAgent.drawer.objective.autoUsage': 'Automatic tasks today {used}/{limit}',
+    'projectAgent.drawer.objective.usage': 'Checks today {used}/{limit}',
+    'projectAgent.drawer.objective.watch.unavailable': 'Check temporarily unavailable',
+    'projectAgent.drawer.objective.watch.auth': 'Sign in to GitHub to check CI',
+    'projectAgent.drawer.objective.watch.cli': 'GitHub CLI is required to check CI',
+    'projectAgent.drawer.objective.watch.daily': 'Daily check limit reached',
+    'projectAgent.drawer.objective.watch.hourly': 'Hourly check limit reached',
+    'projectAgent.drawer.objective.watch.scope': 'Path is outside this project',
+    'projectAgent.drawer.objective.watch.range': 'Watch range is too large; narrow the paths',
+    'projectAgent.drawer.objective.watch.model': 'No observation model is configured',
+    'projectAgent.drawer.objective.watch.cancelled': 'Check stopped',
+    'projectAgent.drawer.objective.last': 'Last check',
+    'projectAgent.drawer.objective.next': 'Next check',
+    'projectAgent.drawer.objective.unchecked': 'Not checked yet',
+    'projectAgent.drawer.objective.event': 'Check on events',
+    'projectAgent.drawer.objective.edit': 'Edit plan',
+    'projectAgent.drawer.objective.save': 'Save',
+    'projectAgent.drawer.objective.cancel': 'Cancel',
+    'projectAgent.drawer.objective.pause': 'Pause',
+    'projectAgent.drawer.objective.resume': 'Resume',
+    'projectAgent.drawer.objective.reopen': 'Reopen',
+    'projectAgent.drawer.objective.abandon': 'Abandon',
+    'projectAgent.drawer.objective.failed': 'Could not save. Refresh and retry.',
+    'projectAgent.drawer.objective.loading': 'Loading objectives',
+    'projectAgent.drawer.objective.title': 'Title',
+    'projectAgent.drawer.objective.outcome': 'Desired outcome',
+    'projectAgent.drawer.objective.tasks': 'Related tasks',
+    'projectAgent.drawer.objective.noTasks': 'No related tasks yet',
+    'projectAgent.drawer.objectives.body': 'Objectives will open in a later version',
+    'projectAgent.drawer.objectives.hint': 'For now, you can give this bot specific tasks in chat.',
+    'projectAgent.drawer.memory.empty': 'No memories yet',
+    'projectAgent.drawer.memory.emptyHint': 'Project facts, preferences, and decisions remembered by the bot will appear here.',
+    'projectAgent.drawer.memory.filterEmpty': 'No memories match these filters',
+    'projectAgent.drawer.memory.controls': 'Memory settings',
+    'projectAgent.drawer.memory.saved': 'Saved memories',
+    'projectAgent.drawer.memory.page': '{start}–{end} / {total}',
+    'projectAgent.drawer.memory.previous': 'Previous page',
+    'projectAgent.drawer.memory.next': 'Next page',
+    'projectAgent.drawer.memory.scope.project': 'This project',
+    'projectAgent.drawer.memory.scope.global': 'All projects',
+    'projectAgent.drawer.memory.readonly': 'Pin, revoke, restore, and export these memories',
+    'projectAgent.drawer.memory.filter.kind': 'Kind',
+    'projectAgent.drawer.memory.filter.trust': 'Trust',
+    'projectAgent.drawer.memory.filter.status': 'Status',
+    'projectAgent.drawer.memory.filter.all': 'All',
+    'projectAgent.drawer.memory.kind.fact': 'Fact',
+    'projectAgent.drawer.memory.kind.preference': 'Preference',
+    'projectAgent.drawer.memory.kind.decision': 'Decision',
+    'projectAgent.drawer.memory.kind.procedure': 'Procedure',
+    'projectAgent.drawer.memory.kind.responsibility': 'Responsibility',
+    'projectAgent.drawer.memory.trust.stated': 'Stated',
+    'projectAgent.drawer.memory.trust.verified': 'Verified',
+    'projectAgent.drawer.memory.status.active': 'Active',
+    'projectAgent.drawer.memory.status.forgotten': 'Revoked',
+    'projectAgent.drawer.memory.sources': 'Sources',
+    'projectAgent.drawer.memory.status.expired': 'Expired',
+    'projectAgent.drawer.memory.status.conflicted': 'Conflicted',
+    'projectAgent.drawer.memory.needsReverify': 'Possibly outdated · Needs verification',
+    'projectAgent.drawer.memory.keepThis': 'Keep this memory',
+    'projectAgent.drawer.memory.pin': 'Pin',
+    'projectAgent.drawer.memory.unpin': 'Unpin',
+    'projectAgent.drawer.memory.revoke': 'Revoke',
+    'projectAgent.drawer.memory.restore': 'Restore',
+    'projectAgent.drawer.memory.edit': 'Edit',
+    'projectAgent.drawer.memory.save': 'Save',
+    'projectAgent.drawer.memory.exportJson': 'Export JSON',
+    'projectAgent.drawer.memory.exportMarkdown': 'Export Markdown',
+    'projectAgent.drawer.memory.projectSwitch': 'Enable memory',
+    'projectAgent.drawer.memory.useMemory': 'Use memory in conversations',
+    'projectAgent.drawer.memory.learnPreferences': 'Learn preferences from my habits',
+    'projectAgent.drawer.memory.learnLater': 'Preference learning starts in a later step. This switch is saved now.',
+    'projectAgent.drawer.settings.name': 'Name',
+    'projectAgent.drawer.settings.appearance': 'Appearance',
+    'projectAgent.drawer.settings.workflow': 'Working style',
+    'projectAgent.drawer.settings.runtime': 'Runtime and global settings',
+    'projectAgent.drawer.settings.globalScope': 'Applies to all bots',
+    'projectAgent.drawer.settings.advancedModels': 'More roles and model limits',
+    'projectAgent.drawer.settings.save': 'Save',
+    'projectAgent.drawer.settings.avatar': 'Avatar',
+    'projectAgent.drawer.settings.avatarNew': 'Generate another',
+    'projectAgent.drawer.settings.avatarColor': 'Color',
+    'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
+    'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',
+    'projectAgent.drawer.settings.avatarColor.1': 'Coral',
+    'projectAgent.drawer.settings.avatarColor.2': 'Amber',
+    'projectAgent.drawer.settings.avatarColor.3': 'Mint',
+    'projectAgent.drawer.settings.avatarColor.4': 'Lilac',
+    'projectAgent.drawer.settings.avatarColor.5': 'Rose',
+    'projectAgent.drawer.settings.avatarColor.6': 'Lagoon',
+    'projectAgent.drawer.settings.avatarColor.7': 'Warm gray',
+    'projectAgent.drawer.settings.delete': 'Delete bot',
+    'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
+    'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',
+    'projectAgent.drawer.settings.concurrency': 'Global concurrent turns',
+    'projectAgent.drawer.settings.concurrencyHint': 'Shared by all bots, from 1 to 8. Each project admits one in-place writer and two readers.',
+    'projectAgent.drawer.queuedBehind': 'Waiting for {tasks}',
+    'projectAgent.drawer.dependencyFailed': 'Dependency needs attention: {tasks}',
+    'projectAgent.drawer.dependencyMissing': 'Dependency is missing; please replan',
+    'projectAgent.drawer.diskSpace': 'Queued: less than 2 GB of free disk space',
+    'projectAgent.drawer.isolationFailed': 'Queued: isolated workspace is unavailable',
+    'projectAgent.drawer.settings.autoHandoff': 'Merge automatically after policy acceptance',
+    'projectAgent.drawer.settings.autoHandoffHint': 'Off by default. Verified, accepted changes may merge into this project when enabled.',
+    'projectAgent.drawer.settings.proactivity': 'How often to speak up',
+    'projectAgent.drawer.settings.proactivity.inherit': 'Follow the global setting',
+    'projectAgent.drawer.settings.proactivity.quiet': 'Quiet',
+    'projectAgent.drawer.settings.proactivity.low': 'Low',
+    'projectAgent.drawer.settings.proactivity.standard': 'Standard',
+    'projectAgent.drawer.settings.proactivity.high': 'High',
+    'projectAgent.drawer.settings.proactivity.muted': 'Muted',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',
@@ -1816,6 +4249,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.channel.auto': 'Auto (follow current version)',
     'updater.settings.channel.beta': 'Beta (early access)',
     'updater.settings.channel.stable': 'Stable (production)',
+    'updater.badge.channel.auto': 'Auto',
+    'updater.badge.channel.beta': 'Beta',
+    'updater.badge.channel.stable': 'Stable',
     'updater.settings.currentVersion': 'Current version',
     'updater.settings.checkNow': 'Check for updates',
     'updater.settings.checking': 'Checking…',

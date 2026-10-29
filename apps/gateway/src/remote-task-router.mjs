@@ -76,7 +76,6 @@ export function createRemoteTaskRouter({ connections, now = Date.now, limit = 20
           pending.delete(requestId);
           reject(new Error('OUTCOME_UNKNOWN'));
         }, answerTimeoutMs);
-        timer.unref?.();
         pending.set(requestId, { resolve, reject, timer });
         try {
           route.send({ type: 'remote.task.request', protocolVersion: 1, request });

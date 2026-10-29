@@ -1,8 +1,8 @@
 import { fetchGrokWithConnectionRecovery } from '../provider-transports/grok-fetch.mjs';
+import { GROK_SUBSCRIPTION_BASE_URL, buildGrokSubscriptionHeaders } from '@peer-agent/runtime-node';
 
-export const GROK_BUILD_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
+export const GROK_BUILD_BASE_URL = GROK_SUBSCRIPTION_BASE_URL;
 export const GROK_BUILD_DEFAULT_MODEL = 'grok-4.5';
-export const GROK_BUILD_CLIENT_VERSION = '0.1.202';
 
 const FALLBACK_MODELS = [
   {
@@ -17,16 +17,7 @@ const FALLBACK_MODELS = [
   },
 ];
 
-export function buildGrokBuildHeaders(accessToken, extra = {}) {
-  return {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-    'X-XAI-Token-Auth': 'xai-grok-cli',
-    'x-grok-client-surface': 'grok-build',
-    'x-grok-client-version': GROK_BUILD_CLIENT_VERSION,
-    ...extra,
-  };
-}
+export const buildGrokBuildHeaders = buildGrokSubscriptionHeaders;
 
 function toModel(item) {
   const id = typeof item?.id === 'string' ? item.id.trim() : '';

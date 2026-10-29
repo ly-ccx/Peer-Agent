@@ -7,26 +7,13 @@ if (process.argv[2] === 'acp') {
   process.exit(process.exitCode ?? 0);
 }
 
-const { createCliRenderer } = await import('@opentui/core');
-const { createRoot } = await import('@opentui/react');
-import os from 'node:os';
-import path from 'node:path';
-
-const { App } = await import('./app.tsx');
 import {
   formatPeerHelp,
   parsePeerArgv,
   shouldRefuseInteractiveTui,
 } from './cli-argv.ts';
-const { runPeerExec } = await import('./cli-exec.ts');
 import { CLI_EXIT } from './cli-exit.ts';
 import { handleCliVersionArgs } from './cli-version.ts';
-import { createCliUpdateController } from './cli-update.ts';
-import { createTuiLocalAccessStore } from './tui-local-access-store.ts';
-const { createTuiRuntime } = await import('./tui-runtime.ts');
-import { createTuiShutdown } from './tui-shutdown.ts';
-import { flushTuiPerfSync } from './tui-perf.ts';
-import { formatTerminalTitle } from './terminal-title.ts';
 
 const argv = process.argv.slice(2);
 if (handleCliVersionArgs(argv)) {
@@ -34,6 +21,7 @@ if (handleCliVersionArgs(argv)) {
 }
 
 const command = parsePeerArgv(argv);
+if (command.kind === 'version') process.exit(0);
 if (command.kind === 'help') {
   console.log(formatPeerHelp(command.topic));
   process.exit(0);
@@ -43,6 +31,7 @@ if (command.kind === 'error') {
   process.exit(command.exitCode);
 }
 if (command.kind === 'exec') {
+  const { runPeerExec } = await import('./cli-exec.ts');
   process.exit(await runPeerExec(command.options));
 }
 if (shouldRefuseInteractiveTui(process.stdout.isTTY)) {
@@ -50,41 +39,5 @@ if (shouldRefuseInteractiveTui(process.stdout.isTTY)) {
   process.exit(CLI_EXIT.usage);
 }
 
-const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
-const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
-const localAccessStore = createTuiLocalAccessStore({ userDataPath });
-const runtime = createTuiRuntime({
-  workspaceRoot,
-  userDataPath,
-  accessLevel: localAccessStore.getAccessLevel(),
-  persistAccessLevel: (accessLevel) => localAccessStore.setAccessLevel(accessLevel),
-});
-const renderer = await createCliRenderer({ exitOnCtrlC: false });
-renderer.setTerminalTitle(formatTerminalTitle(workspaceRoot));
-const cliUpdate = createCliUpdateController();
-const root = createRoot(renderer);
-const shutdown = createTuiShutdown({
-  unmount: () => root.unmount(),
-  destroyRenderer: () => renderer.destroy(),
-  exitProcess: (code) => {
-    void runtime.dispose();
-    flushTuiPerfSync();
-    process.exit(code);
-  },
-});
-
-root.render(
-  <App
-    host={runtime.host}
-    model={runtime.model}
-    modelLabel={runtime.modelConfig.modelLabel}
-    modelSelection={runtime.modelSelection}
-    languageStore={runtime.languageStore}
-    themeStore={runtime.themeStore}
-    cliUpdate={cliUpdate}
-    getSessionFastMode={() => runtime.getSessionFastMode()}
-    setSessionFastMode={(value) => runtime.setSessionFastMode(value)}
-    onQuit={shutdown}
-  />,
-);
-queueMicrotask(() => void cliUpdate.check());
+const { runInteractiveTui } = await import('./interactive-entry.tsx');
+await runInteractiveTui(command);

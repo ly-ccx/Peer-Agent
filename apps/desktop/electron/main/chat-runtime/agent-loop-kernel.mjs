@@ -7,6 +7,7 @@ import {
   createUnknownContextAccountingSnapshot,
   isContextAccountingSnapshotCurrent,
 } from '@peer-agent/runtime-core';
+import { observeProviderRequestOutput } from './provider-request-recovery.mjs';
 
 export function normalizeAgentLoopMaxTurns(value) {
   if (value === undefined || value === null || value === '' || value === false) {
@@ -47,6 +48,7 @@ export function createAgentLoopKernel({
   streamId,
   conversationId = null,
   maxTurns = defaultAgentLoopMaxTurns(),
+  executionBudget = null,
   maxUnsupportedToolRetries = 1,
   maxEmptyResponseRetries = 1,
   maxThinkingOnlyRetries = 1,
@@ -59,7 +61,9 @@ export function createAgentLoopKernel({
   contextWindow = null,
   countCapability = { kind: 'observed_usage_only' },
 } = {}) {
-  const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
+  const requestedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
+  const normalizedMaxTurns = Number.isFinite(executionBudget?.maxTurns)
+    ? Math.min(requestedMaxTurns, Math.max(1, Math.floor(executionBudget.maxTurns))) : requestedMaxTurns;
   const normalizedIdentity = {
     conversationId: String(
       accountingIdentity?.conversationId || conversationId || streamId || 'desktop',
@@ -109,6 +113,7 @@ export function createAgentLoopKernel({
 
   const providerWebContents = {
     send(channel, payload) {
+      observeProviderRequestOutput(channel, payload);
       if (
         (channel === 'chat:stream:delta' || channel === 'chat:stream:thinking')
         && typeof payload?.content === 'string'
@@ -169,22 +174,27 @@ export function createAgentLoopKernel({
     webContents?.send?.('chat:stream:done', payload);
   }
 
-  function sendError(error) {
+  function sendError(error, providerRecovery = null) {
     const usage = usageAccounting.snapshot().turnTotal;
     const payload = {
       streamId,
       error,
       contextAccounting: contextLifecycle.current(),
+      ...(providerRecovery ? { providerRecovery } : {}),
     };
     if (hasBillableUsage(usage)) payload.usage = usage;
     webContents?.send?.('chat:stream:error', payload);
   }
 
-  function sendHttpError(status, text) {
-    sendError(`HTTP ${status}: ${String(text || '').slice(0, 300)}`);
+  function sendHttpError(status, text, providerRecovery = null) {
+    sendError(`HTTP ${status}: ${String(text || '').slice(0, 300)}`, providerRecovery);
   }
 
-  function sendLoopExhausted({ turns = normalizedMaxTurns } = {}) {
+  function sendLoopExhausted({ turns = normalizedMaxTurns, reason = 'max_turns_exceeded' } = {}) {
+    if (reason === 'max_tool_calls_exceeded') {
+      sendError('agent_tool_budget_exhausted: 本轮工具调用额度已用完，回复尚未完成，已停止继续执行。');
+      return;
+    }
     const budget = Number.isFinite(turns) ? String(turns) : 'unbounded';
     sendError(
       `agent_loop_exhausted: configured agent loop turn budget (${budget}) was reached before the model returned a terminal response. The task is not complete; continue the conversation to resume.`
@@ -269,7 +279,7 @@ export function handleTerminalTextResponse({
     return { action: 'stop', reason: 'empty-response' };
   }
 
-  if (responseGuard.shouldRetryNoToolResponse(content)) {
+  if (responseGuard.shouldRetryNoToolResponse(content, { hasToolResults: Array.isArray(apiMessages) && apiMessages.some(isToolResultMessage) })) {
     if (loop.claimUnsupportedToolRetry()) {
       apiMessages.push({
         role: 'user',

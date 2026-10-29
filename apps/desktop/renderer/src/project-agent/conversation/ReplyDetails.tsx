@@ -1,0 +1,55 @@
+import type { I18nRuntime } from '@peer-agent/i18n';
+import type { ConversationDisplayRow } from '../state/botConversationState';
+import { replyWork, type BotWorkIndex } from '../state/botWorkState';
+import { ReplyDetailsContext } from './ReplyContext';
+import { BotProcess, type ProcessDisclosure } from './BotProcess';
+import { CardDiagnostics } from './CardView';
+import { DelegatedWork } from './DelegatedWork';
+import { PeerIcon } from '../../ui/icons';
+import { AgentProcessView } from '../drawer/AgentProcessView';
+
+/** Uses the same live/history projection as the chat; it has no execution path. */
+export function ReplyDetails({ row, loading = false, workspaceId, botName, workIndex, i18n, onOpenEvidence, onOpenWork, disclosure, relatedTurns = [], onOpenRelatedReply }: {
+  readonly row: ConversationDisplayRow | undefined;
+  readonly loading?: boolean;
+  readonly workspaceId: string; readonly botName: string; readonly workIndex: BotWorkIndex;
+  readonly i18n: I18nRuntime; readonly onOpenEvidence: (id: string) => void;
+  readonly onOpenWork: (id: string) => void;
+  readonly disclosure: ProcessDisclosure;
+  readonly relatedTurns?: readonly string[];
+  readonly onOpenRelatedReply?: (id: string) => void;
+}) {
+  if (loading) return <p className="bot-reply-details-note" role="status">{i18n.t('projectAgent.background.loading')}</p>;
+  if (!row || row.type === 'separator') return <p className="bot-reply-details-note">{i18n.t('projectAgent.chat.context.unavailable')}</p>;
+  const message = row.type === 'message' ? row.message : undefined;
+  const work = replyWork(message ?? { sources: [], marks: [], meta: {}, replyTo: row.activity?.replyTo ?? [] }, workIndex);
+  const outcome = message?.cards.some(card => card.kind === 'agent_stopped') ? 'stopped'
+    : message?.cards.some(card => card.kind === 'agent_unavailable') ? 'error' : undefined;
+  return <div className="bot-reply-details" data-reply-id={message?.id ?? row.activity?.turnId}>
+    <header className="bot-reply-details-header">
+      <span className="bot-reply-details-author">{botName}</span>
+      {message?.createdAt ? <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })}</time> : null}
+    </header>
+    <ReplyDetailsContext workspaceId={workspaceId} message={message} i18n={i18n} onOpenEvidence={onOpenEvidence}>
+      {relatedTurns.length && onOpenRelatedReply ? <details className="bot-reply-related-turns">
+        <summary><span>{i18n.t('projectAgent.chat.reply.related', { count: relatedTurns.length })}</span><PeerIcon name="chevronDown" size={12} /></summary>
+        {relatedTurns.map((id, index) => <button type="button" key={id} onClick={() => onOpenRelatedReply(id)}>
+          {i18n.t('projectAgent.chat.reply.relatedTurn', { number: index + 1 })}
+        </button>)}
+      </details> : null}
+      <BotProcess activity={row.activity} rounds={row.type === 'message' ? row.processRounds : undefined}
+        i18n={i18n} disclosure={disclosure} outcome={outcome} />
+      {work.length ? <section className="bot-reply-work-section" aria-label={i18n.t('projectAgent.chat.work.heading')}>
+        <h3>{i18n.t('projectAgent.chat.work.heading')}</h3>
+        <DelegatedWork rows={work} botName={botName} i18n={i18n} onOpen={onOpenWork} disclosure={disclosure} />
+      </section> : null}
+      {message ? <CardDiagnostics cards={message.cards} i18n={i18n} /> : null}
+      {row.type === 'message' && row.processRounds?.length ? <details className="bot-reply-rounds"
+        open={disclosure.open.rounds ?? false} onToggle={event => {
+          if (event.target === event.currentTarget) disclosure.toggle('rounds', event.currentTarget.open);
+        }}><summary><span>{i18n.t('projectAgent.chat.context.rounds')}</span><PeerIcon name="chevronDown" size={12} /></summary>
+        <AgentProcessView rounds={row.processRounds} i18n={i18n} outcome={outcome} />
+      </details> : null}
+    </ReplyDetailsContext>
+  </div>;
+}

@@ -1,6 +1,11 @@
 import type { RuntimeSdkEvent } from '@peer-agent/runtime-sdk';
 import type {
   CapabilityManifest,
+  ProjectAgentActivity,
+  ProjectAgentEvidenceReadRequest,
+  ProjectAgentEvidenceReadResult,
+  ProjectAgentStopResponseRequest,
+  ProjectAgentStopResponseResult,
   ChatSendRequest,
   ChatStartTaskRequest,
   ChatStartTaskResult,
@@ -36,12 +41,33 @@ import type {
   LocalMcpServerUpsertRequest,
   LocalMcpServerView,
   LocaleCode,
+  ModelRole,
+  ModelRoutingMenuOption,
+  ModelTier,
+  ModelTierBinding,
+  RoleSetting,
   McpConnectionProbeResult,
   McpConnectionTestResult,
   McpCredentialMetadataView,
   McpCredentialPutRequest,
   McpManifestRefreshResult,
   PermissionGrant,
+  ProjectObjectiveListRequest,
+  ProjectObjectiveUpdateRequest,
+  ProjectObjectiveCommandRequest,
+  ProjectObjectiveListResult,
+  ProjectObjectiveItemResult,
+  ProjectMemoryEditRequest,
+  ProjectMemoryExportRequest,
+  ProjectMemoryExportResult,
+  ProjectMemoryForgetRequest,
+  ProjectMemoryItemResult,
+  ProjectMemoryListRequest,
+  ProjectMemoryListResult,
+  ProjectMemoryPinRequest,
+  ProjectMemoryRestoreRequest,
+  ProjectMemorySetSwitchesRequest,
+  ProjectMemorySetSwitchesResult,
   PromptContextEpochEventRecord,
   PromptContextEpochRecord,
   PromptSnapshotIndexEntry,
@@ -76,11 +102,7 @@ import type {
  */
 
 // ADR 75 M1 — remote access IPC types
-export type RemoteAccessSettings = {
-  enabled: boolean;
-  gatewayOrigin: string;
-  workspaceId: string;
-};
+export type RemoteAccessSettings = import('@peer-agent/protocol').RemoteAccessSettings;
 export type RemoteAccessFailure = {
   /** Supervisor category: transport_failure, local_failure, network_unavailable, … */
   reason: string;
@@ -108,14 +130,11 @@ export type RemoteAccessIpcResult = {
     lastFailure?: RemoteAccessFailure | null;
     /** Set while the server waits for this device to be claimed. */
     pairing?: RemoteAccessPairing | null;
+    lastAccess?: import('@peer-agent/protocol').RemoteAccessSummary | null;
   };
   error?: string;
 };
-export type RemoteAccessPatch = {
-  enabled?: boolean;
-  gatewayOrigin?: string;
-  workspaceId?: string;
-};
+export type RemoteAccessPatch = import('@peer-agent/protocol').RemoteAccessPatch;
 export type BrowserSessionImportPreflightCheck = {
   readonly id: string;
   readonly status: 'ok' | 'missing' | 'blocked' | 'warn' | 'unsupported' | 'info';
@@ -198,6 +217,12 @@ export type StreamReattachResult =
         readonly cacheWriteTokens?: number;
         readonly cacheReadTokens?: number;
       } | null;
+      /** 仍开放的权限请求。窗口重开后用它恢复权限卡；进程重启后这里为空。 */
+      readonly pendingPermissions?: readonly {
+        readonly toolCallId: string;
+        readonly streamId: string;
+        readonly call: ClientToolCall;
+      }[];
     };
 
 export interface GoalRunnerStateView {
@@ -263,12 +288,54 @@ export interface UsageStatsSnapshot {
   };
   readonly byProvider: readonly UsageStatsGroupRow[];
   readonly byModel: readonly UsageStatsGroupRow[];
+  readonly byRole: readonly UsageStatsGroupRow[];
   readonly notes: {
     readonly unpricedConversationCount: number;
     readonly missingProviderCount: number;
     readonly pricingUnit: string;
     readonly scope: string;
   };
+}
+
+/** 设置页「模型分工」。真相在 main 的 settings.modelRouting，这里只是投影。 */
+export type ModelRoutingProviderOption = ModelRoutingMenuOption;
+
+export interface ModelRoutingView {
+  readonly routing: {
+    readonly tiers: Partial<Record<ModelTier, ModelTierBinding>>;
+    readonly roles: Partial<Record<ModelRole, RoleSetting>>;
+    readonly verifierPreferDifferentFamily: boolean;
+    readonly dailySpendCapUsd?: number;
+    readonly roleSpendCaps?: Partial<Record<ModelRole, number>>;
+  };
+  readonly providers: readonly ModelRoutingProviderOption[];
+  readonly singleModel: boolean;
+}
+
+export interface ModelRoutingPatch {
+  readonly tiers?: Partial<Record<ModelTier, ModelTierBinding>>;
+  readonly roles?: Partial<Record<ModelRole, RoleSetting>>;
+  readonly verifierPreferDifferentFamily?: boolean;
+  readonly dailySpendCapUsd?: number;
+  readonly roleSpendCaps?: Partial<Record<ModelRole, number | null>>;
+}
+
+export interface ModelRoutingPreviewRow {
+  readonly role: ModelRole;
+  readonly ok: boolean;
+  readonly modelProviderId: string | null;
+  readonly reasoningEffort?: string | null;
+  readonly fastMode?: boolean | null;
+  readonly label: string;
+  readonly source: string | null;
+  readonly missing: string | null;
+  readonly reason: string | null;
+  readonly spendExceeded: boolean;
+  readonly sameFamilyAsWorker: boolean | null;
+}
+
+export interface ModelRoutingPreview extends ModelRoutingView {
+  readonly resolutions: readonly ModelRoutingPreviewRow[];
 }
 
 /** 请求日志按天聚合（Token 热力图 / 趋势，对应 main `usage:daily`）。 */
@@ -393,13 +460,41 @@ export interface QuickChatPopoverAnchorRect {
   readonly height: number;
 }
 
+/** `settings.json` 的 `developer` 对象。缺省的 projectAgentMode 视为关闭。 */
+export interface DeveloperSettingsView {
+  readonly projectAgentMode?: boolean;
+}
+
+export interface DeveloperDiagnosticsView {
+  readonly dataHome?: string;
+  readonly isDev?: boolean;
+}
+
 export interface BootstrapPreloadApi {
+  readonly resourceEdits?: import('@peer-agent/protocol').ResourceEditsApi;
+  readonly browserWindowCopy?: (request: import('@peer-agent/protocol').BrowserWindowCopyRequest) => Promise<import('@peer-agent/protocol').BrowserWindowResult>;
+  readonly onBrowserWindowReturn?: (listener: (request: import('@peer-agent/protocol').BrowserWindowReturnRequest) => void) => () => void;
+  readonly browserWindowAcknowledgeReturn?: (request: import('@peer-agent/protocol').BrowserWindowReturnAck) => Promise<{ readonly ok: boolean }>;
+  readonly claimResourceFeedbackPreparation?: (request: import('@peer-agent/protocol').ResourceFeedbackPreparationKey) => Promise<import('@peer-agent/protocol').ResourceFeedbackPreparationResult>;
+  readonly acknowledgeResourceFeedbackPreparation?: (request: import('@peer-agent/protocol').ResourceFeedbackPreparationAck) => Promise<{ readonly ok: boolean }>;
+  readonly onBrowserResourceFeedbackNotice?: (listener: (notice: import('@peer-agent/protocol').BrowserResourceFeedbackNotice) => void) => () => void;
+  readonly onResourceFeedbackPreparation?: (listener: (request: import('@peer-agent/protocol').ResourceFeedbackPreparationRequest) => void) => () => void;
+  readonly resourceWindowOpen?: (request: import('@peer-agent/protocol').ResourceWindowOpenRequest) => Promise<import('@peer-agent/protocol').ResourceWindowResult>;
+  readonly onResourceWindowReturn?: (listener: (request: import('@peer-agent/protocol').ResourceWindowReturnRequest) => void) => () => void;
+  readonly resourceWindowAcknowledgeReturn?: (request: import('@peer-agent/protocol').ResourceWindowReturnAck) => Promise<{ readonly ok: boolean }>;
+  readonly resourceWindowHistory?: (request: { readonly workspaceId: string }) => Promise<import('@peer-agent/protocol').ResourceWindowHistoryResult>;
+  readonly resourceWindowRestore?: (request: { readonly workspaceId: string; readonly id: string }) => Promise<import('@peer-agent/protocol').ResourceWindowResult>;
+  readonly resourceWindowForget?: (request: { readonly workspaceId: string; readonly id: string }) => Promise<{ readonly ok: boolean }>;
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
   readonly listCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly listProjects: () => Promise<readonly WorkspaceProject[]>;
   readonly getRuntimeProjection: () => Promise<RuntimeProjection>;
   readonly setLocale: (locale: LocaleCode) => Promise<ClientSessionState>;
+  readonly getDeveloperSettings: () => Promise<DeveloperSettingsView>;
+  readonly updateDeveloperSettings: (partial: DeveloperSettingsView) => Promise<DeveloperSettingsView>;
+  readonly resetDeveloperSettings: () => Promise<DeveloperSettingsView>;
+  readonly getDeveloperDiagnostics: () => Promise<DeveloperDiagnosticsView>;
   readonly approveLocalAction: (
     toolCallId: string,
     options?: { duration?: PermissionGrant['duration']; scope?: string }
@@ -472,6 +567,8 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
+    comparison?: 'working' | 'staged',
   ) => Promise<{
     readonly ok: boolean;
     readonly status:
@@ -481,8 +578,10 @@ export interface BootstrapPreloadApi {
       | 'untracked'
       | 'no_changes'
       | 'not_git_repo'
+      | 'not_file'
       | 'not_found'
       | 'invalid_path'
+      | 'permission_denied' | 'scope_denied' | 'workspace_unavailable' | 'ambiguous_path' | 'relative_base_required'
       | 'error';
     readonly diffText: string;
     readonly error?: string;
@@ -491,11 +590,14 @@ export interface BootstrapPreloadApi {
      * 标注实际命中的仓库根目录，便于在 UI 上提示「已在其他仓库找到该文件」。
      */
     readonly resolvedFrom?: string;
+    readonly resolvedPath?: string;
   }>;
   readonly gitDiffRange: (params: {
     readonly workspaceRoot: string;
     readonly fromRef: string;
     readonly toRef?: string;
+    readonly documentReference?: import('@peer-agent/protocol').BotDocumentReference;
+    readonly comparison?: 'working' | 'staged';
   }) => Promise<{
     readonly ok: boolean;
     readonly status: 'ok' | 'no_changes' | 'not_git_repo' | 'invalid_ref' | 'error';
@@ -503,6 +605,10 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
     readonly fromRef?: string;
     readonly toRef?: string | null;
+    readonly untracked?: readonly string[];
+    readonly untrackedTruncated?: boolean;
+    readonly workspaceRoot?: string;
+    readonly resolvedPath?: string;
   }>;
   readonly gitListBranches: (params: {
     readonly workspaceRoot: string;
@@ -549,7 +655,7 @@ export interface BootstrapPreloadApi {
     relPath?: string,
   ) => Promise<{ readonly exists: boolean; readonly isDir?: boolean; readonly resolvedFrom?: string }>;
   /**
-   * 读取指定文件的完整文本内容，供 Workbench 的 Diff 视图「文件内容」分段查看。
+   * 读取文件文本供现有文档/源码预览；Bot 引用由宿主按已确认根解析。
    * - absPath 必须是绝对路径；在当前 workspace 找不到时，会用 relPath 在其他已知 workspace 回退查找。
    * - status：ok（读取成功）、not_found（不存在）、not_file（是目录等非普通文件）、too_large（超过 2MB 上限）、
    *   binary（检测到二进制内容，不预览）、invalid_path / error（异常）。
@@ -559,21 +665,9 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
-  ) => Promise<{
-    readonly ok: boolean;
-    readonly status:
-      | 'ok'
-      | 'not_found'
-      | 'not_file'
-      | 'too_large'
-      | 'binary'
-      | 'invalid_path'
-      | 'error';
-    readonly content: string;
-    readonly size?: number;
-    readonly resolvedFrom?: string;
-    readonly error?: string;
-  }>;
+    /** Human-clicked Bot references are scoped by the host, never by a renderer root. */
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
+  ) => Promise<import('@peer-agent/protocol').LocalDocumentReadResult>;
   /**
    * 按需读取本地图片为 dataUrl，供聊天气泡缩略图/放大预览。
    * ADR 59：会话存储不内联整图；仅在用户可见预览时临时加载。
@@ -582,6 +676,7 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
   ) => Promise<{
     readonly ok: boolean;
     readonly status:
@@ -591,8 +686,15 @@ export interface BootstrapPreloadApi {
       | 'too_large'
       | 'unsupported_type'
       | 'invalid_path'
-      | 'error';
+      | 'error'
+      | 'permission_denied' | 'scope_denied' | 'ambiguous_path' | 'workspace_unavailable' | 'relative_base_required'
+      | 'version_changed' | 'source_changed' | 'version_unavailable'
+      | 'not_git_repo' | 'invalid_ref' | 'revision_unavailable' | 'unsupported_entry';
     readonly dataUrl: string;
+    readonly identity?: import('@peer-agent/protocol').LocalDocumentIdentity;
+    readonly observation?: import('@peer-agent/protocol').LocalDocumentObservation;
+    readonly revision?: import('@peer-agent/protocol').ConfirmedGitDocumentRevision;
+    readonly resolvedPath?: string;
     readonly mimeType?: string;
     readonly size?: number;
     readonly path?: string;
@@ -653,15 +755,18 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
   ) => Promise<{
     readonly ok: boolean;
-    readonly status: 'ok' | 'not_found' | 'not_dir' | 'invalid_path' | 'error';
+    readonly status: import('@peer-agent/protocol').LocalDocumentReadResult['status'] | 'not_dir';
+    readonly truncated?: boolean;
     readonly entries: readonly {
       readonly name: string;
       readonly isDir: boolean;
       readonly absPath: string;
     }[];
     readonly resolvedFrom?: string;
+    readonly resolvedPath?: string;
     readonly error?: string;
   }>;
   /**
@@ -672,17 +777,8 @@ export interface BootstrapPreloadApi {
     workspacePath: string,
     query?: string,
     limit?: number,
-  ) => Promise<{
-    readonly ok: boolean;
-    readonly status: 'ok' | 'not_found' | 'not_dir' | 'invalid_path' | 'error';
-    readonly files: readonly {
-      readonly relPath: string;
-      readonly name: string;
-      readonly kind: 'file' | 'directory';
-    }[];
-    readonly workspacePath?: string;
-    readonly error?: string;
-  }>;
+    documentReference?: import('@peer-agent/protocol').BotDocumentReference,
+  ) => Promise<import('@peer-agent/protocol').BotResourceSearchResult>;
   /**
    * 同步文件树轻量监听目录集合（根 + 已展开）。传空数组清空。
    * main 侧按 webContents 维护 fs.watch，不递归整仓。
@@ -709,6 +805,7 @@ export interface BootstrapPreloadApi {
     readonly browserTabId: string;
     readonly active: boolean;
     readonly claimForeground?: boolean;
+    readonly metadataOnly?: boolean;
     readonly url?: string;
     readonly title?: string;
   }) => Promise<{
@@ -979,8 +1076,94 @@ export interface BootstrapPreloadApi {
   readonly mcpReadResource: (params: { mcpId?: string | number; serverId?: string | number; uri: string }) => Promise<unknown>;
   readonly mcpGetPrompt: (params: { mcpId?: string | number; serverId?: string | number; name: string; arguments?: Record<string, unknown> }) => Promise<unknown>;
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number }>;
+  readonly projectAgentListAttention: (params?: import('@peer-agent/protocol').BotAttentionRequest) => Promise<import('@peer-agent/protocol').BotAttentionResult>;
+  readonly projectAgentList: (params?: { query?: string; needsYouOnly?: boolean }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
+  readonly projectAgentGet: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; item?: import('@peer-agent/protocol').BotListItem; path?: string; profile?: import('@peer-agent/protocol').BotProfile; modelOptions?: readonly import('@peer-agent/protocol').ModelRoutingMenuOption[]; modelViews?: import('@peer-agent/protocol').BotModelViews }>;
+  readonly projectAgentReadAvatar: (params: { workspaceId: string }) => Promise<import('@peer-agent/protocol').BotAvatarReadResult>;
+  readonly projectAgentReadAccessPolicy: (params: import('@peer-agent/protocol').BotAccessPolicyReadRequest) => Promise<import('@peer-agent/protocol').BotAccessPolicyResult>;
+  readonly projectAgentUpdateAccessPolicy: (params: import('@peer-agent/protocol').BotAccessPolicyUpdateRequest) => Promise<import('@peer-agent/protocol').BotAccessPolicyResult>;
+  readonly projectAgentCreate: (params: { kind: 'bind' } | { kind: 'managed'; name: string }) => Promise<{ ok: boolean; code?: string; workspaceId?: string; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentUpdateModelSelection: (params: import('@peer-agent/protocol').BotModelSelectionUpdateRequest) => Promise<import('@peer-agent/protocol').BotModelSelectionUpdateResult>;
+  readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; regenerateAvatar?: boolean; avatarColor?: string; chooseAvatar?: boolean; planApproval?: 'never' | 'writes' | 'always'; acceptancePolicy?: 'auto' | 'confirm'; autoHandoffOnPolicyAccept?: boolean; modelPolicy?: import('@peer-agent/protocol').ProjectModelPolicy | null }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentDelete: (params: { workspaceId: string; confirmManaged?: boolean }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentReadInputDraft: (params: import('@peer-agent/protocol').ProjectInputDraftReadRequest) => Promise<import('@peer-agent/protocol').ProjectInputDraftReadResult>;
+  readonly projectAgentWriteInputDraft: (params: import('@peer-agent/protocol').ProjectInputDraftWriteRequest) => Promise<import('@peer-agent/protocol').ProjectInputDraftWriteResult>;
+  readonly projectAgentSubmitInput: (params: {
+    workspaceId: string;
+    inputId: string;
+    text: string;
+    surface?: string;
+    attachments?: readonly import('@peer-agent/protocol').ProjectInputAttachment[];
+    resourceFeedback?: readonly import('@peer-agent/protocol').ResourceFeedback[];
+    quoteRefs?: readonly string[];
+    anchorRefs?: readonly string[];
+    attachmentRefs?: readonly string[];
+    createdAt?: string;
+    answerTo?: string;
+  }) => Promise<import('@peer-agent/protocol').ProjectAgentSubmitInputResult>;
+  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[]; presentationOnly?: boolean; processFor?: string; view?: import('@peer-agent/protocol').BotConversationReadView }) => Promise<{ ok: boolean; code?: string; cards?: readonly Record<string, unknown>[]; recovery?: import('@peer-agent/protocol').BotRecoveryStatus | null; recoveryAvailable?: boolean; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activeReplyQuestionId?: import('@peer-agent/protocol').BotDecisionSnapshot['activeReplyQuestionId']; processMessageId?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
+  readonly projectAgentReadEvidence: (params: ProjectAgentEvidenceReadRequest) => Promise<ProjectAgentEvidenceReadResult>;
+  readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
+  readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
+  readonly projectAgentCancelSession: (params: { sessionId: string; workspaceId?: string; reason?: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
+  readonly projectAgentResumeSession: (params: { sessionId: string; workspaceId: string; requestId: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
+  readonly projectAgentListApprovals: (params?: { workspaceId?: string }) => Promise<{ ok: boolean; code?: string; approvals?: readonly unknown[] }>;
+  readonly projectAgentDecideApproval: (params: {
+    workspaceId: string;
+    approvalId: string;
+    decision: 'approve' | 'reject' | 'deny' | 'cancel';
+    duration?: 'once' | 'task' | 'denied';
+  }) => Promise<{ ok: boolean; code?: string; approval?: unknown }>;
+  readonly projectAgentMarkRead: (params: { workspaceId: string; viewing?: boolean }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null; viewing?: boolean }>;
+  readonly projectAgentSearch: (params?: { query?: string }) => Promise<{
+    ok: boolean;
+    code?: string;
+    items?: readonly import('@peer-agent/protocol').BotListItem[];
+    hits?: readonly {
+      id: string;
+      kind: 'bot' | 'message' | 'task' | 'memory';
+      workspaceId: string;
+      title: string;
+      text: string;
+      messageId?: string;
+      sessionId?: string;
+      memoryId?: string;
+      updatedAt?: string;
+    }[];
+  }>;
+  readonly projectAgentListHistory: (params?: { workspaceId?: string; workspacePath?: string; unscoped?: boolean }) => Promise<{
+    ok: boolean;
+    code?: string;
+    history?: readonly { id: string; title: string; workspacePath: string | null; updatedAt: string; status: string }[];
+    goals?: readonly { planId: string; conversationId: string; title: string; status: string; waitingUser: boolean; updatedAt: string }[];
+  }>;
+  readonly projectAgentContinueHistory: (params: { workspaceId: string; conversationId: string; inputId?: string; text?: string; confirmMissing?: boolean }) => Promise<{ ok: boolean; code?: string; input?: { inputId: string; text: string; historyRef?: string; historySnapshotId?: string; historyConfirmed?: boolean }; snapshot?: { snapshotId: string } }>;
+  readonly projectAgentStartFamiliarize: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentConfirmResult: (params: import('@peer-agent/protocol').SessionConfirmationInput) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentAcceptReadme: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentTakeoverHost: (params: import('@peer-agent/protocol').ProjectHostTakeoverRequest) => Promise<import('@peer-agent/protocol').ProjectHostTakeoverResult>;
+  readonly projectAgentRecovery: (params: import('@peer-agent/protocol').ProjectRecoveryRequest) => Promise<import('@peer-agent/protocol').ProjectRecoveryResult>;
+  readonly projectAgentDiagnostics: (params: import('@peer-agent/protocol').ProjectDiagnosticsRequest) => Promise<import('@peer-agent/protocol').ProjectDiagnosticsResult>;
+  readonly projectAgentRetry: (params: { workspaceId: string; turnId: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentStopResponse: (params: ProjectAgentStopResponseRequest) => Promise<ProjectAgentStopResponseResult>;
+  readonly projectObjectivesList: (params: ProjectObjectiveListRequest) => Promise<ProjectObjectiveListResult>;
+  readonly projectObjectivesUpdate: (params: ProjectObjectiveUpdateRequest) => Promise<ProjectObjectiveItemResult>;
+  readonly projectObjectivesPause: (params: ProjectObjectiveCommandRequest) => Promise<ProjectObjectiveItemResult>;
+  readonly projectObjectivesResume: (params: ProjectObjectiveCommandRequest) => Promise<ProjectObjectiveItemResult>;
+  readonly projectObjectivesDelete: (params: ProjectObjectiveCommandRequest) => Promise<ProjectObjectiveItemResult>;
+  readonly projectMemoryList: (params: ProjectMemoryListRequest) => Promise<ProjectMemoryListResult>;
+  readonly projectMemoryPin: (params: ProjectMemoryPinRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryForget: (params: ProjectMemoryForgetRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryRestore: (params: ProjectMemoryRestoreRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryEdit: (params: ProjectMemoryEditRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryExport: (params: ProjectMemoryExportRequest) => Promise<ProjectMemoryExportResult>;
+  readonly projectMemorySetSwitches: (params: ProjectMemorySetSwitchesRequest) => Promise<ProjectMemorySetSwitchesResult>;
+  readonly onProjectAgentChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
+  readonly onProjectAgentConversationChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
+  readonly onProjectAgentActivity: (listener: (event: ProjectAgentActivity) => void) => () => void;
   readonly workspaceList: () => Promise<{
     workspaces: readonly {
+      id: string;
       path: string;
       name: string;
       addedAt: string;
@@ -999,9 +1182,9 @@ export interface BootstrapPreloadApi {
   readonly onQuickChatPopoverState: (listener: (payload: QuickChatPopoverState) => void) => () => void;
   readonly onQuickChatPopoverSelected: (listener: (payload: { kind: QuickChatPopoverKind; value: string }) => void) => () => void;
   readonly onQuickChatPopoverClosed: (listener: () => void) => () => void;
-  readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;
+  readonly workspaceEnsureDefault: () => Promise<{ id: string | null; path: string | null; name: string; created: boolean }>;
   readonly workspacePreviewDefault: () => Promise<{ path: string; name: string; exists: boolean }>;
-  readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;
+  readonly workspaceAdd: () => Promise<{ id: string; path: string; name: string; existing: boolean } | null>;
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
   readonly workspaceUpdate: (params: {
@@ -1027,6 +1210,9 @@ export interface BootstrapPreloadApi {
   }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly usageGetStats: () => Promise<UsageStatsSnapshot>;
+  readonly modelRoutingGet: () => Promise<ModelRoutingView>;
+  readonly modelRoutingUpdate: (partial: ModelRoutingPatch) => Promise<ModelRoutingView>;
+  readonly modelRoutingPreview: () => Promise<ModelRoutingPreview>;
   readonly usageGetDaily: (params?: { range?: UsageDailyRange }) => Promise<UsageDailySnapshot>;
   readonly usageGetDay: (params: { date: string }) => Promise<UsageDaySnapshot>;
   readonly conversationsList: (params?: {
@@ -1339,8 +1525,8 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   // 流式工具参数进度(Codex 式实时体感)。仅是 provider 流式提示,不替代 Tool Result / Evidence。
   readonly onChatStreamToolProgress: (listener: (payload: { streamId: string; toolCallId: string; tool: string; path: string | null; receivedChars: number; receivedLines: number }) => void) => () => void;
   readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string; startedAtMs?: number; endedAtMs?: number; durationMs?: number }) => void) => () => void;
-  readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
-  readonly onChatStreamPermissionSettled: (listener: (payload: { streamId: string; toolCallIds: readonly string[] }) => void) => () => void;
+  readonly onChatStreamPermissionRequest: (listener: (payload: import('@peer-agent/protocol').ChatPermissionRequest) => void) => () => void;
+  readonly onChatStreamPermissionSettled: (listener: (payload: import('@peer-agent/protocol').ChatPermissionSettled) => void) => () => void;
   readonly onChatStreamError: (listener: (payload: {
     streamId: string;
     conversationId?: string;
@@ -1558,6 +1744,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     messageId?: string | null;
     attentionVersion?: number | null;
     source?: string;
+    workspaceId?: string | null;
   }) => void) => () => void;
   /** 菜单栏托盘：New Chat。 */
   readonly onTrayNewChat: (listener: (payload?: { source?: string }) => void) => () => void;

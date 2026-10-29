@@ -1,3 +1,4 @@
+import { resolveOpenCodeGoWire } from '@peer-agent/runtime-node';
 /**
  * TUI channel → wire resolution.
  *
@@ -36,6 +37,8 @@ export type TuiWireChannelId =
   | string;
 
 export interface TuiWireResolveInput {
+  readonly model?: string;
+  readonly wireOverride?: string;
   readonly channelId?: string | null;
   readonly authMethod?: string | null;
   readonly providerId?: string | null;
@@ -93,6 +96,20 @@ export function resolveTuiWire(input: TuiWireResolveInput): TuiWireDecision {
   }
 
   // Channel-id path for API-key / configured providers.
+  const go = ['opencode-go', 'opencode-go-openai', 'opencode-go-anthropic'].includes(channelId);
+  const chatChannels = ['openai', 'openai-compatible', 'kimi-coding-plan', 'moonshot', 'volcengine-ark', 'xiaomi-mimo', 'xiaomi-mimo-token-plan', 'aliyun-bailian', 'openrouter'];
+  const messagesChannels = ['anthropic', 'anthropic-compatible', 'deepseek', 'glm-coding-plan-cn', 'glm-coding-plan-global', 'minimax-cn', 'minimax-global'];
+  const allowed: readonly string[] = go ? ['openai-chat', 'openai-responses', 'anthropic-messages']
+    : ['openai', 'openai-compatible'].includes(channelId) ? ['openai-chat', 'openai-responses']
+    : channelId === 'grok' ? ['openai-responses']
+    : chatChannels.includes(channelId) ? ['openai-chat'] : messagesChannels.includes(channelId) ? ['anthropic-messages'] : [];
+  if (input.wireOverride && !allowed.includes(input.wireOverride)) return {
+    kind:'unsupported',channelId,authMethod,code:'unsupported_wire',reason:`Unsupported wire for channel ${channelId}: ${input.wireOverride}`,
+  };
+  if (allowed.length) {
+    const wire = input.wireOverride || (go ? resolveOpenCodeGoWire(input.model) : channelId === 'grok' ? 'openai-responses' : allowed[0]);
+    return supported(wire as TuiWire, channelId, authMethod, 'Shared desktop channel protocol');
+  }
   if (channelId === 'qoder' || providerId.includes('qoder') || displayName.includes('qoder')) {
     return supported('qoder-private', channelId || 'qoder', authMethod, 'Qoder channel → private SSE wire');
   }
@@ -155,7 +172,9 @@ export function formatTuiWireMatrix(): string {
     '  qoder_local_auth       → qoder-private',
     '  anthropic*             → anthropic-messages',
     '  google-ai / gemini     → gemini',
-    '  openai / grok (api)    → openai-chat',
+    '  openai (api)           → openai-chat',
+    '  grok (api)             → openai-responses',
+    '  opencode-go            → protocol selected by model',
     '  openai-compatible      → openai-chat',
     '  unknown channel        → unsupported (explicit error)',
   ].join('\n');

@@ -1,0 +1,34 @@
+import { watchVisualMotion, motionDurationMs } from '../state/visualMotion';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+
+/** Keep content mounted through closing motion, then release its controls and effects. */
+export function SettingsDisclosureContent({ expanded, id, children }: {
+  readonly expanded: boolean;
+  readonly id?: string;
+  readonly children: ReactNode;
+}) {
+  const root = useRef<HTMLDivElement>(null), restore = useRef<HTMLElement | null>(null);
+  if (!expanded && root.current?.contains(document.activeElement)) {
+    restore.current = id ? document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(id)}"]`) : null;
+  }
+  useLayoutEffect(() => {
+    if (!expanded && restore.current?.isConnected && !restore.current.closest('[inert]')) restore.current.focus({ preventScroll: true });
+    restore.current = null;
+  }, [expanded]);
+  const [mounted, setMounted] = useState(expanded);
+  const [settled, setSettled] = useState(expanded);
+  useEffect(() => {
+    setSettled(false);
+    if (expanded) setMounted(true);
+    const duration = root.current ? motionDurationMs(getComputedStyle(root.current).getPropertyValue('--za-motion-medium')) : 0;
+    const motion = watchVisualMotion([], () => {
+      if (expanded) setSettled(true); else setMounted(false);
+    }, { durationMs: duration });
+    return motion.cancel;
+  }, [expanded]);
+  return (
+    <div ref={root} id={id} className="llm-settings-disclosure" data-expanded={expanded} data-settled={expanded && settled} inert={!expanded} aria-hidden={!expanded}>
+      <div className="llm-settings-disclosure-inner">{expanded || mounted ? children : null}</div>
+    </div>
+  );
+}

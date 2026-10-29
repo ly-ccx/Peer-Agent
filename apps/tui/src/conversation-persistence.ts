@@ -47,10 +47,10 @@ interface ConversationChangeEvent {
 }
 
 interface ConversationStore {
-  listConversations(params?: { status?: string }): readonly Record<string, unknown>[];
+  listConversations(params?: { status?: string; roles?: readonly string[] }): readonly Record<string, unknown>[];
   listConversationsByWorkspace?(
     workspacePath: string | null | undefined,
-    params?: { status?: string },
+    params?: { status?: string; roles?: readonly string[] },
   ): readonly Record<string, unknown>[];
   getConversation(id: string): (Record<string, unknown> & { messages?: readonly Record<string, unknown>[] }) | null;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: TuiMode; fastMode?: boolean }): { id: string };
@@ -614,8 +614,8 @@ export function createTuiConversationPersistence(options: {
     listResumable() {
       try {
         const conversations = store.listConversationsByWorkspace
-          ? store.listConversationsByWorkspace(workspacePath, { status: 'active' })
-          : store.listConversations({ status: 'active' });
+          ? store.listConversationsByWorkspace(workspacePath, { status: 'active', roles: ['default'] })
+          : store.listConversations({ status: 'active', roles: ['default'] });
         return conversations
           .filter((item) => item.id !== conversationId && Number(item.messageCount ?? 0) > 0)
           .map((item) => ({

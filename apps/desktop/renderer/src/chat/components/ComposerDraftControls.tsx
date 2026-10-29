@@ -1,3 +1,6 @@
+import { MotionSurface } from '../../app/components/MotionSurface';
+import { useCompositionGuard } from '../../app/hooks/useCompositionGuard';
+import { PeerIcon } from '../../ui/icons';
 import type React from 'react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
@@ -221,7 +224,9 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly quotes?: readonly ChatAttachment[];
   readonly onRemoveQuote?: (id: string) => void;
 }) {
+  const composition = useCompositionGuard();
   const draft = useConversationDraft(conversationId);
+  const [dismissedCompletion, setDismissedCompletion] = useState<string | null>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [sessionHits, setSessionHits] = useState<readonly SessionReferenceHit[]>([]);
@@ -275,12 +280,13 @@ const ComposerDraftField = memo(function ComposerDraftField({
       ? SLASH_COMMANDS.filter((command) => command.value.startsWith(query))
       : [];
   }, [draft]);
-  const showSlashCommands = !isBusy && slashCommands.length > 0;
+  const completionDismissed = dismissedCompletion === `${conversationId}:${draft}`;
+  const showSlashCommands = !completionDismissed && !isBusy && slashCommands.length > 0;
   const atQuery = useMemo(() => {
     if (showSlashCommands) return null;
     return detectAtQuery(draft);
   }, [draft, showSlashCommands]);
-  const showContextMentions = Boolean(atQuery) && !isBusy;
+  const showContextMentions = !completionDismissed && Boolean(atQuery) && !isBusy;
   const mentionHits = useMemo(() => mergeContextMentionHits({
     query: atQuery?.query ?? '',
     mentionScope,
@@ -513,7 +519,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
 
   return (
     <>
-      {showSlashCommands ? (
+      <MotionSurface>{showSlashCommands ? (
         <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
           {slashCommands.map((command, index) => (
             <button
@@ -532,8 +538,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
             </button>
           ))}
         </div>
-      ) : null}
-      {showContextMentions ? (
+      ) : null}</MotionSurface>
+      <MotionSurface>{showContextMentions ? (
         <div ref={mentionMenuRef} className="slash-command-menu session-mention-menu" role="listbox" aria-label={isZh ? '引用文件或会话' : 'Mention files or chats'}>
           {mentionHits.map((hit, index) => {
               const key = hit.type === 'file'
@@ -594,7 +600,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
             </div>
           ) : null}
         </div>
-      ) : null}
+      ) : null}</MotionSurface>
       {quotes.length > 0 ? (
         <div className="composer-quote-flow" ref={quoteFlowRef} style={quoteFlow ? { top: quoteFlow.top, left: quoteFlow.left, fontSize: quoteFlow.fontSize, lineHeight: quoteFlow.lineHeight } : undefined}>
           {quotes.map((quote) => (
@@ -613,7 +619,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => onRemoveQuote(quote.id)}
                 >
-                  ×
+                  <PeerIcon name="close" size={12} />
                 </button>
               ) : null}
             </span>
@@ -635,7 +641,12 @@ const ComposerDraftField = memo(function ComposerDraftField({
         style={quotes.length && quoteFlow ? { textIndent: `${quoteFlow.indent}px` } : undefined}
         onPaste={onPaste}
         onChange={(event) => setDraft(event.target.value)}
+        onCompositionStart={event => composition.start(event.currentTarget)}
+        onCompositionEnd={event => composition.end(event.currentTarget)}
+        onKeyUp={event => composition.keyUp(event.nativeEvent)}
+        onBlur={() => composition.reset()}
         onKeyDown={(event) => {
+          if (composition.keyDown(event.nativeEvent)) return;
           // 引用是覆盖层，不在 textarea 文本里。光标在正文最开头时，退格应像删掉前面那个字一样删掉引用。
           if (
             event.key === 'Backspace'
@@ -675,7 +686,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
             }
             if (event.key === 'Escape') {
               event.preventDefault();
-              setDraft('');
+              event.stopPropagation();
+              setDismissedCompletion(`${conversationId}:${draft}`);
               return;
             }
           }
@@ -703,7 +715,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
             }
             if (event.key === 'Escape') {
               event.preventDefault();
-              setDraft(`${draft.slice(0, atQuery.start)}${draft.slice(atQuery.start + 1 + atQuery.query.length)}`);
+              event.stopPropagation();
+              setDismissedCompletion(`${conversationId}:${draft}`);
               return;
             }
           }

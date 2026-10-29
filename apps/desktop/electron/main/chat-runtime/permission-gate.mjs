@@ -1,4 +1,20 @@
+import { createPendingPermissionWait } from './pending-permission-wait.mjs';
+import { createOneTimeApprovalBook } from '@peer-agent/runtime-node';
+export { createOneTimeApprovalBook } from '@peer-agent/runtime-node';
+import { evaluateObjectiveProbeCall } from './objective-probe-gate.mjs';
 import { randomUUID } from 'node:crypto';
+import { digestApprovalArgs, createImageReadAuthority, permissionOperationKey } from '@peer-agent/runtime-node';
+import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
+
+export const sharedOneTimeApprovals = createOneTimeApprovalBook();
+let activeGate = null;
+
+export function refreshActiveAccessPolicies() { activeGate?.refreshAccessPolicies(); }
+
+export function settleActivePermissionRequest(toolCallId, grant, options) {
+  if (!activeGate || typeof activeGate.settlePermissionRequest !== 'function') return false;
+  return activeGate.settlePermissionRequest(toolCallId, grant, options);
+}
 
 const LOCAL_ACCESS_LEVELS = new Set([
   'ask_before_local',
@@ -26,12 +42,15 @@ function compareShellRisk(left, right) {
 }
 
 function buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCallId }) {
-  const action = tool === 'edit_file' ? 'edit' : 'write';
+  const contract = Object.values(SHARED_LOCAL_TOOL_CONTRACTS).find(item => item.toolName === tool && item.capabilityId.startsWith('local.file.'));
+  const capabilityId = contract?.capabilityId ?? 'local.file.write';
+  const action = capabilityId.slice('local.file.'.length);
+  const readOnly = ['read', 'list', 'search'].includes(action);
   return {
     toolCallId: `chat-permission:${toolCallId || randomUUID()}`,
-    capabilityId: `local.file.${action}`,
+    capabilityId,
     displayName: tool,
-    reason: `The ${tool} tool wants to modify a file outside the active workspace.`,
+    reason: `The ${tool} tool wants to ${readOnly ? action : 'modify'} outside the active workspace.`,
     arguments: {
       tool,
       path: filePath,
@@ -44,7 +63,7 @@ function buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCall
       path: filePath,
       workspacePath,
     },
-    riskLevel: 'L2_local_write',
+    riskLevel: readOnly ? 'L1_local_read' : 'L2_local_write',
     dataLevel: 'D2_sensitive',
     requestedAt: new Date().toISOString(),
   };
@@ -90,106 +109,15 @@ function buildLocalCapabilityPermissionCall({ request, toolCallId }) {
   };
 }
 
-function extractPermissionCommand(args) {
-  if (!args || typeof args !== 'object') return '';
-  const candidate =
-    typeof args.command === 'string'
-      ? args.command
-      : typeof args.cmd === 'string'
-        ? args.cmd
-        : typeof args.script === 'string'
-          ? args.script
-          : '';
-  return candidate.trim();
-}
-
-const LEAF_SHELL_COMMANDS = new Set([
-  'awk',
-  'bun',
-  'cat',
-  'chmod',
-  'chown',
-  'cp',
-  'cut',
-  'date',
-  'echo',
-  'env',
-  'false',
-  'find',
-  'grep',
-  'head',
-  'hostname',
-  'ls',
-  'mkdir',
-  'mv',
-  'node',
-  'perl',
-  'printenv',
-  'pwd',
-  'python',
-  'python3',
-  'rg',
-  'rm',
-  'ruby',
-  'sed',
-  'sleep',
-  'sort',
-  'tail',
-  'tee',
-  'touch',
-  'tr',
-  'true',
-  'uname',
-  'uniq',
-  'wc',
-  'whoami',
-  'xargs',
-]);
-
-function normalizePermissionCommandSignature(command) {
-  const tokens = String(command || '').split(/\s+/).filter(Boolean);
-  if (!tokens.length) return '';
-  const base = tokens[0].split('/').pop() ?? tokens[0];
-  if (
-    (base === 'aone-kit' || base === 'a1') &&
-    tokens[1] === 'call-tool' &&
-    tokens[2]
-  ) {
-    return `${base} call-tool ${tokens[2]}`;
-  }
-  if (LEAF_SHELL_COMMANDS.has(base)) return base;
-  const sub = tokens.slice(1).find((token) => !token.startsWith('-'));
-  return sub ? `${base} ${sub}` : base;
-}
-
 function isReusablePermissionType(call) {
-  const preview = call?.argumentsPreview;
-  if (preview && typeof preview === 'object' && preview.kind === 'goal-confirmation') {
-    return false;
-  }
-  if (call?.confirmation) return false;
-  if (call?.capabilityId === 'local.file.edit' || call?.capabilityId === 'local.file.write') {
-    return true;
-  }
-  return call?.capabilityId === 'local.shell.exec';
+  return !call?.confirmation && call?.argumentsPreview?.kind !== 'goal-confirmation'
+    && ['local.file.edit', 'local.file.write', 'local.shell.exec', 'local.image.read'].includes(call?.capabilityId);
 }
 
-function buildPermissionSignature(call) {
-  if (!isReusablePermissionType(call)) {
-    return `${call.capabilityId}::once::${call.toolCallId}`;
-  }
-  if (call.capabilityId === 'local.file.edit' || call.capabilityId === 'local.file.write') {
-    return call.capabilityId;
-  }
-  const command = extractPermissionCommand(call.argumentsPreview);
-  if (!command) return call.capabilityId;
-  return `${call.capabilityId}::${normalizePermissionCommandSignature(command)}`;
-}
-
-function buildPermissionScopeKey({ conversationId, workspacePath, call }) {
-  const conversationScope = conversationId || 'no-conversation';
-  const workspaceScope = workspacePath || 'no-workspace';
-  return `${conversationScope}::${workspaceScope}::${buildPermissionSignature(call)}`;
+function buildPermissionScopeKey({ conversationId, workspacePath, call, sessionId, planId }) {
+  return permissionOperationKey({ capabilityId: call.capabilityId,
+    args: call.capabilityId === 'local.image.read' ? { args: call.arguments, scope: call.argumentsPreview } : call.arguments,
+    conversationId, workspacePath, sessionId, planId });
 }
 
 const PERMISSION_ID_PREFIX = 'chat-permission:';
@@ -267,6 +195,7 @@ function createPolicyDenial({ toolCallId, reason }) {
 }
 
 function automationCapabilityDecision(policy, call) {
+  if(policy?.kind==='objective_probe'){const gate=evaluateObjectiveProbeCall({policy,call});return gate.allowed?createAutoAccessGrant({toolCallId:call.toolCallId,scope:call.capabilityId,reason:'objective_probe_observe'}):createPolicyDenial({toolCallId:call.toolCallId,reason:gate.reason});}
   if (policy?.kind !== 'automation') return null;
   if (policy.blockedCapabilityIds?.includes(call.capabilityId)) {
     return createPolicyDenial({ toolCallId: call.toolCallId, reason: 'automation_capability_blocked' });
@@ -284,59 +213,314 @@ function automationCapabilityDecision(policy, call) {
   });
 }
 
-export function createChatPermissionGate({ activeStreams, accessLevel: initialAccessLevel = 'ask_before_local' } = {}) {
-  const pendingPermissionRequests = new Map();
+function previewSummary(call) {
+  const preview = call?.argumentsPreview;
+  if (preview && typeof preview.command === 'string' && preview.command.trim()) return preview.command;
+  if (typeof call?.reason === 'string' && call.reason.trim()) return call.reason;
+  return call?.displayName || call?.capabilityId || '';
+}
+
+export function createChatPermissionGate({
+  activeStreams,
+  accessLevel: initialAccessLevel = 'ask_before_local',
+  approvalStore = null,
+  resolveApprovalScope = null,
+  resolvePermissionPrincipal = null,
+  resolveAccessPolicy = null,
+  settleNotifier = null,
+  oneTimeApprovals = sharedOneTimeApprovals,
+  now = () => Date.now(),
+  permissionWaitMs,
+  permissionTimers = {},
+  registerActive = true,
+} = {}) {
+  const pendingPermissionRequests = createPendingPermissionWait({ now, waitMs: permissionWaitMs,
+    ...permissionTimers, onEnd: (id, grant, options) => settlePermissionRequest(id, grant, options) });
   const approvedPermissionScopes = new Map();
   const approvedSourceToolCalls = new Map();
   let accessLevel = normalizeLocalAccessLevel(initialAccessLevel);
+  let policyEpoch = 0;
+  let durableApprovals = approvalStore;
+  let resolveScope = resolveApprovalScope;
+  let resolvePrincipal = resolvePermissionPrincipal;
+  let resolveAccess = resolveAccessPolicy;
+  let imageAuthority = createImageReadAuthority({ approvalStore, now });
+  let notifySettled = settleNotifier;
+  let policyWatch = null;
 
-  function reuseApprovedSourceToolCall(call) {
-    const sourceId = sourceToolCallIdFromPermissionId(call?.toolCallId);
-    const remembered = sourceId ? approvedSourceToolCalls.get(sourceId) : null;
-    if (!remembered?.grant?.granted) return null;
-    return {
-      granted: true,
-      grant: {
-        ...remembered.grant,
-        toolCallId: call.toolCallId,
-        duration: 'once',
-      },
-      reason: 'local_user_approved_same_tool_call',
+  function configure(next = {}) {
+    if (Object.prototype.hasOwnProperty.call(next, 'approvalStore')) {
+      durableApprovals = next.approvalStore;
+      imageAuthority = createImageReadAuthority({ approvalStore: durableApprovals, now });
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'resolvePermissionPrincipal')) resolvePrincipal = next.resolvePermissionPrincipal;
+    if (Object.prototype.hasOwnProperty.call(next, 'resolveAccessPolicy')) resolveAccess = next.resolveAccessPolicy;
+    if (Object.prototype.hasOwnProperty.call(next, 'resolveApprovalScope')) resolveScope = next.resolveApprovalScope;
+    if (Object.prototype.hasOwnProperty.call(next, 'settleNotifier')) notifySettled = next.settleNotifier;
+  }
+
+  function recordApproval({
+    call,
+    streamId,
+    conversationId,
+    workspacePath,
+    state,
+    decidedBy = null,
+    workspaceId = undefined,
+    planId = undefined,
+    argsDigest = undefined,
+    createdAt = undefined,
+    deadlineAt = undefined,
+    decisionReason = undefined,
+    policyRevision = undefined,
+  }) {
+    if (!durableApprovals || typeof durableApprovals.append !== 'function' || !call) return null;
+    let scope = {};
+    try {
+      if ((workspaceId === undefined || planId === undefined) && typeof resolveScope === 'function') {
+        scope = resolveScope({ conversationId, workspacePath, streamId, call }) || {};
+      }
+    } catch {
+      scope = {};
+    }
+    const profile = activeStreams.get(streamId)?.turnProfile;
+    const profileWorkspaceId = typeof profile?.workspaceId === 'string' ? profile.workspaceId.trim() : '';
+    const profileSessionId = typeof profile?.sessionId === 'string' ? profile.sessionId.trim() : '';
+    const profilePlanId = typeof profile?.planId === 'string' ? profile.planId.trim() : '';
+    const record = {
+      approvalId: call.toolCallId,
+      workspaceId: profileWorkspaceId
+        || (workspaceId !== undefined ? workspaceId : (scope.workspaceId ?? null))
+        || null,
+      ...(profileSessionId ? { sessionId: profileSessionId } : {}),
+      conversationId: scope.conversationId ?? conversationId ?? null,
+      streamId: streamId ?? null,
+      planId: profilePlanId || (planId !== undefined ? planId : (scope.planId ?? null)) || null,
+      capabilityId: call.capabilityId || 'unknown',
+      ...(call.capabilityId === 'local.image.read' ? { imageReadScope: call.argumentsPreview } : {}),
+      summary: previewSummary(call),
+      riskLevel: call.riskLevel ?? null,
+      argsDigest: argsDigest || digestApprovalArgs(call.arguments),
+      createdAt: createdAt || call.requestedAt || new Date().toISOString(),
+      state,
+      policyRevision: policyRevision ?? accessFor({ streamId, conversationId, workspacePath }).stamp,
+      ...(deadlineAt ? { deadlineAt } : {}),
+      ...(decisionReason ? { decisionReason } : {}),
+    };
+    if (state !== 'open') {
+      record.decidedAt = new Date(Number(now())).toISOString();
+      record.decidedBy = decidedBy || 'local_ui';
+    }
+    try {
+      return durableApprovals.append(record);
+    } catch (error) {
+      console.warn('[permission-gate] approval record failed:', error?.message || error);
+      return null;
+    }
+  }
+
+  function scopeKeyFor(context) {
+    const profile = activeStreams.get(context.streamId)?.turnProfile;
+    return `${accessFor(context).stamp}:${buildPermissionScopeKey({ ...context, sessionId: profile?.sessionId, planId: profile?.planId })}`;
+  }
+
+  function accessFor(context) {
+    let result = null;
+    try { result = resolveAccess?.(context); } catch { result = { ok: false }; }
+    if (result && !result.ok) return { level: 'restricted_local', stamp: 'invalid', valid: false,
+      reason: result.code === 'POLICY_UNAVAILABLE' ? 'access_policy_unavailable' : 'access_identity_invalid' };
+    const policy = result?.policy;
+    return policy ? { level: policy.accessLevel, stamp: `bot:${policy.workspaceId}:${policy.conversationId}:${policy.revision}`, valid: true }
+      : { level: accessLevel, stamp: `global:${policyEpoch}`, valid: true };
+  }
+
+  function guardResolve(resolve, context, snapshot) {
+    return decision => {
+      const valid = () => { const current = accessFor(context); return current.valid && current.stamp === snapshot.stamp; };
+      if (!snapshot.valid || !valid()) return resolve(createPolicyDenial({ toolCallId: context.toolCallId, reason: 'permission_policy_changed' }));
+      const previous = decision.validate;
+      resolve({ ...decision, ...(snapshot.stamp.startsWith('bot:') ? { policyRevision: snapshot.stamp,
+        ...(decision.grant ? { grant: { ...decision.grant, policyRevision: snapshot.stamp } } : {}) } : {}),
+        validate: () => valid() && (!previous || previous()) });
     };
   }
 
+  function principalFor(context) {
+    if (typeof resolvePrincipal === 'function') {
+      const principal = resolvePrincipal(context);
+      const stamp = accessFor(context).stamp;
+      return principal ? { ...principal, ...(stamp.startsWith('bot:') ? { policyRevision: stamp } : {}) } : null;
+    }
+    const profile = activeStreams.get(context.streamId)?.turnProfile;
+    if (profile?.planId) return null; // Delegated identity needs host GoalPlan validation.
+    const stamp = accessFor(context).stamp;
+    return context.conversationId ? { workspaceId: profile?.workspaceId ?? null, conversationId: context.conversationId,
+      ...(stamp.startsWith('bot:') ? { policyRevision: stamp } : {}) } : null;
+  }
+
+  function reuseApprovedSourceToolCall(call, context) {
+    const sourceId = sourceToolCallIdFromPermissionId(call?.toolCallId);
+    const remembered = sourceId ? approvedSourceToolCalls.get(sourceId) : null;
+    const sourceCall = remembered?.confirmation && context.sourceArguments !== undefined ? { ...call, arguments: context.sourceArguments } : call;
+    const key = scopeKeyFor({ ...context, call: sourceCall });
+    if (!remembered?.grant?.granted || remembered.key !== key || remembered.expiresAt <= Number(now())) return null;
+    approvedSourceToolCalls.delete(sourceId); // Single recovery / confirmation handoff.
+    return { granted: true, grant: { ...remembered.grant, toolCallId: call.toolCallId, duration: 'once' },
+      reason: 'local_user_approved_same_tool_call' };
+  }
+
   function setAccessLevel(nextAccessLevel) {
-    accessLevel = normalizeLocalAccessLevel(nextAccessLevel);
+    const next = normalizeLocalAccessLevel(nextAccessLevel);
+    if (next !== accessLevel) {
+      policyEpoch++;
+      // Cache keys contain their authority version. Global changes cannot revoke another Bot.
+      imageAuthority.revokeAll({ shouldRevoke: grant => !grant.policyRevision?.startsWith('bot:')
+        && !accessFor({ conversationId: grant.conversationId }).stamp.startsWith('bot:') });
+    }
+    accessLevel = next;
     return accessLevel;
   }
 
-  function registerPendingPermission({ streamId, call, scopeKey, scope, resolve, webContents = null }) {
-    pendingPermissionRequests.set(call.toolCallId, {
-      streamId,
-      scopeKey,
-      scope,
-      resolve,
-      webContents,
-      reusable: isReusablePermissionType(call),
-    });
+  function registerPendingPermission({
+    streamId,
+    call,
+    scopeKey,
+    scope,
+    resolve,
+    webContents = null,
+    conversationId = null,
+    approval = null,
+    workspacePath = null,
+    signal = null,
+    deadlineAt,
+  }) {
     const active = activeStreams.get(streamId);
     if (active) {
       if (!active.permissionIds) active.permissionIds = new Set();
       active.permissionIds.add(call.toolCallId);
     }
+    pendingPermissionRequests.add(call.toolCallId, {
+      streamId,
+      call,
+      conversationId,
+      scopeKey,
+      scope,
+      workspacePath,
+      resolve,
+      webContents,
+      reusable: isReusablePermissionType(call),
+      approval,
+      deadlineAt,
+      signal: signal ?? active?.runtimeTurn?.signal,
+      policyRevision: accessFor({ streamId, conversationId, workspacePath }).stamp,
+    });
+    if (!policyWatch && resolveAccess) {
+      policyWatch = setInterval(refreshAccessPolicies, 500);
+      policyWatch.unref?.();
+    }
   }
 
-  function createFilePermissionRequester({ webContents, streamId, toolCallId, conversationId = null, permissionPolicy = null }) {
-    return ({ tool, args, filePath, workspacePath }) => new Promise((resolvePermission) => {
+  function askUser({
+    webContents,
+    streamId,
+    call,
+    scopeKey,
+    scope,
+    resolve,
+    conversationId = null,
+    workspacePath = null,
+    signal = null,
+  }) {
+    const at = Number(now());
+    const argsDigest = digestApprovalArgs(call?.arguments);
+    const profile = activeStreams.get(streamId)?.turnProfile;
+    const sessionId = typeof profile?.sessionId === 'string' ? profile.sessionId.trim() : '';
+    const grantWorkspaceId = typeof profile?.workspaceId === 'string' ? profile.workspaceId.trim() : '';
+    if (oneTimeApprovals?.match?.({
+      capabilityId: call?.capabilityId,
+      argsDigest,
+      at,
+      sessionId,
+      workspaceId: grantWorkspaceId,
+      policyRevision: accessFor({ streamId, conversationId, workspacePath }).stamp.startsWith('bot:')
+        ? accessFor({ streamId, conversationId, workspacePath }).stamp : undefined,
+    })) {
+      resolve({
+        granted: true,
+        grant: {
+          grantId: `once-${randomUUID()}`,
+          toolCallId: call.toolCallId,
+          granted: true,
+          duration: 'once',
+          scope: call.capabilityId,
+          decidedAt: new Date(at).toISOString(),
+        },
+        reason: 'local_user_approved_once',
+      });
+      recordApproval({
+        call,
+        streamId,
+        conversationId,
+        workspacePath,
+        state: 'approved',
+        decidedBy: 'local_ui',
+        argsDigest,
+      });
+      return;
+    }
+    const approver = webContents?.approver ?? activeStreams.get(streamId)?.approver;
+    if (approver === 'none') {
+      resolve(createPolicyDenial({
+        toolCallId: call.toolCallId,
+        reason: 'ephemeral_no_approver',
+      }));
+      recordApproval({
+        call,
+        streamId,
+        conversationId,
+        workspacePath,
+        state: 'denied',
+        decidedBy: 'policy',
+      });
+      return;
+    }
+    const deadlineAt = pendingPermissionRequests.deadlineAt();
+    const approval = recordApproval({ call, streamId, conversationId, workspacePath, state: 'open', deadlineAt });
+    if (durableApprovals && !approval) {
+      resolve(createPolicyDenial({ toolCallId: call.toolCallId, reason: 'permission_unavailable' }));
+      return;
+    }
+    registerPendingPermission({
+      streamId,
+      call,
+      scopeKey,
+      scope,
+      workspacePath,
+      resolve,
+      webContents,
+      conversationId,
+      approval, signal, deadlineAt,
+    });
+    if (!pendingPermissionRequests.get(call.toolCallId)) return;
+    try { webContents.send('chat:stream:permission-request', { streamId, call, deadlineAt }); }
+    catch { settlePermissionRequest(call.toolCallId, { granted: false, duration: 'denied' }, { reason: 'permission_unavailable', terminal: true }); }
+  }
+
+  function createFilePermissionRequester({ webContents, streamId, toolCallId, conversationId = null, permissionPolicy = null, sourceArguments = undefined, signal = null }) {
+    return ({ tool, args, filePath, workspacePath }) => new Promise((resolve) => {
+      const context = { streamId, conversationId, workspacePath, toolCallId };
+      const access = accessFor(context);
+      const resolvePermission = guardResolve(resolve, context, access);
       const call = buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCallId });
+      if (!access.valid) return resolve(createPolicyDenial({ toolCallId: call.toolCallId, reason: access.reason }));
       const policyDecision = automationCapabilityDecision(permissionPolicy, call);
       if (policyDecision) {
         resolvePermission(policyDecision);
         return;
       }
-      const scopeKey = buildPermissionScopeKey({ conversationId, workspacePath, call });
+      const scopeKey = scopeKeyFor({ streamId, conversationId, workspacePath, call });
       const scopedGrant = approvedPermissionScopes.get(scopeKey);
-      if (scopedGrant?.granted) {
+      if (scopedGrant?.granted && scopedGrant.expiresAt > Number(now())) {
         resolvePermission({
           granted: true,
           grant: createAutoScopeGrant({ toolCallId: call.toolCallId, scope: scopedGrant.scope || call.capabilityId }),
@@ -344,39 +528,67 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         });
         return;
       }
-      const accessGrant = maybeCreateAutoGrantForFile({ accessLevel, call });
+      const accessGrant = maybeCreateAutoGrantForFile({ accessLevel: access.level, call });
       if (accessGrant) {
         resolvePermission(accessGrant);
         return;
       }
-      const sourceGrant = reuseApprovedSourceToolCall(call);
+      const sourceGrant = reuseApprovedSourceToolCall(call, { streamId, conversationId, workspacePath, sourceArguments });
       if (sourceGrant) {
         resolvePermission(sourceGrant);
         return;
       }
-      registerPendingPermission({
+      askUser({
+        webContents,
         streamId,
         call,
         scopeKey,
         scope: call.capabilityId,
         resolve: resolvePermission,
-        webContents,
+        signal,
+        conversationId,
+        workspacePath,
       });
-      webContents.send('chat:stream:permission-request', { streamId, call });
     });
   }
 
-  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null }) {
-    return (request = {}) => new Promise((resolvePermission) => {
+  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null, sourceArguments = undefined, signal = null, grantScope = undefined, respectConfirmation = false }) {
+    return (request = {}) => new Promise((resolve) => {
+      const context = { streamId, conversationId, workspacePath, toolCallId };
+      const access = accessFor(context);
+      const resolvePermission = guardResolve(resolve, context, access);
       const call = buildLocalCapabilityPermissionCall({ request, toolCallId });
+      if (!access.valid) return resolve(createPolicyDenial({ toolCallId: call.toolCallId, reason: access.reason }));
       const policyDecision = automationCapabilityDecision(permissionPolicy, call);
+      if (policyDecision && !policyDecision.granted) { resolvePermission(policyDecision); return; }
+      if (respectConfirmation && call.confirmation) {
+        askUser({ webContents, streamId, call, scopeKey: scopeKeyFor({ streamId, conversationId, workspacePath, call }),
+          scope: call.capabilityId, resolve: resolvePermission, signal, conversationId, workspacePath });
+        return;
+      }
       if (policyDecision) {
         resolvePermission(policyDecision);
         return;
       }
-      const scopeKey = buildPermissionScopeKey({ conversationId, workspacePath, call });
+      // Full is the user's current host policy. Roles still pass their own
+      // capability gates; they do not turn an already authorized read into
+      // another per-file question or depend on an older scoped grant's TTL.
+      if (access.level === 'full_local') {
+        resolvePermission({
+          ...createAutoAccessGrant({ toolCallId: call.toolCallId,
+            scope: grantScope ?? request.scope ?? call.capabilityId, reason: 'local_access_level_full' }),
+        });
+        return;
+      }
+      if (call.capabilityId === 'local.image.read') {
+        const inherited = imageAuthority.match({ principal: principalFor({ streamId, conversationId, workspacePath }),
+          scope: request.scope, toolCallId: call.toolCallId });
+        if (inherited) { resolvePermission({ ...inherited, validate: () => Boolean(imageAuthority.match({
+          principal: principalFor({ streamId, conversationId, workspacePath }), scope: request.scope, toolCallId: call.toolCallId })) }); return; }
+      }
+      const scopeKey = scopeKeyFor({ streamId, conversationId, workspacePath, call });
       const scopedGrant = approvedPermissionScopes.get(scopeKey);
-      if (scopedGrant?.granted) {
+      if (scopedGrant?.granted && scopedGrant.expiresAt > Number(now())) {
         resolvePermission({
           granted: true,
           grant: createAutoScopeGrant({ toolCallId: call.toolCallId, scope: scopedGrant.scope || call.capabilityId }),
@@ -384,28 +596,22 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         });
         return;
       }
-      if (accessLevel === 'full_local') {
-        resolvePermission(createAutoAccessGrant({
-          toolCallId: call.toolCallId,
-          scope: call.capabilityId,
-          reason: 'local_access_level_full',
-        }));
-        return;
-      }
-      const sourceGrant = reuseApprovedSourceToolCall(call);
+      const sourceGrant = reuseApprovedSourceToolCall(call, { streamId, conversationId, workspacePath, sourceArguments });
       if (sourceGrant) {
         resolvePermission(sourceGrant);
         return;
       }
-      registerPendingPermission({
+      askUser({
+        webContents,
         streamId,
         call,
         scopeKey,
         scope: call.capabilityId,
         resolve: resolvePermission,
-        webContents,
+        signal,
+        conversationId,
+        workspacePath,
       });
-      webContents.send('chat:stream:permission-request', { streamId, call });
     });
   }
 
@@ -416,9 +622,16 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
     conversationId = null,
     workspacePath = null,
     permissionPolicy = null,
+    sourceArguments = undefined,
+    signal = null,
   }) {
-    return ({ call, classification, ruleDecision }) => new Promise((resolvePermission) => {
+    return ({ call, classification, ruleDecision }) => new Promise((resolve) => {
+      const context = { streamId, conversationId, workspacePath, toolCallId };
+      const access = accessFor(context);
+      const resolvePermission = guardResolve(resolve, context, access);
       const permissionCall = buildShellPermissionCall({ call, classification, ruleDecision, toolCallId });
+      if (!access.valid) return resolve(createPolicyDenial({ toolCallId: permissionCall.toolCallId, reason: access.reason }));
+      if(permissionPolicy?.kind==='objective_probe'){resolvePermission(createPolicyDenial({toolCallId:permissionCall.toolCallId,reason:'objective_probe_read_only'}));return;}
       if (permissionPolicy?.kind === 'automation') {
         if (compareShellRisk(classification?.riskLevel, 'L4_privileged') >= 0) {
           resolvePermission(createPolicyDenial({
@@ -433,13 +646,13 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
           return;
         }
       }
-      const scopeKey = buildPermissionScopeKey({
-        conversationId,
+      const scopeKey = scopeKeyFor({
+        streamId, conversationId,
         workspacePath: workspacePath || classification.cwd,
         call: permissionCall,
       });
       const scopedGrant = approvedPermissionScopes.get(scopeKey);
-      if (scopedGrant?.granted) {
+      if (scopedGrant?.granted && scopedGrant.expiresAt > Number(now())) {
         resolvePermission({
           granted: true,
           grant: createAutoScopeGrant({
@@ -450,88 +663,151 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         });
         return;
       }
-      const accessGrant = maybeCreateAutoGrantForShell({ accessLevel, permissionCall, classification });
+      const accessGrant = maybeCreateAutoGrantForShell({ accessLevel: access.level, permissionCall, classification });
       if (accessGrant) {
         resolvePermission(accessGrant);
         return;
       }
-      const sourceGrant = reuseApprovedSourceToolCall(permissionCall);
+      const sourceGrant = reuseApprovedSourceToolCall(permissionCall, { streamId, conversationId, workspacePath: workspacePath || classification.cwd, sourceArguments });
       if (sourceGrant) {
         resolvePermission(sourceGrant);
         return;
       }
-      registerPendingPermission({
+      askUser({
+        webContents,
         streamId,
         call: permissionCall,
         scopeKey,
         scope: permissionCall.capabilityId,
         resolve: resolvePermission,
-        webContents,
+        signal,
+        conversationId,
+        workspacePath: workspacePath || classification.cwd,
       });
-      webContents.send('chat:stream:permission-request', { streamId, call: permissionCall });
     });
   }
 
   function settlePermissionRequest(toolCallId, grant, options = {}) {
-    const pending = pendingPermissionRequests.get(toolCallId);
+    const pending = pendingPermissionRequests.take(toolCallId, options.terminal === true);
     if (!pending) return false;
-    pendingPermissionRequests.delete(toolCallId);
+    if (pendingPermissionRequests.entries().next().done && policyWatch) { clearInterval(policyWatch); policyWatch = null; }
     activeStreams.get(pending.streamId)?.permissionIds?.delete(toolCallId);
-    const rememberType = Boolean(grant?.granted && pending.reusable && pending.scopeKey);
+    let endingReason = options.reason ?? (grant?.reason && grant.granted !== true ? 'permission_cancelled' : null);
+    if (pending.policyRevision !== accessFor(pending).stamp) endingReason = 'permission_policy_changed';
+    if (endingReason) grant = { ...grant, granted: false, duration: 'denied' };
+    const rememberType = options.remember === false
+      ? false
+      : Boolean(grant?.granted && ['scope', 'session', 'task', 'persistent'].includes(grant.duration) && pending.reusable && pending.scopeKey);
     if (rememberType) {
       approvedPermissionScopes.set(pending.scopeKey, {
         ...grant,
         scope: grant.scope || pending.scope,
+        expiresAt: Number(now()) + 30 * 60 * 1000,
       });
     }
     if (grant?.granted) {
       const sourceId = sourceToolCallIdFromPermissionId(toolCallId);
-      if (sourceId) approvedSourceToolCalls.set(sourceId, { grant });
+      if (sourceId) approvedSourceToolCalls.set(sourceId, { grant, confirmation: pending.call.argumentsPreview?.kind === 'goal-confirmation',
+        key: scopeKeyFor({ streamId: pending.streamId, conversationId: pending.conversationId, workspacePath: pending.workspacePath,
+          call: { ...pending.call, capabilityId: pending.call.argumentsPreview?.authorizedCapabilityId ?? pending.call.capabilityId } }),
+        expiresAt: Number(now()) + 30 * 60 * 1000 });
+    }
+    if (rememberType && pending.call.capabilityId === 'local.image.read') {
+      // Generic argument cache cannot substitute for live file / family checks.
+      approvedPermissionScopes.delete(pending.scopeKey);
+      try {
+        const record = recordApproval({ call: pending.call, streamId: pending.streamId,
+          conversationId: pending.conversationId, workspacePath: pending.workspacePath, state: 'approved', decidedBy: 'local_ui',
+          deadlineAt: pending.deadlineAt, createdAt: pending.approval?.createdAt });
+        const imageGrant = imageAuthority.remember({ principal: principalFor(pending), scope: pending.call.argumentsPreview, record });
+        if (!imageGrant) { grant = { ...grant, granted: false, duration: 'denied' }; }
+        else grant = { ...grant, grantId: imageGrant.grantId, scope: imageGrant.scope };
+      } catch { grant = { ...grant, granted: false, duration: 'denied' }; }
+      if (!grant.granted) approvedSourceToolCalls.delete(sourceToolCallIdFromPermissionId(toolCallId));
+    }
+    const decisionPrincipal = principalFor(pending);
+    const saved = recordApproval({
+      call: pending.call,
+      streamId: pending.streamId,
+      conversationId: pending.approval?.conversationId ?? pending.conversationId,
+      state: grant?.granted ? 'approved' : endingReason === 'permission_cancelled' ? 'cancelled' : endingReason ? 'expired' : 'denied',
+      decidedBy: options.decidedBy ?? (endingReason ? 'policy' : 'local_ui'),
+      deadlineAt: pending.deadlineAt,
+      decisionReason: endingReason ?? (grant?.granted ? undefined : 'local_user_denied'),
+      workspaceId: pending.approval?.workspaceId ?? null,
+      planId: pending.approval?.planId ?? null,
+      argsDigest: pending.approval?.argsDigest,
+      createdAt: pending.approval?.createdAt,
+      policyRevision: pending.policyRevision,
+    });
+    if (durableApprovals && !saved && grant?.granted) {
+      grant = { ...grant, granted: false, duration: 'denied' }; endingReason = 'permission_unavailable';
+      approvedPermissionScopes.delete(pending.scopeKey); approvedSourceToolCalls.delete(sourceToolCallIdFromPermissionId(toolCallId));
     }
     pending.resolve({
+      ...(pending.call.capabilityId === 'local.image.read' ? { validate: () => {
+        if (!decisionPrincipal || digestApprovalArgs(principalFor(pending)) !== digestApprovalArgs(decisionPrincipal)) return false;
+        return !rememberType || Boolean(imageAuthority.match({ principal: principalFor(pending), scope: pending.call.argumentsPreview, toolCallId }));
+      } } : {}),
       granted: Boolean(grant?.granted),
       grant,
       reason: grant?.granted
         ? rememberType
           ? 'local_user_approved_scope'
           : 'local_user_approved_once'
-        : 'local_user_denied',
+        : endingReason ?? 'local_user_denied',
     });
-    if (rememberType && !options.cascaded) {
-      const cascadedIds = [];
+    const settledEvent = { streamId: pending.streamId, toolCallIds: [toolCallId], granted: Boolean(grant?.granted),
+      reason: endingReason ?? (grant?.granted ? 'local_user_approved_once' : 'local_user_denied') };
+    // Bot sinks have no BrowserWindow. Broadcast alone cannot update their Activity.
+    if (typeof notifySettled !== 'function' || activeStreams.get(pending.streamId)?.turnProfile?.role === 'project_agent') {
+      try { pending.webContents?.send?.('chat:stream:permission-settled', settledEvent); } catch {}
+    }
+    try { notifySettled?.(pending.streamId, [toolCallId], settledEvent); } catch {}
+    if (rememberType && grant?.granted && !options.cascaded) {
       for (const [pendingId, other] of [...pendingPermissionRequests.entries()]) {
         if (other.scopeKey !== pending.scopeKey) continue;
-        const cascadedGrant = {
-          ...grant,
-          toolCallId: pendingId,
-        };
-        settlePermissionRequest(pendingId, cascadedGrant, { cascaded: true });
-        cascadedIds.push(pendingId);
-      }
-      if (cascadedIds.length) {
-        pending.webContents?.send?.('chat:stream:permission-settled', {
-          streamId: pending.streamId,
-          toolCallIds: cascadedIds,
-        });
+        settlePermissionRequest(pendingId, { ...grant, toolCallId: pendingId }, { cascaded: true });
       }
     }
     return true;
   }
 
-  function settleStreamPermissionRequests(streamId, grant) {
-    const active = activeStreams.get(streamId);
-    const ids = active?.permissionIds ? [...active.permissionIds] : [];
-    for (const id of ids) {
-      settlePermissionRequest(id, grant);
+  function listPendingPermissions({ streamId = null, conversationId = null } = {}) {
+    const items = [];
+    for (const [toolCallId, pending] of pendingPermissionRequests.entries()) {
+      if (streamId && pending.streamId !== streamId) continue;
+      if (conversationId && pending.conversationId !== conversationId) continue;
+      items.push({ toolCallId, streamId: pending.streamId, call: pending.call });
+    }
+    return items;
+  }
+
+  function refreshAccessPolicies() {
+    for (const [id, pending] of [...pendingPermissionRequests.entries()]) {
+      if (pending.policyRevision !== accessFor(pending).stamp) settlePermissionRequest(id,
+        { granted: false, duration: 'denied' }, { reason: 'permission_policy_changed', terminal: true });
     }
   }
 
-  return {
+  function settleStreamPermissionRequests(streamId, grant) {
+    const ids = [...pendingPermissionRequests.entries()].filter(([, pending]) => pending.streamId === streamId).map(([id]) => id);
+    for (const id of ids) {
+      settlePermissionRequest(id, grant, { reason: 'permission_cancelled', terminal: true });
+    }
+  }
+
+  const gate = {
+    configure,
+    refreshAccessPolicies,
     createFilePermissionRequester,
     createLocalCapabilityPermissionRequester,
     createShellApprovalDecider,
+    listPendingPermissions,
     setAccessLevel,
     settlePermissionRequest,
     settleStreamPermissionRequests,
   };
+  if (registerActive) activeGate = gate;
+  return gate;
 }

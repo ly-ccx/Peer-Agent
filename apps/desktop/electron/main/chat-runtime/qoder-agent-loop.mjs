@@ -1,3 +1,4 @@
+import { localImageContinuations } from '@peer-agent/runtime-node';
 import { sendQoderPrivateStream } from '../provider-adapters/qoder-private-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
@@ -14,7 +15,7 @@ import { executeDesktopProviderRequest } from './provider-request-coordinator.mj
 import * as responseGuard from './response-guard.mjs';
 import {
   createDesktopAbortError,
-  runDesktopRuntimePipeline,
+  runDesktopRuntimePipeline, createNotExecutedToolCall,
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 import { createOpenAIVisualObservationMessage } from './visual-observation-projection.mjs';
@@ -69,6 +70,7 @@ export async function agentLoopQoder({
   automationProposalService = null,
   ensureBrowserReady = null,
   agentProgress = null,
+  executionBudget = null,
   maxOutputTokens = 0,
   resolvedChannel = null,
   persistCompaction = null,
@@ -83,6 +85,13 @@ export async function agentLoopQoder({
   initialContextAccounting = null,
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  const imageScope = { conversationId, workspacePath, planId: toolContext?.planId, provider: 'qoder', providerId, model };
+  let nativeCheckpoint;
+  const saved = executionBudget?.providerCheckpoint;
+  if (saved && (saved.provider !== 'qoder' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
+  if (saved && saved.provider === 'qoder' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
+    apiMessages = localImageContinuations.restore(saved, imageScope);
+  }
   const providerConfig = buildCompactionProviderConfig({
     provider: 'qoder',
     baseUrl,
@@ -92,6 +101,7 @@ export async function agentLoopQoder({
     resolvedChannel,
   });
   const loop = createAgentLoopKernel({
+    executionBudget,
     webContents,
     streamId,
     conversationId,
@@ -115,6 +125,12 @@ export async function agentLoopQoder({
     providerId,
     modelId: model,
     maxTurns: loop.maxTurns,
+    maxToolCalls: executionBudget?.maxToolCalls,
+    sliceToolCalls: executionBudget?.sliceToolCalls,
+    yieldAtTurnLimit: executionBudget?.yieldAtTurnLimit,
+    shouldYield: executionBudget?.shouldYield,
+    maxToolBatchCalls: executionBudget?.maxToolBatchCalls,
+    budgetGuard: executionBudget?.guard,
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
@@ -122,6 +138,10 @@ export async function agentLoopQoder({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
+      checkpoint: (_state, executions) => {
+        nativeCheckpoint = localImageContinuations.checkpoint({ provider: 'qoder', providerId, model, messages: apiMessages }, imageScope);
+        return executionBudget?.guard?.checkpoint?.(nativeCheckpoint, executions);
+      },
       initialize: () => ({ provider: 'qoder-private' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -139,6 +159,7 @@ export async function agentLoopQoder({
             tools,
             preserveLatestUserTurn: true,
             runtimeUsageAccounting: loop.usageAccounting,
+            budgetGuard: executionBudget?.guard,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
             },
@@ -187,9 +208,9 @@ export async function agentLoopQoder({
               retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
-            loop.sendError(`${errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+            loop.sendError(`${errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`, providerResponse.providerRecovery);
           } else {
-            loop.sendHttpError(providerResponse.status, errorText || 'qoder_private_error');
+            loop.sendHttpError(providerResponse.status, errorText || 'qoder_private_error', providerResponse.providerRecovery);
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
@@ -255,10 +276,20 @@ export async function agentLoopQoder({
         if (visualObservation) apiMessages.push(visualObservation);
         return state;
       },
-      onStopped: () => loop.sendDone(),
-      onExhausted: () => loop.sendLoopExhausted(),
+      onYield: (_state, context) => {
+        executionBudget?.onYield?.({ ...(nativeCheckpoint ?? localImageContinuations.checkpoint({ provider: 'qoder', providerId, model, messages: apiMessages }, imageScope)),
+          turns: context.turn, usage: loop.usage });
+        loop.sendDone();
+      },
+      onStopped: (_state, executions) => {
+        const reason = executions.find(item => item.terminal)?.terminalReason || '';
+        if (/^(work_budget_limited|work_execution_stopped|.*outcome_unknown|batch_stopped|max_tool_calls_exceeded)$/.test(reason)) loop.sendError(reason);
+        else loop.sendDone();
+      },
+      onExhausted: (_state, _context, reason) => loop.sendLoopExhausted({ reason }),
     },
     tools: {
+      notExecuted: (call, reason) => createNotExecutedToolCall({ call, reason, webContents, streamId }),
       execute: async (call) => {
         const toolExecution = await executeModelToolCall({
           name: call.name,

@@ -35,6 +35,8 @@ export interface SystemContextInput extends Readonly<Record<string, unknown>> {
   readonly configInstructions?: readonly unknown[];
   readonly contextExtensions?: readonly unknown[];
   readonly runtimeReminders?: readonly unknown[];
+  readonly workId?: string;
+  readonly workingContext?: Readonly<Record<string, unknown>>;
   readonly continuityContext?: readonly unknown[];
   readonly explorerContext?: unknown;
   readonly verifierContext?: unknown;
@@ -149,6 +151,15 @@ export function createGoalCheckpointPromptSource(): PromptSource;
 export function createMcpHostPromptSource(): PromptSource;
 export function createModePromptSource(): PromptSource;
 export function createProjectInstructionsPromptSource(options?: Readonly<Record<string, unknown>>): PromptSource;
+export function createProjectAgentPromptSource(): PromptSource;
+export function createProjectRosterPromptSource(): PromptSource;
+export function createProjectMemoryPromptSource(): PromptSource;
+export function memoryIdsFromAssembledContext(
+  context: Pick<AssembledSystemContext, 'sections'> | null | undefined,
+): readonly string[];
+export const PROJECT_MEMORY_BRIEF_LIMIT: 6000;
+export function createWorkSessionOriginPromptSource(): PromptSource;
+export function createWorkSessionPromptSource(): PromptSource;
 export function createProviderPromptSource(): PromptSource;
 export function createRuntimePromptSource(): PromptSource;
 export function createRuntimeReminderPromptSource(): PromptSource;
@@ -169,3 +180,5 @@ export function normalizeTaskAcceptance(value: unknown): TaskAcceptanceContext &
 export function taskAcceptanceFromMessages(
   messages: readonly unknown[] | null | undefined,
 ): ReturnType<typeof normalizeTaskAcceptance>;
+
+export function createAgentCommunicationPromptSource(): PromptSource;

@@ -1,3 +1,4 @@
+import { localImageContinuations } from '@peer-agent/runtime-node';
 import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
 import { countGeminiCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -15,7 +16,7 @@ import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
   createDesktopAbortError,
-  runDesktopRuntimePipeline,
+  runDesktopRuntimePipeline, createNotExecutedToolCall,
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 import { createGeminiVisualObservationParts } from './visual-observation-projection.mjs';
@@ -51,6 +52,7 @@ export async function agentLoopGemini({
   resolvedChannel = null,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
   agentProgress = null,
+  executionBudget = null,
   emitRuntimeEvent = null,
   runtimeEventState = undefined,
   providerId = null,
@@ -61,7 +63,15 @@ export async function agentLoopGemini({
 }) {
   let effectiveSystemPrompt = systemPrompt;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages], { toolCallFormat: 'gemini' });
+  const imageScope = { conversationId, workspacePath, planId: toolContext?.planId, provider: 'gemini', providerId, model };
+  let nativeCheckpoint;
+  const saved = executionBudget?.providerCheckpoint;
+  if (saved && (saved.provider !== 'gemini' || saved.providerId !== providerId || saved.model !== model)) throw new Error('continuity_model_changed');
+  if (saved && saved.provider === 'gemini' && saved.providerId === providerId && saved.model === model && Array.isArray(saved.messages)) {
+    apiMessages = localImageContinuations.restore(saved, imageScope);
+  }
   const loop = createAgentLoopKernel({
+    executionBudget,
     webContents,
     streamId,
     conversationId,
@@ -95,6 +105,12 @@ export async function agentLoopGemini({
     providerId,
     modelId: model,
     maxTurns: loop.maxTurns,
+    maxToolCalls: executionBudget?.maxToolCalls,
+    sliceToolCalls: executionBudget?.sliceToolCalls,
+    yieldAtTurnLimit: executionBudget?.yieldAtTurnLimit,
+    shouldYield: executionBudget?.shouldYield,
+    maxToolBatchCalls: executionBudget?.maxToolBatchCalls,
+    budgetGuard: executionBudget?.guard,
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
@@ -102,6 +118,10 @@ export async function agentLoopGemini({
       toolResultsApplied: () => loop.publishToolResultProjection(),
     },
     model: {
+      checkpoint: (_state, executions) => {
+        nativeCheckpoint = localImageContinuations.checkpoint({ provider: 'gemini', providerId, model, messages: apiMessages }, imageScope);
+        return executionBudget?.guard?.checkpoint?.(nativeCheckpoint, executions);
+      },
       initialize: () => ({ provider: 'gemini' }),
       runTurn: async (state) => {
         const execution = await executeDesktopProviderRequest({
@@ -124,6 +144,7 @@ export async function agentLoopGemini({
             goalPlanStore: runtimeMode === 'goal' ? goalPlanStore : null,
             visualRequestHost: { goalPlanStore, workspacePath },
             runtimeUsageAccounting: loop.usageAccounting,
+            budgetGuard: executionBudget?.guard,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
             },
@@ -189,9 +210,9 @@ export async function agentLoopGemini({
               retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
-            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`, providerResponse.providerRecovery);
           } else {
-            loop.sendHttpError(providerResponse.status, text);
+            loop.sendHttpError(providerResponse.status, text, providerResponse.providerRecovery);
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
@@ -258,10 +279,20 @@ export async function agentLoopGemini({
         });
         return state;
       },
-      onStopped: () => loop.sendDone(),
-      onExhausted: () => loop.sendLoopExhausted(),
+      onYield: (_state, context) => {
+        executionBudget?.onYield?.({ ...(nativeCheckpoint ?? localImageContinuations.checkpoint({ provider: 'gemini', providerId, model, messages: apiMessages }, imageScope)),
+          turns: context.turn, usage: loop.usage });
+        loop.sendDone();
+      },
+      onStopped: (_state, executions) => {
+        const reason = executions.find(item => item.terminal)?.terminalReason || '';
+        if (/^(work_budget_limited|work_execution_stopped|.*outcome_unknown|batch_stopped|max_tool_calls_exceeded)$/.test(reason)) loop.sendError(reason);
+        else loop.sendDone();
+      },
+      onExhausted: (_state, _context, reason) => loop.sendLoopExhausted({ reason }),
     },
     tools: {
+      notExecuted: (call, reason) => createNotExecutedToolCall({ call, reason, webContents, streamId }),
       execute: async (call) => {
         const toolExecution = await executeModelToolCall({
           name: call.name,

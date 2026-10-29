@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -14,6 +15,85 @@ import {
 } from './tool-orchestrator.mjs';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createRuntimeToolProjection } from '../tools/index.mjs';
+import { evidenceBodyFromRecord, presentEvidence } from '../project-agent/evidence-presenter.mjs';
+
+it('real desktop shell Tool Result reaches the scoped index and verifier snapshots', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'command-evidence-'));
+  try {
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict';
+      import path from 'node:path';
+      import { createToolContext, executeModelToolCall } from './apps/desktop/electron/main/chat-runtime/tool-orchestrator.mjs';
+      import { createRuntimeToolProjection } from './apps/desktop/electron/main/tools/index.mjs';
+      import { createGoalPlanStore, verifierEvidenceSnapshots } from './packages/runtime-node/dist/index.js';
+      import { disposeApplicationShellSessions } from './apps/desktop/electron/main/runtime-gateway/application-shell-sessions.mjs';
+      import { disposeApplicationShellTasks } from './apps/desktop/electron/main/runtime-gateway/application-shell-tasks.mjs';
+      const root = process.env.PEER_AGENT_HOME;
+      const storeDir = path.join(root, 'plans');
+      const store = createGoalPlanStore({ storeDir });
+      const plan = store.createGoalContract({ conversationId: 'shell-c', title: 'Command check', goal: 'Inspect actual shell output',
+        successCriteria: ['Check emits RC_COMMAND_FACT'], tasks: [{ taskId: 'check', title: 'Check', status: 'pending' }] });
+      store.recordApproval(plan.planId, { decision: 'approve', decidedBy: 'tester' });
+      store.setRunnerState(plan.planId, { enabled: true, status: 'running', runId: 'shell-run', currentTaskId: 'check' });
+      const { registry, projection } = createRuntimeToolProjection({ projectionOptions: { mode: 'goal' } });
+      try {
+        const permissionGate = {
+          createFilePermissionRequester: () => async () => ({ granted: true }),
+          createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }),
+          createShellApprovalDecider: () => async () => ({ granted: true }),
+        };
+        const result = await executeModelToolCall({ name: 'bash', rawArguments: JSON.stringify({ command: 'echo RC_COMMAND_FACT' }),
+          toolCallId: 'observed-shell', workspacePath: root, toolContext: { ...createToolContext({ conversationId: 'shell-c', mode: 'goal' }),
+            planId: plan.planId, goalRuntime: { planId: plan.planId, runId: 'shell-run', currentTaskId: 'check' } },
+          permissionGate, webContents: { send() {} }, streamId: 'shell-stream', conversationId: 'shell-c', registry,
+          runtimeProjection: projection, goalPlanStore: store });
+        assert.ok(result.result.execution, JSON.stringify(result));
+        assert.equal(result.result.execution.result.status, 'success');
+        const record = createGoalPlanStore({ storeDir }).findEvidenceIndexRecords(['tool-result://observed-shell'])[0];
+        assert.equal(record.bodyPreview.kind, 'command');
+        assert.equal(JSON.parse(record.bodyPreview.text).stdout.trim(), 'RC_COMMAND_FACT');
+        assert.equal(verifierEvidenceSnapshots({ ...plan, criterionResults: [{ evidenceRef: record.evidenceRef }] }, [record])[0].kind, 'command');
+        console.log('actual-shell-index-verifier-passed');
+      } finally {
+        await disposeApplicationShellSessions(root);
+        await disposeApplicationShellTasks(root);
+      }
+    `], { cwd: path.resolve(import.meta.dirname, '../../../../..'),
+      env: { ...process.env, PEER_AGENT_HOME: root }, encoding: 'utf8', timeout: 15000 });
+    assert.match(output, /actual-shell-index-verifier-passed/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+it('file Provider evidence is a redacted execution snapshot across index reload', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'file-evidence-'));
+  try {
+    const file = path.join(root, 'README.md');
+    writeFileSync(file, 'original content\nBearer secret-value\n' + 'a'.repeat(6000));
+    const storeDir = path.join(root, 'goal-plans');
+    const store = createGoalPlanStore({ storeDir });
+    const { registry, projection } = createRuntimeToolProjection({ projectionOptions:{mode:'project_agent'} });
+    const permissionGate = {
+      createFilePermissionRequester:()=>async()=>({approved:true,granted:true}),
+      createLocalCapabilityPermissionRequester:()=>async()=>({approved:true,granted:true}),
+      createShellApprovalDecider:()=>async()=>({approved:true}),
+    };
+    for (const [name, args] of [['read_file',{path:file}],['list_files',{path:root}],['search_files',{query:'original',path:root}]]) {
+      const result = await executeModelToolCall({name,rawArguments:JSON.stringify(args),toolCallId:name,
+        workspacePath:root,toolContext:{...createToolContext({conversationId:'file-c',mode:'project_agent'}),turnRole:'project_agent'},
+        permissionGate,webContents:{send(){}},streamId:'read',conversationId:'file-c',registry,runtimeProjection:projection,goalPlanStore:store});
+      assert.equal(result.result.execution.result.status,'success',JSON.stringify(result.result.execution.grant));
+    }
+    writeFileSync(file, 'changed after execution');
+    const reloaded = createGoalPlanStore({storeDir});
+    const read = reloaded.findEvidenceIndexRecords(['tool-result://read_file'])[0];
+    const body = evidenceBodyFromRecord(read);
+    assert.match(body.text,/original content/); assert.doesNotMatch(body.text,/secret-value|changed after execution/);
+    assert.equal(presentEvidence(body).kind,'file'); assert.equal(presentEvidence(body).truncated,true);
+    for (const name of ['list_files','search_files']) assert.ok(evidenceBodyFromRecord(reloaded.findEvidenceIndexRecords([`tool-result://${name}`])[0]));
+    store.recordEvidenceRefs({evidenceRef:'tool-result://read_file',toolName:'goal_update_task',bodyPreview:{kind:'file',text:'forged',truncated:false}});
+    assert.doesNotMatch(createGoalPlanStore({storeDir}).findEvidenceIndexRecords(['tool-result://read_file'])[0].bodyPreview.text,/forged/);
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
 
 // 回归：MCP 工具卡标题透传。
 // 背景：tool-call 事件此前只发裸 capability 名（如 mcp__server__tool），
@@ -387,4 +467,28 @@ describe('formatToolResultForStream', () => {
     const result = formatToolResultForStream({ name: 'batch_search', args: {}, output });
     assert.equal(result, output);
   });
+});
+
+it('ephemeral verifier Tool Result is indexed under the trusted plan with no conversation', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verifier-evidence-scope-'));
+  try {
+    writeFileSync(path.join(root, 'README.md'), 'Observed verifier fact');
+    const store = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
+    const plan = store.createGoalContract({ conversationId: 'child', goal: 'Review facts',
+      successCriteria: [{ id: 'facts', kind: 'model_review', description: 'Evidence supports facts' }], tasks: [] });
+    const { registry, projection } = createRuntimeToolProjection({ projectionOptions: { mode: 'explorer' } });
+    const permissionGate = {
+      createFilePermissionRequester: () => async () => ({ approved: true, granted: true }),
+      createLocalCapabilityPermissionRequester: () => async () => ({ approved: true, granted: true }),
+      createShellApprovalDecider: () => async () => ({ approved: true }),
+    };
+    await executeModelToolCall({ name: 'read_file', rawArguments: JSON.stringify({ path: path.join(root, 'README.md') }),
+      toolCallId: 'ephemeral-verifier-read', workspacePath: root, conversationId: null,
+      toolContext: { ...createToolContext({ conversationId: null, mode: 'explorer' }), planId: plan.planId, turnRole: 'work_session' },
+      permissionGate, webContents: { send() {} }, streamId: 'verifier-stream', registry, runtimeProjection: projection, goalPlanStore: store });
+    const [record] = createGoalPlanStore({ storeDir: path.join(root, 'plans') }).findEvidenceIndexRecords(['tool-result://ephemeral-verifier-read']);
+    assert.equal(record.planId, plan.planId);
+    assert.equal(record.conversationId, undefined);
+    assert.match(record.bodyPreview.text, /Observed verifier fact/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

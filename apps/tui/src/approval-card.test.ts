@@ -13,7 +13,7 @@ describe('TUI approval card', () => {
   test('exposes the three ordered approval choices', () => {
     expect(TUI_APPROVAL_OPTIONS.map(({ label, decision }) => [label, decision])).toEqual([
       ['Allow once', 'allow-once'],
-      ['Allow similar this session', 'allow-session'],
+      ['Allow this operation this session', 'allow-session'],
       ['Deny', 'deny'],
     ]);
   });

@@ -39,6 +39,23 @@ export function isSkippedFileTreePath(absPath) {
   return parts.some((part) => isSkippedFileTreeDirName(part));
 }
 
+/** Bound enumeration itself, including an extra entry to establish truncation. */
+export function readBoundedDirectoryEntries(root, limit = 1000, open = fs.opendirSync) {
+  const bound = Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.floor(limit))) : 1000;
+  const directory = open(root);
+  const entries = [];
+  let truncated = false;
+  try {
+    let entry;
+    while ((entry = directory.readSync())) {
+      if (isSkippedFileTreeDirName(entry.name)) continue;
+      if (entries.length === bound) { truncated = true; break; }
+      entries.push(entry);
+    }
+    return { entries, truncated };
+  } finally { directory.closeSync(); }
+}
+
 export function shouldSkipFileName(name) {
   if (!name) return true;
   if (name === '.' || name === '..') return true;
@@ -97,40 +114,50 @@ function collectWorkspaceFiles(workspaceRoot, {
   limit = DEFAULT_LIMIT,
   maxVisited = DEFAULT_MAX_VISITED,
   emptyDepth = DEFAULT_EMPTY_DEPTH,
+  maxDepth = 32,
 } = {}) {
   const root = path.normalize(workspaceRoot);
   const needle = String(query || '').trim();
   const collected = [];
   const stack = [{ absPath: root, relPath: '', depth: 0 }];
   let visited = 0;
+  let truncated = false;
 
   while (stack.length > 0 && visited < maxVisited && collected.length < maxVisited) {
     const current = stack.pop();
-    let entries;
+    let directory;
     try {
-      entries = fs.readdirSync(current.absPath, { withFileTypes: true });
-    } catch {
+      directory = fs.opendirSync(current.absPath);
+    } catch (error) {
+      if (current.depth === 0) throw error;
+      truncated = true;
       continue;
     }
-    for (const entry of entries) {
-      visited += 1;
-      if (visited > maxVisited) break;
-      const name = entry.name;
-      const childRel = current.relPath ? `${current.relPath}/${name}` : name;
-      const childAbs = path.join(current.absPath, name);
-      if (entry.isDirectory()) {
-        if (shouldSkipDirName(name) || isFinderPlaceholderName(name)) continue;
-        collected.push({ relPath: childRel, kind: 'directory' });
-        if (!needle && current.depth >= emptyDepth) continue;
-        stack.push({ absPath: childAbs, relPath: childRel, depth: current.depth + 1 });
-        continue;
+    try {
+      let entry;
+      while (visited < maxVisited && (entry = directory.readSync())) {
+        visited += 1;
+        const name = entry.name;
+        const childRel = current.relPath ? `${current.relPath}/${name}` : name;
+        const childAbs = path.join(current.absPath, name);
+        if (entry.isDirectory()) {
+          if (shouldSkipDirName(name) || isFinderPlaceholderName(name)) continue;
+          collected.push({ relPath: childRel, kind: 'directory' });
+          if (!needle && current.depth >= emptyDepth) continue;
+          if (current.depth >= maxDepth) { truncated = true; continue; }
+          stack.push({ absPath: childAbs, relPath: childRel, depth: current.depth + 1 });
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (shouldSkipFileName(name)) continue;
+        collected.push({ relPath: childRel, kind: 'file' });
       }
-      if (!entry.isFile()) continue;
-      if (shouldSkipFileName(name)) continue;
-      collected.push({ relPath: childRel, kind: 'file' });
-    }
+      if (visited >= maxVisited) truncated = true;
+    } catch { truncated = true; }
+    finally { try { directory.closeSync(); } catch { /* Already closed/unavailable. */ } }
   }
-  return rankWorkspaceFiles(collected, needle, limit);
+  const ranked = rankWorkspaceFiles(collected, needle, collected.length || 1);
+  return { files: ranked.slice(0, limit), visited, truncated: truncated || stack.length > 0 || ranked.length > limit };
 }
 
 export function searchWorkspaceFiles(workspaceRoot, options = {}) {
@@ -138,6 +165,9 @@ export function searchWorkspaceFiles(workspaceRoot, options = {}) {
     return { ok: false, status: 'invalid_path', files: [], error: 'missing_workspace' };
   }
   const normalized = path.normalize(workspaceRoot);
+  if (options.query !== undefined && (typeof options.query !== 'string' || options.query.length > 256)) {
+    return { ok: false, status: 'invalid_path', files: [], error: 'invalid_query' };
+  }
   if (!path.isAbsolute(normalized)) {
     return { ok: false, status: 'invalid_path', files: [], error: 'workspace_must_be_absolute' };
   }
@@ -146,16 +176,19 @@ export function searchWorkspaceFiles(workspaceRoot, options = {}) {
     if (!stat.isDirectory()) {
       return { ok: false, status: 'not_dir', files: [], error: 'workspace_not_dir' };
     }
-  } catch {
-    return { ok: false, status: 'not_found', files: [], error: 'workspace_not_found' };
+  } catch (error) {
+    const denied = error?.code === 'EACCES' || error?.code === 'EPERM';
+    return { ok: false, status: denied ? 'permission_denied' : 'not_found', files: [], error: denied ? 'workspace_not_readable' : 'workspace_not_found' };
   }
   try {
-    const files = collectWorkspaceFiles(normalized, options);
-    return { ok: true, status: 'ok', files, workspacePath: normalized };
+    const limit = Number.isFinite(options.limit) ? Math.max(1, Math.min(40, Math.floor(options.limit))) : DEFAULT_LIMIT;
+    const maxVisited = Number.isFinite(options.maxVisited) ? Math.max(1, Math.min(DEFAULT_MAX_VISITED, Math.floor(options.maxVisited))) : DEFAULT_MAX_VISITED;
+    const result = collectWorkspaceFiles(normalized, { ...options, limit, maxVisited, maxDepth: 32 });
+    return { ok: true, status: 'ok', ...result, workspacePath: normalized };
   } catch (error) {
     return {
       ok: false,
-      status: 'error',
+      status: error?.code === 'EACCES' || error?.code === 'EPERM' ? 'permission_denied' : 'error',
       files: [],
       error: error instanceof Error ? error.message : String(error),
     };

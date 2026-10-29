@@ -1,0 +1,3 @@
+Ask for an independent verifier pass on one work session using its frozen user-configured verifier model. Independent means a separate review context; the worker and verifier may use the same model and channel. Same source is not a failure or a reason to change models. Optional focus narrows what to recheck. The session stays verifying until the new host conclusion is recorded. Do not write the conclusion yourself.
+
+The result is structured task verification data, not a public chat card. Read the returned detail, refresh get_session for the current task status, and use post_reply to explain the result, actual verification scope and unresolved limits to the user. Passing verification alone does not imply result acceptance.

@@ -1,3 +1,11 @@
+import { isModelReasoningEffort, modelReasoningLevels, modelSupportsFastMode, projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import {
+  isRoutableProvider,
+  normalizeProjectAgentSettings,
+  resolveRoleRoute,
+  resolveStoredModelRouting,
+} from '@peer-agent/runtime-node';
+
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
   return value;
@@ -5,6 +13,27 @@ function assertFunction(value, label) {
 
 function isRecord(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function projectAgentPartial(before, partial) {
+  if (!isRecord(partial) || !isRecord(partial.projectAgent)) return partial;
+  const current = isRecord(before?.projectAgent) ? before.projectAgent : {};
+  const requestedHours = isRecord(partial.projectAgent.quietHours) ? partial.projectAgent.quietHours : null;
+  const quietHours = requestedHours
+    ? { ...(isRecord(current.quietHours) ? current.quietHours : {}), ...requestedHours }
+    : current.quietHours;
+  return {
+    ...partial,
+    projectAgent: {
+      ...current,
+      ...partial.projectAgent,
+      ...normalizeProjectAgentSettings({
+        ...current,
+        ...partial.projectAgent,
+        ...(quietHours ? { quietHours } : {}),
+      }),
+    },
+  };
 }
 
 export function createSettingsApplicationService({
@@ -51,7 +80,8 @@ export function createSettingsApplicationService({
 
   function update(partial) {
     const before = read();
-    const next = merge(partial);
+    const request = projectAgentPartial(before, partial);
+    const next = merge(request);
     if (isRecord(partial) && Object.prototype.hasOwnProperty.call(partial, 'appearance')) {
       publishAppearance(next.appearance);
     }
@@ -111,6 +141,112 @@ export function createSettingsApplicationService({
     return readSession();
   }
 
+  function getModelRouting(providers = []) {
+    return resolveStoredModelRouting(read().modelRouting, Array.isArray(providers) ? providers : []);
+  }
+
+  function updateModelRouting(partial, providers) {
+    const current = isRecord(read().modelRouting) ? read().modelRouting : {};
+    const nextPartial = isRecord(partial) ? partial : {};
+    const next = { ...current };
+    if (isRecord(nextPartial.tiers)) next.tiers = { ...(isRecord(current.tiers) ? current.tiers : {}), ...nextPartial.tiers };
+    if (isRecord(nextPartial.roles)) next.roles = { ...(isRecord(current.roles) ? current.roles : {}), ...nextPartial.roles };
+    if (typeof nextPartial.verifierPreferDifferentFamily === 'boolean') {
+      next.verifierPreferDifferentFamily = nextPartial.verifierPreferDifferentFamily;
+    }
+    if (Number.isFinite(Number(nextPartial.dailySpendCapUsd)) && Number(nextPartial.dailySpendCapUsd) >= 0) {
+      next.dailySpendCapUsd = Number(nextPartial.dailySpendCapUsd);
+    }
+    if (isRecord(nextPartial.roleSpendCaps)) {
+      const caps = { ...(isRecord(current.roleSpendCaps) ? current.roleSpendCaps : {}) };
+      for (const [role, amount] of Object.entries(nextPartial.roleSpendCaps)) {
+        if (amount == null || amount === '') delete caps[role];
+        else if (Number.isFinite(Number(amount)) && Number(amount) >= 0) caps[role] = Number(amount);
+      }
+      if (Object.keys(caps).length) next.roleSpendCaps = caps;
+      else delete next.roleSpendCaps;
+    }
+    for (const binding of Object.values(nextPartial.tiers || {})) {
+      if (!isRecord(binding)) throw new Error('INVALID_MODEL_ROUTING');
+      if (binding.reasoningEffort !== undefined && !isModelReasoningEffort(binding.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+      if (binding.fastMode !== undefined && typeof binding.fastMode !== 'boolean') throw new Error('INVALID_FAST_MODE');
+      for (const id of [binding.primary, ...(binding.fallbacks || [])]) {
+        const provider = providers?.find(item => item.id === id && isRoutableProvider(item));
+        if (!provider) continue; // Retain stale references; do not silently replace them.
+        if (binding.reasoningEffort !== undefined && !modelReasoningLevels(provider).includes(binding.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+        if (binding.fastMode === true && !modelSupportsFastMode(provider)) throw new Error('INVALID_FAST_MODE');
+      }
+    }
+    for (const [role, setting] of Object.entries(nextPartial.roles || {})) {
+      if (setting?.reasoningEffort != null && !isModelReasoningEffort(setting.reasoningEffort)) throw new Error('INVALID_REASONING_EFFORT');
+      if (setting?.fastMode !== undefined && typeof setting.fastMode !== 'boolean') throw new Error('INVALID_FAST_MODE');
+      if (Array.isArray(providers)) {
+        const resolved = resolveRoleRoute({ role, providers, routing: next, spentUsd: Number.NaN });
+        if (!resolved.ok && resolved.reason === 'reasoning') throw new Error('INVALID_REASONING_EFFORT');
+        if (!resolved.ok && resolved.reason === 'fast_mode') throw new Error('INVALID_FAST_MODE');
+      }
+    }
+    if (JSON.stringify(next) === JSON.stringify(current)) return current;
+    merge({ modelRouting: next });
+    return next;
+  }
+
+  function projectRoutingProvider(provider) {
+    if (!isRoutableProvider(provider)) return null;
+    return projectModelRoutingMenuOption(provider);
+  }
+
+  function describeModelRouting(providers = []) {
+    const list = Array.isArray(providers) ? providers : [];
+    const projected = list.map(projectRoutingProvider).filter(Boolean);
+    const usable = list.filter((provider) => projected.some((item) => item.id === provider.id));
+    return {
+      routing: getModelRouting(usable),
+      providers: projected,
+      singleModel: projected.length <= 1,
+    };
+  }
+
+  function previewModelRouting(providers = [], { spentByRole = {} } = {}) {
+    const described = describeModelRouting(providers);
+    const usable = (Array.isArray(providers) ? providers : []).filter((provider) => (
+      described.providers.some((item) => item.id === provider.id)
+    ));
+    const resolutions = [
+      'project_agent',
+      'session_worker',
+      'explorer',
+      'verifier',
+      'visual_verifier',
+      'memory_curator',
+      'objective_probe',
+      'compactor',
+    ].map((role) => {
+      const resolved = resolveRoleRoute({
+        role,
+        providers: usable,
+        routing: read().modelRouting,
+        spentUsd: Number(spentByRole?.[role]) || 0,
+      });
+      const chosenId = resolved.ok ? resolved.selection.modelProviderId : '';
+      const chosen = described.providers.find((item) => item.id === chosenId) || null;
+      return {
+        role,
+        ok: resolved.ok === true,
+        modelProviderId: chosenId || null,
+        reasoningEffort: resolved.ok ? (resolved.selection.reasoningEffort ?? null) : null,
+        fastMode: resolved.ok ? resolved.selection.fastMode === true : null,
+        label: chosen?.label || chosenId || '',
+        source: resolved.ok ? (resolved.source || null) : null,
+        missing: resolved.ok ? null : (resolved.missing || null),
+        reason: resolved.ok ? null : (resolved.reason || null),
+        spendExceeded: resolved.spendExceeded === true,
+        sameFamilyAsWorker: typeof resolved.sameFamilyAsWorker === 'boolean' ? resolved.sameFamilyAsWorker : null,
+      };
+    });
+    return { ...described, resolutions };
+  }
+
   return Object.freeze({
     get,
     update,
@@ -121,6 +257,10 @@ export function createSettingsApplicationService({
     exportSettings,
     importSettings,
     updateLocale,
+    getModelRouting,
+    updateModelRouting,
+    describeModelRouting,
+    previewModelRouting,
   });
 }
 

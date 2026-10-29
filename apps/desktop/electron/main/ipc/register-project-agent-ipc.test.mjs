@@ -1,0 +1,155 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { createProjectAgentApplicationService } from '../project-agent/project-agent-application-service.mjs';
+import { createProjectAgentIpcRegistrations } from './register-project-agent-ipc.mjs';
+
+const CHANNELS = [
+  'project-agent:list-attention',
+  'project-agent:list',
+  'project-agent:get',
+  'project-agent:read-access-policy',
+  'project-agent:update-access-policy',
+  'project-agent:read-avatar',
+  'project-agent:create',
+  'project-agent:update-profile',
+  'project-agent:update-model-selection',
+  'project-agent:delete',
+  'project-agent:submit-input',
+  'project-agent:read-input-draft',
+  'project-agent:write-input-draft',
+  'project-agent:read-conversation',
+  'project-agent:stop-response',
+  'project-agent:read-evidence',
+  'project-agent:list-sessions',
+  'project-agent:get-session',
+  'project-agent:cancel-session',
+  'project-agent:resume-session',
+  'project-agent:list-approvals',
+  'project-agent:decide-approval',
+  'project-agent:mark-read',
+  'project-agent:search',
+  'project-agent:list-history',
+  'project-agent:continue-history',
+  'project-agent:start-familiarize',
+  'project-agent:confirm-result',
+  'project-agent:accept-readme',
+  'project-agent:retry',
+  'project-agent:takeover-host',
+  'project-agent:recovery',
+  'project-agent:diagnostics',
+];
+
+function harness() {
+  const calls = [];
+  const port = (name) => (...args) => {
+    calls.push([name, ...args]);
+    return { ok: true, name };
+  };
+  const [registration] = createProjectAgentIpcRegistrations({
+    projectAgent: {
+      list: port('list'),
+      listAttention: port('list-attention'),
+      get: port('get'),
+      readAccessPolicy: port('read-access-policy'),
+      updateAccessPolicy: port('update-access-policy'),
+      readAvatar: port('read-avatar'),
+      create: port('create'),
+      updateProfile: port('update-profile'),
+      updateModelSelection: port('update-model-selection'),
+      deleteBot: port('delete'),
+      submitInput: port('submit-input'),
+      readInputDraft: port('read-input-draft'),
+      writeInputDraft: port('write-input-draft'),
+      readConversation: port('read-conversation'),
+      readEvidence: port('read-evidence'),
+      listSessions: port('list-sessions'),
+      getSession: port('get-session'),
+      cancelSession: port('cancel-session'),
+      resumeSession: port('resume-session'),
+      listApprovals: port('list-approvals'),
+      decideApproval: port('decide-approval'),
+      markRead: port('mark-read'),
+      search: port('search'),
+      listHistory: port('list-history'),
+      continueHistory: port('continue-history'),
+      startFamiliarize: port('start-familiarize'),
+      confirmResult: port('confirm-result'),
+      acceptReadme: port('accept-readme'),
+      takeoverHost: port('takeover-host'),
+      controlRecovery: port('recovery'),
+      retry: port('retry'),
+      stopResponse: port('stop-response'),
+      diagnostics: port('diagnostics'),
+    },
+  });
+  const handlers = new Map();
+  registration.register({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+  return { registration, handlers, calls };
+}
+
+test('project-agent-ipc 注册全部项目代理通道', () => {
+  const { registration, handlers } = harness();
+  assert.equal(registration.owner, 'project-agent-ipc');
+  assert.deepEqual([...handlers.keys()], CHANNELS);
+});
+
+test('每个通道把载荷交给应用服务，创建和改档案带上发送方', async () => {
+  const { handlers, calls } = harness();
+  const sender = { id: 7 };
+  for (const channel of CHANNELS) {
+    const payload = { channel };
+    if (channel === 'project-agent:create' || channel === 'project-agent:update-profile') {
+      await handlers.get(channel)({ sender }, payload);
+    } else {
+      await handlers.get(channel)({ sender }, payload);
+    }
+  }
+  assert.equal(calls.length, CHANNELS.length);
+  assert.deepEqual(calls.find(row => row[0] === 'create'), ['create', { channel: 'project-agent:create' }, sender]);
+  assert.deepEqual(calls.find(row => row[0] === 'update-profile'), ['update-profile', { channel: 'project-agent:update-profile' }, sender]);
+  assert.ok(calls.some(row => row[0] === 'list' && row[1].channel === 'project-agent:list'));
+  assert.equal(calls.some((call) => call[0] === 'submit-input'), true);
+  assert.equal(calls.some((call) => call[0] === 'decide-approval'), true);
+  assert.deepEqual(calls.at(-1), ['diagnostics', { channel: 'project-agent:diagnostics' }, sender]);
+});
+
+test('证据正文只经 read-evidence 通道从 main 读出', async () => {
+  const text = `${'命令输出\n'.repeat(400)}结尾`;
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: { list: () => [], search: () => [] },
+    readEvidenceBody(evidenceRef) {
+      if (evidenceRef === 'ev-1') return { evidenceRef, kind: 'command', text };
+      return { evidenceRef, kind: 'command', text: 'npm test' };
+    },
+    broadcast() {},
+  });
+  const [registration] = createProjectAgentIpcRegistrations({ projectAgent: service });
+  const handlers = new Map();
+  registration.register({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+  const opened = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'ev-1' });
+  assert.equal(opened.ok, true);
+  assert.equal(opened.kind, 'command');
+  assert.equal(opened.evidenceRef, 'ev-1');
+  assert.equal(opened.truncated, true);
+  assert.equal(Array.from(opened.summary).length, 2000);
+  assert.equal(opened.summary.includes('结尾'), false);
+  const escaped = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: '../secret' });
+  assert.equal(escaped.ok, false);
+  assert.equal(escaped.code, 'INVALID_REF');
+  const toolResult = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'tool-result://host-verifier' });
+  assert.equal(toolResult.ok, true);
+  assert.equal(toolResult.summary, 'npm test');
+  const stdout = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'local-shell-artifact://task/stdout' });
+  assert.equal(stdout.ok, true);
+  assert.equal(stdout.evidenceRef, 'local-shell-artifact://task/stdout');
+});

@@ -10,10 +10,10 @@
  * - 不回填历史 null 绑定
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
-import { estimateUsageCostUsd } from './usage-stats.mjs';
+import { estimateUsageCostUsd } from './usage-pricing.mjs';
 
 function finiteNumber(value) {
   const n = Number(value);
@@ -80,6 +80,8 @@ export function createUsageRequestLog({
       cacheWriteTokens: finiteNumber(usage.cacheWriteTokens),
       estimatedCostUsd: cost.hasPricing ? cost.estimatedCostUsd : null,
       pricingSource: optionalText(entry.pricingSource),
+      ...(optionalText(entry.role) ? { role: optionalText(entry.role) } : {}),
+      ...(optionalText(entry.workspaceId) ? { workspaceId: optionalText(entry.workspaceId) } : {}),
     };
 
     ensureParent();
@@ -89,8 +91,8 @@ export function createUsageRequestLog({
 
   function readAll({ limit = 5000 } = {}) {
     if (!existsSync(logFile)) return [];
-    const lines = readFileSync(logFile, 'utf8').split('\n').filter(Boolean);
-    const start = Math.max(0, lines.length - Math.max(1, Number(limit) || 5000));
+    const lines = readUsageTail(logFile, Math.max(1, Math.min(50000, Math.floor(Number(limit) || 5000))));
+    const start = Math.max(0, lines.length - Math.max(1, Math.min(50000, Math.floor(Number(limit) || 5000))));
     const rows = [];
     for (let i = start; i < lines.length; i += 1) {
       try {
@@ -111,4 +113,26 @@ export function createUsageRequestLog({
 
 export function appendUsageRequestLog(entry, options) {
   return createUsageRequestLog(options).append(entry);
+}
+
+/** Bounded tail I/O: old logs must not block every settings read as they grow. */
+function readUsageTail(file, limit) {
+  const fd = openSync(file, 'r');
+  try {
+    let position = fstatSync(fd).size, bytes = 0, newlines = 0;
+    const chunks = [], maxBytes = 8 * 1024 * 1024;
+    while (position > 0 && bytes < maxBytes && newlines <= limit) {
+      const size = Math.min(64 * 1024, position, maxBytes - bytes);
+      const chunk = Buffer.allocUnsafe(size);
+      position -= size;
+      const count = readSync(fd, chunk, 0, size, position);
+      const read = chunk.subarray(0, count);
+      for (const byte of read) if (byte === 10) newlines += 1;
+      chunks.unshift(read); bytes += count;
+      if (count < size) break;
+    }
+    const lines = Buffer.concat(chunks).toString('utf8').split('\n');
+    if (position > 0) lines.shift(); // Discard the incomplete first record.
+    return lines.filter(Boolean);
+  } finally { closeSync(fd); }
 }

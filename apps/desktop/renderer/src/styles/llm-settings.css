@@ -9,7 +9,7 @@
   height: 26px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--text-secondary, #6b7280) 24%, transparent);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   color: var(--text-secondary, #6b7280);
   background: var(--surface-raised, rgba(255, 255, 255, 0.72));
 }
@@ -43,7 +43,7 @@
   height: 19px;
   stroke-width: 1.7;
 }
-.llm-brand-icon-model { width: 24px; height: 24px; border-radius: 7px; }
+.llm-brand-icon-model { width: 24px; height: 24px; border-radius: var(--ui-radius-control-compact); }
 .llm-brand-icon-model svg { width: 15px; height: 15px; }
 .llm-brand-icon-model.is-unknown .llm-brand-icon-signal {
   width: 17px;
@@ -65,12 +65,12 @@
 
 .llm-fallback-vision {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--chrome-hairline, var(--za-line, rgba(0, 0, 0, 0.08)));
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--ui-radius-control);
   /* Use the same surface token as provider groups so dark theme stays dark. */
   background: var(--paper-sheet);
 }
@@ -106,7 +106,7 @@
   min-height: 36px;
   justify-content: space-between;
   border: 1px solid var(--chrome-hairline, var(--za-line, rgba(0, 0, 0, 0.12)));
-  border-radius: 8px;
+  border-radius: var(--ui-radius-control);
   background: var(--paper-base, var(--paper-sheet));
   color: var(--graphite-base);
   font: inherit;
@@ -121,28 +121,6 @@
 }
 .llm-fallback-vision-menu .pa-cascading-value {
   text-align: left;
-}
-
-.llm-settings-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.llm-settings-header button {
-  background: none;
-  border: none;
-  color: var(--graphite-soft);
-  cursor: pointer;
-  font-size: 1.2rem;
-  padding: var(--space-1);
-  border-radius: var(--radius-sm);
-  transition: color var(--za-motion-fast);
-}
-.llm-settings-header button:hover { color: var(--graphite-base); }
-.llm-settings-header strong {
-  font-family: var(--font-serif-zh);
-  font-size: 1.1rem;
-  color: var(--graphite-base);
 }
 
 .llm-provider-list {
@@ -180,7 +158,7 @@
   align-items: center;
   gap: 6px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   cursor: pointer;
@@ -201,7 +179,7 @@
   gap: var(--space-3);
   min-height: 108px;
   border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-mute);
   font-size: 0.82rem;
 }
@@ -217,7 +195,7 @@
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   overflow: visible;
   transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
@@ -323,7 +301,7 @@
   max-width: 100%;
   padding: 2px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-chip);
   background: var(--chrome-sunken);
   color: var(--graphite-soft);
   font-size: 0.68rem;
@@ -342,7 +320,7 @@
   font-size: 0.62rem;
   padding: 1px 6px;
   border: 1px solid rgba(78, 163, 217, 0.24);
-  border-radius: var(--radius-xs);
+  border-radius: var(--ui-radius-chip);
   box-shadow:
     0 0 0 1px rgba(104, 201, 255, 0.08),
     0 0 12px rgba(104, 201, 255, 0.14);
@@ -393,7 +371,7 @@
 .llm-provider-actions button {
   background: transparent;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-soft);
   cursor: pointer;
   font-size: 0.72rem;
@@ -419,7 +397,7 @@
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
 }
 .llm-instructions-header {
@@ -437,7 +415,7 @@
   resize: vertical;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -456,7 +434,7 @@
 .llm-instructions-actions button {
   background: transparent;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-soft);
   cursor: pointer;
   font-size: 0.82rem;
@@ -482,7 +460,7 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
 }
 .llm-form h3 {
@@ -506,7 +484,7 @@
 .llm-form input:not([type]) {
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -526,7 +504,7 @@
   resize: vertical;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -578,7 +556,7 @@
   max-height: none;
   overflow: visible;
   border: 1px solid color-mix(in srgb, var(--state-success) 35%, var(--chrome-hairline));
-  border-radius: var(--radius-lg);
+  border-radius: var(--ui-radius-modal);
   background: var(--paper-sheet);
   box-shadow: var(--shadow-lg);
 }
@@ -608,7 +586,7 @@
   min-height: 32px;
   padding: 0 var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   cursor: pointer;
@@ -629,7 +607,7 @@
   min-height: 32px;
   padding: 0 var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   font-size: 0.76rem;
@@ -663,7 +641,7 @@
   width: 100%;
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
 }
 .llm-model-candidates-header {
@@ -701,7 +679,7 @@
   gap: var(--space-2);
   min-height: 32px;
   padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   color: var(--graphite-base);
   font-size: 0.76rem;
   cursor: pointer;
@@ -788,7 +766,7 @@
 .llm-form-actions button {
   background: transparent;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-soft);
   cursor: pointer;
   font-size: 0.82rem;
@@ -808,239 +786,6 @@
 }
 .llm-form-actions button:disabled {
   opacity: 0.3;
-  cursor: not-allowed;
-}
-
-/* 自定义下拉(替代原生 select,贴合暗色设计语言) */
-.pa-dropdown {
-  position: relative;
-  display: inline-block;
-  min-width: 200px;
-}
-.pa-dropdown-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: 32px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
-  background: var(--chrome-sunken);
-  color: var(--graphite-base);
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
-}
-.pa-dropdown-trigger:hover:not(:disabled) {
-  background: var(--chrome-hover);
-}
-.pa-dropdown-trigger.open {
-  border-color: var(--za-primary-control-bg, var(--chrome-hairline));
-}
-.pa-dropdown-trigger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.pa-dropdown-prefix {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-.pa-dropdown-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pa-dropdown-caret {
-  width: 16px;
-  height: 16px;
-  opacity: 0.7;
-  flex-shrink: 0;
-  transition: transform var(--za-motion-fast) var(--za-ease-out), opacity var(--za-motion-fast);
-}
-.pa-dropdown-trigger.open .pa-dropdown-caret {
-  opacity: 0.95;
-  transform: rotate(180deg);
-}
-.pa-dropdown-menu {
-  /* 菜单经 createPortal 投到 document.body，用 fixed 按触发器位置定位(left/top 由 JS 内联注入)，
-     彻底脱离祖先滚动容器(如 .mcp-modal-body)的溢出计算，展开时不会撑高容器/冒出滚动条。
-     作为全局 portal 浮层，层级必须高于设置页 provider 卡片、默认卡片发光伪元素与普通 modal 内容。 */
-  position: fixed;
-  width: var(--pa-dropdown-menu-width, auto);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2);
-  /* 选择器菜单统一 glass-popover 毛玻璃 */
-  background: var(--glass-popover);
-  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
-  -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
-  border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
-  isolation: isolate;
-  z-index: var(--z-dropdown-portal, 10000);
-  max-height: 280px;
-  overflow-y: auto;
-  --motion-enter-from: calc(-1 * var(--za-motion-shift-sm));
-  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .pa-dropdown-menu {
-    background: var(--paper-sheet, var(--chrome-raised));
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    box-shadow: var(--shadow-popover);
-  }
-}
-.pa-dropdown-menu.is-up {
-  --motion-enter-from: var(--za-motion-shift-sm);
-}
-.pa-dropdown-up .pa-dropdown-caret {
-  transform: rotate(180deg);
-}
-.pa-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: 34px;
-  padding: var(--space-2) var(--space-2);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--graphite-base);
-  text-align: left;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-.pa-dropdown-item:hover,
-.pa-dropdown-item.active {
-  background: var(--chrome-sunken);
-}
-.pa-dropdown-item.selected {
-  font-weight: 600;
-}
-.pa-dropdown-item.danger {
-  color: var(--state-danger);
-}
-.pa-dropdown-item.danger:hover,
-.pa-dropdown-item.danger.active {
-  background: var(--za-danger-soft);
-}
-.pa-dropdown-item.danger .pa-dropdown-check {
-  color: var(--state-danger);
-}
-.pa-dropdown-danger .pa-dropdown-trigger {
-  color: var(--state-danger);
-  border-color: rgba(122, 62, 80, 0.22);
-  background: var(--za-danger-soft);
-}
-.pa-dropdown-check {
-  width: 14px;
-  flex-shrink: 0;
-  color: var(--azure-seal, var(--graphite-base));
-}
-.pa-dropdown-item-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pa-dropdown-item-hint {
-  flex: 0 0 auto;
-  margin-left: auto;
-  font-size: 0.68rem;
-  color: var(--graphite-mute);
-}
-.pa-dropdown-search {
-  padding: 0 2px 4px;
-}
-.pa-dropdown-search input {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--chrome-hairline);
-  border-radius: 8px;
-  background: var(--surface-inset, transparent);
-  color: inherit;
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 6px 8px;
-  outline: none;
-}
-.pa-dropdown-search input:focus {
-  border-color: var(--azure-seal, var(--graphite-base));
-}
-.pa-dropdown-tabs {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  gap: 4px;
-  margin: 0 2px 6px;
-  padding: 3px;
-  border-radius: 8px;
-  background: var(--chrome-sunken, var(--pa-surface-muted));
-  border: 1px solid var(--chrome-hairline, var(--pa-border-subtle));
-}
-.pa-dropdown-tab {
-  min-height: 24px;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--graphite-mute, var(--pa-text-secondary));
-  font: inherit;
-  font-size: 0.72rem;
-  cursor: pointer;
-}
-.pa-dropdown-tab:hover {
-  color: var(--graphite-base, var(--pa-text-primary));
-}
-.pa-dropdown-tab.is-active {
-  background: var(--surface-raised, var(--pa-surface-card));
-  color: var(--graphite-base, var(--pa-text-primary));
-  font-weight: 600;
-}
-.pa-dropdown-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 16rem;
-  overflow: auto;
-}
-.pa-dropdown-group {
-  padding: 6px 8px 2px;
-  font-size: 0.68rem;
-  color: var(--graphite-mute);
-}
-.pa-dropdown-empty {
-  padding: 8px;
-  font-size: 0.78rem;
-  color: var(--graphite-mute);
-}
-.pa-dropdown-footer {
-  margin-top: 4px;
-  width: 100%;
-  border: 0;
-  border-top: 1px solid var(--chrome-hairline);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 0.78rem;
-  text-align: left;
-  padding: 8px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.pa-dropdown-footer:hover:not(:disabled) {
-  background: var(--composer-addon-hover-bg, rgba(127, 127, 127, 0.12));
-}
-.pa-dropdown-footer:disabled {
-  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -1095,7 +840,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 18px;
+  border-radius: var(--ui-radius-modal);
   background: var(--paper-sheet);
   box-shadow:
     0 24px 64px color-mix(in srgb, var(--graphite-base) 18%, transparent),
@@ -1112,7 +857,7 @@
 .llm-provider-modal-title .llm-brand-icon {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-avatar);
   margin-top: 1px;
 }
 
@@ -1180,7 +925,7 @@
   margin-top: var(--space-2);
   padding: var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 88%, var(--graphite-base) 4%);
 }
 
@@ -1209,7 +954,7 @@
   box-sizing: border-box;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-base);
   padding: var(--space-2) var(--space-3);
   font-size: 0.82rem;
@@ -1254,7 +999,7 @@
   height: 26px;
   padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-circle);
   background: transparent;
   color: var(--graphite-soft);
   font-size: 0.85rem;
@@ -1289,7 +1034,7 @@
 
 .llm-modal-footer button {
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -1320,7 +1065,7 @@
 /* ── B-2 手风琴：provider 分组折叠 ── */
 .llm-provider-group {
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   overflow: hidden;
 }
@@ -1387,7 +1132,7 @@
 }
 .llm-group-actions button {
   padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -1447,7 +1192,7 @@
 }
 .llm-group-section-actions button {
   padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -1461,66 +1206,6 @@
 
 .llm-quota-chip {
   color: var(--state-success);
-}
-
-.pa-overflow {
-  position: relative;
-  display: inline-flex;
-}
-.pa-overflow-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 26px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--chrome-hairline);
-  background: var(--paper-sheet);
-  color: var(--graphite-base);
-  font-size: 0.9rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.pa-overflow-trigger:hover {
-  background: var(--chrome-hairline);
-}
-.pa-overflow-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 30;
-  min-width: 160px;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
-  border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
-  background: var(--paper-sheet);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
-}
-.pa-overflow-menu button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: var(--space-2) var(--space-3);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--graphite-base);
-  font-size: 0.78rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.pa-overflow-menu button:hover:not(:disabled) {
-  background: var(--chrome-hairline);
-}
-.pa-overflow-menu button.danger {
-  color: var(--state-danger);
-}
-.pa-overflow-menu button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .llm-group-models {
@@ -1538,7 +1223,7 @@
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-row);
   background: var(--chrome-sunken);
 }
 .llm-model-row.is-default {
@@ -1564,7 +1249,7 @@
 .llm-model-picker .pa-dropdown-trigger {
   min-height: 30px;
   padding: 4px 10px;
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
   color: var(--graphite-base);
   font-size: 0.72rem;
@@ -1598,7 +1283,7 @@
 .llm-configured-model-row {
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-row);
   background: var(--chrome-sunken);
   transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
 }
@@ -1732,7 +1417,7 @@
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   color: var(--graphite-soft);
   font-size: 0.66rem;
   white-space: nowrap;
@@ -1764,7 +1449,7 @@
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   background: var(--paper-sheet);
   color: var(--graphite-soft);
   font-size: 0.66rem;
@@ -1816,7 +1501,7 @@
   flex-wrap: wrap;
 }
 
-.llm-configured-model-actions button,
+.llm-configured-model-actions > button,
 .llm-catalog-toolbar button,
 .llm-catalog-summary button,
 .llm-catalog-manual button,
@@ -1825,14 +1510,14 @@
   min-height: 28px;
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   font-size: 0.74rem;
   cursor: pointer;
 }
 
-.llm-configured-model-actions button:hover:not(:disabled),
+.llm-configured-model-actions > button:hover:not(:disabled),
 .llm-catalog-toolbar button:hover:not(:disabled),
 .llm-catalog-summary button:hover:not(:disabled),
 .llm-catalog-manual button:hover:not(:disabled),
@@ -1841,11 +1526,11 @@
   background: var(--chrome-hover);
 }
 
-.llm-configured-model-actions button.danger:hover:not(:disabled) {
+.llm-configured-model-actions > button.danger:hover:not(:disabled) {
   color: var(--state-danger);
 }
 
-.llm-configured-model-actions button:disabled,
+.llm-configured-model-actions > button:disabled,
 .llm-catalog-toolbar button:disabled,
 .llm-catalog-summary button:disabled,
 .llm-catalog-manual button:disabled,
@@ -1862,7 +1547,7 @@
   flex-direction: column;
   overflow: hidden;
   /* 背景/边/阴影/blur 由 .pa-overlay-panel 统一 glass-popover 配方提供 */
-  border-radius: var(--radius-xl);
+  border-radius: var(--ui-radius-modal);
 }
 
 .llm-model-settings-dialog {
@@ -1917,7 +1602,7 @@
 .llm-model-settings-body textarea {
   min-width: 0;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
   color: var(--graphite-base);
   outline: none;
@@ -1950,9 +1635,6 @@
   width: 13px;
   height: 13px;
   flex: 0 0 13px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
   opacity: 0.82;
 }
 
@@ -2011,13 +1693,13 @@
   min-height: 58px;
   padding: var(--space-3);
   border: 1px solid rgba(118, 129, 145, 0.1);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
 }
 
 .llm-catalog-skeleton span {
   display: block;
   height: 11px;
-  border-radius: var(--ui-radius-round);
+  border-radius: var(--ui-radius-pill);
   background: linear-gradient(100deg, rgba(118, 129, 145, 0.08) 20%, rgba(118, 129, 145, 0.18) 42%, rgba(118, 129, 145, 0.08) 64%);
   background-size: 220% 100%;
   animation: llm-catalog-skeleton-shimmer 1.3s ease-in-out infinite;
@@ -2031,7 +1713,7 @@
 .llm-catalog-skeleton span:nth-child(2) {
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--ui-radius-control-compact);
 }
 
 .llm-catalog-skeleton span:nth-child(3) {
@@ -2082,7 +1764,7 @@
   margin: var(--space-2) var(--space-5) 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid rgba(190, 65, 65, 0.3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control-compact);
   background: rgba(190, 65, 65, 0.07);
   color: var(--state-danger);
   font-size: 0.74rem;
@@ -2115,7 +1797,7 @@
   min-height: 140px;
   padding: var(--space-4);
   border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   color: var(--graphite-mute);
   font-size: 0.78rem;
   text-align: center;
@@ -2128,7 +1810,7 @@
   gap: var(--space-3);
   padding: var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   cursor: pointer;
   transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
@@ -2205,7 +1887,7 @@
   margin: 0 var(--space-5) var(--space-3);
   padding: var(--space-3);
   border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
 }
 
@@ -2285,9 +1967,6 @@
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
-  border: 2px solid currentcolor;
-  border-right-color: transparent;
-  border-radius: 50%;
 }
 
 .llm-catalog-apply-check {
@@ -2295,7 +1974,7 @@
   width: 16px;
   height: 16px;
   place-items: center;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   animation: motion-enter-pop var(--za-motion-fast) var(--za-ease-spring) both;
 }
 
@@ -2326,7 +2005,7 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-sunken);
 }
 
@@ -2514,7 +2193,7 @@
   flex: 0 0 auto;
   height: 24px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control-compact);
   border: 1px solid var(--za-border-subtle, rgba(0, 0, 0, 0.08));
   background: var(--za-surface-muted, rgba(0, 0, 0, 0.03));
   color: var(--za-text-secondary, #5b6472);
@@ -2538,47 +2217,9 @@
   flex-direction: column;
   gap: 16px;
   padding: 4px 2px 24px;
-  animation: motion-enter-rise var(--za-motion-medium, 220ms) var(--za-ease-decelerate, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
-.llm-service-catalog-header,
-.llm-service-catalog-search,
-.llm-service-catalog-group {
-  animation: motion-enter-rise var(--za-motion-fast, 140ms) var(--za-ease-out, ease) both;
-}
-
-.llm-service-catalog-search {
-  animation-delay: 40ms;
-}
-
-.llm-service-catalog-group:nth-child(1) { animation-delay: 60ms; }
-.llm-service-catalog-group:nth-child(2) { animation-delay: 100ms; }
-.llm-service-catalog-group:nth-child(3) { animation-delay: 140ms; }
-.llm-service-catalog-group:nth-child(4) { animation-delay: 180ms; }
-.llm-service-catalog-group:nth-child(5) { animation-delay: 220ms; }
-.llm-service-catalog-group:nth-child(6) { animation-delay: 260ms; }
-
-.llm-service-template-card {
-  animation: motion-enter-pop var(--za-motion-fast, 140ms) var(--za-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
-}
-
-.llm-service-template-card:nth-child(1) { animation-delay: 60ms; }
-.llm-service-template-card:nth-child(2) { animation-delay: 90ms; }
-.llm-service-template-card:nth-child(3) { animation-delay: 120ms; }
-.llm-service-template-card:nth-child(4) { animation-delay: 150ms; }
-.llm-service-template-card:nth-child(5) { animation-delay: 180ms; }
-.llm-service-template-card:nth-child(n+6) { animation-delay: 210ms; }
-
-/* 退场：点击「返回」时整体下沉淡出，与 enter-rise 对称 */
-.llm-service-catalog.is-closing,
-.llm-service-catalog.is-closing .llm-service-catalog-header,
-.llm-service-catalog.is-closing .llm-service-catalog-search,
-.llm-service-catalog.is-closing .llm-service-catalog-group,
-.llm-service-catalog.is-closing .llm-service-template-card {
-  animation: motion-exit-sink var(--za-motion-fast, 140ms) var(--za-ease-accelerate, cubic-bezier(0.55, 0, 0.68, 0.2)) both;
-  animation-delay: 0ms;
-}
-
+/* The catalog switches as one surface; filtering never replays a card cascade. */
 .llm-service-catalog-header {
   display: flex;
   align-items: flex-start;
@@ -2591,7 +2232,7 @@
   align-items: center;
   gap: 6px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-control);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   cursor: pointer;
@@ -2619,7 +2260,7 @@
 .llm-service-catalog-search input {
   width: 100%;
   box-sizing: border-box;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   border: 1px solid var(--chrome-hairline);
   padding: 10px 12px;
   background: var(--control-fill);
@@ -2658,7 +2299,7 @@
 
 .llm-service-template-card {
   text-align: left;
-  border-radius: 14px;
+  border-radius: var(--ui-radius-panel);
   border: 1px solid var(--chrome-hairline);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -2699,7 +2340,7 @@
 }
 
 .llm-service-tier {
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   padding: 2px 8px;
   background: color-mix(in srgb, var(--accent, #5b8cff) 12%, transparent);
 }
@@ -2794,7 +2435,7 @@
 
 .llm-local-cli-step {
   border: 1px solid color-mix(in srgb, var(--border, #d7dde5) 88%, transparent);
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   padding: 10px 12px;
   background: color-mix(in srgb, var(--bg-elevated, #fff) 92%, var(--bg-muted, #f5f7fa));
 }
@@ -2854,7 +2495,7 @@
   display: grid;
   gap: 12px;
   padding: 14px 14px 12px;
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   border: 1px solid color-mix(in srgb, #22c55e 40%, var(--border, #d7dde5));
   background:
     linear-gradient(180deg, color-mix(in srgb, #22c55e 10%, transparent), transparent 48%),

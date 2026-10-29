@@ -245,6 +245,15 @@ describe('agent loop kernel', () => {
     assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
   });
 
+  it('request scoped budgets bound an otherwise unbounded provider loop', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 'bounded', executionBudget: { maxTurns: 6 } });
+    assert.equal(loop.maxTurns, 6);
+    assert.equal(createAgentLoopKernel({ maxTurns: 2, executionBudget: { maxTurns: 6 } }).maxTurns, 2);
+    loop.sendLoopExhausted({ reason: 'max_tool_calls_exceeded' });
+    assert.match(webContents.events[0].payload.error, /agent_tool_budget_exhausted/);
+  });
+
   it('appends the terminal assistant reply before emitting the done snapshot', () => {
     const webContents = makeWebContents();
     const apiMessages = [{ role: 'user', content: 'question' }];
@@ -460,3 +469,23 @@ function makeResponseGuard() {
     unsupportedToolResponseError: ({ providerTracePath }) => `unsupported response ${providerTracePath}`,
   };
 }
+
+it('a verifier summary after actual tool results is not rejected for mentioning exitCode or verification', async () => {
+  const responseGuard = await import('./response-guard.mjs');
+  const webContents = makeWebContents();
+  const loop = createAgentLoopKernel({ webContents, streamId: 'report' });
+  const apiMessages = [{ role: 'assistant', tool_calls: [{ id: 'test', type: 'function', function: { name: 'bash', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'test', content: '{"exitCode":0,"stdout":"18 tests passed"}' }];
+  const text = JSON.stringify({ passed: true, summary: 'I verified the actual tool result: exitCode 0, 18 tests passed.', evidenceRefs: ['tool-result://test'] });
+  assert.equal(handleTerminalTextResponse({ text, apiMessages, loop, responseGuard }).action, 'done');
+  assert.equal(webContents.events.at(-1).channel, 'chat:stream:done');
+});
+
+it('past tool results do not authorize leaked protocol or an unexecuted next action', async () => {
+  const responseGuard = await import('./response-guard.mjs');
+  for (const text of ['<tool_call>{"name":"bash"}</tool_call>', 'Let me read the next file.', '正在写入完整文件']) {
+    const loop = createAgentLoopKernel({ webContents: makeWebContents(), streamId: 'bad' });
+    const apiMessages = [{ role: 'tool', content: 'actual old result' }];
+    assert.equal(handleTerminalTextResponse({ text, apiMessages, loop, responseGuard }).action, 'retry');
+  }
+});

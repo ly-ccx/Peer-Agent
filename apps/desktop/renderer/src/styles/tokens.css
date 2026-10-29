@@ -7,7 +7,7 @@
  *   1. Azure 不上 CTA       2. H1 字号 ≥ 30px
  *   3. 标题与正文统一 sans  4. 单屏 azure ≤ 3
  *   5. 纯黑禁 / 纯白仅环境层 6. 状态不只靠颜色
- *   7. 阴影限定 2 场景      8. 圆角 ≤ 16px
+ *   7. 阴影限定 2 场景      8. 表面圆角 ≤ 16px（输入框、胶囊及圆形按用途）
  *
  * 本文件提供三套变量：
  *   1. Frost 正名 token（--chrome-*, --paper-*, --control-*, --graphite-*, --azure-*, --state-*）—— 新代码必须用
@@ -37,17 +37,17 @@
   --font-serif-zh: var(--font-sans);
   --font-sans-zh: var(--font-sans);
   --font-mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-  --color-paper-sheet: #F7F9FC;
-  --color-paper-base: #EDF1F6;
+  --color-paper-sheet: #F8F8F8;
+  --color-paper-base: #F8F8F8;
   --color-graphite-base: #1A1D21;
   --color-azure-seal: #3B7FAB;
-  --radius-frost: 12px;
-  --radius-frost-sm: 6px;
-  --glass-chrome: hsla(215, 16%, 98%, 0.52);
-  --glass-chrome-hover: hsla(215, 16%, 96%, 0.62);
-  --glass-control: hsla(218, 18%, 96%, 0.56);
+  --radius-frost: var(--ui-radius-panel);
+  --radius-frost-sm: var(--ui-radius-control-compact);
+  --glass-chrome: hsla(0, 0%, 96%, 0.86);
+  --glass-chrome-hover: hsla(0, 0%, 98%, 0.90);
+  --glass-control: hsla(0, 0%, 96%, 0.70);
   /* 磨砂毛玻璃：提高不透明度，避免「透明玻璃」可读背景字 */
-  --glass-popover: hsla(212, 12%, 99%, 0.88);
+  --glass-popover: hsla(0, 0%, 99%, 0.88);
   --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.55);
   --blur-chrome: 24px;
   --blur-control: 16px;
@@ -82,26 +82,28 @@
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "kern";
 
-  /* ─── Chrome 环境层（冷感纯白，hue 210-220 sat 14-19%）─── */
-  --chrome-canvas: #FAFBFC;
-  --chrome-raised: #F3F5F8;
-  --chrome-sunken: #EBEEF3;
-  --chrome-hover: #F0F2F6;
-  --chrome-active: #E5E8EE;
-  --chrome-hairline: #DCE0E8;
+  /* 中性底面与独立浮层共用语义色阶；印记和状态色继续保留 Frost 色彩。 */
+  /* ─── Chrome 环境层 ─── */
+  --chrome-canvas: #F4F4F4;
+  --chrome-raised: #F3F3F3;
+  --chrome-sunken: #EAEAEA;
+  --chrome-hover: #EDEDED;
+  --chrome-active: #E4E4E4;
+  --chrome-hairline: #DEDEDE;
 
-  /* ─── Paper 内容层（冷雪纸，hue 210-215 sat 10-13%）─── */
-  --paper-base: #EDF1F6;
-  --paper-sheet: #F7F9FC;
+  /* ─── Paper 内容层（中性近白面板）─── */
+  --paper-base: #F8F8F8;
+  --paper-sheet: #F8F8F8;
   /* ★ 消息卡 / 面板卡默认 */
-  --paper-sunken: #DDE3EB;
-  --paper-hover: #EAEEF4;
-  --paper-active: #D5DCE6;
+  --paper-sunken: #E8E8E8;
+  --paper-hover: #EFEFEF;
+  --paper-active: #DEDEDE;
 
-  /* ─── Control 控件层（冷感灰，hue 216-220 sat 16-19%）─── */
-  --control-composer: #EFF2F6;
-  --control-fill: #EAEDF2;
-  --control-fill-hover: #DFE3EA;
+  /* ─── Control 控件层 ─── */
+  --control-composer: #FFFFFF;
+  --control-fill: #EBEBEB;
+  --control-fill-active: #DDDDDD;
+  --control-fill-hover: #E3E3E3;
 
   /* ─── Graphite 文字阶（冷石墨，hue 210-220 sat 5-14%）─── */
   --graphite-base: #1A1D21;
@@ -147,16 +149,16 @@
    *   上限 1080px（避免超宽屏行宽过长影响阅读）
    */
   --chat-content-max: clamp(740px, 64vw, 1080px);
-  --radius-xs: 2px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-xs: var(--ui-radius-detail);
+  --radius-sm: var(--ui-radius-control-compact);
+  --radius-md: var(--ui-radius-control);
+  --radius-lg: var(--ui-radius-panel);
+  --radius-xl: var(--ui-radius-modal);
   /* 悬浮内容卡片：明显高于页面，仍低于 popover / drag 浮层。 */
   --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.08), 0 10px 28px rgba(26, 29, 33, 0.10);
   --shadow-card-hover: 0 2px 4px rgba(26, 29, 33, 0.10), 0 16px 36px rgba(26, 29, 33, 0.14);
   --shadow-card-active: 0 1px 3px rgba(26, 29, 33, 0.10), 0 8px 22px rgba(26, 29, 33, 0.12);
-  --shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --shadow-popover: 0 6px 20px rgba(26, 29, 33, 0.07), 0 1px 3px rgba(26, 29, 33, 0.04);
   --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
   /* 弹窗专用磨砂：浅色主题不能整块发白，面板采样顶部浮条的 blur，但用更薄的冷灰玻璃和明确边界。 */
   --glass-modal-scrim: color-mix(in srgb, var(--chrome-sunken) 30%, transparent);
@@ -248,17 +250,17 @@
   --za-user-message-bg: #F7F9FC;
   --za-composer-bg: #EFF2F6;
   --za-composer-empty-bg: #EFF2F6;
-  --za-control-fill: #EAEDF2;
-  --za-control-fill-hover: #DFE3EA;
+  --za-control-fill: var(--control-fill);
+  --za-control-fill-hover: var(--control-fill-hover);
   --za-control-ink: #1A1D21;
   --za-primary-control-bg: #1A1D21;
   --za-primary-control-ink: #F7F9FC;
   --za-shadow-panel: 0 2px 12px rgba(26, 29, 33, 0.06);
-  --za-shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
-  --za-radius: 12px;
-  --za-radius-sm: 6px;
-  --za-radius-md: 8px;
-  --za-radius-lg: 16px;
+  --za-shadow-popover: var(--shadow-popover);
+  --za-radius: var(--ui-radius-panel);
+  --za-radius-sm: var(--ui-radius-control-compact);
+  --za-radius-md: var(--ui-radius-control);
+  --za-radius-lg: var(--ui-radius-modal);
   --za-ease-out: cubic-bezier(0.0, 0.0, 0.2, 1);
   --za-ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
   --za-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -291,6 +293,13 @@
   /* 字号用 rem 表达：随 <html data-font-scale> 的根 font-size 等比缩放（外观-字体大小生效路径）。
    * 基准 16px：0.6875rem=11 / 0.75rem=12 / 0.8125rem=13 / 0.875rem=14 / 0.9375rem=15 / 1rem=16 / 1.25rem=20 / 1.625rem=26。
    * medium 档 100% 时与旧 px 完全等值，零视觉回归。 */
+  --ui-control-height: 2.375rem;
+  --ui-control-height-compact: 2rem;
+  --ui-target-min: 1.5rem;
+  --ui-focus-width: 2px;
+  --ui-focus-offset: 3px;
+  --ui-focus-color: var(--azure-seal);
+
   --ui-font-caption: 0.6875rem;
   --ui-font-meta: 0.75rem;
   --ui-font-control: 0.8125rem;
@@ -303,12 +312,35 @@
   --ui-line-control: 1.35;
   --ui-line-body: 1.68;
 
-  --ui-radius-chip: 4px;
-  --ui-radius-control: 6px;
-  --ui-radius-row: 8px;
-  --ui-radius-panel: 12px;
+  --control-radius: var(--ui-radius-control);
+  --control-radius-compact: var(--ui-radius-control-compact);
+  --surface-radius: var(--ui-radius-modal);
+  /* 绘制出来的连续曲线。控件、分组和浮层共用这一条，不再混用圆弧。 */
+  --control-corner: superellipse(1.4);
+  --surface-corner: var(--control-corner);
+  --composer-radius: var(--ui-radius-composer);
+  --composer-corner: var(--control-corner);
+  --composer-surface: color-mix(in srgb, var(--paper-sheet) 72%, var(--control-fill) 28%);
+  --composer-edge: color-mix(in srgb, var(--graphite-base) 7%, transparent);
+  --composer-focus-edge: color-mix(in srgb, var(--graphite-base) 18%, transparent);
+
+  /* 三档尺寸，曲线都是同一条连续圆角。
+   * 8 紧凑控件与小标记，12 普通控件和列表行，16 分组、消息、输入框和浮层。
+   * detail 只留给印章、刻度和图表。胶囊、正圆按几何保留。内嵌角小于外层；相接边用 0/inherit。 */
+  --ui-radius-detail: 2px;
+  --ui-radius-chip: 8px;
+  --ui-radius-control-compact: 8px;
+  --ui-radius-control: 12px;
+  --ui-radius-row: 12px;
+  --ui-radius-panel: 16px;
   --ui-radius-modal: 16px;
-  --ui-radius-round: 999px;
+  --ui-radius-inset: 12px;
+  --ui-radius-message: 16px;
+  --ui-radius-composer: 16px;
+  --ui-radius-pill: 999px;
+  --ui-radius-circle: 50%;
+  --ui-radius-avatar: 25%;
+  --ui-radius-round: var(--ui-radius-pill);
 
   --ui-accent: var(--za-user-accent, var(--za-accent));
   --ui-accent-hover: color-mix(in srgb, var(--ui-accent) 86%, var(--za-text));
@@ -373,30 +405,31 @@
  * ───────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
   color-scheme: dark;
-  --glass-chrome: hsla(220, 22%, 12%, 0.48);
-  --glass-chrome-hover: hsla(220, 20%, 16%, 0.58);
-  --glass-control: hsla(220, 18%, 18%, 0.52);
+  --glass-chrome: hsla(0, 0%, 24%, 0.72);
+  --glass-chrome-hover: hsla(0, 0%, 28%, 0.78);
+  --glass-control: hsla(0, 0%, 18%, 0.62);
   /* 暗色磨砂：同样抬不透明度，背景字不可清晰辨认 */
-  --glass-popover: hsla(220, 20%, 12%, 0.86);
+  --glass-popover: hsla(0, 0%, 12%, 0.86);
   --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.14);
 
   /* ─── Frost 正名 token ─── */
-  --chrome-canvas: #11141A;
-  --chrome-raised: #181C24;
-  --chrome-sunken: #0C0F14;
-  --chrome-hover: #1E232C;
-  --chrome-active: #262C37;
-  --chrome-hairline: #2A303B;
+  --chrome-canvas: #383838;
+  --chrome-raised: #383838;
+  --chrome-sunken: #202020;
+  --chrome-hover: #424242;
+  --chrome-active: #4A4A4A;
+  --chrome-hairline: #303030;
 
-  --paper-base: #1A1E26;
-  --paper-sheet: #1E232C;
-  --paper-sunken: #11141A;
-  --paper-hover: #262C37;
-  --paper-active: #30374A;
+  --paper-base: #141414;
+  --paper-sheet: #141414;
+  --paper-sunken: #101010;
+  --paper-hover: #242424;
+  --paper-active: #303030;
 
-  --control-composer: #0C0F14;
-  --control-fill: #1E232C;
-  --control-fill-hover: #262C37;
+  --control-composer: #262626;
+  --control-fill: #2C2C2C;
+  --control-fill-active: #3C3C3C;
+  --control-fill-hover: #343434;
 
   --graphite-base: #EDF1F6;
   --graphite-base-hover: #D5DCE6;
@@ -420,7 +453,7 @@
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 12px 30px rgba(0, 0, 0, 0.34);
   --shadow-card-hover: 0 2px 5px rgba(0, 0, 0, 0.34), 0 18px 42px rgba(0, 0, 0, 0.44);
   --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
-  --shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --shadow-popover: 0 6px 20px rgba(0, 0, 0, 0.20), 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-drag: 0 4px 16px rgba(0, 0, 0, 0.55);
   /* 弹窗专用磨砂：深色主题保持顶部浮条的真实 blur，但用深色玻璃，避免浅色 token 把暗底洗灰。 */
   --glass-modal-scrim: color-mix(in srgb, var(--chrome-canvas) 62%, transparent);
@@ -499,13 +532,13 @@
   --za-user-message-bg: #1E232C;
   --za-composer-bg: #0C0F14;
   --za-composer-empty-bg: #0C0F14;
-  --za-control-fill: #1E232C;
-  --za-control-fill-hover: #262C37;
+  --za-control-fill: var(--control-fill);
+  --za-control-fill-hover: var(--control-fill-hover);
   --za-control-ink: #EDF1F6;
   --za-primary-control-bg: #EDF1F6;
   --za-primary-control-ink: #11141A;
   --za-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.40);
-  --za-shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --za-shadow-popover: var(--shadow-popover);
   --za-user-accent: #5D9CBF;
   --za-user-background: #11141A;
   --za-user-foreground: #EDF1F6;
@@ -538,6 +571,7 @@
   --paper-active: #CCD0DA;
   --control-composer: #E6E9EF;
   --control-fill: #DCE0E8;
+  --control-fill-active: #BCC0CC;
   --control-fill-hover: #CCD0DA;
   --graphite-base: #4C4F69;   /* text */
   --graphite-base-hover: #5C5F77; /* subtext0 */
@@ -626,6 +660,7 @@
   --paper-active: #45475A;
   --control-composer: #11111B;
   --control-fill: #313244;
+  --control-fill-active: #45475A;
   --control-fill-hover: #45475A;
   --graphite-base: #CDD6F4;   /* text */
   --graphite-base-hover: #BAC2DE; /* subtext1 */
@@ -838,14 +873,29 @@ textarea:focus-visible,
   *,
   *::before,
   *::after {
+    animation: none !important;
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+    transition: none !important;
     transition-duration: 1ms !important;
   }
+
+  .bot-avatar { --bot-gaze-x: 0px !important; --bot-gaze-y: 0px !important; }
 
   /* 扫光停动后直接撤掉遮罩,文字回归纯 ink-base 静态可读 */
   .za-streaming-text::after {
     display: none;
+  }
+}
+
+/* 连续曲线盖住全部绘制圆角。开关及其旋钮保持圆弧。 */
+@supports (corner-shape: superellipse(1.4)) {
+  :where(body *, body *::before, body *::after) {
+    corner-shape: var(--peer-corner, var(--control-corner));
+  }
+
+  :where(.peer-switch) {
+    --peer-corner: round;
   }
 }

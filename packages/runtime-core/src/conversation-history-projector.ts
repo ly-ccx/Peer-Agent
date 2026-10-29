@@ -1,3 +1,4 @@
+import { formatResourceFeedbackContext } from '@peer-agent/protocol';
 /**
  * Canonical persisted-conversation -> active provider history projection.
  *
@@ -6,7 +7,7 @@
  * but must not reinterpret persisted segments.
  */
 
-export const CANONICAL_HISTORY_PROJECTOR_VERSION = 1;
+export const CANONICAL_HISTORY_PROJECTOR_VERSION = 2;
 
 type AnyRecord = Record<string, unknown>;
 
@@ -192,6 +193,7 @@ function userMessage(message: AnyRecord): CanonicalHistoryMessage | null {
     : [];
   const text = [
     typeof message.content === 'string' ? message.content : '',
+    formatResourceFeedbackContext(message.resourceFeedback),
     attachmentText(attachments),
   ].filter((value) => value.trim()).join('\n\n');
   const parts: CanonicalHistoryContentPart[] = [];
@@ -374,7 +376,7 @@ function assistantMessages(message: AnyRecord): CanonicalHistoryMessage[] {
     });
     projected.push({
       role: 'tool',
-      content: typeof segment.result === 'string' ? segment.result : String(segment.result ?? ''),
+      content: typeof segment.result === 'string' ? segment.result : segment.result == null ? '' : safeJson(segment.result),
       toolCallId: id,
       name,
     });
@@ -476,6 +478,8 @@ function directToolMessage(message: AnyRecord): CanonicalHistoryMessage | null {
 }
 
 function projectMessage(value: unknown): CanonicalHistoryMessage[] {
+  const internal = recordOf(value);
+  if (internal?.kind === 'agent_message' || internal?.kind === 'agent_activity') return [];
   const message = recordOf(value);
   if (!message || compactionMarker(message)) return [];
   if (message.role === 'user') {

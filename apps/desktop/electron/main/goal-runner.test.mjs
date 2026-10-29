@@ -1788,8 +1788,8 @@ test('start: 已完成计划不再被拉回 running，并补写 qualityReview', 
   assert.equal(turnCalls, 0);
   assert.equal(got.status, 'completed');
   assert.equal(got.qualityReview?.status, 'passed');
-  // The store settles a leftover active runner to idle once all leaves are complete.
-  assert.equal(got.runner.status, 'idle');
+  // The store settles a leftover active runner to the completed fact.
+  assert.equal(got.runner.status, 'completed');
 });
 
 test('start: 有交付绑定的 Goal 启动时会准备隔离环境', async () => {
@@ -1927,3 +1927,18 @@ test('verbal stop: 纯文本过渡回合先宽限继续，下一轮推进则不�
   assert.equal(graceEvent?.payload?.turnNumber, 1);
 });
 
+
+test('checkpoint recovery can leave delegated work to its project barrier and filter by project', () => {
+  const selection = { modelProviderId: 'worker', providerId: 'fixture', modelId: 'worker', family: 'f' };
+  const snapshot = { worker: selection, explorer: selection, verifier: selection, resolvedAt: '2026-10-01T00:00:00Z' };
+  const created = ['a', 'b'].map(workspaceId => {
+    const plan = store.createPlan({ conversationId: `recovery-${workspaceId}`, title: workspaceId, goal: 'recover', tasks: [{ taskId: 't', title: 't', status: 'pending' }] });
+    store.revisePlan(plan.planId, { delegationOrigin: { sessionId: `session-${workspaceId}`, parentConversationId: 'parent', workspaceId, phase: 'running', readOnly: true, anchorMessageId: 'u1', inputId: 'input-1', modelSelection: snapshot } });
+    store.setPlanStatus(plan.planId, 'executing'); store.setRunnerState(plan.planId, { enabled: true, status: 'running', intent: 'execute' }); return plan;
+  });
+  const runner = createRunner({ runtime: { async runGoalTurn() { throw new Error('must not execute during recovery'); } }, logger: { info() {}, warn() {}, error() {} } });
+  runner.recoverContextCheckpoints({ includeDelegated: false });
+  assert.equal(store.getPlan(created[0].planId).runner.status, 'running');
+  runner.recoverContextCheckpoints({ workspaceId: 'a', deferPump: true });
+  assert.equal(store.getPlan(created[0].planId).runner.status, 'idle'); assert.equal(store.getPlan(created[1].planId).runner.status, 'running');
+});

@@ -133,10 +133,10 @@ test('产物列表具有类型样式、折叠摘要和主要产物上限提示',
   ]) {
     assert.ok(styles.includes(selector), `missing ${selector}`);
   }
-  assert.match(styles, /\.task-artifacts-chevron\s*\{[^}]*transform:\s*scaleY\(1\) translateY\(-25%\) rotate\(45deg\)/s);
-  assert.match(styles, /\.task-artifacts\[open\] \.task-artifacts-chevron\s*\{[^}]*transform:\s*scaleY\(-1\) translateY\(-25%\) rotate\(45deg\)/s);
-  assert.ok(styles.includes('scaleY(1) translateY(-25%) rotate(45deg)'));
-  assert.ok(styles.includes('scaleY(-1) translateY(-25%) rotate(45deg)'));
+  assert.match(styles, /\.task-artifacts-chevron\s*\{[^}]*transform:\s*rotate\(0deg\)/s);
+  assert.match(styles, /\.task-artifacts\[open\] \.task-artifacts-chevron\s*\{[^}]*transform:\s*rotate\(180deg\)/s);
+  assert.match(await readFile(new URL('./TaskOverviewPage.tsx', import.meta.url), 'utf8'), /<PeerIcon name="chevronDown" size=\{14\} className="task-artifacts-chevron" \/>/);
+  assert.doesNotMatch(styles, /border-b border-r/);
   assert.ok(styles.includes('interpolate-size: allow-keywords'));
   assert.ok(styles.includes('::details-content'));
   assert.match(

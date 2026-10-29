@@ -2,11 +2,387 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.28 - 2026-10-28
+
+### 修复与优化
+
+- 修复子任务核验停滞，沿原任务补齐有界验收修复，保留历史与成果。
+- 新增用户可操作的实例交接、只读检查、保全恢复和安全续跑；原输入、已完成操作及未知结果均不重放。
+- 隔离历史任务、回复、交接和子任务，支持保留工作树与报告后结束旧执行；补齐中断重入、停止超时和防止旁路重启。
+- 改善证据卡片排版、版本展示和更新入口，同步中英文文档及生成式网站更新日志。
+
+### Improvements (English)
+
+- Recover stalled child verification through bounded repair of the original task.
+- Add user-operated handoff, source-bound history preservation and safe continuation without replaying historical inputs or completed/unknown operations.
+- Isolate uncertain work, deliveries and handoffs; preserve worktrees and reports when ending earlier execution, with resumable maintenance and enforced stop boundaries.
+- Improve evidence cards and update controls, with bilingual release and website documentation.
+
+## 0.1.0-rc.27 - 2026-10-27
+
+### 新功能与优化
+
+- 完成右侧资源工作区：网页、文档/代码、目录、Diff、真实 Git 历史及按模式阅读恢复；来源范围、文件变化和历史缺失明确表达。
+- 新增有界原生独立窗口与返回、统一 Bot/任务/回复详情、格式降级、交付关联、固定来源选区反馈、本机草稿与三方比较。
+- 文档提交沿现有本地授权与 Evidence 链处理固定稿，授权后核对版本；冲突保留输入，未知结果只核对不重写。
+- 优化提供商首个模型选择、稳定浮层与思考强度粒子，修正草稿/模型辅助文案、暗色选中及面板间拖拽反馈。
+- 改善服务商、权限菜单、档位参数、回复等待和历史任务图标；修复嵌套工作区读取身份。
+- 同步中英文发布说明、README、使用文档和生成式网站更新日志。
+
+### Improvements (English)
+
+- Complete scoped side-by-side reading, historical revisions, native windows, details and resource adapters.
+- Add source-bound feedback, recoverable local drafts and governed conditional submission without replaying unknown writes.
+- Improve model selection/motion, dark selection, draft presentation, task feedback and nested-root identity.
+- Update bilingual release documentation and the generated website changelog.
+
+## 0.1.0-rc.26 - 2026-10-23
+
+### 修复与优化
+
+- 等待、流式输出与正式答复使用连续回复载体，保留头像、段落、引用和详情入口；按输入关联答复，正确表达调度、断线、停止、重试与恢复。
+- 侧栏头像与当前回复联动，进行中的状态提供扫光，尊重减少动态效果设置。
+- 内部核验结论与进度进入任务详情，主 Bot 交付面向用户的说明；超期未验收结果沿用既有停滞事件补完核验，目标头部按生命周期表达阻塞与人工跟进。
+- 收紧单行状态与后台任务间距，保持虚拟列表阅读位置和底部跟随。
+- 启动页使用独立全窗布局，去掉聊天容器内边距形成的白边；新增深浅主题、窄窗口、减少动效、启动失败及进入主界面的实际启动回归。
+- macOS 整窗共用毛玻璃底面，移除侧栏分隔线，深浅主题采用中性浮动主面板与详情面板；外观设置支持毛玻璃/实色及减少透明度回退。
+- 保留任务、对话、证据与原始日志，沿用 RC25 的公开交互上下文与子链按需读取；新增协调旧日志内容证明，修复完整备份迁移后的恢复拒绝，保留原有激活标记及事件链。旧的无证明备份须与只读原件认证。修正本地桌面打包命令，保证生成真实应用包。同步中英说明和文档站更新日志。
+
+
+## 0.1.0-rc.25 - 2026-10-22
+
+- Build on RC24 with public interaction reads by default and child execution details loaded on demand.
+- Retain kind-less legacy public user/assistant interactions in TUI model context; private process records remain excluded.
+- Isolate message, task-card and detail failures; retain readable messages and support explicit retry.
+- Replace repeated coordination snapshots with incremental segmented events and exact usage receipts; recover large journals in background workers and rebuild derived indexes with durable-source checks.
+- Preserve task identities, conversations, evidence and legacy journals; unknown tool outcomes are not automatically repeated.
+- Fix completed-reply detail anchors, asynchronous question answers and narrow-window detail overflow.
+- Integrate all outstanding release PRs: unified lifecycle projection with visible budget/question gates and factual cancellation, continuous interface corners, and removal of the extra Bot-list footer divider. Preserve interruption facts across the compatibility seam.
+- Break the verification-report/session-projection dependency cycle on Desktop and TUI without changing verification or acceptance requirements.
+- Document coordinated upgrades, incompatible downgrade limits and the distinction between publishing and restarting an installed app; synchronize bilingual notes and website changelog.
+
+## 0.1.0-rc.24 - 2026-10-22
+
+- Inherit the Bot-owned access policy across task and verification runtimes; full access supports consecutive image reads without per-image prompts.
+- Show independent tasks as peers, distinguish child Agent identities, and consolidate duplicate result events.
+- Refine conversation typography and compact ended authorization receipts; preserve pending actions and expandable full commands.
+- Remove process empty-state whitespace and refresh open attention lists when questions expire during concurrent reads.
+- Track verification by new facts, settle ten minutes without factual progress, and limit report-format repair to one tool-free request.
+- Synchronize bilingual release notes, user documentation, README candidate links and generated website changelog.
+
+## 0.1.0-rc.22 - 2026-10-20
+
+- Preserve user-configured model and channel selections; independent review may use the same model in a separate context.
+- Expose bounded persisted review diagnostics with source-version association instead of attributing failed verification to model provenance.
+- Remove the delegation tool's unconditional different-source preference hint while retaining configured routing policies.
+- Synchronize bilingual model guidance, README, release notes and generated documentation changelog.
+
+## 0.1.0-rc.19
+
+- Keep authoritative long-reply receipts separate from bounded UI previews.
+- Accept factual verifier summaries after real tool results and recover safe model changes.
+- Reduce large-history execution overhead, coalesce refreshes and preserve historical error details.
+
+## 0.1.0-rc.21 - 2026-10-20
+
+- Incrementally invalidate delegated-plan discovery using the existing journal; preserve current plan, permission and execution guards and full-scan fallback.
+- Keep tool artifact materialization inside the configured data root; retain existing persisted references.
+- Continue from the retained RC20 public-build performance failure with full-scale real-task and offline personal-history validation.
+- Synchronize bilingual release notes and generated documentation changelog.
+
 ## Unreleased
 
 ### Notes
 
 - Nothing yet.
+
+## [0.1.0-rc.18] - 2026-10-18
+
+### Fixed
+
+- Preserve genuine DeepSeek reasoning beside native tool calls and refresh current System Context on checkpoint restore.
+- Coalesce equivalent background continuations under one durable owner, prioritizing new user input and preserving execution and permission boundaries.
+- Settle already delivered results into durable quiet waiting until real source or verification observations change.
+- Carry host observation revisions through delivery and settlement without invalidating acceptance with its own receipt.
+- Avoid full journal scans before normal incremental reads while retaining strict recovery checks.
+
+### Changed
+
+- Synchronize bilingual release notes, README version links and generated documentation changelog.
+
+### Release scope
+
+- Real DeepSeek task execution, verification, delivery, cancellation and restart recovery are covered; mixed-model verifier protocol errors and successful explicit recovery are recorded separately.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Older versions may reject new coordination events; rollback requires the pre-upgrade backup. Stable remains 0.0.18.
+
+## [0.1.0-rc.17] - 2026-10-18
+
+### Fixed
+
+- Reuse validated coordination readers and replay appended journal bytes instead of full history on each progress read.
+- Keep historical avatars static and restrict motion to eligible current activity.
+- Prepare large terminal conversation rewrites off the main thread; retain durable completion, cancellation, failure and slot-release ordering.
+- Carry frozen worker reasoning effort into child conversations and project existing tasks from their own frozen configuration.
+
+### Changed
+
+- Synchronize bilingual release notes, README version links and generated documentation changelog.
+
+### Release scope
+
+- Real-model delegation, tools, verification, cancellation and subsequent conversation are covered; screenshot review is implementer self-review. Stable remains 0.0.18.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
+## [0.1.0-rc.16] - 2026-10-18
+
+### Fixed
+
+- Continue productive work after investigation and verification failures without default cumulative execution limits; preserve explicit budgets and cancellation.
+- Distinguish current main replies, running child tasks and superseded historical interruptions; persist public progress across cooperative yields.
+- Explain explicit budget usage and expose continuation only when the host permits it.
+
+### Release scope
+
+- Historical summary synchronized from the published RC16 notes. Stable remains 0.0.18; rollback requires the pre-upgrade data backup.
+
+## [0.1.0-rc.15] - 2026-10-16
+
+### Fixed
+
+- Honor full local access consistently for Bot, delegated work and verification image reads; retain exact-image approval lifecycles in ask mode.
+- Preserve authorized image pixels across cooperative continuation, recheck current authorization and prevent revoked or unrelated context reuse.
+- Persist returned tool results before cancellation, and safely reconcile interrupted historical verification without replaying unknown side effects or resetting budgets.
+- Restore focus after task cancellation when the original control actually unmounts, without stealing an intentionally moved focus.
+
+### Changed
+
+- Refine the macOS template menu-bar icon as a Retina cat outline, preserving the pending count.
+- Synchronize bilingual release notes, README guidance, permission documentation and generated site changelog for RC15.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; cloud model quality, full platform installation coverage and GA remain separate gates.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
+## [0.1.0-rc.14] - 2026-10-11
+
+### Fixed
+
+- Automatically surface permission cards from actual image reads in the main Bot conversation, with truthful waiting-for-approval activity.
+- Continue the original read after approval; separately settle rejection, card cancellation, reply stop and a five-minute permission deadline.
+- Prevent duplicate or late approvals from reviving ended calls, and keep historical cards consistent after approval-log compaction.
+- Share the local approval store across the Bot host and permission gate; preserve structured cancellation, timeout and execution evidence.
+
+### Changed
+
+- Restore the shimmer on active reply status text while keeping permission waits static.
+- Refresh bilingual release notes, README guidance, permission documentation and generated site changelog for RC14.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; real cloud vision, full platform installation coverage and GA remain separate gates.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
+## [0.1.0-rc.13] - 2026-10-11
+
+### Fixed
+
+- Route out-of-project images through formal local approval and inherit exact image grants across the current Bot, child Agents, verification and restart recovery.
+- Bind reusable approvals to the exact capability, arguments, workspace and execution identity; keep one-time and unrelated queued approvals separate.
+- Fence concurrent permission contexts and recheck revocation, file identity, task state, cancellation and leases.
+- Bound delegated verification with a five-minute overall deadline and promptly return permission denial when no approval interface exists.
+- Keep cancelled file reads from displaying missing results as null.
+
+### Changed
+
+- Make reply details compact, put the latest execution steps first and align provider settings with Frost groups and semantic radius tokens.
+- Refresh bilingual release notes, current README guidance and generated changelog for RC13.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; live cloud vision, complete platform installation coverage and GA remain separate gates.
+- Back up the complete data root and upgrade Desktop, CLI/TUI and Gateway together. Rollback requires the pre-upgrade backup.
+
+## [0.1.0-rc.12] - 2026-10-11
+
+### Changed
+
+- Let the main Bot coordinate independent goals concurrently, send supplements, cancel incorrect work and arrange replacements within existing authorization.
+- Preserve correlated parent/child questions and verified result delivery, with short coordination turns and reserved scheduling capacity.
+- Persist task revisions and cancellation/handoff transitions; fence stale receipts and check uncertain outcomes before replaying work.
+- Keep independent work running through main-reply interruptions and expose truthful stopping, outcome checks, cancellation and handoffs in task details.
+- Refresh bilingual release notes, README, user guidance, landing-page copy and generated changelog.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; GA and long-term acceptance remain separate gates.
+- Rollback requires the complete pre-upgrade backup; older hosts must not write into the newer data directory.
+
+## [0.1.0-rc.11] - 2026-10-10
+
+### Fixed
+
+- Cancel waiting tasks directly from chat and task details, preserving history, current host state and failure retry.
+- Resume unfinished replies from durable checkpoints without replaying previous work; explain checkpoint, scheduling, exhaustion and authentication states.
+- Align Details with the current message bubble and show factual activity descriptions.
+- Deliver authorized local PNG/JPEG/GIF/WebP pixels to vision models and re-read images after recovery, keeping pixels out of persisted evidence and checkpoints.
+
+### Changed
+
+- Execute child Agents in independent conversations with durable bidirectional messaging, answer ownership and named activity.
+- Retain coordination messages received during recovery; distinguish parent-agent questions from human decisions.
+- Integrate product regression for cancellation, reply activity, Agent communication and image delivery; refresh bilingual notes and user guidance.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18. Governed history access, live-model image acceptance, complex-write Evidence and GA remain separate gates.
+- Upgrade Desktop, CLI/TUI and Gateway together; rollback requires the complete pre-upgrade backup.
+
+## [0.1.0-rc.10] - 2026-10-09
+
+### Fixed
+
+- Recover an empty Responses reply once without lowering reasoning effort, replaying executed tools or bypassing usage and execution limits.
+- Keep current verification phase distinct from older completed reports; remove empty space after process disclosures collapse.
+- Preserve optimistic answer identity through acknowledgement, duplicate-click protection and failure recovery; smooth option dismissal and message sending.
+- Keep update dialogs mounted through their exit, shrink toward the measured footer progress bar and retain fast-completion and error recovery actions.
+
+### Changed
+
+- Place Details at the right edge on hover or keyboard focus; organize process, related tasks and supporting records in the sidebar.
+- Match bot reply surfaces to avatar identity colors in both themes while preserving readable text and quotations.
+- Extend product regression for combined colors, reply details, answer sending and updater motion; refresh bilingual notes and user guidance.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18. Governed history-query capability, complex-write Evidence and GA acceptance remain separate work.
+- Upgrade Desktop, CLI/TUI and Gateway together; rollback requires the complete pre-upgrade backup.
+
+## [0.1.0-rc.8] - 2026-10-07
+
+### Fixed
+
+- Persist work coordination across scheduling yields and restarts; deliver returned results once and avoid repeated dispatch or no-progress polling.
+- Verify ordinary quality criteria without accidental manual gates, preserve explicit human authority and close results under the configured policy.
+- Unify verification facts, clear stale verifying states and resume retries from retained work.
+- Preserve provider-required reasoning history and dynamically resolve Grok request version information.
+- Stabilize model and effort controls, long-error wrapping, task follow-up and evidence inspection.
+
+### Changed
+
+- Present complete message bubbles with technical details in the right sidebar; align messages, work and composer spacing.
+- Use named-bot placeholders, compact quotes and a selected-text quote toolbar anchored to the selection.
+- Rename the compact header entry to Bot settings and open configuration directly.
+- Refresh bilingual notes and user guidance, retain RC7 upgrade coverage and add RC8.
+
+### Release scope
+
+- Prerelease for continued evaluation. Stable remains 0.0.18; complex-write Evidence and GA acceptance remain separate gates.
+- Rollback requires the complete pre-upgrade backup; older writers may discard RC8 criterion authority and coordination fields.
+
+## [0.1.0-rc.7] - 2026-10-05
+
+### Changed
+
+- Keep streamed replies and show actual tool actions, targets, elapsed time and active scanning highlights, with nested parameters, results and technical details.
+- Show delegated work by title and latest local status, prioritizing work needing user attention; group reply evidence under one result-basis entry.
+- Separate process/evidence inspection from Bot Overview and Memory. Overview describes the bot; Memory starts with saved content.
+- Synchronize bilingual release notes, user documentation and the generated site changelog; retain RC6 coverage and add RC7 to the upgrade matrix.
+
+### Fixed
+
+- Reasoning-effort selection and popup geometry remain stable during asynchronous saves and restore correctly on failure.
+- Streamed content preserves the reading position after scrolling up; expanded tool and delegated-work details survive canonical reply handoff and the next turn.
+- Interactive streaming test fixtures are isolated from background cognition.
+
+### Release scope
+
+- Candidate for owner evaluation, with stable 0.0.18 and npm beta 0.1.0-beta.5 retained. Complex-write Evidence verification remains a separate GA blocker.
+
+## [0.1.0-beta.4] - 2026-10-01
+
+### Added
+
+- Host scheduling for concurrent tasks, priorities and accepted dependencies; independent Git worktrees with explicit merge decisions.
+- Pause, supersede and resume with retained task context and ordered crash recovery.
+- Project objectives, read-only scheduled and event probes, factual change notifications, and report/propose/act autonomy with device budgets.
+- Memory expiry, conflict handling, and file source freshness checks.
+
+### Changed
+
+- Custom animated bot avatars, colors and SVG controls; refreshed profile, task, memory and objective surfaces.
+- Canonical task reports deduplicate unchanged host facts; card updates and evidence disclosure refresh reliably.
+- Ordinary wakes and handled merge decisions cannot create additional tasks using historical user authority.
+- Workspace builds run sequentially to prevent concurrent shared output cleanup.
+
+### Limitations
+
+- Token hard limits remain unsupported; objective tasks require acceptance unless the user explicitly enables automatic acceptance.
+- TUI and remote project bot surfaces remain scheduled for Beta5. Cross-platform interactive installation and five days of owner daily use are not claimed.
+- Downgrade to beta.3 or 0.0.18 keeps added project data; objectives pause while using an older app.
+
+## [0.1.0-beta.3] - 2026-09-28
+
+### Notes
+
+- Third prerelease on the 0.1.0 line. The stable release remains 0.0.18.
+- The default screen is the bot list. Settings → General switches back to the classic screen. Older conversations are under each bot's profile → Tasks → History.
+
+### Features
+
+- Needs-you cards cover approvals, decisions, and plan approval. The same item is resolved once from the conversation or the task scene.
+- You can fold an interruption into the current task or stop it. A quoted message limits that action to the tasks it cites.
+- Verification detail and evidence can be opened on demand. Proactivity levels, quiet hours, and the daily digest are available.
+- Project memory enters the conversation and has its own page. A background pass extracts memories, and the same failure three times asks you instead of retrying.
+- A stalled task or a repeated failure wakes the bot. Quick chat, screenshots, search, the tray, and shortcuts point at bots.
+
+### Known issues
+
+- One project still runs one task at a time. Project objectives, parallel tasks, remote viewing, and the terminal bot are not in this prerelease.
+- The bot itself cannot write files. Quick chat in bot mode sends text only. A screenshot arrives as a thumbnail.
+
+## [0.1.0-beta.2] - 2026-09-27
+
+### Notes
+
+- Second prerelease on the 0.1.0 line. The stable release remains 0.0.18.
+- The project agent must be turned on in Settings → Developer. While that switch is off, the app stays on the current conversation screen.
+
+### Features
+
+- With the switch on, the main screen is a bot list: conversation, profile, bind an existing folder, or create a managed bot.
+- A new or bound bot familiarizes itself with the project using read-only tools. The bot cannot write files.
+- A bot can open a task on the model frozen at open time. Finished work follows the acceptance policy.
+- Project memory can be remembered and withdrawn. Surfacing decides system notifications, and the tray badge counts items that need you.
+
+### Known issues
+
+- Project objectives, parallel tasks, the daily digest, remote viewing, and the terminal bot are not open.
+- The profile memory list is view-only. Acceptance policy and a per-project model choice are shown, not edited, in the profile.
+- Proactivity stays at the standard level.
+
+## [0.1.0-beta.1] - 2026-09-26
+
+### Notes
+
+- First prerelease on the 0.1.0 line. The stable release remains 0.0.18, and the current conversation interface stays in place.
+- Changelog generation accepts `vX.Y.Z-(alpha|beta|rc).N` notes, lists them on a beta channel, and the changelog page marks that channel as pre-release.
+
+### Features
+
+- A running goal can continue after the window closes.
+- Approval requests persist across restart and are marked when they expire.
+- Settings include model routing by kind of work. A single available model is used for every kind of work.
+- Image review prefers a model that can see images.
+
+### Changes
+
+- Developer settings store a project-agent preference. The switch does not change the app.
+
+### Known issues
+
+- The bot list, project agent, memory, parallel tasks, project objectives, and remote viewing are not open.
+- Installing 0.0.18 again still opens existing conversations. Conversation text is not rewritten. Settings are backed up before the schema version and project ids are written.
 
 ## [0.0.18] - 2026-09-26
 

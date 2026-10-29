@@ -1,6 +1,10 @@
 import type { ReactNode, SVGProps } from 'react';
+import lucideLicense from './LUCIDE-LICENSE?raw';
 
 export type PeerIconName =
+  | 'loader'
+  | 'globe'
+  | 'folder'
   | 'back'
   | 'plus'
   | 'close'
@@ -8,12 +12,49 @@ export type PeerIconName =
   | 'chevronUp'
   | 'chevronLeft'
   | 'chevronRight'
+  | 'arrowUpRight'
   | 'send'
+  | 'arrowDown'
   | 'terminal'
+  | 'hand'
+  | 'shieldAlert'
   | 'info'
-  | 'stop';
+  | 'fileText'
+  | 'image'
+  | 'userRound'
+  | 'stop'
+  | 'settings'
+  | 'history'
+  | 'search'
+  | 'repeat'
+  | 'blocks'
+  | 'agentOrbit'
+  | 'agentBloom'
+  | 'agentPrism'
+  | 'agentWeave'
+  | 'agentSpark'
+  | 'agentFacet'
+  | 'agentLeaf'
+  | 'agentKnot'
+  | 'check'
+  | 'minus'
+  | 'circle'
+  | 'pause'
+  | 'warning'
+  | 'ellipsis'
+  | 'archive'
+  | 'arrowRight'
+  | 'panelRight'
+  | 'panelLeft'
+  | 'maximize'
+  | 'restore'
+  | 'arrowRightOff'
+  | 'bolt';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a17 17 0 0 1 0 18 17 17 0 0 1 0-18Z" /></>,
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />,
+  loader: <path d="M20 12a8 8 0 1 1-5.5-7.6" />,
   back: (
     <>
       <path d="M19 12H5" />
@@ -28,16 +69,57 @@ const PATHS: Record<PeerIconName, ReactNode> = {
     </>
   ),
   terminal: <><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3m6 0h4" /></>,
+  // Lucide hand / shield-alert (ISC); source and notice in LUCIDE-LICENSE.
+  hand: <g data-license={lucideLicense}><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" /><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" /><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></g>,
+  shieldAlert: <g data-license={lucideLicense}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="M12 8v4M12 16h.01" /></g>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v.01" /></>,
+  fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8m-8 4h6" /></>,
+  image: <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></>,
+  // Lucide user-round (ISC); source and notice in LUCIDE-LICENSE.
+  userRound: <g data-license={lucideLicense}><circle cx="12" cy="8" r="5" /><path d="M20 21a8 8 0 0 0-16 0" /></g>,
+  settings: <><path d="M3 6h5m4 0h9M3 12h10m4 0h4M3 18h3m4 0h11" /><circle cx="10" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="8" cy="18" r="2" /></>,
+  history: <><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6M12 7v5l3 2" /></>,
+  search: <><circle cx="10.5" cy="10.5" r="7.5" /><path d="m16 16 5 5" /></>,
+  repeat: <><path d="m17 2 4 4-4 4M3 11V8a2 2 0 0 1 2-2h16M7 22l-4-4 4-4m14-1v3a2 2 0 0 1-2 2H3" /></>,
+  blocks: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 17.5h7m-3.5-3.5v7" /></>,
+  agentOrbit: <><circle cx="12" cy="12" r="3" /><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-35 12 12)" /></>,
+  agentBloom: <><path d="M12 12C2 12 2 2 7 3c4 0 5 5 5 9Zm0 0C12 2 22 2 21 7c0 4-5 5-9 5Zm0 0c10 0 10 10 5 9-4 0-5-5-5-9Zm0 0c0 10-10 10-9 5 0-4 5-5 9-5Z" /></>,
+  agentPrism: <><path d="m12 2 10 10-10 10L2 12Zm0 0v20M2 12h20" /></>,
+  agentWeave: <><rect x="3" y="7" width="18" height="10" rx="5" /><rect x="7" y="3" width="10" height="18" rx="5" /></>,
+  agentSpark: <path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" />,
+  agentFacet: <><path d="m12 2 9 5v10l-9 5-9-5V7Zm0 10 9-5m-9 5L3 7m9 5v10" /></>,
+  agentLeaf: <><path d="M12 13C3 13 2 6 3 3c7-1 10 3 9 10Zm0 0c9 0 10-7 9-10-7-1-10 3-9 10Zm0 0v8m-5-4 5 4 5-4" /></>,
+  agentKnot: <><rect x="3" y="3" width="12" height="12" rx="4" /><rect x="9" y="9" width="12" height="12" rx="4" /></>,
+  check: <path d="m5 12 4 4L19 6" />,
+  minus: <path d="M5 12h14" />,
+  circle: <circle cx="12" cy="12" r="8" />,
+  pause: <><path d="M8 5v14M16 5v14" /></>,
+  warning: <><path d="m12 3 10 18H2Z" /><path d="M12 9v4m0 4h.01" /></>,
+  ellipsis: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
+  archive: <><rect x="3" y="3" width="18" height="4" rx="1" /><path d="M5 7v14h14V7m-10 5h6" /></>,
+  arrowRight: <path d="M4 12h16m-6-6 6 6-6 6" />,
+  panelRight: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></>,
+  panelLeft: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></>,
+  maximize: <path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" />,
+  restore: <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />,
+  arrowRightOff: <><path d="M4 12h10m2 0h4m-6-6 6 6-3 3M3 3l18 18" /></>,
+  bolt: <path d="M13 2 4 14h7l-1 8 10-12h-7l0-8Z" />,
   stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   chevronUp: <path d="m6 15 6-6 6 6" />,
   chevronLeft: <path d="m15 18-6-6 6-6" />,
   chevronRight: <path d="m9 6 6 6-6 6" />,
+  arrowUpRight: <><path d="M7 17 17 7M8 7h9v9" /></>,
   send: (
     <>
       <path d="M12 19V5" />
       <path d="m5 12 7-7 7 7" />
+    </>
+  ),
+  arrowDown: (
+    <>
+      <path d="M12 5v14" />
+      <path d="m5 12 7 7 7-7" />
     </>
   ),
 };

@@ -1,14 +1,11 @@
 import {
-  buildModelMenuGroups,
   resolveLlmModelOptionValues,
   type ContextAccountingSnapshot,
   type ContextUsageBreakdown,
   type LlmProviderConfigView,
 } from '@peer-agent/protocol';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dropdown, type DropdownOption } from '../../../app/components/Dropdown';
-import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import { accountUsageViewIdentity } from '../../../app/components/accountUsageIdentity';
 import { ContextAccountUsage } from './ContextAccountUsage';
 import { supportsSubscriptionQuotaMethod } from '../../../app/components/llmSubscriptionQuota';
@@ -16,15 +13,9 @@ import {
   contextWindowDefinition,
   selectedModelContextWindow,
 } from '../../../app/components/llmModelConfiguration';
-import { effortLabel, type EffortLevel } from '../../state/preferences';
+import { type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
-import { getProviderDisplayName } from '../../state/providerDisplay';
-import {
-  effortIndexForLevel,
-  effortIndexFromValue,
-  effortLevelForDisplay,
-  snapEffortValue,
-} from './effortSlider';
+import { ComposerModelMenu } from './ModelSelectionPanel';
 import type { TokenUsageState } from '../../state/types';
 import { ContextUsagePanel } from './ContextUsagePanel';
 import { contextDisplayScopeKey, resolveStickyContextDisplay } from './stickyContextDisplay';
@@ -47,266 +38,6 @@ function formatContextWindowLabel(tokens: number | undefined): string {
   return `${Math.round(tokens)}`;
 }
 
-function ReasoningEffortSlider({
-  effort,
-  effortLevels,
-  fastAvailable,
-  fastMode,
-  isZh,
-  disabled,
-  onEffortChange,
-  onFastModeChange,
-}: {
-  readonly effort: EffortLevel;
-  readonly effortLevels: readonly EffortLevel[];
-  readonly fastAvailable: boolean;
-  readonly fastMode: boolean;
-  readonly isZh: boolean;
-  readonly disabled: boolean;
-  readonly onEffortChange: (level: EffortLevel) => void;
-  readonly onFastModeChange: (enabled: boolean) => void;
-}) {
-  const selectedIndex = effortIndexForLevel(effort, effortLevels);
-  const selectedValue = effortLevels.length > 1 ? (selectedIndex / (effortLevels.length - 1)) * 100 : 0;
-  const [open, setOpen] = useState(false);
-  const [dragValue, setDragValue] = useState(selectedValue);
-  const [dirty, setDirty] = useState(false);
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const panelId = useId();
-
-  useEffect(() => {
-    setDragValue(selectedValue);
-    setDirty(false);
-  }, [selectedValue]);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const updatePosition = () => {
-      const trigger = triggerRef.current;
-      const panel = panelRef.current;
-      if (!trigger || !panel) return;
-      const rect = trigger.getBoundingClientRect();
-      const panelWidth = panel.offsetWidth;
-      const panelHeight = panel.offsetHeight;
-      const gap = 6;
-      const margin = 8;
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-
-      // Prefer above the trigger; flip below when there is not enough room.
-      let top = rect.top - panelHeight - gap;
-      if (top < margin) {
-        const below = rect.bottom + gap;
-        if (below + panelHeight <= viewportHeight - margin) {
-          top = below;
-        } else {
-          top = Math.max(margin, Math.min(top, viewportHeight - panelHeight - margin));
-        }
-      }
-
-      // Prefer left-aligned with the trigger; clamp horizontally to the viewport.
-      const left = Math.max(
-        margin,
-        Math.min(rect.left, viewportWidth - panelWidth - margin),
-      );
-
-      setCoords({ left, top });
-    };
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener('pointerdown', closeOnPointerDown);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnPointerDown);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [open]);
-
-  const commit = (value: number) => {
-    if (!dirty) return;
-    const snapped = snapEffortValue(value, effortLevels.length);
-    const next = effortLevels[effortIndexFromValue(snapped, effortLevels.length)];
-    setDragValue(snapped);
-    setDirty(false);
-    if (next) onEffortChange(next);
-  };
-
-  const effectiveValue = dirty ? dragValue : selectedValue;
-  const displayedLevel = effortLevelForDisplay(effort, effortLevels, effectiveValue, dirty);
-  const displayLabel = effortLabel(displayedLevel, isZh);
-  const label = effortLabel(effort, isZh);
-  const panel = open
-    ? createPortal(
-        <div
-          ref={panelRef}
-          id={panelId}
-          className="reasoning-effort-panel"
-          style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}
-        >
-          <div className="reasoning-effort-panel-heading">
-            <span>{isZh ? '思考强度' : 'Reasoning effort'}</span>
-            <strong>{displayLabel}</strong>
-          </div>
-          <div className="reasoning-effort-slider-shell">
-            {/*
-              几何契约（与 WebKit/Firefox range 拇指圆心一致）：
-              centerX = thumb/2 + (100% - thumb) * t
-              轨道/刻度/填充必须共用此坐标系，不能再用 track 局部 0–100%。
-            */}
-            <div className="reasoning-effort-slider-track" aria-hidden="true">
-              <div
-                className="reasoning-effort-slider-fill"
-                style={{
-                  width: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${effectiveValue} / 100)`,
-                }}
-              />
-            </div>
-            {effortLevels.map((level, index) => {
-              const t = effortLevels.length > 1
-                ? index / (effortLevels.length - 1)
-                : 0;
-              const previewIndex = dirty
-                ? effortIndexFromValue(effectiveValue, effortLevels.length)
-                : selectedIndex;
-              const active = index <= previewIndex;
-              return (
-                <span
-                  key={level}
-                  className={`reasoning-effort-slider-tick${active ? ' is-active' : ''}`}
-                  style={{
-                    left: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${t})`,
-                  }}
-                  aria-hidden="true"
-                />
-              );
-            })}
-            <input
-              className="reasoning-effort-slider"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={effectiveValue}
-              aria-label={isZh ? '思考强度' : 'Reasoning effort'}
-              aria-valuetext={displayLabel}
-              style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
-              onInput={(event) => {
-                setDirty(true);
-                setDragValue(Number(event.currentTarget.value));
-              }}
-              onChange={(event) => {
-                setDirty(true);
-                setDragValue(Number(event.currentTarget.value));
-              }}
-              onPointerUp={(event) => commit(Number(event.currentTarget.value))}
-              onKeyUp={(event) => {
-                if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
-                  commit(Number(event.currentTarget.value));
-                }
-              }}
-              onBlur={(event) => commit(Number(event.currentTarget.value))}
-            />
-          </div>
-          {fastAvailable ? (
-            <div className="reasoning-request-channel">
-              <span className="reasoning-request-channel-label">
-                {isZh ? '请求通道' : 'Request channel'}
-              </span>
-              <div
-                className="reasoning-request-channel-options"
-                role="group"
-                aria-label={isZh ? '请求通道' : 'Request channel'}
-              >
-                <button
-                  type="button"
-                  className={!fastMode ? 'is-active' : ''}
-                  aria-pressed={!fastMode}
-                  disabled={disabled}
-                  onClick={() => onFastModeChange(false)}
-                >
-                  {isZh ? '正常' : 'Normal'}
-                </button>
-                <button
-                  type="button"
-                  className={fastMode ? 'is-active is-fast' : 'is-fast'}
-                  aria-pressed={fastMode}
-                  disabled={disabled}
-                  onClick={() => onFastModeChange(true)}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path
-                      d="M9.15 1.75 3.9 8.3h3.65L6.9 14.25l5.2-7.05H8.55l.6-5.45Z"
-                      fill="currentColor"
-                      stroke="currentColor"
-                      strokeWidth="0.7"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  {isZh ? '快速' : 'Fast'}
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>,
-        document.body,
-      )
-    : null;
-
-  return (
-    <div ref={rootRef} className="reasoning-effort-control">
-      <button
-        ref={triggerRef}
-        type="button"
-        className={`reasoning-effort-trigger ${open ? 'open' : ''}`}
-        disabled={disabled}
-        title={isZh ? '思考强度' : 'Reasoning effort'}
-        aria-label={`${isZh ? '思考强度' : 'Reasoning effort'}：${label}`}
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="reasoning-effort-trigger-content" aria-hidden="true">
-          {fastAvailable && fastMode ? (
-            <svg className="reasoning-effort-channel-badge" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M9.15 1.75 3.9 8.3h3.65L6.9 14.25l5.2-7.05H8.55l.6-5.45Z"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="0.7"
-                strokeLinejoin="round"
-              />
-            </svg>
-          ) : null}
-          {label}
-        </span>
-      </button>
-      {panel}
-    </div>
-  );
-}
-
 export function TokenUsageDisplay({
   providers,
   tokenUsage,
@@ -317,14 +48,12 @@ export function TokenUsageDisplay({
   isStreaming,
   isZh,
   effort,
-  effortLevels,
   onEffortChange,
   fastMode = false,
   onFastModeChange,
-  modelOptions = [],
   modelLoading = false,
-  canSwitchModel = false,
   onModelChange,
+  onManageModels,
   selectedModelProviderId = null,
   showContextUsage = true,
   showModelControls = true,
@@ -351,6 +80,8 @@ export function TokenUsageDisplay({
   readonly canSwitchModel?: boolean;
   /** onModelChange 回传选中项的已配置模型记录 id，会话据此绑定模型。 */
   readonly onModelChange?: (providerId: string) => void;
+  /** Opens the existing model settings page. */
+  readonly onManageModels?: () => void;
   /** 会话级绑定的模型记录 id；决定下拉选中项与展示的模型/价格/上下文窗口。null=用全局默认。 */
   readonly selectedModelProviderId?: string | null;
   /** 首页框内只保留模型/思考；框下右侧单独放上下文统计。 */
@@ -425,19 +156,6 @@ export function TokenUsageDisplay({
     });
   }, [stickyScopeKey, liveCtxPercent, liveContextTokens, liveBreakdown]);
 
-  // 级联菜单分组：一级 provider（按 groupId 折叠同一凭证下的多模型），二级为该 provider 下的模型。
-  // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
-  // 未配置 API Key 的模型也一并列出，但置灰（disabled）不可选；整组模型都未配置时整组置灰。
-  // 注意：必须在 hasInfo early return 之前调用 hooks，否则 hasInfo 从 false→true 会触发 React #310。
-  const modelGroups: readonly CascadingMenuGroup[] = useMemo(() => buildModelMenuGroups(
-    providers.map((prov) => ({
-      id: prov.id, groupId: prov.groupId, groupLabel: getProviderDisplayName(prov, isZh),
-      model: prov.model, modelLabel: prov.modelLabel, available: Boolean(prov.apiKeyConfigured),
-    })),
-  ), [providers, isZh]);
-  const handleModelMenuChange = useCallback((next: string) => {
-    onModelChange?.(next);
-  }, [onModelChange]);
   // 这三份 useMemo 必须留在 hasInfo early return 之前。草稿态（无 provider /
   // 无 usage）hasInfo=false；打开会话后 contextAccounting 一到 hasInfo=true，
   // 若此时才第一次调用 hook，会触发 React #310。
@@ -546,41 +264,26 @@ export function TokenUsageDisplay({
     selectedContextWindow ?? contextWindow ?? defaultProvider?.contextWindow,
   );
 
-  const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
-  const modelDisplayName = defaultProvider?.modelLabel || defaultProvider?.model;
-  const modelTitle = defaultProvider?.modelLabel && defaultProvider.modelLabel !== defaultProvider.model
-    ? `${isZh ? '当前会话使用的模型' : 'Model used for this conversation'}: ${defaultProvider.model}`
+  const modelTitle = modelLoading
+    ? (isZh ? '正在加载模型列表' : 'Loading models')
     : (isZh ? '当前会话使用的模型' : 'Model used for this conversation');
 
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
-        {showModelControls && defaultProvider?.model ? (
-          shouldShowModelDropdown ? (
-            <CascadingMenu
-              className="composer-cascading-menu composer-model-dropdown"
-              value={defaultProvider.id}
-              groups={modelGroups}
-              onChange={handleModelMenuChange}
-              ariaLabel={isZh ? '切换模型' : 'Switch model'}
-              title={modelLoading ? (isZh ? '正在加载模型列表' : 'Loading models') : modelTitle}
-              menuPlacement="up"
-              disabled={isStreaming || modelLoading}
-            />
-          ) : (
-            <span className="token-usage-model" title={modelTitle}>{modelDisplayName}</span>
-          )
-        ) : null}
-        {showModelControls && effortLevels.length > 0 ? (
-          <ReasoningEffortSlider
+        {showModelControls && onModelChange ? (
+          <ComposerModelMenu
+            providers={providers}
+            selectedModelId={defaultProvider?.id ?? null}
             effort={effort}
-            effortLevels={effortLevels}
-            fastAvailable={(defaultProvider?.authMethod === 'oauth_chatgpt' || defaultProvider?.authMethod === 'oauth_grok') && Boolean(onFastModeChange)}
             fastMode={fastMode}
             isZh={isZh}
-            disabled={Boolean(isStreaming)}
+            disabled={Boolean(isStreaming || modelLoading)}
+            title={modelTitle}
+            onSelectModel={onModelChange}
             onEffortChange={onEffortChange}
-            onFastModeChange={onFastModeChange ?? (() => undefined)}
+            onFastModeChange={onFastModeChange}
+            onManageModels={onManageModels}
           />
         ) : null}
         {showModelControls && canSwitchContextWindow && contextOptionDefinition && defaultProvider ? (

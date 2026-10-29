@@ -70,7 +70,7 @@ test('Automation surfaces, controls, states and focus use semantic token roles',
   );
   assert.match(
     automationCss,
-    /\.automation-advanced\{border:1px solid var\(--za-line\);border-radius:14px;background:var\(--paper-sheet\)/,
+    /\.automation-advanced\{border:1px solid var\(--za-line\);border-radius:var\(--ui-radius-panel\);background:var\(--paper-sheet\)/,
   );
   assert.match(
     automationCss,

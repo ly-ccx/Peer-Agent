@@ -71,17 +71,81 @@ export function buildAppshotMessage(payload, options = {}) {
   };
 }
 
+const INPUT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+
+export function pickAppshotBot(bots) {
+  const list = (Array.isArray(bots) ? bots : [])
+    .filter((bot) => bot && typeof bot.workspaceId === 'string' && bot.workspaceId && bot.status !== 'archived');
+  list.sort((left, right) => String(right.lastActiveAt || right.updatedAt || '').localeCompare(
+    String(left.lastActiveAt || left.updatedAt || ''),
+  ));
+  return list[0] || null;
+}
+
+export function buildAppshotSubmission(payload, workspaceId, options = {}) {
+  const raw = `appshot-${String(payload?.appshotId || '').trim()}`.replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 128);
+  const inputId = INPUT_ID.test(raw) ? raw : 'appshot';
+  const ref = typeof payload?.visual?.artifactRef === 'string' ? payload.visual.artifactRef.trim() : '';
+  const message = buildAppshotMessage(payload, options);
+  return {
+    workspaceId,
+    inputId,
+    surface: 'desktop',
+    text: `Appshot — ${payload?.source?.appName || 'window'}`,
+    attachmentRefs: ref ? [ref] : [],
+    attachments: message.attachments,
+  };
+}
+
+/** Hotkey result after delivery. A failed bot delivery must not look like success. */
+export function completeAppshotHotkey(source, result, delivery, notify, log) {
+  if (!delivery || delivery.ok === false) {
+    const code = delivery?.code || 'NO_BOT';
+    if (typeof notify === 'function') notify(source, { ok: false, code });
+    return { ok: false, code, delivery };
+  }
+  if (typeof log === 'function') {
+    const target = delivery.conversationId || delivery.workspaceId || '';
+    log(`[appshot] delivered ${target}${delivery.created ? ' (new)' : ''}`.trim());
+  }
+  if (typeof notify === 'function') {
+    notify(source, { ok: true, appName: result?.payload?.source?.appName, delivery });
+  }
+  return { ...result, delivery };
+}
+
 /**
- * Deliver a successful appshot into a conversation. Does NOT run the agent.
+ * Deliver a successful appshot.
+ * Classic shell appends one user message and does not run the agent.
+ * Bot shell submits the artifact ref to the most recently active bot.
  * @param {object} deps
- * @param {import('@peer-agent/protocol').AppshotPayload} deps.payload
- * @param {() => Array<object>} deps.listConversations
- * @param {(input?: object) => {id:string}} deps.createConversation
- * @param {(id: string, message: object) => unknown} deps.appendMessage
- * @param {{ thumbnailDataUrl?: string }} [deps.options]
- * @returns {{ ok: true, conversationId: string, created: boolean, messageId: string }}
  */
-export function deliverAppshot({ payload, listConversations, createConversation, appendMessage, options }) {
+export function deliverAppshot({
+  payload,
+  listConversations,
+  createConversation,
+  appendMessage,
+  options,
+  shell,
+  listBots,
+  submitInput,
+}) {
+  if (shell === 'bots') {
+    const bot = pickAppshotBot(typeof listBots === 'function' ? listBots() : []);
+    if (!bot || typeof submitInput !== 'function') return { ok: false, code: 'NO_BOT' };
+    const submission = buildAppshotSubmission(payload, bot.workspaceId, options);
+    const saved = submitInput(submission);
+    if (saved && saved.ok === false) return { ok: false, code: 'NO_BOT' };
+    return {
+      ok: true,
+      workspaceId: bot.workspaceId,
+      conversationId: null,
+      created: false,
+      messageId: null,
+      inputId: saved?.inputId || submission.inputId,
+      attachmentRefs: submission.attachmentRefs,
+    };
+  }
   const destination = resolveAppshotDestination({ listConversations, createConversation });
   const message = buildAppshotMessage(payload, options);
   appendMessage(destination.conversationId, message);

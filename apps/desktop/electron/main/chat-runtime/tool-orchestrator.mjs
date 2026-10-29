@@ -1,5 +1,5 @@
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
-import { materializeToolResultContent } from '@peer-agent/runtime-node';
+import { materializeToolResultContent, isLocalImageObservation } from '@peer-agent/runtime-node';
 import { isDesktopPreviewObservation } from '../runtime-gateway/desktop-preview-service.mjs';
 
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
@@ -9,6 +9,8 @@ import {
 } from '@peer-agent/runtime-core';
 import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goal-idempotency-durable';
 import { pathOf } from '../data-store.mjs';
+import { noteTurnToolCall } from '../project-agent/turn-memory.mjs';
+import { toolResultEvidencePreview } from './file-evidence-preview.mjs';
 
 export function createToolContext({
   conversationId = null,
@@ -321,6 +323,7 @@ export async function executeModelToolCall({
   ensureBrowserReady = null,
 }) {
   const args = safeParseJson(rawArguments);
+  const callOrdinal = toolContext?.turnRole === 'project_agent' ? (toolContext.toolCallOrdinal = (toolContext.toolCallOrdinal || 0) + 1) : null;
   // displayName 是后端 Runtime Projection 注入的固定展示文案（MCP 工具为
   // 「服务名: 工具名」），表达层用它渲染工具卡标题。这里按 name 从投影反查并随
   // tool-call 事件透传，避免渲染层只能显示裸 capability 名（如 mcp__server__tool）。
@@ -352,6 +355,8 @@ export async function executeModelToolCall({
     toolCallId,
     conversationId,
     permissionPolicy: toolContext.permissionPolicy,
+    sourceArguments: args,
+    signal,
   });
   const requestLocalCapabilityPermission = permissionGate.createLocalCapabilityPermissionRequester({
     webContents,
@@ -360,6 +365,8 @@ export async function executeModelToolCall({
     conversationId,
     workspacePath,
     permissionPolicy: toolContext.permissionPolicy,
+    sourceArguments: args,
+    signal,
   });
 
   // Milestone D: Goal side-effect guard. When Goal context is present, avoid
@@ -389,6 +396,7 @@ export async function executeModelToolCall({
       args,
       openToolCalls: goalPlan.runner.contextCheckpoint?.openToolCalls || [],
       completedLedger: goalIdempotencyLedger.snapshot(),
+      requiresFreshResult: registry?.getTool(name)?.runtime?.resultReplay === 'fresh_read',
     });
     if (decision.action === 'reuse') {
       const reused = {
@@ -462,10 +470,10 @@ export async function executeModelToolCall({
     name,
     args,
     workspacePath,
-    toolContext,
+    toolContext: callOrdinal == null ? toolContext : { ...toolContext, toolCallOrdinal: callOrdinal },
     toolCallId,
     requestPermission: (request) => {
-      if (request?.confirmation) return requestLocalCapabilityPermission(request);
+      if (request?.confirmation || request?.capabilityId) return requestLocalCapabilityPermission(request);
       if (request?.filePath || request?.tool || request?.workspacePath) return requestFilePermission(request);
       return requestLocalCapabilityPermission(request);
     },
@@ -476,6 +484,8 @@ export async function executeModelToolCall({
       conversationId,
       workspacePath,
       permissionPolicy: toolContext.permissionPolicy,
+      sourceArguments: args,
+      signal,
     }),
     signal,
     registry,
@@ -486,13 +496,14 @@ export async function executeModelToolCall({
     automationProposalService,
     ensureBrowserReady,
   });
+  if(result.execution&&typeof toolContext.onToolExecution==='function')toolContext.onToolExecution(result.execution);
   if (signal?.aborted) {
     const endedAtMs = Date.now();
     webContents.send('chat:stream:tool-result', {
       streamId,
       toolCallId,
-      result: '工具调用已中断',
-      evidenceRefs: [],
+      result: result.execution?.result ? JSON.stringify(result.execution.result) : '工具调用已中断',
+      evidenceRefs: collectToolEvidenceRefs({ toolCallId, execution: result.execution }),
       startedAtMs,
       endedAtMs,
       durationMs: Math.max(0, endedAtMs - startedAtMs),
@@ -507,7 +518,9 @@ export async function executeModelToolCall({
       const userArtifacts = Array.isArray(providerEvidence?.userArtifacts)
         ? providerEvidence.userArtifacts
         : [];
+      const bodyPreview = toolResultEvidencePreview(result.execution);
       goalPlanStore.recordEvidenceRefs({
+        ...(goalPlan?.planId ? { planId: goalPlan.planId } : {}),
         conversationId,
         streamId,
         toolCallId,
@@ -516,12 +529,14 @@ export async function executeModelToolCall({
         evidenceRefs,
         artifactRefs: evidenceRefs.filter((ref) => !ref.startsWith('tool-result://')),
         userArtifacts,
+        ...(bodyPreview ? { bodyPreview } : {}),
       });
     } catch (err) {
       console.warn('[tool-orchestrator] failed to register EvidenceIndex refs:', err);
     }
   }
   const output = appendEvidenceRefsToToolOutput(rawOutput, evidenceRefs);
+  noteTurnToolCall(toolContext, { name, input: args, result: output });
   const streamResult = formatToolResultForStream({ name, args, output });
   // Layer 0 材料化(17 号文档 §3.1 / 23 号台账阶段 E):回灌给模型的超阈值输出
   // 落盘 artifact,消息内只留 ref 骨架(预览+检索命令);UI 流(streamResult)不受影响。
@@ -593,25 +608,27 @@ export async function executeModelToolCall({
   const controlSignal = extractToolControlSignal(result);
   const visualObservations = Array.isArray(result.execution?.result?.modelContext?.visualObservations)
     ? result.execution.result.modelContext.visualObservations.filter((observation) => (
-        ((observation?.kind === 'browser_screenshot'
+        (result.execution?.result?.status === 'success' && isLocalImageObservation(observation, toolCallId)) || (
+          ((observation?.kind === 'browser_screenshot'
           && typeof observation?.artifactRef === 'string'
           && observation.artifactRef.startsWith('local-browser-artifact://'))
           || (observation?.kind === 'desktop_preview'
             && result.execution?.result?.status === 'success'
             && isDesktopPreviewObservation(observation, toolCallId)))
-        && observation?.mediaType === 'image/png'
-        && typeof observation?.dataUrl === 'string'
-        && observation.dataUrl.startsWith('data:image/png;base64,')
+          && observation?.mediaType === 'image/png'
+          && typeof observation?.dataUrl === 'string'
+          && observation.dataUrl.startsWith('data:image/png;base64,')
+        )
       ))
     : [];
-  return {
+  return Object.defineProperty({
     aborted: false,
     args,
     output: providerOutput,
     result,
     controlSignal,
-    // Side-band, current-turn-only visual context. It is deliberately excluded from
-    // output/providerOutput so Evidence and tool cards never persist image bytes.
-    visualObservations,
-  };
+  }, 'visualObservations', {
+    // Current-turn-only context; JSON and event snapshots exclude image bytes.
+    value: visualObservations, enumerable: false,
+  });
 }

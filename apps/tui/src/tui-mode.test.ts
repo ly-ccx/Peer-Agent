@@ -46,6 +46,7 @@ describe('tui mode catalog', () => {
 
   test('declares projection rules for user-facing and runtime-only modes', () => {
     expect(TUI_MODE_PROJECTION_RULES.map(({ mode }) => mode)).toEqual([
+      'project_agent', 'memory_curator',
       'chat',
       'plan',
       'goal',
@@ -58,6 +59,8 @@ describe('tui mode catalog', () => {
       'plan',
       'goal',
       'explorer',
+      'project_agent',
+      'memory_curator',
       'compact',
       'system',
     ]);
@@ -65,6 +68,8 @@ describe('tui mode catalog', () => {
     expect(tuiModeAllowsWriteTools('goal')).toBe(true);
     expect(tuiModeAllowsWriteTools('plan')).toBe(false);
     expect(tuiModeAllowsWriteTools('explorer')).toBe(false);
+    expect(tuiModeAllowsWriteTools('project_agent')).toBe(false);
+    expect(tuiModeAllowsWriteTools('memory_curator')).toBe(false);
     expect(tuiModeProjectionRule('plan')).toMatchObject({
       mode: 'plan',
       readOnly: true,

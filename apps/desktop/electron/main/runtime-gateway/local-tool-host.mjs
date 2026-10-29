@@ -1,8 +1,22 @@
-import { createNodeRuntimeHostAdapter } from '@peer-agent/runtime-node';
+import { createWorkingContextProvider } from '@peer-agent/runtime-node/project-agent';
+import {
+  createNodeRuntimeHostAdapter,
+  createLocalGitProvider
+} from "@peer-agent/runtime-node/providers";
 import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
+import { createDesktopLocalImageProvider } from './local-image-provider.mjs';
+import { createLocalDelegationProvider } from './local-delegation-provider.mjs';
+import { liveDelegationSupervisor, liveObjectiveService, delegationStoreDir } from '../project-agent/delegation-port.mjs';
+import { liveDeliveryFacts } from '../project-agent/delivery-facts-port.mjs';
+import { createDesktopReplyComposer } from '../project-agent/reply-composer-port.mjs';
+import { liveSessionVerification } from '../project-agent/session-verification.mjs';
+import { liveProjectProactivity } from '../project-agent/proactivity-port.mjs';
+import { createLocalMemoryProvider } from './local-memory-provider.mjs';
+import { liveMemoryGate } from '../project-agent/memory-gate-port.mjs';
+import { installMemoryIndex } from '../project-agent/memory-index-port.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
@@ -24,8 +38,12 @@ export function createLocalToolHost({
   mcpRegistry,
   mcpCredentialResolver = null,
   fileProvider = createLocalFileProvider({ workspaceRoot }),
+  imageProvider = createDesktopLocalImageProvider({ workspaceRoot }),
+  gitProvider = createLocalGitProvider({ workspaceRoot, artifactBaseDir: userDataPath ? `${userDataPath}/artifacts` : undefined }),
   shellProvider = null,
   goalProvider = createLocalGoalProvider(),
+  delegationProvider = null,
+  memoryProvider = null,
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
   ensureBrowserReady = null,
@@ -42,7 +60,26 @@ export function createLocalToolHost({
   extraProviders = [],
   hookRunner = null,
   onRuntimeEvent = null,
+  executionGate = null,
 }) {
+  const activeMemoryProvider = memoryProvider ?? createLocalMemoryProvider({
+    enabled: (workspaceId) => liveMemoryGate().enabled(workspaceId),
+  });
+  installMemoryIndex({
+    rebuild() {
+      activeMemoryProvider.rebuildIndex?.();
+    },
+  });
+  const activeDelegationProvider = delegationProvider ?? createLocalDelegationProvider({
+    supervisor: liveDelegationSupervisor(),
+    objectives: liveObjectiveService(),
+    storeDir: delegationStoreDir,
+    verification: liveSessionVerification(),
+    proactivity: liveProjectProactivity(),
+    replyComposer: createDesktopReplyComposer({
+      readDelivery: (view) => liveDeliveryFacts().read(view),
+    }),
+  });
   const activeHookRunner = hookRunner ?? createConfiguredHookRunner({ userDataPath, workspaceRoot });
   const activeShellProvider = shellProvider ?? createLocalShellProvider({
     workspaceRoot,
@@ -57,8 +94,13 @@ export function createLocalToolHost({
   const providerRegistry = createCapabilityProviderRegistry({
     providers: providers ?? [
       fileProvider,
+      imageProvider,
+      gitProvider,
       activeShellProvider,
       goalProvider,
+      activeDelegationProvider,
+      activeMemoryProvider,
+      createWorkingContextProvider({ supervisor: liveDelegationSupervisor() }),
       interactionProvider,
       automationProposalProvider,
       webProvider,
@@ -71,6 +113,7 @@ export function createLocalToolHost({
   });
 
   const hostAdapter = createNodeRuntimeHostAdapter({
+    ...(executionGate ? { executionGate } : {}),
     workspaceRoot,
     providerExecutor: providerRegistry,
     sessionProvider: sessionStore,

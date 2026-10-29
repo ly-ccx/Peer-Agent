@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import { Overlay } from '../../app/components/Overlay';
 
 export interface PasswordManagerPanelProps {
@@ -215,6 +216,7 @@ export function PasswordManagerPanel({
       backdropClassName="session-import-overlay"
       panelClassName="session-import-modal password-manager-modal"
     >
+      {({ requestClose }) => <>
         <header className="session-import-header">
           <div>
             <h2 className="session-import-title">{t.title}</h2>
@@ -225,7 +227,7 @@ export function PasswordManagerPanel({
               </p>
             ) : null}
           </div>
-          <button type="button" className="session-import-close" onClick={onClose}>
+          <button type="button" className="session-import-close" onClick={requestClose}>
             {t.close}
           </button>
         </header>
@@ -284,7 +286,7 @@ export function PasswordManagerPanel({
             </button>
           </div>
 
-          {loading ? <p className="session-import-hint">…</p> : null}
+          {loading ? <p className="session-import-hint"><PeerIcon name="ellipsis" size={14} className="inline-icon" />{isZh ? '正在读取' : 'Loading'}</p> : null}
           {!loading && filtered.length === 0 ? (
             <p className="session-import-hint">{t.empty}</p>
           ) : (
@@ -317,6 +319,7 @@ export function PasswordManagerPanel({
             </ul>
           )}
         </section>
+      </>}
     </Overlay>
   );
 }

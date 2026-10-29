@@ -59,10 +59,10 @@ export function createBrowserIpcRegistrations({ browser, sessionImport, fdaDrag,
 
   return [
     owner('browser-ipc', (ipc) => {
-      ipc.handle('browser:register-webcontents', (_event, registration = {}) =>
-        ports.registerWebContents(registration));
-      ipc.handle('browser:unregister-webcontents', (_event, registration = {}) =>
-        ports.unregisterWebContents(registration));
+      ipc.handle('browser:register-webcontents', (event, registration = {}) =>
+        ports.registerWebContents(registration, event.sender));
+      ipc.handle('browser:unregister-webcontents', (event, registration = {}) =>
+        ports.unregisterWebContents(registration, event.sender));
       ipc.handle('browser:clear-site-data', (_event, payload = {}) =>
         ports.clearSiteData(payload));
       ipc.handle('browser:capture-page', (event, payload = {}) =>

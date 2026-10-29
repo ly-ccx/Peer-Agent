@@ -127,6 +127,9 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       openid-client:
         specifier: ^6.8.8
         version: 6.8.8

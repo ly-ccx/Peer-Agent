@@ -2,7 +2,7 @@
 // Never connects to the user's data home or running Peer instance.
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { executeProjectedModelTool } from '../electron/main/chat-runtime/projected-tool-executor.mjs';
@@ -78,7 +78,7 @@ app.whenReady().then(async () => {
     stdin: {
       contents: process.env.PEER_BACKGROUND_VISUAL_FIXTURE === '1'
         ? "import '../../scripts/background-runtime-ui-fixture';"
-        : "import React from 'react';import {createRoot} from 'react-dom/client';import {GlobalBackgroundTasksButton,BackgroundRunsProvider} from './workbench/GlobalBackgroundTasksButton';function Fixture(){const [generation,setGeneration]=React.useState(0);globalThis.remountBackgroundHeader=()=>setGeneration(v=>v+1);return <BackgroundRunsProvider isZh={true}><header key={generation} data-generation={generation} className='chat-header' style={{position:'fixed',top:0,left:0,width:'100%'}}><span>对话</span><div className='chat-header-right'><GlobalBackgroundTasksButton/><button className='chat-header-action-btn' aria-label='搜索'>⌕</button></div></header><div className='sidebar-bottom' style={{position:'fixed',bottom:0,left:0,width:264}}><button className='sidebar-nav-btn'>设置</button><span data-testid='version'>v0.0.11</span></div></BackgroundRunsProvider>;}createRoot(document.getElementById('root')).render(<Fixture/>);",
+        : "import '../../scripts/background-tasks-ui-fixture';",
       loader: 'tsx', resolveDir: path.join(desktop, 'renderer/src'),
     }, bundle: true, write: false, format: 'iife', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' },
   });
@@ -88,5 +88,7 @@ app.whenReady().then(async () => {
     preload: path.join(desktop, 'electron/preload/preload.cjs'), contextIsolation: true, nodeIntegration: false,
   } });
   const html = `<html data-theme="dark"><meta charset="utf-8"><style>${css}</style><body><div id="root"></div><script>${result.outputFiles[0].text.replaceAll('</script', '<\\/script')}</script></body></html>`;
-  await win.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
+  const pageFile = path.join(home, 'background-smoke.html');
+  writeFileSync(pageFile, html);
+  await win.loadFile(pageFile);
 }).catch((error) => { console.error(error); app.exit(1); });

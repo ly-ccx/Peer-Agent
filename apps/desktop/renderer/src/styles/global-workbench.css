@@ -4,7 +4,7 @@
     @apply h-full min-h-0 min-w-0 overflow-y-auto;
     background: var(--za-app-bg);
     /* 末卡离开外壳圆角裁切：gwb 是自持滚动器，等价契约必须落在自己的滚动区上 */
-    padding-bottom: var(--radius-lg);
+    padding-bottom: var(--ui-radius-panel);
   }
 
   .gwb-shell {
@@ -61,7 +61,7 @@
   }
 
   .gwb-panel {
-    @apply overflow-hidden rounded-2xl border;
+    @apply overflow-hidden rounded-[var(--ui-radius-panel)] border;
     background: var(--za-surface-0);
     border-color: var(--za-line);
   }
@@ -144,7 +144,7 @@
   }
 
   .gwb-tag {
-    @apply inline-flex h-6 items-center rounded-full px-2.5 text-xs font-semibold;
+    @apply inline-flex h-6 items-center rounded-[var(--ui-radius-pill)] px-2.5 text-xs font-semibold;
   }
 
   .gwb-tag-need {
@@ -182,7 +182,7 @@
   }
 
   .gwb-chip {
-    @apply inline-flex h-6 items-center rounded-full px-2 font-semibold;
+    @apply inline-flex h-6 items-center rounded-[var(--ui-radius-pill)] px-2 font-semibold;
     font-size: var(--ui-font-caption, 11px);
     background: color-mix(in srgb, var(--za-text) 6%, transparent);
     color: var(--za-text-soft);
@@ -198,7 +198,7 @@
   }
 
   .gwb-btn {
-    @apply inline-flex h-9 items-center justify-center rounded-full px-3.5 text-xs font-semibold;
+    @apply inline-flex h-9 items-center justify-center rounded-[var(--ui-radius-pill)] px-3.5 text-xs font-semibold;
   }
 
   .gwb-btn-primary {
@@ -221,7 +221,7 @@
   }
 
   .gwb-empty {
-    @apply flex flex-1 flex-col items-center justify-center rounded-2xl border px-6 py-10 text-center;
+    @apply flex flex-1 flex-col items-center justify-center rounded-[var(--ui-radius-panel)] border px-6 py-10 text-center;
     min-height: 310px;
     border-color: var(--za-line);
     background: var(--za-surface-0);
@@ -422,7 +422,7 @@
     top: 18%;
     width: 7px;
     height: 7px;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-circle);
     opacity: 0;
     animation: gwb-item-confetti 900ms ease-out forwards;
   }
@@ -468,10 +468,7 @@
     width: 12px;
     height: 12px;
     margin-right: 6px;
-    border: 1.5px solid color-mix(in srgb, #fff 35%, transparent);
-    border-top-color: #fff;
-    border-radius: 999px;
-    animation: gwb-accept-spin 700ms linear infinite;
+    animation: motion-spin 700ms linear infinite;
     vertical-align: -1px;
   }
 

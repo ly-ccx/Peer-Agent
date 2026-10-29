@@ -5,7 +5,7 @@
     max-width: var(--chat-content-max);
     margin: 0 auto 8px;
     border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-panel, var(--za-radius));
+    border-radius: var(--ui-radius-panel);
     background: var(--za-control-fill);
     color: var(--ink-base);
     font-size: var(--ui-font-control, 13px);
@@ -18,7 +18,7 @@
     flex-shrink: 0;
     padding: 1px 8px;
     border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
-    border-radius: var(--ui-radius-round, 999px);
+    border-radius: var(--ui-radius-pill);
     background: transparent;
     color: var(--ink-soft);
     font-family: var(--font-mono);
@@ -87,7 +87,7 @@
   .permission-gate-strip button {
     padding: 4px 12px;
     border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
-    border-radius: var(--ui-radius-control, var(--za-radius-sm));
+    border-radius: var(--ui-radius-control);
     background: transparent;
     color: var(--ink-base);
     font-size: 12px;

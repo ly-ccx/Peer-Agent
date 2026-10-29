@@ -871,13 +871,18 @@ describe('createProviderChatModel stream recovery', () => {
     expect(controller.getSnapshot().messages.at(-1)?.content).toContain('ok after retry');
   });
 
-  test('does not retry after partial deltas were emitted', async () => {
+  test('retries a dropped socket after partial deltas and keeps only the successful attempt', async () => {
     let attempts = 0;
     const provider: ModelProvider = {
       async stream(request) {
         attempts += 1;
-        request.onEvent?.({ type: 'text.delta', content: 'partial ' });
-        throw connectionError('The socket connection was closed unexpectedly.');
+        if (attempts === 1) {
+          request.onEvent?.({ type: 'text.delta', content: 'partial ' });
+          request.onEvent?.({ type: 'reasoning.delta', content: 'thinking' });
+          throw connectionError('The socket connection was closed unexpectedly.');
+        }
+        request.onEvent?.({ type: 'text.delta', content: 'ok after retry' });
+        return completed('ok after retry');
       },
     };
     const controller = createChatController({
@@ -886,11 +891,40 @@ describe('createProviderChatModel stream recovery', () => {
         provider,
         model: 'model-test',
         toolDefinitions: [],
+        streamRetryDelaysMs: [0],
       }),
     });
     await controller.send('hello');
-    expect(attempts).toBe(1);
-    expect(controller.getSnapshot().error).toContain('socket connection was closed unexpectedly');
+    expect(attempts).toBe(2);
+    expect(controller.getSnapshot().error).toBeUndefined();
+    const content = controller.getSnapshot().messages.at(-1)?.content ?? '';
+    expect(content).toBe('ok after retry');
+    expect(content).not.toContain('partial');
+    expect(controller.getSnapshot().messages.at(-1)?.thinkingContent).toBeUndefined();
+  });
+
+  test('stops after the socket stays closed and explains the failure', async () => {
+    let attempts = 0;
+    const provider: ModelProvider = {
+      async stream() {
+        attempts += 1;
+        throw connectionError('The socket connection was closed unexpectedly. For more information, pass verbose: true in the second argument to fetch()');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      getLocale: () => 'zh-CN',
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+        streamRetryDelaysMs: [0, 0],
+      }),
+    });
+    await controller.send('hello');
+    expect(attempts).toBe(3);
+    expect(controller.getSnapshot().error).toBe('模型连接中断，这次回复没有完成。可以再发一次。');
+    expect(controller.getSnapshot().error).not.toContain('verbose: true');
   });
 
   test('does not retry non-recoverable provider errors', async () => {
@@ -1119,4 +1153,21 @@ describe('TUI summary input budget', () => {
     expect(maxChars).toBeLessThanOrEqual(80_000 * 4);
     expect(maxChars).toBeGreaterThan(2_000 * 4);
   });
+});
+
+test('Agent communication tools are projected only to the main Bot and its worker', async () => {
+  for (const [role, agentKind, allowed] of [
+    ['project_agent', undefined, true], ['work_session', 'worker', true],
+    ['goal_runner', undefined, false], ['work_session', 'explorer', false], ['work_session', 'verifier', false],
+  ] as const) {
+    const requests: ModelProviderRequest[] = [];
+    const model = createProviderChatModel({model: 'test-model', provider: {async stream(request) {requests.push(request); return completed('done');}},
+      toolDefinitions: [{name: 'send_agent_message', capabilityId: 'local.delegation.send_agent_message', description: 'Work communication', inputSchema: {type: 'object'}}]});
+    const context = {run: {mode: 'goal', streamId: 'test', conversationId: 'test'}, signal: new AbortController().signal, emit() {return null;}} as any;
+    const state = await model.initialize({input: {content: 'Continue', history: [], modelMessages: [], turnId: 'test', turnIndex: 0,
+      systemContextInput: {role, turnContext: {agentKind}}}} as any, context);
+    context.run.input = {content: 'Continue', history: [], modelMessages: [], turnId: 'test', turnIndex: 0, systemContextInput: {role, turnContext: {agentKind}}};
+    await model.runTurn(state, context);
+    expect(requests[0]?.tools?.some(tool => tool.name === 'send_agent_message') ?? false).toBe(allowed);
+  }
 });

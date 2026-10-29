@@ -2,7 +2,7 @@
  * motion.css — 全局动效语义基元层（Single Source of Motion）
  * ----------------------------------------------------------------------------
  * 定位：把散落在各组件 CSS 的 keyframes 收敛为一组「语义命名」基元。
- *   - 5 组 / 13 个基元：入场 enter / 退场 exit / 脉冲 pulse / 流光 sheen / 进度 progress
+ *   - 入场 enter / 退场 exit / 脉冲 pulse / 流光 sheen / 进度 progress
  *   - 每个基元 = 一个 @keyframes motion-* + 一个 utility class .motion-*
  *   - 时长 / 缓动 / 位移一律引用 tokens.css 的 --za-motion-* 变量，禁止 magic number
  *   - 组件只需挂 class（或引用 animation-name），不再自定义时长曲线
@@ -10,7 +10,7 @@
  * 命名空间：统一 `motion-` 前缀（新命名空间，与旧 `za-` keyframes 解耦），
  *          便于治理脚本 check-architecture-governance.mjs 识别与强制准入。
  *
- * reduced-motion：由 tokens.css 末尾的全局兜底（animation-duration:1ms）统一降级，
+ * reduced-motion：由 tokens.css 末尾的全局兜底（animation:none）统一降级，
  *                本文件不重复写媒体查询（见准入纪律 §4：reduced-motion 收敛到全局）。
  *
  * 依赖 token（tokens.css）：
@@ -22,6 +22,27 @@
 /* ---------------------------------------------------------------------------
  * 入场 enter — 元素挂载时的呈现（收敛自 ~15 个旧 keyframes）
  * ------------------------------------------------------------------------- */
+
+/* Decorative flow from the left edge toward the effort thumb; not execution/progress. */
+@keyframes motion-effort-mote {
+  0% { opacity: 0; transform: translateX(0%); }
+  15% { opacity: 0.55; }
+  80% { opacity: 0.4; }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+
+/* Fresh content expands its intrinsic footprint without moving existing rows at once. */
+@keyframes motion-enter-layout {
+  from { height: 0; padding-bottom: 0; }
+  to { height: auto; padding-bottom: var(--motion-layout-space, 0px); }
+}
+
+.motion-enter-layout {
+  interpolate-size: allow-keywords;
+  min-height: 0;
+  overflow: clip;
+  animation: motion-enter-layout var(--za-motion-medium) var(--za-ease-standard) backwards;
+}
 
 /* 纯淡入：最克制的入场，用于不需要位移的覆盖层内容 */
 @keyframes motion-enter-fade {
@@ -139,6 +160,21 @@
   }
 }
 
+/* A measured side column gives its space back while its content remains stable. */
+@keyframes motion-exit-collapse-inline {
+  from {
+    flex-basis: var(--motion-collapse-inline-from);
+    width: var(--motion-collapse-inline-from);
+    max-width: var(--motion-collapse-inline-from);
+    padding-inline-end: var(--motion-collapse-inline-padding, 0px);
+  }
+  to { flex-basis: 0px; width: 0px; max-width: 0px; padding-inline-end: 0px; }
+}
+
+.motion-exit-collapse-inline {
+  animation: motion-exit-collapse-inline var(--za-motion-medium) var(--za-ease-accelerate) both;
+}
+
 /* 淡出 + 缩小，支持方向变量（--motion-collapse-x / -y）：
  * 默认原地收缩；升级弹窗「飞向左上角」即传入负向 x/y 的定向实例。
  * 位移上限受 --za-motion-shift-lg（24px）约束，transform-origin 由调用点设定。 */
@@ -151,6 +187,17 @@
   to {
     opacity: 0;
     transform: translate3d(var(--motion-collapse-x, 0), var(--motion-collapse-y, 0), 0) scale(0.82);
+  }
+}
+
+/* A continuing action may dismiss into its measured progress destination. */
+@keyframes motion-exit-to-target {
+  from { opacity: 1; transform: translate3d(0, 0, 0) scale(1, 1); }
+  70% { opacity: 0.7; }
+  to {
+    opacity: 0;
+    transform: translate3d(var(--motion-target-x, 0), var(--motion-target-y, 0), 0)
+      scale(var(--motion-target-scale-x, 1), var(--motion-target-scale-y, 1));
   }
 }
 
@@ -297,6 +344,45 @@
   }
 }
 
+@keyframes bot-avatar-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1px) scale(1.035, 0.975); }
+}
+
+@keyframes bot-avatar-blink {
+  0%, 42%, 46%, 100% { transform: scaleY(1); }
+  44% { transform: scaleY(0.12); }
+}
+
+@keyframes bot-avatar-thinking {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(-2px) rotate(5deg); }
+}
+
+@keyframes bot-avatar-thought {
+  0%, 100% { opacity: 0.15; transform: translateY(1px) scale(0.6); }
+  55% { opacity: 0.9; transform: translateY(-2px) scale(1); }
+}
+
+@keyframes bot-avatar-attention {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(-2px) rotate(-7deg); }
+  55% { transform: translateY(0) rotate(5deg); }
+}
+
+@keyframes bot-thinking-hop {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(-5px); }
+  70% { transform: translateY(-1px); }
+}
+
+@keyframes bot-avatar-reply {
+  0% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-4px) scale(1.11, 0.92); }
+  72% { transform: translateY(1px) scale(0.96, 1.04); }
+  100% { transform: translateY(0) scale(1); }
+}
+
 /* 加载点波动：三点依次起伏（配合 animation-delay 错峰） */
 @keyframes motion-dots {
   0%,
@@ -326,6 +412,50 @@
 
 .motion-spin {
   animation: motion-spin var(--za-motion-slow) linear infinite;
+}
+
+/* Controlled menus/popovers share mount, exit and static end states. */
+.motion-surface {
+  --motion-enter-from: var(--za-motion-shift-sm);
+}
+.motion-surface[data-surface-state='open'][data-surface-kind] {
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+}
+.motion-surface[data-surface-state='open'][data-surface-kind='fade'] {
+  animation-name: motion-enter-fade;
+}
+.motion-surface[data-surface-state='open'][data-surface-settled='true'] {
+  animation: none;
+}
+.motion-surface[data-surface-state='closed'][data-surface-kind] {
+  opacity: 0;
+  pointer-events: none;
+  animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
+}
+
+/* Native disclosures retain their own keyboard/focus semantics and static fallback. */
+@supports (interpolate-size: allow-keywords) and selector(details::details-content) {
+  .motion-details {
+    interpolate-size: allow-keywords;
+  }
+  .motion-details::details-content {
+    height: 0;
+    opacity: 0;
+    overflow: clip;
+    transition: height var(--za-motion-medium) var(--za-ease-standard),
+      opacity var(--za-motion-fast) var(--za-ease-out),
+      content-visibility var(--za-motion-medium) allow-discrete;
+  }
+  .motion-details[open]::details-content {
+    height: auto;
+    opacity: 1;
+  }
+  .motion-details[open][data-motion-settled='true']::details-content { overflow: visible; }
+  @media (prefers-reduced-motion: reduce) {
+    .motion-details::details-content {
+      transition: none;
+    }
+  }
 }
 
 .motion-dots {
@@ -465,4 +595,3 @@
     transform: translate3d(0, 42px, 0) scale(1);
   }
 }
-

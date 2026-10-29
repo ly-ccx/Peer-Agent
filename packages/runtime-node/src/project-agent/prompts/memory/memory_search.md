@@ -1,0 +1,1 @@
+Search active project memories and cross-project user preferences. query is required. Optional scope is project or user. Optional limit is an integer from 1 to 20. Results include trust and source refs. Forgotten memories are omitted.

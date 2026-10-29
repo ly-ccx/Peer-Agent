@@ -3,8 +3,9 @@
  * surfacing a terminal stream error. Mirrors Desktop recovering-fetch policy
  * for the single Bun/Node fetch channel used by the TUI.
  *
- * Scope is connect / first-response recovery only. Mid-stream body failures
- * still terminate the turn; the next user message can start a fresh request.
+ * Scope is connect / first-response recovery only. A body that dies after
+ * tokens have started is retried by the chat model's stream attempt, which
+ * discards that attempt before sending the same request again.
  */
 
 export type FetchLike = (

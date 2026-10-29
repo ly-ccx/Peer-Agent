@@ -1,3 +1,6 @@
+import { MotionSurface } from '../components/MotionSurface';
+import { useInteractionLayer } from '../hooks/useInteractionLayer';
+import { watchVisualMotion } from '../state/visualMotion';
 import { createI18n } from '@peer-agent/i18n';
 import type { TaskOverviewArtifact, TaskOverviewItem } from '@peer-agent/protocol';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
@@ -486,7 +489,7 @@ function HeroLayout({
   const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const [backgroundBarHost, setBackgroundBarHost] = useState<HTMLElement | null>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
-  const transitionTimers = useRef<Set<number>>(new Set());
+  const transitionTimers = useRef<Set<ReturnType<typeof watchVisualMotion>>>(new Set());
 
   useEffect(() => {
     const sentinel = headerSentinelRef.current;
@@ -508,7 +511,7 @@ function HeroLayout({
 
   useEffect(
     () => () => {
-      for (const timer of transitionTimers.current) window.clearTimeout(timer);
+      for (const timer of transitionTimers.current) timer.cancel();
       transitionTimers.current.clear();
     },
     [],
@@ -521,11 +524,11 @@ function HeroLayout({
   }, [acceptanceOrderSnapshot.length, acceptanceTransitions]);
 
   const scheduleTransition = useCallback((callback: () => void, delayMs: number) => {
-    const timer = window.setTimeout(() => {
-      transitionTimers.current.delete(timer);
-      callback();
-    }, delayMs);
-    transitionTimers.current.add(timer);
+    let completed = false, motion: ReturnType<typeof watchVisualMotion> | undefined;
+    motion = watchVisualMotion([], () => {
+      completed = true; if (motion) transitionTimers.current.delete(motion); callback();
+    }, { durationMs: delayMs });
+    if (!completed) transitionTimers.current.add(motion);
   }, []);
 
   const handleAccept = useCallback(async (item: TaskOverviewItem) => {
@@ -978,7 +981,7 @@ const WorkItem = memo(function WorkItem({
       <div className="task-overview-work-top">
         <span className="task-overview-work-state">
           {item.actionRight !== 'paused' && item.source !== 'conversation' ? (
-            <i className="task-overview-spinner" aria-hidden="true" />
+            <PeerIcon name="loader" className="task-overview-spinner" />
           ) : null}
           {item.actionRight === 'paused' ? item.statusLabel : advancingStateLabel(item)}
         </span>
@@ -1096,11 +1099,15 @@ interface ActiveArtifactPreview {
   readonly anchor: HTMLElement;
 }
 
-function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPreview }) {
+function ArtifactPreviewPortal({ active, onDismiss }: { readonly active: ActiveArtifactPreview | null; readonly onDismiss: () => void }) {
   const previewRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLElement | null>(null); anchorRef.current = active?.anchor ?? null;
+  useInteractionLayer(Boolean(active), { roots: [previewRef], trigger: anchorRef, identity: active?.anchor, passive: true, restoreFocus: false,
+    closeOnTriggerRemoval: true, onClose: onDismiss });
   const [position, setPosition] = useState<{ left: number; top: number; placement: 'above' | 'below' } | null>(null);
 
   useLayoutEffect(() => {
+    if (!active) return;
     const updatePosition = () => {
       const previewElement = previewRef.current;
       if (!previewElement || !active.anchor.isConnected) return;
@@ -1113,16 +1120,19 @@ function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPrev
       ));
     };
     updatePosition();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
+    if (previewRef.current) observer?.observe(previewRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
   }, [active]);
 
   return createPortal(
-    <div
+    <MotionSurface kind="fade">{active ? (<div
       ref={previewRef}
       id={`artifact-preview-${encodeURIComponent(active.artifact.ref)}`}
       className={`task-artifact-preview-portal task-artifact-preview-portal--${active.artifact.preview?.kind ?? 'code'} is-${position?.placement ?? 'below'}`}
@@ -1136,7 +1146,7 @@ function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPrev
       }}
     >
       <ArtifactHoverPreview artifact={active.artifact} />
-    </div>,
+    </div>) : null}</MotionSurface>,
     document.body,
   );
 }
@@ -1151,7 +1161,7 @@ function ArtifactList({ item }: { readonly item: TaskOverviewItem }) {
       <summary className="task-artifacts-summary" onClick={(event) => event.stopPropagation()}>
         <span>主要产物</span>
         <span className="task-artifacts-count">{projection.summary}</span>
-        <span className="task-artifacts-chevron" aria-hidden="true" />
+        <PeerIcon name="chevronDown" size={14} className="task-artifacts-chevron" />
       </summary>
       <div className="task-artifacts-content" aria-label="主要产物">
         {projection.groups.map((group) => (
@@ -1217,7 +1227,7 @@ function ArtifactList({ item }: { readonly item: TaskOverviewItem }) {
         ) : null}
       </div>
     </details>
-    {activePreview ? <ArtifactPreviewPortal active={activePreview} /> : null}
+    <ArtifactPreviewPortal active={activePreview} onDismiss={() => setActivePreview(null)} />
     </>
   );
 }
@@ -1259,7 +1269,7 @@ function ResultCard({
       <div className="task-overview-work-top">
         <span className="task-overview-work-state result-card-state">
           <i className="result-card-seal" aria-hidden="true">
-            ✓
+            <PeerIcon name="check" size={14} />
           </i>
           {celebrating
             ? '验收完成，任务已圆满结束'
@@ -1300,12 +1310,12 @@ function ResultCard({
         <div className="work-item-actions__buttons">
         {phase === 'submitting' ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
-            <span className="result-card-spinner" aria-hidden="true" />
+            <PeerIcon name="loader" className="result-card-spinner" />
             正在合进源头…
           </button>
         ) : celebrating ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
-            已归档 ✓
+            已归档 <PeerIcon name="check" size={14} />
           </button>
         ) : (
           <button

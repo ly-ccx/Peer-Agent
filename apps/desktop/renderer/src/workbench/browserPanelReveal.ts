@@ -26,6 +26,7 @@ export function resolveBrowserPanelReveal(input: {
   readonly hostOpen: boolean;
   readonly hostBrowserActive: boolean;
   readonly requestSessionExists: boolean;
+  readonly preserveAttention?: boolean;
 }): BrowserPanelRevealDecision {
   const requestId = typeof input.requestConversationId === 'string'
     ? input.requestConversationId.trim()
@@ -54,6 +55,10 @@ export function resolveBrowserPanelReveal(input: {
   }
 
   const isHostConversation = requestId === input.hostConversationId;
+  if (isHostConversation && input.focus !== false && input.preserveAttention) return {
+    accept: false, stealUi: false, prepareSession: false, mountPrepared: false,
+    status: 'opened', error: 'attention_preserved',
+  };
   const stealUi = input.focus !== false && isHostConversation;
   if (isHostConversation) {
     const alreadyVisible = input.hostOpen && input.hostBrowserActive;

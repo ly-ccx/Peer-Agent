@@ -26,9 +26,16 @@ export function createSelectionSideChatService({ store, authorize, resolveRuntim
     // Never forward renderer runtimeState, capturedAt, or parent identity.
     const runtimeState = await resolveRuntimeState(parentConversationId);
     await check(caller, parentConversationId, 'create-child');
-    return store.createSelectionChild({ parentConversationId, requestId: request?.requestId,
-      selection: request?.selection, confirmMissing: request?.confirmMissing === true,
-      runtimeState, capturedAt: now() });
+    return store.createChildConversation({
+      parentConversationId,
+      anchorMessageId: request?.selection?.messageId,
+      snapshotPolicy: 'inherited',
+      requestId: request?.requestId,
+      selection: request?.selection,
+      confirmMissing: request?.confirmMissing === true,
+      runtimeState,
+      capturedAt: now(),
+    });
   }
   async function list(caller, { offset = 0, limit = 20, includeArchived = false } = {}) {
     await check(caller, caller?.conversationId, 'list-children');

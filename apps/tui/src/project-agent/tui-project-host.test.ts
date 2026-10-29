@@ -1,0 +1,367 @@
+import { afterEach, expect, test } from 'bun:test';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createConversationStore } from '@peer-agent/conversation-store';
+import { createBotLifecycle, createProjectRegistry, createHostLease } from '@peer-agent/runtime-node';
+import { createTuiProjectHost } from './tui-project-host.ts';
+import { createTuiProjectClient } from './tui-project-client.ts';
+import { createTuiHost } from '../tui-host.ts';
+import { createProviderChatModel } from '../provider-chat-model.ts';
+import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
+import { buildTuiSystemPrompt } from '../tui-language.ts';
+import { createTurnTestRuntime, drainTestCleanup, waitForTestStart, type TestCleanup } from './turn-test-support.ts';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+
+const cleanups: TestCleanup[] = [];
+afterEach(() => drainTestCleanup(cleanups));
+const provider = { id: 'configured', provider: 'openai', model: 'test-model', enabled: true,
+  apiKeyConfigured: true, supportsTools: true, supportsStructured: true, isDefault: true };
+function fixture() {
+  const dataHome = mkdtempSync(path.join(os.tmpdir(), 'peer-tui-project-'));
+  cleanups.push(() => rmSync(dataHome, { recursive: true, force: true }));
+  const workspacePath = path.join(dataHome, 'workspace'); mkdirSync(workspacePath);
+  writeFileSync(path.join(dataHome, 'llm-providers.json'), JSON.stringify([provider]));
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects/registry.json') });
+  const entry = registry.ensureForPath(workspacePath);
+  const conversations = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const lifecycle = createBotLifecycle({ rootDir: dataHome, registry, conversationStore: conversations } as never);
+  const created = lifecycle.ensureBot(entry.workspaceId) as any;
+  expect(created.ok).toBe(true);
+  return { dataHome, workspacePath, workspaceId: entry.workspaceId, conversationId: created.profile.agentConversationId };
+}
+function start(f: ReturnType<typeof fixture>, executeTurn: (request: any) => Promise<any>) {
+  const host = createTuiProjectHost({ ...f, autoStart: false, executeTurn,
+    getSettings: () => ({ providers: [provider], projectAgent: { concurrency: 1 } }) });
+  cleanups.push(() => host.close());
+  return host;
+}
+
+test('terminal plan approval is durable before admission and replays only an awaiting plan', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  await host.tick();
+  let resumed = 0;
+  (host.supervisor as any).get = () => ({ origin: { phase: 'awaiting_approval' } });
+  (host.supervisor as any).resumeFromApproval = async (record: any) => {
+    expect(host.approvals.list({ workspaceId: f.workspaceId }).find((row: any) => row.approvalId === record.approvalId)?.state).toBe('approved');
+    expect(record.decidedBy).toBe('local_ui');
+    expect(Number.isFinite(Date.parse(record.decidedAt))).toBe(true);
+    resumed++; return { ok: true };
+  };
+  host.approvals.append({ approvalId: 'plan:s', workspaceId: f.workspaceId, sessionId: 's', planId: 'p',
+    conversationId: 'c', capabilityId: 'goal.plan', kind: 'plan_approval', state: 'open', argsDigest: 'a'.repeat(64) } as never);
+  expect((await host.decideApproval('plan:s', 'approve')).ok).toBe(true);
+  expect(resumed).toBe(1);
+  expect((await host.decideApproval('plan:s', 'approve')).ok).toBe(true);
+  expect(resumed).toBe(2);
+  expect((await host.decideApproval('plan:s', 'deny')).ok).toBe(true);
+  expect(resumed).toBe(2);
+  (host.supervisor as any).get = () => ({ origin: { phase: 'superseded' } });
+  expect((await host.decideApproval('plan:s', 'approve')).ok).toBe(true);
+  expect(resumed).toBe(2);
+});
+
+test('terminal never admits a plan if persisting approval fails', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  await host.tick();
+  let resumed = 0;
+  (host.supervisor as any).get = () => null;
+  (host.supervisor as any).resumeFromApproval = async () => { resumed++; return { ok: true }; };
+  host.approvals.append({ approvalId: 'plan:s', workspaceId: f.workspaceId, sessionId: 's', planId: 'p', state: 'open', capabilityId: 'goal.plan' });
+  (host.approvals as any).append = () => { throw Error('disk failure'); };
+  await expect(host.decideApproval('plan:s', 'approve')).rejects.toThrow('disk failure');
+  expect(resumed).toBe(0);
+});
+
+test('terminal task scheduling stays closed until recovery and after host drain', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  const scheduler = host.executor.executionScheduler;
+  expect(scheduler.isWorkspaceReady(f.workspaceId)).toBe(false);
+  expect(scheduler.isWorkspaceReady('another-workspace')).toBe(false);
+  await host.tick();
+  expect(scheduler.isWorkspaceReady(f.workspaceId)).toBe(true);
+  host.host.drain(f.workspaceId);
+  expect(scheduler.isWorkspaceReady(f.workspaceId)).toBe(false);
+});
+
+test('closing a terminal host blocks new input while its old turn drains', async () => {
+  const f = fixture();
+  let release!: () => void, entered!: () => void, calls = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const host = start(f, async () => { calls++; entered(); await gate; return { ok: true, text: 'done' }; });
+  host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'before-close', surface: 'tui', text: 'first' });
+  const first = host.tick();
+  let closing: Promise<unknown> | undefined, late: Promise<unknown> | undefined;
+  try {
+    await waitForTestStart(started, first, 'terminal host turn');
+    closing = host.close();
+    host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'during-close', surface: 'tui', text: 'second' });
+    late = host.tick();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(calls).toBe(1);
+    expect(host.holdsLease(f.workspaceId)).toBe(false);
+  } finally {
+    release();
+    await Promise.allSettled([first, closing, late]);
+  }
+});
+
+test('terminal composition consumes a durable input once and projects its shared reply', async () => {
+  const f = fixture(), calls: any[] = [];
+  const host = start(f, async input => { calls.push(input); return { ok: true, text: 'received', toolCalls: [] }; });
+  const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
+  cleanups.push(() => client.close());
+  const receipt = client.submit('hello', { inputId: 'same-input' });
+  expect(receipt.inputId).toBe('same-input');
+  await host.tick();
+  client.submit('different retry text', { inputId: 'same-input' }); await host.tick();
+  const messages = (await client.poll(true)).messages;
+  expect(calls).toHaveLength(1);
+  expect(messages.filter(row => row.id === 'input-same-input')).toHaveLength(1);
+  expect(messages.find(row => row.id === 'input-same-input').content).toBe('hello');
+  expect(messages.find(row => row.kind === 'agent_reply').content).toBe('received');
+  expect(calls[0].turnProfile.role).toBe('project_agent');
+  expect(calls[0].turnProfile.modelSelection.modelProviderId).toBe('configured');
+});
+
+test('terminal model context keeps legacy public interactions and excludes private process records', async () => {
+  const f=fixture(), requests:(readonly any[])[]=[];
+  const runtimeCleanup: TestCleanup[] = [];
+  const host=createTuiProjectHost({...f,autoStart:false,
+    getSettings:()=>({providers:[provider],projectAgent:{concurrency:1},memory:{enabled:false}}),
+    createRuntime(options){
+      const toolHost=createTuiHost(options);
+      return createTurnTestRuntime({host:toolHost,
+        modelSelection:createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'}),
+        model:createProviderChatModel({model:'test-model',toolDefinitionsForMode:mode=>toolHost.toolDefinitionsForMode!(mode),
+          getSystemPrompt:context=>buildTuiSystemPrompt({}, {...context.systemContextInput,mode:context.mode}),
+          provider:{async stream(request){requests.push(request.messages);return {content:'Public reply',toolCalls:[]};}}}),
+      }, runtimeCleanup);
+    }});
+  cleanups.push(()=>drainTestCleanup(runtimeCleanup));
+  cleanups.push(()=>host.close());
+  host.conversations.appendMessage(f.conversationId,{id:'legacy-public-user',role:'user',content:'KEEP_LEGACY_USER_BOUNDARY'});
+  host.conversations.appendMessage(f.conversationId,{id:'legacy-public-assistant',role:'assistant',content:'KEEP_LEGACY_PUBLIC_REPLY'});
+  host.conversations.appendMessage(f.conversationId,{id:'private-process-record',role:'assistant',kind:'agent_turn',turnKind:'wake',
+    content:'PRIVATE_PROCESS_SENTINEL',rounds:[{content:'PRIVATE_ROUND_SENTINEL'}]} as never);
+  host.inputs.submitInput({workspaceId:f.workspaceId,inputId:'current-public-input',surface:'tui',text:'Current public question'});
+  await host.tick();
+  const messages=requests.flat();
+  expect(messages.some(row=>row.role==='user'&&JSON.stringify(row.content).includes('KEEP_LEGACY_USER_BOUNDARY'))).toBe(true);
+  expect(messages.some(row=>row.role==='assistant'&&JSON.stringify(row.content).includes('KEEP_LEGACY_PUBLIC_REPLY'))).toBe(true);
+  expect(JSON.stringify(requests)).not.toContain('PRIVATE_PROCESS_SENTINEL');
+  expect(JSON.stringify(requests)).not.toContain('PRIVATE_ROUND_SENTINEL');
+});
+
+test('a terminal client writes only the queue; active desktop owns consumption and approval', async () => {
+  const f = fixture();
+  const desktop = createHostLease({ rootDir: path.join(f.dataHome, 'project-runtime'), hostId: 'desktop', surface: 'desktop' } as never);
+  desktop.acquire(f.workspaceId); cleanups.push(() => desktop.close());
+  let turns = 0;
+  const host = start(f, async () => { turns++; return { ok: true, text: 'must not run' }; });
+  const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
+  cleanups.push(() => client.close());
+  client.submit('queue me', { inputId: 'other-process' }); await host.tick();
+  expect(turns).toBe(0);
+  expect((await client.poll(true)).isHost).toBe(false);
+  expect((await client.poll()).messages.some(row => row.id === 'input-other-process')).toBe(false);
+  expect(await client.decide('approval', 'approve')).toEqual({ ok: false, error: 'desktop_approval_required' });
+  desktop.close(); await host.tick();
+  expect(turns).toBe(1);
+});
+
+test('unchanged client polls retain snapshot identity and read only public pages and current cards', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'hello' }));
+  const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
+  cleanups.push(() => client.close());
+  const original = host.directory.readConversation;
+  host.directory.readConversation = ((workspaceId: string, params: any) => {
+    expect(params.view).toBe('cards');
+    return original(workspaceId, params);
+  }) as typeof original;
+  const first = await client.poll();
+  expect(await client.poll()).toBe(first);
+  host.directory.readConversation = original;
+});
+
+test('a client input is consumed once by a host in a different process',async()=>{
+  const f=fixture(), helper=path.join(f.dataHome,'host-child.ts');
+  writeFileSync(helper,`import {createInterface} from 'node:readline';
+import {createTuiProjectHost} from ${JSON.stringify(new URL('./tui-project-host.ts',import.meta.url).href)};
+const host=createTuiProjectHost({dataHome:process.argv[2],workspacePath:process.argv[3],autoStart:false,
+  getSettings:()=>({providers:[${JSON.stringify(provider)}],memory:{enabled:false}}),
+  executeTurn:async()=>({ok:true,text:'child process received',toolCalls:[]})});
+await host.tick();console.log('child-ready');
+for await(const line of createInterface({input:process.stdin})){
+ if(line==='close'){await host.close();break;}
+ await host.tick();console.log('child-consumed');
+}
+`);
+  const child=spawn(process.execPath,[helper,f.dataHome,f.workspacePath],{stdio:['pipe','pipe','pipe']});
+  let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});
+  cleanups.push(()=>{child.kill();});
+  const lines=createInterface({input:child.stdout}), iterator=lines[Symbol.asyncIterator]();
+  async function next(expected:string){
+    const limit=Date.now()+4000;
+    while(Date.now()<limit){const result=await Promise.race([iterator.next(),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error(`child timed out: ${stderr}`)),4000))]);
+      if(result.done)throw new Error(`child exited: ${stderr}`);if(result.value===expected)return;}
+  }
+  await next('child-ready');
+  const host=start(f,async()=>{throw new Error('client executed a turn');});
+  const client=createTuiProjectClient({dataHome:f.dataHome,host,autoStart:false});cleanups.push(()=>client.close());
+  client.submit('cross process',{inputId:'cross-process'});expect((await client.poll(true)).isHost).toBe(false);
+  child.stdin.write('tick\n');await next('child-consumed');
+  expect((await client.poll(true)).messages.filter(row=>row.kind==='agent_reply'&&row.content==='child process received')).toHaveLength(1);
+  client.submit('duplicate retry',{inputId:'cross-process'});child.stdin.write('tick\n');await next('child-consumed');
+  expect((await client.poll(true)).messages.filter(row=>row.id==='input-cross-process')).toHaveLength(1);
+  expect((await client.poll(true)).messages.filter(row=>row.kind==='agent_reply'&&row.content==='child process received')).toHaveLength(1);
+  const exited=new Promise<void>(resolve=>child.once('close',()=>resolve()));child.stdin.write('close\n');child.stdin.end();await exited;lines.close();
+},12000);
+
+test('two terminal compositions start only one project turn and takeover preserves input', async () => {
+  const f = fixture(), calls: string[] = [];
+  const one = start(f, async () => { calls.push('one'); return { ok: true, text: 'first' }; });
+  const two = start(f, async () => { calls.push('two'); return { ok: true, text: 'second' }; });
+  one.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'first', text: 'first', surface: 'tui' });
+  await Promise.all([one.tick(), two.tick()]);
+  expect(calls).toEqual(['one']);
+  expect((await two.takeover()).requested).toBe(true);
+  one.leases.pulse(); await one.leases.awaitDrained();
+  two.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'after-takeover', text: 'second', surface: 'tui' });
+  await Promise.all([one.tick(), two.tick()]);
+  expect(calls).toEqual(['one', 'two']);
+  expect(two.holdsLease(f.workspaceId)).toBe(true);
+  const history = two.conversations.getPersistedConversationHistory?.(f.conversationId)?.messages as any[];
+  expect(history.filter(row => row.kind === 'user_input')).toHaveLength(2);
+});
+
+test('shared terminal composition completes delegation, real file evidence, independent verification and a governed reply',async()=>{
+  const f=fixture();writeFileSync(path.join(f.workspacePath,'README.md'),'verified terminal fixture');
+  const runtimeCleanup: TestCleanup[] = [];
+  let host:ReturnType<typeof createTuiProjectHost>;
+  let sequence=0, verified=false;
+  const call=(name:string,args:object)=>({content:'',toolCalls:[{id:`chain-${++sequence}`,name,arguments:JSON.stringify(args)}]});
+  host=createTuiProjectHost({...f,autoStart:false,
+    getSettings:()=>({providers:[provider],projectAgent:{concurrency:2},memory:{enabled:false}}),
+    createRuntime(options){
+      const toolHost=createTuiHost(options);
+      const model=createProviderChatModel({model:'test-model',toolDefinitionsForMode:mode=>toolHost.toolDefinitionsForMode!(mode),
+        getSystemPrompt:context=>buildTuiSystemPrompt({}, {...context.systemContextInput,mode:context.mode}),
+        provider:{async stream(request){
+          const content=request.messages.map(row=>typeof row.content==='string'?row.content:JSON.stringify(row.content)).join('\n');
+          const lastToolRow=request.messages.filter(row=>row.role==='tool').at(-1) as any;
+          const lastTool=lastToolRow ? {...lastToolRow,name:request.messages.flatMap((row:any)=>row.toolCalls ?? []).find((row:any)=>row.id===lastToolRow.toolCallId)?.name} : null;
+          const plans=host.plans.listPlans().map((row:any)=>host.plans.getPlan(row.planId)).filter(Boolean);
+          const plan=plans.find((row:any)=>row.delegationOrigin?.workspaceId===f.workspaceId);
+          if(content.includes('Verifier mission for plan')){
+            const refs=host.plans.listEvidenceIndex().filter((row:any)=>row.planId===plan?.planId&&row.bodyPreview?.text?.includes('verified terminal fixture')).map((row:any)=>row.evidenceRef);
+            expect(refs.length).toBeGreaterThan(0);
+            const text=JSON.stringify({passed:true,failedCriteria:[],missingEvidence:[],risks:[],evidenceRefs:[refs[0]],summary:'independent verification passed'});
+            request.onEvent?.({type:'text.delta',content:text});return {content:text,toolCalls:[]};
+          }
+          if(content.includes('Explorer mission for plan')){
+            if(!lastTool)return call('read_file',{path:'README.md'});
+            const ref=`tool-result://${lastTool.toolCallId}`;
+            const text=JSON.stringify({summary:'README.md is the primary project file',findings:[{claim:'README.md contains verified terminal fixture',evidenceRefs:[ref]}],evidenceRefs:[ref],recommendedNextStep:'Read README.md and verify its existence',confidence:'high'});
+            request.onEvent?.({type:'text.delta',content:text});return {content:text,toolCalls:[]};
+          }
+          if(request.tools?.some(tool=>tool.name==='spawn_session')){
+            const session=host.supervisor.sessionsForProject(f.workspaceId)[0];
+            if(!session)return call('spawn_session',{anchorMessageIds:['input-chain'],title:'Read README',brief:'Read README.md and verify its contents',kind:'research',readOnly:true,isolation:'none',successCriteria:[{kind:'file-exists',description:'README exists',path:'README.md'}]});
+            if(session.status==='result_ready'&&!verified){verified=true;return call('verify_session',{sessionId:session.sessionId});}
+            if(lastTool?.name==='verify_session')return call('post_reply',{text:'已完成 README 检查并通过验收。',sources:[session.sessionId],replyTo:[],proactive:true,statusClaims:[{sessionId:session.sessionId,status:session.status}]});
+            if(lastTool?.name==='post_reply')return {content:'',toolCalls:[]};
+            if(lastTool?.name==='spawn_session'){
+              expect(lastTool.content).toContain(session.sessionId);
+              return call('post_reply',{text:'已开始检查 README。',sources:[session.sessionId],replyTo:['input-chain'],statusClaims:[{sessionId:session.sessionId,status:session.status}]});
+            }
+            return {content:'',toolCalls:[]};
+          }
+          if(!lastTool)return call('read_file',{path:'README.md'});
+          if(lastTool.name==='read_file')return call('goal_update_task',{planId:plan!.planId,taskId:plan!.tasks[0].taskId,status:'completed',result:'README read',evidenceRefs:[`tool-result://${lastTool.toolCallId}`],criterionResults:[{criterionId:'c1',passed:true,evidenceRef:`tool-result://${lastTool.toolCallId}`,detail:'Real read confirms README exists'}]});
+          return {content:'worker finished',toolCalls:[]};
+        }}});
+      return createTurnTestRuntime({host:toolHost,model,modelSelection:createTuiModelSelectionControl({providerId:'configured',modelId:'test-model',displayName:'test'})}, runtimeCleanup);
+    }});
+  cleanups.push(()=>drainTestCleanup(runtimeCleanup));
+  cleanups.push(()=>host.close());
+  const client=createTuiProjectClient({dataHome:f.dataHome,host,autoStart:false});cleanups.push(()=>client.close());
+  client.submit('Read README and verify it',{inputId:'chain'});await host.tick();
+  const deadline=Date.now()+6000;
+  while(Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,20));await host.tick();
+    if((await client.poll(true)).messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收')))break;}
+  const snapshot=await client.poll(true),session=snapshot.sessions[0];
+  expect(session).toBeDefined();
+  expect(snapshot.messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收'))).toBe(true);
+  const plan=host.plans.getPlan(session.planId)!;
+  expect(plan.hostVerification?.independentVerifier).toBe('passed');
+  expect(host.plans.listEvidenceIndex().some((row:any)=>row.planId===plan.planId&&row.bodyPreview?.text==='verified terminal fixture')).toBe(true);
+  const before=JSON.parse(JSON.stringify({status:plan.status,runner:plan.runner,origin:plan.delegationOrigin}));
+  await host.close();
+  const after=host.plans.getPlan(plan.planId)!;
+  expect({status:after.status,runner:after.runner,origin:after.delegationOrigin}).toEqual(before);
+},15000);
+
+test('terminal public messages survive optional card failure and a failed refresh without a full conversation read',async()=>{
+  const f=fixture(),host=start(f,async()=>({ok:true,text:'public reply',toolCalls:[]}));
+  const client=createTuiProjectClient({dataHome:f.dataHome,host,autoStart:false});cleanups.push(()=>client.close());
+  client.submit('public question',{inputId:'isolated-public'});await host.tick();
+  const before=await client.poll(true);expect(before.messages.some(row=>row.content==='public reply')).toBe(true);
+  const read=host.directory.readConversation,interactions=host.directory.readInteractions;
+  try {
+    host.directory.readConversation=((_workspaceId: string,params: any)=>{
+      expect(params.view).toBe('cards');return {ok:false,code:'CONTROLLED_CARD_FAILURE'};
+    }) as typeof read;
+    const cardsFailed=await client.poll(true);expect(cardsFailed.cardsUnavailable).toBe(true);
+    expect(cardsFailed.messages.some(row=>row.content==='public reply')).toBe(true);
+    host.directory.readInteractions=(async()=>{throw new Error('CONTROLLED_PUBLIC_FAILURE');}) as typeof interactions;
+    const refreshFailed=await client.poll(true);expect(refreshFailed.messageState).toBe('unavailable');
+    expect(refreshFailed.messages).toEqual(cardsFailed.messages);
+  }finally{host.directory.readConversation=read;host.directory.readInteractions=interactions;}
+});
+
+
+test('terminal cancellation keeps its own durable state and cannot replay as an approval', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' })); await host.tick();
+  let resumed = 0; (host.supervisor as any).resumeFromApproval = async () => { resumed++; return { ok: true }; };
+  host.approvals.append({ approvalId: 'image-cancel', workspaceId: f.workspaceId, sessionId: 's', state: 'stale', capabilityId: 'local.image.read' });
+  const cancelled = await host.decideApproval('image-cancel', 'cancel');
+  expect(cancelled.ok).toBe(true); expect((cancelled as any).approval.state).toBe('cancelled');
+  expect((cancelled as any).approval.decisionReason).toBe('permission_cancelled');
+  const replay = await host.decideApproval('image-cancel', 'approve');
+  expect((replay as any).approval.state).toBe('cancelled'); expect(resumed).toBe(0);
+});
+
+test('terminal client coalesces bounded reads and drops a late result after close', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  let complete!: (value: any) => void, reads = 0, published = 0;
+  (host.directory as any).readInteractions = async (_id: string, params: any) => {
+    reads++; expect(params.limit).toBe(50);
+    return await new Promise(resolve => { complete = resolve; });
+  };
+  const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false, onChanged: () => { published++; } });
+  const first = client.poll(), second = client.poll(true);
+  expect(reads).toBe(1);
+  await client.close();
+  complete({ ok: true, messages: [{ id: 'late', kind: 'agent_reply', content: 'late' }], nextCursor: null });
+  await Promise.all([first, second]);
+  expect(published).toBe(0); expect(client.current().messages).toEqual([]);
+});
+test('terminal mode close saves drafts and refuses to detach when saving fails', async () => {
+  const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));
+  const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
+  const session = client.recovery(f.workspaceId); await session.load();
+  const get = host.directory.get;
+  (host.directory as any).get = () => ({ ok: false });
+  session.edit({ text: 'preserve on switch' });
+  await expect(client.close()).rejects.toThrow('project_draft_save_failed');
+  (host.directory as any).get = get;
+  await client.close();
+  const reopened = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
+  cleanups.push(() => reopened.close());
+  const recovered = reopened.recovery(f.workspaceId); await recovered.load();
+  expect(recovered.getSnapshot().draft.text).toBe('preserve on switch');
+  expect(() => client.submit('after close')).toThrow('project_client_closed');
+});

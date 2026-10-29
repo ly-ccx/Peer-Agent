@@ -10,6 +10,7 @@ export interface ProjectFolder {
 }
 
 export interface ProjectWorkspace {
+  id: string;
   path: string;
   name: string;
   addedAt: string;

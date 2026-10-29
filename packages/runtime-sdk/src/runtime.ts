@@ -163,13 +163,19 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
       records: postRecords,
     });
 
-    const result = options.host.appendHookEvidence
+    let result = options.host.appendHookEvidence
       ? options.host.appendHookEvidence(
           execution.result,
           [...preRecords, ...postRecords],
           preDecision,
         )
       : execution.result;
+    // Host-only sideband must survive a Hook Evidence clone without becoming
+    // enumerable event/storage data. Model-supplied fields cannot create it.
+    const sideband = Object.getOwnPropertyDescriptor(execution.result, 'modelContext');
+    if (result !== execution.result && sideband && sideband.enumerable === false) {
+      result = Object.defineProperty({ ...result }, 'modelContext', sideband);
+    }
     const resolvedExecution = { ...execution, result };
     emit({ type: 'tool.completed', ...eventBase, decision: preDecision, result });
     return resolvedExecution;

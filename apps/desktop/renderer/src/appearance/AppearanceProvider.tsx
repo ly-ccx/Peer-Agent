@@ -15,6 +15,7 @@ import type {
   AppearanceScheme,
   AppearanceSettings,
   DiffMarkerMode,
+  WindowMaterial,
 } from './appearanceTypes';
 import { DEFAULT_APPEARANCE_SETTINGS } from './themePresets';
 import { applyAppearance, sanitizeSettings } from './themeTokens';
@@ -25,6 +26,7 @@ const LEGACY_STORAGE_KEY = 'peer-agent.appearance.v1';
 interface AppearanceContextValue {
   readonly activeScheme: AppearanceScheme;
   readonly settings: AppearanceSettings;
+  readonly setWindowMaterial: (material: WindowMaterial) => void;
   readonly setMode: (mode: AppearanceMode) => void;
   readonly setPalette: (palette: AppearancePalette) => void;
   readonly setDensity: (density: AppearanceDensity) => void;
@@ -43,6 +45,9 @@ function readSystemScheme(): AppearanceScheme {
 
 function loadSettings(): AppearanceSettings {
   if (typeof window === 'undefined') return DEFAULT_APPEARANCE_SETTINGS;
+  if (window.peerResource) return sanitizeSettings(window.peerResource.initialAppearance);
+  if (window.peerBrowserWindow) return sanitizeSettings(window.peerBrowserWindow.initialAppearance);
+  if (new URLSearchParams(window.location?.search).get('window') === 'resource' || new URLSearchParams(window.location?.search).get('window') === 'browser-resource') return DEFAULT_APPEARANCE_SETTINGS;
   const api = window.peerAgent;
   // 1) 优先读主进程同步注入的初始设置——与 ~/.peer-agent/settings.json 同源，
   //    保证刷新/重启后主题立刻正确，无 localStorage 往返、无闪烁
@@ -84,6 +89,7 @@ function saveSettings(settings: AppearanceSettings) {
 function appearanceEqual(a: AppearanceSettings, b: AppearanceSettings): boolean {
   return (
     a.mode === b.mode
+    && a.windowMaterial === b.windowMaterial
     && a.palette === b.palette
     && a.density === b.density
     && a.fontScale === b.fontScale
@@ -110,7 +116,7 @@ export function AppearanceProvider({
   // Main window / settings may change appearance while Quick Chat is open.
   // Main process broadcasts `appearance:changed` to all windows.
   useEffect(() => {
-    const api = typeof window !== 'undefined' ? window.peerAgent : undefined;
+    const api = typeof window !== 'undefined' ? window.peerAgent ?? window.peerResource ?? window.peerBrowserWindow : undefined;
     if (!api?.onAppearanceChanged) return undefined;
     return api.onAppearanceChanged((next) => {
       if (!next || typeof next !== 'object') return;
@@ -141,6 +147,7 @@ export function AppearanceProvider({
     });
   }, []);
 
+  const setWindowMaterial = useCallback((windowMaterial: WindowMaterial) => update({ windowMaterial }), [update]);
   const setMode = useCallback((mode: AppearanceMode) => update({ mode }), [update]);
   const setPalette = useCallback((palette: AppearancePalette) => update({ palette }), [update]);
   const setDensity = useCallback((density: AppearanceDensity) => update({ density }), [update]);
@@ -159,6 +166,7 @@ export function AppearanceProvider({
     () => ({
       activeScheme,
       settings,
+      setWindowMaterial,
       setMode,
       setPalette,
       setDensity,
@@ -170,6 +178,7 @@ export function AppearanceProvider({
     [
       activeScheme,
       settings,
+      setWindowMaterial,
       setMode,
       setPalette,
       setDensity,

@@ -1,13 +1,16 @@
+import { useConversationGitEnvironment } from '../hooks/useConversationGitEnvironment';
+import { useComposerAttachmentIntake } from '../hooks/useComposerAttachmentIntake';
+import { useThreadScrollGesture } from '../hooks/useThreadScrollGesture';
+
+import { findCurrentTurnIdForScroll } from "../state/threadScrollAnchor.ts";
+import { formatQueueNoticeText, formatRetryCountdownLabel, formatRetryCountdownLabelEn } from "../state/providerRecoveryText.ts";
+import { loadConversationMessages, nextId } from "../state/conversationHydration.ts";
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
 import type {
-  AutomationCreateContext,
   AutomationProposalAction,
   ClientToolCall,
-  ConfigInstructionContextItem,
   ContextAccountingSnapshot,
-  ContextAttachmentItem,
-  ContinuityContextItem,
   GoalRunnerStatus,
   LlmProviderConfigView,
   SelectionRange,
@@ -18,14 +21,13 @@ import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
-import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
 import { SelectionQuoteAction } from './SelectionQuoteAction';
+import { ConversationAccessControl } from './ConversationAccessControl';
 import { appendSelectionQuote } from '../state/selectionQuoteAttachment';
 import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
 import { isWorkspaceRequiredNotice, registeredWorkspacePath, workspaceRequiredNotice } from '../state/registeredWorkspace';
-import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
   normalizeEffortLevels,
   hasTunableEffortLevels,
@@ -41,98 +43,47 @@ import {
   modeLabel,
   modePickerValue,
   modeTitle,
-  normalizeChatMode,
   resolveDraftModelProviderId,
   resolveProviderById,
   writeLastModelProviderId,
   type EffortLevel,
-  type ChatMode,
 } from '../state/preferences';
+import { useStableCallback } from '../hooks/useStableCallback';
 import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
-import { useWorkspaceGit } from '../hooks/useWorkspaceGit';
 import { GitBranchGlyph, GitWorktreeGlyph } from './gitGlyphs';
-import { CreateBranchDialog, type CreateBranchRequest } from './CreateBranchDialog';
+import { CreateBranchDialog } from './CreateBranchDialog';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
 import {
   COMPOSER_ENV_ISOLATION_OFF,
-  COMPOSER_ENV_ISOLATION_ON,
-  buildComposerBranchOptions,
-  formatComposerBranchOptionLabel,
-  formatComposerEnvCapsule,
-  isComposerEnvSentinel,
-  isSafeComposerBranchName,
-  parseComposerUpstreamSpec,
-  planComposerGitChrome,
-  resolveComposerCreateSourceBranch,
-  type TaskDeliveryLine,
+  COMPOSER_ENV_ISOLATION_ON
 } from '../state/taskBoundBranch';
-import {
-  canAutoDispatchQueuedMessage,
-  dispatchQueuedMessage,
-} from '../state/messageQueueDispatch';
-import {
-  contextAccountingRestoreKey,
-  shouldStartContextAccountingRestore,
-} from '../state/contextRestore';
+import { canAutoDispatchQueuedMessage, dispatchQueuedMessage } from '../state/messageQueueDispatch';
+import { contextAccountingRestoreKey, shouldStartContextAccountingRestore } from '../state/contextRestore';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import { getStreamProfiler } from '../state/streamProfiler.ts';
-import {
-  createStreamingScrollScheduler,
-  type StreamingScrollScheduler,
-} from '../state/streamingScrollScheduler';
-import {
-  buildMessageRailItemsIncremental,
-  type MessageRailItemCache,
-} from '../state/messageRailItems';
+import { createStreamingScrollScheduler, type StreamingScrollScheduler } from '../state/streamingScrollScheduler';
+import { buildMessageRailItemsIncremental, type MessageRailItemCache } from '../state/messageRailItems';
 import { findMessageTargetWithRetry } from '../state/messageNavigation';
-import { intakeAttachments } from '../state/attachmentIntake';
+import { restoreThreadReading, type ThreadScrollSnapshot } from '../state/threadReadingRestore';
 import {
   normalizeStreamSegment,
-  segmentsSignature,
   mergeReattachedSegments,
   contentFromSegments,
   isEmptyAssistantPlaceholder,
   isEmptyUserMessage,
-  groupSegments,
-  getTextContent,
-  migrateToSegments,
-  findNextSerializedToolCall,
-  parseSerializedToolSegments,
 } from '../state/streamSegments';
-import {
-  canShowStreamResume,
-  formatStreamErrorLabel,
-  resolveStreamResumeTarget,
-  restoreStreamErrorFromInterrupted,
-} from '../state/streamResume';
+import { canShowStreamResume, formatStreamErrorLabel, resolveStreamResumeTarget, restoreStreamErrorFromInterrupted } from '../state/streamResume';
 import {
   buildConversationAttachmentContext,
   buildConfigInstructionContext,
   buildReplyLanguageContext,
   buildGitBranchPrefixContext,
 } from '../state/contextSources';
-import {
-  compactionProgressPercent as getCompactionProgressPercent,
-  compactionStateLabel,
-} from '../state/compactionStateView';
+import { compactionProgressPercent as getCompactionProgressPercent, compactionStateLabel } from '../state/compactionStateView';
 import { IDLE_COMPACTION_STATE } from '../state/types';
-import type {
-  ChatAttachment,
-  ContentSegment,
-  ToolCallLegacy,
-  CompactionMeta,
-  CompactionState,
-  ChatMsg,
-  ProviderRecoveryNotice,
-  QueuedMessage,
-  TextGroup,
-  ThinkingGroup,
-  ToolCallGroup,
-  SegmentGroup,
-} from '../state/types';
-import { MarkdownMessage } from './markdown/MarkdownMessage';
+import type { ChatAttachment, ContentSegment, CompactionState, ChatMsg, QueuedMessage } from '../state/types';
 import { WorkspacePathContext } from './markdown/InlineMarkdown';
 import { ImageLightbox, imageLightboxSourceFromAttachment } from './thread/ImageLightbox';
 import {
@@ -142,41 +93,22 @@ import {
 } from '../../automations/automationChatProposal';
 import { AutomationProposalCard } from './AutomationProposalCard';
 import { ComposerDraftControls } from './ComposerDraftControls';
-import {
-  buildSessionReferenceAttachment,
-  type SessionReferenceHit,
-} from '../state/sessionReference';
-import {
-  buildWorkspaceFileAttachment,
-  type WorkspaceFileHit,
-} from '../state/contextMention';
 import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
 import { TaskMonitorRailView } from '../../workbench/views/TaskMonitorRailView';
-import {
-  VirtualChatTurnList,
-  type VirtualChatTurnListHandle,
-} from './thread/VirtualChatTurnList';
+import { VirtualChatTurnList, type VirtualChatTurnListHandle } from './thread/VirtualChatTurnList';
 import { GoalPlanPanel } from './GoalPlanPanel';
 import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
 import { MessageQueue } from './MessageQueue';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
-import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
-import {
-  clearInterruptedMarkers,
-  historyBeforeEditedUserMessage,
-  serializeConversationMessages,
-} from '../state/editHistory';
+import { type MessageActionId } from './thread/MessageActionBar';
+import { clearInterruptedMarkers, historyBeforeEditedUserMessage, serializeConversationMessages } from '../state/editHistory';
 import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
 import { beginConversationCompaction } from '../state/automaticCompaction';
-import {
-  conversationStore,
-  DRAFT_CONVERSATION_ID,
-  type ConversationRuntimeState,
-} from '../state/conversationStore';
+import { conversationStore, DRAFT_CONVERSATION_ID, type ConversationRuntimeState } from '../state/conversationStore';
 import { createFrameCoalescer } from '../state/frameCoalescer';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
@@ -192,74 +124,15 @@ import {
   shouldShowConversationEmptyHome,
   shouldShowConversationLoadingPlaceholder,
 } from '../state/conversationEmptyStatePolicy';
-import {
-  shouldHardBeginConversationLoad,
-  shouldPersistEffortCorrection,
-} from '../state/conversationLoadGate';
-import { mapInChunks } from '../state/yieldToMain';
+import { shouldHardBeginConversationLoad, shouldPersistEffortCorrection } from '../state/conversationLoadGate';
 import { resolveTurnStartedAt } from '../state/turnStartedAt';
-import {
-  getTurnUserMessage,
-  groupMessagesIntoTurnsIncremental,
-  shouldVirtualizeChatTurns,
-  type ChatTurnGroupCache,
-} from '../state/chatTurns';
+import { getTurnUserMessage, groupMessagesIntoTurnsIncremental, shouldVirtualizeChatTurns, type ChatTurnGroupCache } from '../state/chatTurns';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
-const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
 const EMPTY_EFFORT_LEVELS: readonly EffortLevel[] = [];
 /** 无 WorkbenchProvider 时的降级空操作（会话抽屉等 Provider 之外场景）。 */
 const NOOP = () => {};
-
-function useStableCallback<T extends (...args: never[]) => unknown>(callback: T): T {
-  const callbackRef = useRef(callback);
-  useLayoutEffect(() => {
-    callbackRef.current = callback;
-  }, [callback]);
-  return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
-}
-
-// 重试倒计时文案：归零后说「正在重连」，避免本地倒计时钳在 0 时
-// 长时间显示「约 0s 后重试」让用户误以为卡死。
-function formatRetryCountdownLabel(remainingSeconds: number): string {
-  if (remainingSeconds <= 0) return '正在重连…';
-  return `约 ${remainingSeconds}s 后重试`;
-}
-
-function formatRetryCountdownLabelEn(remainingSeconds: number): string {
-  if (remainingSeconds <= 0) return 'reconnecting…';
-  return `in about ${remainingSeconds}s`;
-}
-
-// 排队等待时长文案：秒级显示 s，分钟级显示 m，避免长等待显示成一大串秒。
-function formatQueueDurationLabel(ms: number): string {
-  const value = Number(ms) || 0;
-  if (value <= 0) return '';
-  if (value < 60_000) return `${Math.max(1, Math.round(value / 1000))}s`;
-  return `${Math.max(1, Math.round(value / 60_000))}m`;
-}
-
-function formatQueueNoticeText(notice: ProviderRecoveryNotice, isZh: boolean): string {
-  const count = typeof notice.queueCount === 'number' && notice.queueCount > 0
-    ? (isZh ? `，前方约 ${notice.queueCount} 人` : `, ~${notice.queueCount} ahead`)
-    : '';
-  const upstream = formatQueueDurationLabel(notice.upstreamWaitTimeMs ?? 0);
-  const upstreamLabel = upstream
-    ? (isZh ? `，上游预计等待 ~${upstream}` : `, upstream est. ~${upstream}`)
-    : '';
-  const waited = formatQueueDurationLabel(notice.waitedMs ?? 0);
-  const waitedLabel = waited
-    ? (isZh ? `，已等待 ${waited}` : `, waited ${waited}`)
-    : '';
-  const poll = formatQueueDurationLabel(notice.waitMs ?? 0);
-  const pollLabel = poll
-    ? (isZh ? `；每 ${poll} 查询一次队列` : `; polling every ${poll}`)
-    : '';
-  return isZh
-    ? `Qoder 上游排队中${count}${upstreamLabel}${waitedLabel}${pollLabel}，正在按队列节奏等待…`
-    : `Queued upstream at Qoder${count}${upstreamLabel}${waitedLabel}${pollLabel}; waiting on the queue cadence…`;
-}
 
 function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
   const text = msg.content.trim().replace(/\s+/g, ' ');
@@ -275,31 +148,6 @@ function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
   return isZh ? '（空消息）' : '(empty message)';
 }
 
-function findCurrentTurnIdForScroll(container: HTMLDivElement): string | null {
-  // 观测：本函数是流式热路径上最贵的一步——getBoundingClientRect + elementFromPoint
-  // （命中测试）+ 再次 getBoundingClientRect，每次都会强制同步布局。
-  // 它此前在每个 delta 写入后被调用两次（saveThreadScrollSnapshot 与
-  // updateCurrentTurnContext 各自算一遍），所以单独计时以确认量级与去重效果。
-  return getStreamProfiler().measure('scroll.hitTest', () => {
-    const containerRect = container.getBoundingClientRect();
-    const probeX = containerRect.left + Math.min(Math.max(container.clientWidth / 2, 1), Math.max(containerRect.width - 1, 1));
-    const probeY = containerRect.top + CURRENT_TURN_CONTEXT_PROBE_PX;
-    const hit = container.ownerDocument.elementFromPoint(probeX, probeY);
-    const candidate = hit instanceof Element
-      ? hit.closest<HTMLElement>('[data-chat-turn-id]')
-      : null;
-    if (!candidate || !container.contains(candidate)) return null;
-
-    const turnId = candidate.dataset.chatTurnId ?? null;
-    if (!turnId) return null;
-
-    const userMessage = candidate.querySelector<HTMLElement>('.chat-msg-user');
-    if (userMessage && userMessage.getBoundingClientRect().bottom > probeY) return null;
-
-    return turnId;
-  });
-}
-
 interface TokenUsageState {
   input: number;
   output: number;
@@ -307,150 +155,7 @@ interface TokenUsageState {
   cacheRead?: number;
 }
 
-interface ThreadScrollSnapshot {
-  top: number;
-  atBottom: boolean;
-  turnId: string | null;
-  turnOffset: number;
-}
 
-let msgSeq = 0;
-function nextId() { return `msg-${++msgSeq}-${Date.now()}`; }
-
-
-
-function usageFromLifetime(lifetime: {
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheWriteTokens?: number;
-  cacheReadTokens?: number;
-}): { input: number; output: number; cacheWrite: number; cacheRead: number } {
-  return {
-    input: lifetime.inputTokens ?? 0,
-    output: lifetime.outputTokens ?? 0,
-    cacheWrite: lifetime.cacheWriteTokens ?? 0,
-    cacheRead: lifetime.cacheReadTokens ?? 0,
-  };
-}
-
-async function loadConversationMessages(conversationId: string): Promise<{
-  messages: ChatMsg[];
-  tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
-  mode: ChatMode;
-  fastMode: boolean;
-  preferredExecutionIsolation: 'none' | 'worktree';
-  effort: EffortLevel;
-  modelProviderId: string | null;
-  contextAccounting: ContextAccountingSnapshot | null;
-  automationCreateContext: AutomationCreateContext | null;
-}> {
-  const conv = await clientApi.conversationsGet({ id: conversationId });
-  if (!conv?.messages) return {
-    messages: [],
-    tokenUsage: null,
-    mode: 'chat',
-    fastMode: false,
-    preferredExecutionIsolation: 'none',
-    effort: 'default',
-    modelProviderId: null,
-    contextAccounting: null,
-    automationCreateContext: null,
-  };
-  // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
-  const convMode: ChatMode = normalizeChatMode(conv.mode);
-  const convFastMode = conv.fastMode === true;
-  const convPreferredExecutionIsolation: 'none' | 'worktree' =
-    conv.preferredExecutionIsolation === 'worktree' ? 'worktree' : 'none';
-  // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
-  // 老会话无字段时：effort 回退 'default'，modelProviderId 回退 null（用全局默认 provider）。
-  const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
-  const convModelProviderId: string | null =
-    typeof conv.modelProviderId === 'string' && conv.modelProviderId ? conv.modelProviderId : null;
-  const contextAccounting: ContextAccountingSnapshot | null =
-    conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
-  let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
-  const mapped = await mapInChunks(
-    conv.messages as Record<string, unknown>[],
-    (m) => {
-    const msg: ChatMsg = {
-      id: (m.id as string) || nextId(),
-      role: (m.role as ChatMsg['role']) || 'user',
-      content: (m.content as string) || '',
-      timestamp: m.timestamp as number | undefined,
-    };
-    if (m.segments) {
-      msg.segments = m.segments as ContentSegment[];
-    } else if (Array.isArray(m.toolCalls) && (m.toolCalls as unknown[]).length) {
-      msg.segments = migrateToSegments(msg.content, m.toolCalls as ToolCallLegacy[]);
-    } else if (msg.role === 'assistant') {
-      msg.segments = parseSerializedToolSegments(msg.content);
-    }
-    if (m.usage && typeof m.usage === 'object') {
-      const u = m.usage as { input?: number; output?: number; cacheWrite?: number; cacheRead?: number };
-      msg.usage = { input: u.input ?? 0, output: u.output ?? 0, cacheWrite: u.cacheWrite ?? 0, cacheRead: u.cacheRead ?? 0 };
-      totalInput += msg.usage.input;
-      totalOutput += msg.usage.output;
-      totalCacheWrite += msg.usage.cacheWrite ?? 0;
-      totalCacheRead += msg.usage.cacheRead ?? 0;
-    }
-    if (m._compaction && typeof m._compaction === 'object') {
-      const c = m._compaction as unknown as CompactionMeta;
-      msg.compaction = c;
-    }
-    if (Array.isArray(m.attachments)) {
-      msg.attachments = m.attachments as ChatAttachment[];
-    }
-    // ADR 33: 每条消息的整轮工作时长留痕,随消息持久化,重启后仍可见。
-    if (typeof m.durationMs === 'number' && Number.isFinite(m.durationMs)) {
-      msg.durationMs = m.durationMs;
-    }
-    // (b) 长流中断保留：连接中断未自然收尾的 assistant 消息标记，重启后仍可见。
-    if (m.interrupted === true) {
-      msg.interrupted = true;
-    }
-    return msg;
-  },
-    { chunkSize: 32 },
-  );
-  const loaded = mapped.filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
-  // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
-  // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
-  const lifetime = conv.lifetimeUsage as
-    | { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number }
-    | undefined;
-  if (
-    lifetime &&
-    ((lifetime.inputTokens ?? 0) > 0 ||
-      (lifetime.outputTokens ?? 0) > 0 ||
-      (lifetime.cacheWriteTokens ?? 0) > 0 ||
-      (lifetime.cacheReadTokens ?? 0) > 0)
-  ) {
-    return {
-      messages: loaded,
-      tokenUsage: usageFromLifetime(lifetime),
-      mode: convMode,
-      fastMode: convFastMode,
-      preferredExecutionIsolation: convPreferredExecutionIsolation,
-      effort: convEffort,
-      modelProviderId: convModelProviderId,
-      contextAccounting,
-      automationCreateContext: conv.automationCreateContext ?? null,
-    };
-  }
-  return {
-    messages: loaded,
-    tokenUsage: totalInput > 0 || totalOutput > 0 || totalCacheWrite > 0 || totalCacheRead > 0
-      ? { input: totalInput, output: totalOutput, cacheWrite: totalCacheWrite, cacheRead: totalCacheRead }
-      : null,
-    mode: convMode,
-    fastMode: convFastMode,
-    preferredExecutionIsolation: convPreferredExecutionIsolation,
-    effort: convEffort,
-    modelProviderId: convModelProviderId,
-    contextAccounting,
-    automationCreateContext: conv.automationCreateContext ?? null,
-  };
-}
 
 export function ChatSurface({
   i18n,
@@ -480,7 +185,7 @@ export function ChatSurface({
   isPageActive,
   messageTarget,
   onOpenAutomationRun,
-  onClose,
+  onClose, onOpenPermissionBot,
   onOpenSelectionChild,
   onSelectionChildSend,
   pendingSendText,
@@ -528,6 +233,7 @@ export function ChatSurface({
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
   /** Drawer host close action; surfaces as a close control in ChatHeader. */
   readonly onClose?: () => void;
+  readonly onOpenPermissionBot?: (workspaceId: string) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
   readonly workspaces?: readonly { path: string; name: string }[];
@@ -629,18 +335,6 @@ export function ChatSurface({
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
   const [preferredWorktree, setPreferredWorktree] = useState(false);
-  const { workspaceGit, workspaceIsGit, refreshWorkspaceGit } = useWorkspaceGit(workspacePath, {
-    refreshWhenIdle: !isStreaming,
-  });
-  const [createBranchDialog, setCreateBranchDialog] = useState<{
-    readonly source: string;
-  } | null>(null);
-  const [branchPushNotice, setBranchPushNotice] = useState<{
-    readonly branchName: string;
-    readonly reason: string;
-  } | null>(null);
-  const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
-  const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
   const [goalRunnerStatus, setGoalRunnerStatus] = useState<GoalRunnerStatus | null>(null);
   const persistDraftComposer = useCallback((patch: {
     draft?: string;
@@ -679,6 +373,8 @@ export function ChatSurface({
     }
     persistDraftComposer({ preferredWorktree: enabled });
   }, [conversationId, persistDraftComposer]);
+  const { deliveryLine, deliveryLineKnown, workspaceGit, workspaceIsGit, refreshWorkspaceGit, createBranchDialog, branchPushNotice, handleActiveDeliveryChange, gitChrome, canSelectBoundBranch, envCapsule, composerBranchOptions, handleSelectBoundBranch, handleCreateBoundBranch, handleOpenCreateBranchDialog, resetDeliveryContext, closeCreateBranchDialog, dismissBranchPushNotice } = useConversationGitEnvironment({ workspacePath: workspacePath ?? null, conversationId, isStreaming, isZh: i18n.locale === 'zh-CN', preferredWorktree, changePreferredWorktree });
+
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
   const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
@@ -895,8 +591,6 @@ export function ChatSurface({
   const shouldAutoScrollRef = useRef(true);
   // 用户主动滚动意图：只有 wheel/touch/pointer 等手势可退出 follow。
   // 流式增高、虚拟列表重测、程序贴底触发的 scroll 不得清掉 follow。
-  const userScrollIntentRef = useRef(false);
-  const userScrollIntentClearTimerRef = useRef<number | null>(null);
   const threadScrollSnapshotsRef = useRef(new Map<string, ThreadScrollSnapshot>());
   const pendingThreadScrollRestoreRef = useRef<{
     conversationId: string;
@@ -907,36 +601,31 @@ export function ChatSurface({
   const messageNavigationRequestRef = useRef(0);
   const lastAppliedMessageTargetRequestId = useRef<number | null>(null);
 
+  const userScroll = useThreadScrollGesture(direction => {
+    pendingThreadScrollRestoreRef.current = null; messageNavigationRequestRef.current++;
+    if (direction !== 'down') { shouldAutoScrollRef.current = false; setIsThreadAtBottom(false); }
+  });
+  const markUserScrollIntent = userScroll.mark;
+
   // 打开会话时在 render 阶段挂上贴底 pending，让同帧 layout restore 能等到列表挂载后再滚到底。
   // 不能放进 conversationId 的 useEffect：那会在首帧虚拟列表已经停在顶部之后才写入 pending。
   if (lastThreadOpenConversationIdRef.current !== conversationId) {
-    lastThreadOpenConversationIdRef.current = conversationId;
-    const openPlan = planThreadScrollOnConversationOpen({
-      hasExplicitMessageTarget: Boolean(
+    lastThreadOpenConversationIdRef.current = conversationId; userScroll.clear();
+    const explicitTarget = Boolean(
         conversationId
         && messageTarget
         && messageTarget.conversationId === conversationId
         && lastAppliedMessageTargetRequestId.current !== messageTarget.requestId,
-      ),
-    });
-    pendingThreadScrollRestoreRef.current = conversationId && openPlan.stickToBottom
-      ? { conversationId, snapshot: null }
+      );
+    const snapshot = conversationId ? threadScrollSnapshotsRef.current.get(conversationId) ?? null : null;
+    const openPlan = planThreadScrollOnConversationOpen({ hasExplicitMessageTarget: explicitTarget, savedFollowing: snapshot?.atBottom });
+    pendingThreadScrollRestoreRef.current = conversationId && !explicitTarget
+      ? { conversationId, snapshot }
       : null;
     shouldAutoScrollRef.current = Boolean(conversationId) && openPlan.stickToBottom;
     previousMessageCountRef.current = messages.length;
   }
 
-  const markUserScrollIntent = useCallback(() => {
-    userScrollIntentRef.current = true;
-    if (userScrollIntentClearTimerRef.current != null) {
-      window.clearTimeout(userScrollIntentClearTimerRef.current);
-    }
-    // 手势后的惯性滚动仍可能继续触发 scroll；短暂保持 intent，避免误 reaffirm。
-    userScrollIntentClearTimerRef.current = window.setTimeout(() => {
-      userScrollIntentRef.current = false;
-      userScrollIntentClearTimerRef.current = null;
-    }, 120);
-  }, []);
 
   const updateThreadBottomState = useCallback((
     container: HTMLDivElement | null,
@@ -949,6 +638,7 @@ export function ChatSurface({
       currentlyFollowing: shouldAutoScrollRef.current,
       atBottom,
       userInitiated: options?.userInitiated === true,
+      direction: userScroll.state.current.direction,
     });
     shouldAutoScrollRef.current = decision.nextFollowing;
     // Equality gate: avoid re-rendering ChatSurface when stick-to-bottom flag is unchanged.
@@ -967,7 +657,6 @@ export function ChatSurface({
     currentTurnId?: string | null,
   ) => {
     if (!id || !container) return;
-    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const turnId = currentTurnId === undefined
       ? findCurrentTurnIdForScroll(container)
       : currentTurnId;
@@ -976,10 +665,11 @@ export function ChatSurface({
       : null;
     threadScrollSnapshotsRef.current.set(id, {
       top: container.scrollTop,
-      atBottom: distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX,
+      atBottom: shouldAutoScrollRef.current,
       turnId,
       turnOffset: turnElement ? container.scrollTop - turnElement.offsetTop : 0,
     });
+    while (threadScrollSnapshotsRef.current.size > 40) threadScrollSnapshotsRef.current.delete(threadScrollSnapshotsRef.current.keys().next().value!);
   }, []);
 
   const updateCurrentTurnContext = useCallback((
@@ -999,11 +689,7 @@ export function ChatSurface({
     // 观测：这是每个流式写入后都要走一遍的提交，内部包含多次强制同步布局。
     getStreamProfiler().measure('scroll.bottom', () => {
       // 程序贴底：进入 follow，并清掉用户上滑意图，避免紧随其后的 scroll 事件误退出。
-      userScrollIntentRef.current = false;
-      if (userScrollIntentClearTimerRef.current != null) {
-        window.clearTimeout(userScrollIntentClearTimerRef.current);
-        userScrollIntentClearTimerRef.current = null;
-      }
+      userScroll.clear();
       container.scrollTo({ top: container.scrollHeight, behavior });
       shouldAutoScrollRef.current = true;
       setIsThreadAtBottom((previous) => (previous ? previous : true));
@@ -1027,14 +713,6 @@ export function ChatSurface({
   const updateCurrentTurnContextRef = useRef(updateCurrentTurnContext);
   updateCurrentTurnContextRef.current = updateCurrentTurnContext;
 
-  /**
-   * 流式追加时的滚动调度器。
-   *
-   * messages 每次写入都会换引用，下面那个 useLayoutEffect 因此每个 delta 都要提交一次
-   * 滚动，而每次提交内部包含多次强制同步布局（scrollHeight / getBoundingClientRect /
-   * elementFromPoint 命中测试）。输出快时每秒几十次，主线程被布局吃满，整个界面卡死。
-   * 调度器把它收敛为「每帧最多一次」，且与绘制同帧（rAF 在 paint 之前），观感不变。
-   */
   const streamingScrollSchedulerRef = useRef<StreamingScrollScheduler | null>(null);
   if (streamingScrollSchedulerRef.current === null) {
     streamingScrollSchedulerRef.current = createStreamingScrollScheduler({
@@ -1085,7 +763,7 @@ export function ChatSurface({
   }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
-    const userInitiated = userScrollIntentRef.current;
+    const userInitiated = userScroll.state.current.active;
     // Scroll can dispatch far faster than React can commit a long thread. Keep the latest
     // container state and coalesce virtual range updates and geometry probes to one pass per frame.
     // Virtual viewport only setStates when the window indices/padding change; bottom/turn/scrolled
@@ -1097,10 +775,6 @@ export function ChatSurface({
 
   useEffect(() => () => {
     threadScrollCoalescerRef.current.cancel();
-    if (userScrollIntentClearTimerRef.current != null) {
-      window.clearTimeout(userScrollIntentClearTimerRef.current);
-      userScrollIntentClearTimerRef.current = null;
-    }
   }, []);
 
   // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
@@ -1125,7 +799,7 @@ export function ChatSurface({
       ),
     }).then((target) => {
       if (!target) return;
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.scrollIntoView({ behavior: 'auto', block: 'center' });
       target.classList.remove('chat-msg-flash');
       void target.offsetWidth;
       target.classList.add('chat-msg-flash');
@@ -1397,8 +1071,7 @@ export function ChatSurface({
     if (!conversationId) {
       setPreferredWorktree(persisted?.preferredWorktree === true);
     }
-    setDeliveryLine(null);
-    setDeliveryLineKnown(false);
+    resetDeliveryContext();
     // 打开会话的默认落点（贴底）在 render 阶段写入 pendingThreadScrollRestoreRef，
     // 避免等这个 useEffect 才挂 pending，导致加载占位上的空容器贴底被清掉后列表从顶部挂载。
     setIsThreadAtBottom((previous) => {
@@ -1540,6 +1213,7 @@ export function ChatSurface({
         const live = await clientApi.chatStreamReattach({ conversationId });
         if (cancelled) return;
         if (live && live.streamId) {
+          conversationStore.restorePendingPermissions(conversationId, live.pendingPermissions);
           // 方案 3：reattach 既可能返回「运行中的流」，也可能返回「已终结但保留的终态快照」。
           // - running：接回 streamIdRef + isStreaming，使 delta 监听续上（既有无缝续接）。
           // - terminal：不重新武装流式，只用终态快照补齐完整正文/工具段，并标注 interrupted，
@@ -1808,6 +1482,14 @@ export function ChatSurface({
       return;
     }
 
+    if (pending.snapshot && !pending.snapshot.atBottom) {
+      shouldAutoScrollRef.current = false; setIsThreadAtBottom(false);
+      return restoreThreadReading({ container, snapshot: pending.snapshot,
+        locateTurn: id => { const index = chatTurns.findIndex(turn => turn.id === id); if (index >= 0) scrollToTurn(index, { align: 'start' }); },
+        isActive: () => pendingThreadScrollRestoreRef.current === pending && conversationIdRef.current === pending.conversationId,
+        finish: finishRestore });
+    }
+
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom((previous) => (previous ? previous : true));
     scrollThreadToBottom('auto');
@@ -1837,6 +1519,7 @@ export function ChatSurface({
     loadStatus,
     messageTarget,
     messages,
+    chatTurns, scrollToTurn,
     saveThreadScrollSnapshot,
     scrollThreadToBottom,
     updateCurrentTurnContext,
@@ -1900,22 +1583,18 @@ export function ChatSurface({
     scheduleScrollStateRefresh,
   ]);
 
-  // 手动 /compact 不改 messages，上面的自动滚动 effect 不会重跑；而压缩进度横幅
-  // 渲染在滚动容器最底部。若用户此时已向上滚，横幅会落在视口外，造成"点了没反应"
-  // 的错觉。压缩一开始就强制滚到底，让进度横幅立即进入视口。
-  // 压缩结束（finalizing -> done/idle）时再清一次测量并贴底，避免 merge 后仍停在顶部。
+  // Compaction may remeasure the thread but cannot reclaim a reading viewport.
   const wasCompactionActiveRef = useRef(false);
   useLayoutEffect(() => {
     if (isCompactionActive) {
       wasCompactionActiveRef.current = true;
-      shouldAutoScrollRef.current = true;
-      scrollThreadToBottom('auto');
+      if (shouldAutoScrollRef.current) scrollThreadToBottom('auto');
       return;
     }
     if (wasCompactionActiveRef.current) {
       wasCompactionActiveRef.current = false;
-      shouldAutoScrollRef.current = true;
       resetVirtualMeasurements();
+      if (!shouldAutoScrollRef.current) return;
       scrollThreadToBottom('auto');
       const outer = requestAnimationFrame(() => {
         if (!shouldAutoScrollRef.current) return;
@@ -1947,56 +1626,7 @@ export function ChatSurface({
     void clientApi.denyLocalAction(call.toolCallId);
   }, [removePendingPermissionCall]);
 
-  const addFiles = useCallback(async (files: FileList | File[] | null | undefined) => {
-    const result = await intakeAttachments(files, attachments.length, isZh);
-    setAttachmentError(result.error);
-    if (result.attachments.length) {
-      setAttachments((prev) => [...prev, ...result.attachments]);
-    }
-  }, [attachments.length, isZh]);
-
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
-    setAttachmentError(null);
-  }, []);
-
-  const attachWorkspaceFile = useCallback((hit: WorkspaceFileHit) => {
-    const attachment = buildWorkspaceFileAttachment(hit);
-    setAttachments((prev) => {
-      const filtered = prev.filter((item) => item.workspaceRelPath !== attachment.workspaceRelPath);
-      return [...filtered, attachment];
-    });
-  }, []);
-
-  const attachSessionReference = useCallback(async (hit: SessionReferenceHit) => {
-    try {
-      const loaded = await loadConversationMessages(hit.id);
-      const attachment = buildSessionReferenceAttachment({
-        conversationId: hit.id,
-        title: hit.title,
-        messages: loaded.messages,
-      });
-      setAttachments((prev) => {
-        // 同一会话重复引用时替换旧附件，避免叠多份
-        const filtered = prev.filter((item) => !item.name.startsWith('session:') || !item.id.includes(hit.id));
-        return [...filtered, attachment];
-      });
-      setAttachmentError(null);
-    } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : (isZh ? '读取会话失败' : 'Failed to load session'));
-    }
-  }, [isZh]);
-
-  const reorderAttachment = useCallback((fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
-    setAttachments((prev) => {
-      if (fromIndex < 0 || toIndex < 0 || fromIndex >= prev.length || toIndex >= prev.length) return prev;
-      const next = [...prev];
-      const [item] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, item);
-      return next;
-    });
-  }, []);
+  const { addFiles, removeAttachment, attachWorkspaceFile, attachSessionReference, reorderAttachment, handlePaste, isFileDropActive, handleSurfaceDragEnter, handleSurfaceDragOver, handleSurfaceDragLeave, handleSurfaceDrop } = useComposerAttachmentIntake({ attachments, setAttachments, setAttachmentError, isZh, hasProvider, isStreaming });
 
   /** 点编辑回填输入框：文案/附件回到 composer，不从队列移除（只有 × 才移除）。 */
   const refillQueuedMessageToComposer = useCallback((item: QueuedMessage) => {
@@ -2014,60 +1644,6 @@ export function ChatSurface({
     }
     setAttachmentError(null);
   }, [conversationId]);
-
-  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const fileItems = Array.from(event.clipboardData?.items ?? [])
-      .filter((item) => item.kind === 'file')
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => Boolean(file));
-    if (!fileItems.length) return;
-    event.preventDefault();
-    void addFiles(fileItems);
-  }, [addFiles]);
-
-  const [isFileDropActive, setIsFileDropActive] = useState(false);
-  const fileDragDepthRef = useRef(0);
-  const canAcceptFileDrop = hasProvider && !isStreaming;
-  const hasFileTransfer = useCallback((dataTransfer: DataTransfer | null) => {
-    if (!dataTransfer) return false;
-    if (Array.from(dataTransfer.types ?? []).includes('Files')) return true;
-    return Array.from(dataTransfer.items ?? []).some((item) => item.kind === 'file');
-  }, []);
-  const resetFileDropState = useCallback(() => {
-    fileDragDepthRef.current = 0;
-    setIsFileDropActive(false);
-  }, []);
-  const handleSurfaceDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    fileDragDepthRef.current += 1;
-    event.dataTransfer.dropEffect = 'copy';
-    setIsFileDropActive(true);
-  }, [canAcceptFileDrop, hasFileTransfer]);
-  const handleSurfaceDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.dataTransfer.dropEffect = 'copy';
-    setIsFileDropActive(true);
-  }, [canAcceptFileDrop, hasFileTransfer]);
-  const handleSurfaceDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
-    if (fileDragDepthRef.current === 0) setIsFileDropActive(false);
-  }, [canAcceptFileDrop, hasFileTransfer]);
-  const handleSurfaceDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const droppedFiles = event.dataTransfer.files;
-    resetFileDropState();
-    if (!droppedFiles.length) return;
-    void addFiles(droppedFiles);
-  }, [addFiles, canAcceptFileDrop, hasFileTransfer, resetFileDropState]);
 
   // 核心发送路径:给定文本(+ 可选附件)就执行一次 agent turn。
   // handleSend(用户输入)与 pending-task 续传(跨重启)都复用它,避免另造发送路径。
@@ -2131,7 +1707,7 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId: targetConversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, fastMode, mode, conversationId: targetConversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
     return true;
   }, [
     isStreaming,
@@ -2141,6 +1717,7 @@ export function ChatSurface({
     messages,
     onConversationUpdated,
     effort,
+    fastMode,
     mode,
     modelProviderId,
     systemInstructions,
@@ -2616,121 +2193,9 @@ export function ChatSurface({
   const handleGoalPlansCountChange = useCallback((count: number) => {
     setHasGoalPlan(count > 0);
   }, [setHasGoalPlan]);
-  const handleActiveDeliveryChange = useCallback((line: TaskDeliveryLine | null) => {
-    setDeliveryLine(line);
-    setDeliveryLineKnown(true);
-  }, []);
   const handleActiveGoalRunnerStatusChange = useCallback((status: GoalRunnerStatus | null) => {
     setGoalRunnerStatus(status);
   }, []);
-  // ADR 79：预配置源头（workspace baseBranch）已移除。draft 的「源头」芯片直接
-  // 跟随工作区实时 HEAD（planComposerGitChrome 内部回退 currentHead）。
-  const gitChrome = useMemo(
-    () => planComposerGitChrome({
-      delivery: deliveryLine,
-      workspaceBaseBranch: null,
-      currentHead: workspaceGit?.ok ? workspaceGit.current : null,
-      isDraft: isDraftConversation,
-      deliveryKnown: isDraftConversation || deliveryLineKnown,
-    }, { locale: isZh ? 'zh' : 'en' }),
-    [deliveryLine, deliveryLineKnown, isDraftConversation, isZh, workspaceGit],
-  );
-  // ADR 79：composer 不再提供「固定源头分支」选择（无设置可写）；
-  // 隔离偏好（Worktree on/off）不受影响。
-  const canSelectBoundBranch = false;
-  const envCapsule = useMemo(
-    () => formatComposerEnvCapsule(gitChrome, {
-      locale: isZh ? 'zh' : 'en',
-      preferredIsolation: preferredWorktree,
-    }),
-    [gitChrome, isZh, preferredWorktree],
-  );
-  /**
-   * Forkable branches only — no isolation sentinels, and not gated on the capsule's
-   * `selectable` flag, because the create-branch dialog needs a pickable list even when
-   * the capsule itself is not offering branch switching.
-   */
-  const composerBranchOptions = useMemo<readonly DropdownOption[]>(() => {
-    const localGroup = isZh ? '源头' : 'Source';
-    const remoteGroup = isZh ? '远程源头' : 'Remote source';
-    return buildComposerBranchOptions({
-      branches: workspaceGit?.ok ? workspaceGit.branches : [],
-      localBranches: workspaceGit?.ok ? workspaceGit.localBranches : [],
-      remoteBranches: workspaceGit?.ok ? workspaceGit.remoteBranches : [],
-      selected: gitChrome.taskLine?.value,
-    }).map((option) => ({
-      value: option.value,
-      label: formatComposerBranchOptionLabel(option.value),
-      group: option.kind === 'remote' ? remoteGroup : localGroup,
-      tab: option.kind,
-      hint: option.kind === 'remote'
-        ? (isZh ? '远程' : 'remote')
-        : (isZh ? '本地' : 'local'),
-    }));
-  }, [gitChrome.taskLine?.value, isZh, workspaceGit]);
-  const handleSelectBoundBranch = useCallback((nextBranch: string) => {
-    const next = nextBranch.trim();
-    if (next === COMPOSER_ENV_ISOLATION_ON) {
-      if (!isStreaming) changePreferredWorktree(true);
-      return;
-    }
-    if (next === COMPOSER_ENV_ISOLATION_OFF) {
-      if (!isStreaming) changePreferredWorktree(false);
-      return;
-    }
-    // ADR 79：分支选择不再写工作区设置（预配置源头已移除），此路径不生效。
-  }, [changePreferredWorktree, isStreaming]);
-  const handleCreateBoundBranch = useCallback((request: CreateBranchRequest) => {
-    const name = request.name.trim();
-    if (!name || !workspacePath || !canSelectBoundBranch) return;
-    if (!isSafeComposerBranchName(name)) return;
-    // The dialog owns the source choice; re-check here so a sentinel ("Worktree" row) can
-    // never reach git even if a caller constructs the request by hand.
-    const source = request.source.trim();
-    if (!source || isComposerEnvSentinel(source)) return;
-    const shouldPush = request.push;
-    const upstream = shouldPush ? parseComposerUpstreamSpec(request.upstream, name) : null;
-    if (shouldPush && !upstream) return;
-    void clientApi.gitCreateBranch({
-      workspaceRoot: workspacePath,
-      name,
-      startPoint: source,
-      push: shouldPush,
-      upstreamRemote: upstream?.remote,
-      upstreamBranch: upstream?.branch,
-    }).then((created) => {
-      if (created?.ok !== true) return;
-      if (shouldPush && created.pushed === false) {
-        setBranchPushNotice({
-          branchName: name,
-          reason: created.pushError || 'push_failed',
-        });
-      } else {
-        setBranchPushNotice(null);
-      }
-      handleSelectBoundBranch(name);
-      refreshWorkspaceGit();
-    }).catch(() => {});
-  }, [
-    canSelectBoundBranch,
-    handleSelectBoundBranch,
-    refreshWorkspaceGit,
-    workspacePath,
-  ]);
-  /**
-   * Opens the create-branch dialog. Takes no branch argument on purpose: the capsule list
-   * highlight follows the mouse, so the source must be chosen inside the dialog instead.
-   * The dialog only needs a sensible default seed, which is the checked branch or HEAD.
-   */
-  const handleOpenCreateBranchDialog = useCallback(() => {
-    if (!canSelectBoundBranch) return;
-    const source = resolveComposerCreateSourceBranch({
-      selected: gitChrome.taskLine?.value,
-      currentHead: workspaceGit?.current,
-    });
-    if (!source) return;
-    setCreateBranchDialog({ source });
-  }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2800,6 +2265,7 @@ export function ChatSurface({
       modelOptions={modelOptions}
       canSwitchModel={canSwitchModel}
       onModelChange={handleModelChange}
+      onManageModels={onOpenSettings}
       onContextWindowChange={handleContextWindowChange}
       selectedModelProviderId={modelProviderId}
       showContextUsage={false}
@@ -2872,14 +2338,14 @@ export function ChatSurface({
         taskMonitorOpen={taskMonitorOpen}
         onToggleTaskMonitor={toggleTaskMonitor}
       />
-      {findOpen ? (
-        <ChatFindBar
-          containerRef={threadRef}
-          isZh={isZh}
-          onClose={() => setFindOpen(false)}
-          recomputeKey={messages.length}
-        />
-      ) : null}
+      <ChatFindBar
+        open={findOpen}
+        containerRef={threadRef}
+        onNavigate={() => { pendingThreadScrollRestoreRef.current = null; messageNavigationRequestRef.current++; shouldAutoScrollRef.current = false; setIsThreadAtBottom(false); }}
+        isZh={isZh}
+        onClose={() => setFindOpen(false)}
+        recomputeKey={messages.length}
+      />
       {banner ? <div className="selection-child-banner">{banner}</div> : null}
       {currentTurnContext ? (
         <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>
@@ -2891,13 +2357,14 @@ export function ChatSurface({
         className="chat-thread"
         ref={threadRef}
         onScroll={handleThreadScroll}
+        tabIndex={0} onKeyDown={markUserScrollIntent} onPointerDown={markUserScrollIntent}
         onWheel={markUserScrollIntent}
         onTouchMove={markUserScrollIntent}
       >
         {/* 切会话 beginLoad 会先清空 messages；空首页仅 loadStatus === 'ready' 且无消息时显示。 */}
         {shouldShowConversationLoadingPlaceholder({ loadStatus, messageCount: messages.length }) ? (
           <div className="chat-thread-loading" role="status" aria-live="polite">
-            <div className="chat-thread-loading-mark" aria-hidden="true" />
+            <PeerIcon name="loader" size={28} className="chat-thread-loading-mark" />
             <p>{isZh ? '正在加载会话…' : 'Loading conversation…'}</p>
           </div>
         ) : showEmptyHome ? (
@@ -2981,7 +2448,7 @@ export function ChatSurface({
             <button
               type="button"
               className="branch-push-notice-dismiss"
-              onClick={() => setBranchPushNotice(null)}
+              onClick={dismissBranchPushNotice}
               aria-label={isZh ? '关闭提示' : 'Dismiss'}
             >
               <PeerIcon name="close" size={14} />
@@ -3230,14 +2697,12 @@ export function ChatSurface({
               title={modeTitle(mode, isZh)}
               menuPlacement="up"
             />
-            <Dropdown
-              className="composer-dropdown composer-access-dropdown"
+            <ConversationAccessControl
+              conversationId={conversationId} isZh={isZh} onOpenBot={onOpenPermissionBot}
               value={localAccessLevel}
               options={accessLevelOptions}
               onChange={handleAccessLevelDropdownChange}
-              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
               title={accessLevelTitle(localAccessLevel, isZh)}
-              menuPlacement="up"
             />
           </div>
           {homeComposerContextControls}
@@ -3250,7 +2715,7 @@ export function ChatSurface({
           isZh={isZh}
           sourceOptions={composerBranchOptions}
           initialSource={createBranchDialog.source}
-          onCancel={() => setCreateBranchDialog(null)}
+          onCancel={closeCreateBranchDialog}
           onConfirm={handleCreateBoundBranch}
         />
       ) : null}

@@ -28,6 +28,36 @@ afterEach(() => {
 });
 
 describe('tool result materialization (17 号文档 §3.1)', () => {
+  it('uses the current canonical data home for writes, budgets and removal without crossing environments', () => {
+    const first = makeBaseDir(), second = makeBaseDir(), explicit = makeBaseDir();
+    const previous = process.env.PEER_AGENT_HOME;
+    try {
+      process.env.PEER_AGENT_HOME = first;
+      // Assert before writing so a regression can never write into the real user cache.
+      assert.equal(resolveToolArtifactDir({ conversationId: 'same-session' }), join(first, 'artifacts', 'same-session'));
+      const a = writeToolResultArtifact({ conversationId: 'same-session', toolCallId: 'one', content: 'first' });
+      process.env.PEER_AGENT_HOME = second;
+      assert.equal(resolveToolArtifactDir({ conversationId: 'same-session' }), join(second, 'artifacts', 'same-session'));
+      const b = writeToolResultArtifact({ conversationId: 'same-session', toolCallId: 'one', content: 'second' });
+      enforceConversationArtifactBudget({ conversationId: 'same-session', maxBytes: 0 });
+      assert.equal(existsSync(b.artifactPath), false);
+      assert.equal(readFileSync(a.artifactPath, 'utf8'), 'first');
+      removeConversationToolArtifacts({ conversationId: 'same-session' });
+      assert.equal(existsSync(a.artifactPath), true);
+      const c = writeToolResultArtifact({ conversationId: 'same-session', toolCallId: 'one', content: 'explicit', baseDir: explicit });
+      assert.equal(c.artifactPath, join(explicit, 'same-session', 'tool-one.txt'));
+      removeConversationToolArtifacts({ conversationId: 'same-session', baseDir: explicit });
+      assert.equal(existsSync(c.artifactPath), false);
+      assert.equal(existsSync(a.artifactPath), true);
+      process.env.PEER_AGENT_HOME = first;
+      removeConversationToolArtifacts({ conversationId: 'same-session' });
+      assert.equal(existsSync(a.artifactPath), false);
+    } finally {
+      if (previous === undefined) delete process.env.PEER_AGENT_HOME;
+      else process.env.PEER_AGENT_HOME = previous;
+    }
+  });
+
   it('keeps small results inline without touching disk', () => {
     const baseDir = makeBaseDir();
     const result = materializeToolResultContent({

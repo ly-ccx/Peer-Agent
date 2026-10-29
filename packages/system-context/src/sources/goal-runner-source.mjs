@@ -84,7 +84,7 @@ function summarizeCriteria(rawCriteria, rawResults, limit) {
       description = sanitizeRuntimeText(raw).trim();
     } else if (raw && typeof raw === 'object') {
       id = asString(raw.id) || null;
-      kind = AUTO_CRITERION_KINDS_SET.has(asString(raw.kind)) || asString(raw.kind) === 'manual'
+      kind = AUTO_CRITERION_KINDS_SET.has(asString(raw.kind)) || ['manual', 'model_review'].includes(asString(raw.kind))
         ? asString(raw.kind)
         : 'manual';
       description = sanitizeRuntimeText(raw.description || raw.command || raw.path).trim();
@@ -95,9 +95,17 @@ function summarizeCriteria(rawCriteria, rawResults, limit) {
       const result = id ? resultById.get(id) : null;
       verify = !result ? 'pending' : result.passed === true ? 'passed' : 'failed';
     } else {
-      verify = 'manual';
+      verify = kind === 'model_review' ? 'host_review' : 'manual';
     }
-    out.push({ id, kind, description, verify });
+    const fields = {};
+    const omittedFields = [];
+    for (const [key, maxLength] of [['id', 200], ['command', 2000], ['path', 1000], ['expect', 2000]]) {
+      const value = key === 'id' ? id : asString(raw?.[key]);
+      if (!value) continue;
+      if (value.length > maxLength) omittedFields.push(key);
+      else fields[key] = sanitizeRuntimeText(value);
+    }
+    out.push({ ...fields, id: fields.id ?? null, kind, description, verify, omittedFields });
     if (out.length >= limit) break;
   }
   return out;
@@ -216,7 +224,15 @@ function normalizePlan(plan) {
                     }
                   : { kind: 'plan', taskId: null, criterionId: null },
                 evidenceCount: Array.isArray(run?.evidenceRefs) ? run.evidenceRefs.length : 0,
-                summary: sanitizeRuntimeText(run?.summary).trim(),
+                summary: sanitizeRuntimeText(run?.summary).trim().slice(0, 600),
+                issues: [...(Array.isArray(run?.report?.failedCriteria) ? run.report.failedCriteria : []),
+                  ...(Array.isArray(run?.report?.missingEvidence) ? run.report.missingEvidence : [])]
+                  .slice(0, 4).map(issue => ({
+                    target: sanitizeRuntimeText(issue?.criterionId || issue?.taskId).slice(0, 200),
+                    reason: sanitizeRuntimeText(issue?.reason).slice(0, 400),
+                    evidenceRefs: asStringArray(issue?.evidenceRefs, 3).map(ref => ref.slice(0, 240)),
+                  })),
+                recommendedNextAction: sanitizeRuntimeText(run?.report?.recommendedNextAction).slice(0, 400),
               }))
             : [],
         }
@@ -305,6 +321,10 @@ function formatFacts(plan, options = {}) {
             : 'plan';
         const summary = run.summary ? ` — ${run.summary}` : '';
         lines.push(`- ${run.verifierRunId ?? '(no-id)'} ${target} ${run.status} (evidenceRefs=${run.evidenceCount})${summary}`);
+        for (const issue of run.issues) {
+          lines.push(`  reported gap (${issue.target || target}): ${issue.reason}; evidenceRefs=${JSON.stringify(issue.evidenceRefs)}`);
+        }
+        if (run.recommendedNextAction) lines.push(`  verifier suggested next action (unverified): ${run.recommendedNextAction}`);
       }
     }
   }
@@ -325,8 +345,15 @@ function formatFacts(plan, options = {}) {
   if (plan.successCriteria.length) {
     lines.push('success criteria (Definition of Done):');
     for (const c of plan.successCriteria) {
-      // 形如： - [pending] (command) run npm test —— 让模型看到每条 DoD 的验证状态。
-      lines.push(`- [${c.verify}] (${c.kind}) ${c.description}`);
+      const criterionId = c.id ? ` criterionId=${JSON.stringify(c.id)}` : '';
+      lines.push(`- [${c.verify}] (${c.kind})${criterionId} ${c.description}`);
+      const checks = ['command', 'path', 'expect']
+        .filter(key => typeof c[key] === 'string')
+        .map(key => `${key}=${JSON.stringify(c[key])}`);
+      if (checks.length) lines.push(`  check: ${checks.join('; ')}`);
+      if (c.omittedFields.length) {
+        lines.push(`  oversized fields omitted (${c.omittedFields.join(', ')}); read full values via goal_get_plan.`);
+      }
     }
     const pendingAuto = plan.successCriteria.filter((c) => c.verify === 'pending');
     const failedAuto = plan.successCriteria.filter((c) => c.verify === 'failed');
@@ -377,6 +404,7 @@ function formatContract() {
     '- Continue advancing the current goal; do not re-plan unrelated goals.',
     '- When uncertain, prefer reading authoritative state via goal_get_plan.',
     '- After completing a subtask, write evidence back through goal_update_task; do not mark completion without evidenceRefs.',
+    '- A model_review criterion belongs to the host verifier. Record the completed step with its real evidence; do not put model_review self-assessments in criterionResults. Pending host review does not mean the step is still running.',
     '- Verify against the Definition of Done: for each auto-verifiable success criterion '
       + '(command/test/file-contains/file-exists), actually run its check after acting, then record '
       + 'the outcome via goal_update_task.criterionResults (criterionId + passed + evidenceRef, '

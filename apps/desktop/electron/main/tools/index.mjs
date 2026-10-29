@@ -1,9 +1,16 @@
+import { CONTINUITY_TOOL_DEFINITIONS } from './continuity-tool-definitions.mjs';
 import { AUTOMATION_TOOL_DEFINITIONS } from './automation-tool-definitions.mjs';
 import { GOAL_TOOL_DEFINITIONS } from './goal-tool-definitions.mjs';
 import { INTERACTION_TOOL_DEFINITIONS } from './interaction-tool-definitions.mjs';
 import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.mjs';
+import {
+  LOCAL_IMAGE_TOOL_DEFINITIONS,
+  LOCAL_GIT_TOOL_DEFINITIONS
+} from "@peer-agent/runtime-node/providers";
 import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 import { createSkillToolDefinitionsFromStore } from './skill-tool-definitions.mjs';
+import { DELEGATION_TOOL_DEFINITIONS } from './delegation-tool-definitions.mjs';
+import { MEMORY_TOOL_DEFINITIONS } from './memory-tool-definitions.mjs';
 import { SEARCH_TOOL_DEFINITIONS } from './search-tool-definitions.mjs';
 import { WEB_TOOL_DEFINITIONS } from './web-tool-definitions.mjs';
 import { BROWSER_TOOL_DEFINITIONS } from './browser-tool-definitions.mjs';
@@ -54,7 +61,12 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
   return createToolRegistry({
     tools: [
       ...LEGACY_LOCAL_TOOL_DEFINITIONS,
+      ...LOCAL_IMAGE_TOOL_DEFINITIONS,
+      ...LOCAL_GIT_TOOL_DEFINITIONS,
       ...SEARCH_TOOL_DEFINITIONS,
+      ...DELEGATION_TOOL_DEFINITIONS,
+      ...MEMORY_TOOL_DEFINITIONS,
+      ...CONTINUITY_TOOL_DEFINITIONS,
       ...GOAL_TOOL_DEFINITIONS,
       ...INTERACTION_TOOL_DEFINITIONS,
       ...AUTOMATION_TOOL_DEFINITIONS,
@@ -69,6 +81,14 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
 }
 
 import { isSelectionDiscussion } from '../selection-background-context.mjs';
+import {
+  evaluateWorkSessionWrite
+} from "@peer-agent/runtime-node/project-agent";
+
+function excludeCapabilityPrefixes(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((prefix) => typeof prefix === 'string' && prefix.length > 0);
+}
 
 export function createRuntimeToolProjection({
   mcpRegistry,
@@ -77,7 +97,23 @@ export function createRuntimeToolProjection({
   projectionOptions = {},
 } = {}) {
   if (isSelectionDiscussion()) registry = createToolRegistry({ tools: [] });
+  const prefixes = excludeCapabilityPrefixes(projectionOptions.excludeCapabilityPrefixes);
+  if (prefixes.length > 0) {
+    registry = createToolRegistry({
+      tools: registry.listTools().filter((tool) => {
+        const capabilityId = tool.runtime?.executorCapabilityId || tool.capabilityId || '';
+        return !prefixes.some((prefix) => capabilityId.startsWith(prefix));
+      }),
+    });
+  }
   const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);
+  if (projectionOptions.readOnlyWorkSession === true) {
+    const allowed = new Set(projection.capabilities.filter(capability => evaluateWorkSessionWrite(
+      { delegationOrigin: { readOnly: true } }, capability,
+    ).allowed).map(capability => capability.capabilityId));
+    registry = createToolRegistry({ tools: registry.listTools().filter(tool => allowed.has(tool.runtime?.executorCapabilityId || tool.capabilityId)) });
+    return createRuntimeToolProjection({ registry, projectionOptions: { ...projectionOptions, readOnlyWorkSession: false } });
+  }
   const modelProjection = createModelToolProjectionFromRuntimeProjection(
     projection,
     registry,

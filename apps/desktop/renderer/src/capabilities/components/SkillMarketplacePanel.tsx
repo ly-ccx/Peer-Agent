@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 import type { SkillHubCategory, SkillHubInstallScope, SkillHubMarketplaceEntry, SkillHubMarketplacePage, SkillHubMarketplaceSort } from '@peer-agent/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
@@ -287,10 +288,10 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
       </div>
       {totalPages > 1 ? (
         <nav className="skill-marketplace-pagination skill-marketplace-pagination--pages" aria-label="skillhub 市场分页">
-          <button type="button" className="pagination-arrow" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹</button>
+          <button type="button" className="pagination-arrow" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><PeerIcon name="chevronLeft" size={14} /></button>
           {buildPageItems(page, totalPages).map((item) =>
             item.type === 'ellipsis' ? (
-              <span key={item.key} className="pagination-ellipsis" aria-hidden="true">…</span>
+              <span key={item.key} className="pagination-ellipsis" aria-hidden="true"><PeerIcon name="ellipsis" size={14} /></span>
             ) : (
               <button
                 key={item.key}
@@ -303,7 +304,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
               </button>
             ),
           )}
-          <button type="button" className="pagination-arrow" aria-label="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>›</button>
+          <button type="button" className="pagination-arrow" aria-label="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}><PeerIcon name="chevronRight" size={14} /></button>
         </nav>
       ) : null}
       {selected ? (

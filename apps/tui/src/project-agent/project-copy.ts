@@ -1,0 +1,55 @@
+import type {TuiLocale} from '../tui-language.ts';
+const english = {
+  recordsUnavailable:'Could not read these records. The previous snapshot is preserved; reopen /memory or /objectives to retry.',
+  draftLoading:'Restoring draft…',sending:'Sending',unconfirmed:'Delivery unconfirmed; retry the same message ID',draftFailed:'Draft not saved. Its contents remain here; retry before leaving.',draftConflict:'Draft changed in another window. Preserve this text before reopening.',approved:'Approved',denied:'Denied',expired:'Expired',stale:'Needs a fresh decision',
+  messageUnavailable:'Messages unavailable; /latest retries. Existing messages are preserved.', cardsUnavailable:'Task status unavailable; conversation remains readable.',
+  bots:'Bots', conversation:'Conversation', tasks:'Tasks', memory:'Memory', objectives:'Objectives', cards:'Needs you',
+  bind:'Bind this directory to a bot?', yes:'Yes, create a bot', no:'No, open task mode', empty:'Nothing here yet',
+  botMode:'Bot mode',switchClassic:'F2 · Task mode',switchHint:'/classic or F2 · Task mode',
+  diagnostics:'Diagnostics',diagnosticHint:'Use /diagnostics for technical details',unavailable:'Bot reply interrupted',
+  networkError:'Connection interrupted',emptyResponse:'The model returned no reply',stopped:'Bot stopped',
+  recovered:'Earlier interruption · recovered',superseded:'Earlier interruption · continued in a later turn',resolvedInterruption:'Earlier interruption · closed',
+  passed:'Verified',partial:'Partially verified',
+  host:'Running here', client:'Client · messages are queued to the host', desktop:'Handle this action on the desktop',
+  composer:'Message this bot, or /help', received:'Received', replied:'Reply to', marks:'Result', you:'You', bot:'Bot',
+  select:'Up/down to select · Enter to open · Esc to return', cardKeys:'Tab to select cards · arrows to choose · Enter to act',cardKeysFocused:'Left/right option · up/down card · Enter to act · Esc back to typing',
+  help:'F2 /classic · /diagnostics\n /bots /tasks /task N /memory /objectives /cards /takeover /classic /older /latest\n /approve N /deny N /answer N text /action N option /retry-input ID /save-draft',
+  invalid:'Invalid command or expired card. Use /help.', error:'Action failed', done:'Request submitted; see the current task state', takeover:'Takeover requested',
+  leaving:'Stopping the host. Tasks can continue on the next host.', earlier:'Earlier messages', latest:'Latest messages',
+  allow:'Allow once',allow_task:'Allow this task',approve:'Approve',reject:'Deny',continue:'Continue',answer:'Answer',confirm:'Confirm result',
+  accept_readme:'Allow README creation',retry:'Retry',choose_memory:'Keep this memory',familiarize:'Familiarize with project',familiarizeQuestion:'Shall I familiarize myself with this project?',
+  running:'Running',waiting_user:'Waiting for you',waiting_approval:'Waiting for approval',accepted:'Accepted',
+  result_ready:'Ready to confirm',queued:'Queued',paused:'Paused',completed:'Completed',failed:'Failed',cancelled:'Cancelled',
+  active:'Active',forgotten:'Forgotten',conflicted:'Conflicted',stated:'Stated',verified:'Verified',inferred:'Inferred',
+};
+const chinese: Record<keyof typeof english,string> = {
+  recordsUnavailable:'记录读取失败，保留上次快照；重新输入 /memory 或 /objectives 可重试。',
+  draftLoading:'正在恢复草稿…',sending:'正在发送',unconfirmed:'发送结果未确认，重试保留同一消息 ID',draftFailed:'草稿暂未保存，内容仍在此终端，请在离开前重试。',draftConflict:'另一窗口修改了草稿，请先复制保留当前内容再重新打开。',approved:'已批准',denied:'已拒绝',expired:'已失效',stale:'需要重新决定',
+  messageUnavailable:'消息暂不可用，已保留当前对话；输入 /latest 重试。',cardsUnavailable:'任务状态暂不可用，对话仍可阅读。',
+  bots:'机器人',conversation:'对话',tasks:'任务',memory:'记忆',objectives:'目标',cards:'待处理',
+  bind:'把这个目录绑定为机器人？',yes:'是，创建机器人',no:'否，进入普通任务模式',empty:'这里暂时没有内容',
+  botMode:'机器人模式',switchClassic:'F2 · 普通任务模式',switchHint:'/classic 或 F2 · 普通任务模式',
+  diagnostics:'诊断详情',diagnosticHint:'输入 /diagnostics 查看技术详情',unavailable:'机器人回复中断',
+  networkError:'连接中断',emptyResponse:'模型未返回回复',stopped:'机器人已停止',
+  recovered:'先前中断 · 已恢复',superseded:'先前中断 · 后续回合已接续',resolvedInterruption:'先前中断 · 已结束',
+  passed:'验证通过',partial:'部分通过',
+  host:'由本终端运行',client:'客户端 · 消息将交由宿主处理',desktop:'请在桌面处理这个操作',
+  composer:'跟机器人说话，或输入 /help',received:'已收到',replied:'回复',marks:'结果',you:'你',bot:'机器人',
+  select:'上下键选择 · 回车打开 · Esc 返回',cardKeys:'Tab 选择卡片 · 方向键切换选项 · 回车执行',cardKeysFocused:'左右键切选项 · 上下键切卡片 · 回车执行 · Esc 回到输入',
+  help:'F2 /classic · /diagnostics\n /bots /tasks /task N /memory /objectives /cards /takeover /classic /older /latest\n /approve N /deny N /answer N 内容 /action N 选项 /retry-input ID /save-draft',
+  invalid:'命令无效或卡片已过期。输入 /help 查看用法。',error:'操作失败',done:'操作已提交，请以最新任务状态为准',takeover:'已请求接管',
+  leaving:'正在停止宿主。任务会在下一个宿主上继续。',earlier:'较早的消息',latest:'最新消息',
+  allow:'允许一次',allow_task:'允许此任务',approve:'批准',reject:'拒绝',continue:'继续',answer:'回答',confirm:'确认结果',
+  accept_readme:'允许创建 README',retry:'重试',choose_memory:'保留这条记忆',familiarize:'先熟悉一下项目',familiarizeQuestion:'要我先熟悉一下这个项目吗？',
+  running:'进行中',waiting_user:'等你回答',waiting_approval:'待批准',accepted:'已签收',result_ready:'待签收',queued:'排队中',
+  paused:'已暂停',completed:'已完成',failed:'失败',cancelled:'已取消',active:'有效',forgotten:'已撤回',conflicted:'有冲突',
+  stated:'用户声明',verified:'已验证',inferred:'推断',
+};
+export function projectCopy(locale:TuiLocale,key:keyof typeof english) { return (locale==='en-US'?english:chinese)[key]; }
+export function projectStatus(locale:TuiLocale,value:string) {return value in english ? projectCopy(locale,value as keyof typeof english):value;}
+export function actionLabel(locale:TuiLocale,action:any) {return action.payload?.text || projectStatus(locale,action.id);}
+
+export function projectSessionStatus(locale: TuiLocale, session: { status?: string; followUp?: { owner: string } }) {
+  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return locale === 'en-US' ? 'Reviewing the result' : '正在核对结果';
+  return projectStatus(locale, session.status || '');
+}

@@ -5,8 +5,8 @@ import {
   createSettingsApplicationService,
 } from './settings-application-service.mjs';
 
-function createHarness({ exportDirectory = '/export', importDirectory = '/import' } = {}) {
-  let settings = {
+function createHarness({ exportDirectory = '/export', importDirectory = '/import', settings: initialSettings } = {}) {
+  let settings = initialSettings ?? {
     appearance: 'dark',
     systemInstructions: 'alpha',
     localAccessLevel: 'manual',
@@ -138,4 +138,178 @@ test('permission decisions preserve grant fields and resolve through the injecte
     ['call-1', approved],
     ['call-2', denied],
   ]);
+});
+
+test('projectAgentMode round-trips in developer settings and reset clears it', () => {
+  const { service } = createHarness();
+  assert.equal(service.getDeveloperSettings().projectAgentMode, undefined);
+  assert.equal(service.updateDeveloperSettings({ projectAgentMode: true }).projectAgentMode, true);
+  assert.equal(service.getDeveloperSettings().trace, false);
+  assert.deepEqual(service.resetDeveloperSettings(), {});
+  assert.equal(service.getDeveloperSettings().projectAgentMode, undefined);
+});
+
+test('model routing defaults are computed on read and are not written back', () => {
+  const { service, calls, getSettings } = createHarness();
+  const providers = [{
+    id: 'only-model',
+    enabled: true,
+    apiKeyConfigured: true,
+    supportsVision: true,
+    isDefault: true,
+    provider: 'openai',
+  }];
+  const mergesBefore = calls.filter((call) => call[0] === 'merge').length;
+  const routing = service.getModelRouting(providers);
+  assert.equal(calls.filter((call) => call[0] === 'merge').length, mergesBefore);
+  assert.equal(routing.tiers.strong.primary, 'only-model');
+  assert.equal(routing.tiers.fast.primary, 'only-model');
+  assert.equal(routing.tiers.economy.primary, 'only-model');
+  assert.equal(routing.tiers.vision.primary, 'only-model');
+  assert.equal(routing.roles.explorer.tier, 'economy');
+  assert.equal(routing.verifierPreferDifferentFamily, true);
+  assert.equal(getSettings().modelRouting, undefined);
+
+  const stored = service.updateModelRouting({
+    tiers: { strong: { primary: 'only-model', fallbacks: ['spare'] } },
+    verifierPreferDifferentFamily: false,
+    dailySpendCapUsd: 3,
+  });
+  assert.equal(stored.tiers.strong.primary, 'only-model');
+  assert.deepEqual(stored.tiers.strong.fallbacks, ['spare']);
+  assert.equal(stored.verifierPreferDifferentFamily, false);
+  assert.equal(stored.dailySpendCapUsd, 3);
+  assert.equal(stored.roles, undefined);
+
+  const again = service.getModelRouting(providers);
+  assert.equal(again.tiers.strong.primary, 'only-model');
+  assert.deepEqual(again.tiers.strong.fallbacks, ['spare']);
+  assert.equal(again.tiers.economy.primary, 'only-model');
+  assert.equal(again.roles.verifier.tier, 'strong');
+  assert.equal(again.verifierPreferDifferentFamily, false);
+  assert.equal(getSettings().modelRouting.roles, undefined);
+  assert.equal(getSettings().modelRouting.tiers.economy, undefined);
+});
+
+test('clearing a role spend cap removes that key', () => {
+  const { service, calls, getSettings } = createHarness();
+  service.updateModelRouting({ roleSpendCaps: { explorer: 1, verifier: 2 } });
+  const stored = service.updateModelRouting({ roleSpendCaps: { explorer: null } });
+  assert.equal(stored.roleSpendCaps.verifier, 2);
+  assert.equal(stored.roleSpendCaps.explorer, undefined);
+  assert.equal(getSettings().modelRouting.roleSpendCaps.explorer, undefined);
+  const cleared = service.updateModelRouting({ roleSpendCaps: { verifier: '' } });
+  assert.equal(cleared.roleSpendCaps, undefined);
+  assert.equal(getSettings().modelRouting.roleSpendCaps, undefined);
+  const mergesBefore = calls.filter((call) => call[0] === 'merge').length;
+  service.updateModelRouting({ roleSpendCaps: { explorer: null } });
+  assert.equal(calls.filter((call) => call[0] === 'merge').length, mergesBefore);
+});
+
+test('one model can persist a tier effort, preview the resolved value and reject unsupported writes', () => {
+  const { service, calls, getSettings } = createHarness({ settings: {} });
+  const providers = [{ id: 'one', model: 'reasoner', provider: 'openai', enabled: true, apiKeyConfigured: true,
+    supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' }];
+  service.updateModelRouting({ roles: { project_agent: { mode: 'tier', tier: 'fast', reasoningEffort: 'high' } } }, providers);
+  const role = service.describeModelRouting(providers).routing.roles.project_agent;
+  assert.deepEqual(role, { mode: 'tier', tier: 'fast', reasoningEffort: 'high' });
+  const preview = service.previewModelRouting(providers).resolutions.find(row => row.role === 'project_agent');
+  assert.equal(preview.modelProviderId, 'one');
+  assert.equal(preview.reasoningEffort, 'high');
+  const count = calls.length;
+  assert.throws(() => service.updateModelRouting({ roles: { project_agent: { ...role, reasoningEffort: 'max' } } }, providers), /INVALID_REASONING_EFFORT/);
+  assert.equal(calls.length, count);
+  assert.equal(getSettings().modelRouting.roles.project_agent.reasoningEffort, 'high');
+  service.updateModelRouting({ roles: { project_agent: { mode: 'tier', tier: 'fast' } } }, providers);
+  assert.equal(service.previewModelRouting(providers).resolutions.find(row => row.role === 'project_agent').reasoningEffort, 'low');
+});
+
+test('project agent settings keep the standard level and merge quiet hours', () => {
+  const { service, getSettings } = createHarness();
+  const first = service.update({ projectAgent: { proactivity: 'high', digestTime: '18:30' } });
+  assert.deepEqual(first.projectAgent, {
+    concurrency: 4,
+    proactivity: 'high',
+    quietHours: { enabled: false, start: '22:00', end: '08:00' },
+    digestTime: '18:30',
+    shell: 'bots',
+    shellIntroPending: false,
+    shellIntroDismissed: false,
+  });
+  const second = service.update({ projectAgent: { quietHours: { enabled: true, start: '21:00' } } });
+  assert.equal(second.projectAgent.proactivity, 'high');
+  assert.deepEqual(second.projectAgent.quietHours, { enabled: true, start: '21:00', end: '08:00' });
+  assert.equal(getSettings().projectAgent.digestTime, '18:30');
+  assert.equal(service.update({ projectAgent: { proactivity: 'nope' } }).projectAgent.proactivity, 'standard');
+  const rooted = service.update({ projectAgent: { managedRoot: '/tmp/bots', proactivity: 'low' } });
+  assert.equal(rooted.projectAgent.managedRoot, '/tmp/bots');
+  assert.equal(rooted.projectAgent.proactivity, 'low');
+  assert.equal(rooted.projectAgent.digestTime, '18:30');
+  const kept = service.update({ projectAgent: { digestTime: '07:15' } });
+  assert.equal(kept.projectAgent.managedRoot, '/tmp/bots');
+  assert.equal(kept.projectAgent.proactivity, 'low');
+  assert.equal(kept.projectAgent.digestTime, '07:15');
+  assert.equal(kept.projectAgent.quietHours.enabled, true);
+});
+
+test('switching shells keeps workspaces and the stored developer flag', () => {
+  const initial = {
+    appearance: 'dark',
+    systemInstructions: 'alpha',
+    localAccessLevel: 'manual',
+    developer: { trace: false, projectAgentMode: true },
+    locale: 'zh-CN',
+    workspaces: [{ path: '/repo', name: 'Repo' }],
+    projectAgent: {
+      proactivity: 'high',
+      quietHours: { enabled: false, start: '22:00', end: '08:00' },
+      digestTime: '18:30',
+      shell: 'bots',
+      shellIntroPending: true,
+      shellIntroDismissed: false,
+      managedRoot: '/tmp/bots',
+    },
+  };
+  const { service, getSettings } = createHarness({ settings: structuredClone(initial) });
+  const classic = service.update({ projectAgent: { shell: 'classic' } });
+  assert.equal(classic.projectAgent.shell, 'classic');
+  assert.equal(classic.projectAgent.proactivity, 'high');
+  assert.equal(classic.projectAgent.managedRoot, '/tmp/bots');
+  assert.equal(classic.projectAgent.shellIntroPending, true);
+  assert.deepEqual(classic.workspaces, initial.workspaces);
+  assert.equal(classic.developer.projectAgentMode, true);
+  assert.equal(classic.appearance, 'dark');
+  const bots = service.update({ projectAgent: { shell: 'bots' } });
+  assert.equal(bots.projectAgent.shell, 'bots');
+  assert.deepEqual(bots.workspaces, initial.workspaces);
+  assert.equal(bots.developer.projectAgentMode, true);
+  assert.equal(getSettings().systemInstructions, 'alpha');
+});
+
+test('global concurrency is persisted through existing settings and unrelated project settings survive', () => {
+  const {service,getSettings}=createHarness();
+  service.update({projectAgent:{proactivity:'high',concurrency:2}});
+  assert.equal(getSettings().projectAgent.concurrency,2);
+  assert.equal(service.update({projectAgent:{concurrency:8}}).projectAgent.proactivity,'high');
+  assert.equal(getSettings().projectAgent.concurrency,8);
+  assert.equal(service.update({projectAgent:{concurrency:9}}).projectAgent.concurrency,4);
+});
+
+test('routing parameter updates preserve bindings and reject unsupported channels before persistence', () => {
+  const oauth = { id: 'grok', model: 'grok', authMethod: 'oauth_grok', apiKeyConfigured: true,
+    supportsReasoning: true, reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' };
+  const api = { ...oauth, id: 'api', authMethod: 'api_key' };
+  const host = createHarness({ settings: { modelRouting: { tiers: {
+    fast: { primary: 'grok', fallbacks: [], reasoningEffort: 'high', fastMode: true },
+    economy: { primary: 'removed', fallbacks: [], reasoningEffort: 'max' },
+  } } } });
+  host.service.updateModelRouting({ roles: { project_agent: { mode: 'tier', tier: 'fast', reasoningEffort: null, fastMode: false } } }, [oauth, api]);
+  const row = host.service.previewModelRouting([oauth, api]).resolutions.find(item => item.role === 'project_agent');
+  assert.equal(row.ok, true);
+  assert.equal(row.reasoningEffort, 'low');
+  assert.equal(row.fastMode, false);
+  const before = JSON.stringify(host.getSettings());
+  assert.throws(() => host.service.updateModelRouting({ tiers: { fast: { primary: 'api', fallbacks: [], fastMode: true } } }, [oauth, api]), /INVALID_FAST_MODE/);
+  assert.equal(JSON.stringify(host.getSettings()), before);
+  assert.equal(host.getSettings().modelRouting.tiers.economy.primary, 'removed');
 });

@@ -1,3 +1,4 @@
+import { useProviderFormGuard } from '../hooks/useProviderFormGuard';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import {
   resolveLlmModelOptionValues,
@@ -5,7 +6,7 @@ import {
   type LlmProviderConfigView,
   type LlmReasoningParamStyle,
 } from '@peer-agent/protocol';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { PeerIcon } from '../../ui/icons';
 import { Dropdown } from './Dropdown';
 import { Overlay } from './Overlay';
@@ -58,6 +59,7 @@ export function ModelSettingsDialog({
   readonly onClose: () => void;
 }) {
   const zh = i18n.locale === 'zh-CN';
+  const saveLock = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState<ModelSettingsForm>({
@@ -80,13 +82,14 @@ export function ModelSettingsDialog({
   const completion = modelMetadataCompletion(model);
 
   const save = async () => {
-    setSaving(true);
+    if (saveLock.current) return false;
+    saveLock.current = true; setSaving(true);
     setSaveError(null);
     try {
       const modelId = form.modelId.trim();
       if (!modelId) {
         setSaveError(zh ? 'Model ID 不能为空' : 'Model ID is required');
-        return;
+        return false;
       }
       const reasoningEffortMap = form.supportsReasoning === 'yes'
         ? parseReasoningEffortMap(form.reasoningEffortMapText)
@@ -111,16 +114,17 @@ export function ModelSettingsDialog({
         metadataSource: 'manual',
         metadataSyncedAt: new Date().toISOString(),
       });
-      onClose();
+      onClose(); return true;
     } catch (error: unknown) {
-      setSaveError(error instanceof Error ? error.message : 'model_settings_save_failed');
+      setSaveError(error instanceof Error ? error.message : 'model_settings_save_failed'); return false;
     } finally {
-      setSaving(false);
+      saveLock.current = false; setSaving(false);
     }
   };
 
+  const guardClose = useProviderFormGuard(form, true, saving, onClose, save);
   return (
-    <Overlay onClose={onClose} closeOnBackdrop={!saving} ariaLabel={zh ? '模型设置' : 'Model settings'} panelClassName="llm-model-settings-dialog">
+    <Overlay onClose={onClose} onRequestClose={guardClose} onEscape={() => saving} closeOnBackdrop={!saving} ariaLabel={zh ? '模型设置' : 'Model settings'} panelClassName="llm-model-settings-dialog">
       {({ requestClose }) => (
         <>
           <header className="llm-dialog-header">
@@ -131,7 +135,7 @@ export function ModelSettingsDialog({
             <button type="button" className="llm-dialog-close" onClick={requestClose} aria-label={zh ? '关闭' : 'Close'}><PeerIcon name="close" size={14} /></button>
           </header>
 
-          <div className="llm-model-settings-body">
+          <fieldset className="llm-model-settings-body ui-form-fields" disabled={saving}>
             <section className="llm-settings-section">
               <div className="llm-settings-section-heading">
                 <h4>{zh ? '基础' : 'Basics'}</h4>
@@ -252,12 +256,12 @@ export function ModelSettingsDialog({
               <div><span>{zh ? '数据来源' : 'Metadata source'}</span><strong>{sourceLabel(model.metadataSource, zh)}</strong></div>
               <div><span>{zh ? '最后更新' : 'Last updated'}</span><strong>{model.metadataSyncedAt ? new Date(model.metadataSyncedAt).toLocaleString() : (zh ? '未知' : 'Unknown')}</strong></div>
             </section>
-            {saveError ? <p className="llm-catalog-error">{saveError}</p> : null}
-          </div>
+            {saveError ? <p className="llm-catalog-error" role="alert">{saveError}</p> : null}
+          </fieldset>
 
           <footer className="llm-dialog-footer">
-            <button type="button" onClick={requestClose}>{zh ? '取消' : 'Cancel'}</button>
-            <button type="button" className="primary" onClick={() => void save()} disabled={saving}>{saving ? '…' : (zh ? '保存模型设置' : 'Save model settings')}</button>
+            <button type="button" className="ui-button" onClick={requestClose}>{zh ? '取消' : 'Cancel'}</button>
+            <button type="button" className="primary ui-button is-primary" onClick={() => void save()} disabled={saving}>{saving ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{saving ? (zh ? '正在保存' : 'Saving') : (zh ? '保存模型设置' : 'Save model settings')}</button>
           </footer>
         </>
       )}

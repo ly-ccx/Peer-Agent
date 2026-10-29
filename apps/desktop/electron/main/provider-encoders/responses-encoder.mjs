@@ -111,6 +111,8 @@ function toResponsesTools(tools) {
         name: fn.name,
         description: fn.description,
         parameters: fn.parameters,
+        // Responses may normalize an omitted policy into strict schemas (ADR 28 §9).
+        strict: typeof fn.strict === 'boolean' ? fn.strict : false,
       };
     })
     .filter(Boolean);

@@ -1,3 +1,11 @@
+import './settings-section-header.css';
+import '../../styles/llm-settings.css';
+import { MotionSurface } from './MotionSurface';
+import { useFallbackVisionSetting } from '../hooks/useFallbackVisionSetting';
+import { useProviderCollection } from '../hooks/useProviderCollection';
+import { useProviderFormGuard } from '../hooks/useProviderFormGuard';
+import { FormFeedback } from '../../ui/forms/FormFeedback';
+import { useGuardedNavigation } from '../../ui/forms/UnsavedChanges';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type {
   LlmAuthMethod,
@@ -16,7 +24,10 @@ import { clientApi } from '../../clientApi';
 import { getProviderDisplayName } from '../../chat/state/providerDisplay';
 import { Switch } from '../../ui/boolean-controls';
 import { PeerIcon } from '../../ui/icons';
-import { CascadingMenu, type CascadingMenuGroup } from './CascadingMenu';
+import type { CascadingMenuGroup } from './CascadingMenu';
+import { FallbackVisionSetting } from './FallbackVisionSetting';
+import { SettingsDisclosureContent } from './SettingsDisclosureContent';
+import './provider-settings.css';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { useConfirm } from './ConfirmProvider';
 import { LlmBrandIcon } from './LlmBrandIcon';
@@ -592,14 +603,15 @@ export function LlmSettingsPanel({
   readonly onBack?: () => void;
 }) {
   const confirm = useConfirm();
-  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [fallbackVisionProviderId, setFallbackVisionProviderId] = useState<string>('');
-  const [fallbackVisionSaving, setFallbackVisionSaving] = useState(false);
+  const { providers, setProviders, refresh, loading: providersLoading, error: providersError } = useProviderCollection(list => {
+    setTestResults(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => !list.some(provider => provider.id === id && isOAuthMethod(provider.authMethod) && provider.oauthStatus?.status === 'connected'))));
+  });
+  const navigate = useGuardedNavigation();
+  const fallbackVision = useFallbackVisionSetting();
+  const fallbackVisionProviderId = fallbackVision.draft, fallbackVisionSaving = !fallbackVision.loaded || fallbackVision.saving;
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [catalogClosing, setCatalogClosing] = useState(false);
-  const catalogCloseTimer = useRef<number | null>(null);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -608,6 +620,7 @@ export function LlmSettingsPanel({
   const [showAdvancedFields, setShowAdvancedFields] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [quotaResults, setQuotaResults] = useState<Record<string, LlmSubscriptionQuota>>({});
@@ -645,44 +658,12 @@ export function LlmSettingsPanel({
     });
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      const list = await clientApi.llmListProviderGroups();
-      setProviders(list);
-      setTestResults((prev) => {
-        let next: Record<string, LlmProviderTestResult> | null = null;
-        for (const provider of list) {
-          if (!isOAuthMethod(provider.authMethod) || provider.oauthStatus?.status !== 'connected' || !prev[provider.id]) continue;
-          next ??= { ...prev };
-          delete next[provider.id];
-        }
-        return next ?? prev;
-      });
-      return list;
-    } catch { /* silent */ }
-    return [];
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  useEffect(() => {
-    const settings = (clientApi.initialSettings || {}) as Record<string, unknown>;
-    const raw = settings.fallbackVision;
-    if (typeof raw === 'string' && raw.trim()) {
-      setFallbackVisionProviderId(raw.trim());
-      return;
-    }
-    if (raw && typeof raw === 'object' && typeof (raw as { providerId?: unknown }).providerId === 'string') {
-      setFallbackVisionProviderId(String((raw as { providerId: string }).providerId).trim());
-    }
-  }, []);
-
   // 与底部模型选择器一致：一级 provider（groupId），二级 vision 模型；未配 Key 的模型置灰。
   const fallbackVisionMenuGroups: readonly CascadingMenuGroup[] = useMemo(() => {
     const isZh = i18n.locale === 'zh-CN';
-    // CascadingMenu 触发器展示「分组 · 模型」；「不使用」拆成两级文案，避免重复。
+    // Model choices retain their service group; the empty choice uses a compact trigger label.
     const noneGroupLabel = isZh ? '不使用' : 'None';
-    const noneItemLabel = isZh ? '仅剥离图片' : 'Strip images only';
+    const noneItemLabel = i18n.t('settings.fallbackVision.none');
     const order: string[] = [];
     const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
     for (const prov of providers) {
@@ -719,21 +700,6 @@ export function LlmSettingsPanel({
     ];
   }, [providers, i18n]);
 
-  const handleFallbackVisionChange = async (nextId: string) => {
-    const normalized = nextId === '__none__' ? '' : nextId;
-    const previous = fallbackVisionProviderId;
-    setFallbackVisionProviderId(normalized);
-    setFallbackVisionSaving(true);
-    try {
-      await clientApi.updateSettings({
-        fallbackVision: normalized ? { providerId: normalized } : null,
-      });
-    } catch {
-      setFallbackVisionProviderId(previous);
-    } finally {
-      setFallbackVisionSaving(false);
-    }
-  };
 
   useEffect(() => clientApi.onLlmOAuthPending((pending) => {
     setOauthPending(pending);
@@ -821,27 +787,8 @@ export function LlmSettingsPanel({
     }));
   };
 
-  const openAdd = () => {
-    if (catalogCloseTimer.current !== null) {
-      window.clearTimeout(catalogCloseTimer.current);
-      catalogCloseTimer.current = null;
-    }
-    setCatalogQuery('');
-    setCatalogClosing(false);
-    setCatalogOpen(true);
-  };
-
-  const closeCatalog = () => {
-    setCatalogClosing(true);
-    if (catalogCloseTimer.current !== null) {
-      window.clearTimeout(catalogCloseTimer.current);
-    }
-    catalogCloseTimer.current = window.setTimeout(() => {
-      catalogCloseTimer.current = null;
-      setCatalogOpen(false);
-      setCatalogClosing(false);
-    }, 170);
-  };
+  const openAdd = () => { setCatalogQuery(''); setCatalogOpen(true); };
+  const closeCatalog = () => setCatalogOpen(false);
 
   const clearLocalCliFlow = useCallback(() => {
     setLocalCliDetectSteps([]);
@@ -861,7 +808,7 @@ export function LlmSettingsPanel({
     const tryScroll = (attempt: number) => {
       const el = document.querySelector(`[data-llm-group-id="${groupId}"]`);
       if (el instanceof HTMLElement) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
         return;
       }
       if (attempt < 12) {
@@ -969,8 +916,16 @@ export function LlmSettingsPanel({
     setShowForm(true);
   };
 
+  const closeProviderForm = () => {
+    setShowForm(false); setEditingId(null); setAddModelGroupId(null);
+    setFormLockSource('manual'); setShowAdvancedFields(false); clearLocalCliFlow();
+    setForm(emptyForm(channels));
+  };
+  const guardProviderClose = useProviderFormGuard(form, showForm, saving || Boolean(oauthBusyId), closeProviderForm);
+
   const handleSave = async () => {
-    setSaving(true);
+    if (saveLock.current) return;
+    saveLock.current = true; setSaving(true);
     setFormError(null);
     try {
       const localCli = isLocalCliMethod(form.authMethod);
@@ -1165,7 +1120,7 @@ export function LlmSettingsPanel({
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Save failed');
     } finally {
-      setSaving(false);
+      saveLock.current = false; setSaving(false);
     }
   };
 
@@ -1274,6 +1229,12 @@ export function LlmSettingsPanel({
     const configuredModels = providers.filter(
       (provider) => (provider.groupId ?? provider.id) === groupId,
     );
+    if (sourceOverride === 'manual') {
+      for (const patch of patches) {
+        if (!configuredModels.some(model => model.model === patch.model)) await clientApi.llmAddModel({ groupId, name: target.name, ...patch });
+      }
+      return (await refresh()).filter(provider => (provider.groupId ?? provider.id) === groupId);
+    }
     const changes = calculateModelSelectionChanges(models, configuredModels);
     if (changes.additions.length === 0 && changes.removals.length === configuredModels.length) {
       throw new Error('provider_requires_at_least_one_model');
@@ -1459,46 +1420,28 @@ export function LlmSettingsPanel({
     <div className="llm-settings-panel">
       {onBack ? (
         <header className="llm-settings-header">
-          <button type="button" onClick={onBack} aria-label="Back">
+          <button type="button" onClick={() => navigate(onBack)} aria-label="Back">
             <PeerIcon name="back" size={18} />
           </button>
           <strong>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</strong>
         </header>
       ) : null}
 
-      <div className="llm-list-toolbar">
-        <div className="llm-list-summary">
-          <strong>{i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}</strong>
-          <span>{groups.length} {i18n.locale === 'zh-CN' ? '个渠道' : 'channels'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+      <FormFeedback i18n={i18n} loading={providersLoading} readError={providersError} onReload={refresh} />
+      <header className="frost-page-heading llm-page-heading">
+        <div>
+          <h1>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</h1>
+          <p>{i18n.locale === 'zh-CN' ? '管理机器人使用的服务与模型。' : 'Manage the services and models your bots use.'}</p>
         </div>
-        <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
-          <PeerIcon name="plus" size={14} />
+        {!catalogOpen ? <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
+          <PeerIcon name="plus" size={16} />
           {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
-        </button>
-      </div>
+        </button> : null}
+      </header>
 
-      <section className="llm-fallback-vision" aria-label={i18n.t('settings.fallbackVision')}>
-        <div className="llm-fallback-vision-copy">
-          <strong>{i18n.t('settings.fallbackVision')}</strong>
-          <p>{i18n.t('settings.fallbackVision.description')}</p>
-        </div>
-        <div className="llm-fallback-vision-select">
-          <CascadingMenu
-            className="llm-fallback-vision-menu"
-            value={fallbackVisionProviderId || '__none__'}
-            groups={fallbackVisionMenuGroups}
-            onChange={(nextId) => { void handleFallbackVisionChange(nextId); }}
-            disabled={fallbackVisionSaving}
-            ariaLabel={i18n.t('settings.fallbackVision')}
-            placeholder={i18n.t('settings.fallbackVision.none')}
-            menuPlacement="down"
-          />
-        </div>
-      </section>
+            <MotionSurface kind="fade">{catalogOpen ? (
 
-            {catalogOpen ? (
-
-        <div className={`llm-service-catalog${catalogClosing ? ' is-closing' : ''}`} role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
+        <div className="llm-service-catalog" role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
           <div className="llm-service-catalog-header">
             <div>
               <strong>{i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}</strong>
@@ -1598,7 +1541,12 @@ export function LlmSettingsPanel({
           })()}
         </div>
       ) : (
-        <div className="llm-provider-list">
+        <section className="llm-connected-group" aria-label={i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}>
+          <header className="llm-connected-band">
+            <h2>{i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}</h2>
+            <span className="llm-connected-meta">{groups.length} {i18n.locale === 'zh-CN' ? '个服务' : 'services'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+          </header>
+          <div className="llm-provider-list">
 {providers.length === 0 ? (
           <div className="llm-empty">
             <p>{i18n.locale === 'zh-CN' ? '还没有连接 AI 服务。' : 'No AI services connected yet.'}</p>
@@ -1613,97 +1561,48 @@ export function LlmSettingsPanel({
           const groupChannel = descriptorFor(head.channelId || (head.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
           const zh = i18n.locale === 'zh-CN';
           const quotaSummary = usageSummaryChip(currentAccountUsage(quotaResults[head.id], head), zh);
+          const groupState = aggregateGroupConnectionState(g.models);
+          const status = connectionStatusLabel(groupState ? { ...head, connectionState: groupState } : head, zh);
+          const defaultModel = g.models.find((model) => model.isDefault);
           return (
           <div key={g.groupId} data-llm-group-id={g.groupId} className={`llm-provider-group${highlightGroupId === g.groupId ? ' is-highlight' : ''}`}>
             <div className="llm-group-header">
-              <div className="llm-group-header-main">
-              <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)} aria-expanded={!collapsed}>
-                <LlmBrandIcon
-                  channelId={head.channelId}
-                  providerName={head.name}
-                  serviceTemplateId={head.serviceTemplateId}
-                />
-                <svg
-                  className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`}
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-                <strong>{head.name || head.provider}</strong>
-                <span className="llm-group-count">{g.models.length} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+              <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)}
+                aria-expanded={!collapsed} aria-controls={`llm-models-${g.groupId}`}>
+                <LlmBrandIcon channelId={head.channelId} providerName={head.name} serviceTemplateId={head.serviceTemplateId} />
+                <span className="llm-service-copy">
+                  <strong>{head.name || head.provider}</strong>
+                  <span className="llm-group-count">{`${accessMethodLabel(head, zh)} · ${g.models.length} ${zh ? '个模型' : 'models'}${defaultModel ? ` · ${zh ? '默认' : 'default'} ${defaultModel.modelLabel || defaultModel.model}` : ''}`}</span>
+                </span>
+                <PeerIcon name="chevronDown" size={14} className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`} />
               </button>
-              <span className="llm-provider-meta">
-                <span className="llm-provider-chip">{groupChannel.label}</span>
-                <span className="llm-provider-chip">{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
-                {quotaSummary ? (
-                  <span className="llm-provider-chip llm-quota-chip" title={zh ? '最近一次查询的余额' : 'Balance from the last query'}>{quotaSummary}</span>
-                ) : null}
+              <span className={`llm-connection-status tone-${status.tone}`} title={head.connectionStateReason || head.lastErrorCategory || ''}>
+                <PeerIcon name="circle" size={8} className="llm-service-status-dot" />{status.text}
               </span>
-              {isLocalCliMethod(head.authMethod) ? (
-                <small className="llm-provider-key">
-                  {i18n.locale === 'zh-CN' ? '本机 Qoder 登录态' : 'Local Qoder Auth'}
-                </small>
-              ) : isOAuthMethod(head.authMethod) ? (
-                <small className={`llm-provider-key llm-oauth-status-${head.oauthStatus?.status ?? 'disconnected'}`}>
-                  {head.oauthStatus?.status === 'connected'
-                    ? (i18n.locale === 'zh-CN' ? `已登录${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}` : `Signed in${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}`)
-                    : head.oauthStatus?.status === 'expired'
-                      ? (i18n.locale === 'zh-CN' ? '⚠ 登录已过期，请点击“重新登录”' : '⚠ Session expired — click “Re-login”')
-                      : (i18n.locale === 'zh-CN' ? '未登录' : 'Not logged in')}
-                </small>
-              ) : (
-                <small className="llm-provider-key">
-                  {(() => {
-                    const groupState = aggregateGroupConnectionState(g.models);
-                    const status = connectionStatusLabel(
-                      groupState ? { ...head, connectionState: groupState } : head,
-                      i18n.locale === 'zh-CN',
-                    );
-                    return (
-                      <span className={`llm-connection-status tone-${status.tone}`} title={head.connectionStateReason || head.lastErrorCategory || ''}>
-                        {status.text}
-                        <span className="llm-connection-method"> · {accessMethodLabel(head, i18n.locale === 'zh-CN')}</span>
-                        {head.apiKeyConfigured ? ` · ${head.apiKeyMasked || 'Key'}` : ''}
-                      </span>
-                    );
-                  })()}
-                </small>
-              )}
               <div className="llm-group-actions">
-                <button type="button" onClick={() => openEdit(head)}>
-                  {i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit connection'}
-                </button>
-                {isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected' ? (
-                  <button type="button" onClick={() => void handleOAuthLogin({ id: head.id })} disabled={oauthBusyId === head.id}>
-                    {oauthBusyId === head.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
-                  </button>
-                ) : null}
-                <OverflowMenu
-                  zh={zh}
+                <OverflowMenu zh={zh} label={zh ? `管理 ${head.name || head.provider}` : `Manage ${head.name || head.provider}`}
                   items={[
-                    {
-                      key: 'remove-group',
-                      label: i18n.locale === 'zh-CN' ? '删除渠道' : 'Remove provider',
-                      danger: true,
+                    { key: 'edit-group', label: zh ? '编辑连接' : 'Edit connection', onSelect: () => openEdit(head) },
+                    ...(isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected' ? [{
+                      key: 'login-group', label: zh ? '重新登录' : 'Re-login', disabled: oauthBusyId === head.id,
+                      onSelect: () => void handleOAuthLogin({ id: head.id }),
+                    }] : []),
+                    { key: 'remove-group', label: zh ? '删除服务' : 'Remove service', danger: true,
                       disabled: removingGroupId === g.groupId,
-                      onSelect: () => void handleRemoveGroup(g.groupId, head.name || head.provider),
-                    },
-                  ]}
-                />
-              </div>
-            
+                      onSelect: () => void handleRemoveGroup(g.groupId, head.name || head.provider) },
+                  ]} />
               </div>
             </div>
-            {!collapsed ? (
+            <SettingsDisclosureContent expanded={!collapsed} id={`llm-models-${g.groupId}`}>
               <div className="llm-group-body">
+                <div className="llm-service-connection-details">
+                  <span>{groupChannel.label}</span>
+                  <span>{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
+                  <span>{accessMethodLabel(head, zh)}</span>
+                  {head.apiKeyConfigured && head.apiKeyMasked ? <span>{head.apiKeyMasked}</span> : null}
+                  {isOAuthMethod(head.authMethod) && head.oauthStatus?.accountId ? <span>{head.oauthStatus.accountId}</span> : null}
+                  {quotaSummary ? <span>{quotaSummary}</span> : null}
+                </div>
                 <div className="llm-group-section">
                   <div className="llm-group-section-head">
                     <span className="llm-group-section-title">{i18n.locale === 'zh-CN' ? '模型' : 'Models'}</span>
@@ -1743,23 +1642,24 @@ export function LlmSettingsPanel({
                   onRefresh={() => void handleRefreshQuota(head.id)}
                 />
               </div>
-            ) : null}
+            </SettingsDisclosureContent>
           </div>
           );
         })}
-        </div>
-      )}
+          </div>
+        </section>
+      )}</MotionSurface>
+
+      {!catalogOpen ? <FormFeedback i18n={i18n} {...fallbackVision} onReload={fallbackVision.reload} onRetry={fallbackVision.save} /> : null}
+      {!catalogOpen ? <FallbackVisionSetting i18n={i18n} value={fallbackVisionProviderId}
+        groups={fallbackVisionMenuGroups} saving={fallbackVisionSaving}
+        onChange={nextId => { void fallbackVision.change(nextId); }} /> : null}
 
 {showForm ? (
         <Overlay
-          onClose={() => {
-            setShowForm(false);
-            setEditingId(null);
-            setAddModelGroupId(null);
-            setFormLockSource('manual');
-            setShowAdvancedFields(false);
-            clearLocalCliFlow();
-          }}
+          onClose={closeProviderForm}
+          onRequestClose={guardProviderClose}
+          onEscape={() => saving || Boolean(oauthBusyId)}
           closeOnBackdrop={!saving && !oauthBusyId}
           ariaLabel={editingId
             ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
@@ -1806,7 +1706,7 @@ export function LlmSettingsPanel({
                 <PeerIcon name="close" size={14} />
               </button>
             </header>
-            <div className="llm-form llm-modal-body">
+            <fieldset className="llm-form llm-modal-body ui-form-fields" disabled={saving || Boolean(oauthBusyId)}>
 
           {!isAddModel && (
           <>
@@ -2133,15 +2033,15 @@ export function LlmSettingsPanel({
           </>
           ) : null}
 
-          {formError ? <p className="llm-form-error">{(isLocalCliAuth ? friendlyLocalCliError(formError, i18n.locale) : friendlyTestError(formError, i18n.locale))}</p> : null}
-            </div>
+          {formError ? <p className="llm-form-error" role="alert">{(isLocalCliAuth ? friendlyLocalCliError(formError, i18n.locale) : friendlyTestError(formError, i18n.locale))}</p> : null}
+            </fieldset>
             <div className="llm-modal-footer">
-            <button type="button" className="llm-modal-cancel" onClick={requestClose}>
+            <button type="button" className="llm-modal-cancel ui-button" onClick={requestClose}>
               {i18n.locale === 'zh-CN' ? '取消' : 'Cancel'}
             </button>
             <button
               type="button"
-              className="primary"
+              className="primary ui-button is-primary"
               onClick={() => {
                 if (formValidationError) {
                   setFormError(formValidationError);
@@ -2151,10 +2051,10 @@ export function LlmSettingsPanel({
               }}
               disabled={!canSubmit}
             >
-              {saving || oauthBusyId
+              {saving || oauthBusyId ? <PeerIcon name="ellipsis" size={14} className="inline-icon" /> : null}{saving || oauthBusyId
                 ? (isLocalCliAuth
                     ? (i18n.locale === 'zh-CN' ? '检测中…' : 'Detecting…')
-                    : '...')
+                    : (i18n.locale === 'zh-CN' ? '处理中…' : 'Working…'))
                 : (isLocalCliAuth && !editingId
                     ? (i18n.locale === 'zh-CN' ? '检测并连接' : 'Detect & connect')
                     : (isOAuthMethod(form.authMethod) && !editingId
@@ -2171,6 +2071,7 @@ export function LlmSettingsPanel({
 
       {pendingProviderDraft ? (
         <ModelCatalogDialog
+          pendingCreation
           i18n={i18n}
           providerName={pendingProviderDraft.name}
           channelId={pendingProviderDraft.channelId}
@@ -2230,7 +2131,6 @@ export function LlmSettingsPanel({
 
       {oauthPending ? (
         <Overlay
-          onClose={() => undefined}
           closeOnBackdrop={false}
           ariaLabel={i18n.locale === 'zh-CN' ? 'Grok 登录授权码' : 'Grok sign-in authorization code'}
           panelClassName="llm-oauth-code-dialog"

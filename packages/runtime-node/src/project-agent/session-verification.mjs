@@ -1,0 +1,245 @@
+import { beginVerificationAttempt, sessionFactsFromPlan } from './session-facts.mjs';
+import { randomUUID } from 'node:crypto';
+import { currentModelReview, criterionSourceRevision } from './criterion-review.mjs';
+/**
+ * 把桌面宿主的计划、证据索引和 verifier 运行入口收成委托工具的 verification 端口。
+ * 工具每次调用时再读取当前端口，所以启动顺序不必先于 Local Tool Host。
+ */
+import { readdirSync } from 'node:fs';
+import { verificationContentHash } from './verification-completion.mjs';
+import { verificationFailure } from './verification-failure.mjs';
+import { verificationHistory } from './verification-history.mjs';
+
+export function createSessionVerification({
+  goalPlanStore,
+  verifySession,
+  readReport = () => '',
+  completeRecheck = null,
+} = {}) {
+  const active = new Map();
+  function findPlan(sessionId) {
+    const id = typeof sessionId === 'string' ? sessionId.trim() : '';
+    if (!id || typeof goalPlanStore?.getStoreDir !== 'function' || typeof goalPlanStore?.getPlan !== 'function') {
+      return null;
+    }
+    let names = [];
+    try {
+      names = readdirSync(goalPlanStore.getStoreDir());
+    } catch {
+      return null;
+    }
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      let plan = null;
+      try {
+        plan = goalPlanStore.getPlan(name.slice(0, -'.json'.length));
+      } catch {
+        plan = null;
+      }
+      if (plan?.delegationOrigin?.sessionId === id) return plan;
+    }
+    return null;
+  }
+
+  function evidenceRecords(plan) {
+    if (typeof goalPlanStore?.listEvidenceIndex !== 'function') return [];
+    let records = [];
+    try {
+      records = goalPlanStore.listEvidenceIndex() || [];
+    } catch {
+      return [];
+    }
+    const conversationId = plan?.conversationId;
+    return records.filter((record) => record?.planId === plan?.planId
+      || (conversationId && record?.conversationId === conversationId));
+  }
+
+  function factsFor(plan, authority = {}) {
+    const records = evidenceRecords(plan);
+    const evidenceIndex = records
+      .map((record) => record?.evidenceRef)
+      .filter((ref) => typeof ref === 'string' && ref.trim());
+    const stored = plan?.hostVerification && typeof plan.hostVerification === 'object'
+      ? plan.hostVerification
+      : {};
+    const semantic = (plan.successCriteria || []).filter(row => row.kind === 'model_review');
+    const currentReviews = semantic.map(row => currentModelReview(plan, row.id));
+    const allowedReviewRefs = new Set(evidenceIndex);
+    // Only host-admitted, version-bound reviews may satisfy this authority. A bare runner verdict never can.
+    const semanticAuthority = semantic.length > 0 && currentReviews.every(row => row?.passed === true
+      && row.evidenceRefs?.length && row.evidenceRefs.every(ref => allowedReviewRefs.has(ref))
+      && plan.runner?.verifierRuns?.some(run => run.verifierRunId === row.verifierRunId && run.status === 'passed')) ? 'passed' : 'missing';
+    const selection = plan?.delegationOrigin?.modelSelection;
+    const workerModel = modelLabel(selection?.worker);
+    const verifierModel = typeof authority.verifierModel === 'string'
+      ? authority.verifierModel
+      : (typeof stored.verifierModel === 'string' ? stored.verifierModel : modelLabel(selection?.verifier));
+    const sameFamily = typeof authority.sameFamilyAsWorker === 'boolean'
+      ? authority.sameFamilyAsWorker
+      : (typeof stored.sameFamilyAsWorker === 'boolean'
+        ? stored.sameFamilyAsWorker
+        : selection?.verifier?.sameFamilyAsWorker === true);
+    const independentVerifier = authority.independentVerifier
+      || (semantic.length > 0 ? semanticAuthority
+        : stored.contentHash && stored.contentHash !== verificationContentHash(plan, readReport(plan)) ? 'missing' : stored.independentVerifier || 'missing');
+    const allowed = new Set(evidenceIndex);
+    const outputs = [];
+    for (const record of records) {
+      const evidenceRef = typeof record?.evidenceRef === 'string' ? record.evidenceRef.trim() : '';
+      if (!evidenceRef || !allowed.has(evidenceRef)) continue;
+      const text = previewText(record);
+      if (!text) continue;
+      outputs.push({
+        evidenceRef,
+        name: typeof record.toolName === 'string' && record.toolName.trim() ? record.toolName.trim() : 'output',
+        text,
+      });
+    }
+    return {
+      plan,
+      evidenceIndex,
+      independentVerifier,
+      ...(workerModel ? { workerModel } : {}),
+      ...(verifierModel ? { verifierModel } : {}),
+      sameFamilyAsWorker: sameFamily,
+      reviewAttempts: verificationHistory(plan, evidenceIndex),
+      outputs,
+    };
+  }
+
+  return {
+    reconcileInterrupted({ workspaceId, parentConversationId, sessionId }) {
+      const plan = findPlan(sessionId);
+      if (!plan || plan.delegationOrigin?.workspaceId !== workspaceId
+        || plan.delegationOrigin?.parentConversationId !== parentConversationId) return { status: 'unavailable' };
+      if (sessionFactsFromPlan(plan).verificationActive) return { status: 'active' };
+      return { status: 'inactive', workspaceId, parentConversationId, sessionId,
+        planId: plan.planId, sourceRevision: criterionSourceRevision(plan) };
+    },
+    facts(sessionId) {
+      const plan = findPlan(sessionId);
+      if (!plan) return null;
+      return factsFor(plan);
+    },
+    async markVerifying(sessionId) {
+      if (active.has(sessionId)) throw Object.assign(new Error('This session already has an active independent review'), { code: 'verifier_in_progress' });
+      const plan = findPlan(sessionId);
+      if (!plan?.delegationOrigin || typeof goalPlanStore?.revisePlan !== 'function') return null;
+      active.set(sessionId, beginVerificationAttempt(plan.planId, `session:${sessionId}`));
+      try {
+        return goalPlanStore.revisePlan(plan.planId, {
+          delegationOrigin: { ...plan.delegationOrigin, verifying: true },
+        }, { reason: 'independent verification', changedBy: 'session-verification' });
+      } catch (error) { active.get(sessionId)?.(); active.delete(sessionId); throw error; }
+    },
+    async finish(sessionId) {
+      active.get(sessionId)?.();
+      active.delete(sessionId);
+      const plan = findPlan(sessionId);
+      if (plan?.delegationOrigin?.verifying === true && typeof goalPlanStore?.revisePlan === 'function') {
+        goalPlanStore.revisePlan(plan.planId, {
+          delegationOrigin: { ...plan.delegationOrigin, verifying: false },
+        }, { reason: 'independent verification ended', changedBy: 'session-verification' });
+      }
+    },
+    async run(input = {}) {
+      const plan = findPlan(input.sessionId);
+      if (!plan) return { ok: false, error: 'session_not_found' };
+      if (typeof verifySession !== 'function') return { ok: false, error: 'verifier_unavailable' };
+      let report = null;
+      const contentHash = verificationContentHash(plan, readReport(plan));
+      const sourceRevision = criterionSourceRevision(plan);
+      try {
+        report = await verifySession(plan, input.focus, { workId: input.workId });
+      } catch (error) {
+        const failure = verificationFailure(error);
+        if (failure.error === 'verifier_in_progress') return failure;
+        goalPlanStore.recordVerifierRun?.(plan.planId, { verifierRunId: `delegated-failure:${randomUUID()}`,
+          target: { kind: 'plan' }, status: 'failed', summary: failure.message, failureReason: failure.message,
+          report: { passed: false, risks: [failure.error, failure.message], evidenceRefs: [], recommendedNextAction: failure.nextAction } });
+        return failure;
+      }
+      if (!report || report.ok === false || typeof report.passed !== 'boolean') {
+        return { ...verificationFailure(report), error: report?.error || 'verifier_failed' };
+      }
+      if ((plan.successCriteria || []).some(row => row.kind === 'model_review')) {
+        const fresh = goalPlanStore.getPlan(plan.planId);
+        if (criterionSourceRevision(fresh) !== sourceRevision) return { ok: false, error: 'verification_source_changed' };
+        const refs = report.evidenceRefs || [];
+        const allowed = new Set(evidenceRecords(fresh).map(row => row.evidenceRef));
+        const passed = report.passed === true && !report.failedCriteria?.length && !report.missingEvidence?.length
+          && refs.length > 0 && refs.every(ref => allowed.has(ref));
+        const verifierRunId = `delegated-semantic:${plan.planId}:${sourceRevision}:${randomUUID()}`;
+        goalPlanStore.recordVerifierRun(plan.planId, { verifierRunId, target: { kind: 'plan' }, status: passed ? 'passed' : 'failed',
+          report: { ...report, passed }, evidenceRefs: refs });
+        goalPlanStore.recordModelReviews(plan.planId, { sourceRevision, verifierRunId, passed, evidenceRefs: refs.filter(ref => allowed.has(ref)) });
+        report = { ...report, passed };
+      }
+      return {
+        ok: true,
+        at: new Date().toISOString(),
+        contentHash,
+        facts: factsFor(goalPlanStore.getPlan(plan.planId), {
+          independentVerifier: report.passed ? 'passed' : 'failed',
+          ...(typeof report.verifierModel === 'string' ? { verifierModel: report.verifierModel } : {}),
+          ...(typeof report.sameFamilyAsWorker === 'boolean' ? { sameFamilyAsWorker: report.sameFamilyAsWorker } : {}),
+        }),
+      };
+    },
+    async record({ event, card, detail, contentHash } = {}) {
+      const plan = findPlan(event?.sessionId || card?.sessionId);
+      if (contentHash && plan && contentHash !== verificationContentHash(plan, readReport(plan))) {
+        return { ok: false, error: 'verification_source_changed' };
+      }
+      if (plan && typeof goalPlanStore?.revisePlan === 'function') {
+        const stored = plan.hostVerification && typeof plan.hostVerification === 'object' ? plan.hostVerification : {};
+        goalPlanStore.revisePlan(plan.planId, {
+          delegationOrigin: { ...plan.delegationOrigin, verifying: false },
+          hostVerification: {
+            ...stored,
+            independentVerifier: authorityFromDetail(detail, stored),
+            ...(typeof detail?.verifierModel === 'string' ? { verifierModel: detail.verifierModel } : {}),
+            ...(typeof detail?.sameSource === 'boolean' ? { sameFamilyAsWorker: detail.sameSource } : {}),
+            verdictRef: event?.verdictRef || card?.verdictRef || '',
+            contentHash: typeof contentHash === 'string' ? contentHash : '',
+          },
+        }, { reason: 'verification verdict', changedBy: 'session-verification' });
+        if (detail?.outcome === 'passed' && typeof completeRecheck === 'function') {
+          const current = findPlan(event?.sessionId || card?.sessionId);
+          await completeRecheck({ planId: plan.planId, contentHash,
+            currentHash: verificationContentHash(current, readReport(current)) });
+        }
+      }
+      return { ok: true };
+    },
+  };
+}
+
+function authorityFromDetail(detail, stored) {
+  const check = Array.isArray(detail?.checks)
+    ? detail.checks.find((item) => item?.name === 'independent_verifier')
+    : null;
+  if (check?.reason === 'failed' || check?.reason === 'missing') return check.reason;
+  if (check?.result === 'passed') return 'passed';
+  return stored.independentVerifier || 'missing';
+}
+
+function modelLabel(selection) {
+  if (!selection || typeof selection !== 'object') return null;
+  if (typeof selection.modelId === 'string' && selection.modelId.trim()) return selection.modelId.trim();
+  if (typeof selection.modelProviderId === 'string' && selection.modelProviderId.trim()) return selection.modelProviderId.trim();
+  return null;
+}
+
+function previewText(record) {
+  const lines = [];
+  for (const artifact of Array.isArray(record?.userArtifacts) ? record.userArtifacts : []) {
+    const preview = artifact?.preview;
+    if (preview?.kind === 'code' && Array.isArray(preview.diffLines)) {
+      lines.push(...preview.diffLines.filter((line) => typeof line === 'string'));
+    } else if (typeof artifact?.label === 'string' && artifact.label.trim()) {
+      lines.push(artifact.label.trim());
+    }
+  }
+  return lines.join('\n').trim();
+}

@@ -33,8 +33,15 @@ const FALLBACK: UpdaterStatus = {
   phase: 'idle',
 };
 
+const channelStatusSubscribers = new Set<(status: UpdaterStatus) => void>();
+
 export function useUpdater(): UseUpdaterResult {
   const [status, setStatus] = useState<UpdaterStatus | null>(null);
+
+  useEffect(() => {
+    channelStatusSubscribers.add(setStatus);
+    return () => { channelStatusSubscribers.delete(setStatus); };
+  }, []);
 
   // 初始快照。
   useEffect(() => {
@@ -133,7 +140,9 @@ export function useUpdater(): UseUpdaterResult {
   const setChannel = useCallback(async (preference: UpdaterStatus['preference']) => {
     try {
       const next = await clientApi.updaterSetChannel(preference);
-      if (next) setStatus(next);
+      if (next) {
+        for (const subscriber of channelStatusSubscribers) subscriber(next);
+      }
     } catch {
       /* 错误经 updater:event(error) 反映 */
     }

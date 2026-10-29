@@ -50,7 +50,7 @@ export interface NodeRuntimeCapabilityPermissionPrompt {
   readonly reason: string;
   readonly confirmation: {
     readonly kind: 'capability-approval';
-    readonly approvalKind: 'file-write' | 'shell-exec' | 'web-fetch';
+    readonly approvalKind: 'file-read' | 'file-write' | 'shell-exec' | 'web-fetch';
     readonly reason: string;
   };
   readonly scope: {
@@ -102,6 +102,8 @@ export interface NodeRuntimeResultFactory {
 }
 
 export interface CreateNodeRuntimeHostAdapterOptions {
+  /** Recheck local authority after asynchronous Hooks/approval, before dispatch. */
+  readonly executionGate?: (request: RuntimeSdkExecuteRequest, context: NodeRuntimeExecutionContext) => string | null;
   readonly workspaceRoot?: string;
   readonly providerExecutor: NodeRuntimeProviderExecutor;
   readonly sessionProvider: {

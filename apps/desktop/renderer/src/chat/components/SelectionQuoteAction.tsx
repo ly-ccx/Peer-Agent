@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../app/components/MotionSurface';
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { resolveSelectionSource } from './markdown/selectionSource';
@@ -62,10 +63,10 @@ export function SelectionQuoteAction({ root, conversationId, onQuote, onOpenChil
     window.addEventListener('resize', place);
     document.addEventListener('keydown', keydown, true);
     document.addEventListener('pointerdown', pointerdown, true);
-    const observer = new ResizeObserver(place);
-    if (toolbar.current) observer.observe(toolbar.current);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    if (toolbar.current) observer?.observe(toolbar.current);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
       document.removeEventListener('keydown', keydown, true);
@@ -101,8 +102,8 @@ export function SelectionQuoteAction({ root, conversationId, onQuote, onOpenChil
     document.addEventListener('selectionchange', inspect);
     return () => document.removeEventListener('selectionchange', inspect);
   }, [root, conversationId, gate]);
-  if (!range || !conversationId) return null;
   const act = async (child: boolean) => {
+      if (!range || !conversationId) return;
       const request = gate.begin();
       if (!request) return;
       setBusy(true);
@@ -155,7 +156,7 @@ export function SelectionQuoteAction({ root, conversationId, onQuote, onOpenChil
       }
     } finally { if (request.finish()) setBusy(false); }
   };
-  return createPortal(<div ref={toolbar} className="selection-action-toolbar" role="group" aria-label="选区操作"
+  return createPortal(<MotionSurface kind="fade">{range && conversationId ? (<div ref={toolbar} className="selection-action-toolbar" role="group" aria-label="选区操作"
     style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}>
     {confirmation ? <div className="selection-action-toolbar__confirm">
       <span role="alert">背景不完整：部分附件或工具材料尚未解析，不会作为完整材料继承。仍要使用可用背景创建子会话吗？</span>
@@ -168,5 +169,5 @@ export function SelectionQuoteAction({ root, conversationId, onQuote, onOpenChil
     {onOpenChild ? <button type="button" disabled={busy || range.end <= range.start} onMouseDown={(event) => event.preventDefault()} onClick={() => void act(true)}>在侧栏打开</button> : null}
     </>}
     {error ? <span role="alert">{error}</span> : null}
-  </div>, document.body);
+  </div>) : null}</MotionSurface>, document.body);
 }

@@ -35,7 +35,8 @@ import {
   createUpdateCheckSchedule,
   registerActivationUpdateChecks,
 } from './update-check-schedule.mjs';
-import { isNewerVersion } from './update-version.mjs';
+import { isPrerelease } from './update-version.mjs';
+import { installPeerGitHubProvider, isStrictlyNewerUpdate } from './update-github-provider.mjs';
 import {
   isLockedPhase,
   shouldSkipUpdateCheck,
@@ -78,6 +79,7 @@ const state = {
   /** 偏好读取器（main 注入，从 settingsStore 读取） */
   getPreference: undefined,
   wired: false,
+  providerReady: undefined,
   /**
    * 毕业探查中（ADR-61）：auto 偏好下静默探查 stable 通道期间置 true，
    * wireEvents 的事件处理器据此跳过状态写入与事件广播，避免探查的中间态
@@ -116,6 +118,8 @@ function toUpdaterChannel(channel) {
 function applyChannel(channel) {
   autoUpdater.channel = toUpdaterChannel(channel);
   autoUpdater.allowPrerelease = channel === 'beta';
+  // SDK channel assignment enables downgrade implicitly; no preference authorizes it.
+  autoUpdater.allowDowngrade = false;
 }
 
 /**
@@ -149,6 +153,7 @@ export function initAutoUpdater(options = {}) {
   // 关键：检查到新版本不自动下载，由渲染层弹窗用户确认后再下载。
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  state.providerReady = installPeerGitHubProvider(autoUpdater);
 
   wireEvents();
 
@@ -248,7 +253,7 @@ async function probeStableGraduation() {
     // 毕业判定信号：stable 版本严格大于当前安装版本（semver：
     // 1.0.0 > 1.0.0-beta.5）。electron-updater 的 update-available 语义
     // 与此一致，此处显式比较保证契约清晰。
-    if (candidate && isNewerVersion(candidate, state.currentVersion)) {
+    if (!isPrerelease(candidate) && isEligibleUpdate(candidate)) {
       return {
         graduated: true,
         version: candidate,
@@ -279,6 +284,7 @@ export async function checkForUpdates() {
   }
   checkSchedule.markChecked();
   try {
+    await state.providerReady;
     setPhase('checking');
 
     // ADR-61 毕业探查：仅 auto 偏好 + 当前版本含预发布后缀时触发。
@@ -292,6 +298,7 @@ export async function checkForUpdates() {
         state.channel = 'stable';
         applyChannel('stable');
         state.availableVersion = probe.version;
+        autoUpdater.autoInstallOnAppQuit = true;
         state.releaseNotes = probe.releaseNotes;
         setPhase('available');
         emit('update-available', {
@@ -324,6 +331,10 @@ export async function downloadUpdate() {
   // 重复点击「更新」不再发起第二次下载，直接返回当前快照。
   if (isLockedPhase(state.phase)) {
     log(`downloadUpdate skipped (phase locked: ${state.phase}).`);
+    return getUpdaterStatus();
+  }
+  if (!isEligibleUpdate(state.availableVersion)) {
+    clearUnavailableUpdate(state.availableVersion);
     return getUpdaterStatus();
   }
   // mac（zip + latest-mac.yml）、Windows NSIS（latest.yml）与 Linux AppImage
@@ -375,6 +386,11 @@ export function quitAndInstall() {
     log('quitAndInstall skipped (disabled).');
     return;
   }
+  if (state.phase !== 'downloaded') return;
+  if (!isEligibleUpdate(state.availableVersion)) {
+    clearUnavailableUpdate(state.availableVersion);
+    return;
+  }
   // isSilent=false, isForceRunAfter=true
   autoUpdater.quitAndInstall(false, true);
 }
@@ -405,6 +421,21 @@ function stopStallWatchdog() {
 
 function setPhase(phase) {
   state.phase = phase;
+}
+
+function isEligibleUpdate(version) {
+  return isStrictlyNewerUpdate(version, state.currentVersion);
+}
+
+function clearUnavailableUpdate(version) {
+  autoUpdater.autoInstallOnAppQuit = false;
+  state.availableVersion = undefined;
+  state.releaseNotes = undefined;
+  state.percent = undefined;
+  state.error = undefined;
+  state.releaseUrl = undefined;
+  setPhase('not-available');
+  emit('update-not-available', { version });
 }
 
 /**
@@ -446,7 +477,12 @@ function wireEvents() {
   autoUpdater.on('update-available', (info) => {
     if (state.probing) return;
     if (shouldSkipStaleUpdateEvent(state.phase, 'update-available')) return;
+    if (!isEligibleUpdate(info?.version)) {
+      clearUnavailableUpdate(info?.version);
+      return;
+    }
     state.availableVersion = info?.version;
+    autoUpdater.autoInstallOnAppQuit = true;
     state.releaseNotes = normalizeReleaseNotes(info?.releaseNotes);
     setPhase('available');
     emit('update-available', {
@@ -458,9 +494,7 @@ function wireEvents() {
   autoUpdater.on('update-not-available', (info) => {
     if (state.probing) return;
     if (shouldSkipStaleUpdateEvent(state.phase, 'update-not-available')) return;
-    state.availableVersion = undefined;
-    setPhase('not-available');
-    emit('update-not-available', { version: info?.version });
+    clearUnavailableUpdate(info?.version);
   });
 
   autoUpdater.on('download-progress', (p) => {
@@ -482,6 +516,10 @@ function wireEvents() {
 
   autoUpdater.on('update-downloaded', (info) => {
     if (state.probing) return;
+    if (!isEligibleUpdate(info?.version)) {
+      clearUnavailableUpdate(info?.version);
+      return;
+    }
     state.availableVersion = info?.version;
     state.percent = 100;
     setPhase('downloaded');

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 const contextSource = readFileSync(new URL('./WorkbenchContext.tsx', import.meta.url), 'utf8');
+const resizeSource = readFileSync(new URL('../app/hooks/usePointerResize.ts', import.meta.url), 'utf8');
 const panelSource = readFileSync(new URL('./WorkbenchPanel.tsx', import.meta.url), 'utf8');
 const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.meta.url), 'utf8');
 const sidebarStyles = readFileSync(new URL('../styles/sidebar.css', import.meta.url), 'utf8');
@@ -46,14 +47,19 @@ describe('workbench maximize behavior', () => {
     assert.match(panelSource, /aria-label=\{maximized \?/);
     assert.match(panelSource, /aria-pressed=\{maximized\}/);
     assert.match(panelSource, /onClick=\{\(\) => setMaximized\(!maximized\)\}/);
-    assert.match(panelSource, /\{open \? \(/);
-    assert.match(panelSource, /maximized \? '100%' : `\$\{width\}px`/);
+    assert.match(panelSource, /const resizer = open \? \(/);
+    assert.match(panelSource, /\{resourceMode \? resizer : null\}/);
+    assert.match(panelSource, /\{!resourceMode \? resizer : null\}/);
+    assert.match(panelSource, /maximized \? '100%' : `\$\{displayedWidth\}px`/);
+    assert.match(panelSource, /const displayedWidth = resourceMode \? Math\.min\(width, resizeLimit\) : width/);
   });
 
   it('captures the workbench resizer pointer and clears the drag session on cancel', () => {
-    assert.match(panelSource, /setPointerCapture\(pointerId\)/);
-    assert.match(panelSource, /addEventListener\('pointercancel', onUp\)/);
-    assert.match(panelSource, /addEventListener\('lostpointercapture', onUp\)/);
+    assert.match(panelSource, /usePointerResize\(\)/);
+    assert.match(panelSource, /resize\.start\(event/);
+    assert.match(resizeSource, /setPointerCapture\(pointerId\)/);
+    assert.match(resizeSource, /addEventListener\('pointercancel', abortPointer\)/);
+    assert.match(resizeSource, /addEventListener\('lostpointercapture', abort\)/);
     assert.match(panelSource, /dataset\.workbenchResizing = 'true'/);
     assert.match(panelSource, /delete document\.documentElement\.dataset\.workbenchResizing/);
     assert.match(panelSource, /delete resizer\.dataset\.active/);
@@ -118,11 +124,11 @@ describe('workbench maximize behavior', () => {
   it('keeps a visible left radius on the conversation drawer outline', () => {
     assert.match(
       drawerStyles,
-      /\.conversation-chat-drawer \{[\s\S]*?border-radius:\s*var\(--radius-xl\) 0 0 var\(--radius-xl\);/,
+      /\.conversation-chat-drawer \{[\s\S]*?border-radius:\s*var\(--ui-radius-modal\) 0 0 var\(--ui-radius-modal\);/,
     );
     assert.match(
       drawerStyles,
-      /\.conversation-result-drawer \{[\s\S]*?border-radius:\s*var\(--radius-xl\) 0 0 var\(--radius-xl\);/,
+      /\.conversation-result-drawer \{[\s\S]*?border-radius:\s*var\(--ui-radius-modal\) 0 0 var\(--ui-radius-modal\);/,
     );
   });
 });

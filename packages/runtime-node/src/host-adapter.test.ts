@@ -65,6 +65,20 @@ test('enriches provider execution with session and request identifiers', async (
   assert.equal(receivedContext?.traceId, 'trace-1');
 });
 
+test('rechecks authority before provider dispatch and records denial without execution', async () => {
+  let calls = 0;
+  const adapter = createNodeRuntimeHostAdapter({
+    sessionProvider: { getSession: () => ({ locale: 'en-US' }) }, resultFactory: createResultFactory(),
+    executionGate: () => 'host_unavailable',
+    providerExecutor: { execute: async () => { calls++; return null; } },
+  });
+  const execution = await adapter.executeProvider(request, {});
+  assert.equal(calls, 0);
+  assert.equal(execution.result.status, 'denied');
+  assert.equal(execution.result.reason, 'host_unavailable');
+  assert.equal((execution.grant as {granted:boolean}).granted, false);
+});
+
 test('creates unsupported capability fallback when no provider handles the call', async () => {
   const adapter = createNodeRuntimeHostAdapter({
     sessionProvider: { getSession: () => ({ locale: 'en-US' }) },

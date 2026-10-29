@@ -202,3 +202,15 @@ test('Strict Mode double-render still remembers the leaving non-blank session', 
   assert.deepEqual(buggyPlan(), ['A']);
   assert.deepEqual(buggyPlan(), []);
 });
+
+test('R3 background Browser reveal cannot displace a user reading another resource', () => {
+  const decision = resolveBrowserPanelReveal({ requestConversationId: 'c', hostConversationId: 'c',
+    hostOpen: true, hostBrowserActive: false, requestSessionExists: true, preserveAttention: true });
+  assert.equal(decision.accept, false);
+  assert.equal(decision.error, 'attention_preserved');
+  assert.equal(decision.stealUi, false);
+  const background = resolveBrowserPanelReveal({ requestConversationId: 'c', hostConversationId: 'c', focus: false,
+    hostOpen: true, hostBrowserActive: false, requestSessionExists: true, preserveAttention: true });
+  assert.equal(background.accept, true);
+  assert.equal(background.stealUi, false);
+});

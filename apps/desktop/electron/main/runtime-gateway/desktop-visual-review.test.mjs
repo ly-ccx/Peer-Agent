@@ -202,6 +202,7 @@ test('independent review sends the same grok identity headers as chat', async t 
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   globalThis.fetch = async (url, init = {}) => {
+    if (String(url) === 'https://x.ai/cli/stable') return new Response('1.0.46');
     received.push({ url: String(url), headers: init.headers || {} });
     return new Response('Upgrade Required', { status: 426, headers: { 'content-type': 'text/plain' } });
   };
@@ -214,10 +215,10 @@ test('independent review sends the same grok identity headers as chat', async t 
   await assert.rejects(runPlanVisualVerifier({ plan: f.plan, verifierRunId: `review:${randomUUID()}`,
     signal: f.controller.signal, goalPlanStore: f.store, workspacePath: f.root, llmChatService: llm, modelProviderId: 'fixture' }));
   assert.equal(received.length, 1, 'review must still reach Grok');
-  const headers = received[0].headers;
-  const value = (name) => headers[name] ?? headers[name.toLowerCase()];
+  const headers = new Headers(received[0].headers);
+  const value = (name) => headers.get(name);
   assert.equal(value('x-grok-client-surface'), 'grok-build');
-  assert.equal(value('x-grok-client-version'), '0.1.202');
+  assert.equal(value('x-grok-client-version'), '1.0.46');
   assert.equal(value('X-XAI-Token-Auth') ?? value('x-xai-token-auth'), 'xai-grok-cli');
   assert.match(String(value('Authorization') ?? value('authorization') ?? ''), /^Bearer /);
 });

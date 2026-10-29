@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { createGoalPlanStore } from '@peer-agent/runtime-node';
 import { createTuiGoalBridge, GOAL_CAPABILITY_IDS, GOAL_TOOL_NAMES } from './goal-bridge.ts';
 import { createTuiSharedGoalRunner } from './goal-runner-adapter.ts';
 
@@ -481,6 +482,68 @@ describe('createTuiSharedGoalRunner', () => {
       expect(full.tasks.length).toBe(2);
       expect(full?.progress?.total).toBe(2);
       expect(typeof full?.progress?.percent).toBe('number');
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('任务计划不推进，普通计划仍由当前会话推进', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-task-plan-'));
+    try {
+      const store = createGoalPlanStore({ storeDir });
+      const bridge = createTuiGoalBridge({ store });
+      const chat = createFakeChat({
+        runGoalTurn() {
+          return { failed: true, failureReason: 'stop-after-proof' };
+        },
+      });
+      let conversationId = 'conv-task';
+      const runner = createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        getConversationId: () => conversationId,
+      });
+      const selection = {
+        providerId: 'local', modelId: 'worker-1', modelProviderId: 'worker-1', family: 'alpha',
+      };
+      const task = store.createPlan({
+        conversationId: 'conv-task',
+        title: '任务计划',
+        goal: '任务计划要等宿主租约',
+        tasks: [{ title: '一步' }],
+        delegationOrigin: {
+          anchorMessageId: 'anchor-1',
+          inputId: 'input-1',
+          surface: 'tui',
+          workspaceId: 'ws-1',
+          depth: 1,
+          modelSelection: {
+            worker: selection,
+            explorer: selection,
+            verifier: { ...selection, sameFamilyAsWorker: true },
+            source: { worker: 'global' },
+            resolvedAt: '2026-09-27T00:00:00.000Z',
+          },
+        },
+      });
+      store.recordApproval(task.planId, { decision: 'approve', decidedBy: 'tester' });
+      expect(store.getPlan(task.planId)?.delegationOrigin?.workspaceId).toBe('ws-1');
+      const before = store.getPlan(task.planId)?.runner;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await runner.start(task.planId);
+      await runner.resume(task.planId);
+      expect(chat.sentMessages).toHaveLength(0);
+      expect(store.getPlan(task.planId)?.runner).toEqual(before);
+
+      conversationId = 'conv-ordinary';
+      const ordinary = store.createPlan({
+        conversationId: 'conv-ordinary',
+        ...createAcceptedGoalArgs(),
+      });
+      store.recordApproval(ordinary.planId, { decision: 'approve', decidedBy: 'tester' });
+      await runner.start(ordinary.planId);
+      await waitFor(() => chat.sentMessages.length > 0);
+      expect(chat.sentMessages[0]).toContain(ordinary.planId);
     } finally {
       await rm(storeDir, { recursive: true, force: true });
     }

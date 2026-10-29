@@ -1,19 +1,72 @@
-export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
+export type { AttentionCard, BotDecisionSnapshot, BotAttentionItem, BotAttentionRequest, BotAttentionResult } from './attention.ts';
+export type {
+  ProjectWorkBudgetLimits,
+  ProjectWorkBudgetBoundary,
+  ProjectReplyRecoveryAction,
+  ProjectWorkReceipt,
+  ProjectWorkRecovery,
+  ProjectWorkState,
+  ProjectTurnEnd,
+  ProjectReplyFailureStatus,
+  ProjectAgentSilentWait,
+} from './work-coordination.ts';
+export type {
+  CoordinationAction,
+  CoordinationLifecycle,
+  CoordinationMandate,
+  CoordinationDecision,
+  TaskTransitionPhase,
+  TaskTransition,
+  CoordinationExecutionBinding,
+  CoordinationSessionFacts,
+} from './delegation-coordination.ts';
+export { deriveSessionFacts, type SessionFactSnapshot } from './session-facts.ts';
+export { projectAgentFailureKind, classifyProjectAgentFailure, type ProjectRecoveryFailureKind, type ProviderRequestRecovery, type ProjectAgentTurnRecovery, type ReplyAnchorCandidate } from './project-agent-failure.ts';
+export type { EvidenceSourceDescription, EvidenceDeliveryBinding, EvidenceDelivery, ProjectAgentEvidenceReadRequest, ProjectAgentEvidenceReadResult } from './evidence-inspection.ts';
+export { toolActivityPreview, toolActivitySummary } from './tool-activity-preview.ts';
+export { isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort, type ModelReasoningEffort } from './model-reasoning.ts';
+export type {
+  SelectionRange,
+  SelectionReference,
+  SelectionDraft,
+  SelectionOrigin,
+  SelectionChildSession,
+  SelectionChildSummary,
+  SelectionChildrenPage,
+  SelectionChildRead,
+} from './selection-reference.ts';
 
 export { buildModelMenuGroups, modelMenuChannelName, type ModelMenuRow } from './model-menu.ts';
 export { evaluateUiDelivery } from './ui-delivery-verification.ts';
 export { DESKTOP_PREVIEW_PROTOCOL, DESKTOP_PREVIEW_CAPABILITY, DESKTOP_PREVIEW_TOOL } from './desktop-preview.ts';
 export type { DesktopPreviewRequest, DesktopPreviewReply } from './desktop-preview.ts';
-export type { UiDeliveryIdentity, UiDeliveryRequirement, UiDeliveryObservation, UiDeliveryJudgment, UiDeliveryGap } from './ui-delivery-verification.ts';
+export type {
+  UiDeliveryIdentity,
+  UiDeliveryRequirement,
+  UiDeliveryObservation,
+  UiDeliveryJudgment,
+  UiDeliveryGap,
+} from './ui-delivery-verification.ts';
 
 export { REMOTE_PROTOCOL_VERSION, parseRemoteReadRequest, admitRemoteRead } from './remote-access.ts';
 export type { RemoteReadRequest, RemoteReadContext, RemoteReadRejection, RemoteReadAdmission } from './remote-access.ts';
+export { REMOTE_PROJECT_LIMITS, parseRemoteProjectRequest, admitRemoteProject, parseRemoteDelegationProjection } from './remote-access.ts';
+export type {
+  RemoteProjectGrant,
+  RemoteProjectRequest,
+  RemoteProjectContext,
+  RemoteProjectRejection,
+  RemoteProjectAdmission,
+  RemoteDelegationProjection,
+} from './remote-access.ts';
 
 export type LocalAccessLevel =
   | 'ask_before_local'
   | 'session_local'
   | 'restricted_local'
   | 'full_local';
+
+export type { BotAccessPolicy, BotAccessPolicyReadRequest, BotAccessPolicyUpdateRequest, BotAccessPolicyResult } from './bot-access-policy.ts';
 
 export type {
   ConversationLifetimeUsage,
@@ -538,7 +591,14 @@ export interface LlmOAuthStatus {
   readonly expiresAt?: string;
 }
 
-export type { AccountUsageSource, AccountUsageScope, AccountUsageBalance, AccountUsageSpend, AccountUsageUnavailable, AccountUsageLocal } from './account-usage.js';
+export type {
+  AccountUsageSource,
+  AccountUsageScope,
+  AccountUsageBalance,
+  AccountUsageSpend,
+  AccountUsageUnavailable,
+  AccountUsageLocal,
+} from './account-usage.js';
 
 /** 订阅额度窗口（session / weekly / model 等）。 */
 export interface LlmSubscriptionQuotaWindow {
@@ -911,6 +971,19 @@ export interface ClientToolCall extends RuntimeToolCall {
   readonly requestedAt: string;
 }
 
+/** Host permission wait events. Requests are presentation, never permission truth. */
+export interface ChatPermissionRequest {
+  readonly streamId: string;
+  readonly call: ClientToolCall;
+  readonly deadlineAt?: string;
+}
+export interface ChatPermissionSettled {
+  readonly streamId: string;
+  readonly toolCallIds: readonly string[];
+  readonly granted?: boolean;
+  readonly reason?: string;
+}
+
 export interface ClientToolCallPollRequest {
   readonly sessionId: string;
   readonly projectionId?: string;
@@ -929,11 +1002,13 @@ export interface ClientToolCallPollResult {
 export type PermissionDuration = 'once' | 'task' | 'session' | 'scope' | 'persistent' | 'denied';
 
 export interface PermissionGrant {
+  /** Host-issued policy version; audit provenance, never a client authority token. */
+  readonly policyRevision?: string;
   readonly grantId: string;
   readonly toolCallId: string;
   readonly granted: boolean;
   readonly duration: PermissionDuration;
-  readonly scope?: string;
+  readonly scope?: string | import('./local-image.ts').LocalImagePermissionScope;
   readonly decidedAt: string;
 }
 
@@ -1073,3 +1148,31 @@ export * from './appshot.ts';
 export * from './automation.ts';
 export * from './task-overview.ts';
 export * from './skill-marketplace.ts';
+export * from './delegation.ts';
+export * from './model-routing.ts';
+export * from './document-reference.ts';
+export * from './project.ts';
+export * from './objectives.ts';
+export * from './remote-access-settings.ts';
+
+export type { BotModelSelectionUpdateRequest, BotModelSelectionUpdateResult } from './bot-model-selection.ts';
+export * from './local-image.ts';
+export * from './bot-conversation-read.ts';
+export * from './project-recovery.ts';
+export * from './local-git.ts';
+export * from './agent-supervision.ts';
+export type { CapabilityBlocker, DelegationCapabilityAdmission } from './capability-admission.ts';
+export * from './project-input-recovery.ts';
+
+export { botResourceReferences } from './resource-reference-hints.ts';
+
+export type { ResourceWindowCheckpointRequest, ResourceWindowCheckpointAck, ResourceWindowCloseBlocked, ResourceWindowReturnRequest, ResourceWindowReturnAck, ResourceWindowHistoryEntry, ResourceWindowHistoryResult, ResourceWindowReadRequest, ResourceWindowReadResult, ResourceWindowResource, ResourceWindowNavigation, ResourceWindowOpenRequest, ResourceWindowOwner, ResourceWindowIdentity, ResourceWindowContext, ResourceWindowStatus, ResourceWindowResult } from './resource-window.ts';
+export { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation } from './resource-window.ts';
+export * from './browser-window.js';
+export * from './resource-feedback.js';
+
+export * from './resource-edit.ts';
+export * from './resource-file-replace.ts';
+export * from './resource-edit-execution.ts';
+
+export { decideFollowUp, type FollowUpOwner, type FollowUpReason, type FollowUpProjection } from './task-overview.ts';

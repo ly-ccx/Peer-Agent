@@ -1,31 +1,147 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { UpdateChannelPreference } from '@peer-agent/protocol';
 import type { CSSProperties } from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useUpdater } from '../state/useUpdater';
 import { UpdateModal } from './UpdateModal';
+import { Dropdown } from './Dropdown';
+import { versionBadgeLabel } from './versionBadgeLabel';
+import { PeerIcon } from '../../ui/icons';
 
 /**
- * VersionBadge —— 侧边栏品牌区右侧的版本徽标（表达层）。
+ * VersionBadge —— 版本与更新的表达层。
  *
- * 行为（按确认的产品设计）：
- *   - 始终展示当前版本号（vX.Y.Z）。
- *   - 有可用更新时（available）：版本号旁显示更新图标，与版本号共享点击入口。
- *   - 下载中（downloading）：更新图标原地升级为 mini 环形进度 + 百分比文字。
- *   - 下载完成（downloaded）：版本号旁持久挂「安装」按钮
- *     （Codex 模式），不再弹出右下角 toast。
- *   - 点击版本号：打开更新摘要弹窗（无更新时顺带触发一次检查）。
- *   - 点击「安装」按钮：直接触发安装，不打开弹窗。
+ * classic：经典侧边栏底部。版本号本身可点；下载中保留进度环，完成后在旁边放「安装」。
+ * bot-subtitle：机器人列表里，Peer 名称下的缩小版本号。只展示，不承接更新。
+ * bot-upgrade：有更新时才出现，放在「新建」左侧。
+ *   点击仍打开更新摘要弹窗；确认下载后按钮缩小成环形进度，数字居中。
+ *   下载完成后同一位置展开成写着「安装」的按钮。
  *
  * 能力真相在主进程，本组件通过 useUpdater 消费状态与动作。
  */
-export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
+export function VersionBadge({ i18n, showChannel = false, variant = 'classic' }: {
+  readonly i18n: I18nRuntime;
+  readonly showChannel?: boolean;
+  readonly variant?: 'classic' | 'bot-subtitle' | 'bot-upgrade';
+}) {
+  if (variant === 'bot-subtitle') return <BotVersionSubtitle />;
+  if (variant === 'bot-upgrade') return <BotUpgradeControl i18n={i18n} />;
+  return <ClassicVersionBadge i18n={i18n} showChannel={showChannel} />;
+}
+
+function BotVersionSubtitle() {
+  const { status } = useUpdater();
+  if (!status) return null;
+  const label = versionBadgeLabel(status.currentVersion);
+  return (
+    <span className="sidebar-version-badge bot-version-subtitle" title={`v${status.currentVersion}`}>
+      <span className="sidebar-version-text">{label.version}</span>
+      {label.stage ? <span className="sidebar-version-stage">{label.stage}</span> : null}
+      {import.meta.env.DEV ? (
+        <span className="sidebar-version-dev-tag" aria-label="开发版本">
+          开发
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function BotUpgradeControl({ i18n }: { readonly i18n: I18nRuntime }) {
   const { status, hasUpdate, check, download, install, openReleasePage } = useUpdater();
   const [modalOpen, setModalOpen] = useState(false);
-  // 跨组件连续性（C1 时序衔接）：点「更新」后 download() 是异步转调主进程，
-  // phase 要等主进程首个 download-progress 事件才变 downloading。若不处理，
-  // 弹窗已朝左上角收缩消失、而进度环尚未挂载，中间出现空窗、视线断裂。
-  // pendingDownload 让徽标在点击瞬间立即显示 0% 进度环（脉冲+光环就绪），
-  // 正好接住飞来的弹窗；真实 downloading/终态到来后即清除。
+  const [pendingDownload, setPendingDownload] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const progressTarget = useCallback(() => buttonRef.current, []);
+  const phase = status?.phase;
+
+  useEffect(() => {
+    if (!pendingDownload) return;
+    if (phase === 'downloading' || phase === 'downloaded' || phase === 'error') {
+      setPendingDownload(false);
+    }
+  }, [phase, pendingDownload]);
+
+  if (!status) return null;
+
+  const isDownloading = phase === 'downloading';
+  const isReady = phase === 'downloaded';
+  const isAvailable = hasUpdate && !isDownloading && !isReady && !pendingDownload;
+  const isError = phase === 'error';
+  const showProgress = (isDownloading || pendingDownload) && phase !== 'downloaded' && phase !== 'error';
+  const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)));
+  const progressPercent = isDownloading ? percent : 0;
+  const readyVersion = status.availableVersion ?? '';
+  const title = showProgress
+    ? i18n.t('updater.badge.downloading', { percent: progressPercent })
+    : isReady
+      ? i18n.t('updater.badge.ready', { version: readyVersion })
+      : isError
+        ? i18n.t('updater.modal.error', { message: status.error ?? '' })
+        : hasUpdate
+          ? i18n.t('updater.badge.updateAvailable')
+          : i18n.t('updater.badge.upToDate');
+  const visible = showProgress || isAvailable || isReady || isError;
+
+  return (
+    <>
+      {visible ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          className={`bot-upgrade${showProgress ? ' is-progress' : ''}${isReady && !showProgress ? ' is-install' : ''}${isError && !showProgress ? ' is-error' : ''}`}
+          style={showProgress ? ({ '--progress': `${progressPercent}%` } as CSSProperties) : undefined}
+          title={title}
+          aria-label={isReady && !showProgress ? i18n.t('updater.badge.install') : showProgress ? title : isAvailable ? i18n.t('updater.badge.ariaHasUpdate') : title}
+          role={showProgress ? 'progressbar' : undefined}
+          aria-valuemin={showProgress ? 0 : undefined}
+          aria-valuemax={showProgress ? 100 : undefined}
+          aria-valuenow={showProgress ? progressPercent : undefined}
+          onClick={() => {
+            if (isReady && !showProgress) {
+              void install();
+              return;
+            }
+            setModalOpen(true);
+            if (!showProgress && !hasUpdate && phase !== 'error') void check();
+          }}
+        >
+          {showProgress ? (
+            <span className="bot-upgrade-value" data-digits={String(progressPercent).length}>{progressPercent}</span>
+          ) : isReady ? (
+            i18n.t('updater.badge.install')
+          ) : (
+            <PeerIcon name={isError ? 'warning' : 'arrowDown'} size={15} strokeWidth={1.75} />
+          )}
+        </button>
+      ) : null}
+      <UpdateModal
+        i18n={i18n}
+        open={modalOpen}
+        status={status}
+        pendingDownload={pendingDownload}
+        onClose={() => setModalOpen(false)}
+        progressTarget={progressTarget}
+        onUpdate={() => {
+          setPendingDownload(true);
+          void download().finally(() => setPendingDownload(false));
+        }}
+        onOpenReleasePage={() => void openReleasePage()}
+        onRecheck={() => void check()}
+      />
+    </>
+  );
+}
+
+function ClassicVersionBadge({ i18n, showChannel = false, variant = 'classic' }: {
+  readonly i18n: I18nRuntime;
+  readonly showChannel?: boolean;
+  readonly variant?: 'classic' | 'bot-footer';
+}) {
+  const { status, hasUpdate, check, download, install, openReleasePage, setChannel } = useUpdater();
+  const [modalOpen, setModalOpen] = useState(false);
+  const badgeRef = useRef<HTMLDivElement>(null);
+  const progressTarget = useCallback(() => badgeRef.current?.querySelector<HTMLElement>('.sidebar-version-progress') ?? badgeRef.current, []);
+  // Reserve the visible destination until the host publishes download state.
   const [pendingDownload, setPendingDownload] = useState(false);
 
   const phase = status?.phase;
@@ -39,49 +155,55 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
 
   if (!status) return null;
 
+  const compact = variant === 'bot-footer';
+  const label = compact ? versionBadgeLabel(status.currentVersion) : { version: `v${status.currentVersion}` };
+
   const isDownloading = phase === 'downloading';
   const isReady = phase === 'downloaded';
-  const isAvailable = hasUpdate && !isDownloading && !isReady;
+  const isAvailable = hasUpdate && !isDownloading && !isReady && !pendingDownload;
   const readyVersion = status.availableVersion ?? '';
-  // 展示进度：真实 downloading 或「刚点更新、进度环已就位但主进程事件还没到」的过渡态。
+  // The destination appears immediately; later progress remains host-owned.
   const showProgress = isDownloading || pendingDownload;
   const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)));
-  // 过渡期还没有真实进度，显示 0%，让进度环以「起步脉冲」形态接住视线。
+  // The pending destination does not claim downloaded bytes before a host event.
   const progressPercent = isDownloading ? percent : 0;
 
   const handleClick = () => {
     // 下载中：打开下载进度弹窗，绝不触发检测（进度由弹窗内进度条 + 徽标环形进度表达）。
-    if (isDownloading) {
+    if (isDownloading || pendingDownload) {
       setModalOpen(true);
       return;
     }
     setModalOpen(true);
-    if (!hasUpdate) {
+    if (!hasUpdate && phase !== 'error') {
       void check();
     }
   };
 
-  const title = isDownloading
-    ? i18n.t('updater.badge.downloading', { percent })
+  const title = showProgress
+    ? i18n.t('updater.badge.downloading', { percent: progressPercent })
     : isReady
       ? i18n.t('updater.badge.ready', { version: readyVersion })
       : hasUpdate
         ? i18n.t('updater.badge.updateAvailable')
-        : status.phase === 'checking'
-          ? i18n.t('updater.badge.checking')
-          : i18n.t('updater.badge.upToDate');
+        : status.phase === 'error'
+          ? i18n.t('updater.modal.error', { message: status.error ?? '' })
+          : status.phase === 'checking'
+            ? i18n.t('updater.badge.checking')
+            : i18n.t('updater.badge.upToDate');
 
   return (
     <>
-      <div className={`sidebar-version-badge ${hasUpdate ? 'has-update' : ''}`}>
+      <div ref={badgeRef} className={`sidebar-version-badge ${hasUpdate ? 'has-update' : ''}${showProgress ? ' is-progress' : ''}`}>
         <button
           type="button"
           className="sidebar-version-text-btn"
           title={title}
-          aria-label={hasUpdate ? i18n.t('updater.badge.ariaHasUpdate') : title}
+          aria-label={`${hasUpdate ? i18n.t('updater.badge.ariaHasUpdate') : title}${compact ? ` · v${status.currentVersion}` : ''}`}
           onClick={handleClick}
         >
-          <span className="sidebar-version-text">v{status.currentVersion}</span>
+          <span className="sidebar-version-text">{label.version}</span>
+          {label.stage ? <span className="sidebar-version-stage">{label.stage}</span> : null}
           {import.meta.env.DEV ? (
             <span className="sidebar-version-dev-tag" aria-label="开发版本">
               开发
@@ -106,16 +228,22 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
               </svg>
             </span>
           ) : null}
+          {phase === 'error' ? <PeerIcon name="warning" size={13} /> : null}
         </button>
 
         {showProgress ? (
           <span
             className="sidebar-version-progress"
-            style={{ '--progress': `${progressPercent}%` } as CSSProperties}
+            style={{ '--progress': `${progressPercent}%`, '--progress-ratio': progressPercent / 100 } as CSSProperties}
             title={title}
             aria-label={title}
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
           >
-            <span className="sidebar-version-progress-ring" aria-hidden="true" />
+            {compact ? <span className="sidebar-version-progress-track" aria-hidden="true"><span className="sidebar-version-progress-fill" /></span>
+              : <span className="sidebar-version-progress-ring" aria-hidden="true" />}
             <span className="sidebar-version-progress-text">{progressPercent}%</span>
           </span>
         ) : null}
@@ -130,18 +258,35 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
             {i18n.t('updater.badge.install')}
           </button>
         ) : null}
+
+        {showChannel ? (
+          <Dropdown
+            className="sidebar-version-channel"
+            value={status.preference}
+            triggerLabel={i18n.t(`updater.badge.channel.${status.preference}`)}
+            options={[
+              { value: 'auto', label: i18n.t('updater.settings.channel.auto') },
+              { value: 'beta', label: i18n.t('updater.settings.channel.beta') },
+              { value: 'stable', label: i18n.t('updater.settings.channel.stable') },
+            ]}
+            ariaLabel={i18n.t('updater.settings.channel')}
+            title={i18n.t('updater.settings.channel.description')}
+            menuPlacement="up"
+            onChange={(value) => void setChannel(value as UpdateChannelPreference)}
+          />
+        ) : null}
       </div>
 
       <UpdateModal
         i18n={i18n}
         open={modalOpen}
         status={status}
+        pendingDownload={pendingDownload}
         onClose={() => setModalOpen(false)}
+        progressTarget={progressTarget}
         onUpdate={() => {
-          // 先就位进度环，再触发异步下载 + 收起弹窗，保证视线不断。
           setPendingDownload(true);
-          void download();
-          setModalOpen(false);
+          void download().finally(() => setPendingDownload(false));
         }}
         onOpenReleasePage={() => void openReleasePage()}
         onRecheck={() => void check()}

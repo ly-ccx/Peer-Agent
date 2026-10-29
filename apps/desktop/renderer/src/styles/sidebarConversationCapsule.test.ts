@@ -55,9 +55,9 @@ test('conversation rows stay list geometry instead of capsules', () => {
   assert.match(rowBody, /line-height:\s*1;/);
   assert.match(rowBody, /min-height:\s*28px;/);
   assert.match(rowBody, /padding:\s*5px var\(--sidebar-conv-row-pad-x\);/);
-  assert.match(rowBody, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
+  assert.match(rowBody, /border-radius:\s*var\(--ui-radius-row\);/);
   assert.doesNotMatch(rowBody, /--ui-radius-panel/);
-  assert.match(layeredRow, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
+  assert.match(layeredRow, /border-radius:\s*var\(--ui-radius-row\);/);
   assert.doesNotMatch(layeredRow, /--ui-radius-panel/);
   assert.match(titleBody, /line-height:\s*1\.2;/);
   assert.match(titleBody, /font-size:\s*var\(--ui-font-control\);/);

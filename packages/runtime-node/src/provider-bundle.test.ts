@@ -3,6 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 
 import type { RuntimeSdkEvent, RuntimeSdkHookRunner } from '@peer-agent/runtime-sdk';
 
@@ -27,6 +28,7 @@ test('node provider bundle exposes a host-neutral projection and governed runtim
   assert.deepEqual(
     bundle.projection.tools.map(({ name, capabilityId }) => ({ name, capabilityId })),
     [
+      { name: 'git_query', capabilityId: 'local.git.query' },
       { name: 'read_file', capabilityId: 'local.file.read' },
       { name: 'list_files', capabilityId: 'local.file.list' },
       { name: 'write_file', capabilityId: 'local.file.write' },
@@ -39,7 +41,7 @@ test('node provider bundle exposes a host-neutral projection and governed runtim
       { name: 'request_user_input', capabilityId: 'local.interaction.request_user_input' },
     ],
   );
-  assert.equal(bundle.providers.length, 5);
+  assert.equal(bundle.providers.length, 6);
 
   const execution = await bundle.runtime.execute({
     sessionId: 'session-1',
@@ -81,12 +83,14 @@ test('node provider bundle materializes mode scopes into read-only plan and expl
   t.after(() => Promise.all([plan, explorer, goal, compact, system].map((bundle) => bundle.dispose())));
 
   const explorerCapabilities = [
+    'local.git.query',
     'local.file.read',
     'local.file.list',
     'local.file.search',
     'local.search.aggregate',
   ];
   const planCapabilities = [
+    'local.git.query',
     'local.file.read',
     'local.file.list',
     'local.file.search',
@@ -103,6 +107,7 @@ test('node provider bundle materializes mode scopes into read-only plan and expl
     explorerCapabilities,
   );
   const fullCapabilities = [
+    'local.git.query',
     'local.file.read',
     'local.file.list',
     'local.file.write',
@@ -117,6 +122,25 @@ test('node provider bundle materializes mode scopes into read-only plan and expl
   assert.deepEqual(goal.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
   assert.deepEqual(compact.projection.tools.map((tool) => tool.capabilityId), []);
   assert.deepEqual(system.projection.tools.map((tool) => tool.capabilityId), []);
+});
+
+test('Node Git query produces governed read evidence while shell remains unavailable to project agent', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-node-git-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  execFileSync('git', ['init', workspaceRoot]);
+  await writeFile(path.join(workspaceRoot, 'note.txt'), 'retained');
+  const bundle = createNodeProviderBundle({ workspaceRoot, mode: 'project_agent', git: { artifactRoot: path.join(workspaceRoot, 'artifacts') },
+    requestPermission: async request => { assert.equal(request.capabilityId, 'local.git.query'); return { granted: true }; } });
+  t.after(() => bundle.dispose());
+  assert.equal(bundle.projection.tools.some(tool => tool.name === 'git_query'), true);
+  assert.equal(bundle.projection.tools.some(tool => tool.capabilityId === 'local.shell.exec'), false);
+  const execution = await bundle.runtime.execute({ sessionId: 'readonly-git',
+    call: { toolCallId: 'git-query', capabilityId: 'local.git.query', arguments: { path: workspaceRoot } } });
+  assert.equal(execution.result.status, 'completed');
+  const preview = execution.result.outputPreview as { kind: string; artifactPath: string; status: { untracked: number }; atomic: boolean };
+  assert.equal(preview.kind, 'local_git_observation'); assert.equal(preview.status.untracked, 1); assert.equal(preview.atomic, false);
+  const full = JSON.parse(await readFile(preview.artifactPath, 'utf8'));
+  assert.equal(full.status.untracked, 1); assert.equal(full.unborn, true);
 });
 
 test('node provider bundle omits shell execution and stop together when shell is disabled', async (t) => {

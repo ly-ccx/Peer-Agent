@@ -205,7 +205,7 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('onMouseDown={() => onResume(row)}');
     expect(appSource).toContain('onResume={handleResumeConversationSummary}');
     expect(keyboardSource).toContain("key.name === 'escape'");
-    expect(keyboardSource).toContain("key.name === 'return' || key.name === 'enter'");
+    expect(keyboardSource).toContain('if (isEnterKeyName(key.name)) {');
   });
 
 
@@ -656,7 +656,7 @@ describe('TUI app layout', () => {
     expect(historySource).toContain('formatUserMessageBody');
     expect(historySource).toContain('message.images');
     expect(historySource).toContain('imageLabel');
-    expect(appSource).toContain("attachment.images.length > 0 ? '' : attachment.displayContent");
+    expect(appSource).toContain('submission.current.submit({ value, locale, controller, imagePathRegistry');
   });
 
   test('uses the shared theme module for chrome colors and picker selection', () => {

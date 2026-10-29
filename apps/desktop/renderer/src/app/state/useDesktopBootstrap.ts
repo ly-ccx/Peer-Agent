@@ -6,6 +6,7 @@ import type {
   WorkspaceProject,
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
+import { useResourceRead } from '../../ui/resources/useResourceState';
 import { clientApi } from '../../clientApi';
 import { normalizeConversationListPage } from '../../chat/state/conversationListPagination';
 
@@ -27,13 +28,14 @@ export interface DesktopStartupSnapshot {
     readonly pinnedOrder?: number | null;
   }[];
   readonly workspaceInfo: { readonly name: string; readonly absolutePath: string; readonly git?: { readonly branch?: string; readonly isDirty?: boolean } } | null;
-  readonly workspaces: readonly { readonly path: string; readonly name: string; readonly addedAt: string }[];
+  readonly workspaces: readonly { readonly id: string; readonly path: string; readonly name: string; readonly addedAt: string }[];
 }
 
 export interface DesktopBootstrapState {
   readonly availableLocales: readonly LocaleCode[];
   readonly capabilities: readonly CapabilityManifest[];
   readonly initError: string | null;
+  readonly loading: boolean;
   readonly projects: readonly WorkspaceProject[];
   /** Authoritative provider list from the same bootstrap the window starts from.
    * The composer must not depend on a single best-effort llm:list IPC succeeding. */
@@ -43,73 +45,41 @@ export interface DesktopBootstrapState {
   readonly startupSnapshot: DesktopStartupSnapshot | null;
 }
 
+const EMPTY = { locales: [] as readonly LocaleCode[], capabilities: [] as readonly CapabilityManifest[], projects: [] as readonly WorkspaceProject[], providers: [] as readonly LlmProviderConfigView[] };
+
+/** Bootstrap readiness owns the gate; optional warmup never holds the usable shell. */
 export function useDesktopBootstrap(): DesktopBootstrapState {
-  const [session, setSession] = useState<ClientSessionState | null>(null);
+  const resource = useResourceRead('desktop-bootstrap', () => clientApi.getBootstrap());
+  const bootstrap = resource.value;
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null);
-  const [availableLocales, setAvailableLocales] = useState<readonly LocaleCode[]>([]);
-  const [capabilities, setCapabilities] = useState<readonly CapabilityManifest[]>([]);
-  const [projects, setProjects] = useState<readonly WorkspaceProject[]>([]);
-  const [llmProviders, setLlmProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [initError, setInitError] = useState<string | null>(null);
-
-  const loadBootstrap = useCallback(async () => {
-    try {
-      const bootstrap = await clientApi.getBootstrap();
-      // 冷启动门闩：bootstrap 成功即可离开启动页（session 非 null）。
-      // workspace / 会话列表属于可后台填充的预加载，不应阻塞 BrandStartupLoader。
-      setAvailableLocales(bootstrap.availableLocales);
-      setCapabilities(bootstrap.capabilities);
-      setProjects(bootstrap.projects);
-      setLlmProviders(bootstrap.llmProviders ?? []);
-      setSession(bootstrap.session);
-      setInitError(null);
-
-      if (!bootstrap.session) {
-        setStartupSnapshot(null);
-        return;
-      }
-
+  useEffect(() => {
+    let active = true;
+    setStartupSnapshot(null);
+    if (bootstrap?.session) void (async () => {
       try {
         const directory = await clientApi.workspaceList();
+        if (!active) return;
         const [workspaceInfo, conversationPage] = await Promise.all([
           directory.activeWorkspace ? clientApi.workspaceInfo({ path: directory.activeWorkspace }) : Promise.resolve(null),
-          clientApi.conversationsList({
-            status: 'active',
-            limit: CONVERSATION_LIST_PAGE_SIZE,
-            paginated: true,
-          }),
+          clientApi.conversationsList({ status: 'active', limit: CONVERSATION_LIST_PAGE_SIZE, paginated: true }),
         ]);
+        if (!active) return;
         const page = normalizeConversationListPage(conversationPage);
-        setStartupSnapshot({
-          activeWorkspace: directory.activeWorkspace,
-          conversations: page.items,
-          conversationNextCursor: page.nextCursor,
-          conversationHasMore: page.hasMore,
-          workspaceInfo,
-          workspaces: directory.workspaces,
-        });
-      } catch {
-        // Bootstrap remains usable when optional workspace preloading fails.
-        // App and Sidebar will fall back to their normal background refresh paths.
-        setStartupSnapshot(null);
-      }
-    } catch (error: unknown) {
-      setInitError(error instanceof Error ? error.message : 'Failed to bootstrap local client.');
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadBootstrap();
-  }, [loadBootstrap]);
-
+        setStartupSnapshot({ activeWorkspace: directory.activeWorkspace, conversations: page.items,
+          conversationNextCursor: page.nextCursor, conversationHasMore: page.hasMore, workspaceInfo, workspaces: directory.workspaces });
+      } catch { /* Optional warmup cannot turn a usable bootstrap into a failure. */ }
+    })();
+    return () => { active = false; };
+  }, [bootstrap]);
+  const refreshBootstrap = useCallback(async () => { await resource.reload(); }, [resource.reload]);
   return {
-    availableLocales,
-    capabilities,
-    initError,
-    llmProviders,
-    projects,
-    refreshBootstrap: loadBootstrap,
-    session,
-    startupSnapshot,
+    availableLocales: bootstrap?.availableLocales ?? EMPTY.locales,
+    capabilities: bootstrap?.capabilities ?? EMPTY.capabilities,
+    projects: bootstrap?.projects ?? EMPTY.projects,
+    llmProviders: bootstrap?.llmProviders ?? EMPTY.providers,
+    session: bootstrap?.session ?? null,
+    initError: resource.error ? 'Local client bootstrap was not confirmed.' : null,
+    loading: resource.loading,
+    refreshBootstrap, startupSnapshot,
   };
 }

@@ -100,6 +100,7 @@ async function coordinated(f, wire, messages, send, extra = {}) {
   return executeDesktopProviderRequest({ request: { messages, systemPrompt: '', contextWindow: 1_000_000,
     conversationId: f.options.conversationId, streamId: f.options.streamId,
     providerConfig: { model: f.options.model }, signal: extra.signal,
+    requestRecoveryOptions: { waitImpl: async () => {} },
     visualRequestHost: { goalPlanStore: f.store, workspacePath: f.home, reviewToken: f.options.reviewToken } },
     buildCanonicalRequest: ({ messages: projected }) => ({ messages: sanitizeApiMessages(projected, { toolCallFormat: wire }) }),
     send, ...extra });
@@ -141,7 +142,7 @@ for (const wire of wires) for (const scenario of ['retained', 'removed', 'text-o
     assertReceiptPrivacy(record);
     assert.equal(record.status, scenario === 'failed' ? 'failed' : scenario === 'cancelled' ? 'cancelled'
       : expectedImage ? 'response-completed' : 'image-not-transported');
-    assert.equal(record.attempts.length, scenario === 'retry' ? 2 : 1);
+    assert.equal(record.attempts.length, scenario === 'failed' ? 4 : scenario === 'retry' ? 2 : 1);
     assert.equal(server.received.length, record.attempts.length);
     for (const [i, attempt] of record.attempts.entries()) {
       assert.equal(attempt.imagesPresent, expectedImage);

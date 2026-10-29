@@ -1,5 +1,5 @@
 export type TuiMode = 'chat' | 'plan' | 'goal' | 'explorer';
-export type TuiRuntimeMode = TuiMode | 'compact' | 'system';
+export type TuiRuntimeMode = TuiMode | 'compact' | 'system' | 'project_agent' | 'memory_curator';
 
 export interface TuiModeOption {
   readonly mode: TuiMode;
@@ -30,6 +30,8 @@ export interface TuiModeProjectionRule {
 }
 
 export const TUI_MODE_PROJECTION_RULES: readonly TuiModeProjectionRule[] = Object.freeze([
+  { mode: 'project_agent', readOnly: true, allowsWriteTools: false, userSelectable: false },
+  { mode: 'memory_curator', readOnly: true, allowsWriteTools: false, userSelectable: false },
   {
     mode: 'chat',
     readOnly: false,
@@ -95,6 +97,8 @@ const TUI_KNOWN_USER_MODES: readonly TuiMode[] = Object.freeze(['chat', 'plan', 
 
 export const TUI_RUNTIME_MODES: readonly TuiRuntimeMode[] = Object.freeze([
   ...TUI_KNOWN_USER_MODES,
+  'project_agent',
+  'memory_curator',
   'compact',
   'system',
 ]);

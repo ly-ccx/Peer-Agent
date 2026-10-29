@@ -17,6 +17,8 @@ export interface ConversationUsage {
 }
 
 export type ConversationContextSnapshot = ContextAccountingSnapshot;
+export type ImmutableHistoryValue<T> = T extends object
+  ? { readonly [K in keyof T]: ImmutableHistoryValue<T[K]> } : T;
 
 export interface ConversationMeta {
   readonly id: string;
@@ -45,11 +47,29 @@ export interface ConversationMeta {
   /** Durable source for automation Fresh Conversations; rename-safe badge signal. */
   readonly automationOrigin?: ConversationAutomationOrigin | null;
   readonly messageCount?: number;
+  /** Missing or any other value is an ordinary conversation. */
+  readonly role?: 'project_agent' | 'work_session';
+  readonly parentConversationId?: string;
+  readonly workspaceId?: string;
+  readonly delegation?: {
+    readonly sessionId: string;
+    readonly anchorMessageId: string;
+    readonly inputId: string;
+  };
+  readonly backgroundSnapshotId?: string;
   readonly [key: string]: unknown;
 }
 
 export interface StoredConversation extends ConversationMeta {
   readonly messages: readonly Record<string, unknown>[];
+}
+
+export interface PersistedConversationHistory {
+  conversationId: string;
+  contentRevision: number;
+  messages: Record<string, unknown>[];
+  excludedFromMessageId: string | null;
+  requiresRuntimeCheck: true;
 }
 
 export interface ConversationListPage {
@@ -68,8 +88,15 @@ export interface ConversationChangeEvent {
   readonly changedAt: string;
 }
 
+export type ConversationRoleFilter = 'default' | 'project_agent' | 'work_session';
+
 export interface ConversationListParams {
   status?: string | readonly string[];
+  /**
+   * Missing or empty keeps ordinary conversations only.
+   * Callers that need task children or the project agent must pass them explicitly.
+   */
+  roles?: readonly ConversationRoleFilter[];
   includeMessageCount?: boolean;
   /** 显式同步回填 messageCount（会读 jsonl）；默认 false，list 热路径永不读正文 */
   backfillMessageCount?: boolean;
@@ -92,6 +119,7 @@ export interface InheritedBackgroundSnapshot {
   status: 'full' | 'compacted' | 'partial';
   requiresMissingConfirmation: boolean;
   contentHash: string;
+  scope?: { kind: 'delegation'; messageIds: string[] };
 }
 
 export interface SelectionChildRequest {
@@ -107,9 +135,39 @@ export interface SelectionChildRequest {
 }
 
 export interface ConversationStore {
+  readInteractionPage(conversationId: string, params?: { before?: string; limit?: number }): Promise<(PersistedConversationHistory & { sourceVersion: string; nextCursor: string | null }) | null>;
+  readInteractionProcess(conversationId: string, params: { messageId?: string; turnId?: string }): Promise<{ conversationId: string; sourceVersion: string; messages: Record<string, unknown>[]; nextCursor: null } | null>;
+  readInteractionContext(conversationId: string): Promise<PersistedConversationHistory | null>;
   resolveSelectionReference?(request: { conversationId: string; selection: import('@peer-agent/protocol').SelectionRange; runtimeState: { conversationId: string; contentRevision: number; status: string; activeMessageId?: string } }): import('@peer-agent/protocol').SelectionReference;
   /** Internal only: host must authorize and resolve runtimeState before calling. */
   createSelectionChild?(request: SelectionChildRequest): ConversationMeta;
+  /**
+   * Internal only. `snapshotPolicy: 'inherited'` keeps the selection side-chat shape.
+   * Any other policy freezes history through `anchorMessageId` inclusive.
+   */
+  createChildConversation?(input: {
+    parentConversationId: string;
+    role?: 'project_agent' | 'work_session';
+    anchorMessageId?: string;
+    snapshotPolicy?: 'inherited' | 'to_anchor';
+    title?: string;
+    workspacePath?: string | null;
+    workspaceId?: string;
+    mode?: string;
+    modelProviderId?: string | null;
+    /** Frozen worker effort for delegated tasks; omitted ordinary children inherit their parent. */
+    effort?: string;
+    delegation?: { sessionId: string; anchorMessageId: string; inputId: string };
+    runtimeState?: SelectionChildRequest['runtimeState'];
+    capturedAt?: string;
+    /** Work sessions only: admit these persisted anchors instead of the whole history. */
+    backgroundMessageIds?: string[];
+    backgroundSnapshotId?: string;
+    confirmMissing?: boolean;
+    requestId?: string;
+    selection?: SelectionChildRequest['selection'];
+  }): ConversationMeta;
+  listChildren?(parentConversationId: string, params?: { role?: ConversationRoleFilter }): ConversationMeta[];
   updateSelectionChildDraft?(id: string, draft: { text: string; referenceIds: string[] }): { text: string; references: Record<string, unknown>[] };
   /** Internal metadata lookup; not a model-visible authorization boundary. */
   listSelectionChildren?(parentConversationId: string): (ConversationMeta & { parentConversationId: string; hasDraft: boolean })[];
@@ -123,13 +181,16 @@ export interface ConversationStore {
   /** Internal raw read. Caller must enforce parent-child access before use. */
   readInheritedBackground?(snapshotId: string): InheritedBackgroundSnapshot;
   /** Persisted records before any streaming sidecar target; still requires runtime liveness checks. */
-  getPersistedConversationHistory?(id: string): {
-    conversationId: string;
-    contentRevision: number;
-    messages: Record<string, unknown>[];
-    excludedFromMessageId: string | null;
-    requiresRuntimeCheck: true;
-  } | null;
+  getPersistedConversationHistory?(id: string): PersistedConversationHistory | null;
+  /** Compact presentation cache; does not attest permissions, runtime liveness or acceptance.
+   * immutableInput opts a pure callback into deeply frozen shared input.
+   * immutableOutput shares deeply frozen plain derived facts; default results remain isolated copies. */
+  createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
+    options: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput: true }): (id: string) => ImmutableHistoryValue<T> | null;
+  createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
+    options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
+  /** Current index batch; no cross-file transaction or permission/liveness attestation. */
+  getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   deleteConversationsByWorkspace?(workspacePath: string | null | undefined): ConversationMeta[];
@@ -141,6 +202,7 @@ export interface ConversationStore {
     workspacePath?: string | null;
     limit?: number;
     includeWorkspaceNameMatch?: boolean;
+    roles?: readonly ConversationRoleFilter[];
   }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
   getLatestContextObservation(
@@ -155,8 +217,15 @@ export interface ConversationStore {
     preferredExecutionIsolation?: 'none' | 'worktree';
     automationCreateContext?: AutomationCreateContext | null;
     automationOrigin?: ConversationAutomationOrigin | null;
+    role?: 'project_agent' | 'work_session';
+    workspaceId?: string;
   }): ConversationMeta;
-  appendMessage(id: string, message: object): unknown;
+  appendMessage(id: string, message: object, options?: { returnMessages?: boolean }): unknown;
+  /** Worker preparation followed by a version-checked atomic commit; resolves before terminal delivery. */
+  commitStreamingMessage(id: string, messageId: string, patch: Readonly<Record<string, unknown>>): Promise<{
+    readonly id: string; readonly messageId: string; readonly contentRevision: number;
+  }>;
+  drainPendingCommits(): Promise<readonly PromiseSettledResult<unknown>[]>;
   /**
    * 标记会话已读。只推进 lastReadAt，不修改 updatedAt。
    * options.at 可显式传入水位时间；默认 now。水位只前进不回退。
@@ -182,6 +251,8 @@ export interface ConversationStore {
         providerName?: string | null;
         estimatedCostUsd?: number | null;
         pricingSource?: string | null;
+        role?: string | null;
+        workspaceId?: string | null;
       };
     },
   ): {

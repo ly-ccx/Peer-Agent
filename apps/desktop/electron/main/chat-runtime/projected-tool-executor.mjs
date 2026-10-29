@@ -1,8 +1,10 @@
+import { evaluateObjectiveProbeCall,objectiveProbeDenial } from './objective-probe-gate.mjs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { getDataHome } from '../data-store.mjs';
+import { evaluateWorkSessionWrite, capabilityDenial } from '@peer-agent/runtime-node';
 import {
   buildGoalModeDenial,
   evaluateGoalModeGate,
@@ -10,6 +12,11 @@ import {
   resolveActivePlanBoundaries,
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
+import {
+  attachProjectAgentDenialEvidence,
+  buildProjectAgentModeDenial,
+  evaluateProjectAgentModeGate,
+} from './project-agent-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
 import { getDesktopPreviewService } from '../runtime-gateway/desktop-preview-service.mjs';
 import { createWebUiCapture } from '../runtime-gateway/web-ui-capture.mjs';
@@ -67,6 +74,7 @@ export function resolveProjectedModelToolCall({
     return {
       ok: false,
       error: `Unknown tool: ${name}`,
+      reason: 'capability_not_projected',
     };
   }
 
@@ -74,10 +82,12 @@ export function resolveProjectedModelToolCall({
   const capability = (runtimeProjection?.capabilities ?? []).find(
     (candidate) => candidate.name === name && candidate.capabilityId === capabilityId,
   );
-  if (!capability) {
+  if (!capability || !['available', 'needs_permission'].includes(capability.health)) {
     return {
       ok: false,
       error: `Tool ${name} is not available in the current Runtime Projection.`,
+      reason: 'capability_not_projected',
+      capabilityId,
     };
   }
 
@@ -184,9 +194,39 @@ export async function executeProjectedModelTool({
     runtimeProjection,
   });
   if (!projection.ok) {
-    return { success: false, error: projection.error };
+    const reason = projection.reason || 'capability_not_projected';
+    const detail = capabilityDenial({ reason, capabilityId: projection.capabilityId, toolName: name, stage: 'projection', locale });
+    const call = { toolCallId: toolCallId || `projected-tool:${randomUUID()}`, capabilityId: projection.capabilityId || 'unknown.tool' };
+    return attachProjectAgentDenialEvidence({ success: false, error: detail.message,
+      output: JSON.stringify({ ok: false, error: reason, ...detail }) }, { call, locale, reason });
   }
 
+  const dispatchPolicy = toolContext?.resolveAccessPolicy?.();
+  const workSessionGate = () => {
+    const accessDenial = toolContext?.checkAccessPolicy?.();
+    if (accessDenial) return accessDenial;
+    if (dispatchPolicy?.ok && dispatchPolicy.policy) {
+      const current = toolContext.resolveAccessPolicy();
+      if (!current?.ok || current.policy?.workspaceId !== dispatchPolicy.policy.workspaceId
+        || current.policy?.conversationId !== dispatchPolicy.policy.conversationId
+        || current.policy?.revision !== dispatchPolicy.policy.revision) return 'permission_policy_changed';
+    }
+    const planId = toolContext?.turnProfile?.planId ?? toolContext?.planId;
+    const plan = planId ? goalPlanStore?.getPlan?.(planId) : null;
+    const gate = evaluateWorkSessionWrite(plan, {
+      capabilityId: projection.call.capabilityId, toolName: name,
+      permissionKind: projection.tool?.permissionPolicy?.kind, riskLevel: projection.capability?.riskLevel,
+    });
+    return gate.allowed ? null : gate.error;
+  };
+  const workSessionDenial = workSessionGate();
+  if (workSessionDenial) return attachProjectAgentDenialEvidence({ success: false, error: workSessionDenial,
+    output: JSON.stringify({ ok: false, error: workSessionDenial,
+      ...(workSessionDenial === 'read_only' ? capabilityDenial({ reason: workSessionDenial, capabilityId: projection.call.capabilityId, toolName: name, locale }) : {}) }), projectionCapability: projection.capability,
+  }, { call: projection.call, locale, reason: workSessionDenial });
+
+  const probeGate=evaluateObjectiveProbeCall({policy:toolContext?.permissionPolicy,call:projection.call,workspacePath});
+  if(!probeGate.allowed)return {...objectiveProbeDenial(projection.call,probeGate.reason,locale),projectionCapability:projection.capability};
   const requestedCwd = resolveSafeWorkspaceRoot(workspacePath);
   const mode = toolContext?.mode ?? 'chat';
   const conversationId = toolContext?.conversationId ?? null;
@@ -197,6 +237,7 @@ export async function executeProjectedModelTool({
   const effectiveToolContext = toolContext
     ? {
       ...toolContext,
+      checkAccessPolicy: workSessionGate,
       workspacePath: cwd,
       originWorkspacePath: goalBinding?.originWorkspacePath ?? toolContext.originWorkspacePath ?? requestedCwd,
       targetWorkspacePath: goalBinding?.targetWorkspacePath ?? toolContext.targetWorkspacePath ?? null,
@@ -204,6 +245,27 @@ export async function executeProjectedModelTool({
       writableRoots: goalBinding?.writableRoots ?? toolContext.writableRoots,
     }
     : toolContext;
+
+  // 项目代理硬闸在 Goal 闸与 PermissionGrant 之前。投影漏出的写能力也在这里拒绝。
+  const turnRole = toolContext?.turnRole ?? toolContext?.turnProfile?.role ?? null;
+  const projectAgentGate = evaluateProjectAgentModeGate({
+    mode,
+    role: turnRole,
+    capabilityId: projection.call.capabilityId,
+    permissionKind: projection.tool?.permissionPolicy?.kind ?? null,
+  });
+  if (!projectAgentGate.allowed) {
+    return {
+      ...buildProjectAgentModeDenial({
+        call: projection.call,
+        locale,
+        toolName: name,
+        capabilityId: projection.call.capabilityId,
+        detail: projectAgentGate.detail ?? null,
+      }),
+      projectionCapability: projection.capability,
+    };
+  }
 
   // 运行时闸门（见 goal-mode-gate.mjs / goal-mode-ultrathink-workflow 设计文档）：
   // - plan 模式：计划未获批准前，拒绝有副作用能力，强制「先规划 → 批准 → 执行」。
@@ -222,10 +284,16 @@ export async function executeProjectedModelTool({
       : null,
   });
   if (!gate.allowed) {
-    return {
+    const denial = {
       ...buildGoalModeDenial({ name, reason: gate.reason, locale, detail: gate.detail ?? null }),
       projectionCapability: projection.capability,
     };
+    if (!projectAgentGate.applies) return denial;
+    return attachProjectAgentDenialEvidence(denial, {
+      call: projection.call,
+      locale,
+      reason: gate.reason,
+    });
   }
   // goal 模式高风险动作：不可逆动作或 scope expansion 逐动作确认后放行，拒绝则结构化失败。
   if (gate.requiresConfirmation) {
@@ -259,6 +327,7 @@ export async function executeProjectedModelTool({
         confirmation: gate.confirmation ?? null,
         scope: {
           kind: 'goal-confirmation',
+          authorizedCapabilityId: projection.call.capabilityId,
           confirmationKind,
           tool: name,
           workspacePath: cwd,
@@ -297,6 +366,7 @@ export async function executeProjectedModelTool({
     })
     : null;
   const host = createLocalToolHost({
+    executionGate: workSessionGate,
     workspaceRoot: cwd,
     userDataPath,
     sessionStore: createSessionStore(locale),
@@ -326,12 +396,17 @@ export async function executeProjectedModelTool({
       hookRunner,
     }),
   });
-  const execution = await host.execute({ call: projection.call, conversationId }, {
+  const hostExecution = await host.execute({ call: projection.call, conversationId }, {
     toolContext: effectiveToolContext,
     requestPermission,
     signal,
     locale,
   });
+  // Provenance enriches the actual Provider grant; it never creates or replaces a decision.
+  const execution = dispatchPolicy?.ok && dispatchPolicy.policy && hostExecution.grant
+    ? { ...hostExecution, grant: { ...hostExecution.grant,
+        policyRevision: `bot:${dispatchPolicy.policy.workspaceId}:${dispatchPolicy.policy.conversationId}:${dispatchPolicy.policy.revision}` } }
+    : hostExecution;
   return {
     ...materializeProjectedToolExecution({
       name,

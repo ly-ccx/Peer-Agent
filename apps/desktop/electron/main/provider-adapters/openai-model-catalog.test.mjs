@@ -87,6 +87,22 @@ test('GPT-6 Sol and Luna use subscription context with official pricing', () => 
   }
 });
 
+test('GPT-6.1 Sol is selectable with supported reasoning and subscription context', () => {
+  const model = getSubscriptionModelMetadata('gpt-6.1-sol');
+  assert.ok(isSubscriptionUsableModel(model?.id));
+  assert.equal(model.label, 'GPT-6.1 Sol');
+  assert.equal(model.contextWindow, 400_000);
+  assert.equal(model.maxOutputTokens, 128_000);
+  assert.deepEqual(model.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(model.supportsVision, true);
+  assert.equal(model.cacheReadPrice, 0.1);
+  assert.equal(model.longContextInputThreshold, 272_000);
+  assert.equal(model.longContextInputPrice, 4);
+  assert.equal(model.longContextCacheReadPrice, 0.2);
+  assert.equal(model.longContextOutputPrice, 15);
+  assert.equal(DEFAULT_SUBSCRIPTION_MODEL, 'gpt-6-astra');
+});
+
 test('GPT-5.6 subscription models expose cache pricing and max reasoning', () => {
   const expected = new Map([
     ['gpt-5.6-sol', { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 30 }],
@@ -152,6 +168,7 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
     res.models.map((m) => m.id),
     [
       'gpt-6-astra',
+      'gpt-6.1-sol',
       'gpt-6-sol',
       'gpt-6-luna',
       'gpt-5.6-sol',
@@ -167,7 +184,7 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
 test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
   const res = await listSubscriptionModels({});
   res.models.push({ id: 'x', label: 'x' });
-  assert.equal(SUBSCRIPTION_CATALOG.length, 9);
+  assert.equal(SUBSCRIPTION_CATALOG.length, 10);
 });
 
 test('isSubscriptionUsableModel keeps catalog models, drops API-only models', () => {

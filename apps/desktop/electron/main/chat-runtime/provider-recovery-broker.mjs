@@ -10,12 +10,6 @@ const TRANSPORT_FAILURE_PATTERNS = [
   /network/i,
   /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i,
   /UND_ERR_|HeadersTimeoutError|ConnectTimeoutError|SocketError/i,
-  /unexpected status 403 forbidden/i,
-  /HTTP 403/i,
-  /not allowed by the default security policy/i,
-  /不在安全策略默认允许的范围内/i,
-  /域名拦截/i,
-  /Domain Blocking/i,
 ];
 
 const SAME_PROVIDER_RETRY_PATTERNS = [
@@ -59,7 +53,16 @@ export function describeFetchFailure(error) {
 
 export function isProviderTransportFailure(errorText) {
   const text = String(errorText || '');
-  return TRANSPORT_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
+  return isProviderRoutingBlockedFailure(text)
+    || TRANSPORT_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+// A gateway's explicit domain denial can select an already authorized route.
+// Ordinary provider authentication 403 responses must retain their terminal truth.
+export function isProviderRoutingBlockedFailure(errorText) {
+  const text = String(errorText || '');
+  return /\b403\b/.test(text)
+    && /Domain Blocking|域名拦截|not allowed by the default security policy|不在安全策略默认允许的范围内/i.test(text);
 }
 
 export function isSameProviderRetryableFailure(errorText) {
@@ -156,9 +159,34 @@ export function resolveConversationModelBindingPatch({
   return patch;
 }
 
-export function orderProviderCandidates(providers = [], preferredProviderId = null) {
-  const runnable = providers.filter(providerCanRun);
+export function orderProviderCandidates(providers = [], preferredProviderId = null, allowedProviderIds = null) {
+  const allowList = Array.isArray(allowedProviderIds)
+    ? allowedProviderIds
+      .filter((id) => typeof id === 'string' && id.trim())
+      .map((id) => id.trim())
+    : null;
+  const allow = allowList ? new Set(allowList) : null;
+  const runnable = providers.filter(providerCanRun).filter((provider) => {
+    if (!allow) return true;
+    const id = typeof provider?.id === 'string' ? provider.id.trim() : '';
+    const groupId = typeof provider?.groupId === 'string' ? provider.groupId.trim() : '';
+    return (id && allow.has(id)) || (groupId && allow.has(groupId));
+  });
   if (!runnable.length) return [];
+  // A role recovery list is a closed set. Do not fall through to the global default
+  // or to a same-name model that the role filter already rejected.
+  if (allow) {
+    const preferred = resolvePreferredProvider(runnable, preferredProviderId);
+    if (!preferred) return [];
+    const rest = [];
+    for (const id of allowList) {
+      const match = runnable.find((provider) => provider.id === id || provider.groupId === id);
+      if (match && match.id !== preferred.id && !rest.some((provider) => provider.id === match.id)) {
+        rest.push(match);
+      }
+    }
+    return [preferred, ...rest];
+  }
   // 会话级首选 provider（会话 meta 里的 modelProviderId）优先：若指定且该 provider 仍可运行，
   // 就把它排首位作为本轮主 provider。兼容历史 groupId::model / groupId 绑定。
   //
@@ -179,15 +207,19 @@ export function orderProviderCandidates(providers = [], preferredProviderId = nu
   ];
 }
 
-export function canReplayProviderAttempt({ errorText, observedReplayUnsafeEvent = false } = {}) {
-  return !observedReplayUnsafeEvent && isProviderTransportFailure(errorText);
+export function canReplayProviderAttempt({ errorText, observedReplayUnsafeEvent = false,
+  requestRecoveryOwned = false, protectedNativeRecovery = false, replaySafe = true, failureKind = null } = {}) {
+  return !observedReplayUnsafeEvent && !protectedNativeRecovery && replaySafe
+    && (requestRecoveryOwned
+      ? failureKind === 'authentication' && isProviderRoutingBlockedFailure(errorText)
+      : isProviderTransportFailure(errorText));
 }
 
 export function canRetrySameProviderAttempt({ errorText, observedReplayUnsafeEvent = false } = {}) {
   return !observedReplayUnsafeEvent && isSameProviderRetryableFailure(errorText);
 }
 
-export function createProviderAttemptStream({ webContents, streamId, provider }) {
+export function createProviderAttemptStream({ webContents, streamId, provider, protectedNativeRecovery = false }) {
   let terminalError = null;
   let terminalSent = false;
   let observedReplayUnsafeEvent = false;
@@ -221,6 +253,7 @@ export function createProviderAttemptStream({ webContents, streamId, provider })
 
   function getResult() {
     const errorText = terminalError?.payload?.error ?? null;
+    const requestRecoveryOwned = Boolean(terminalError?.payload?.providerRecovery?.requestId);
     return {
       provider,
       terminalSent,
@@ -230,8 +263,12 @@ export function createProviderAttemptStream({ webContents, streamId, provider })
       replayable: Boolean(terminalError) && canReplayProviderAttempt({
         errorText,
         observedReplayUnsafeEvent,
+        requestRecoveryOwned,
+        protectedNativeRecovery,
+        replaySafe: terminalError?.payload?.providerRecovery?.replaySafe !== false,
+        failureKind: terminalError?.payload?.providerRecovery?.kind,
       }),
-      sameProviderRetryable: Boolean(terminalError) && canRetrySameProviderAttempt({
+      sameProviderRetryable: !requestRecoveryOwned && !protectedNativeRecovery && Boolean(terminalError) && canRetrySameProviderAttempt({
         errorText,
         observedReplayUnsafeEvent,
       }),

@@ -1,0 +1,825 @@
+/**
+ * Project-agent delegation contracts. Pure projections only; nothing here runs a tool.
+ * The user-visible conclusion of a work session is `decideLifecycle`'s conclusion.
+ */
+
+import type { ModelSelectionSnapshot } from './model-routing.ts';
+import {
+  decideLifecycle,
+  type ExecutionOwnership,
+  type GoalPlanProjectionSnapshot,
+  type TaskOverviewItem,
+} from './task-overview.ts';
+
+export type WorkSessionStatus =
+  | 'paused'
+  | 'queued'
+  | 'starting'
+  | 'running'
+  | 'waiting_user'
+  | 'waiting_agent'
+  | 'stopping'
+  | 'awaiting_outcome'
+  | 'verifying'
+  | 'result_ready'
+  | 'accepted'
+  | 'failed'
+  | 'cancelled'
+  | 'superseded';
+
+export const WORK_SESSION_STATUSES = ['paused', 'queued', 'starting', 'running', 'waiting_user', 'waiting_agent', 'stopping', 'awaiting_outcome', 'verifying',
+  'result_ready', 'accepted', 'failed', 'cancelled', 'superseded'] as const satisfies readonly WorkSessionStatus[];
+
+export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
+
+export interface DelegationOrigin {
+  readonly capabilityAdmission?: import('./capability-admission.ts').DelegationCapabilityAdmission;
+  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed'; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string };
+  readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
+  readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean };
+  readonly retainedForRecovery?: boolean;
+  readonly workId?: string;
+  readonly anchorMessageId: string;
+  readonly inputId: string;
+  readonly surface: InputSurface;
+  readonly memorySnapshotId: string;
+  readonly objectiveId?: string;
+  readonly objectiveActionId?: string;
+  readonly priority?: 'high' | 'normal' | 'low';
+  readonly isolation?: 'auto' | 'none' | 'worktree';
+  readonly isolationBlock?: 'disk_space' | 'isolation_failed' | null;
+  readonly isolationRetainedAt?: string;
+  readonly supersededBy?: string;
+  readonly supersededAt?: string;
+  readonly lastResumeAnchorMessageId?: string;
+  readonly handoffAuthorizedAt?: string;
+  readonly handoffDeferredAt?: string;
+  readonly modelSelection: ModelSelectionSnapshot;
+  readonly parentSessionId?: string;
+  readonly depth: number;
+}
+
+export interface SessionQueueFacts {
+  readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
+  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | 'disk_space' | 'isolation_failed' | null;
+}
+
+export interface WorkSessionConversationMeta extends SessionQueueFacts {
+  readonly coordination?: import('./delegation-coordination.ts').CoordinationSessionFacts;
+  readonly sessionId?: string;
+  readonly conversationId?: string;
+  readonly workspaceId: string;
+  readonly spawnedAt?: string;
+  readonly origin: DelegationOrigin;
+  readonly supersededBy?: string;
+  readonly acceptance?: 'auto' | 'confirm';
+  readonly resultConfirmationRequired?: boolean;
+  readonly accepted?: boolean;
+  readonly verifying?: boolean;
+  readonly phase?: 'starting' | 'verifying' | 'paused';
+  /** 进程内执行所有权（runtime 采集）；缺省表示该入口尚未接入所有权事实。 */
+  readonly executionOwnership?: ExecutionOwnership;
+}
+
+export interface WorkSession extends SessionQueueFacts {
+  readonly followUp?: import('./task-overview.ts').FollowUpProjection;
+  readonly verificationProgress?: VerificationProgress;
+  readonly completionReviewRequired?: boolean;
+  readonly resultConfirmationRequired?: boolean;
+  readonly coordination?: import('./delegation-coordination.ts').CoordinationSessionFacts;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly title: string;
+  readonly planId: string | null;
+  readonly status: WorkSessionStatus;
+  readonly actionRight: TaskOverviewItem['actionRight'];
+  readonly nextAction: TaskOverviewItem['nextAction'];
+  readonly statusLabel: string;
+  /** 是否可取消；由生命周期决策统一给出，renderer 不再自行推断。 */
+  readonly cancelable?: boolean;
+  readonly needsYouReason?: TaskOverviewItem['needsYouReason'];
+  readonly spawnedAt: string;
+  readonly conversationId?: string;
+  readonly origin: DelegationOrigin;
+  readonly supersededBy?: string;
+}
+
+export interface SessionReport {
+  readonly agentSupervision?: import('./agent-supervision.ts').AgentSupervisionReport;
+  /** Current host verification, loaded with task details; never assistant prose. */
+  readonly verification?: SessionVerificationDetail;
+  readonly sessionId: string;
+  readonly planId: string | null;
+  readonly status: WorkSessionStatus;
+  readonly summary: string;
+  readonly taskBrief?: string;
+  readonly keyFindings: readonly string[];
+  readonly changedFiles: readonly { readonly path: string; readonly summary: string }[];
+  readonly evidenceRefs: readonly string[];
+  /** Persisted worker output is a claim; verification still comes from host Evidence. */
+  readonly contentSource?: {
+    readonly kind: 'worker_message' | 'task_results';
+    readonly conversationId?: string;
+    readonly messageId?: string;
+    readonly verification: 'unverified';
+  };
+}
+
+export type DelegationEventKind =
+  | 'agent_message'
+  | 'session_running'
+  | 'session_spawned'
+  | 'session_progress'
+  | 'session_needs_user'
+  | 'report_available'
+  | 'session_verified'
+  | 'session_ended'
+  | 'user_intervened'
+  | 'objective_signal'
+  | 'digest_due';
+
+/** Local orchestration facts; never a human authorization or a verified result. */
+export interface AgentMessage {
+  readonly deliveryIntent?: import('./agent-supervision.ts').AgentDeliveryIntent;
+  readonly decisionRequest?: import('./agent-supervision.ts').AgentDecisionRequest;
+  readonly decisionAnswer?: import('./agent-supervision.ts').AgentDecisionAnswer;
+  readonly goalRevision?: number;
+  readonly executionEpoch?: string;
+  readonly replyTo?: string;
+  readonly messageId: string;
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly senderConversationId: string;
+  readonly recipientConversationId: string;
+  readonly direction: 'parent_to_child' | 'child_to_parent';
+  readonly purpose: 'update' | 'question' | 'answer';
+  readonly text: string;
+  readonly at: string;
+}
+
+export interface VerificationProgress {
+  readonly continuationId: string;
+  readonly startedAt: string;
+  readonly lastProgressAt: string;
+  readonly observationCount: number;
+  readonly phase: 'ready' | 'requesting' | 'tools' | 'completed';
+}
+
+export interface AgentActivity {
+  readonly verificationProgress?: VerificationProgress;
+  readonly eventId: string;
+  readonly sessionId: string;
+  readonly name: string;
+  readonly state: 'queued' | 'started' | 'update' | 'question' | 'answer' | 'reported' | 'verified' | 'verifying' | 'ended' | 'cancelled' | 'blocked';
+}
+
+export type JsonValue =
+  | null
+  | string
+  | number
+  | boolean
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+export interface DelegationEvent {
+  readonly eventId: string;
+  readonly kind: DelegationEventKind;
+  readonly sessionId?: string;
+  readonly workspaceId?: string;
+  readonly objectiveId?: string;
+  readonly watchId?: string;
+  readonly executionKey?: string;
+  readonly at: string;
+  readonly payload: JsonValue;
+}
+
+export interface AgentReplyMeta {
+  /** Host generated factual delivery keys; model input cannot set them. */
+  readonly reportFactKeys?: readonly string[];
+  readonly replyTo: readonly string[];
+  readonly sources: readonly string[];
+  readonly verdictRef?: string;
+  /** Host snapshot; accepted only when resultAcceptance has been persisted. */
+  readonly sessionStates?: readonly ReplySessionState[];
+  readonly memoryUsed: readonly string[];
+  readonly memoryLearned: readonly string[];
+  readonly surfacing: 'interrupt' | 'message' | 'digest' | 'silent';
+}
+
+export interface ReplySessionState {
+  readonly sourceRevision?: string;
+  /** Stable reporting facts, including a changed verifier failure; not acceptance authority. */
+  readonly observationRevision?: string;
+  readonly sessionId: string;
+  readonly status: WorkSessionStatus;
+}
+
+export type MessageDisposition =
+  | { readonly kind: 'answered'; readonly messageId: string; readonly replyMessageIds: readonly string[] }
+  | { readonly kind: 'merged'; readonly messageId: string; readonly sessionId: string }
+  | { readonly kind: 'stopped'; readonly messageId: string; readonly sessionIds: readonly string[]; readonly reason: string }
+  | { readonly kind: 'superseded'; readonly messageId: string; readonly oldSessionId: string; readonly newSessionId: string; readonly reason: string }
+  | { readonly kind: 'parallel'; readonly messageId: string; readonly sessionIds: readonly string[] }
+  | { readonly kind: 'queued'; readonly messageId: string; readonly sessionId: string; readonly dependsOn: readonly string[] }
+  | { readonly kind: 'out_of_scope'; readonly messageId: string; readonly sessionId: string };
+
+export interface DispositionMessage {
+  readonly id: string;
+  readonly role: 'user' | 'assistant';
+  readonly replyTo?: readonly string[];
+  readonly quoteSessionIds?: readonly string[];
+}
+
+export interface DispositionEvent {
+  readonly kind: 'spawn' | 'merge' | 'stop' | 'supersede' | 'parallel' | 'queue';
+  readonly anchorMessageId: string;
+  readonly sessionId?: string;
+  readonly sessionIds?: readonly string[];
+  readonly dependsOn?: readonly string[];
+  readonly reason?: string;
+  readonly oldSessionId?: string;
+  readonly newSessionId?: string;
+  readonly replyMessageId?: string;
+}
+
+export type VerificationOutcome = 'passed' | 'failed' | 'partial' | 'unverifiable';
+
+/** Host-bound manual completion review; distinct from acceptance of a completed result. */
+export interface SessionCompletionReview {
+  readonly sessionId: string;
+  readonly reviewToken: string;
+  readonly criteria: readonly { readonly id: string; readonly description: string }[];
+  readonly report: string;
+  readonly confirmed?: boolean;
+}
+
+export type SessionConfirmationInput = { readonly workspaceId: string; readonly sessionId: string } & (
+  | { readonly stage?: 'result_acceptance' }
+  | { readonly stage: 'manual_completion'; readonly reviewToken: string }
+);
+
+export type IndependentVerifierState = 'passed' | 'failed' | 'not_required' | 'missing';
+
+export interface VerificationCheck {
+  readonly name: string;
+  readonly passed: boolean;
+  readonly reason?: string;
+}
+
+export interface VerificationVerdict {
+  readonly outcome: VerificationOutcome;
+  readonly independentVerifier: IndependentVerifierState;
+  readonly verifierModel?: string;
+  readonly sameFamilyAsWorker?: boolean;
+  readonly checks: readonly VerificationCheck[];
+  readonly evidenceRefs: readonly string[];
+}
+
+export interface SessionVerificationDetail {
+  readonly sessionId: string;
+  readonly outcome: VerificationOutcome;
+  readonly checks: readonly {
+    readonly name: string;
+    readonly result: 'passed' | 'failed';
+    readonly evidenceRefs: readonly string[];
+    readonly reason?: string;
+  }[];
+  readonly workerModel: string | null;
+  readonly verifierModel: string | null;
+  readonly sameSource: boolean;
+  readonly reviewAttempts: readonly VerificationAttemptDiagnostic[];
+  readonly outputs: readonly { readonly name: string; readonly evidenceRef: string; readonly summary: string; readonly truncated: boolean }[];
+}
+
+/** Bounded persisted diagnostics, never an input to acceptance or Evidence authority. */
+export interface VerificationAttemptDiagnostic {
+  readonly verifierRunId: string;
+  readonly status: 'passed' | 'failed';
+  readonly diagnosticOnly: true;
+  /** null means this historical run has no source-version binding. */
+  readonly matchesCurrentSource: boolean | null;
+  readonly completedAt: string;
+  readonly failureReason: string;
+  readonly failedCriteria: readonly { readonly criterionId: string; readonly reason: string; readonly evidenceRefs: readonly string[] }[];
+  readonly missingEvidence: readonly { readonly taskId: string; readonly reason: string; readonly evidenceRefs: readonly string[] }[];
+  readonly risks: readonly string[];
+  readonly recommendedNextAction: string;
+  readonly evidenceRefs: readonly string[];
+}
+
+export type AcceptancePolicy = 'auto' | 'confirm';
+
+export type AcceptanceReason =
+  | 'verdict_not_passed'
+  | 'manual_criteria_pending'
+  | 'external_side_effects'
+  | 'destructive_operation'
+  | 'out_of_scope_write'
+  | 'project_requires_confirm'
+  | 'user_requested_review'
+  | 'verification_below_floor';
+
+export interface AcceptanceDecision {
+  readonly mode: AcceptancePolicy;
+  readonly acceptedBy?: 'policy' | 'user';
+  readonly reasons: readonly AcceptanceReason[];
+}
+
+export interface AcceptanceSessionFacts {
+  readonly manualCriteriaPending?: boolean;
+  readonly externalSideEffects?: boolean;
+  readonly destructiveOperation?: boolean;
+  readonly outOfScopeWrite?: boolean;
+  readonly userRequestedReview?: boolean;
+  readonly verificationBelowFloor?: boolean;
+  /** The agent has already posted the reply that explains this result. */
+  readonly reported?: boolean;
+  /** Acceptance close gate. Policy acceptance does not proceed when this is false. */
+  readonly closeGatePassed?: boolean;
+}
+
+export type Surfacing = 'interrupt' | 'message' | 'digest' | 'silent';
+
+export interface SurfacingDecision {
+  readonly decision: Surfacing;
+  readonly reason: string;
+}
+
+export interface SurfacingEvent {
+  readonly origin: 'user_request' | 'objective_signal' | 'agent_idea';
+  readonly kind: 'needs_user' | 'confirm' | 'failure_needs_decision' | 'result' | 'observation' | 'idea' | 'objective_risk';
+  readonly novelty: boolean;
+  readonly severity: 'info' | 'notable' | 'urgent';
+  readonly deadlineImminent?: boolean;
+}
+
+/** Explicit user uploads are factual user context, never execution authority. */
+export type ProjectInputAttachment = {
+  readonly id: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly sourceKind: 'user_upload';
+} & (
+  | { readonly kind: 'image'; readonly dataUrl: string }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'unsupported' }
+);
+
+export interface ProjectInput {
+  readonly inputId: string;
+  readonly workspaceId: string;
+  readonly surface: InputSurface;
+  readonly text: string;
+  readonly anchorRefs: readonly string[];
+  readonly quoteRefs: readonly string[];
+  readonly attachmentRefs: readonly string[];
+  readonly attachments?: readonly ProjectInputAttachment[];
+  readonly resourceFeedback?: readonly import('./resource-feedback.ts').ResourceFeedback[];
+  readonly createdAt: string;
+}
+
+/** Existing durable input receipt. A later handoff can fail after input was saved. */
+export interface ProjectAgentSubmitInputResult {
+  readonly ok: boolean;
+  readonly code?: string;
+  readonly message?: string;
+  readonly input?: ProjectInput;
+  readonly delivery?: 'queued' | 'user_intervened';
+}
+
+export type PendingApprovalState = 'open' | 'approved' | 'denied' | 'expired' | 'stale' | 'cancelled';
+
+export interface PendingApproval {
+  readonly policyRevision?: string;
+  readonly imageReadScope?: import('./local-image.ts').LocalImagePermissionScope;
+  readonly imageReadGrant?: import('./local-image.ts').ImageReadGrant;
+  readonly approvalId: string;
+  readonly workspaceId: string | null;
+  readonly sessionId?: string | null;
+  readonly conversationId?: string | null;
+  readonly planId: string | null;
+  readonly toolCallId?: string;
+  readonly streamId: string;
+  readonly capabilityId: string;
+  readonly summary: string;
+  readonly riskLevel: string;
+  readonly argsDigest: string;
+  readonly createdAt: string;
+  readonly state: PendingApprovalState;
+  readonly deadlineAt?: string;
+  readonly decisionReason?: 'permission_cancelled' | 'permission_timeout' | 'permission_unavailable' | 'local_user_denied' | 'permission_policy_changed';
+  readonly decidedAt?: string;
+  readonly decidedBy?: 'local_ui' | 'policy';
+}
+
+export interface HostLease {
+  readonly hostId: string;
+  readonly surface: 'desktop' | 'tui';
+  readonly pid: number;
+  readonly appVersion: string;
+  readonly acquiredAt: string;
+  readonly heartbeatAt: string;
+}
+
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function stableStringify(value: JsonValue): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  const record = value as { readonly [key: string]: JsonValue };
+  const keys = Object.keys(record).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key] ?? null)}`).join(',')}}`;
+}
+
+export function delegationEventId(input: {
+  readonly kind: DelegationEventKind;
+  readonly sessionId: string;
+  readonly at: string;
+  readonly payload: JsonValue;
+}): string {
+  const body = stableStringify({
+    at: input.at,
+    kind: input.kind,
+    payload: input.payload,
+    sessionId: input.sessionId,
+  });
+  const high = fnv1a(body).toString(16).padStart(8, '0');
+  const low = fnv1a(`#${body}`).toString(16).padStart(8, '0');
+  return `${high}${low}`;
+}
+
+export function createDelegationEvent(input: {
+  readonly kind: DelegationEventKind;
+  readonly sessionId: string;
+  readonly at: string;
+  readonly payload?: JsonValue;
+}): DelegationEvent {
+  const payload = input.payload ?? null;
+  return {
+    eventId: delegationEventId({ ...input, payload }),
+    kind: input.kind,
+    sessionId: input.sessionId,
+    at: input.at,
+    payload,
+  };
+}
+
+/**
+ * Project a GoalPlan snapshot into a work session.
+ * actionRight / nextAction / statusLabel come from projectGoalPlan, so the two projections cannot disagree.
+ * A paused plan has no delegation status of its own; it is queued, and the visible conclusion stays paused.
+ */
+export function projectWorkSession(
+  plan: GoalPlanProjectionSnapshot,
+  conversationMeta: WorkSessionConversationMeta,
+): WorkSession {
+  const projected = decideLifecycle(plan, {
+    ...(conversationMeta.executionOwnership ? { executionOwnership: conversationMeta.executionOwnership } : {}),
+    // `delegated` 必须是真实事实；不能用"这是工作会话"反推，否则会改写非委派历史语义。
+    ...(plan.delegated === true ? { delegated: true } : {}),
+    ...(conversationMeta.acceptance ? { acceptance: conversationMeta.acceptance } : {}),
+    humanGate: conversationMeta.resultConfirmationRequired === true,
+    accepted:
+      conversationMeta.accepted === true ||
+      (plan.delegated !== true &&
+        plan.status === 'completed' &&
+        conversationMeta.acceptance !== 'confirm' &&
+        conversationMeta.accepted === undefined &&
+        !conversationMeta.verifying &&
+        !plan.runnerStatus),
+    superseded: Boolean(conversationMeta.supersededBy),
+    needsUser: plan.status === 'awaiting_approval' || plan.needsUser === true,
+    verificationActive: conversationMeta.verifying === true,
+    ...(conversationMeta.phase ? { phase: conversationMeta.phase } : {}),
+    blockedReason: plan.agentWaiting ? 'waiting_parent_agent' : plan.blockedReason,
+    interrupted: plan.interrupted,
+    interruptionOrigin: plan.interruptionOrigin,
+    ...(conversationMeta.origin.cancellation?.phase
+      ? { cancellationPhase: conversationMeta.origin.cancellation.phase }
+      : {}),
+    ...(conversationMeta.coordination?.phase === 'awaiting_outcome'
+      ? { takeoverPhase: 'awaiting_outcome' }
+      : conversationMeta.origin.takeover?.phase
+        ? { takeoverPhase: conversationMeta.origin.takeover.phase }
+        : {}),
+  });
+  const status = projected.status;
+  return {
+    sessionId: conversationMeta.sessionId ?? plan.conversationId ?? plan.planId,
+    workspaceId: conversationMeta.workspaceId,
+    title: plan.title,
+    planId: plan.planId,
+    status,
+    // 直接消费同一份决策；这里再改写就等于第二套状态机。
+    actionRight: projected.actionRight,
+    nextAction: projected.nextAction,
+    statusLabel: projected.statusLabel,
+    cancelable: projected.cancelable,
+    followUp: projected.followUp,
+    ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
+    ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
+    spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
+    ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
+    origin: conversationMeta.origin,
+    ...(conversationMeta.queuedBehind ? { queuedBehind: conversationMeta.queuedBehind.map(item => ({ ...item })) } : {}),
+    ...(conversationMeta.queueReason ? { queueReason: conversationMeta.queueReason } : {}),
+    ...(conversationMeta.supersededBy ? { supersededBy: conversationMeta.supersededBy } : {}),
+  };
+}
+
+function eventOutOfScope(message: DispositionMessage, sessionId: string | undefined): boolean {
+  if (!sessionId) return false;
+  const quoted = message.quoteSessionIds;
+  if (!quoted || quoted.length === 0) return false;
+  return !quoted.includes(sessionId);
+}
+
+function dispositionFor(message: DispositionMessage, event: DispositionEvent): MessageDisposition {
+  const sessionId = event.sessionId ?? event.sessionIds?.[0] ?? '';
+  if (eventOutOfScope(message, sessionId) || (event.sessionIds ?? []).some((id) => eventOutOfScope(message, id))) {
+    return { kind: 'out_of_scope', messageId: message.id, sessionId };
+  }
+  switch (event.kind) {
+    case 'merge':
+      return { kind: 'merged', messageId: message.id, sessionId };
+    case 'stop':
+      return {
+        kind: 'stopped',
+        messageId: message.id,
+        sessionIds: event.sessionIds ?? (sessionId ? [sessionId] : []),
+        reason: event.reason ?? '',
+      };
+    case 'supersede':
+      return {
+        kind: 'superseded',
+        messageId: message.id,
+        oldSessionId: event.oldSessionId ?? '',
+        newSessionId: event.newSessionId ?? sessionId,
+        reason: event.reason ?? '',
+      };
+    case 'parallel':
+      return { kind: 'parallel', messageId: message.id, sessionIds: event.sessionIds ?? (sessionId ? [sessionId] : []) };
+    case 'queue':
+      return { kind: 'queued', messageId: message.id, sessionId, dependsOn: event.dependsOn ?? [] };
+    default:
+      return { kind: 'parallel', messageId: message.id, sessionIds: event.sessionIds ?? (sessionId ? [sessionId] : []) };
+  }
+}
+
+export interface DispositionToolCall {
+  readonly name?: string;
+  /** Arbitrary tool input. A disposition field here is ignored. */
+  readonly input?: Readonly<Record<string, unknown>> | null;
+  readonly result?: unknown;
+}
+
+function toolRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function toolBody(result: unknown): Record<string, unknown> | null {
+  const record = toolRecord(result);
+  if (!record) return null;
+  const nested = toolRecord(record.output);
+  if (nested && typeof record.sessionId !== 'string' && (typeof nested.sessionId === 'string' || typeof nested.error === 'string' || nested.ok === false)) {
+    return nested;
+  }
+  return record;
+}
+
+function toolFailed(body: Record<string, unknown> | null): boolean {
+  if (!body) return true;
+  if (typeof body.error === 'string' && body.error.trim()) return true;
+  return body.ok === false;
+}
+
+function toolSessionId(body: Record<string, unknown> | null, fallback: string | undefined): string {
+  if (body && typeof body.sessionId === 'string' && body.sessionId.trim()) return body.sessionId.trim();
+  return typeof fallback === 'string' ? fallback.trim() : '';
+}
+
+function toolQueued(body: Record<string, unknown>): boolean {
+  return body.status === 'queued' || body.queued === true;
+}
+
+/**
+ * Derive disposition events from one turn's tool calls.
+ * Answer is not an event: only post_reply, projected later from the assistant reply.
+ * A model-supplied disposition field is ignored.
+ */
+export function dispositionEventsFromToolCalls(
+  anchorMessageId: string,
+  toolCalls: readonly DispositionToolCall[],
+): DispositionEvent[] {
+  const anchor = anchorMessageId.trim();
+  if (!anchor) return [];
+  const events: DispositionEvent[] = [];
+  for (const call of toolCalls) {
+    const name = call?.name;
+    const input = call?.input ?? null;
+    const body = toolBody(call?.result);
+    if (toolFailed(body)) continue;
+    if (name === 'message_session' && fieldText(input, 'intent') === 'amend') {
+      const sessionId = toolSessionId(body, fieldText(input, 'sessionId'));
+      if (!sessionId) continue;
+      events.push({ kind: 'merge', anchorMessageId: anchor, sessionId });
+      continue;
+    }
+    if (name === 'cancel_session') {
+      const sessionId = toolSessionId(body, fieldText(input, 'sessionId'));
+      if (!sessionId) continue;
+      events.push({
+        kind: 'stop',
+        anchorMessageId: anchor,
+        sessionId,
+        sessionIds: [sessionId],
+        reason: fieldText(input, 'reason'),
+      });
+      continue;
+    }
+    if (name !== 'spawn_session') continue;
+    const sessionId = toolSessionId(body, '');
+    if (!sessionId || !body) continue;
+    const supersedes = fieldText(input, 'supersedes');
+    if (supersedes) {
+      events.push({
+        kind: 'supersede',
+        anchorMessageId: anchor,
+        sessionId,
+        oldSessionId: supersedes,
+        newSessionId: sessionId,
+        reason: '',
+      });
+      continue;
+    }
+    if (toolQueued(body)) {
+      const depends = input?.dependsOn;
+      events.push({
+        kind: 'queue',
+        anchorMessageId: anchor,
+        sessionId,
+        dependsOn: Array.isArray(depends) ? depends.filter((item): item is string => typeof item === 'string') : [],
+      });
+      continue;
+    }
+    events.push({ kind: 'parallel', anchorMessageId: anchor, sessionId, sessionIds: [sessionId] });
+  }
+  return events;
+}
+
+function fieldText(record: Readonly<Record<string, unknown>> | null, key: string): string {
+  const value = record?.[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Dispositions are a projection of anchor events plus replies.
+ * The assistant text answers the last user message in the turn unless replyTo says otherwise.
+ * A quote limits message/cancel/supersede to those sessions; anything else is out_of_scope.
+ */
+export function projectMessageDispositions(
+  messages: readonly DispositionMessage[],
+  events: readonly DispositionEvent[],
+): MessageDisposition[] {
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const dispositions: MessageDisposition[] = [];
+  for (const event of events) {
+    const message = byId.get(event.anchorMessageId);
+    if (!message || message.role !== 'user') continue;
+    dispositions.push(dispositionFor(message, event));
+  }
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || message.role !== 'assistant') continue;
+    const targets = message.replyTo && message.replyTo.length > 0
+      ? message.replyTo
+      : previousUserId(messages, index);
+    for (const messageId of targets) {
+      dispositions.push({
+        kind: 'answered',
+        messageId,
+        replyMessageIds: [message.id],
+      });
+    }
+  }
+  return dispositions;
+}
+
+function previousUserId(messages: readonly DispositionMessage[], assistantIndex: number): readonly string[] {
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'user') return [message.id];
+    if (message?.role === 'assistant') break;
+  }
+  return [];
+}
+
+const ATTENTION_KINDS = new Set<SurfacingEvent['kind']>([
+  'needs_user',
+  'confirm',
+  'failure_needs_decision',
+  'objective_risk',
+]);
+
+function agentOrigin(origin: SurfacingEvent['origin']): boolean {
+  return origin === 'agent_idea' || origin === 'objective_signal';
+}
+
+/**
+ * Surfacing table from the delegation runtime, top to bottom.
+ * foreground does not change the row. needsYou uses the same row as needs_user.
+ */
+export function decideSurfacing(input: {
+  readonly event: SurfacingEvent;
+  readonly proactivity: 'off' | 'low' | 'normal' | 'high';
+  readonly foreground: boolean;
+  readonly quietHours: boolean;
+  readonly needsYou: boolean;
+}): SurfacingDecision {
+  void input.foreground;
+  const { event, proactivity, quietHours, needsYou } = input;
+  if (needsYou || ATTENTION_KINDS.has(event.kind)) {
+    const staysInterrupt = event.kind === 'objective_risk' && event.deadlineImminent === true;
+    if (quietHours && !staysInterrupt) return { decision: 'message', reason: 'quiet_hours' };
+    return { decision: 'interrupt', reason: needsYou && !ATTENTION_KINDS.has(event.kind) ? 'needs_you' : 'attention' };
+  }
+  if (event.origin === 'user_request' && event.kind === 'result') {
+    if (proactivity === 'normal' || proactivity === 'high') {
+      return { decision: 'interrupt', reason: 'user_result' };
+    }
+    return { decision: 'message', reason: 'user_result' };
+  }
+  if (agentOrigin(event.origin) && event.novelty === false) {
+    return { decision: 'silent', reason: 'not_novel' };
+  }
+  if (agentOrigin(event.origin) && event.severity === 'urgent') {
+    return { decision: 'interrupt', reason: 'agent_urgent' };
+  }
+  if (agentOrigin(event.origin) && event.severity === 'notable') {
+    const decision: Surfacing = proactivity === 'high'
+      ? 'interrupt'
+      : proactivity === 'normal'
+        ? 'message'
+        : 'digest';
+    return { decision, reason: 'agent_notable' };
+  }
+  if (agentOrigin(event.origin) && (event.severity === 'info' || event.kind === 'idea')) {
+    const decision: Surfacing = proactivity === 'high'
+      ? 'message'
+      : proactivity === 'off'
+        ? 'silent'
+        : 'digest';
+    return { decision, reason: 'agent_info' };
+  }
+  return { decision: 'message', reason: 'default' };
+}
+
+const CONFIRM_REASON_ORDER: readonly AcceptanceReason[] = [
+  'verdict_not_passed',
+  'manual_criteria_pending',
+  'external_side_effects',
+  'destructive_operation',
+  'out_of_scope_write',
+  'project_requires_confirm',
+  'user_requested_review',
+  'verification_below_floor',
+];
+
+/**
+ * Policy acceptance ignores userOverride. It also requires a posted reply and a passed close gate.
+ * A user override can record acceptedBy user on a confirm decision; it cannot mint a policy acceptance.
+ */
+export function decideAcceptance(input: {
+  readonly verdict: VerificationVerdict;
+  readonly policy: AcceptancePolicy;
+  readonly session: AcceptanceSessionFacts;
+  readonly userOverride?: { readonly accept: boolean } | null;
+}): AcceptanceDecision {
+  const reasons: AcceptanceReason[] = [];
+  if (input.verdict.outcome !== 'passed') reasons.push('verdict_not_passed');
+  if (input.session.manualCriteriaPending === true) reasons.push('manual_criteria_pending');
+  if (input.session.externalSideEffects === true) reasons.push('external_side_effects');
+  if (input.session.destructiveOperation === true) reasons.push('destructive_operation');
+  if (input.session.outOfScopeWrite === true) reasons.push('out_of_scope_write');
+  if (input.policy === 'confirm') reasons.push('project_requires_confirm');
+  if (input.session.userRequestedReview === true) reasons.push('user_requested_review');
+  if (input.session.verificationBelowFloor === true) reasons.push('verification_below_floor');
+  const ordered = CONFIRM_REASON_ORDER.filter((reason) => reasons.includes(reason));
+  const closeGatePassed = input.session.closeGatePassed === true;
+  if (ordered.length === 0 && input.policy === 'auto' && input.session.reported === true && closeGatePassed) {
+    return { mode: 'auto', acceptedBy: 'policy', reasons: [] };
+  }
+  if (ordered.length > 0 && input.userOverride?.accept === true && closeGatePassed) {
+    return { mode: 'confirm', acceptedBy: 'user', reasons: ordered };
+  }
+  return { mode: ordered.length > 0 ? 'confirm' : 'auto', reasons: ordered };
+}

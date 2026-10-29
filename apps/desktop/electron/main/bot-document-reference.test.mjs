@@ -1,0 +1,263 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, unlinkSync, rmSync, statSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createBotDocumentResolver } from './bot-document-reference.mjs';
+import { documentIdentity, observeDocumentRead } from './document-observation.mjs';
+
+function fixture() {
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'peer-doc-preview-')));
+  const root = path.join(dir, 'Bot'); const knowledge = path.join(dir, 'Peer-Knowledge');
+  mkdirSync(root); mkdirSync(path.join(knowledge, 'knowledge'), { recursive: true });
+  writeFileSync(path.join(root, 'README.md'), '# Bot');
+  writeFileSync(path.join(knowledge, 'knowledge', 'ADR.md'), '# Decision');
+  writeFileSync(path.join(dir, 'private.md'), 'outside');
+  const options = { environment: {}, getWorkspace: id => id === 'bot' ? { ok: true, path: root } : { ok: false },
+    readGitOrigin: async candidate => candidate === knowledge ? 'https://github.com/ly-ccx/Peer-Knowledge.git' : '' };
+  return { dir, root, knowledge, options, dispose: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('nested registered roots keep one physical identity across qualified and absolute conditional reads', async () => {
+  const f = fixture();
+  try {
+    const child = path.join(f.root, 'child'), target = path.join(child, 'guide.md');
+    mkdirSync(child); writeFileSync(target, '# Nested');
+    writeFileSync(path.join(child, 'index.md'), '# Index');
+    symlinkSync(path.join(f.root, 'README.md'), path.join(child, 'outside.md'));
+    let roots = [f.root, child];
+    const resolve = createBotDocumentResolver({ ...f.options, getKnownRoots: () => roots });
+    const reference = { workspaceId: 'bot', path: 'child/guide.md' };
+    const metadata = await resolve({ ...reference, metadataOnly: true });
+    assert.equal(metadata.root, child);
+    const expectedObservation = { resourceId: documentIdentity(reference, metadata).resourceId };
+    for (const request of [reference, { workspaceId: 'bot', path: './child/guide.md' },
+      { workspaceId: 'bot', path: target }, { workspaceId: 'bot', path: 'guide.md', relativeTo: path.join(child, 'index.md') }]) {
+      const exact = await resolve(request);
+      assert.equal(exact.ok, true); assert.equal(exact.root, child);
+      assert.equal(observeDocumentRead({ ...request, expectedObservation }, exact, Buffer.from('# Nested')).status, 'ok');
+    }
+    roots = [child, f.root, child];
+    assert.deepEqual(documentIdentity(reference, await resolve(reference)), documentIdentity(reference, metadata));
+    for (const name of ['child/../README.md', 'child/outside.md']) {
+      assert.equal((await resolve({ workspaceId: 'bot', path: name })).status, 'scope_denied');
+    }
+    roots = [];
+    const withdrawn = await resolve({ workspaceId: 'bot', path: target });
+    assert.equal(observeDocumentRead({ workspaceId: 'bot', expectedObservation }, withdrawn, Buffer.from('# Nested')).status, 'source_changed');
+  } finally { f.dispose(); }
+});
+
+test('historical virtual paths retain the original scope and deleted origins without weakening live reads', async () => {
+  const f = fixture();
+  try {
+    const resolve = createBotDocumentResolver(f.options), revision = { kind: 'git', commit: 'a'.repeat(40) };
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'deleted/guide.md' })).status, 'not_found');
+    const old = await resolve({ workspaceId: 'bot', path: 'deleted/guide.md', revision });
+    assert.equal(old.ok, true); assert.equal(old.root, f.root); assert.equal(old.target, path.join(f.root, 'deleted/guide.md'));
+    const nested = await resolve({ workspaceId: 'bot', path: 'nested.md', relativeTo: old.target, revision });
+    assert.equal(nested.target, path.join(f.root, 'deleted/nested.md'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: '../private.md', revision })).status, 'scope_denied');
+    symlinkSync(f.dir, path.join(f.root, 'outside-parent'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'outside-parent/missing.md', revision })).status, 'scope_denied');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'Peer-Knowledge/knowledge/deleted.md', revision })).root, f.knowledge);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'directory', revision })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md', revision: { kind: 'git', commit: 'HEAD' } })).status, 'invalid_path');
+  } finally { f.dispose(); }
+});
+
+test('a historical task locator still requires the current Session/Plan ownership', async () => {
+  const f = fixture();
+  try {
+    const task = { sessionId: 'task', planId: 'plan' };
+    const resolve = createBotDocumentResolver({ ...f.options,
+      getTaskSession: id => id === 'task' ? { sessionId: id, workspaceId: 'bot', report: { planId: 'plan' } } : null,
+      getTaskPlan: () => ({ planId: 'plan', delegationOrigin: { workspaceId: 'bot', sessionId: 'task' },
+        deliveryBinding: { executionIsolation: 'worktree', worktreePath: f.root, baseCommit: 'a'.repeat(40) } }) });
+    const reference = { workspaceId: 'bot', path: 'deleted/result.md', task, revision: { kind: 'git', commit: 'a'.repeat(40) } };
+    assert.equal((await resolve(reference)).ok, true);
+    assert.equal((await resolve({ ...reference, task: { ...task, sessionId: 'forged' } })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
+test('project and confirmed cross-repository paths resolve without changing the reference', async () => {
+  const f = fixture();
+  try {
+    const resolve = createBotDocumentResolver(f.options);
+    const reference = { workspaceId: 'bot', path: 'Peer-Knowledge/knowledge/ADR.md' };
+    assert.deepEqual(await resolve(reference), { ok: true, root: f.knowledge, target: path.join(f.knowledge, 'knowledge/ADR.md') });
+    assert.equal(reference.path, 'Peer-Knowledge/knowledge/ADR.md');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md' })).target, path.join(f.root, 'README.md'));
+    assert.equal((await resolve({ ...reference, path: 'ADR.md', relativeTo: path.join(f.knowledge, 'knowledge/ADR.md') })).ok, true);
+  } finally { f.dispose(); }
+});
+
+test('missing, permission denial, traversal, symlink escapes and unknown projects are explicit failures', async () => {
+  const f = fixture();
+  try {
+    symlinkSync(path.join(f.dir, 'private.md'), path.join(f.root, 'escape.md'));
+    const resolve = createBotDocumentResolver(f.options);
+    for (const request of [{ path: '../private.md' }, { path: 'escape.md' }, { path: path.join(f.dir, 'private.md') },
+      { path: 'Peer-Knowledge/../private.md' }, { path: 'README.md', relativeTo: path.join(f.dir, 'private.md') }]) {
+      assert.equal((await resolve({ workspaceId: 'bot', ...request })).status, 'scope_denied');
+    }
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'missing.md' })).status, 'not_found');
+    assert.equal((await resolve({ workspaceId: 'unknown', path: 'README.md' })).status, 'workspace_unavailable');
+    const denied = createBotDocumentResolver({ ...f.options, stat: target => {
+      if (target.endsWith('README.md')) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return statSync(target);
+    } });
+    assert.equal((await denied({ workspaceId: 'bot', path: 'README.md' })).status, 'permission_denied');
+  } finally { f.dispose(); }
+});
+
+test('an unconfirmed knowledge identity and broken explicit configuration do not silently fall through', async () => {
+  const f = fixture();
+  try {
+    const reference = { workspaceId: 'bot', path: 'Peer-Knowledge/knowledge/ADR.md' };
+    const wrong = createBotDocumentResolver({ ...f.options, readGitOrigin: async () => 'https://github.com/someone/Other.git' });
+    assert.equal((await wrong(reference)).status, 'workspace_unavailable');
+    const configured = createBotDocumentResolver({ ...f.options, environment: { PEER_KNOWLEDGE_ROOT: path.join(f.dir, 'missing') } });
+    assert.equal((await configured(reference)).status, 'workspace_unavailable');
+  } finally { f.dispose(); }
+});
+
+test('duplicate registered repository names are reported as ambiguous rather than guessed', async () => {
+  const f = fixture();
+  try {
+    const a = path.join(f.dir, 'a', 'Shared'); const b = path.join(f.dir, 'b', 'Shared');
+    mkdirSync(a, { recursive: true }); mkdirSync(b, { recursive: true });
+    const resolve = createBotDocumentResolver({ ...f.options, getKnownRoots: () => [a, b] });
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'Shared/report.md' })).status, 'ambiguous_path');
+  } finally { f.dispose(); }
+});
+
+test('a bare knowledge-relative path offers a confirmed location and opens it only after explicit selection', async () => {
+  const f = fixture();
+  try {
+    const resolve = createBotDocumentResolver(f.options);
+    const result = await resolve({ workspaceId: 'bot', path: 'knowledge/ADR.md' });
+    assert.deepEqual(result, { ok: false, status: 'relative_base_required', error: 'relative_base_required', content: '',
+      candidates: [{ path: path.join(f.knowledge, 'knowledge/ADR.md'), root: f.knowledge }] });
+    const chosen = await resolve({ workspaceId: 'bot', path: result.candidates[0].path });
+    assert.equal(chosen.ok, true); assert.equal(chosen.root, f.knowledge);
+    assert.equal((await resolve({ workspaceId: 'bot', path: './knowledge/ADR.md' })).status, 'not_found');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'knowledge/ADR.md', relativeTo: path.join(f.root, 'README.md') })).status, 'not_found');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'Peer-Knowledge/missing.md' })).status, 'not_found');
+  } finally { f.dispose(); }
+});
+
+test('project and nested document bases are retained when another repository contains the same file', async () => {
+  const f = fixture();
+  try {
+    writeFileSync(path.join(f.knowledge, 'README.md'), '# Knowledge');
+    const resolve = createBotDocumentResolver(f.options);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md' })).target, path.join(f.root, 'README.md'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: '../README.md', relativeTo: path.join(f.knowledge, 'knowledge/ADR.md') })).target,
+      path.join(f.knowledge, 'README.md'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: '../private.md' })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
+test('multiple registered roots require a choice; candidate hints cannot bypass revalidation', async () => {
+  const f = fixture();
+  try {
+    const a = path.join(f.dir, 'a', 'Shared'), b = path.join(f.dir, 'b', 'Shared');
+    for (const base of [a, b]) { mkdirSync(base, { recursive: true }); writeFileSync(path.join(base, 'report.md'), '# Report'); }
+    let roots = [a, b, a];
+    const resolve = createBotDocumentResolver({ ...f.options, getKnownRoots: () => roots });
+    const result = await resolve({ workspaceId: 'bot', path: 'report.md' });
+    assert.equal(result.status, 'relative_base_required'); assert.equal(result.content, '');
+    assert.deepEqual(result.candidates.map(row => row.path), [path.join(a, 'report.md'), path.join(b, 'report.md')]);
+    unlinkSync(result.candidates[0].path); symlinkSync(path.join(f.dir, 'private.md'), result.candidates[0].path);
+    assert.equal((await resolve({ workspaceId: 'bot', path: result.candidates[0].path })).status, 'scope_denied');
+    roots = [];
+    assert.equal((await resolve({ workspaceId: 'bot', path: result.candidates[1].path })).status, 'scope_denied');
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'report.md' })).status, 'not_found');
+  } finally { f.dispose(); }
+});
+
+test('fallback discovery does not accept an unconfirmed companion, escaped file or unreadable candidate', async () => {
+  const f = fixture();
+  try {
+    const reference = { workspaceId: 'bot', path: 'knowledge/ADR.md' };
+    const wrong = createBotDocumentResolver({ ...f.options, readGitOrigin: async () => 'https://github.com/other/Knowledge.git' });
+    assert.equal((await wrong(reference)).status, 'not_found');
+    const broken = createBotDocumentResolver({ ...f.options, environment: { PEER_KNOWLEDGE_ROOT: path.join(f.dir, 'missing') } });
+    assert.equal((await broken(reference)).status, 'workspace_unavailable');
+    const denied = createBotDocumentResolver({ ...f.options, stat: target => {
+      if (target === path.join(f.knowledge, 'knowledge/ADR.md')) throw Object.assign(Error('denied'), { code: 'EACCES' });
+      return statSync(target);
+    } });
+    assert.equal((await denied(reference)).status, 'permission_denied');
+    symlinkSync(path.join(f.dir, 'private.md'), path.join(f.knowledge, 'escape.md'));
+    const resolve = createBotDocumentResolver(f.options);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'escape.md' })).status, 'not_found');
+  } finally { f.dispose(); }
+});
+
+test('R1 directory intent resolves only confirmed scope and validates request shape', async () => {
+  const f = fixture();
+  try {
+    const resolve = createBotDocumentResolver(f.options);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'directory', metadataOnly: true })).target, f.root);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'Peer-Knowledge', kind: 'directory' })).target, f.knowledge);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md', kind: 'directory' })).ok, false);
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', kind: 'unknown' })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: '.', metadataOnly: 'true' })).status, 'invalid_path');
+    assert.equal((await resolve({ workspaceId: 'bot', path: f.dir, kind: 'directory' })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
+test('an absolute OS/path alias resolves to the same allowed physical root without admitting an escape', async () => {
+  const f = fixture();
+  try {
+    const alias = path.join(f.dir, 'alias');
+    symlinkSync(f.root, alias);
+    symlinkSync(path.join(f.dir, 'private.md'), path.join(f.root, 'escape.md'));
+    const resolve = createBotDocumentResolver(f.options);
+    const result = await resolve({ workspaceId: 'bot', path: path.join(alias, 'README.md') });
+    assert.equal(result.ok, true); assert.equal(result.target, path.join(f.root, 'README.md'));
+    assert.equal((await resolve({ workspaceId: 'bot', path: alias, kind: 'directory' })).target, f.root);
+    assert.equal((await resolve({ workspaceId: 'bot', path: path.join(alias, 'escape.md') })).status, 'scope_denied');
+    assert.equal((await resolve({ workspaceId: 'bot', path: path.join(f.dir, 'private.md') })).status, 'scope_denied');
+  } finally { f.dispose(); }
+});
+
+test('task worktrees outside registered roots require live matching Session and GoalPlan records on every read', async () => {
+  const f = fixture();
+  try {
+    const worktree = path.join(f.dir, 'internal', 'task-tree'); mkdirSync(worktree, { recursive: true });
+    writeFileSync(path.join(worktree, 'result.md'), '# Task result');
+    writeFileSync(path.join(worktree, 'other.md'), '# Nested');
+    symlinkSync(path.join(f.dir, 'private.md'), path.join(worktree, 'escape.md'));
+    const task = { sessionId: 'task', planId: 'plan' };
+    let session = { workspaceId: 'bot', sessionId: 'task', report: { planId: 'plan' } };
+    let plan = { planId: 'plan', delegationOrigin: { workspaceId: 'bot', sessionId: 'task' },
+      deliveryBinding: { executionIsolation: 'worktree', worktreePath: worktree, targetWorkspacePath: f.root, baseCommit: 'a'.repeat(40) } };
+    const originalPlan = structuredClone(plan), originalSession = structuredClone(session);
+    const resolve = createBotDocumentResolver({ ...f.options, getTaskSession: id => id === 'task' ? session : null,
+      getTaskPlan: id => id === 'plan' ? plan : null });
+    const reference = { workspaceId: 'bot', path: path.join(worktree, 'result.md'), task };
+    assert.equal((await resolve({ ...reference, task: undefined })).status, 'scope_denied');
+    assert.deepEqual(await resolve(reference), { ok: true, root: worktree, target: reference.path });
+    assert.equal((await resolve({ ...reference, path: 'other.md', relativeTo: reference.path })).target, path.join(worktree, 'other.md'));
+    for (const change of [{ path: path.join(f.root, 'README.md') }, { path: '../private.md' }, { path: path.join(worktree, 'escape.md') },
+      { task: { ...task, planId: 'forged' } }, { task: { ...task, sessionId: 'other' } }, { task: {} }, { task: null }]) {
+      assert.equal((await resolve({ ...reference, ...change })).ok, false);
+    }
+    for (const change of [{ workspaceId: 'other' }, { sessionId: 'other' }, { report: { planId: 'other' } }]) {
+      session = { ...originalSession, ...change }; assert.equal((await resolve(reference)).status, 'scope_denied');
+    }
+    session = originalSession;
+    for (const change of [{ planId: 'other' }, { delegationOrigin: { workspaceId: 'other', sessionId: 'task' } },
+      { delegationOrigin: { workspaceId: 'bot', sessionId: 'other' } }, { deliveryBinding: { ...originalPlan.deliveryBinding, worktreePath: undefined } },
+      { deliveryBinding: { ...originalPlan.deliveryBinding, baseCommit: 'HEAD' } }]) {
+      plan = { ...originalPlan, ...change }; assert.equal((await resolve(reference)).ok, false);
+    }
+    plan = originalPlan;
+    unlinkSync(reference.path); assert.equal((await resolve(reference)).status, 'not_found');
+    rmSync(worktree, { recursive: true }); assert.equal((await resolve(reference)).ok, false);
+    assert.equal((await resolve({ workspaceId: 'bot', path: 'README.md' })).ok, true);
+  } finally { f.dispose(); }
+});

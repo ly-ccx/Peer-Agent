@@ -1,7 +1,17 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
+import { createResourceEditApplicationService } from './resource-edit-application-service.mjs';
+import { createResourceEditSources } from './resource-edit-sources.mjs';
+import { createResourceEditSubmissionHost } from './resource-edit-submission-host.mjs';
+import { createResourceEditIpcRegistrations } from './ipc/register-resource-edit-ipc.mjs';
+import { bindBrowserSelectionFeedback } from './browser-selection-feedback.mjs';
+import { resolveResourceFeedbackRecipient } from './resource-feedback-recipient.mjs';
+import { createResourceFeedbackPreparation } from './resource-feedback-preparation.mjs';
+import { createResourceFeedbackIpcRegistrations } from './ipc/register-resource-feedback-ipc.mjs';
+import { createBrowserWindowController } from './browser-window-controller.mjs';
+import { createBrowserWindowIpcRegistrations } from './ipc/register-browser-window-ipc.mjs';
+import { app, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
-import http from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
+import { createMcpOAuthCallback } from './mcp-oauth-callback.mjs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -13,6 +23,8 @@ import os from 'node:os';
 const PEER_BROWSER_PARTITION = 'persist:peer-browser';
 
 const execFileAsync = promisify(execFile);
+import { createAgentTurnExecutor } from './agent-host/agent-turn-executor.mjs';
+import { buildGoalRunnerMessage, createDesktopGoalRunnerHost } from './agent-host/goal-runner-host.mjs';
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { createLocalDesktopPreviewProvider } from './runtime-gateway/local-desktop-preview-provider.mjs';
@@ -27,11 +39,12 @@ import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createTaskOverviewBroadcastScheduler } from './task-overview-broadcast.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
-import { setupRemoteAccess } from './runtime-gateway/setup-remote-access.mjs';
+import { setupRemoteAccess,readRemoteAccessSummary } from './runtime-gateway/setup-remote-access.mjs';
 import { createRemoteAccessController } from './runtime-gateway/remote-access-controller.mjs';
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
   getActiveBrowserEntry,
+  getBrowserEntry,
   registerBrowserWebContents,
   unregisterBrowserWebContents,
   getActiveWebContentsId,
@@ -54,7 +67,11 @@ import { createPasswordVaultStore } from './password-vault-store.mjs';
 import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { getApplicationShellTasks, disposeApplicationShellTasks } from './runtime-gateway/application-shell-tasks.mjs';
-import { getApplicationShellSessions, disposeApplicationShellConversation, disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
+import {
+  getApplicationShellSessions,
+  disposeApplicationShellConversation,
+  disposeApplicationShellSessions,
+} from './runtime-gateway/application-shell-sessions.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
@@ -66,12 +83,12 @@ import { createSettingsStore } from './settings-store.mjs';
 import { createShortcutService } from './shortcut-service.mjs';
 import { createAppshotService } from './appshot-service.mjs';
 import { buildAppshotPermissionPreflight, openScreenRecordingSettings } from './appshot-permission-preflight.mjs';
-import { deliverAppshot } from './appshot-delivery.mjs';
+import { completeAppshotHotkey, deliverAppshot } from './appshot-delivery.mjs';
 import {
   createQuickChatWindowController,
   DEFAULT_SIZE as QUICK_CHAT_SIZE,
 } from './quick-chat-window.mjs';
-import { getMainWindowWebContents, getOAuthWindowWebContents } from './window-routing.mjs';
+import { getOAuthWindowWebContents } from './window-routing.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
@@ -95,25 +112,35 @@ import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs'
 import {
   createAutomationStore,
   createGoalPlanStore,
-  createGoalRunner,
-  buildGoalRunnerTickMessage,
-  describeVisualRepair,
-  resolveWorkspaceHead,
-  decideIntakeConvergence,
   exportBundle,
   getDataHome,
   goalPlanIsSelfDriven,
   importBundle,
   migrateFromLegacy,
-  removeConversationToolArtifacts,
+  applyStartupApprovalRecovery,
+  createApprovalStore,
+  createHostLease,
+  listBotWorkspaceIds
+} from "@peer-agent/runtime-node/storage";
+import {
+  resolveWorkspaceHead,
+  decideIntakeConvergence,
   isStalledAcceptedGoalRunner,
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
   shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
-  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
-} from '@peer-agent/runtime-node';
+  shouldRecoverAcceptedGoalRunnerOnConversationOpen
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  removeConversationToolArtifacts
+} from "@peer-agent/runtime-node/providers";
+import {
+  createResourceEditStorage,
+  createBotProfileStore,
+  createBotAccessPolicyAuthority
+} from "@peer-agent/runtime-node/project-agent";
 import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
@@ -133,22 +160,17 @@ import { createConversationStore } from './conversation-store.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
+import { createProjectAgentNotifier } from './project-agent/project-agent-notifier.mjs';
 import { createAutomationRuntimeOwner } from './automation-runtime-owner.mjs';
 import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
-import { preparePlanExecutionWorkspace } from './goal-preferred-worktree.mjs';
 import { buildPlanEvidenceExport, serializeEvidenceExportDocument } from './goal-evidence-export.mjs';
 import { resolveNewTaskWorkspacePath } from './chat-start-workspace.mjs';
 import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
-import {
-  buildGoalRunnerStreamStartedPayload,
-  createGoalRunnerAssistantPlaceholder,
-  mapGoalTurnOutcome,
-} from './goal-runner-message-persistence.mjs';
 import { fetchProviderAccountUsage as fetchProviderSubscriptionQuota } from './account-usage.mjs';
 import {
   applyGoalMessageRoute,
@@ -186,12 +208,15 @@ import { createAutomationChatProposalService } from './automation-chat-proposal-
 import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
 import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
 import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
+import { createResourceWindowIpcRegistrations } from './ipc/register-resource-window-ipc.mjs';
+import { createResourceWindowController } from './resource-window-controller.mjs';
 import { createPendingTaskIpcRegistrations } from './ipc/register-pending-task-ipc.mjs';
 import { createPasswordVaultIpcRegistrations } from './ipc/register-password-vault-ipc.mjs';
 import { createProviderConfigurationIpcRegistrations } from './ipc/register-provider-configuration-ipc.mjs';
 import { createProviderAccessIpcRegistrations } from './ipc/register-provider-access-ipc.mjs';
 import { createRuntimeHostIpcRegistrations } from './ipc/register-runtime-host-ipc.mjs';
 import { createWorkspaceIpcRegistrations } from './ipc/register-workspace-ipc.mjs';
+import { registerDesktopProjectAgent } from './project-agent/project-agent-host.mjs';
 import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
 import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
 import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
@@ -208,8 +233,11 @@ import { createBrowserFdaDragApplicationService } from './browser-fda-drag-appli
 import { createBrowserSessionImportApplicationService } from './browser-session-import-application-service.mjs';
 import { createChatStreamApplicationService } from './chat-stream-application-service.mjs';
 import { createConversationApplicationService } from './conversation-application-service.mjs';
+import { createConversationReadProjection } from './conversation-read-projection.mjs';
 import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
+import { readBoundedDirectoryEntries } from './workspace-file-search.mjs';
+import { createBotDocumentResolver } from './bot-document-reference.mjs';
 import { createGoalApplicationService } from './goal-application-service.mjs';
 import { createOpenPathApplicationService } from './open-path-application-service.mjs';
 import { createEditorLaunchService } from './editor-launch-service.mjs';
@@ -348,61 +376,10 @@ const mcpCredentialResolver = async (auth, server) => {
   }
   return injection;
 };
-const MCP_OAUTH_CALLBACK_PORT = 33418;
-const MCP_OAUTH_CALLBACK_PATH = '/mcp/oauth/callback';
-const MCP_OAUTH_CALLBACK_URL = `http://127.0.0.1:${MCP_OAUTH_CALLBACK_PORT}${MCP_OAUTH_CALLBACK_PATH}`;
-const MCP_OAUTH_CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
-let activeMcpOAuthCallback = null;
-
-function closeMcpOAuthCallback() {
-  if (activeMcpOAuthCallback?.server) {
-    try { activeMcpOAuthCallback.server.close(); } catch {}
-  }
-  if (activeMcpOAuthCallback?.timer) clearTimeout(activeMcpOAuthCallback.timer);
-  activeMcpOAuthCallback = null;
-}
-
-function waitForMcpOAuthCallback(expectedState) {
-  closeMcpOAuthCallback();
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      try {
-        const callbackUrl = new URL(req.url ?? '/', MCP_OAUTH_CALLBACK_URL);
-        if (callbackUrl.pathname !== MCP_OAUTH_CALLBACK_PATH) {
-          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-          res.end('Not found');
-          return;
-        }
-        const state = callbackUrl.searchParams.get('state') ?? '';
-        const code = callbackUrl.searchParams.get('code') ?? '';
-        const error = callbackUrl.searchParams.get('error') ?? '';
-        if (expectedState && state && state !== expectedState) throw new Error('MCP OAuth state mismatch.');
-        if (error) throw new Error(`MCP OAuth failed: ${error}`);
-        if (!code) throw new Error('MCP OAuth callback missing authorization code.');
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权已完成，可以回到 Peer Agent。</p>');
-        resolve(code);
-      } catch (error) {
-        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权失败，请回到 Peer Agent 重试。</p>');
-        reject(error);
-      } finally {
-        closeMcpOAuthCallback();
-      }
-    });
-    server.once('error', (error) => {
-      closeMcpOAuthCallback();
-      reject(error);
-    });
-    server.listen(MCP_OAUTH_CALLBACK_PORT, '127.0.0.1', () => {
-      const timer = setTimeout(() => {
-        closeMcpOAuthCallback();
-        reject(new Error('MCP OAuth authorization timed out.'));
-      }, MCP_OAUTH_CALLBACK_TIMEOUT_MS);
-      activeMcpOAuthCallback = { server, timer };
-    });
-  });
-}
+const mcpOAuthCallback = createMcpOAuthCallback();
+const MCP_OAUTH_CALLBACK_URL = mcpOAuthCallback.url;
+const closeMcpOAuthCallback = mcpOAuthCallback.dispose;
+const waitForMcpOAuthCallback = mcpOAuthCallback.wait;
 
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
@@ -568,8 +545,10 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
     }).resolveArtifact } : {}),
   },
 });
+let browserWindowController = null;
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
+  revealNative: request => browserWindowController?.reveal(request),
   isBrowserReady: (conversationId) => {
     const entry = getActiveBrowserEntry(conversationId);
     if (!entry?.webContentsId) return false;
@@ -578,6 +557,13 @@ const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   },
 });
 let taskNotificationBroker = null;
+let projectAgentNotifier = null;
+let viewingBotWorkspaceId = null;
+let projectAgentDirectory = {
+  listItems: () => [],
+  botName: () => '',
+  workspaceIdForConversation: () => '',
+};
 let trayController = null;
 let desktopLifecycleBinding = null;
 const stopGoalPlanChangeSubscription = bindExternalGoalPlanChanges({
@@ -681,6 +667,13 @@ function broadcastToAllWindows(channel, payload) {
   for (const win of wins) {
     if (!win.isDestroyed()) win.webContents.send(channel, payload);
   }
+  if (channel === 'project-agent:changed') {
+    try {
+      trayController?.refreshBadge?.();
+    } catch (error) {
+      console.warn('[tray] badge refresh failed:', error);
+    }
+  }
 }
 
 function getPeerAgentMainWindow() {
@@ -728,6 +721,27 @@ function openConversationFromTaskNotification(payload = {}) {
     return true;
   }
   return false;
+}
+
+function openBotFromSurfacing(payload = {}) {
+  const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : '';
+  if (!workspaceId) return false;
+  showOrCreateMainWindow();
+  const window = getPeerAgentMainWindow();
+  if (!window || window.isDestroyed()) return false;
+  const eventPayload = {
+    conversationId: workspaceId,
+    workspacePath: '',
+    workspaceId,
+    messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
+    source: 'project-agent-notification',
+  };
+  const send = () => {
+    if (!window.isDestroyed()) window.webContents.send('quick-chat:open-conversation', eventPayload);
+  };
+  if (window.webContents.isLoadingMainFrame()) window.webContents.once('did-finish-load', send);
+  else send();
+  return true;
 }
 
 function openAutomationRunFromNotification(payload = {}) {
@@ -845,9 +859,17 @@ function createAppTrayController() {
         if (scheduler) scheduler.setGloballyPaused(paused);
         else automationStore.setRuntimeState({ globallyPaused: paused });
       },
+      onOpenBot: (payload) => openBotFromSurfacing(payload),
       onQuit: () => {
         app.quit();
       },
+    },
+    isProjectAgentEnabled: () => true,
+    shellMode: () => (settingsStore.getAll()?.projectAgent?.shell === 'classic' ? 'classic' : 'bots'),
+    listNeedsYouBots: () => (projectAgentDirectory.listItems?.() || []).filter((item) => Number(item?.state?.needsYou) > 0),
+    getNeedsYouCount: () => {
+      const items = projectAgentDirectory.listItems?.() || [];
+      return items.reduce((sum, item) => sum + (Number(item?.state?.needsYou) || 0), 0);
     },
   });
 }
@@ -877,9 +899,6 @@ function showTaskSystemNotification({ title, body, onClick }) {
   }
 }
 
-function getRunnerWebContents() {
-  return getMainWindowWebContents(BrowserWindow.getAllWindows());
-}
 
 function toDesktopProviderMessages(messages = []) {
   return messages.map((message) => ({
@@ -900,293 +919,6 @@ function toDesktopProviderMessages(messages = []) {
     ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
     ...(message.name ? { name: message.name } : {}),
   }));
-}
-
-function buildGoalRunnerMessage(plan, turnNumber) {
-  return buildGoalRunnerTickMessage(plan, turnNumber);
-}
-
-function buildGoalRunnerReminder(plan, turnNumber) {
-  return {
-    id: `goal-runner-${plan?.planId || 'unknown'}-${turnNumber}`,
-    title: 'Goal Runner execution contract',
-    kind: 'goal-runner',
-    scope: 'turn',
-    layer: 'L6_MODE_REMINDER',
-    content: [
-      'Continue autonomously within the active goal, boundaries, and success criteria.',
-      'Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path.',
-      'Open tasks are not finished by narrating the next read/search/edit. In this same turn emit a real tool call (read_file, bash, edit_file, or write_file).',
-      'Do not send a planning-only reply such as "现在读" / "先读取" / "Let me read" and then stop.',
-      'If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
-      describeVisualRepair(plan),
-    ].filter(Boolean).join(' '),
-  };
-}
-
-function buildExplorerMessage({ plan, explorer }) {
-  const request = explorer?.request || {};
-  const targetWorkspacePath =
-    typeof plan?.targetWorkspacePath === 'string' && plan.targetWorkspacePath.trim().length > 0
-      ? plan.targetWorkspacePath.trim()
-      : null;
-  // 跨仓提示：当目标要改的代码仓与会话工作区不同（如"知识库驱动代码库"），
-  // 显式告知 Explorer 目标仓绝对路径，并声明它有权用绝对路径跨仓检索/读取，
-  // 避免 Explorer 因默认 cwd 在会话工作区而误判"读不到目标代码"。
-  const targetWorkspaceLine = targetWorkspacePath
-    ? `\nTarget code repository (may differ from the current workspace): ${targetWorkspacePath}`
-      + `\nYou may search and read files under this absolute path across repositories; do not assume you are limited to the current workspace.`
-    : '';
-  return `Explorer mission for plan "${plan?.title || plan?.goal || plan?.planId || 'goal'}".
-Question: ${request.question || 'Explore missing evidence for the active goal'}
-Reason: ${request.reason || 'The Goal Runner needs more evidence before continuing.'}${targetWorkspaceLine}
-Scope include: ${(request.scope?.include || []).join(', ') || '(not specified)'}
-Scope exclude: ${(request.scope?.exclude || []).join(', ') || '(not specified)'}
-Budget maxToolCalls: ${request.budget?.maxToolCalls || 4}`;
-}
-
-function buildExplorerReminder(explorer) {
-  return {
-    id: `goal-explorer-${explorer?.explorerId || 'unknown'}`,
-    title: 'Explorer readonly contract',
-    kind: 'goal-explorer',
-    scope: 'turn',
-    layer: 'L6_MODE_REMINDER',
-    content: `Profile: readonly_explorer. You are a dynamically created evidence explorer, not a fixed role.
-Use only the tools exposed to this explorer context. Do not modify files, do not update the goal plan, and do not claim evidence you did not inspect.
-Use only evidenceRefs shown in your tool results; do not invent refs or cite paths as refs.
-Return a concise JSON object only with: summary, findings[{claim,evidenceRefs}], evidenceRefs, recommendedNextStep, confidence(low|medium|high).`,
-  };
-}
-
-function buildExplorerContext({ plan, explorer }) {
-  const request = explorer?.request && typeof explorer.request === 'object' ? explorer.request : {};
-  return {
-    explorerId: explorer?.explorerId,
-    planId: plan?.planId || request.planId,
-    planTitle: plan?.title || plan?.goal || null,
-    request: {
-      ...request,
-      explorerId: explorer?.explorerId || request.explorerId,
-      planId: plan?.planId || request.planId,
-    },
-  };
-}
-
-function collectLeafTaskSummaries(plan) {
-  const out = [];
-  const stack = Array.isArray(plan?.tasks) ? [...plan.tasks] : [];
-  while (stack.length > 0) {
-    const task = stack.shift();
-    if (!task || typeof task !== 'object') continue;
-    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    if (subtasks.length > 0) {
-      for (const child of subtasks) stack.push(child);
-      continue;
-    }
-    out.push({
-      taskId: task.taskId,
-      title: task.title,
-      status: task.status,
-      evidenceRefs: Array.isArray(task.evidenceRefs) ? task.evidenceRefs : [],
-    });
-  }
-  return out;
-}
-
-function collectExplorerReports(plan) {
-  return (Array.isArray(plan?.runner?.explorers) ? plan.runner.explorers : [])
-    .filter((run) => run?.status === 'completed' && run.report)
-    .map((run) => ({
-      explorerId: run.explorerId,
-      summary: run.report.summary,
-      evidenceRefs: Array.isArray(run.report.evidenceRefs) ? run.report.evidenceRefs : [],
-      confidence: run.report.confidence,
-    }));
-}
-
-function buildVerifierContext({ plan, verifierRunId }) {
-  return {
-    verifierRunId,
-    planId: plan?.planId,
-    plan,
-    tasks: collectLeafTaskSummaries(plan),
-    explorerReports: collectExplorerReports(plan),
-  };
-}
-
-function buildVerifierMessage({ plan, verifierRunId }) {
-  return `Verifier mission for plan "${plan?.title || plan?.goal || plan?.planId || 'goal'}" (verifierRunId=${verifierRunId}).
-Review the existing task evidence, success criteria, criterionResults, and explorer reports. Do not modify files or update the plan.
-Return JSON only with: passed, failedCriteria[{criterionId,reason,evidenceRefs}], missingEvidence[{taskId,reason}], risks[], evidenceRefs[], recommendedNextAction.`;
-}
-
-function buildVerifierReminder(verifierRunId) {
-  return {
-    id: `goal-verifier-${verifierRunId || 'unknown'}`,
-    title: 'Verifier readonly contract',
-    kind: 'goal-verifier',
-    scope: 'turn',
-    layer: 'L6_MODE_REMINDER',
-    content: `Profile: readonly_verifier. Use only read-only tools. Do not modify files, do not update the goal plan, and do not create completion evidence.
-Return JSON only with: passed, failedCriteria[{criterionId,reason,evidenceRefs}], missingEvidence[{taskId,reason}], risks[], evidenceRefs[], recommendedNextAction.`,
-  };
-}
-
-function createCollectingWebContents() {
-  // 内存收集器：Explorer / Verifier 专用。不转发到真实渲染窗口，避免内部 JSON 出现在聊天。
-  const events = [];
-  let text = '';
-  let terminal = null;
-  return {
-    send(channel, payload) {
-      events.push({ channel, payload });
-      if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
-        text += payload.content;
-      }
-      if (channel === 'chat:stream:done' || channel === 'chat:stream:error' || channel === 'chat:stream:aborted') {
-        terminal = { channel, payload };
-      }
-    },
-    getText() {
-      return text;
-    },
-    getEvents() {
-      return events.slice();
-    },
-    getTerminal() {
-      return terminal;
-    },
-  };
-}
-
-function addEvidenceRefs(target, value) {
-  if (typeof value === 'string' && value.trim()) {
-    target.add(value.trim());
-    return;
-  }
-  if (!Array.isArray(value)) return;
-  for (const item of value) {
-    if (typeof item === 'string' && item.trim()) target.add(item.trim());
-  }
-}
-
-function tryParseJsonObject(value) {
-  if (typeof value !== 'string') return null;
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function collectExplorerEvidenceRefs(events) {
-  const refs = new Set();
-  for (const event of Array.isArray(events) ? events : []) {
-    if (event?.channel !== 'chat:stream:tool-result') continue;
-    const payload = event.payload ?? {};
-    addEvidenceRefs(refs, payload.evidenceRefs);
-
-    const parsed = tryParseJsonObject(payload.result);
-    if (!parsed) continue;
-    addEvidenceRefs(refs, parsed.evidenceRefs);
-    addEvidenceRefs(refs, parsed.artifactRef);
-    addEvidenceRefs(refs, parsed.artifactRefs);
-    addEvidenceRefs(refs, parsed.outputPreview?.artifactRef);
-    addEvidenceRefs(refs, parsed.outputPreview?.artifactRefs);
-    addEvidenceRefs(refs, parsed.outputPreview?.localToolResultRef?.artifactRef);
-    addEvidenceRefs(refs, parsed.outputPreview?.localToolResultRef?.artifactRefs);
-  }
-  return Array.from(refs);
-}
-
-function normalizeVerifierIssues(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const reason = typeof item.reason === 'string' && item.reason.trim()
-        ? item.reason.trim()
-        : '';
-      if (!reason) return null;
-      return {
-        ...(typeof item.taskId === 'string' && item.taskId.trim() ? { taskId: item.taskId.trim() } : {}),
-        ...(typeof item.criterionId === 'string' && item.criterionId.trim() ? { criterionId: item.criterionId.trim() } : {}),
-        reason,
-        evidenceRefs: Array.isArray(item.evidenceRefs)
-          ? item.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
-          : [],
-      };
-    })
-    .filter(Boolean);
-}
-
-function parseVerifierReport(rawText, fallback = {}) {
-  const text = typeof rawText === 'string' ? rawText.trim() : '';
-  let parsed = null;
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        try { parsed = JSON.parse(match[0]); } catch {}
-      }
-    }
-  }
-  const report = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? parsed
-    : { passed: false, risks: [text || fallback.summary || 'Verifier finished without structured output.'] };
-  return {
-    passed: report.passed === true,
-    failedCriteria: normalizeVerifierIssues(report.failedCriteria),
-    missingEvidence: normalizeVerifierIssues(report.missingEvidence),
-    risks: Array.isArray(report.risks)
-      ? report.risks.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
-      : [],
-    evidenceRefs: Array.isArray(report.evidenceRefs)
-      ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
-      : [],
-    recommendedNextAction: typeof report.recommendedNextAction === 'string'
-      ? report.recommendedNextAction
-      : undefined,
-    summary: typeof report.summary === 'string' && report.summary.trim()
-      ? report.summary.trim()
-      : report.passed === true
-        ? 'Verifier passed.'
-        : fallback.summary || 'Verifier found issues.',
-  };
-}
-
-function parseExplorerReport(rawText, fallback = {}) {
-  const text = typeof rawText === 'string' ? rawText.trim() : '';
-  let parsed = null;
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        try { parsed = JSON.parse(match[0]); } catch {}
-      }
-    }
-  }
-  const report = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? parsed
-    : { summary: text || fallback.summary || 'Explorer finished without textual output.' };
-  const evidenceRefs = Array.isArray(report.evidenceRefs)
-    ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
-    : [];
-  return {
-    summary: typeof report.summary === 'string' && report.summary.trim()
-      ? report.summary.trim()
-      : fallback.summary || 'Explorer completed.',
-    findings: Array.isArray(report.findings) ? report.findings : [],
-    evidenceRefs,
-    recommendedNextStep: typeof report.recommendedNextStep === 'string' ? report.recommendedNextStep : undefined,
-    confidence: ['low', 'medium', 'high'].includes(report.confidence) ? report.confidence : 'medium',
-  };
 }
 
 goalWorktreeAdapter = createGoalWorktreeAdapter({ goalPlanStore });
@@ -1247,17 +979,18 @@ desktopPreviewProvider = !isPackaged && !isManagedPreview
   })
   : null;
 if (desktopPreviewProvider) registerDesktopPreviewService(goalPlanStore, workspaceRoot, desktopPreviewProvider);
-// 验收报告写入器：completed 迁移时把证据索引与视觉判定汇总成 markdown
-// 落盘 ~/.peer-agent/goal-reports/<planId>.md（见 goal-acceptance-report-writer.mjs）。
 goalAcceptanceReportWriter = createGoalAcceptanceReportWriter({ goalPlanStore });
-// 网页侧复用同一套账本、产物仓与宿主复核调度器：只有显式声明计划归属的截图才会走它。
-// 复用（而不是新建调度器）保证每个计划仍只有一条在飞复核。
 const webUiCapture = createWebUiCapture({
   goalPlanStore,
   authority: desktopPreviewProvider?.authority,
   artifacts: desktopPreviewProvider?.artifacts,
   hostVisualReview: desktopPreviewProvider?.hostVisualReview,
   workspaceRoot,
+});
+const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
+const hostLeases = createHostLease({
+  surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
+  projectAgentEnabled: () => settingsStore.getAll()?.projectAgent?.shell !== 'classic', botWorkspaceIds: listBotWorkspaceIds,
 });
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
@@ -1267,223 +1000,23 @@ const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   }),
   startRunner: (planId) => goalRunner.start(planId),
 });
-goalRunner = createGoalRunner({
+goalRunner = createDesktopGoalRunnerHost({
   goalPlanStore,
-  uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
-  prepareIsolation: async (plan) => {
-    if (!plan) return plan;
-    const conversation = plan.conversationId
-      ? conversationStore.getConversation(plan.conversationId)
-      : null;
-    return preparePlanExecutionWorkspace({
-      plan,
-      conversation,
-      ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch,
-      prepareForPlan: goalWorktreeAdapter?.prepareForPlan,
-      isolatePlan: goalWorktreeAdapter?.isolatePlan,
-    });
-  },
-  chatRuntime: {
-    async runGoalTurn({ plan, turnNumber }) {
-      const webContents = getRunnerWebContents();
-      if (!webContents) {
-        return { blocked: true, blockedReason: 'No renderer window is available for Goal Runner' };
-      }
-      const conversation = conversationStore.getConversation(plan.conversationId);
-      if (!conversation) {
-        return { failed: true, failureReason: 'Goal conversation not found' };
-      }
-      const streamId = randomUUID();
-      // Goal Runner 执行回合必须主进程落盘：先创建 assistant 占位并拿到 id，
-      // 再把 assistantMessageId 同时交给 streamStarted（渲染绑定）与 sendMessage（正文回写）。
-      // 没有 assistantMessageId 时 llm-chat-service 会跳过 persistStreamRecord。
-      const startedAt = Date.now();
-      const { id: assistantMessageId, message: assistantPlaceholder } =
-        createGoalRunnerAssistantPlaceholder({ now: startedAt });
-      conversationStore.appendMessage(plan.conversationId, assistantPlaceholder);
-      broadcastToAllWindows('goalRunner:changed', buildGoalRunnerStreamStartedPayload({
-        planId: plan.planId,
-        conversationId: plan.conversationId ?? null,
-        streamId,
-        turnNumber,
-        assistantMessageId,
-        startedAt,
-      }));
-      
-      const canonicalHistory = projectConversationHistory(conversation.messages);
-      const messages = [
-        ...toDesktopProviderMessages(canonicalHistory.messages),
-        { role: 'user', content: buildGoalRunnerMessage(plan, turnNumber) },
-      ];
-      const goalContinuityContext = desktopContinuityContextFromProjection(canonicalHistory);
-      // Goal Runner 实时计数 sink：把「模型每轮」和「每次工具调用」即时写回 store。
-      // setRunnerState 内部 persist→notifyChanged 会广播 goalRunner:changed，
-      // 渲染层据此实时刷新底部「轮次 / 工具」数字（roundCount 为展示计数，与预算 turnCount 解耦）。
-      const planId = plan.planId;
-      const bumpRunnerCount = (field) => {
-        const current = goalPlanStore.getPlan(planId)?.runner;
-        if (!current) return;
-        const prev = Number.isFinite(current[field]) ? current[field] : 0;
-        goalPlanStore.setRunnerState(planId, { [field]: prev + 1 });
-      };
-      // per-run Explorer 请求收集器：模型在本回合内调用 request_explorer 工具时，
-      // 经 agentProgress.onToolCall 带上的 input（question/reason/scope）登记到这里。
-      // sendMessage 结束后组装成 result.explorers 返回，交给 goal-runner 既有派发循环
-      // （normalizeExploreRequests → dispatchExplorer → runExplorer）真正执行，
-      // 使底部「explorers x/3」随真实派发增长。explorerId/planId 由 store 兜底补齐。
-      const collectedExplorers = [];
-      const agentProgress = {
-        onRound: () => bumpRunnerCount('roundCount'),
-        onToolCall: ({ tool, input } = {}) => {
-          bumpRunnerCount('toolCallCount');
-          if (tool === 'request_explorer') {
-            const req = input && typeof input === 'object' ? input : {};
-            const question = typeof req.question === 'string' ? req.question.trim() : '';
-            if (!question) return;
-            const scope = req.scope && typeof req.scope === 'object' ? req.scope : undefined;
-            collectedExplorers.push({
-              planId,
-              question,
-              reason: typeof req.reason === 'string' ? req.reason.trim() : undefined,
-              ...(scope ? { scope } : {}),
-            });
-          }
-        },
-      };
-      const outcome = await llmChatService.sendMessage({
-        messages,
-        webContents,
-        streamId,
-        effort: 'default',
-        // Runner 归 goal 模式独占(A1):托管推进的 turn 以 goal 模式驱动,使 goal-runner-source
-        // 注入续推上下文、goal-mode-gate 放行自驱。plan 为纯审批门,不再托管续推。
-        mode: 'goal',
-        conversationId: plan.conversationId,
-        modelProviderId: resolveConversationModelProviderId({
-          conversationId: plan.conversationId,
-          conversationStore,
-        }),
-        assistantMessageId,
-        continuityContext: goalContinuityContext,
-        runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
-        agentProgress,
-      });
-      // 有 Explorer 请求时返回 explorers，让 Runner 进入 explore 派发分支；
-      // 否则维持原有 verify 收尾语义。
-      if (collectedExplorers.length > 0) {
-        return {
-          intent: 'explore',
-          explorers: collectedExplorers,
-          terminalStatus: outcome?.terminalStatus ?? null,
-          toolCallCount: outcome?.toolCallCount ?? 0,
-        };
-      }
-      return mapGoalTurnOutcome(outcome);
-    },
-  },
-  explorerRunner: {
-    async runExplorer({ plan, explorer }) {
-      const streamId = randomUUID();
-      const webContents = createCollectingWebContents();
-      broadcastToAllWindows('goalRunner:changed', {
-        type: 'goalRunner:explorerStreamStarted',
-        planId: plan.planId,
-        conversationId: plan.conversationId ?? null,
-        changeKind: 'runner-state',
-        explorerId: explorer.explorerId,
-        streamId,
-        startedAt: Date.now(),
-      });
-      await llmChatService.sendMessage({
-        messages: [{ role: 'user', content: buildExplorerMessage({ plan, explorer }) }],
-        webContents,
-        streamId,
-        effort: 'default',
-        mode: 'explorer',
-        // 旁路只读调查：不写会话正文，避免内部过程进聊天。
-        conversationId: null,
-        modelProviderId: resolveConversationModelProviderId({
-          conversationId: plan.conversationId,
-          conversationStore,
-        }),
-        ephemeral: true,
-        explorerContext: buildExplorerContext({ plan, explorer }),
-        runtimeReminders: [buildExplorerReminder(explorer)],
-      });
-      const terminal = webContents.getTerminal();
-      if (terminal?.channel === 'chat:stream:error') {
-        throw new Error(terminal.payload?.error || 'Explorer stream failed');
-      }
-      if (terminal?.channel === 'chat:stream:aborted') {
-        throw new Error('Explorer stream aborted');
-      }
-      const report = parseExplorerReport(webContents.getText(), {
-        summary: 'Explorer completed without a structured report.',
-      });
-      const events = webContents.getEvents();
-      report.toolCallCount = events.filter((event) => event.channel === 'chat:stream:tool-call').length;
-      report.allowedEvidenceRefs = collectExplorerEvidenceRefs(events);
-      return report;
-    },
-  },
-  verifierRunner: {
-    async runVerifier({ plan, verifierRunId, stage, signal }) {
-      if (stage === 'visual') return runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore,
-        workspacePath: (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
-          || plan?.targetWorkspacePath || conversationStore?.getConversation?.(plan.conversationId)?.workspacePath || workspaceRoot,
-        llmChatService, modelProviderId: resolveConversationModelProviderId({
-          conversationId: plan.conversationId, conversationStore }) });
-      const streamId = randomUUID();
-      const webContents = createCollectingWebContents();
-      broadcastToAllWindows('goalRunner:changed', {
-        type: 'goalRunner:verifierStreamStarted',
-        planId: plan.planId,
-        conversationId: plan.conversationId ?? null,
-        changeKind: 'runner-state',
-        verifierRunId,
-        streamId,
-        startedAt: Date.now(),
-      });
-      await llmChatService.sendMessage({
-        messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId }) }],
-        webContents,
-        streamId,
-        effort: 'default',
-        // Verifier 复用 explorer 的只读工具投影；任务语义由 verifierContext Source 注入。
-        mode: 'explorer',
-        // 验收旁路流：不写会话、不进活跃流投影，JSON 只给 runner 解析。
-        conversationId: null,
-        modelProviderId: resolveConversationModelProviderId({
-          conversationId: plan.conversationId,
-          conversationStore,
-        }),
-        ephemeral: true,
-        verifierContext: buildVerifierContext({ plan, verifierRunId }),
-        runtimeReminders: [buildVerifierReminder(verifierRunId)],
-      });
-      const terminal = webContents.getTerminal();
-      if (terminal?.channel === 'chat:stream:error') {
-        throw new Error(terminal.payload?.error || 'Verifier stream failed');
-      }
-      if (terminal?.channel === 'chat:stream:aborted') {
-        throw new Error('Verifier stream aborted');
-      }
-      return parseVerifierReport(webContents.getText(), {
-        summary: 'Verifier completed without a structured report.',
-      });
-    },
-  },
-  emitEvent: (payload) => {
-    const planId = payload?.planId ?? null;
-    const plan = planId ? goalPlanStore.getPlan(planId) : null;
-    broadcastToAllWindows('goalRunner:changed', {
-      ...payload,
-      planId,
-      conversationId: payload?.conversationId ?? plan?.conversationId ?? null,
-      changeKind: payload?.changeKind ?? 'runner-state',
-    });
-  },
-});
+  conversationStore,
+  agentTurnExecutor,
+  broadcast: broadcastToAllWindows,
+  llmChatService,
+  goalWorktreeAdapter,
+  goalTaskBranchAdapter,
+  desktopPreviewProvider,
+  runPlanVisualVerifier,
+  resolveConversationModelProviderId,
+  toDesktopProviderMessages,
+  desktopContinuityContextFromProjection,
+  workspaceRoot,
+  getMainWindows: () => BrowserWindow.getAllWindows().filter((window) => window.__peerAgentMainWindow === true),
+  hostLeases,
+}).goalRunner;
 
 function buildRuntimeProjection() {
   const session = sessionStore.getSession();
@@ -1649,21 +1182,22 @@ async function handleAppshotHotkey(source = 'hotkey') {
       if (!image.isEmpty()) {
         const size = image.getSize();
         const width = Math.min(480, size.width);
-        thumbnailDataUrl = image.resize({ width }).toDataURL();
+        thumbnailDataUrl = `data:image/jpeg;base64,${image.resize({ width }).toJPEG(60).toString('base64')}`;
       }
     } catch {
       thumbnailDataUrl = undefined; // card falls back to the broken/placeholder state
     }
     const delivery = deliverAppshot({
       payload: result.payload,
+      shell: settingsStore.getAll()?.projectAgent?.shell === 'classic' ? 'classic' : 'bots',
+      listBots: () => projectAgentDirectory.listItems?.() || [],
+      submitInput: (input) => projectAgentDirectory.submitInput?.(input),
       listConversations: () => conversationStore.listConversations({ includeMessageCount: false }),
       createConversation: (input) => conversationStore.createConversation(input),
       appendMessage: (id, message) => conversationStore.appendMessage(id, message),
       options: { thumbnailDataUrl },
     });
-    console.log('[appshot] delivered to conversation', delivery.conversationId, delivery.created ? '(new)' : '');
-    notifyAppshotOutcome(source, { ok: true, appName: result.payload.source.appName, delivery });
-    return { ...result, delivery };
+    return completeAppshotHotkey(source, result, delivery, notifyAppshotOutcome, console.log);
   } catch (err) {
     console.error('[appshot] hotkey handling failed:', err?.message ?? err);
     notifyAppshotOutcome(source, { ok: false, code: 'window_not_capturable' });
@@ -1671,14 +1205,6 @@ async function handleAppshotHotkey(source = 'hotkey') {
   }
 }
 
-/**
- * T9: lightweight capture feedback (product §9).
- * - Never force-reveals the Peer main window (the user stays in their app).
- * - Hotkey path only; settings "test capture" already renders inline feedback.
- * - System notification, silent-failure tolerant; click routes to the conversation
- *   via the existing task-notification reveal path.
- * - Log lines carry outcome codes only — no window titles, no image data (ADR 59).
- */
 function notifyAppshotOutcome(source, outcome) {
   if (source !== 'hotkey') return;
   try {
@@ -1686,11 +1212,13 @@ function notifyAppshotOutcome(source, outcome) {
       const notified = showTaskSystemNotification({
         title: 'Appshot',
         body: `已捕获「${outcome.appName}」窗口，已添加到会话。`,
-        onClick: () => openConversationFromTaskNotification({
-          conversationId: outcome.delivery?.conversationId,
-          messageId: outcome.delivery?.messageId,
-          source: 'appshot-notification',
-        }),
+        onClick: () => (outcome.delivery?.workspaceId
+          ? openBotFromSurfacing({ workspaceId: outcome.delivery.workspaceId })
+          : openConversationFromTaskNotification({
+            conversationId: outcome.delivery?.conversationId,
+            messageId: outcome.delivery?.messageId,
+            source: 'appshot-notification',
+          })),
       });
       if (!notified) console.log('[appshot] delivered (notification unavailable)');
       return;
@@ -1700,6 +1228,7 @@ function notifyAppshotOutcome(source, outcome) {
       peer_frontmost: 'Peer 自身在前台，请切换到要捕获的应用后重试。',
       no_window: '未找到可捕获的前台窗口。',
       window_not_capturable: '该窗口不支持捕获。',
+      NO_BOT: '还没有机器人，这次截图没有送出。',
     };
     showTaskSystemNotification({ title: 'Appshot', body: bodies[outcome.code] ?? '捕获失败。' });
   } catch (err) {
@@ -1897,23 +1426,7 @@ const conversationApplicationService = createConversationApplicationService({
     conversationStore.listConversationsByWorkspace(workspacePath, params),
   searchConversations: (params) => conversationStore.searchConversations(params),
   createConversation: (params) => conversationStore.createConversation(params),
-  getConversation: (id) => {
-    const conv = conversationStore.getConversation(id);
-    if (!conv?.contextSnapshot || conv.contextSnapshot.version !== 1) return conv;
-    const providers = llmConfigStore.listProviders();
-    const boundId = conv.modelProviderId;
-    const provider = (boundId && providers.find((p) => p.id === boundId))
-      || providers.find((p) => p.isDefault)
-      || providers[0]
-      || null;
-    if (!provider?.contextWindow) return conv;
-    const projected = reprojectContextAccountingWindow(
-      conv.contextSnapshot,
-      provider.contextWindow,
-    );
-    if (!projected || projected === conv.contextSnapshot) return conv;
-    return { ...conv, contextSnapshot: projected };
-  },
+  getConversation: createConversationReadProjection({ conversationStore, goalPlanStore, llmConfigStore }),
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
   updateFastMode: (id, fastMode) => conversationStore.updateFastMode(id, fastMode),
@@ -1948,7 +1461,32 @@ const conversationApplicationService = createConversationApplicationService({
   },
 });
 
+const popupResourceFeedback = (window, item) => {
+  Menu.buildFromTemplate([{ label: item.label, enabled: item.enabled, click: () => { void item.onClick(); } }, { type: 'separator' }, { role: 'copy' }])
+    .popup({ window: window ?? undefined, ...(item.params?.frame ? { frame: item.params.frame } : {}) });
+};
+const feedbackRecipientForConversation = conversationId => resolveResourceFeedbackRecipient(conversationId, {
+  items: projectAgentDirectory.listItems?.() ?? [],
+  conversations: conversationStore.listConversations({ roles: ['default', 'project_agent', 'work_session'], includeMessageCount: false }),
+});
+const resourceFeedbackPreparation = createResourceFeedbackPreparation({
+  isMainSender: sender => trustedWindowRegistry.getRole(sender) === 'main',
+  getRecipient: workspaceId => {
+    const item = projectAgentDirectory.listItems?.().find(value => value.workspaceId === workspaceId);
+    return item?.profile?.status === 'active' && item.profile.agentConversationId ? { conversationId: item.profile.agentConversationId } : null;
+  },
+});
+
 const browserCoreApplicationService = createBrowserCoreApplicationService({
+  bindSelectionFeedback: ({ contents, getRegistration, sourceSender }) => bindBrowserSelectionFeedback({ contents,
+    getBinding: () => { const owned = getRegistration(), registration = owned?.registration;
+      const recipient = registration ? feedbackRecipientForConversation(registration.conversationId) : null;
+      return owned?.sender === sourceSender && contents.hostWebContents === sourceSender && recipient
+        ? { sourceSender, recipient, conversationId: registration.conversationId, browserTabId: registration.browserTabId } : null; },
+    prepare: request => resourceFeedbackPreparation.prepare(request), isZh: () => sessionStore.getSession().locale?.startsWith('zh'),
+    popup: item => popupResourceFeedback(BrowserWindow.fromWebContents(sourceSender), item),
+    report: notice => { if (!sourceSender.isDestroyed()) sourceSender.send('resource-feedback:notice', notice); },
+  }),
   getActiveWebContentsId: () => getActiveWebContentsId(),
   registerWebContents: (registration) => registerBrowserWebContents(registration),
   unregisterWebContents: (registration) => unregisterBrowserWebContents(registration),
@@ -2115,17 +1653,88 @@ const workspaceApplicationService = createWorkspaceApplicationService({
   readProjectIndex: (options) => readProjectIndex(options),
 });
 
+const resolveBotDocumentReference = createBotDocumentResolver({
+  getWorkspace: workspaceId => projectAgentDirectory.projectAccess?.directory?.get(workspaceId),
+  getTaskSession: sessionId => projectAgentDirectory.projectAccess?.getSession(sessionId),
+  getTaskPlan: planId => goalPlanStore.getPlan(planId),
+  getKnownRoots: () => {
+    const settings = settingsStore.getAll();
+    return [...(settings.workspaces || []).map(item => typeof item === 'string' ? item : item?.path), settings.activeWorkspace]
+      .filter(value => typeof value === 'string' && path.isAbsolute(value));
+  },
+  readGitOrigin: async root => {
+    const [location, remote] = await Promise.all([
+      execFileAsync('git', ['-C', root, 'rev-parse', '--show-toplevel']),
+      execFileAsync('git', ['-C', root, 'config', '--local', '--get', 'remote.origin.url']),
+    ]);
+    return realpathSync(location.stdout.trim()) === root ? remote.stdout : '';
+  },
+});
 const fileAccessApplicationService = createFileAccessApplicationService({
+  resolveBotDocument: resolveBotDocumentReference,
   getSettings: () => settingsStore.getAll(),
   pathExists: (candidate) => existsSync(candidate),
   statPath: (candidate) => statSync(candidate),
   readDirectory: (candidate) => readdirSync(candidate, { withFileTypes: true }),
+  readDirectoryBounded: readBoundedDirectoryEntries,
   readFile: (candidate) => readFileSync(candidate),
   writeFile: (candidate, content) => writeFileSync(candidate, content, 'utf8'),
   createDirectory: (candidate) => mkdirSync(candidate, { recursive: false }),
   watchDirectory: (candidate, options, onChange) => fsWatch(candidate, options, onChange),
   executeGit: (cwd, args, options) =>
     execFileAsync('git', ['-C', cwd, ...args], options),
+});
+
+const resourceWindowController = createResourceWindowController({
+  BrowserWindow, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),
+  preloadPath: path.join(__dirname, '../preload/resource-window.cjs'),
+  resolveDocument: resolveBotDocumentReference, fileAccess: fileAccessApplicationService,
+  prepareFeedback: request => resourceFeedbackPreparation.prepare(request),
+  getAppearance: () => settingsStore.getAll().appearance,
+  getLocale: () => sessionStore.getSession().locale,
+  readHistory: () => settingsStore.getAll().resourceWindowReadingHistory,
+  writeHistory: value => settingsStore.merge({ resourceWindowReadingHistory: value }),
+  getOwner: workspaceId => {
+    const item = projectAgentDirectory.listItems?.().find(value => value.workspaceId === workspaceId);
+    return item?.profile?.status === 'active' && item.profile.agentConversationId
+      ? { conversationId: item.profile.agentConversationId } : null;
+  },
+});
+
+const resourceEditProfiles = createBotProfileStore({ rootDir: dataHome });
+const resourceEditOwner = workspaceId => {
+  const profile = resourceEditProfiles.read(workspaceId);
+  return profile && (profile.status === 'active' || profile.status == null) && profile.agentConversationId ? { conversationId: profile.agentConversationId } : null;
+};
+const resourceEditStorage = createResourceEditStorage({ rootDir: path.join(dataHome, 'project-runtime') });
+const resourceEditSources = createResourceEditSources({ fileAccess: fileAccessApplicationService, resourceWindows: resourceWindowController,
+  getRole: sender => trustedWindowRegistry.getRole(sender), getOwner: resourceEditOwner });
+const resourceEdits = createResourceEditApplicationService({ storage: resourceEditStorage,
+  notify: (sender, notice) => sender.send('resource-edit:changed', notice),
+  getRole: sender => trustedWindowRegistry.getRole(sender), getOwner: resourceEditOwner,
+  getWindowId: sender => { const window = BrowserWindow.fromWebContents(sender); return window && !window.isDestroyed() ? `window-${window.id}` : null; },
+  readSource: resourceEditSources.read, isSourceCurrent: resourceEditSources.isCurrent, canReadRetained: resourceEditSources.canReadRetained,
+});
+const resourceEditAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore: resourceEditProfiles, conversationStore, goalPlanStore,
+  legacyAccessLevel: sessionStore.getSession().accessLevel });
+const resourceEditSubmissionHost = createResourceEditSubmissionHost({ edits: resourceEdits, storage: resourceEditStorage, sources: resourceEditSources,
+  authority: resourceEditAuthority, approvalStore: createApprovalStore({ rootDir: path.join(dataHome, 'project-runtime') }), sessionStore, userDataPath: dataHome });
+
+browserWindowController = createBrowserWindowController({
+  getFeedbackRecipient: feedbackRecipientForConversation,
+  prepareFeedback: request => resourceFeedbackPreparation.prepare(request), popupFeedback: popupResourceFeedback, isZh: () => sessionStore.getSession().locale?.startsWith('zh'),
+  BrowserWindow, WebContentsView, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),
+  preloadPath: path.join(__dirname, '../preload/browser-window.cjs'), getWebContents: id => webContents.fromId(id),
+  getEntry: (conversationId, tabId) => tabId ? getBrowserEntry(conversationId, tabId) : getActiveBrowserEntry(conversationId),
+  register: registerBrowserWebContents, unregister: unregisterBrowserWebContents, rebuildMenu: () => rebuildAppMenu(),
+  getOwner: conversationId => {
+    const conversation = conversationStore.getConversation(conversationId);
+    if (!conversation || conversation.archivedAt) return null;
+    const workspaceId = projectAgentDirectory.workspaceIdForConversation(conversationId);
+    return { conversationId, ...(workspaceId ? { workspaceId } : {}) };
+  },
+  canFocus: conversationId => !!viewingBotWorkspaceId && projectAgentDirectory.workspaceIdForConversation(conversationId) === viewingBotWorkspaceId,
+  getAppearance: () => settingsStore.getAll().appearance, getLocale: () => sessionStore.getSession().locale,
 });
 
 const goalApplicationService = createGoalApplicationService({
@@ -2389,7 +1998,7 @@ function registerDesktopIpcHost() {
     }),
     ...createSettingsIpcRegistrations({
       settings: settingsApplicationService,
-      permissions: permissionGrantService,
+      permissions: permissionGrantService, listProviders: () => llmConfigStore.listProviders(),
     }),
     ...createHostIpcRegistrations({
       os: {
@@ -2606,11 +2215,32 @@ function registerDesktopIpcHost() {
     ...createProviderAccessIpcRegistrations({
       providers: providerAccessApplicationService,
     }),
-    ...createWorkspaceIpcRegistrations({
-      workspace: workspaceApplicationService,
-    }),
-    ...createFileAccessIpcRegistrations({
-      fileAccess: fileAccessApplicationService,
+    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService, searchFiles: fileAccessApplicationService.searchWorkspaceFiles }),
+    ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
+    ...createResourceWindowIpcRegistrations({ resourceWindows: resourceWindowController }),
+    ...createResourceEditIpcRegistrations({ edits: resourceEdits, submissions: resourceEditSubmissionHost.submissions }),
+    ...createResourceFeedbackIpcRegistrations({ preparation: resourceFeedbackPreparation }),
+    ...createBrowserWindowIpcRegistrations({ browserWindows: browserWindowController }),
+    ...registerDesktopProjectAgent({
+      configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),
+      enabled: () => true,
+      dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
+      workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
+      hostLeases, holdsLease: (workspaceId) => hostLeases.holds(workspaceId), acquireLease: (id) => hostLeases.acquire(id), releaseLease: (id) => hostLeases.release(id),
+      getSettings: () => settingsStore.getAll(), readRuntimePolicy: () => settingsStore.getRuntimePolicy(), mergeSettings: (patch) => settingsStore.merge(patch),
+      dialog, BrowserWindow, shell, listModels: () => llmConfigStore.listProviders(),
+      readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
+      onReady: (api) => { projectAgentDirectory = api; },
+      onViewing: (workspaceId) => {
+        viewingBotWorkspaceId = typeof workspaceId === 'string' && workspaceId ? workspaceId : null;
+      },
+      onAppendedMessage: (payload) => {
+        try {
+          projectAgentNotifier?.handleAppended(payload);
+        } catch (error) {
+          console.warn('[project-agent-notifier] handleAppended failed:', error);
+        }
+      },
     }),
   ],
   });
@@ -2626,8 +2256,6 @@ function createWindow() {
     minWidth: 1040,
     minHeight: 720,
     title: 'Peer Agent',
-    // 冷启动首帧前不要把空窗露出来：show:false + ready-to-show 再显示。
-    // 否则 macOS 透明底会在 HTML/CSS 注入前短暂露黑（「首次打开黑一下，第二次正常」）。
     show: false,
     backgroundColor: isMac ? '#00000000' : '#1e1e2e',
     ...(isMac
@@ -2635,9 +2263,6 @@ function createWindow() {
           transparent: true,
           vibrancy: 'sidebar',
           visualEffectState: 'active',
-          // trafficLightPosition 是按钮簇左上角，不是圆心。
-          // 12pt 灯在 40px hiddenInset 标题栏内垂直居中：(40 - 12) / 2 = 14。
-          // y: 18 会把视觉中心压到 24px，三点会明显偏低。仅 macOS 生效。
           trafficLightPosition: { x: 16, y: 14 },
         }
       : {}),
@@ -3864,11 +3489,10 @@ function flushPendingRuntimeEvents() {
 }
 
 async function startRecoveryAndAppearance() {
-  // Milestone C: 进程重启后扫描 interrupted Goal compaction/resume 状态。
-  // 必须在 UI/IPC 就绪前尽早 kick，避免用户打开会话前 runner 一直挂着。
+  applyStartupApprovalRecovery({ approvalStore: createApprovalStore(), goalPlanStore, canRecover: row => !goalPlanStore.getPlan(row.planId)?.delegationOrigin || hostLeases.holds(row.workspaceId) });
   try {
     if (goalRunner && typeof goalRunner.recoverContextCheckpoints === 'function') {
-      const recovery = goalRunner.recoverContextCheckpoints();
+      const recovery = goalRunner.recoverContextCheckpoints({ includeDelegated: false });
       if (recovery?.recovered?.length) {
         console.info(
           `[main] recovered ${recovery.recovered.length}/${recovery.scanned} goal checkpoint(s) after startup`,
@@ -3944,9 +3568,7 @@ function startLocalRuntime() {
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
-  // 远程只读接入（ADR 75 M1）。连接的唯一所有者是 remoteAccessController：
-  // 设置页、用户开关、常驻服务都经由它，避免多处以不同理由启停同一个连接。
-  // 环境变量只在首次引导时作为种子写入设置（不直接启动连接），随后一切以设置页为准。
+  // 连接由 remoteAccessController 按本机设置启停。
   try {
     const current = settingsStore.getAll()?.remoteAccess;
     const seeded = current && typeof current === 'object' && typeof current.gatewayOrigin === 'string'
@@ -3963,17 +3585,12 @@ function startLocalRuntime() {
       console.log('[remote] seeded settings from environment');
     }
     remoteAccess = createRemoteAccessController({
-      settingsStore,
-      deviceName: os.hostname(),
-      createSession: ({ gatewayOrigin, workspaceId }) => setupRemoteAccess({
-        userDataPath,
-        gatewayOrigin,
-        deviceName: os.hostname(),
-        workspaceId,
-        goalPlanStore,
-        sessionStore,
-        buildProjection: buildRuntimeProjection,
-        host: localToolHost,
+      settingsStore,deviceName:os.hostname(),readLastAccess:()=>readRemoteAccessSummary(userDataPath),
+      createSession: config => setupRemoteAccess({
+        ...config,userDataPath,deviceName:os.hostname(),goalPlanStore,sessionStore,
+        buildProjection:buildRuntimeProjection,host:localToolHost,
+        getProjectAccess:()=>projectAgentDirectory.projectAccess,
+        getRemoteSettings:()=>settingsStore.getAll()?.remoteAccess,
       }),
     });
     // 启动时按已保存的意图恢复连接；未配置或已关闭则什么都不做。
@@ -3988,6 +3605,7 @@ function startLocalRuntime() {
     name: 'local-tool-host-events',
     dispose: async () => {
       try {
+        await hostLeases.closeAfterDraining();
         await remoteAccess?.stop().catch(() => {});
         remoteAccess = null;
         await Promise.all([
@@ -4013,6 +3631,7 @@ function startDesktopAffordances() {
         () => stopAutoUpdater(),
         () => shortcutService.dispose(),
         () => trayController?.destroy?.(),
+        () => { projectAgentNotifier = null; },
         () => quickChatWindowController.destroy(),
       ]) {
         try {
@@ -4056,6 +3675,26 @@ function startDesktopAffordances() {
   } catch (err) {
     console.warn('[task-notification] broker init failed:', err);
     taskNotificationBroker = null;
+  }
+
+  try {
+    projectAgentNotifier = createProjectAgentNotifier({
+      isEnabled: () => true,
+      isForegroundSameBot: (workspaceId) => (
+        isMainAppForegroundForNotifications() && viewingBotWorkspaceId === workspaceId
+      ),
+      botNameForWorkspace: (workspaceId) => projectAgentDirectory.botName?.(workspaceId) || '',
+      workspaceIdForConversation: (conversationId) => (
+        projectAgentDirectory.workspaceIdForConversation?.(conversationId) || ''
+      ),
+      openBot: (payload) => openBotFromSurfacing(payload),
+      showNotification: (payload) => showTaskSystemNotification(payload),
+      receiptStore: taskNotificationBroker?.getReceiptStore?.(),
+      logWarn: (message, err) => console.warn(message, err),
+    });
+  } catch (err) {
+    console.warn('[project-agent-notifier] init failed:', err);
+    projectAgentNotifier = null;
   }
 
   // 启动后预热 Quick 窗口（隐藏态创建 + 加载 renderer），避免首次快捷键唤醒冷创建。
@@ -4183,7 +3822,12 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
     { name: 'task-overview-broadcast', dispose: () => taskOverviewBroadcast.dispose() },
     { name: 'goal-plan-change-subscription', dispose: stopGoalPlanChangeSubscription },
     { name: 'mcp-oauth-callback', dispose: closeMcpOAuthCallback },
+    { name: 'browser-windows', dispose: () => browserWindowController?.dispose() },
+    { name: 'resource-feedback-preparation', dispose: () => resourceFeedbackPreparation.dispose() },
+    { name: 'resource-windows', dispose: () => resourceWindowController.dispose() },
+    { name: 'resource-edit-host', dispose: async () => { resourceEdits.dispose(); await resourceEditSubmissionHost.dispose(); resourceEditStorage.close(); resourceEditAuthority.close(); } },
     { name: 'catalog-ipc-main', dispose: () => ipcMain.dispose() },
+    { name: 'project-agent', dispose: () => projectAgentDirectory?.dispose() },
     { name: 'trusted-window-registry', dispose: () => trustedWindowRegistry.dispose() },
     { name: 'full-disk-access-drag-float', dispose: () => fullDiskAccessDragFloatController.destroy() },
   ],

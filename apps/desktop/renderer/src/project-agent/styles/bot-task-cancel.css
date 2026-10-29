@@ -1,0 +1,7 @@
+.bot-task-cancel { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; min-width: 0; }
+.bot-task-cancel button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 0; min-height: 27px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-secondary); font: inherit; font-size: 12px; cursor: pointer; }
+.bot-task-cancel button:hover { color: var(--graphite-base); }
+.bot-task-cancel button:disabled { cursor: wait; opacity: .65; }
+.bot-task-cancel button:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: 2px; }
+.bot-task-cancel p[role="alert"] { margin: 0; color: var(--graphite-base); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.bot-work-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px 18px; }

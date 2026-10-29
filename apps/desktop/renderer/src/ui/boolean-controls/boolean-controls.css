@@ -7,7 +7,7 @@
   align-items: center;
   padding: 1px;
   border: 1px solid var(--graphite-hairline);
-  border-radius: 10px;
+  border-radius: var(--ui-radius-pill);
   background: var(--control-fill);
   color: var(--graphite-mute);
   cursor: pointer;
@@ -40,7 +40,7 @@
   display: block;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-circle);
   background: var(--paper-sheet);
   transform: translateX(0);
   transition: transform 160ms ease;
@@ -80,7 +80,7 @@
   height: 18px;
   place-items: center;
   border: 1px solid var(--graphite-hairline);
-  border-radius: 5px;
+  border-radius: var(--ui-radius-chip);
   background: var(--control-fill);
   /* Keep the mark legible on the selected fill in every governed palette. */
   color: var(--za-primary-control-ink);

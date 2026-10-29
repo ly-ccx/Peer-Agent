@@ -32,6 +32,8 @@ export interface ModelToolDefinition {
   readonly name: string;
   readonly description?: string;
   readonly parameters?: Readonly<Record<string, unknown>>;
+  /** Explicit schema policy; Responses defaults to false to preserve optional Manifest fields. */
+  readonly strict?: boolean;
 }
 
 export interface ModelToolCall {

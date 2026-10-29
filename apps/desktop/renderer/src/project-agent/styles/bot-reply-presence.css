@@ -1,0 +1,28 @@
+.bot-continuous-reply { position: relative; }
+/* Keep every reference target at the reply's start without contributing flex gaps. */
+.bot-reply-alias { position: absolute; inset-block-start: 0; inset-inline-start: 0; display: block; width: 0; height: 0; }
+.bot-continuous-paragraphs:empty { display: none; }
+.bot-reply-related-turns { font-size: 12px; color: var(--graphite-soft); }
+.bot-reply-related-turns > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; list-style: none; }
+.bot-reply-related-turns > summary::-webkit-details-marker { display: none; }
+.bot-reply-related-turns[open] > summary > svg { transform: rotate(180deg); }
+.bot-reply-related-turns > summary:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: 2px; }
+.bot-reply-related-turns > button { display: block; padding: 6px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.bot-reply-related-turns > button:hover { color: var(--graphite-base); }
+.bot-reply-related-turns > button:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: 2px; }
+.bot-continuous-reply > .bot-reply-context { gap: 8px; flex-wrap: wrap; }
+.bot-reply-context > button:disabled { cursor: default; pointer-events: none; }
+/* Rotate the glyph inside its stable SVG viewport; its layout edge stays on the text column. */
+.bot-reply-loading-icon > * { animation: motion-spin 1s linear infinite; transform-box: view-box; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) { .bot-reply-loading-icon > * { animation: none; } }
+.bot-reply-typing-dots > circle {
+  fill: currentColor;
+}
+.bot-reply-typing-dots.is-active > circle {
+  animation: motion-dots calc(var(--za-motion-slow) * 3) var(--za-ease-standard) infinite;
+}
+.bot-reply-typing-dots > circle:nth-child(2) { animation-delay: calc(var(--za-motion-slow) * -2); }
+.bot-reply-typing-dots > circle:nth-child(3) { animation-delay: calc(var(--za-motion-slow) * -1); }
+@media (prefers-reduced-motion: reduce) {
+  .bot-reply-typing-dots.is-active > circle { animation: none; opacity: 1; transform: none; }
+}

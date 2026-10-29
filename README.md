@@ -43,16 +43,40 @@ Many coding agents already run tools on your machine. That alone is no longer a 
 
 **Peer Agent is about what happens after local execution:** goals are accepted with boundaries, ambiguity is clarified instead of guessed, work is planned by complexity, and completion is proven with Evidence — under one permissioned capability chain across Desktop, TUI, and CLI.
 
-Three first-class shells share one unified core runtime:
+Desktop, TUI and CLI share the same core runtime:
 
 | Surface | What it is |
 | --- | --- |
-| **Desktop** | Task threads, composer, task information card (outputs, sources, active runs, environment), review cards, Workbench, tray |
+| **Desktop** | Project bots, conversation, scoped tasks, review cards, memory, objectives and a classic interface |
 | **TUI** | Full terminal agent (`peer`) with the same runtime |
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
+>
+> Release target: beta channel **`0.1.0-rc.28`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
+
+### The 0.1.0 candidate
+
+Fixed bot model and channel choices are preserved. Execution and independent review can use the same model in separate contexts; failed reviews should explain the recorded error or missing evidence.
+
+Bind a folder or create a managed bot, choose its avatar color, then give it a request. The bot handles read-only understanding and delegates writes to tasks with success criteria. The main bot coordinates independent goals concurrently, sends additions to the responsible Agent, and can cancel incorrect work and arrange its replacement. Child Agents ask it questions and return results for verification and delivery within existing authorization; their named activity appears in the conversation. Receipt, verification, acceptance and worktree integration remain visible as separate steps.
+
+With full local access selected, the main Bot, its tasks and verification can read consecutive images without per-image prompts; authorization remains local. In ask mode, out-of-project images display a permission card in the main conversation, and approval continues the original read. Reject or cancel directly, or stop the reply; an approval wait expires after five minutes. Permission for this round covers only the current Bot and its tasks, the exact file and 30 minutes. Productive verification continues in saved slices without a default lifetime cap; explicit budgets, per-call timeouts, denial and cancellation remain enforced.
+
+Bot settings opens the bot's configuration, with project history, memory and objectives in adjacent tabs. Replies use complete message bubbles in the bot's identity color, with supporting records and process available through Reply details below the left edge of each bubble. Waiting, streamed text and the final answer share one continuous reply. Verification verdicts stay in task details; the main Bot explains the outcome. On macOS, Appearance switches glass/solid window materials with neutral floating panels in both themes. Keyboard navigation, reduced motion, locale parity and diagnostics are part of the candidate checks. [Candidate release notes](release-notes/v0.1.0-rc.28.md) cover features, upgrade instructions and limits. Upgrade Desktop, CLI/TUI and Gateway together. Back up the complete data root before upgrading; rollback requires that pre-upgrade backup because older writers do not support the RC25 coordination format. Publishing a release does not restart your app; wait for active execution to finish before installing. Retained legacy journals are evidence, not the latest state after activation.
+
+If startup recovery is blocked, open **Check recovery** above the conversation. Request a safe handoff, preserve history and continue only verified work, or keep results and end an uncertain earlier execution. Historical inputs and completed operations are not replayed; reports and worktrees remain available. New admission uses minimum reader/writer version 4, so rollback requires the complete pre-upgrade backup.
+
+The conversation’s Workspace button opens web pages, documents/code, directories and diffs in side-by-side tabs. Inspect actual Git revisions, keep reading while a file changes, prepare selection feedback, and save local document drafts. Applying a fixed draft follows local authorization and checks the file version again; conflicts keep your input and unknown outcomes are reconciled without replay. Separate windows return to the same source; browser windows use explicit address copies.
+
+Stable publication follows comprehensive owner testing and seven days of daily use. Remote input is text only; approvals stay on the computer. Remote device identity currently requires macOS Keychain.
+
+![Project bots and conversation](docs/screenshots/project-bots-rc.png)
+
+![Bot profile and avatar colors](docs/screenshots/bot-profile-rc.png)
+
+Source UI screenshots use three synthetic projects and an illustrative conversation. They show the interface; release validation is recorded separately.
 
 ---
 

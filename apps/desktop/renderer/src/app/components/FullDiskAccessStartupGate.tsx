@@ -1,3 +1,4 @@
+import { PeerIcon } from '../../ui/icons';
 /**
  * 应用启动时的 macOS 必需权限门（表达层）。
  *
@@ -228,6 +229,7 @@ export function FullDiskAccessStartupGate({
       ariaLabel={isZh ? 'Agent 必需权限' : 'Required permissions for Agent'}
       panelClassName="fda-startup-gate"
     >
+      {({ requestClose }) => <>
         <div className="fda-startup-gate-body">
           <h2 className="fda-startup-gate-title">
             {isZh ? '需要授予 Agent 必需权限' : 'Required permissions for Agent'}
@@ -271,9 +273,10 @@ export function FullDiskAccessStartupGate({
 
           <div className="fda-permission-card">
             <div className="fda-drag-banner">
+              <PeerIcon name="send" size={14} className="inline-icon" />
               {isZh
-                ? `↑ 将 ${displayName} 拖到系统设置「完全磁盘访问」列表（列表不会自动出现 App）`
-                : `↑ Drag ${displayName} into Full Disk Access list (apps never auto-appear)`}
+                ? `将 ${displayName} 拖到系统设置「完全磁盘访问」列表（列表不会自动出现 App）`
+                : `Drag ${displayName} into Full Disk Access list (apps never auto-appear)`}
             </div>
             <button
               type="button"
@@ -358,11 +361,12 @@ export function FullDiskAccessStartupGate({
                 ? (isZh ? '检测中…' : 'Checking…')
                 : (isZh ? '我已授权，重新检测' : 'I’ve granted access — re-check')}
             </button>
-            <button type="button" className="updater-btn ghost" onClick={() => setOpen(false)}>
+            <button type="button" className="updater-btn ghost" onClick={requestClose}>
               {isZh ? '稍后' : 'Later'}
             </button>
           </div>
         </div>
+      </>}
     </Overlay>
   );
 }

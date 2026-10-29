@@ -27,6 +27,7 @@ export function createBrowserCoreApplicationService({
   now,
   writeFile,
   openExternal,
+  bindSelectionFeedback,
 } = {}) {
   const ports = {
     getActiveWebContentsId: assertFunction(getActiveWebContentsId, 'getActiveWebContentsId'),
@@ -44,6 +45,11 @@ export function createBrowserCoreApplicationService({
     openExternal: assertFunction(openExternal, 'openExternal'),
   };
 
+  const owned = new Map();
+  function ownedRegistration(sender, registration) {
+    const wc = ports.getWebContentsById(Number(registration?.webContentsId));
+    return sender && typeof sender === 'object' && wc && !wc.isDestroyed() && wc.getType?.() === 'webview' && wc.hostWebContents === sender;
+  }
   function runRegistryCommand(command, registration) {
     const hadActiveBrowser = ports.getActiveWebContentsId() != null;
     const result = command(registration);
@@ -144,10 +150,29 @@ export function createBrowserCoreApplicationService({
   }
 
   return Object.freeze({
-    registerWebContents: (registration = {}) =>
-      runRegistryCommand(ports.registerWebContents, registration),
-    unregisterWebContents: (registration = {}) =>
-      runRegistryCommand(ports.unregisterWebContents, registration),
+    registerWebContents: (registration = {}, sender) => {
+      if (!ownedRegistration(sender, registration)) return { ok: false, error: 'browser_owner_mismatch' };
+      const safe = Object.fromEntries(['webContentsId', 'conversationId', 'browserTabId', 'active', 'claimForeground', 'url', 'title', 'metadataOnly']
+        .filter(key => Object.hasOwn(registration, key)).map(key => [key, registration[key]]));
+      const result = runRegistryCommand(ports.registerWebContents, safe);
+      if (result?.ok) {
+        const id = Number(safe.webContentsId), wc = ports.getWebContentsById(id);
+        const previous = owned.get(id), reuseFeedback = previous?.sender === sender && previous.wc === wc;
+        if (previous) { previous.wc.removeListener?.('destroyed', previous.destroyed); if (!reuseFeedback) previous.stopFeedback?.(); }
+        const record = { sender, wc, registration: safe, stopFeedback: reuseFeedback ? previous.stopFeedback : undefined, destroyed: () => {
+          if (owned.get(id) !== record) return; record.stopFeedback?.(); owned.delete(id); runRegistryCommand(ports.unregisterWebContents, safe);
+        } };
+        owned.set(id, record); wc.once?.('destroyed', record.destroyed);
+        if (!record.stopFeedback && bindSelectionFeedback) record.stopFeedback = bindSelectionFeedback({ contents: wc, getRegistration: () => owned.get(id), sourceSender: sender });
+      }
+      return result;
+    },
+    unregisterWebContents: (registration = {}, sender) => {
+      const id = Number(registration.webContentsId), previous = owned.get(id);
+      if (!ownedRegistration(sender, registration) && !(previous && previous.sender === sender && previous.registration.browserTabId === registration.browserTabId && previous.registration.conversationId === registration.conversationId)) return { ok: false, error: 'browser_owner_mismatch' };
+      if (previous) { previous.stopFeedback?.(); previous.wc.removeListener?.('destroyed', previous.destroyed); owned.delete(id); }
+      return runRegistryCommand(ports.unregisterWebContents, registration);
+    },
     clearSiteData,
     capturePage,
     openExternal: openExternalUrl,

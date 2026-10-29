@@ -3,7 +3,10 @@ import test from 'node:test';
 import {
   resolveAppshotDestination,
   buildAppshotMessage,
+  buildAppshotSubmission,
+  completeAppshotHotkey,
   deliverAppshot,
+  pickAppshotBot,
 } from './appshot-delivery.mjs';
 
 const payload = {
@@ -94,4 +97,69 @@ test('deliverAppshot appends exactly one message and never runs the agent', () =
   assert.equal(appended.length, 1);
   assert.equal(appended[0].id, 'conv-1');
   assert.equal(appended[0].message.id, 'appshot-abc-123');
+});
+
+test('bot shell submits the artifact ref to the most recently active bot', () => {
+  const submitted = [];
+  const result = deliverAppshot({
+    payload,
+    shell: 'bots',
+    listBots: () => [
+      { workspaceId: 'old', lastActiveAt: '2026-09-27T00:00:00.000Z' },
+      { workspaceId: 'new', lastActiveAt: '2026-09-28T00:00:00.000Z' },
+    ],
+    submitInput: (input) => {
+      submitted.push(input);
+      return input;
+    },
+    listConversations: () => { throw new Error('classic list'); },
+    createConversation: () => { throw new Error('classic create'); },
+    appendMessage: () => { throw new Error('classic append'); },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.workspaceId, 'new');
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].surface, 'desktop');
+  assert.deepEqual(submitted[0].attachmentRefs, ['local-appshot-artifact://abc-123']);
+  assert.equal(pickAppshotBot([]), null);
+  assert.equal(buildAppshotSubmission(payload, 'new').inputId, 'appshot-abc-123');
+});
+
+test('bot shell without a bot does not create a classic conversation', () => {
+  const result = deliverAppshot({
+    payload,
+    shell: 'bots',
+    listBots: () => [],
+    submitInput: () => { throw new Error('must not submit'); },
+    listConversations: () => { throw new Error('classic list'); },
+    createConversation: () => { throw new Error('classic create'); },
+    appendMessage: () => { throw new Error('classic append'); },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'NO_BOT');
+});
+
+test('bot submission keeps the thumbnail the model can see', () => {
+  const thumb = 'data:image/png;base64,AA==';
+  const submission = buildAppshotSubmission(payload, 'new', { thumbnailDataUrl: thumb });
+  assert.equal(submission.attachments[0].kind, 'image');
+  assert.equal(submission.attachments[0].dataUrl, thumb);
+  assert.equal(submission.attachments[0].artifactRef, 'local-appshot-artifact://abc-123');
+  assert.equal(submission.attachmentRefs[0], 'local-appshot-artifact://abc-123');
+});
+
+test('failed bot delivery is reported as a failure', () => {
+  const notices = [];
+  const failed = completeAppshotHotkey(
+    'hotkey',
+    { ok: true, payload },
+    { ok: false, code: 'NO_BOT' },
+    (source, outcome) => notices.push({ source, outcome }),
+    () => { throw new Error('must not log success'); },
+  );
+  assert.equal(failed.ok, false);
+  assert.equal(failed.code, 'NO_BOT');
+  assert.equal(notices[0].source, 'hotkey');
+  assert.equal(notices[0].outcome.ok, false);
+  assert.equal(notices[0].outcome.code, 'NO_BOT');
 });

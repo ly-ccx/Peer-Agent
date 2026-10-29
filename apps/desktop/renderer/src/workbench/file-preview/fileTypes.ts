@@ -1,3 +1,4 @@
+import { MARKDOWN_BUDGET } from './presentationBudget.ts';
 import type { WorkbenchFileMode } from '../documentSessionState';
 
 export type WorkbenchFileKind =
@@ -11,10 +12,11 @@ export type WorkbenchFileKind =
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkd']);
 const JSON_EXTENSIONS = new Set(['json', 'jsonc', 'jsonl']);
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
 const HTML_EXTENSIONS = new Set(['html', 'htm']);
 const TEXT_EXTENSIONS = new Set(['txt', 'log', 'csv', 'tsv', 'yml', 'yaml', 'toml', 'ini', 'env']);
 const CODE_EXTENSIONS = new Set([
+  'svg',
   'c',
   'cc',
   'cpp',
@@ -71,13 +73,22 @@ export function detectFileKind(path: string): WorkbenchFileKind {
 }
 
 export function defaultModeForKind(kind: WorkbenchFileKind): WorkbenchFileMode {
-  if (kind === 'markdown' || kind === 'json' || kind === 'image' || kind === 'html') return 'preview';
+  if (kind === 'markdown' || kind === 'json' || kind === 'image') return 'preview';
   return 'source';
 }
 
 export function formatJsonForPreview(content: string): string | null {
+  if (content.length > MARKDOWN_BUDGET.characters) return null;
+  let depth = 0, quoted = false, escaped = false;
+  for (const char of content) {
+    if (quoted) { if (escaped) escaped = false; else if (char.charCodeAt(0) === 92) escaped = true; else if (char === '"') quoted = false; continue; }
+    if (char === '"') quoted = true;
+    else if (char === '{' || char === '[') { if (++depth > 64) return null; }
+    else if (char === '}' || char === ']') depth--;
+  }
   try {
-    return JSON.stringify(JSON.parse(content), null, 2);
+    const formatted = JSON.stringify(JSON.parse(content), null, 2);
+    return formatted.length <= 200_000 ? formatted : null;
   } catch {
     return null;
   }

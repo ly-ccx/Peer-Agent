@@ -225,14 +225,18 @@ export function createQuickChatWindowController({
     quickChatWindow.setMaximumSize?.(size.width, size.height);
   }
 
+  function hideWindowPopover() {
+    if (!popoverWindow || popoverWindow.isDestroyed()) return;
+    if (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible()) popoverWindow.hide();
+    // The independent renderer must retire its content too, so the next opening
+    // starts from the new state and replays its entrance once.
+    popoverWindow.webContents?.send?.('quick-chat:popover-closed');
+  }
+
   function hidePopover({ restoreFocus = false } = {}) {
     const wasOpen = popoverState !== null;
     popoverState = null;
-    if (popoverWindow && !popoverWindow.isDestroyed()) {
-      if (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible()) {
-        popoverWindow.hide();
-      }
-    }
+    hideWindowPopover();
     if (wasOpen) resizeBarForContent();
     if (restoreFocus && quickChatWindow && !quickChatWindow.isDestroyed()) {
       quickChatWindow.show();
@@ -341,10 +345,7 @@ export function createQuickChatWindowController({
       return false;
     }
     // Close any Electron window popover first.
-    if (popoverWindow && !popoverWindow.isDestroyed()
-      && (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible())) {
-      popoverWindow.hide();
-    }
+    hideWindowPopover();
 
     popoverState = {
       kind: nextState.kind,
@@ -641,6 +642,23 @@ export function createQuickChatWindowController({
     hidePopover,
     selectPopoverValue,
   };
+}
+
+export function quickChatShell(settings) {
+  return settings?.projectAgent?.shell === 'classic' ? 'classic' : 'bots';
+}
+
+export function pickQuickChatBot(bots) {
+  const list = (Array.isArray(bots) ? bots : [])
+    .filter((bot) => typeof bot?.workspaceId === 'string' && bot.workspaceId);
+  return [...list].sort((left, right) => String(right.lastActiveAt || '').localeCompare(String(left.lastActiveAt || '')))[0] || null;
+}
+
+export function quickChatSubmission({ shell, workspaceId, text }) {
+  const body = typeof text === 'string' ? text.trim() : '';
+  if (shell === 'classic') return { mode: 'classic', text: body };
+  if (!workspaceId || !body) return { mode: 'bots', ok: false, code: 'INVALID_INPUT' };
+  return { mode: 'bots', ok: true, workspaceId, text: body, surface: 'quick_chat' };
 }
 
 export {

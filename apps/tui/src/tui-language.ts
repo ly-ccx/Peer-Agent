@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { loadMigratedSettings } from '@peer-agent/runtime-node';
 import path from 'node:path';
 import {
   assembleSystemContext,
@@ -52,10 +53,6 @@ export const TUI_LANGUAGE_OPTIONS: readonly TuiLanguageOption[] = Object.freeze(
     shortcut: '2',
   },
 ]);
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export function normalizeTuiLocale(value: unknown, fallback: TuiLocale = 'zh-CN'): TuiLocale {
   if (typeof value !== 'string') return fallback;
@@ -112,15 +109,7 @@ export function createTuiLanguageStore({
 }): TuiLanguageStore {
   const settingsFile = path.join(userDataPath, 'settings.json');
 
-  const readSettings = (): Record<string, unknown> => {
-    if (!existsSync(settingsFile)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(settingsFile, 'utf8')) as unknown;
-      return isObjectRecord(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  };
+  const readSettings = (): Record<string, unknown> => loadMigratedSettings(settingsFile);
 
   const writeSettings = (next: Record<string, unknown>): void => {
     mkdirSync(userDataPath, { recursive: true });
@@ -194,6 +183,7 @@ export type TuiMessageKey =
   | 'composer.running'
   | 'composer.cancelling'
   | 'composer.compacting'
+  | 'error.connectionClosed'
   | 'command.model.label'
   | 'command.model.description'
   | 'command.mode.label'
@@ -270,6 +260,7 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'composer.running': '运行中…',
     'composer.cancelling': '正在取消…',
     'composer.compacting': '压缩中…',
+    'error.connectionClosed': '模型连接中断，这次回复没有完成。可以再发一次。',
     'command.model.label': '模型',
     'command.model.description': '选择模型与思考强度',
     'command.mode.label': '模式',
@@ -345,6 +336,7 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'composer.running': 'Working…',
     'composer.cancelling': 'Cancelling…',
     'composer.compacting': 'Compacting…',
+    'error.connectionClosed': 'The model connection closed before the reply finished. Send the message again.',
     'command.model.label': 'Model',
     'command.model.description': 'Choose model and reasoning effort',
     'command.mode.label': 'Mode',
@@ -405,6 +397,19 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.version.description': 'Show the current Peer Agent version',
   },
 });
+
+const CONNECTION_CLOSED_ERROR = 'peer.connection_closed';
+
+export function presentChatError(locale: TuiLocale, message: string): string {
+  if (
+    message === CONNECTION_CLOSED_ERROR
+    || /socket connection was closed unexpectedly/i.test(message)
+    || /connection closed unexpectedly/i.test(message)
+  ) {
+    return tuiMessage(locale, 'error.connectionClosed');
+  }
+  return message;
+}
 
 export function tuiMessage(locale: TuiLocale, key: TuiMessageKey): string {
   return MESSAGES[locale][key] ?? MESSAGES['en-US'][key] ?? key;

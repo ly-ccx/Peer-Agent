@@ -1,9 +1,15 @@
+import type { ReactNode } from 'react';
+
 export interface DropdownOption {
   readonly value: string;
   readonly label: string;
   readonly tone?: 'danger';
   readonly group?: string;
   readonly hint?: string;
+  readonly icon?: ReactNode;
+  readonly description?: string;
+  /** Shown, but not selectable. Used when a model is visible yet fails a capability check. */
+  readonly disabled?: boolean;
   /** When set, the option is only listed while this tab is active. Untagged options stay visible on every tab. */
   readonly tab?: string;
 }

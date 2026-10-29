@@ -7,6 +7,7 @@ export * from './capability-registry.ts';
 export * from './projection.ts';
 export * from './projection-materializers.ts';
 export * from './local-tool-contracts.ts';
+export * from './goal-tool-contracts.ts';
 export * from './context-compaction.ts';
 export * from './goal-keep-policy.ts';
 export * from './goal-checkpoint.ts';
@@ -20,3 +21,6 @@ export * from './context-accounting-lifecycle.ts';
 export * from './context-usage-breakdown.ts';
 export * from './conversation-history-projector.ts';
 export * from './runtime-usage-accounting.ts';
+export * from './project-input-recovery.ts';
+
+export * from './resource-edit-state.ts';

@@ -31,9 +31,76 @@ function readInitialSettings() {
   return {};
 }
 
+function getSettings() {
+  // Quick Chat already owns the sync snapshot channel, never settings:get.
+  const href = globalThis.location?.href;
+  if (href && new URL(href).searchParams.get('window') === 'quick-chat') {
+    return Promise.resolve(readInitialSettings());
+  }
+  return ipcRenderer.invoke('settings:get');
+}
+
 contextBridge.exposeInMainWorld('peerAgent', {
+  resourceEdits: Object.freeze({
+    onChanged: listener => {
+      const handler = (_event, notice) => listener(notice);
+      ipcRenderer.on('resource-edit:changed', handler);
+      return () => ipcRenderer.removeListener('resource-edit:changed', handler);
+    },
+    open: request => ipcRenderer.invoke('resource-edit:open', request),
+    resume: request => ipcRenderer.invoke('resource-edit:resume', request),
+    cancelOpen: requestId => ipcRenderer.invoke('resource-edit:cancel-open', requestId),
+    read: handle => ipcRenderer.invoke('resource-edit:read', handle),
+    acquire: request => ipcRenderer.invoke('resource-edit:acquire', request),
+    save: request => ipcRenderer.invoke('resource-edit:save', request),
+    discard: request => ipcRenderer.invoke('resource-edit:discard', request),
+    close: handle => ipcRenderer.invoke('resource-edit:close', handle),
+    list: request => ipcRenderer.invoke('resource-edit:list', request),
+    history: request => ipcRenderer.invoke('resource-edit:history', request),
+    readSnapshot: request => ipcRenderer.invoke('resource-edit:snapshot', request),
+    cleanup: request => ipcRenderer.invoke('resource-edit:cleanup', request),
+    archive: request => ipcRenderer.invoke('resource-edit:archive', request),
+    clearDelivery: request => ipcRenderer.invoke('resource-edit:clear-delivery', request),
+    submit: request => ipcRenderer.invoke('resource-edit:submit', request),
+    continueSubmission: request => ipcRenderer.invoke('resource-edit:continue-submission', request),
+    operationStatus: request => ipcRenderer.invoke('resource-edit:operation-status', request),
+    reconcileSubmission: request => ipcRenderer.invoke('resource-edit:reconcile-submission', request),
+    cancelSubmission: request => ipcRenderer.invoke('resource-edit:cancel-submission', request),
+    decideSubmissionPermission: request => ipcRenderer.invoke('resource-edit:decide-submission-permission', request),
+    readExecution: request => ipcRenderer.invoke('resource-edit:execution', request),
+    readSubmission: request => ipcRenderer.invoke('resource-edit:submission', request),
+  }),
+  browserWindowCopy: request => ipcRenderer.invoke('browser-window:copy', request),
+  browserWindowAcknowledgeReturn: request => ipcRenderer.invoke('browser-window:return-ack', request),
+  onBrowserWindowReturn: listener => {
+    const handler = (_event, request) => listener(request);
+    ipcRenderer.on('browser-window:return-target', handler);
+    return () => ipcRenderer.removeListener('browser-window:return-target', handler);
+  },
+  claimResourceFeedbackPreparation: request => ipcRenderer.invoke('resource-feedback:claim', request),
+  acknowledgeResourceFeedbackPreparation: request => ipcRenderer.invoke('resource-feedback:ack', request),
+  onBrowserResourceFeedbackNotice: listener => {
+    const handler = (_event, notice) => listener(notice);
+    ipcRenderer.on('resource-feedback:notice', handler);
+    return () => ipcRenderer.removeListener('resource-feedback:notice', handler);
+  },
+  onResourceFeedbackPreparation: listener => {
+    const handler = (_event, request) => listener(request);
+    ipcRenderer.on('resource-feedback:prepare', handler);
+    return () => ipcRenderer.removeListener('resource-feedback:prepare', handler);
+  },
+  resourceWindowOpen: request => ipcRenderer.invoke('resource-window:open', request),
+  resourceWindowHistory: request => ipcRenderer.invoke('resource-window:history', request),
+  resourceWindowRestore: request => ipcRenderer.invoke('resource-window:restore', request),
+  resourceWindowForget: request => ipcRenderer.invoke('resource-window:forget', request),
+  resourceWindowAcknowledgeReturn: request => ipcRenderer.invoke('resource-window:return-ack', request),
+  onResourceWindowReturn: listener => {
+    const handler = (_event, context) => listener(context);
+    ipcRenderer.on('resource-window:return-target', handler);
+    return () => ipcRenderer.removeListener('resource-window:return-target', handler);
+  },
   initialSettings: readInitialSettings(),
-  getSettings: () => ipcRenderer.invoke('settings:get'),
+  getSettings,
   updateSettings: (partial) => ipcRenderer.invoke('settings:update', partial),
   // Remote access (ADR 75 M1). Each returns { ok, status } or { ok:false, error }.
   getRemoteAccess: () => ipcRenderer.invoke('remote-access:status'),
@@ -70,18 +137,17 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot, ...(options || {}) }),
   listEditors: () => ipcRenderer.invoke('shell:editors:list'),
   setDefaultEditor: (editorId) => ipcRenderer.invoke('shell:editors:set-default', { editorId }),
-  gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
+  gitDiff: (absPath, workspaceRoot, relPath, documentReference, comparison) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}), ...(comparison ? { comparison } : {}) }),
   gitDiffRange: (params) => ipcRenderer.invoke('git:diff-range', params),
   gitListBranches: (params) => ipcRenderer.invoke('git:list-branches', params),
   gitCreateBranch: (params) => ipcRenderer.invoke('git:create-branch', params),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
-  readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
-  readImageDataUrl: (absPath, workspaceRoot, relPath) =>
-    ipcRenderer.invoke('file:read-image-data-url', { absPath, workspaceRoot, relPath }),
+  readFile: (absPath, workspaceRoot, relPath, documentReference) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}) }),
+  readImageDataUrl: (absPath, workspaceRoot, relPath, documentReference) => ipcRenderer.invoke('file:read-image-data-url', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}) }),
   writeFile: (absPath, workspaceRoot, relPath, content) => ipcRenderer.invoke('file:write', { absPath, workspaceRoot, relPath, content }),
   mkdir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:mkdir', { absPath, workspaceRoot, relPath }),
-  readDir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath }),
-  searchWorkspaceFiles: (workspacePath, query, limit) => ipcRenderer.invoke('workspace:search-files', { workspacePath, query, limit }),
+  readDir: (absPath, workspaceRoot, relPath, documentReference) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath, ...(documentReference ? { documentReference } : {}) }),
+  searchWorkspaceFiles: (workspacePath, query, limit, documentReference) => ipcRenderer.invoke('workspace:search-files', { workspacePath, query, limit, documentReference }),
   /** 同步 Workbench 文件树要监听的目录集合（根 + 已展开）；传空数组清空。 */
   watchDirs: (paths, workspaceRoot) => ipcRenderer.invoke('fs:watch-dirs', { paths, workspaceRoot }),
   /** 订阅目录变更；返回 unsubscribe。payload: { dirPath } */
@@ -177,6 +243,66 @@ contextBridge.exposeInMainWorld('peerAgent', {
   installQoderSkill: (identity) => ipcRenderer.invoke('skills:qoder:install', identity || {}),
   listQoderTaxonomies: () => ipcRenderer.invoke('skills:qoder:list-taxonomies'),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
+  projectAgentListAttention: (params) => ipcRenderer.invoke('project-agent:list-attention', params),
+  projectAgentList: (params) => ipcRenderer.invoke('project-agent:list', params),
+  projectAgentGet: (params) => ipcRenderer.invoke('project-agent:get', params),
+  projectAgentReadAccessPolicy: (params) => ipcRenderer.invoke('project-agent:read-access-policy', params),
+  projectAgentUpdateAccessPolicy: (params) => ipcRenderer.invoke('project-agent:update-access-policy', params),
+  projectAgentUpdateModelSelection: (params) => ipcRenderer.invoke('project-agent:update-model-selection', params),
+  projectAgentReadAvatar: (params) => ipcRenderer.invoke('project-agent:read-avatar', params),
+  projectAgentCreate: (params) => ipcRenderer.invoke('project-agent:create', params),
+  projectAgentUpdateProfile: (params) => ipcRenderer.invoke('project-agent:update-profile', params),
+  projectAgentDelete: (params) => ipcRenderer.invoke('project-agent:delete', params),
+  projectAgentSubmitInput: (params) => ipcRenderer.invoke('project-agent:submit-input', params),
+  projectAgentReadInputDraft: (params) => ipcRenderer.invoke('project-agent:read-input-draft', params),
+  projectAgentWriteInputDraft: (params) => ipcRenderer.invoke('project-agent:write-input-draft', params),
+  projectAgentReadConversation: (params) => ipcRenderer.invoke('project-agent:read-conversation', params),
+  projectAgentReadEvidence: (params) => ipcRenderer.invoke('project-agent:read-evidence', params),
+  projectAgentListSessions: (params) => ipcRenderer.invoke('project-agent:list-sessions', params),
+  projectAgentGetSession: (params) => ipcRenderer.invoke('project-agent:get-session', params),
+  projectAgentCancelSession: (params) => ipcRenderer.invoke('project-agent:cancel-session', params),
+  projectAgentResumeSession: (params) => ipcRenderer.invoke('project-agent:resume-session', params),
+  projectAgentListApprovals: (params) => ipcRenderer.invoke('project-agent:list-approvals', params),
+  projectAgentDecideApproval: (params) => ipcRenderer.invoke('project-agent:decide-approval', params),
+  projectAgentMarkRead: (params) => ipcRenderer.invoke('project-agent:mark-read', params),
+  projectAgentSearch: (params) => ipcRenderer.invoke('project-agent:search', params),
+  projectAgentListHistory: (params) => ipcRenderer.invoke('project-agent:list-history', params),
+  projectAgentContinueHistory: (params) => ipcRenderer.invoke('project-agent:continue-history', params),
+  projectAgentStartFamiliarize: (params) => ipcRenderer.invoke('project-agent:start-familiarize', params),
+  projectAgentConfirmResult: (params) => ipcRenderer.invoke('project-agent:confirm-result', params),
+  projectAgentAcceptReadme: (params) => ipcRenderer.invoke('project-agent:accept-readme', params),
+  projectAgentTakeoverHost: (params) => ipcRenderer.invoke('project-agent:takeover-host', params),
+  projectAgentRecovery: (params) => ipcRenderer.invoke('project-agent:recovery', params),
+  projectAgentRetry: (params) => ipcRenderer.invoke('project-agent:retry', params),
+  projectAgentStopResponse: (params) => ipcRenderer.invoke('project-agent:stop-response', params),
+  projectAgentDiagnostics: (params) => ipcRenderer.invoke('project-agent:diagnostics', params),
+  projectObjectivesList: (params) => ipcRenderer.invoke('project-objectives:list', params),
+  projectObjectivesUpdate: (params) => ipcRenderer.invoke('project-objectives:update', params),
+  projectObjectivesPause: (params) => ipcRenderer.invoke('project-objectives:pause', params),
+  projectObjectivesResume: (params) => ipcRenderer.invoke('project-objectives:resume', params),
+  projectObjectivesDelete: (params) => ipcRenderer.invoke('project-objectives:delete', params),
+  projectMemoryList: (params) => ipcRenderer.invoke('project-memory:list', params),
+  projectMemoryPin: (params) => ipcRenderer.invoke('project-memory:pin', params),
+  projectMemoryForget: (params) => ipcRenderer.invoke('project-memory:forget', params),
+  projectMemoryRestore: (params) => ipcRenderer.invoke('project-memory:restore', params),
+  projectMemoryEdit: (params) => ipcRenderer.invoke('project-memory:edit', params),
+  projectMemoryExport: (params) => ipcRenderer.invoke('project-memory:export', params),
+  projectMemorySetSwitches: (params) => ipcRenderer.invoke('project-memory:set-switches', params),
+  onProjectAgentChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:changed', handler);
+    return () => ipcRenderer.removeListener('project-agent:changed', handler);
+  },
+  onProjectAgentConversationChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:conversation-changed', handler);
+    return () => ipcRenderer.removeListener('project-agent:conversation-changed', handler);
+  },
+  onProjectAgentActivity: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:activity', handler);
+    return () => ipcRenderer.removeListener('project-agent:activity', handler);
+  },
   quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
   quickChatSetTaskCardVisible: (visible) => ipcRenderer.invoke('quick-chat:set-task-card-visible', { visible }),
   quickChatSetContentHeight: (height) => ipcRenderer.invoke('quick-chat:set-content-height', { height }),
@@ -216,6 +342,9 @@ contextBridge.exposeInMainWorld('peerAgent', {
   workspaceInfo: (params) => ipcRenderer.invoke('workspace:info', params),
   conversationsList: (params) => ipcRenderer.invoke('conversations:list', params),
   usageGetStats: () => ipcRenderer.invoke('usage:stats'),
+  modelRoutingGet: () => ipcRenderer.invoke('model-routing:get'),
+  modelRoutingUpdate: (partial) => ipcRenderer.invoke('model-routing:update', partial),
+  modelRoutingPreview: () => ipcRenderer.invoke('model-routing:preview'),
   usageGetDaily: (params) => ipcRenderer.invoke('usage:daily', params),
   usageGetDay: (params) => ipcRenderer.invoke('usage:day', params),
   conversationsSearch: (params) => ipcRenderer.invoke('conversations:search', params),

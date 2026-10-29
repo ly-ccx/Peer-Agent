@@ -5,7 +5,7 @@ function reject(code) { throw Object.assign(new Error(code), { code }); }
 /** Build data, never provider messages. Runtime must attest revision/liveness.
  * Attachment and tool material need a separate governed resolver; omissions are explicit.
  */
-export function buildInheritedBackground(history, { expectedRevision, runtimeState, maxCharacters = 64000, capturedAt }) {
+export function buildInheritedBackground(history, { expectedRevision, runtimeState, maxCharacters = 64000, capturedAt, messageIds }) {
   if (!history || !Array.isArray(history.messages)) reject('BACKGROUND_HISTORY_MISSING');
   if (!Number.isSafeInteger(expectedRevision) || history.contentRevision !== expectedRevision) reject('BACKGROUND_VERSION_CHANGED');
   if (!runtimeState || runtimeState.conversationId !== history.conversationId
@@ -21,6 +21,16 @@ export function buildInheritedBackground(history, { expectedRevision, runtimeSta
     const index = rows.findIndex((m) => m.id === active);
     if (index >= 0) { rows = rows.slice(0, index); excludedFromMessageId = active; }
     else if (excludedFromMessageId !== active) reject('BACKGROUND_RUNTIME_UNCONFIRMED');
+  }
+  let scope;
+  if (messageIds !== undefined) {
+    if (!Array.isArray(messageIds) || messageIds.length === 0
+      || messageIds.some(id => typeof id !== 'string' || !id.trim())
+      || new Set(messageIds).size !== messageIds.length) reject('BACKGROUND_SCOPE_INVALID');
+    const wanted = new Set(messageIds);
+    if (messageIds.some(id => !rows.some(row => row.id === id))) reject('BACKGROUND_SCOPE_MISSING');
+    rows = rows.filter(row => wanted.has(row.id));
+    scope = { kind: 'delegation', messageIds: rows.map(row => row.id) };
   }
   let summaryIndex = -1;
   rows.forEach((row, index) => { if (row?._compaction) summaryIndex = index; });
@@ -55,6 +65,7 @@ export function buildInheritedBackground(history, { expectedRevision, runtimeSta
     sourceRevision: expectedRevision, capturedAt, excludedFromMessageId,
     coveredMessageIds, entries, missingItems, characterCount,
     status: missingItems.length ? 'partial' : summaryIndex >= 0 ? 'compacted' : 'full',
-    requiresMissingConfirmation: missingItems.length > 0 };
+    requiresMissingConfirmation: missingItems.length > 0,
+    ...(scope ? { scope } : {}) };
   return { ...data, contentHash: selectionTextHash(JSON.stringify(data)) };
 }

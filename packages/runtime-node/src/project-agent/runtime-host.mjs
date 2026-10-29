@@ -1,0 +1,454 @@
+import { registerWorkBudget } from './work-budget.mjs';
+import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { pathOf } from '../data-store.mjs';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { createProjectInbox } from './project-inbox.mjs';
+import { createInputQueue } from './input-queue.mjs';
+import { createProjectAgentRunner } from './runner.mjs';
+import { createProjectRecovery } from './recovery.mjs';
+import { createCircuitBreaker } from './circuit-breaker.mjs';
+import { createDigestQueue } from './digest.mjs';
+import { createWatchPublisher } from './watch-publisher.mjs';
+import { normalizeProjectAgentSettings } from './digest.mjs';
+import { resolveRoleRoute } from '../model-router.mjs';
+
+export function createProjectAgentHost({
+  rootDir = null,
+  holdsLease = () => false,
+  listWorkspaceIds = () => [],
+  readOwnedWorkspaceIds = null,
+  resolveConversationId = () => '',
+  hasMessage = null,
+  appendMessage = () => {},
+  executeTurn,
+  resolveModel = null,
+  resolveContext = null,
+  resolveRoster = null,
+  resolveTurnRoster = null,
+  onReplied = null,
+  onInputsConsumed = null,
+  routing = null,
+  createSink = () => ({ send() {} }),
+  now,
+  retryDelays,
+  onCurator = null,
+  onMaintenance = null,
+  onStatus = null,
+  onActivity = null,
+  inbox = null,
+  inputQueue = null,
+  readSettings = null,
+  digestQueue = null,
+  schedule = null,
+  clearSchedule = null,
+  readFacts = null,
+  subscribePlans = null,
+  reconcileSessions = null,
+  reconcileVerification = null,
+  restoreQueue = null,
+  recoverTasks = null,
+  restoreWatches = null,
+  stopWatches = null,
+  activateSessions = null,
+  acquireLease = null,
+  readMessages = null,
+  readInputFacts = readMessages,
+  continuityVersion = 1,
+  readLeaseEpoch = null,
+  onRecoveryPhase = null,
+  onRecoveryStatus = null,
+} = {}) {
+  if (typeof executeTurn !== 'function') {
+    throw new TypeError('ProjectAgentHost requires executeTurn');
+  }
+  const inboxStore = inbox || createProjectInbox({ rootDir, now });
+  const queue = inputQueue || createInputQueue({
+    rootDir,
+    now,
+    holdsLease,
+    resolveConversationId,
+    hasMessage: typeof hasMessage === 'function' ? hasMessage : () => false,
+    appendMessage,
+  });
+  const runners = new Map();
+  const stagedInputs = new Map();
+  const stoppedWorkspaces = new Set();
+  const maintenanceWorkspaces = new Set();
+  const syncFlights = new Map();
+  const recoverySessions = new Map();
+  const digests = digestQueue || createDigestQueue({
+    file: rootDir ? path.join(rootDir, 'digest-queue.json') : null,
+  });
+
+  function resolveTurnModel(workspaceId, conversationId) {
+    if (typeof resolveModel === 'function') {
+      return resolveModel({ workspaceId, conversationId, role: 'project_agent' });
+    }
+    return resolveRoleRoute({
+      role: 'project_agent',
+      providers: routing?.providers,
+      routing: routing?.routing,
+      projectPolicy: routing?.projectPolicy,
+      spentUsd: routing?.spentUsd,
+    });
+  }
+
+  const watch = typeof readFacts === 'function' ? createWatchPublisher({ now }) : null;
+
+  function drop(workspaceId) {
+    recovery.drop(workspaceId);
+    if(typeof stopWatches==='function')void stopWatches(workspaceId);
+    const runner = runners.get(workspaceId);
+    if (!runner) return;
+    runner.dispose();
+    runners.delete(workspaceId);
+  }
+
+  function publishWatch(workspaceId) {
+    if (!watch) return [];
+    let facts = { sessions: [] };
+    try {
+      facts = readFacts(workspaceId) || { sessions: [] };
+    } catch {
+      return [];
+    }
+    const events = watch.publish(workspaceId, facts);
+    if (events.length === 0) return [];
+    const saved = inboxStore.append(workspaceId, events);
+    return Array.isArray(saved?.appended) ? saved.appended : [];
+  }
+
+  async function ensureRunner(workspaceId, conversationId) {
+    if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+    const existing = runners.get(workspaceId);
+    if (existing && existing.conversationId === conversationId) return existing;
+    if (existing) drop(workspaceId);
+    const coordinationStore = createWorkCoordinationStore({ rootDir, workspaceId, formatVersion: 2, fenceLegacyWrites: true,
+      holdsLease: () => holdsLease(workspaceId),
+      leaseEpoch: () => {
+        if (readLeaseEpoch) return readLeaseEpoch(workspaceId);
+        const lease = JSON.parse(readFileSync(path.join(rootDir || pathOf('projectRuntime'), workspaceId, 'host.lease'), 'utf8'));
+        if (!lease.hostId || !lease.acquiredAt) throw new Error('coordination_lease_invalid');
+        return `${lease.hostId}:${lease.acquiredAt}`;
+      },
+    });
+    try {
+      await coordinationStore.prepare();
+      if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+      if (holdsLease(workspaceId) !== true) { coordinationStore.close(); throw new Error('coordination_lease_lost'); }
+      const recoveredState = coordinationStore.recover();
+      const restored = recoveredState.lastRecovery;
+      recoverySessions.set(workspaceId, new Set(restored?.quarantinedSessionIds || []));
+      if (restored?.executionBlocked === true) {
+        throw Object.assign(new Error('coordination_reconciliation_required'), { code: 'coordination_reconciliation_required' });
+      }
+      if (continuityVersion !== 1 && Object.values(recoveredState.works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
+    } catch (error) { coordinationStore.close(); throw error; }
+    const unregisterBudget = registerWorkBudget(workspaceId, coordinationStore, readSettings?.()?.projectAgent?.executionBudget);
+    const runner = createProjectAgentRunner({
+      workspaceId,
+      conversationId,
+      inbox: inboxStore,
+      coordinationStore: continuityVersion === 1 ? coordinationStore : null,
+      holdsLease: () => !stoppedWorkspaces.has(workspaceId) && recovery.isReady(workspaceId),
+      circuitBreaker: createCircuitBreaker({ rootDir, workspaceId, ...(now ? { now } : {}) }),
+      onInputsCompleted: inputs => queue.completeExecution?.(workspaceId, inputs.map(input => input.inputId)),
+      executeTurn,
+      reconcileVerification,
+      appendMessage,
+      readMessages: () => typeof readMessages === 'function' ? readMessages(conversationId) : [],
+      hasMessage,
+      resolveModel: () => resolveTurnModel(workspaceId, conversationId),
+      resolveContext: (info) => (
+        typeof resolveContext === 'function'
+          ? resolveContext({ ...info, workspaceId, conversationId })
+          : null
+      ),
+      resolveRoster: () => typeof resolveRoster === 'function' ? resolveRoster(workspaceId) : null,
+      resolveTurnRoster: info => typeof resolveTurnRoster === 'function' ? resolveTurnRoster({ ...info, workspaceId, conversationId })
+        : typeof resolveRoster === 'function' ? resolveRoster(workspaceId) : null,
+      onReplied: typeof onReplied === 'function' ? (message) => onReplied(workspaceId, message) : null,
+      sink: createSink(),
+      now,
+      retryDelays,
+      schedule: typeof schedule === 'function' ? schedule : setTimeout,
+      clearSchedule: typeof clearSchedule === 'function' ? clearSchedule : clearTimeout,
+      onDigest: (item) => digests.hold(workspaceId, item),
+      onDigestDelivered: (message) => {
+        const date = message?.meta?.digestDate;
+        if (typeof date === 'string') digests.acknowledge(workspaceId, date);
+      },
+      onCurator: typeof onCurator === 'function'
+        ? (info) => onCurator({ ...info, workspaceId })
+        : null,
+      onStatus: typeof onStatus === 'function'
+        ? (status) => onStatus(workspaceId, status)
+        : null,
+      onActivity,
+    });
+    const disposeRunner = runner.dispose;
+    runner.dispose = () => { unregisterBudget(); disposeRunner(); coordinationStore.close(); };
+    runners.set(workspaceId, runner);
+    return runner;
+  }
+
+  const recovery = createProjectRecovery({ rootDir, holdsLease: workspaceId => !stoppedWorkspaces.has(workspaceId) && holdsLease(workspaceId), ...(now ? { now } : {}), onPhase: onRecoveryPhase, onChange: onRecoveryStatus,
+    ports: {
+      lease(workspaceId) {
+        if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+        if (!holdsLease(workspaceId) && typeof acquireLease === 'function') acquireLease(workspaceId);
+        if (holdsLease(workspaceId) !== true) throw new Error('lease_unavailable');
+      },
+      async inputs(workspaceId) {
+        const conversationId = resolveConversationId(workspaceId);
+        if (!conversationId) throw new Error('conversation_unavailable');
+        await ensureRunner(workspaceId, conversationId);
+        stagedInputs.set(workspaceId, await consumeInputs(workspaceId));
+      },
+      inbox: workspaceId => inboxStore.takeBatch(workspaceId),
+      queue: workspaceId => typeof restoreQueue === 'function' ? restoreQueue(workspaceId) : undefined,
+      tasks: workspaceId => typeof recoverTasks === 'function' ? recoverTasks(workspaceId) : undefined,
+      watch: async workspaceId => {if(typeof restoreWatches==='function')await restoreWatches(workspaceId);return publishWatch(workspaceId);},
+      digest: workspaceId => armDigest(runners.get(workspaceId), workspaceId),
+    },
+  });
+
+  async function consumeInputs(workspaceId) {
+    if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+    const consumed = queue.consume(workspaceId);
+    if (consumed.skipped) throw new Error(consumed.skipped);
+    if (consumed.consumed?.length && typeof onInputsConsumed === 'function') await onInputsConsumed(workspaceId, consumed.consumed);
+    return consumed.consumed || [];
+  }
+
+  function pendingInputs(workspaceId, conversationId, consumed) {
+    if (typeof queue.pendingExecution !== 'function') return consumed;
+    if (!queue.pendingExecution(workspaceId).length) return [];
+    const messages = typeof readInputFacts === 'function' ? readInputFacts(conversationId) : [];
+    const repliedTo = messages.filter(message => message.role === 'assistant' && message.kind === 'agent_reply').flatMap(message => message.replyTo || message.meta?.replyTo || []);
+    const stoppedTurns = new Set(messages.filter(message => message.card === 'agent_stopped').map(message => message.turnId));
+    for (const turn of messages) if (turn.kind === 'agent_turn' && stoppedTurns.has(turn.id)) {
+      repliedTo.push(...(turn.userInputs || []).map(input => `input-${input.inputId}`));
+    }
+    const runner = runners.get(workspaceId);
+    const owned = new Set(runner?.ownedInputIds() || []);
+    return queue.pendingExecution(workspaceId, { repliedTo }).filter(input => !owned.has(input.inputId));
+  }
+
+  async function sync(workspaceIds) {
+    const listed = Array.isArray(workspaceIds) ? workspaceIds : listWorkspaceIds();
+    const wanted = [...new Set(listed)].filter(workspaceId => typeof workspaceId === 'string' && !stoppedWorkspaces.has(workspaceId) && resolveConversationId(workspaceId));
+    // A targeted wake is not a replacement for the complete project inventory.
+    const inventory = Array.isArray(workspaceIds) ? listWorkspaceIds() : wanted;
+    const registeredIds = new Set(inventory.filter(workspaceId => typeof workspaceId === 'string' && !stoppedWorkspaces.has(workspaceId) && resolveConversationId(workspaceId)));
+    // One fresh cleanup snapshot avoids repeatedly loading global eligibility.
+    // Execution/recovery still use holdsLease at their original authority gates.
+    const ownedIds = typeof readOwnedWorkspaceIds === 'function' ? new Set(readOwnedWorkspaceIds([...registeredIds])) : null;
+    for (const workspaceId of runners.keys()) if (!registeredIds.has(workspaceId) || (ownedIds ? !ownedIds.has(workspaceId) : !holdsLease(workspaceId))) drop(workspaceId);
+    const outcomes = await Promise.all(wanted.map(workspaceId => {
+      const pending = (async () => {
+        if (!holdsLease(workspaceId) && typeof acquireLease !== 'function') return { workspaceId, skipped: 'not-host' };
+        const recovered = await recovery.recover(workspaceId);
+        if (!recovered.ok) return { workspaceId, ...recovered };
+        try {
+          if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+          if (!recovered.reused && typeof activateSessions === 'function') await activateSessions(workspaceId);
+          const conversationId = resolveConversationId(workspaceId), runner = await ensureRunner(workspaceId, conversationId);
+          const consumed = [...(stagedInputs.get(workspaceId) || []), ...await consumeInputs(workspaceId)];
+          if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
+          stagedInputs.delete(workspaceId);
+          const pending = pendingInputs(workspaceId, conversationId, consumed);
+          const due = armDigest(runner, workspaceId);
+          publishWatch(workspaceId);
+          let advanced = false;
+          if (pending.length) { await runner.enqueueUserInputs(pending); advanced = true; }
+          else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) {
+            await runner.kick();
+            advanced = true;
+          }
+          // Recheck after a turn crossed await. The entirely idle branch has
+          // already decided there is no continuation and changed no work.
+          if (advanced && runner.hasContinuation()) scheduleSweepSoon();
+          return { workspaceId, ok: true };
+        } catch (error) { drop(workspaceId); try { recovery.fail(workspaceId, error); } catch { /* Returned failure still identifies the project. */ } return { workspaceId, ok: false, error: error?.message || String(error) }; }
+      })();
+      const flights = syncFlights.get(workspaceId) || new Set(); flights.add(pending); syncFlights.set(workspaceId, flights);
+      return pending.finally(() => { flights.delete(pending); if (!flights.size) syncFlights.delete(workspaceId); });
+    }));
+    return { workspaces: outcomes.filter(item => item.ok).map(item => item.workspaceId), outcomes };
+  }
+
+  function armDigest(runner, workspaceId) {
+    if (typeof readSettings !== 'function') return false;
+    const settings = normalizeProjectAgentSettings(readSettings()?.projectAgent);
+    const at = typeof now === 'function' ? now() : new Date();
+    if (typeof onMaintenance === 'function') onMaintenance({ workspaceId, at, digestTime: settings.digestTime });
+    const due = digests.consider(workspaceId, at, settings.digestTime);
+    if (!due?.timer) return false;
+    const queued = runner.enqueueTimer(due.timer);
+    return queued?.queued === true;
+  }
+
+  async function deliverDigests() {
+    await sync();
+    const settings = normalizeProjectAgentSettings(
+      typeof readSettings === 'function' ? readSettings()?.projectAgent : null,
+    );
+    const at = typeof now === 'function' ? now() : new Date();
+    const listed = listWorkspaceIds();
+    const seen = new Set();
+    const runs = [];
+    for (const workspaceId of listed) {
+      if (typeof workspaceId !== 'string' || seen.has(workspaceId)) continue;
+      seen.add(workspaceId);
+      if (!recovery.isReady(workspaceId)) continue;
+      const conversationId = resolveConversationId(workspaceId);
+      if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
+      const preview = digests.consider(workspaceId, at, settings.digestTime);
+      if (!preview?.timer && !runners.has(workspaceId)) continue;
+      const runner = await ensureRunner(workspaceId, conversationId.trim());
+      const due = armDigest(runner, workspaceId);
+      const waiting = runner.mailbox().timers.some((timer) => timer?.kind === 'digest_due' && timer.wake === true);
+      if (due || waiting) runs.push(runner.kick());
+    }
+    await Promise.all(runs);
+  }
+
+  const useSchedule = typeof schedule === 'function' ? schedule : setTimeout;
+  const useClearSchedule = typeof clearSchedule === 'function' ? clearSchedule : clearTimeout;
+  let digestHandle = null;
+  let watchHandle = null;
+  let watchSoonHandle = null;
+  let hostDisposed = false;
+  let unsubscribePlans = () => {};
+
+  function clearDigestHandle() {
+    if (digestHandle == null) return;
+    useClearSchedule(digestHandle);
+    digestHandle = null;
+  }
+
+  function nextDigestDelay() {
+    const settings = normalizeProjectAgentSettings(
+      typeof readSettings === 'function' ? readSettings()?.projectAgent : null,
+    );
+    const at = typeof now === 'function' ? now() : new Date();
+    const date = at instanceof Date ? new Date(at.getTime()) : new Date(at);
+    if (Number.isNaN(date.getTime())) return 60_000;
+    const [hour, minute] = settings.digestTime.split(':').map((part) => Number(part));
+    const next = new Date(date);
+    next.setHours(hour, minute, 0, 0);
+    if (next.getTime() <= date.getTime()) next.setDate(next.getDate() + 1);
+    return Math.max(1000, next.getTime() - date.getTime());
+  }
+
+  function planDigestClock(delay) {
+    clearDigestHandle();
+    if (hostDisposed || typeof readSettings !== 'function') return;
+    digestHandle = useSchedule(() => {
+      digestHandle = null;
+      return Promise.resolve()
+        .then(() => deliverDigests())
+        .catch(() => {})
+        .finally(() => {
+          if (!hostDisposed) planDigestClock(nextDigestDelay());
+        });
+    }, delay);
+  }
+
+  if (typeof readSettings === 'function') planDigestClock(0);
+
+  function clearWatchHandle() {
+    if (watchHandle == null) return;
+    useClearSchedule(watchHandle);
+    watchHandle = null;
+  }
+
+  function clearWatchSoon() {
+    if (watchSoonHandle == null) return;
+    useClearSchedule(watchSoonHandle);
+    watchSoonHandle = null;
+  }
+
+  async function sweepWatch() {
+    if (!watch || hostDisposed) return 30_000;
+    await sync();
+    if (typeof reconcileSessions === 'function') await reconcileSessions();
+    const at = typeof now === 'function' ? now() : new Date();
+    const atIso = at instanceof Date ? at.toISOString() : (typeof at === 'string' ? at : new Date().toISOString());
+    let delay = 30_000;
+    for (const workspaceId of listWorkspaceIds()) if (recovery.isReady(workspaceId)) delay = Math.min(delay, watch.nextDelay(workspaceId, atIso));
+    return delay;
+  }
+
+  function planWatchClock(delay) {
+    clearWatchHandle();
+    if (hostDisposed || !watch) return;
+    watchHandle = useSchedule(() => {
+      watchHandle = null;
+      return Promise.resolve()
+        .then(() => watch ? sweepWatch() : sync().then(() => 30_000))
+        .then((next) => {
+          if (!hostDisposed) planWatchClock(next);
+        })
+        .catch(() => {
+          if (!hostDisposed) planWatchClock(30_000);
+        });
+    }, delay);
+  }
+
+  function scheduleSweepSoon() {
+    if (hostDisposed || watchSoonHandle != null) return;
+    watchSoonHandle = useSchedule(() => {
+      watchSoonHandle = null;
+      return Promise.resolve()
+        .then(() => watch ? sweepWatch() : sync().then(() => 30_000))
+        .then((next) => {
+          if (!hostDisposed) planWatchClock(next);
+        })
+        .catch(() => {});
+    }, 1000);
+  }
+
+  if (watch) {
+    if (typeof subscribePlans === 'function') {
+      try {
+        const unsubscribe = subscribePlans(() => { scheduleSweepSoon(); });
+        if (typeof unsubscribe === 'function') unsubscribePlans = unsubscribe;
+      } catch {
+        unsubscribePlans = () => {};
+      }
+    }
+    planWatchClock(0);
+  }
+
+  function dispose() {
+    hostDisposed = true;
+    clearDigestHandle();
+    clearWatchHandle();
+    clearWatchSoon();
+    try { unsubscribePlans(); } catch { /* 订阅已经结束 */ }
+    for (const workspaceId of [...runners.keys()]) drop(workspaceId);
+  }
+
+  return {
+    sync,
+    dispose,
+    drain: drop,
+    stop(workspaceId) { stoppedWorkspaces.add(workspaceId); drop(workspaceId); },
+    beginMaintenance(workspaceId) { maintenanceWorkspaces.add(workspaceId); stoppedWorkspaces.add(workspaceId); drop(workspaceId); },
+    endMaintenance(workspaceId) { maintenanceWorkspaces.delete(workspaceId); },
+    async waitForIdle(workspaceId) { while (syncFlights.has(workspaceId)) await Promise.allSettled([...syncFlights.get(workspaceId)]); },
+    restart(workspaceId) {
+      if (maintenanceWorkspaces.has(workspaceId)) return Promise.reject(new Error('coordination_maintenance_pending'));
+      stoppedWorkspaces.delete(workspaceId); return sync([workspaceId]);
+    },
+    isReady: recovery.isReady,
+    recovery,
+    runnerFor: (workspaceId) => runners.get(workspaceId) ?? null,
+    sessionHeld: (workspaceId, sessionId) => recoverySessions.get(workspaceId)?.has(sessionId) === true,
+    inbox: inboxStore,
+    inputQueue: queue,
+  };
+}

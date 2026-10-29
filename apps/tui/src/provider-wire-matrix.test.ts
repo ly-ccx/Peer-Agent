@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+const { CHANNEL_IDS, getChannelDescriptor, resolveOpenCodeGoWire } = await import(
+  new URL('../../desktop/electron/main/provider-channels.mjs', import.meta.url).href,
+) as {CHANNEL_IDS:Record<string,string>; getChannelDescriptor(id:string):{defaultWire:string}; resolveOpenCodeGoWire(model:string):string};
 
 import {
   assertTuiWireSupported,
@@ -8,6 +11,17 @@ import {
 } from './provider-wire-matrix.ts';
 
 describe('resolveTuiWire', () => {
+  test('every desktop API-key channel uses its declared protocol, including model-dependent Go', () => {
+    for (const channelId of Object.values(CHANNEL_IDS)) {
+      const descriptor = getChannelDescriptor(channelId);
+      for (const model of ['glm-5.3-flash', 'claude-sonnet-4', 'gpt-5.6-luna']) {
+        const expected = channelId.startsWith('opencode-go') ? resolveOpenCodeGoWire(model) : descriptor.defaultWire;
+        expect(resolveTuiWire({channelId,model,authMethod:'api_key'})).toMatchObject({kind:'supported',wire:expected});
+      }
+    }
+    expect(resolveTuiWire({channelId:'opencode-go',model:'glm-5.3-flash',wireOverride:'gemini'}).kind).toBe('unsupported');
+    expect(resolveTuiWire({channelId:'openai',wireOverride:'openai-responses'})).toMatchObject({kind:'supported',wire:'openai-responses'});
+  });
   test('maps OAuth auth methods to correct wires', () => {
     expect(resolveTuiWire({ authMethod: 'oauth_chatgpt' })).toMatchObject({
       kind: 'supported',

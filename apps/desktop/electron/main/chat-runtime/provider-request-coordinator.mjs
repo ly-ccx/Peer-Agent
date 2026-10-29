@@ -1,5 +1,6 @@
 import {
   createContextAccountingCompactionPipeline,
+  fingerprintCanonicalRequest,
   parseContextOverflowEvidence,
 } from '@peer-agent/runtime-core';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -35,6 +36,7 @@ export async function coordinateDesktopProviderRequest({
   goalPlanId = null,
   usageSnapshot = null,
   runtimeUsageAccounting = null,
+  budgetGuard = null,
   rebuildSystemPrompt = null,
   force = false,
   emergency = false,
@@ -58,6 +60,7 @@ export async function coordinateDesktopProviderRequest({
     goalPlanId,
     usageSnapshot,
     runtimeUsageAccounting,
+    budgetGuard,
     rebuildSystemPrompt,
     force,
     emergency,
@@ -82,6 +85,7 @@ export async function coordinateDesktopProviderRequest({
  */
 import { projectSelectionRequestMessages } from '../selection-background-context.mjs';
 import { createVisualRequestScope } from '../provider-transports/visual-request-context.mjs';
+import { runProviderRequestWithRecovery } from './provider-request-recovery.mjs';
 
 export async function executeDesktopProviderRequest({
   request,
@@ -146,7 +150,26 @@ export async function executeDesktopProviderRequest({
         },
       };
     },
-    send: (...args) => visualScope.send(() => send(...args)),
+    send: (...args) => {
+      const fingerprint = fingerprintCanonicalRequest(args[0]);
+      return visualScope.send(() => runProviderRequestWithRecovery(
+        () => {
+          if (fingerprintCanonicalRequest(args[0]) !== fingerprint) {
+            const error = new Error('context_request_fingerprint_mismatch: canonical request changed before retry');
+            error.providerRecovery = { kind: 'invalid_request', phase: 'request', retryable: false };
+            throw error;
+          }
+          return send(...args);
+        }, {
+          signal: request?.signal,
+          budgetGuard: request?.budgetGuard,
+          webContents: request?.webContents,
+          streamId: request?.streamId,
+          provider: request?.providerConfig?.provider,
+          model: request?.providerConfig?.model,
+          ...request?.requestRecoveryOptions,
+        }));
+    },
     getUsage,
     onProviderRequest: request?.onProviderRequest,
     getOverflow(response) {

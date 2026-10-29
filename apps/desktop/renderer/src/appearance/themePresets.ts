@@ -42,13 +42,13 @@ export const PEER_FROST_TOKENS: Readonly<Record<AppearanceScheme, ThemeSnapshot>
   light: {
     scheme: 'light',
     accent: '#3B7FAB',     // azure-seal
-    background: '#F4F6F9', // paper-base (light)
+    background: '#F8F8F8', // paper-base (light)
     foreground: '#1A1D21', // graphite-base
   },
   dark: {
     scheme: 'dark',
     accent: '#5D9CBF',     // azure-seal (dark)
-    background: '#16191D',
+    background: '#141414', // paper-base (dark)
     foreground: '#EDF1F6',
   },
 };
@@ -72,6 +72,7 @@ export const DEFAULT_CUSTOM_COLORS: CustomColors = {
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   mode: 'system',
+  windowMaterial: 'glass',
   palette: 'frost',
   density: 'comfortable',
   fontScale: 'medium',
