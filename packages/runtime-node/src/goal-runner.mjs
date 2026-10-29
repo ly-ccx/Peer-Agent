@@ -37,6 +37,7 @@ import { scheduleVisualRepair, hasActiveGoalRepair } from './goal-visual-repair.
 import { planRequiresQualityReview, evaluateUiDelivery } from '@peer-agent/protocol';
 import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 import { canCompleteAfterRecheck } from './project-agent/verification-completion.mjs';
+import { repairExecutionPending } from './project-agent/session-repair.mjs';
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
@@ -272,6 +273,7 @@ function planNeedsQualityReview(plan) {
 
 function shouldRerunCompletedPlan(plan) {
   if (!plan || plan.status !== 'completed') return false;
+  if (repairExecutionPending(plan)) return true;
   if (plan.runner?.status === 'blocked' && plan.runner?.intent === 'verify'
     && !(plan.successCriteria || []).some(item => item.kind === 'model_review')) return true;
   return Boolean(plan.runner?.visualRepair) && plan.runner?.status === 'running' && plan.runner?.phase === 'repair';
@@ -1022,7 +1024,8 @@ export function createGoalRunner({
     if (existing) return existing.promise;
 
     const session = { cancelled: false, promise: null,
-      skipCompletionOnce: repairVerification || hasActiveGoalRepair(goalPlanStore.getPlan(planId)), verificationRepairs: 0 };
+      skipCompletionOnce: repairVerification || hasActiveGoalRepair(goalPlanStore.getPlan(planId))
+        || repairExecutionPending(goalPlanStore.getPlan(planId)), verificationRepairs: 0 };
     const promise = pump(planId, session)
       .catch((error) => {
         if (turnOwnerStopped(planId, session)) return getState(planId);
@@ -1046,7 +1049,9 @@ export function createGoalRunner({
   function initializeRunner(planId, options = {}) {
     const current = goalPlanStore.getPlan(planId);
     if (!current) return null;
-    if (TERMINAL_PLAN_STATUSES.has(current.status)) return current;
+    // Completed leaves cannot absorb a returned-result repair before its first actual turn.
+    const sessionRepair = current.status === 'completed' && repairExecutionPending(current);
+    if (TERMINAL_PLAN_STATUSES.has(current.status) && !sessionRepair) return current;
 
     // 批准准入闸门：未获批准的 plan 不允许启动 Runner（边界由代码强制，不靠调用方自觉）。
     if (!isStartAuthorized(current)) {
@@ -1067,9 +1072,9 @@ export function createGoalRunner({
     return goalPlanStore.setRunnerState(planId, {
       enabled: true,
       status: 'running',
-      intent: options.intent ?? runner.intent ?? 'execute',
+      intent: sessionRepair ? 'execute' : options.intent ?? runner.intent ?? 'execute',
       currentTaskId: options.currentTaskId ?? runner.currentTaskId,
-      phase: options.phase ?? runner.phase ?? 'orient',
+      phase: sessionRepair ? 'repair' : options.phase ?? runner.phase ?? 'orient',
       turnCount: toPositiveInteger(runner.turnCount, 0, { allowZero: true }),
       toolCallCount: toPositiveInteger(runner.toolCallCount, 0, { allowZero: true }),
       explorerCount: toPositiveInteger(runner.explorerCount, 0, { allowZero: true }),

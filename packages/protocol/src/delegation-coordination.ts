@@ -47,10 +47,11 @@ export interface TaskTransition {
   replacementSessionId?: string;
   executionEpoch: string;
   phase: TaskTransitionPhase;
-  minimumExecutorVersion: 1 | 2;
+  minimumExecutorVersion: 1 | 2 | 3;
   executionAdmission?: 'queued' | 'admitted' | 'rejected';
   executionEffect?: 'pending' | 'applied' | 'unknown' | 'rejected';
   executionAttemptRef?: string;
+  reconciliationRef?: string;
   updatedAt: string;
 }
 export interface CoordinationExecutionBinding {

@@ -156,7 +156,7 @@ export function readRecoveredCoordination(directory, generation, { includeProof 
   const proof = () => Object.fromEntries(files.map(file => [file, hashFile(containedTree(directory, file))]));
   const before = proof(), manifest = JSON.parse(readFileSync(manifestFile)), head = JSON.parse(readFileSync(headFile));
   const fence = containedTree(directory, 'coordination.jsonl');
-  if (manifest.schemaVersion !== 2 || ![3, 4, 5].includes(manifest.minimumReaderVersion)
+  if (manifest.schemaVersion !== 2 || ![3, 4, 5, 6].includes(manifest.minimumReaderVersion)
     || manifest.minimumWriterVersion !== manifest.minimumReaderVersion || manifest.frozenLegacyFile !== 'baseline.jsonl'
     || manifest.generation !== generation || head.generation !== generation || manifest.legacyVersion !== head.legacyVersion
     || !lstatSync(fence).isDirectory()) throw failure('coordination_repair_plan_changed');
@@ -218,7 +218,9 @@ export function recoverCoordinationForkBackup({ directory, sourceFingerprint, re
       stateHash: digest(stable(plan.state)), at: new Date().toISOString() };
     durable(path.join(candidate, 'baseline.jsonl'), JSON.stringify(entry) + '\n');
     const s = lstatSync(path.join(candidate, 'baseline.jsonl'), { bigint: true }), legacyVersion = stamp(s);
-    const minimumVersion = SUPERVISION_BUCKETS.some(bucket => Object.keys(plan.state[bucket] || {}).length) ? 5 : 3;
+    const closure = Object.values(plan.state.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
+      || Object.values(plan.state.agentCommands || {}).some(row => row.completionRecorded === true);
+    const minimumVersion = closure ? 6 : SUPERVISION_BUCKETS.some(bucket => Object.keys(plan.state[bucket] || {}).length) ? 5 : 3;
     durable(path.join(candidate, 'head.json'), JSON.stringify({ generation, legacyVersion, revision: 1, hash: '', minimumWriterVersion: minimumVersion }));
     durable(path.join(candidate, 'manifest.json'), JSON.stringify({ schemaVersion: 2, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion,
       generation, legacyFile: 'coordination.jsonl', frozenLegacyFile: 'baseline.jsonl', legacyVersion }));

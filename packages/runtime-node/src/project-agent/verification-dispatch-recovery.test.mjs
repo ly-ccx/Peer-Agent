@@ -67,6 +67,49 @@ test('manual continue reconciles a known verification target and preserves the o
   } finally { env.close(); }
 });
 
+test('an interrupted readonly session query needs its canonical dispatch and turn, then resumes without replay', async () => {
+  const env = fixture({ legacy: true, capabilityId: 'get_session' });
+  try {
+    env.messages[0].rounds[0].toolCalls.forEach(call => { call.name = 'get_session'; });
+    await env.runner.kick();
+    assert.equal(env.calls, 0, 'no original dispatch identity means no reconciliation');
+    const work = env.work(), pending = work.budget.uncertainDispatches[0];
+    env.store.saveWork({ ...work, attemptId: 'old-turn', budget: { ...work.budget, uncertainDispatches: [],
+      attempts: { old: { role: 'project_agent', pendingTools: [pending] } } } });
+    env.store.saveWork(work);
+    await env.runner.kick();
+    assert.equal(env.calls, 1);
+    assert.deepEqual(env.work().budget.uncertainDispatches, []);
+    assert.equal(env.work().budget.reconciledDispatches[0].outcome, 'query_interrupted');
+    assert.equal(env.work().budget.toolCalls, 61, 'the old query is not replayed');
+    assert.equal(env.context.dispatchRecovery[0].verdict, 'unconfirmed');
+  } finally { env.close(); }
+});
+
+test('a query with a mismatched canonical tool name cannot release an unknown dispatch', async () => {
+  const env = fixture({ legacy: true, capabilityId: 'get_session' });
+  try {
+    const work = env.work(), pending = work.budget.uncertainDispatches[0];
+    env.store.saveWork({ ...work, attemptId: 'old-turn', budget: { ...work.budget, uncertainDispatches: [],
+      attempts: { old: { role: 'project_agent', pendingTools: [pending] } } } });
+    env.store.saveWork(work);
+    await env.runner.kick();
+    assert.equal(env.calls, 0);
+    assert.equal(env.work().budget.uncertainDispatches.length, 1);
+  } finally { env.close(); }
+});
+
+test('a legacy delivered receipt can reconcile an inactive local verification without replaying it',async()=>{
+  const env=fixture({state:'delivered'});
+  try {
+    await env.runner.kick();
+    assert.deepEqual(env.work().budget.uncertainDispatches,[]);
+    assert.equal(env.work().budget.reconciledDispatches[0].outcome,'verification_interrupted');
+    assert.equal(env.calls,0);
+    assert.equal(env.work().budget.toolCalls,61);
+  }finally{env.close();}
+});
+
 for (const variant of [
   { name: 'unconfirmed write', capabilityId: 'local.file.write' },
   { name: 'unavailable host', query: () => { throw Error('unreadable plan'); } },

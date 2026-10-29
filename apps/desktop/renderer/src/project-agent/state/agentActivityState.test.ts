@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeBotMessage, visibleBotMessages } from './botConversationState.ts';
-import { agentIdentity, agentActivityRunning, readAgentActivity, coalesceAgentActivity } from './agentActivityState.ts';
+import { normalizeBotMessage, visibleBotMessages, conversationWindowAnchor } from './botConversationState.ts';
+import { agentIdentity, agentActivityRunning, readAgentActivity, coalesceAgentActivity, currentAgentActivity, agentActivityPresentationId } from './agentActivityState.ts';
+import { conversationRowKey } from './conversationWindow.ts';
 import { indexBotWork } from './botWorkState.ts';
 import type { DrawerSession } from './drawerState';
 
@@ -31,19 +32,31 @@ test('unavailable or missing current facts never replay a historic running anima
   assert.equal(agentActivityRunning(started, indexBotWork([session('another-child', 'running')], true)), false);
   const work = indexBotWork([session('child', 'running')], true);
   for (const state of ['reported', 'ended', 'cancelled', 'question', 'blocked']) {
-    assert.equal(agentActivityRunning(activity(state, 'child', undefined, state).agentActivity!, work), false, state);
+    assert.equal(agentActivityRunning(activity(state, 'child', undefined, state).agentActivity!, work), true, 'current execution facts supersede the historical event');
   }
 });
 
-test('legacy same-time returned-result rows coalesce without changing history or hiding different agents or later reports', () => {
+test('one stable Agent slot updates across replies while raw history and independent Agents remain intact', () => {
   const source = [activity('report'), activity('result-ready'), activity('other', 'other'),
     activity('later', 'child', '2026-10-21T00:01:00Z'), activity('ended', 'child', '2026-10-21T00:01:00Z', 'ended')];
-  assert.deepEqual(visibleBotMessages(source).map(row => row.id), ['report', 'other', 'later', 'ended']);
+  const before=JSON.stringify(source);
+  assert.deepEqual(visibleBotMessages(source).map(row => row.id), ['report', 'other']);
+  assert.equal(visibleBotMessages(source)[0]!.agentActivity!.state,'ended');
+  assert.equal(JSON.stringify(source),before);
   assert.equal(source.length, 5);
   const reply = normalizeBotMessage({ id: 'reply', kind: 'agent_reply', content: '进展' })!;
-  assert.equal(visibleBotMessages([activity('a'), reply, activity('b')]).length, 3);
-  assert.equal(visibleBotMessages([activity('a', 'child', ''), activity('b', 'child', '')]).length, 2);
-  assert.equal(visibleBotMessages([activity('a', 'child', undefined, 'question'), activity('b', 'child', undefined, 'question')]).length, 2);
+  assert.equal(visibleBotMessages([activity('a'), reply, activity('b')]).length, 2);
+  assert.equal(visibleBotMessages([activity('a', 'child', ''), activity('b', 'child', '')]).length, 1);
+  assert.equal(visibleBotMessages([activity('a', 'child', undefined, 'question'), activity('b', 'child', undefined, 'question')]).length, 1);
+});
+
+test('Agent identity and reading anchor survive loading an earlier source event',()=>{
+  const first={type:'message' as const,message:activity('newer')},earlier={type:'message' as const,message:activity('earlier')};
+  assert.equal(conversationRowKey(first),conversationRowKey(earlier));
+  assert.equal(conversationRowKey(first),agentActivityPresentationId(first.message.agentActivity!));
+  assert.equal(conversationWindowAnchor([first],[earlier],0),0);
+  assert.equal(currentAgentActivity(first.message.agentActivity!,indexBotWork([session('child','verifying')],true)).state,'verifying');
+  assert.equal(currentAgentActivity(first.message.agentActivity!,indexBotWork([session('child','result_ready')],true)).state,'reported');
 });
 
 test('agent identity is stable and varies both SVG shape and tone across independent sessions', () => {
@@ -63,7 +76,8 @@ test('internal verification progress remains validated without becoming a main c
       verificationProgress: { ...verificationProgress, observationCount: count } }) });
   const source = [row('first', 0), row('next', 7)];
   const before = JSON.stringify(source);
-  assert.deepEqual(coalesceAgentActivity(source).map(row => row.id), ['next']);
+  assert.deepEqual(coalesceAgentActivity(source).map(row => row.id), ['first']);
+  assert.equal(coalesceAgentActivity(source)[0]!.agentActivity?.verificationProgress?.observationCount,7);
   assert.equal(source[1]!.agentActivity?.verificationProgress?.observationCount, 7);
   assert.equal(row('bad', -1).agentActivity?.verificationProgress, undefined);
   assert.equal(normalizeBotMessage(source[1]), null);

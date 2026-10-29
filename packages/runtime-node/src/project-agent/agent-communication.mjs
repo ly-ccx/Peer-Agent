@@ -15,13 +15,15 @@ export function agentMessagesForContext(messages, conversationId, workspaceId) {
   const legacy = (Array.isArray(messages) ? messages : []).filter(row => !row?.supervisionRef);
   const canonical = workspaceId && agentDelivery.available(workspaceId)
     ? [...agentDelivery.read(workspaceId, conversationId, { limit: 50 }),
-      ...agentDelivery.read(workspaceId, conversationId, { limit: 8, pendingOnly: true, oldestFirst: true })]
+      ...agentDelivery.read(workspaceId, conversationId, { limit: 8, pendingOnly: true, oldestFirst: true }),
+      ...agentDelivery.unansweredQuestions(workspaceId,conversationId)]
       .map(message => ({ kind: 'agent_message', agentMessage: message })) : [];
   const merged = [...new Map([...legacy, ...canonical].filter(row => row?.kind === 'agent_message'
     && row.agentMessage?.recipientConversationId === conversationId).map(row => [row.agentMessage.messageId, row.agentMessage])).values()]
     .map(message => ({ ...message, ...(message.operationId && agentDelivery.available(workspaceId)
       ? { deliveryReceipt: agentDelivery.receipt(workspaceId, message.operationId) } : {}) }));
-  const queued = merged.filter(message => message.deliveryIntent === 'ensure_turn' && message.deliveryReceipt?.delivery === 'queued');
+  const queued = merged.filter(message => message.deliveryIntent === 'ensure_turn' && message.deliveryReceipt?.delivery === 'queued'
+    || message.direction === 'child_to_parent' && message.decisionRequest?.status === 'open' && message.decisionRequest.responder === 'parent');
   const selected = queued.length ? queued.sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).slice(0, 8) : merged.slice(-8);
   const projected = (queued.length ? selected : selected.reverse()).flatMap(message => {
     if (!message || !PURPOSES.has(message.purpose) || typeof message.text !== 'string'

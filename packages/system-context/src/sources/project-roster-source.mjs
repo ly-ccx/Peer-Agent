@@ -44,6 +44,9 @@ function normalizeSession(session) {
     latest: latestEventText(session.latestEvent || session.latest),
     needsYou: needsYou(session.needsUser ?? session.needsYou),
     anchorMessageId: clipText(session.origin?.anchorMessageId, 200),
+    followUp: ['bot','user','none'].includes(session.followUp?.owner)
+      ? { owner: session.followUp.owner, reason: clipText(session.followUp.reason, 80) } : null,
+    blockedReason: clipText(session.blockedReason, TEXT_MAX),
   };
 }
 
@@ -96,6 +99,8 @@ function formatRoster(sessions, events, inputAnchors, objectives=[], proposals=[
       const needs = session.needsYou ? '; needs you' : '';
       lines.push(`- ${session.sessionId} [${session.status}] ${session.title}${needs}`);
       if (session.anchorMessageId) lines.push(`  anchorMessageId: ${session.anchorMessageId}`);
+      if (session.followUp) lines.push(`  followUp: ${JSON.stringify(session.followUp)}`);
+      if (session.blockedReason) lines.push(`  blockedReason: ${session.blockedReason}`);
       if (session.latest) lines.push(`  latest: ${session.latest}`);
     }
   }
@@ -130,9 +135,9 @@ export function createProjectRosterPromptSource() {
         inputAnchors: inputAnchorsOf(input),
         retryContinuity: retryContinuityOf(input),
         dispatchRecovery: (firstArray(turnBag(input).dispatchRecovery) || []).slice(-8)
-          .filter(row => row && row.outcome === 'verification_interrupted' && row.verdict === 'unconfirmed')
+          .filter(row => row && ['verification_interrupted','query_interrupted'].includes(row.outcome) && row.verdict === 'unconfirmed')
           .map(row => ({ toolCallId: clipText(row.toolCallId, 200), sessionId: clipText(row.sessionId, 200),
-            outcome: 'verification_interrupted', verdict: 'unconfirmed', at: clipText(row.at, 80) })),
+            outcome: row.outcome, verdict: 'unconfirmed', at: clipText(row.at, 80) })),
         coordination: (firstArray(turnBag(input).coordination) || []).slice(-24).map(item => ({
           workId: clipText(item.workId, 200), goalRevision: item.goalRevision, lifecycle: clipText(item.lifecycle, 40),
           sessionIds: (Array.isArray(item.sessionIds) ? item.sessionIds : []).slice(-24).map(id => clipText(id,200)),

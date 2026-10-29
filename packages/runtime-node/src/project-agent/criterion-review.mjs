@@ -5,7 +5,8 @@ export function criterionSourceRevision(plan) {
   const tasks = nodes => (nodes || []).map(node => ({ taskId: node.taskId, status: node.status,
     result: node.result, evidenceRefs: node.evidenceRefs, subtasks: tasks(node.subtasks) }));
   return createHash('sha256').update(JSON.stringify([plan?.planId, plan?.goal,
-    plan?.successCriteria, tasks(plan?.tasks), plan?.manualConfirmations, plan?.deliveryBinding])).digest('hex');
+    plan?.successCriteria, tasks(plan?.tasks), plan?.manualConfirmations, plan?.deliveryBinding,
+    ...(plan?.delegationOrigin?.takeover?.repair === true ? [plan.delegationOrigin.takeover.binding?.executionEpoch] : [])])).digest('hex');
 }
 
 export function currentModelReview(plan, criterionId) {

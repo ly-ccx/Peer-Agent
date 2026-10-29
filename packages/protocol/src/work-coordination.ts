@@ -54,15 +54,16 @@ export type ProjectWorkState = 'runnable' | 'waiting_children' | 'waiting_user' 
   | 'budget_limited' | 'blocked_system' | 'delivered' | 'cancelled' | 'coalesced';
 export type ProjectTurnEnd = 'reply_committed' | 'awaiting_children' | 'yielded' | 'awaiting_user'
   | 'budget_limited' | 'provider_retryable' | 'no_progress' | 'user_stopped' | 'fatal' | 'coalesced';
-/** Host reconciliation closes an interrupted review, never supplies its verdict. */
+/** Host reconciliation closes an interrupted review/query, never supplies its result or verdict. */
 export interface VerificationDispatchReconciliation {
   readonly attemptId: string;
   readonly toolCallId: string;
-  readonly capabilityId: 'verify_session' | 'local.delegation.verify_session';
+  readonly capabilityId: 'verify_session' | 'local.delegation.verify_session'
+    | 'get_session' | 'local.delegation.get_session' | 'get_verification_detail' | 'local.delegation.get_verification_detail';
   readonly sessionId: string;
   readonly planId: string;
   readonly sourceRevision: string;
-  readonly outcome: 'verification_interrupted';
+  readonly outcome: 'verification_interrupted' | 'query_interrupted';
   readonly at: string;
 }
 

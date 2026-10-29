@@ -42,6 +42,7 @@ export interface AgentCommandReceipt {
   readonly error?: string;
   readonly observedAt?: string;
   readonly attemptRef?: string;
+  readonly completionRecorded?: boolean;
 }
 
 export interface ContextWindowRecord {
@@ -69,6 +70,16 @@ export interface WorkNoteRevision {
 
 /** Bounded task-detail projection; roster queries do not hydrate the mailbox. */
 export interface AgentSupervisionReport {
+  readonly recovery?: {
+    readonly state: 'settled' | 'waiting_user' | 'waiting_agent' | 'observing' | 'reconciliation_required' | 'user_stopped' | 'legacy_unbound' | 'blocked' | 'repairable';
+    readonly blockers: readonly string[];
+    readonly nextAction: 'none' | 'native_user_decision' | 'inspect_original_results' | 'current_user_required' | 'adopt_with_current_user'
+      | 'inspect_blocker_and_change_method' | 'inspect_current_facts' | 'coordinate_resume' | 'answer_agent_request' | 'observe_current_attempt';
+    readonly expectedRevision?: number;
+    readonly requestId?: string;
+    readonly expectedRequestRevision?: number;
+    readonly replayAllowed?: false;
+  };
   readonly requests: readonly AgentDecisionRequest[];
   readonly receipts: readonly AgentCommandReceipt[];
 }

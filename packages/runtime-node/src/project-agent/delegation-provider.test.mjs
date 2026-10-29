@@ -49,6 +49,24 @@ function outputOf(result) {
   return JSON.parse(result.result.outputPreview.legacyResult.output);
 }
 
+test('a returned readonly report exception produces a failed Tool Result; mutations still propagate', async () => {
+  const provider = createDelegationProvider({ supervisor: {
+    get(input) {
+      if (input.detail === 'report') throw new TypeError('SQLite parameter cannot be bound');
+      return { sessionId: input.sessionId, workspaceId: 'w' };
+    },
+    cancel() { throw new Error('control outcome unknown'); },
+  } });
+  const failed = await provider.executeCapability(call('local.delegation.get_session', { sessionId: 's', detail: 'report' }),
+    agentContext({ workspaceId: 'w' }));
+  assert.equal(failed.result.status, 'failed');
+  assert.equal(failed.result.evidence.toolCallId, 'tool-1');
+  assert.equal(outputOf(failed).error, 'supervision_query_failed');
+  assert.match(outputOf(failed).message, /SQLite parameter/);
+  await assert.rejects(provider.executeCapability(call('local.delegation.cancel_session', { sessionId: 's', reason: 'user stopped' }, 'cancel'),
+    agentContext({ workspaceId: 'w', toolCallOrdinal: 1 })), /control outcome unknown/);
+});
+
 test('successful post_reply ends the provider loop, including suppression and idempotent replay', async () => {
   for (const suppressed of [false, true]) {
     let calls = 0;

@@ -85,7 +85,8 @@ export function hasActiveGoalRepair(plan) {
   return !['paused', 'cancelled', 'failed', 'interrupted'].includes(plan?.status)
     && runner?.status === 'running' && runner.phase === 'repair'
     && (Boolean(runner.visualRepair)
-      || ['verification_gate_failed', 'verifier_failed'].includes(runner.blockerAudit?.reason));
+      || ['verification_gate_failed', 'verifier_failed'].includes(runner.blockerAudit?.reason)
+      || plan.delegationOrigin?.takeover?.repair === true && plan.delegationOrigin.takeover.phase === 'completed');
 }
 
 export function describeVisualRepair(plan) {

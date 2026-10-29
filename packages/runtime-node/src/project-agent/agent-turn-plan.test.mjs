@@ -7,6 +7,18 @@ import {
   planAgentTurn,
 } from './agent-turn-plan.mjs';
 
+test('pending task turns cannot deliver source-free final-text fallback; ordinary questions still can', () => {
+  const plan = planAgentTurn({ kind: 'user', userInputs: [{ inputId: 'q', text: '?' }],
+    roster: [{ sessionId: 's', status: 'waiting_agent', followUp: { owner: 'bot', inCurrentList: true, reason: 'technical_block' } }] });
+  assert.equal(plan.requiresStructuredReply, true);
+  assert.equal(plan.reminder.layer, 'L6_MODE_REMINDER');
+  const failed = finishAgentTurn({ turnId: 't', plan, rounds: [{ text: '已经看完了' }] });
+  assert.equal(failed.failed, true);
+  assert.equal(failed.messages.some(row => row.kind === 'agent_reply'), false);
+  const ordinary = finishAgentTurn({ turnId: 'ordinary', plan: planAgentTurn({ kind: 'user' }), rounds: [{ text: '普通答复' }] });
+  assert.equal(ordinary.messages.some(row => row.kind === 'agent_reply'), true);
+});
+
 test('persisted objective reply retains its host observation refs alongside later task evidence',()=>{
  const observation='objective-probe:ws:actual';
  const finished=finishAgentTurn({turnId:'watch-turn',plan:planAgentTurn({kind:'wake'}),rounds:[{toolCalls:[

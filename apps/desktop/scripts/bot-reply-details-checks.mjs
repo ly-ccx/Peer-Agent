@@ -30,14 +30,16 @@ export async function scrollToBotMessage(page, message) {
   if (!await message.count()) {
     const thread = page.locator('.bot-thread');
     // Numeric IDs belong to this ordered 10,000-message fixture, not production identity.
-    const match = /#bot-msg-rc-message-(\d+)/.exec(message.toString());
+    // Stationary Agent rows expose the event that placed them as their source message.
+    const match = /(?:#bot-msg-|data-source-message=\W*)rc-message-(\d+)/.exec(message.toString());
     const target = match ? Number(match[1]) : null;
     if (target === null) { await thread.focus(); await thread.press('Home'); }
     for (let step = 0; step < 240; step++) {
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       if (await message.count()) break;
       const state = await thread.evaluate(node => ({ busy: node.getAttribute('aria-busy') === 'true', top: node.scrollTop,
-        ids: [...node.querySelectorAll('[id^="bot-msg-rc-message-"]')].map(row => Number(row.id.match(/(\d+)$/)?.[1])).filter(Number.isFinite) }));
+        ids: [...node.querySelectorAll('[id^="bot-msg-rc-message-"], [data-source-message^="rc-message-"]')]
+          .map(row => Number((row.dataset.sourceMessage ?? row.id).match(/(\d+)$/)?.[1])).filter(Number.isFinite) }));
       if (state.busy) { await page.locator('.bot-thread[aria-busy="false"]').waitFor(); continue; }
       const direction = target === null ? 1 : !state.ids.length || target < Math.min(...state.ids) ? -1 : 1;
       // Programmatic scrollTop changes are layout, not reading intent. A real
