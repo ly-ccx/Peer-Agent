@@ -1,3 +1,4 @@
+import './overflow-menu.css';
 import { MotionSurface } from './MotionSurface';
 import { isImeKey } from '../../chat/state/compositionGuard';
 import { PeerIcon } from '../../ui/icons';

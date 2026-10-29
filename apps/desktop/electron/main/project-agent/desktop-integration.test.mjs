@@ -151,8 +151,18 @@ test('200-bot attention search skips legacy catalogs; explicit history still rea
     assert.equal(env.invoke('search', { query: 'test' }).ok, true);
     assert.equal(conversationReads, 0, 'attention is not inferred from old classic waiting goals');
     assert.ok(planReads <= 2, 'one projection read and at most one corpus rebuild read');
-    assert.equal(batchReads, 1, 'only corpus uses the raw batch; directory uses versioned presentation views');
+    assert.equal(batchReads, 0, 'both directory and corpus use versioned presentation views');
     assert.equal(singleReads, 0, 'no repeated index read for each bot');
+    env.conversations.appendMessage(env.bot.profile.agentConversationId, {
+      id: 'search-projection-public', kind: 'agent_reply', role: 'assistant', content: 'versioned-search-freshness public body',
+    });
+    env.conversations.appendMessage(env.bot.profile.agentConversationId, {
+      id: 'search-projection-private', kind: 'agent_turn', role: 'assistant', content: 'versioned-search-freshness private process',
+    });
+    const changed = env.invoke('search', { query: 'versioned-search-freshness' });
+    assert.ok(changed.hits.some(hit => hit.messageId === 'search-projection-public'));
+    assert.ok(!changed.hits.some(hit => hit.messageId === 'search-projection-private'));
+    assert.equal(batchReads, 0); assert.equal(singleReads, 0);
     assert.equal(env.invoke('list-history').ok, true);
     assert.equal(conversationReads, 1, 'explicit history remains available');
   } finally { env.dispose(); }

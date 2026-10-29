@@ -527,9 +527,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   checks.push('completion replaces preview once, preserves Markdown and follows latest');
   await closeReplyDetails(page);
   const afterDrawer = await readingAnchor();
-  assert.equal(afterDrawer.id, beforeDrawer.id, 'drawer round trip keeps the same reading row');
-  assert.ok(Math.abs(afterDrawer.delta - beforeDrawer.delta) < 2, 'drawer round trip restores the reading offset');
   report.replyDrawerReading = { before: beforeDrawer, after: afterDrawer };
+  assert.equal(afterDrawer.id, beforeDrawer.id, 'drawer round trip keeps the same reading row');
+  assert.ok(Math.abs(afterDrawer.delta - beforeDrawer.delta) < 2, `drawer round trip restores the reading offset: ${JSON.stringify(report.replyDrawerReading)}`);
 
   await start('RC_STREAM_STOP');
   assert.equal(await completed.locator('.bot-narration p').count(), 4);

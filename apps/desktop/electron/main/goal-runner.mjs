@@ -7,5 +7,5 @@ export {
   createGoalRunner,
   detectPlanDrift,
   evaluateVerificationGate,
-  shouldReanchor,
-} from '@peer-agent/runtime-node';
+  shouldReanchor
+} from "@peer-agent/runtime-node/project-agent";

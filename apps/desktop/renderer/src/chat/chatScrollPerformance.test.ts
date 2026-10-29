@@ -6,7 +6,9 @@ const readChatSurface = () => readFile(new URL('./components/ChatSurface.tsx', i
 
 test('current turn probing uses a point hit test instead of scanning every rendered turn', async () => {
   const source = await readChatSurface();
-  const helper = source.match(/function findCurrentTurnIdForScroll[\s\S]*?\n\}/)?.[0];
+  assert.match(source, /from ['"]\.\.\/state\/threadScrollAnchor(?:\.ts)?['"]/);
+  const anchor = await readFile(new URL('./state/threadScrollAnchor.ts', import.meta.url), 'utf8');
+  const helper = anchor.match(/function findCurrentTurnIdForScroll[\s\S]*?\n\}/)?.[0];
 
   assert.ok(helper, 'ChatSurface should expose one current-turn probe helper');
   assert.match(helper, /elementFromPoint/);

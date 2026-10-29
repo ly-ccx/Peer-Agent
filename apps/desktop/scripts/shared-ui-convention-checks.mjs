@@ -127,7 +127,11 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       assert.equal(await page.evaluate(() => document.documentElement.getBoundingClientRect().top === 0
         && document.getElementById('root')?.scrollTop === 0
-        && (document.querySelector('.app-shell')?.scrollTop ?? 0) === 0), true,
+        && (document.querySelector('.app-shell')?.scrollTop ?? 0) === 0
+        && (document.querySelector('.bot-resource-primary')?.scrollTop ?? 0) === 0
+        && (document.querySelector('.bot-shell')?.getBoundingClientRect().top ?? 0) >= 0
+        && (document.querySelector('.bot-resource-layout')?.getBoundingClientRect().right ?? 0) <= innerWidth
+        && document.body.getBoundingClientRect().right <= innerWidth), true,
         'the capture must not crop a scrolled root document');
       await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `ui-${scene}-${width}-${theme}.png`) });
       cases.push({ scene, width, theme });
@@ -144,6 +148,7 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
     assert.equal(await preview.evaluate(node => node === document.activeElement), true);
   });
   await nav.getByRole('button', { name: '外观', exact: true }).click();
+  await page.locator('.appearance-mode-thumb').first().waitFor({ state: 'visible' });
   await layouts('appearance', async () => {
     const previews = await page.locator('.appearance-mode-thumb').evaluateAll(nodes => nodes.map(node => ({
       radius: getComputedStyle(node).borderRadius,

@@ -146,7 +146,7 @@ test('sending a new task clears shared draft text while keeping isolation prefer
 });
 
 test('new tasks can opt into worktree isolation from the draft composer', async () => {
-  const [surface, main, service, panel, goalRunnerHost] = await Promise.all([
+  const [surfaceSource, main, service, panel, goalRunnerHost] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('../../../../electron/main/main.mjs'),
     readSource('../../../../electron/main/llm-chat-service.mjs'),
@@ -156,6 +156,9 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   // The create-branch dialog now owns its own markup and source picker, so the
   // push-by-default assertions below read that module instead of ChatSurface.
   const createBranchDialog = await readSource('./CreateBranchDialog.tsx');
+  const gitEnvironment = await readSource('../hooks/useConversationGitEnvironment.ts');
+  assert.match(surfaceSource, /useConversationGitEnvironment\(/);
+  const surface = `${surfaceSource}\n${gitEnvironment}`;
 
   assert.match(surface, /workspaceIsGit === false/);
   assert.match(surface, /composer-chrome-row[\s\S]*composer-chrome-left[\s\S]*GoalPlanPanel[\s\S]*composer-chrome-right[\s\S]*<ComposerDraftControls/);
@@ -174,7 +177,7 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.doesNotMatch(surface, /独立目录/);
   assert.doesNotMatch(surface, /Isolated directory/);
   assert.doesNotMatch(surface, /当前分支/);
-  assert.match(surface, /if \(!isStreaming\) changePreferredWorktree/);
+  assert.match(await readSource('../hooks/useConversationGitEnvironment.ts'), /if \(!isStreaming\) changePreferredWorktree/);
   assert.doesNotMatch(surface, /当前工作区不是 Git 仓库，无法隔离执行/);
   assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
   assert.match(surface, /conversationsUpdatePreferredExecutionIsolation/);
@@ -187,35 +190,35 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /planComposerGitChrome/);
   assert.match(surface, /GitWorktreeGlyph/);
   assert.match(surface, /envCapsule\.isolated/);
-  assert.match(surface, /canSelectBoundBranch = false/);
-  assert.match(surface, /ADR 79：预配置源头（workspace baseBranch）已移除/);
+  assert.match(gitEnvironment, /canSelectBoundBranch = false/);
+  assert.match(gitEnvironment, /ADR 79：预配置源头（workspace baseBranch）已移除/);
   assert.doesNotMatch(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch/);
-  assert.match(surface, /workspaceBaseBranch: null/);
+  assert.match(gitEnvironment, /workspaceBaseBranch: null/);
   assert.match(surface, /sourceOptions=\{composerBranchOptions\}/);
   assert.match(surface, /onSelectEnv=\{handleSelectBoundBranch\}/);
   assert.match(surface, /onCreateBranch=\{handleOpenCreateBranchDialog\}/);
-  assert.match(surface, /gitCreateBranch/);
+  assert.match(gitEnvironment, /gitCreateBranch/);
   assert.match(surface, /handleOpenCreateBranchDialog/);
   assert.match(surface, /resolveComposerCreateSourceBranch/);
-  assert.match(surface, /handleSelectBoundBranch\(name\)/);
+  assert.match(gitEnvironment, /handleSelectBoundBranch\(name\)/);
   assert.match(surface, /CreateBranchDialog/);
-  assert.match(surface, /setCreateBranchDialog\(\{ source \}\)/);
+  assert.match(gitEnvironment, /setCreateBranchDialog\(\{ source \}\)/);
   assert.match(createBranchDialog, /panelClassName="pa-confirm-dialog"/);
   assert.doesNotMatch(surface, /disabled: \(query\) => !isSafeComposerBranchName\(query\)/);
   assert.match(surface, /源头/);
-  assert.match(surface, /远程源头/);
+  assert.match(gitEnvironment, /远程源头/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
   // Create-branch dialog pushes to the remote by default (opt-out checkbox).
   assert.match(createBranchDialog, /pa-confirm-check/);
   assert.match(createBranchDialog, /创建后推送到远端（git push -u）/);
   assert.match(createBranchDialog, /const \[push, setPush\] = useState\(true\)/);
-  assert.match(surface, /push: shouldPush,/);
-  assert.match(surface, /upstreamRemote: upstream\?\.remote/);
-  assert.match(surface, /upstreamBranch: upstream\?\.branch/);
+  assert.match(gitEnvironment, /push: shouldPush,/);
+  assert.match(gitEnvironment, /upstreamRemote: upstream\?\.remote/);
+  assert.match(gitEnvironment, /upstreamBranch: upstream\?\.branch/);
   assert.match(createBranchDialog, /跟踪到/);
   assert.match(surface, /parseComposerUpstreamSpec/);
   assert.match(createBranchDialog, /defaultComposerUpstreamSpec/);
-  assert.match(surface, /pushed === false/);
+  assert.match(gitEnvironment, /pushed === false/);
   assert.match(surface, /branchPushNotice/);
   assert.match(surface, /branch-push-notice/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);

@@ -1,19 +1,22 @@
+import './settings-controls.css';
+import '../../styles/settings-page.css';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocaleCode } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { UnsavedChangesProvider, useGuardedNavigation } from '../../ui/forms/UnsavedChanges';
-import { AppearancePanel } from '../../appearance/AppearancePanel';
-import { ArchivedConversationsPanel } from './ArchivedConversationsPanel';
-import { GeneralPanel } from './GeneralPanel';
-import { GitPanel } from './GitPanel';
-import { LlmSettingsPanel } from './LlmSettingsPanel';
-import { SystemInstructionsPanel } from './SystemInstructionsPanel';
-import { ShortcutsPanel } from './ShortcutsPanel';
-import { UpdatesPanel } from './UpdatesPanel';
-import { RemoteAccessPanel } from './RemoteAccessPanel';
-import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
-import { ModelRoutingPanel } from './settings/ModelRoutingPanel';
-import { DeveloperPanel } from './settings/DeveloperPanel';
+import { deferPanel } from './deferPanel';
+const AppearancePanel = deferPanel(() => import('../../appearance/AppearancePanel').then(module => ({ default: module.AppearancePanel })));
+const ArchivedConversationsPanel = deferPanel(() => import('./ArchivedConversationsPanel').then(module => ({ default: module.ArchivedConversationsPanel })));
+const GeneralPanel = deferPanel(() => import('./GeneralPanel').then(module => ({ default: module.GeneralPanel })));
+const GitPanel = deferPanel(() => import('./GitPanel').then(module => ({ default: module.GitPanel })));
+const LlmSettingsPanel = deferPanel(() => import('./LlmSettingsPanel').then(module => ({ default: module.LlmSettingsPanel })));
+const SystemInstructionsPanel = deferPanel(() => import('./SystemInstructionsPanel').then(module => ({ default: module.SystemInstructionsPanel })));
+const ShortcutsPanel = deferPanel(() => import('./ShortcutsPanel').then(module => ({ default: module.ShortcutsPanel })));
+const UpdatesPanel = deferPanel(() => import('./UpdatesPanel').then(module => ({ default: module.UpdatesPanel })));
+const RemoteAccessPanel = deferPanel(() => import('./RemoteAccessPanel').then(module => ({ default: module.RemoteAccessPanel })));
+const UsageStatsPanel = deferPanel(() => import('../../settings/UsageStatsPanel').then(module => ({ default: module.UsageStatsPanel })));
+const ModelRoutingPanel = deferPanel(() => import('./settings/ModelRoutingPanel').then(module => ({ default: module.ModelRoutingPanel })));
+const DeveloperPanel = deferPanel(() => import('./settings/DeveloperPanel').then(module => ({ default: module.DeveloperPanel })));
 
 export type SettingsSection = 'general' | 'providers' | 'routing' | 'model' | 'instructions' | 'git' | 'developer' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage' | 'remote';
 // 注：model 仅为 deep-link 兼容别名，导航只展示「服务商」。

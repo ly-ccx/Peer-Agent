@@ -7,8 +7,15 @@ import { isImeKey } from './chat/state/compositionGuard';
 import { createI18n } from '@peer-agent/i18n';
 import type { AcceptanceCloseVerdict, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
-import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
+import type { SettingsSection } from './app/components/SettingsPage';
+import {
+  SettingsPage,
+  CapabilitiesPanel,
+  AutomationCenter,
+  WorkbenchPanel,
+  QuickChatWindow,
+  QuickChatPopoverHost,
+} from './app/components/deferredPanels';
 import { Drawer } from './app/components/Drawer';
 import { ConversationResultView } from './app/components/ConversationResultView';
 import { continueTaskInConversation } from './app/taskContinuation';
@@ -26,12 +33,9 @@ import {
   MISSING_WORKBENCH_CONVERSATION_NOTICE,
   resolveWorkbenchConversationId,
 } from './app/state/openWorkbenchConversation';
-import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { FullDiskAccessStartupGate } from './app/components/FullDiskAccessStartupGate';
-import { QuickChatPopoverHost } from './app/components/QuickChatPopoverHost';
-import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { displayShortcut } from './app/components/ShortcutsPanel';
 import { useConfirm } from './app/components/ConfirmProvider';
 import {
@@ -40,7 +44,7 @@ import {
 } from './app/state/quickChatSubmission';
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ResourceFeedback } from './ui/resources/ResourceFeedback';
-import { ChatSurface } from './chat/components/ChatSurface';
+import { ChatSurface } from './app/components/deferredPanels';
 import { SelectionChatWorkspace } from './chat/components/SelectionChatWorkspace';
 import { BackgroundRunsProvider } from './workbench/GlobalBackgroundTasksButton';
 import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
@@ -61,7 +65,6 @@ import { readGitBranchPrefixFromSettings } from './app/gitBranchPrefix';
 import type { CompactionState } from './chat/state/types';
 import { registeredWorkspacePath } from './chat/state/registeredWorkspace';
 import { clientApi } from './clientApi';
-import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
 import { BotResourceLayout, type BotResourceOwner } from './workbench/ResourceWorkspaceContext';
 import { BotListShell } from './project-agent/BotListShell';

@@ -3,8 +3,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
 import { usePointerResize } from '../app/hooks/usePointerResize';
-import { AutomationCenter } from '../automations/AutomationCenter';
-import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
+import { AutomationCenter, CapabilitiesPanel } from '../app/components/deferredPanels';
 import { VersionBadge } from '../app/components/VersionBadge';
 import { AttentionSheet } from './AttentionSheet';
 import { HistorySheet } from './HistorySheet';
@@ -99,7 +98,7 @@ export function BotListShell({
   onClosePage,
   notificationFocus = null,
 }: BotListShellProps) {
-  const list = useBotList();
+  const list = useBotList(activePage !== 'settings');
   const resources = useResourceWorkspace();
   const showDetails = resources?.showDetails;
   const resizeGesture = usePointerResize();
@@ -140,7 +139,7 @@ export function BotListShell({
       && replyPresence?.workspaceId === item.workspaceId && replyPresence.mood ? replyPresence.mood : mood] as const;
   })), [list.catalog, replyFlash, opened?.workspaceId, replyPresence]);
   const openedAvatarMood = opened ? avatarMoods.get(opened.workspaceId) ?? botAvatarMood(opened.state) : 'idle';
-  const work = useBotWorkSessions(opened?.workspaceId ?? null);
+  const work = useBotWorkSessions(opened?.workspaceId ?? null, activePage === 'chat');
   const modelControls = useBotModels(opened?.workspaceId ?? null, opened?.profile ?? null, list.updateProfile);
   const openedIdRef = useRef(list.openedId);
   const firstVisibleIdRef = useRef(list.visible[0]?.workspaceId ?? '');
