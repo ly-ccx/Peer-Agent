@@ -440,6 +440,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.background'
   | 'projectAgent.chat.context.basis'
   | 'projectAgent.chat.originalMessage'
+  | 'projectAgent.chat.viewOriginal'
   | 'projectAgent.chat.context.details'
   | 'projectAgent.chat.context.title'
   | 'projectAgent.chat.context.back'
@@ -2098,6 +2099,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.background': '当前任务（{count}）',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
+    'projectAgent.chat.viewOriginal': '查看原文',
     'projectAgent.chat.context.details': '回复详情',
     'projectAgent.chat.context.title': '回复详情',
     'projectAgent.chat.context.back': '返回回复详情',
@@ -3521,6 +3523,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.background': 'Tasks ({count})',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',
+    'projectAgent.chat.viewOriginal': 'View original',
     'projectAgent.chat.context.details': 'Reply details',
     'projectAgent.chat.context.title': 'Reply details',
     'projectAgent.chat.context.back': 'Back to reply details',

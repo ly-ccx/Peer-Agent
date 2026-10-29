@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-const VOLATILE = /^(id|.*Id|.*At|.*Ms|.*Ref|.*Refs|seq|version|revision|duration|usage|timing|timestamp)$/;
+const VOLATILE = /^(id|.*Id|.*At|.*Ms|.*Ref|.*Refs|seq|version|revision|executionEpoch|sourceRevision|observationRevision|payloadHash|duration|usage|timing|timestamp)$/;
 function material(value) {
   if (Array.isArray(value)) return value.map(material);
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()

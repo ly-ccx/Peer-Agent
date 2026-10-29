@@ -4,6 +4,22 @@ import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-r
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
+async function assertQuoteInsideColumn(quote) {
+  const fit = await quote.evaluate(node => {
+    const column = node.closest('.bot-thread-row')?.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    const excerpt = node.querySelector('.bot-reply-bar-excerpt');
+    const excerptBox = excerpt?.getBoundingClientRect();
+    const style = excerpt ? getComputedStyle(excerpt) : null;
+    return {
+      inside: Boolean(column) && box.left >= column.left - 1 && box.right <= column.right + 1,
+      excerptInside: Boolean(excerptBox) && excerptBox.left >= box.left - 1 && excerptBox.right <= box.right + 1,
+      ellipsis: style?.whiteSpace === 'nowrap' && style.textOverflow === 'ellipsis' && (style.overflowX === 'hidden' || style.overflowX === 'clip'),
+    };
+  });
+  assert.deepEqual(fit, { inside: true, excerptInside: true, ellipsis: true });
+}
+
 /** Production reply rendering and callbacks; no model, tool or Evidence claims. */
 export async function checkBotShellReply({ page, until, report, captureDirectory }) {
   const checks = report.replyInteraction = [];
@@ -13,8 +29,12 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal(await quote.evaluate(node => Boolean(node.closest('.bot-reply-body'))), true,
     'reply reference must belong to the reply bubble, rather than a detached short-text card');
   assert.ok((await quote.textContent()).includes('请帮我梳理项目现状'));
-  assert.equal(await quote.locator('svg').count(), 0);
+  assert.equal(await quote.locator('svg').count(), 1);
+  assert.equal(await quote.locator('.bot-reply-bar-action svg').count(), 1);
+  assert.equal((await quote.locator('.bot-reply-bar-action').textContent()).trim(), '查看原文');
+  assert.ok(Number.isFinite(Date.parse(await quote.locator('.bot-reply-bar-source time').getAttribute('datetime'))));
   assert.equal(await quote.locator('.bot-reply-bar-label').textContent(), '你');
+  await assertQuoteInsideColumn(quote);
   assert.ok((await quote.getAttribute('aria-label')).startsWith('查看原消息: 你'));
   assert.ok((await quote.getAttribute('title')).endsWith('原文结束标记'));
   assert.equal(await reply.getByRole('button', { name: /通知方式/ }).count(), 0);
@@ -22,9 +42,9 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await openReplyDetails(page, reply);
   assert.equal(await page.locator('.bot-reply-details .bot-reply-delivery').textContent(), '通知方式：即时提醒');
   await closeReplyDetails(page);
-  checks.push('loaded quote names its actual author, preserves full text in its accessible name and tooltip, and removes navigation chrome; delivery stays readonly');
+  checks.push('loaded quote names its actual author and source time, preserves full text in its accessible name and tooltip, and exposes one SVG locate-original action; delivery stays readonly');
 
-  // Source and excerpt share a line inside the bubble; the new body remains separate.
+  // Source metadata sits above one excerpt line inside the bubble; the new body remains separate.
   // Secondary actions stay quiet; restore theme and disclosure after samples.
   const originalTheme = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, palette: document.documentElement.dataset.palette }));
   const context = reply.locator('.bot-reply-context');
@@ -38,28 +58,30 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     const sample = await reply.evaluate(node => {
       const read = selector => {
         const item = node.querySelector(selector) ?? document.querySelector(`.bot-reply-details ${selector}`), style = getComputedStyle(item);
-        return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, borderStyle: style.borderTopStyle, edge: style.borderInlineStartWidth, shadow: style.boxShadow, height: item.getBoundingClientRect().height, width: item.getBoundingClientRect().width, font: style.fontSize, clamp: style.webkitLineClamp };
+        return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, borderStyle: style.borderTopStyle, edge: style.borderInlineStartWidth, shadow: style.boxShadow, height: item.getBoundingClientRect().height, width: item.getBoundingClientRect().width, font: style.fontSize, whiteSpace: style.whiteSpace, textOverflow: style.textOverflow };
       };
       return { quote: read('.bot-reply-bar'), source: read('.bot-reply-bar-label'), excerpt: read('.bot-reply-bar-excerpt'), action: read('.bot-reply-context > button'), delivery: read('.bot-reply-delivery') };
     });
     report.replyStyles.push({ theme, ...sample });
     assert.equal(sample.quote.border, '0px');
-    assert.equal(sample.quote.background, 'rgba(0, 0, 0, 0)');
+    assert.notEqual(sample.quote.background, 'rgba(0, 0, 0, 0)');
     assert.equal(sample.quote.edge, '0px');
     assert.equal(sample.quote.shadow, 'none');
-    assert.ok(sample.quote.height >= 28 && sample.quote.height <= 44);
+    assert.ok(sample.quote.height >= 44 && sample.quote.height <= 76, String(sample.quote.height));
     const geometry = await quote.evaluate(node => {
       const quote = node.getBoundingClientRect(), bubble = node.closest('.bot-reply-body').getBoundingClientRect();
       const source = node.querySelector('.bot-reply-bar-label').getBoundingClientRect();
+      const action = node.querySelector('.bot-reply-bar-action').getBoundingClientRect();
       const excerpt = node.querySelector('.bot-reply-bar-excerpt').getBoundingClientRect();
       const text = node.closest('.bot-reply-body').querySelector('.bot-reply-text').getBoundingClientRect();
       return { inside: quote.left >= bubble.left && quote.right <= bubble.right && quote.top >= bubble.top,
-        horizontal: excerpt.left > source.right && Math.abs(source.top + source.height / 2 - excerpt.top - excerpt.height / 2) < 1,
+        header: action.left > source.right && Math.abs(source.top + source.height / 2 - action.top - action.height / 2) < 2,
+        stacked: excerpt.top >= source.bottom && Math.abs(excerpt.left - source.left) < 1,
         aboveBody: quote.bottom < text.top, aligned: Math.abs(quote.left - text.left) < 1 };
     });
     assert.ok(Object.values(geometry).every(Boolean), JSON.stringify(geometry));
-    assert.equal(sample.source.font, '11px'); assert.equal(sample.excerpt.font, '12px');
-    assert.equal(sample.excerpt.clamp, '2');
+    assert.equal(sample.source.font, '12px'); assert.equal(sample.excerpt.font, '13px');
+    assert.equal(sample.excerpt.whiteSpace, 'nowrap'); assert.equal(sample.excerpt.textOverflow, 'ellipsis');
     assert.equal(sample.action.background, 'rgba(0, 0, 0, 0)');
     assert.equal(sample.action.shadow, 'none');
     assert.ok(sample.action.height >= 27);
@@ -72,7 +94,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
   }, originalTheme);
   assert.notEqual(report.replyStyles[0].excerpt.color, report.replyStyles[1].excerpt.color);
-  checks.push('dark/light references share a horizontal row inside the reply bubble, aligned with its text, with no separate card or leading vertical edge');
+  checks.push('dark/light references stack source metadata and locate action above one ellipsized excerpt inside the reply bubble, aligned with its text, with no border, shadow or leading vertical edge');
 
   await closeReplyDetails(page);
   await checkShortReplyQuote({ page, report, captureDirectory });
@@ -162,13 +184,19 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.notEqual(await explicitQuote.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(0, 0, 0, 0)');
   assert.equal(await explicitQuote.evaluate(node => getComputedStyle(node).borderInlineStartWidth), '0px');
   assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  await assertQuoteInsideColumn(explicitQuote);
   if (captureDirectory) await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'reply-narrow-sent.png') });
   await page.setViewportSize({ width: 1280, height: 780 });
+  await explicit.scrollIntoViewIfNeeded();
+  await openReplyDetails(page, reply);
+  await assertQuoteInsideColumn(explicitQuote);
+  await closeReplyDetails(page);
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; document.documentElement.dataset.palette = 'frost'; }, theme);
     await explicit.scrollIntoViewIfNeeded();
     await explicit.evaluate(async node => { await Promise.race([Promise.all(node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))), new Promise(resolve => setTimeout(resolve, 500))]); });
     assert.equal(await explicit.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await assertQuoteInsideColumn(explicitQuote);
     if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `quote-sent-1280-${theme}.png`), animations: 'disabled' });
   }
   await page.evaluate(original => {
@@ -198,8 +226,8 @@ async function checkShortReplyQuote({ page, report, captureDirectory }) {
       const source = node.querySelector('.bot-reply-bar-label').getBoundingClientRect();
       const excerpt = node.querySelector('.bot-reply-bar-excerpt').getBoundingClientRect();
       return { inside: Boolean(body && row.left >= body.left && row.right <= body.right && row.top >= body.top),
-        horizontal: excerpt.left > source.right && Math.abs(source.top - excerpt.top) < 3,
-        compact: row.height <= 32, fits: node.scrollWidth <= node.clientWidth };
+        stacked: excerpt.top >= source.bottom && Math.abs(excerpt.left - source.left) < 1,
+        compact: row.height <= 76, fits: node.scrollWidth <= node.clientWidth };
     });
     assert.ok(Object.values(shape).every(Boolean), JSON.stringify(shape));
     if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `quote-reply-${width}-${appearance}.png`), animations: 'disabled' });

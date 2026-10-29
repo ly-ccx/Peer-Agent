@@ -13,6 +13,8 @@ test('delegated execution rules are static and only admitted for work sessions',
   assert.equal(sections[1].layer, 'L7_CONTINUITY');
   assert.match(sections[1].content, /phase=running/);
   assert.match(sections[1].content, /does not authorize/);
+  assert.match(sections[0].content, /structured question to the parent Bot before completing/);
+  assert.match(sections[0].content, /report cannot create a human approval requirement/);
   assert.ok(sections.every(section => !section.content.includes('INJECT_SYSTEM')));
 });
 

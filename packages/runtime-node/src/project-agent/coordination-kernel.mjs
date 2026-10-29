@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const COORDINATION_ACTIONS = Object.freeze(['parallel', 'augment', 'revise', 'query', 'answer', 'cancel', 'replace', 'handoff', 'resume']);
 const revisions = new Set(['revise', 'cancel', 'replace']);
 const phases = { recorded: ['stopping', 'ready', 'completed', 'blocked'], stopping: ['awaiting_outcome', 'ready', 'completed', 'blocked'],
-  awaiting_outcome: ['ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready'], completed: [] };
+  awaiting_outcome: ['stopping', 'ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready'], completed: [] };
 const unique = values => [...new Set(values || [])];
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -54,7 +54,7 @@ export function admitCoordinationDecision(state, decision, host) {
     initiator: 'project_agent', decisionSource: inputs.length ? 'user_revision' : 'execution_repair',
     action: decision.action, reason: decision.reason, ...(decision.sessionId ? { oldSessionId: decision.sessionId } : {}),
     executionEpoch: `execution-${fingerprint([decision.workId, goalRevision, decision.operationId])}`,
-    phase: 'recorded', minimumExecutorVersion: decision.action === 'resume' ? 2 : 1, updatedAt: host.now };
+    phase: 'recorded', minimumExecutorVersion: decision.payload?.repair === true ? 3 : decision.action === 'resume' ? 2 : 1, updatedAt: host.now };
   const receipt = { ...decision, digest, goalRevision, mandateId: mandate.mandateId };
   return { ok: true, entry: { kind: 'coordination_decision', mandate, receipt, transition }, receipt };
 }

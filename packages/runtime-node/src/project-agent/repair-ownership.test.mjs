@@ -5,6 +5,7 @@ import { watchFactsFromPlan } from './watchdog.mjs';
 import { createRunnerCoordination } from './runner-coordination.mjs';
 import { mapDelegationEvents } from './event-mapper.mjs';
 import { repairOwnership, stateAfterReply } from './repair-ownership.mjs';
+import { reconcileRepairCustody } from './repair-custody.mjs';
 
 const blocked = () => ({ planId: 'p', status: 'executing', tasks: [],
   delegationOrigin: { sessionId: 's', phase: 'running' },
@@ -78,6 +79,20 @@ test('a public progress reply transfers event custody while retaining runnable r
   assert.equal(f.coordination.recoverJob().workId, 'w');
 });
 
+test('a delivered related reply retains follow-up in its user work until the original session settles', () => {
+  const f = coordinationFixture();
+  f.work().sessionIds = [];
+  const job = { workId: 'w', events: [] };
+  f.coordination.finish(job, { rounds: [], reportedSessionIds: ['s'] }, f.roster);
+  assert.deepEqual(f.work().sessionIds, ['s']);
+  assert.equal(f.work().state, 'runnable');
+  assert.deepEqual(f.work().repairSessionIds, ['s']);
+  f.roster[0] = { sessionId: 's', status: 'accepted', followUp: { owner: 'none', inCurrentList: false, reason: 'settled' } };
+  f.coordination.finish(job, { rounds: [], reportedSessionIds: ['s'] }, f.roster);
+  assert.equal(f.work().state, 'delivered');
+  assert.deepEqual(f.work().repairSessionIds, []);
+});
+
 test('legacy false waiting_user recovers from current facts without a fresh allowance', () => {
   const f = coordinationFixture('waiting_user');
   assert.equal(f.coordination.recoverJob().workId, 'w');
@@ -86,6 +101,30 @@ test('legacy false waiting_user recovers from current facts without a fresh allo
   f.coordination.finish({ workId: 'w', events: [] }, { yielded: false, rounds: [] }, f.roster);
   assert.equal(f.work().state, 'waiting_user');
   assert.equal(f.coordination.recoverJob(), null);
+});
+
+test('returned coordination work reclaims existing repair responsibility without replaying a tool tail', () => {
+  const f = coordinationFixture('delivered');
+  assert.equal(f.coordination.recoverJob().workId, 'w');
+  assert.equal(f.work().state, 'runnable');
+  assert.deepEqual(f.work().repairSessionIds, ['s']);
+});
+
+test('repair custody chooses one existing owner and preserves explicit stop and unknown dispatches',()=>{
+  const make=id=>({workId:id,parentConversationId:'parent',state:'delivered',sessionIds:['s'],checkpointRef:'cp'});
+  const works={a:make('a'),b:make('b')};
+  const store={read:()=>({works}),readCheckpoint:()=>({outcome:{rounds:[]}}),saveWork:row=>{works[row.workId]=row;}};
+  const sessions=[{sessionId:'s',status:'result_ready',followUp:{owner:'bot',reason:'awaiting_acceptance_technical'}}];
+  reconcileRepairCustody({store,conversationId:'parent',sessions});
+  assert.equal(Object.values(works).filter(row=>row.state==='runnable').length,1);
+  for(const patch of [{stopScope:'work'},{historyRecovery:{disposition:'held'}},{budget:{uncertainDispatches:[{toolCallId:'unknown'}]}}]){
+    works.a={...make('a'),...patch}; delete works.b;
+    reconcileRepairCustody({store,conversationId:'parent',sessions});
+    assert.equal(works.a.state,'delivered');
+  }
+  works.a=make('a'); store.readCheckpoint=()=>({outcome:{rounds:[],stopped:true}});
+  reconcileRepairCustody({store,conversationId:'parent',sessions});
+  assert.equal(works.a.state,'delivered');
 });
 
 test('repeated identical repair observations stop automatically; cancellation remains stopped', () => {

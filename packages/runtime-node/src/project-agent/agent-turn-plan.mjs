@@ -27,6 +27,8 @@ export function planAgentTurn({
   }));
   const { inputAnchors: _previousAnchors, ...currentContext } = context || {};
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
+  const requiresStructuredReply = !wake && (Array.isArray(roster) ? roster : roster?.sessions || roster?.items || [])
+    .some(session => session.followUp?.inCurrentList === true);
   return {
     kind: wake ? 'wake' : 'user',
     mode: 'project_agent',
@@ -42,7 +44,8 @@ export function planAgentTurn({
     userInputs: inputs.map((input) => ({ ...input })),
     events: facts.map((event) => ({ ...event })),
     roster: roster ?? null,
-    reminder: wake ? wakeReminder(facts, roster) : null,
+    ...(requiresStructuredReply ? { requiresStructuredReply: true } : {}),
+    reminder: wake ? wakeReminder(facts, roster) : requiresStructuredReply ? taskDeliveryReminder() : null,
   };
 }
 
@@ -81,6 +84,10 @@ export function finishAgentTurn({
     return { messages, replied: false, failed: true };
   }
   const fallbackText = publicFallbackText(finalText(storedRounds), messages[0].publicUpdates ?? []);
+  if (plan?.requiresStructuredReply) {
+    messages.push(unavailableCard(turnId, 'reply_delivery_required', plan?.turnProfile?.workspaceId));
+    return { messages, replied: false, failed: true };
+  }
   if (plan?.kind === 'user' && fallbackText.trim()) {
     messages.push(attachEvidence(applyMemoryMeta({
       id: `${turnId}-reply`,
@@ -157,6 +164,17 @@ function wakeReminder(events, roster) {
     layer: 'L6_MODE_REMINDER',
     content: lines.join('\n'),
   };
+}
+
+/** Existing L6 mode-reminder seam; task facts remain in the L7 roster. */
+export function taskDeliveryReminder() {
+  return { id: 'project-agent-task-delivery', title: 'Task result delivery', kind: 'project-agent-task-delivery',
+    scope: 'turn', layer: 'L6_MODE_REMINDER',
+    content: 'This user turn has existing follow-up tasks in the host roster. Decide whether the new input relates to them or is independent. '
+      + 'Deliver your answer with post_reply; plain final text cannot deliver or settle a task result. '
+      + 'For a related task read its retained report, cite its sessionId in sources with current statusClaims, and preserve its remaining follow-up. '
+      + 'Do not repeat the investigation as a replacement for closing the original task. Independent answers may use sources=[]. '
+      + 'Use actual verification and the existing acceptance path; never infer completion, permission or acceptance from your own text.' };
 }
 
 export function unavailableCard(turnId, reason, workspaceId) {

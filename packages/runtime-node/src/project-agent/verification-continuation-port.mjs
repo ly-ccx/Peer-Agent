@@ -47,9 +47,22 @@ export function createVerificationContinuationPort({ plan, goalPlanStore, workId
   }
   return {
     workId: candidate,
-    load() { const value = goalPlanStore.getPlan(plan.planId)?.runner?.verificationContinuation;
+    load() { const current = goalPlanStore.getPlan(plan.planId);
+      const value = current?.runner?.verificationContinuation;
       if (value && value.planId !== plan.planId) throw failure('verifier_checkpoint_unavailable');
-      return value ? validateVerificationContinuation(value) : null; },
+      if (!value) return null;
+      const state = validateVerificationContinuation(value);
+      const terminal = current.runner?.verifierRuns?.at(-1);
+      // A host-recorded finished review can outlive a stale requesting marker.
+      // Keep total usage; never reinterpret a pending tool batch as completed.
+      if (['ready','requesting'].includes(state.phase) && current.runner?.status === 'blocked'
+        && /^(Verifier failed:|Verification gate failed:)/.test(current.runner.blockedReason || '')
+        && terminal?.target?.kind === 'plan' && ['passed','failed'].includes(terminal.status)
+        && Number.isFinite(Date.parse(terminal.completedAt))
+        && Date.parse(terminal.completedAt) >= Date.parse(state.lastProgressAt || state.startedAt)) {
+        return { ...state, phase: 'completed' };
+      }
+      return state; },
     save(value) { assertCurrent(); goalPlanStore.setRunnerState(plan.planId,
       { verificationContinuation: validateVerificationContinuation({ ...value, ...(candidate ? { workId: candidate } : {}) }) }); },
     assertCurrent,

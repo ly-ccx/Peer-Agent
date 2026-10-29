@@ -12,6 +12,10 @@ export async function checkBotCompletionReview({ page, until, report, captureDir
     renameSync(commandFile + '.next', commandFile);
   };
   const asMessage = card => ({ id: card.cardId, role: 'assistant', kind: 'system_card', cards: [card] });
+  // Earlier work-surface checks leave the reader in history, where appended rows
+  // stay outside the virtual window until the reader returns to the latest.
+  const latest = page.getByRole('button', { name: '回到最新消息', exact: true });
+  if (await latest.isVisible()) await latest.click();
   const obsolete = projectCards(initial.workspaceId, { confirmations: [{ sessionId: 'completion-fixture', summary: '核对项目' }] })[0];
   send([asMessage(obsolete)]);
   const old = page.locator('[data-card-id="card:confirm_result:completion-fixture"]');

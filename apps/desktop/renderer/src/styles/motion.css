@@ -507,6 +507,12 @@
   }
 }
 
+/* A stationary SVG or other masked mark uses the same sweep geometry without moving its box. */
+@keyframes motion-mask-shimmer {
+  from { mask-position: var(--motion-shimmer-from, 0%) var(--motion-shimmer-y, 0); }
+  to { mask-position: var(--motion-shimmer-x, 200%) var(--motion-shimmer-y, 0); }
+}
+
 /* ---------------------------------------------------------------------------
  * 品牌启动页 — brand-startup-loader 的编排关键帧
  * ---------------------------------------------------------------------------

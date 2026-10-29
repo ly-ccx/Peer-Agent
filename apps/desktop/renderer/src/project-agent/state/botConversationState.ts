@@ -23,7 +23,7 @@ import {
   type ProjectReplyRecoveryAction,
 } from '@peer-agent/protocol';
 
-import { coalesceAgentActivity, readAgentActivity } from './agentActivityState.ts';
+import { coalesceAgentActivity, readAgentActivity, agentActivityPresentationId } from './agentActivityState.ts';
 import { readReplyRecoveryAction } from './replyRecoveryState.ts';
 
 export const CONVERSATION_PAGE_SIZE = 50;
@@ -499,7 +499,8 @@ export function windowConversationRows<T>(
 
 /** Prepending history must preserve the identity of the current reading window. */
 export function conversationWindowAnchor(previous: readonly ConversationRow[], next: readonly ConversationRow[], index: number): number {
-  const idOf = (row: ConversationRow) => row.type === 'message' ? row.message.id : row.id;
+  const idOf = (row: ConversationRow) => row.type === 'message'
+    ? row.message.kind === 'agent_activity' && row.message.agentActivity ? agentActivityPresentationId(row.message.agentActivity) : row.message.id : row.id;
   const old = previous[index];
   const found = old ? next.findIndex(row => idOf(row) === idOf(old)) : -1;
   return found >= 0 ? found : Math.max(0, Math.min(index, next.length - 1));

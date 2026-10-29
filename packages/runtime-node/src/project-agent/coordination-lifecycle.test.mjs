@@ -58,6 +58,22 @@ test('a current user can cancel a returned result; an ordinary wake cannot aband
  await f.lifecycle.recover('w');assert.deepEqual(f.cancellations,[opened.sessionId]);
 });
 
+test('a returned legacy session is adopted only from current user input before repair',async t=>{
+  const f=await fixture(t);
+  f.sessions.set('legacy',{sessionId:'legacy',planId:'old-plan',workspaceId:'w',status:'result_ready',origin:{parentConversationId:'parent'}});
+  const lifecycle=createCoordinationLifecycle({...f.ports,takeover:async()=>({ok:true})});
+  const input={action:'resume',sessionId:'legacy',expectedRevision:0,reason:'Correct the missing analysis'};
+  assert.equal((await lifecycle.coordinate(input,f.context('','wake',{currentInputAnchors:[]}))).error,'current_user_required');
+  assert.equal(f.store.read().mandates?.goal,undefined);
+  const receipt=await lifecycle.coordinate(input,f.context('u1','adopt'));
+  assert.equal(receipt.ok,true,JSON.stringify(receipt));
+  assert.equal(receipt.phase,'completed');
+  assert.deepEqual(f.store.read().mandates.goal.sessionIds,['legacy']);
+  assert.deepEqual(f.store.read().mandates.goal.rootInputIds,['u1']);
+  assert.equal(f.store.read().transitions.adopt.minimumExecutorVersion,3);
+  assert.equal(f.spawns.length,0);
+});
+
 test('current user can finish cancellation on stopped work without reopening admission', async t => {
  const f=await fixture(t);
  const opened=await f.lifecycle.coordinate({action:'parallel',reason:'original',task:f.task('u1')},f.context('u1','original'));
@@ -67,7 +83,7 @@ test('current user can finish cancellation on stopped work without reopening adm
  assert.equal(f.store.read().works.goal.stopScope,'work');assert.equal(f.store.read().works.goal.state,'cancelled');
  const repeated=await f.lifecycle.coordinate({action:'cancel',sessionId:opened.sessionId,expectedRevision:2,reason:'already withdrawn'},f.context('u3','cancel-again'));
  assert.equal(repeated.ok,true);assert.deepEqual(f.cancellations,[opened.sessionId]);
- assert.equal((await f.lifecycle.coordinate({action:'replace',sessionId:opened.sessionId,expectedRevision:3,reason:'revive',task:f.task('u3')},f.context('u3','replace-stopped'))).error,'work_execution_stopped');
+  assert.equal((await f.lifecycle.coordinate({action:'replace',sessionId:opened.sessionId,expectedRevision:3,reason:'revive',task:f.task('u3')},f.context('u3','replace-stopped'))).error,'work_execution_stopped');
 });
 
 test('parallel work survives a sibling cancellation and cancellation events cannot revive it', async t => {

@@ -1,7 +1,9 @@
 import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
 import { controlProjectWork } from './work-control.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
-import { createSessionTakeover, takeoverHumanBlocker } from './session-takeover.mjs';
+import { createSessionTakeover } from './session-takeover.mjs';
+import { takeoverBlocker } from './session-repair.mjs';
+import { supervisionRecovery } from './supervision-recovery.mjs';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
@@ -171,17 +173,16 @@ export function createSessionSupervisor({
     abortStream, isolationPlanner, exclusive, project, emit, promote,
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [], now });
   const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
-    abortStream, promote, emit, now });
+    abortStream, promote, emit, now, humanGateOf });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
     admitTask: (input, context) => checkDelegationCapabilities(input, context),
     readSessionSummary: input => {
       const plan = findBySession(input.sessionId);
       return plan ? summaries({ workspaceId: plan.delegationOrigin.workspaceId, sessionIds: [input.sessionId] })[0] : null;
     },
-    checkTakeover: id => {
+    checkTakeover: (id, action) => {
       const plan = findBySession(id);
-      return takeoverHumanBlocker(plan)
-        || (plan?.resultAcceptance?.acceptedAt || ['completed','cancelled'].includes(plan?.status) ? 'session_not_running' : null);
+      return takeoverBlocker(plan, action, plan && humanGateOf(plan));
     },
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
     spawn: (input, context) => exclusive(() => spawnLocked(input, context)), requestCancel: cancellation.request,
@@ -693,15 +694,24 @@ export function createSessionSupervisor({
 
   function summaries(input = {}) {
     const ids = new Set(input.sessionIds || []), anchors = new Set(input.anchorMessageIds || []);
-    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId
-      && (input.all === true || ids.has(plan.delegationOrigin.sessionId) || input.workId && plan.delegationOrigin.workId === input.workId
-        || anchors.has(plan.delegationOrigin.anchorMessageId))).slice(0, 24).map(plan => {
-      const origin = plan.delegationOrigin;
-      return { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
-        acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
-        conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}) }),
-        metadataRevision: plan.updatedAt || plan.createdAt || '' };
-    });
+    const related = plan => input.all === true || ids.has(plan.delegationOrigin.sessionId)
+      || input.workId && plan.delegationOrigin.workId === input.workId || anchors.has(plan.delegationOrigin.anchorMessageId);
+    const userFollowUp = plan => input.kind === 'user' && input.conversationId === plan.delegationOrigin.parentConversationId;
+    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId && (related(plan) || userFollowUp(plan)))
+      .map(plan => {
+        const origin = plan.delegationOrigin;
+        const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
+          acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
+          conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
+          ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
+          ...(origin.phase === 'paused' ? { phase: 'paused' } : {}) }),
+          ...(sessionFactsFromPlan(plan).blockedReason ? { blockedReason: sessionFactsFromPlan(plan).blockedReason } : {}),
+          metadataRevision: plan.updatedAt || plan.createdAt || '' };
+        return { plan, summary };
+      }).filter(({plan,summary}) => related(plan) || userFollowUp(plan) && summary.followUp.inCurrentList)
+      .sort((a,b) => Number(Boolean(related(b.plan))) - Number(Boolean(related(a.plan)))
+        || String(b.plan.updatedAt || '').localeCompare(String(a.plan.updatedAt || '')))
+      .slice(0, 24).map(({summary}) => summary);
   }
 
   function list(input = {}) {
@@ -729,6 +739,15 @@ export function createSessionSupervisor({
         requests: journal.querySupervision('agentRequests', 'sessionId', session.sessionId, { pendingOnly: true, limit: 16 }),
         receipts: journal.querySupervision('agentCommands', 'sessionId', session.sessionId, { limit: 16 }),
       } : undefined;
+      if (agentSupervision) {
+        const facts = journal.readLifecycleFacts();
+        const workId = text(plan.delegationOrigin.workId);
+        agentSupervision.recovery = supervisionRecovery({plan,session,
+          work:workId ? journal.readWork(workId) : null,mandate:workId ? facts.mandates?.[workId] : undefined,
+          transitions:Object.values(facts.transitions || {}),receipts:agentSupervision.receipts,requests:agentSupervision.requests,
+          relatedWorks:Object.values(journal.readSnapshot().works).filter(row => row.parentConversationId === plan.delegationOrigin.parentConversationId
+            && row.sessionIds?.includes(session.sessionId) && row.state === 'blocked_system').slice(-8)});
+      }
       return { ...session, report: { ...buildReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
         verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
       } : {}) } };
