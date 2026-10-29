@@ -20,6 +20,9 @@ test('a failed delegated stream retains parent responsibility after a public upd
   const events = mapDelegationEvents({ sessions: [{ ...session, status: 'running' }] }, { sessions: [watchFactsFromPlan(plan)] });
   assert.equal(events.find(row => row.kind === 'interrupted').payload.reason, 'conversation_persistence_failed: EIO');
   assert.equal(events.some(row => row.kind === 'needs_user'), false);
+  const stopped = sessionFactsFromPlan({ ...plan, runner: { ...plan.runner,
+    interruption: { ...plan.runner.interruption, origin: 'user' } } });
+  assert.equal(stopped.status, 'paused', 'the runtime adapter must preserve an explicit user stop');
 });
 
 test('technical verification blockers belong to the parent and cannot manufacture human questions', () => {
