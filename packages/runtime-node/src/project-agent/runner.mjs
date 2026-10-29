@@ -7,6 +7,7 @@ import { waitResult } from './wake-wait.mjs';
 import { createTurnActivity } from './turn-activity.mjs';
 import { readRetryContinuity } from './retry-continuity.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
+import { agentDelivery } from './agent-delivery.mjs';
 
 /**
  * 与桌面 llm-chat-service 的同提供方重试退避一致（ADR 30）：
@@ -323,6 +324,10 @@ export function createProjectAgentRunner({
           preserveCheckpoint: job.continuation === true };
       }
       job.turnId = outcome.turnId;
+      if (!outcome.failed && !outcome.stopped && !outcome.preempted && agentDelivery.available(workspace)) {
+        agentDelivery.executed(workspace, conversation, (job.events || []).filter(event => event.kind === 'agent_message')
+          .map(event => event.payload?.agentMessage?.messageId).filter(Boolean), outcome.turnId);
+      }
       if (classifyProjectAgentFailure(outcome.reason, outcome.failure).kind === 'execution_outcome_unknown') { job.explicitRetryOnly = true; job.outcomeUnknown = true; }
       if (disposed || outcome.disposed) { circuitBreaker?.abandonTrial(); return 'disposed'; }
       if (outcome.stopped) return completeStoppedTurn(job, outcome, diagnosticTiming('stopped'));
@@ -822,7 +827,7 @@ export function createProjectAgentRunner({
       abortController.abort('user-stop');
       return { ok: true };
     },
-    hasContinuation: () => holdsLease() === true && Boolean(coordination?.recoverJob() || coordination?.hasPendingDelivery()),
+    hasContinuation: () => holdsLease() === true && Boolean(coordination?.hasContinuation()),
     ownsInput: inputId => coordination?.ownsInput(inputId) === true,
     ownedInputIds: () => coordination?.ownedInputIds?.() || [],
     activity: activity.snapshot,

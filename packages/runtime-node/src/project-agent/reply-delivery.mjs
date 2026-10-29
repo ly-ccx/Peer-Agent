@@ -45,6 +45,6 @@ export function createReplyDelivery({ store, readMessages, appendMessage, accept
         await onRecovered?.(message);
       }
     },
-    pending: () => { const snapshot = readSnapshot(); return Object.values(snapshot.deliveries).some(row => row.state === 'prepared' && !held(row.message, snapshot)); },
+    pending: (snapshot = readSnapshot()) => Object.values(snapshot.deliveries).some(row => row.state === 'prepared' && !held(row.message, snapshot)),
   };
 }

@@ -43,6 +43,7 @@ function png(width = 2) {
 
 test('source rendering caps blank-line DOM and escapes unhighlighted HTML', () => {
   const h = hooks(); const { SourceViewer } = load('./SourceViewer.tsx', h.react, {
+    '../../chat/components/markdown/useHighlightLanguages': { useHighlightLanguages: () => 0 },
     './sourceHighlight.ts': { highlightSourceLines: (text: string) => ({ language: null, lines: text.split('\n') }) },
   });
   const tree = SourceViewer({ content: '\n'.repeat(50_000), emptyLabel: 'empty' });

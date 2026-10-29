@@ -322,6 +322,7 @@ export interface GoalPlanProjectionSnapshot {
   readonly interrupted?: boolean;
   /** 持久化中断事实中的用户可展示原因。 */
   readonly interruptionReason?: string;
+  readonly interruptionOrigin?: import('./agent-supervision.ts').InterruptionOrigin;
   readonly title: string;
   readonly workspaceLabel?: string;
   /** 用户可见的交付路由；缺目标分支时写「未确认」。 */
@@ -455,6 +456,7 @@ export type ExecutionOwnership = 'live' | 'ended' | 'unknown';
  * 的唯一出口；任何适配器都不得自行改写生命周期结论。
  */
 export interface LifecycleFacts {
+  readonly humanGate?: boolean;
   readonly executionOwnership?: ExecutionOwnership;
   readonly phase?: string;
   readonly delegated?: boolean;
@@ -464,6 +466,7 @@ export interface LifecycleFacts {
   readonly needsUser?: boolean;
   /** 未消费的执行中断是当前行动权事实，优先于 completed/结果就绪。 */
   readonly interrupted?: boolean;
+  readonly interruptionOrigin?: import('./agent-supervision.ts').InterruptionOrigin;
   readonly verificationActive?: boolean;
   readonly blockedReason?: string;
   readonly cancellationPhase?: string;
@@ -471,12 +474,104 @@ export interface LifecycleFacts {
   readonly coordinationPhase?: string;
 }
 
-export interface LifecycleDecision extends ProjectionDecision {
+export interface LifecycleCoreDecision extends ProjectionDecision {
   readonly status: WorkSessionStatus;
   readonly cancelable: boolean;
   readonly needsUser: boolean;
   readonly verificationActive: boolean;
   readonly blockedReason?: string;
+}
+
+/**
+ * 当前跟进责任（ADR 110）。`bot` = 主 Bot 自己收口的技术跟进；`user` = 真实人工/策略门槛；
+ * `none` = 退出当前待办（已签收、已被完成替换承接、用户停止已确认）。
+ * `inCurrentList` 是派生事实，不允许消费端各自按 status 再判一次。
+ */
+export type FollowUpOwner = 'bot' | 'user' | 'none';
+
+export type FollowUpReason =
+  | 'settled'
+  | 'superseded'
+  | 'stop_confirmed'
+  | 'stop_unconfirmed'
+  | 'human_request'
+  | 'awaiting_human_gate'
+  | 'technical_block'
+  | 'awaiting_acceptance_technical'
+  | 'verification_failed'
+  | 'live_execution'
+  | 'paused'
+  | 'unknown_facts';
+
+export interface FollowUpProjection {
+  readonly owner: FollowUpOwner;
+  readonly inCurrentList: boolean;
+  readonly reason: FollowUpReason;
+}
+
+export interface LifecycleDecision extends LifecycleCoreDecision {
+  readonly followUp: FollowUpProjection;
+}
+
+function followUpOf(owner: FollowUpOwner, reason: FollowUpReason): FollowUpProjection {
+  return { owner, inCurrentList: owner !== 'none', reason };
+}
+
+/**
+ * 责任判定：只读同一份生命周期结论 + 同一份权威事实，不引入第二套状态机。
+ * 缺事实一律 fail closed（留在当前列表、责任在 bot），不按文案推断承接或停止。
+ */
+export function decideFollowUp(
+  decision: Pick<LifecycleCoreDecision, 'status' | 'needsYouReason'>,
+  facts: LifecycleFacts = {},
+  ownership: ExecutionOwnership = 'unknown',
+): FollowUpProjection {
+  const status = decision.status;
+  const live = ownership === 'live';
+  // 停止回执是宿主在 abort + waitForIdle 之后写入的事实，不是从 status 猜的终态；
+  // `executionOwnership==='unknown'` 单独（重启残留的 running/idle/paused）不能证明已结束，
+  // 只有回执 completed 且没有活体执行才算已确认停止。
+  const stopStatus = status === 'cancelled' || status === 'stopping' || status === 'awaiting_outcome';
+  const stopPending = stopStatus && !(facts.cancellationPhase === 'completed' && !live);
+  const humanNeedsYou = status === 'waiting_user'
+    || (status === 'result_ready' && facts.humanGate === true && facts.accepted !== true);
+
+  // 1) 保护性事实优先：活动执行、真实人工请求、未决停止回执，都不允许被“已签收 / 已被承接”
+  //    提前盖掉。`unknown` 本身不构成结束证据；停止只认宿主写入的完成回执。
+  if (humanNeedsYou) {
+    return status === 'result_ready' || decision.needsYouReason === 'decision'
+      ? followUpOf('user', 'awaiting_human_gate')
+      : followUpOf('user', 'human_request');
+  }
+  if (live) return followUpOf('bot', 'live_execution');
+  if (stopPending) return followUpOf('bot', 'stop_unconfirmed');
+
+  // 2) 退出当前待办：只有上面三类事实都不成立时，承接 / 失败 / 签收 / 已确认停止才生效。
+  //    退出只影响“当前列表归属”，不改写原验收、原核验与未完成事实。
+  if (facts.superseded === true || status === 'superseded') return followUpOf('none', 'superseded');
+  // 3) 核验失败/缺证据：即使存在历史 accepted 事实也不能静默（那次验收是旧结论）。
+  if (status === 'failed') return followUpOf('bot', 'verification_failed');
+  if (facts.accepted === true) return followUpOf('none', 'settled');
+  if (stopStatus) return followUpOf('none', 'stop_confirmed');
+  // 4) 父代理等技术阻塞：主 Bot 责任，不显示需要用户确认。
+  if (status === 'waiting_agent') return followUpOf('bot', 'technical_block');
+  // 5) 执行交回不等于验收：普通结果由 Bot 自动收口，只有宿主确认过的人工门才换责任人。
+  if (status === 'result_ready') return followUpOf('bot', 'awaiting_acceptance_technical');
+  // 11. 活动执行/核验：保留在当前列表。
+  if (status === 'verifying' || status === 'running' || status === 'starting' || status === 'queued') {
+    return followUpOf('bot', 'live_execution');
+  }
+  // 12. 用户暂停：等待用户恢复，维持既有「不在当前待办」表现。
+  if (status === 'paused') {
+    if (facts.interrupted === true && facts.interruptionOrigin !== 'user') {
+      return followUpOf('bot', facts.interruptionOrigin && facts.interruptionOrigin !== 'unknown' ? 'technical_block' : 'unknown_facts');
+    }
+    return followUpOf('none', 'paused');
+  }
+  // 13. 已是验收事实的状态。
+  if (status === 'accepted') return followUpOf('none', 'settled');
+  // 14. 事实缺失或未知停止回执：fail closed。
+  return followUpOf('bot', 'unknown_facts');
 }
 
 /** 仍在占用执行体的 runner 状态（持久化字符串本身不构成活体证据）。 */
@@ -511,10 +606,10 @@ const NON_CANCELABLE_STATUSES = new Set([
  * 过渡兼容：不传 `executionOwnership` 的旧入口按 `unknown` 处理——
  * `runner.status` 字符串本身不能证明"还在跑"；真实入口（S2/S3）应显式传入 live/ended/unknown。
  */
-export function decideLifecycle(
+function decideLifecycleCore(
   snapshot: GoalPlanProjectionSnapshot,
   facts: LifecycleFacts = {},
-): LifecycleDecision {
+): LifecycleCoreDecision {
   const declaredOwnership = facts.executionOwnership ?? snapshot.executionOwnership;
   const ownership: ExecutionOwnership = declaredOwnership ?? 'unknown';
   const persistedRunner = snapshot.runnerStatus;
@@ -541,6 +636,7 @@ export function decideLifecycle(
   const verificationActive = facts.verificationActive === true;
   const blockedReason = facts.blockedReason ?? snapshot.blockedReason;
   const interrupted = facts.interrupted ?? snapshot.interrupted === true;
+  const interruptionOrigin = facts.interruptionOrigin ?? snapshot.interruptionOrigin;
   const delegated = facts.delegated ?? snapshot.delegated === true;
 
   let status: WorkSessionStatus;
@@ -556,7 +652,7 @@ export function decideLifecycle(
   else if (facts.superseded === true && snapshot.status !== 'completed') status = 'superseded';
   else if ((facts.phase === 'paused' || runnerStatus === 'paused') && snapshot.status !== 'completed') status = 'paused';
   // A failed delegated attempt leaves recovery with the parent, not a human pause.
-  else if (interrupted && delegated && runnerStatus === 'failed' && !needsUserFacts && !liveExecution) status = 'waiting_agent';
+  else if (interrupted && interruptionOrigin !== 'user' && delegated && runnerStatus === 'failed' && !needsUserFacts && !liveExecution) status = 'waiting_agent';
   // 未消费中断优先于 completed/结果就绪（decideGoalPlan rule 1 已按此给文案），
   // 但持久化终态（cancelled/failed）和真实验收结论先于它。
   else if (interrupted) status = 'paused';
@@ -676,7 +772,7 @@ function lifecyclePresentation(
       };
     case 'waiting_agent':
       // 技术阻塞是父代理的跟进项，不是人类待办；具体文案（等待答复/系统中断）沿用旧规则。
-      return legacy.actionRight === 'needs_you' || legacy.actionRight === 'paused'
+      return legacy.actionRight === 'needs_you' || (facts.delegated && legacy.actionRight === 'paused')
         ? {
             actionRight: 'peer_advancing',
             nextAction: 'none',
@@ -707,6 +803,23 @@ function lifecyclePresentation(
     default:
       return legacy;
   }
+}
+
+/**
+ * 公开唯一出口：先取既有生命周期结论，再补同一份事实算出的跟进责任（ADR 110）。
+ * 适配器只读 `followUp`，不得按 `status` 自行再判一次列表归属与责任人。
+ */
+export function decideLifecycle(
+  snapshot: GoalPlanProjectionSnapshot,
+  facts: LifecycleFacts = {},
+): LifecycleDecision {
+  const core = decideLifecycleCore(snapshot, facts);
+  // 与核心同一表达式的读取：不新增事实来源，也不引入第二套规则。
+  const ownership: ExecutionOwnership = facts.executionOwnership ?? snapshot.executionOwnership ?? 'unknown';
+  return { ...core, followUp: decideFollowUp(core, { ...facts,
+    interrupted: facts.interrupted ?? snapshot.interrupted,
+    interruptionOrigin: facts.interruptionOrigin ?? snapshot.interruptionOrigin,
+  }, ownership) };
 }
 
 /** Conversation → 无计划讨论态（工作台动线 §15）。 */

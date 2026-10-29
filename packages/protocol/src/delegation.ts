@@ -73,6 +73,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly origin: DelegationOrigin;
   readonly supersededBy?: string;
   readonly acceptance?: 'auto' | 'confirm';
+  readonly resultConfirmationRequired?: boolean;
   readonly accepted?: boolean;
   readonly verifying?: boolean;
   readonly phase?: 'starting' | 'verifying' | 'paused';
@@ -81,6 +82,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly followUp?: import('./task-overview.ts').FollowUpProjection;
   readonly verificationProgress?: VerificationProgress;
   readonly completionReviewRequired?: boolean;
   readonly resultConfirmationRequired?: boolean;
@@ -103,6 +105,7 @@ export interface WorkSession extends SessionQueueFacts {
 }
 
 export interface SessionReport {
+  readonly agentSupervision?: import('./agent-supervision.ts').AgentSupervisionReport;
   /** Current host verification, loaded with task details; never assistant prose. */
   readonly verification?: SessionVerificationDetail;
   readonly sessionId: string;
@@ -137,6 +140,11 @@ export type DelegationEventKind =
 
 /** Local orchestration facts; never a human authorization or a verified result. */
 export interface AgentMessage {
+  readonly deliveryIntent?: import('./agent-supervision.ts').AgentDeliveryIntent;
+  readonly decisionRequest?: import('./agent-supervision.ts').AgentDecisionRequest;
+  readonly decisionAnswer?: import('./agent-supervision.ts').AgentDecisionAnswer;
+  readonly goalRevision?: number;
+  readonly executionEpoch?: string;
   readonly replyTo?: string;
   readonly messageId: string;
   readonly workspaceId: string;
@@ -478,6 +486,7 @@ export function projectWorkSession(
     // `delegated` 必须是真实事实；不能用"这是工作会话"反推，否则会改写非委派历史语义。
     ...(plan.delegated === true ? { delegated: true } : {}),
     ...(conversationMeta.acceptance ? { acceptance: conversationMeta.acceptance } : {}),
+    humanGate: conversationMeta.resultConfirmationRequired === true,
     accepted:
       conversationMeta.accepted === true ||
       (plan.delegated !== true &&
@@ -491,6 +500,8 @@ export function projectWorkSession(
     verificationActive: conversationMeta.verifying === true,
     ...(conversationMeta.phase ? { phase: conversationMeta.phase } : {}),
     blockedReason: plan.agentWaiting ? 'waiting_parent_agent' : plan.blockedReason,
+    interrupted: plan.interrupted,
+    interruptionOrigin: plan.interruptionOrigin,
     ...(conversationMeta.origin.cancellation?.phase
       ? { cancellationPhase: conversationMeta.origin.cancellation.phase }
       : {}),
@@ -512,6 +523,7 @@ export function projectWorkSession(
     nextAction: projected.nextAction,
     statusLabel: projected.statusLabel,
     cancelable: projected.cancelable,
+    followUp: projected.followUp,
     ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
     ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',

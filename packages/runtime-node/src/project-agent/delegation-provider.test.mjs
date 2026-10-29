@@ -818,3 +818,18 @@ test('a current user turn cannot use an unrelated historical anchor to create wo
  const result=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),agentContext({currentInputAnchors:['u2'],messages:[USER,{id:'u2',role:'user',kind:'user_input'}]}));
  assert.equal(outputOf(result).error,'current_user_required');
 });
+
+test('pure task queries read fresh facts without opening or rewriting the effect ledger', async () => {
+  let revision = 0;
+  const provider = createDelegationProvider({
+    ledger() { throw new Error('read-only query opened the effect ledger'); },
+    supervisor: { list() { return [{ sessionId: 's', sourceRevision: String(++revision) }]; } },
+  });
+  const context = agentContext();
+  const first = await provider.executeCapability(call('local.delegation.list_sessions', {}, 'query'), context);
+  const second = await provider.executeCapability(call('local.delegation.list_sessions', {}, 'query'), context);
+  assert.equal(first.result.status, 'success');
+  assert.equal(outputOf(first).sessions[0].sourceRevision, '1');
+  assert.equal(outputOf(second).sessions[0].sourceRevision, '2');
+  assert.ok(first.result.evidence);
+});

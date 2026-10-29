@@ -37,8 +37,14 @@ const FOLLOW_UP = ['waiting_user', 'waiting_agent', 'result_ready', 'running', '
 /** Attention first; the compact surface is bounded while its count stays factual. */
 export function backgroundWork(index: BotWorkIndex): { count: number; rows: BotWorkRow[] } {
   if (!index.available) return { count: 0, rows: [] };
-  const sessions = [...index.byId.values()].filter(session => FOLLOW_UP.some(status => status === session.status));
-  const rank = (status: string) => FOLLOW_UP.findIndex(value => value === status);
+  const sessions = [...index.byId.values()].filter(session =>
+    session.followUp ? session.followUp.inCurrentList : FOLLOW_UP.some(status => status === session.status));
+  // 未列入兜底表的状态（如 failed / 事实缺失）仍可能按宿主判定进列表：排在已知状态之后，
+  // 不能因 findIndex 返回 -1 反而顶到最前，破坏「attention first」。
+  const rank = (status: string) => {
+    const position = FOLLOW_UP.findIndex(value => value === status);
+    return position < 0 ? FOLLOW_UP.length : position;
+  };
   sessions.sort((a, b) => rank(a.status) - rank(b.status));
   return { count: sessions.length, rows: sessions.slice(0, 100).map(session => ({ id: session.sessionId, session, status: session.status as WorkSessionStatus })) };
 }

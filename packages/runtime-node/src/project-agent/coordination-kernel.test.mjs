@@ -69,3 +69,18 @@ test('transition patches do not retain caller-owned handoff objects', () => {
   assert.equal(next.transitions.one.handoff.result, 'original');
   assert.equal(before.transitions.one.phase, 'recorded');
 });
+
+test('resume retains the task revision, fences the old executor and requires a new execution receipt', () => {
+  const w = world(); try {
+    w.store.decide(command('spawn', 'A', 'a'), host);
+    const original = w.store.read().transitions.spawn;
+    w.store.bindSession('A', 1, 'sa', { workId: 'A', goalRevision: 1, executionEpoch: original.executionEpoch });
+    const resumed = w.store.decide({ ...command('resume', 'A', 'a', 'resume', 1), sessionId: 'sa' }, host);
+    assert.equal(resumed.ok, true);
+    const state = w.store.read();
+    assert.equal(state.mandates.A.goalRevision, 1);
+    assert.equal(state.transitions.resume.minimumExecutorVersion, 2);
+    assert.equal(executionBindingCurrent(state.mandates.A, original, { workId: 'A', goalRevision: 1, executionEpoch: original.executionEpoch, sessionId: 'sa' }), false);
+    assert.equal(state.transitions.resume.executionEffect, undefined);
+  } finally { w.close(); }
+});

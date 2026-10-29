@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
-import { ChatSurface } from './ChatSurface';
+import { ChatSurface } from '../../app/components/deferredPanels';
 import { Drawer } from '../../app/components/Drawer';
 import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
 import { clientApi } from '../../clientApi';

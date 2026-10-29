@@ -74,6 +74,7 @@ export async function checkBotShellUpdater({ page, app, emitUpdaterEvent, until,
     await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page.getByRole('button', { name: '更新与关于', exact: true }).click();
     const settingsChannel = page.getByRole('button', { name: '更新通道', exact: true });
+    await settingsChannel.waitFor({ state: 'visible' });
     assert.equal(await settingsChannel.locator('svg').count(), 1);
     await settingsChannel.focus(); await settingsChannel.press('Enter');
     await page.getByRole('listbox', { name: '更新通道', exact: true }).waitFor();

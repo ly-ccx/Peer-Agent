@@ -2,9 +2,9 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useEffect, useState } from 'react';
 import { Drawer } from '../../app/components/Drawer';
-import { ChatSurface } from '../../chat/components/ChatSurface';
+import { ChatSurface } from '../../app/components/deferredPanels';
 import { clientApi } from '../../clientApi';
-import { WorkbenchPanel } from '../../workbench/WorkbenchPanel';
+import { WorkbenchPanel } from '../../app/components/deferredPanels';
 import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
 import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
 import { BotDocumentPreview } from '../conversation/BotDocumentPreview';
@@ -59,7 +59,7 @@ export function ConversationSceneDrawer({
     isPageActive={!embedded || !!workspace?.detailsVisible} layoutHost="local">
     <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
       <div className="conversation-chat-drawer__body">
-        <ChatSurface onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
+        <ChatSurface showComposer={false} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
           conversationId={conversationId} conversationTitle={title} systemInstructions={systemInstructions}
           replyLanguage={replyLanguage} gitBranchPrefix={gitBranchPrefix} onOpenSettings={() => {}}
           onProvidersRefresh={async () => { setProviders(await clientApi.llmListProviders()); }}

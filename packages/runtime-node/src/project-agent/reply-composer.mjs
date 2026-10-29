@@ -292,7 +292,8 @@ function readQuestion(question) {
   const options = stringList(question.options, { min: 1, max: 8, itemMax: ID_MAX });
   if (!options) return fail('invalid_input', 'question.options must contain 1 to 8 choices.');
   if (question.expiresAt !== undefined && (typeof question.expiresAt !== 'string' || !Number.isFinite(Date.parse(question.expiresAt)))) return fail('invalid_input', 'question.expiresAt must be an ISO date.');
-  return { value: { options, ...(question.expiresAt ? { expiresAt: new Date(question.expiresAt).toISOString() } : {}) } };
+  if (question.agentRequestId !== undefined && (!boundedId(question.agentRequestId, 200) || !Number.isSafeInteger(question.expectedRequestRevision) || question.expectedRequestRevision < 1)) return fail('invalid_input', 'Invalid linked Agent question.');
+  return { value: { options, ...(question.agentRequestId ? { agentRequestId: question.agentRequestId, expectedRequestRevision: question.expectedRequestRevision } : {}), ...(question.expiresAt ? { expiresAt: new Date(question.expiresAt).toISOString() } : {}) } };
 }
 
 function stringList(value, { min, max, itemMax }) {

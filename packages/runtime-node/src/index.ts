@@ -267,6 +267,7 @@ export {
 export { createInputQueue, inputMessageId } from './project-agent/input-queue.mjs';
 export { createBotDirectory } from './project-agent/bot-directory.mjs';
 export { createBotSummaryHistory, projectBotSummaryHistory } from './project-agent/bot-summary-history.mjs';
+export { createBotSearchHistory, projectBotSearchHistory } from './project-agent/bot-search-history.mjs';
 export { createBotConversationHistory, projectBotConversationHistory } from './project-agent/bot-conversation-history.mjs';
 export {
   collectConversationSearchDocuments,
@@ -570,7 +571,12 @@ export { createRemoteBindingStore } from './remote-binding-store.mjs';
 export { createRemoteReceiptStore } from './remote-receipt-store.mjs';
 
 export { createExecutionScheduler, normalizeConcurrency } from './project-agent/execution-scheduler.mjs';
-export { createIsolationPlanner, decideIsolation, MIN_WORKTREE_FREE_BYTES, FAILED_WORKTREE_RETENTION_MS } from './project-agent/isolation-planner.mjs';
+export {
+  createIsolationPlanner,
+  decideIsolation,
+  MIN_WORKTREE_FREE_BYTES,
+  FAILED_WORKTREE_RETENTION_MS,
+} from './project-agent/isolation-planner.mjs';
 
 export { createCircuitBreaker, CIRCUIT_FAILURE_LIMIT, CIRCUIT_COOLDOWN_MS } from './project-agent/circuit-breaker.mjs';
 export { createProjectRecovery, RECOVERY_PHASES } from './project-agent/recovery.mjs';
@@ -603,11 +609,29 @@ export { createProjectAgentHost } from './project-agent/runtime-host.mjs';
 export { createCollectingSink, createCallbackSink } from './project-agent/turn-sinks.mjs';
 export { emitToolArgProgress } from './provider-adapters/tool-arg-progress.mjs';
 export { conversationPrefersWorktree, preparePlanExecutionWorkspace } from './project-agent/goal-preferred-worktree.mjs';
-export { inspectSourceCheckout, commitSourceCheckout, stashSourceCheckout, resolveHandoffConflicts, previewHandoffMerge, cleanupHandoffPreview, triageTaskLine, createGoalDeliveryHandoff } from './project-agent/goal-delivery-handoff.mjs';
-export { createGoalRunnerAssistantPlaceholder, buildGoalRunnerStreamStartedPayload, mapGoalTurnOutcome } from './project-agent/goal-runner-message-persistence.mjs';
+export {
+  inspectSourceCheckout,
+  commitSourceCheckout,
+  stashSourceCheckout,
+  resolveHandoffConflicts,
+  previewHandoffMerge,
+  cleanupHandoffPreview,
+  triageTaskLine,
+  createGoalDeliveryHandoff,
+} from './project-agent/goal-delivery-handoff.mjs';
+export {
+  createGoalRunnerAssistantPlaceholder,
+  buildGoalRunnerStreamStartedPayload,
+  mapGoalTurnOutcome,
+} from './project-agent/goal-runner-message-persistence.mjs';
 export { resolveGoalSitePath, createGoalWorktreeAdapter } from './project-agent/goal-worktree-adapter.mjs';
 export { createAutomationWorktreeAdapter } from './project-agent/automation-worktree-adapter.mjs';
-export { isDelegatedWorkSession, resolveDelegatedWorkTurn, resolveWorkSessionProfile, WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES } from './project-agent/work-session-profile.mjs';
+export {
+  isDelegatedWorkSession,
+  resolveDelegatedWorkTurn,
+  resolveWorkSessionProfile,
+  WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES,
+} from './project-agent/work-session-profile.mjs';
 export { finalVerifierText, decodeVerifierReport, runVerifierWithReport } from './project-agent/verifier-report.mjs';
 export { runBoundedVerification, isVerificationTurn, verificationExecutionBudget } from './project-agent/verifier-lifecycle.mjs';
 export { verifierEvidenceSnapshots } from './project-agent/verifier-evidence.mjs';
@@ -631,17 +655,36 @@ export { createWorkBudgetGuard, registerWorkBudget, DEFAULT_WORK_BUDGET } from '
 export { createLegacyCriterionRecovery } from './project-agent/criterion-recovery.mjs';
 
 export { agentMessagesForContext, createAgentCommunication } from './project-agent/agent-communication.mjs';
+export { agentDelivery, recordAgentContextAdmission } from './project-agent/agent-delivery.mjs';
 export { createAgentEventPublisher } from './project-agent/agent-activity.mjs';
 
 export { agentCommunicationExcludedPrefixes } from './project-agent/work-session-profile.mjs';
 export { createLocalImageProvider, detectLocalImageMediaType, isLocalImageObservation } from './local-image-provider.mjs';
 export { LOCAL_IMAGE_TOOL_DEFINITIONS } from './local-image-tools.mjs';
-export { LOCAL_IMAGE_CONTEXT_PREFIX, checkpointWithoutLocalImagePixels, bindLocalImageContextBlock, createLocalImageContinuationStore, localImageContinuations } from './local-image-checkpoint.mjs';
+export {
+  LOCAL_IMAGE_CONTEXT_PREFIX,
+  checkpointWithoutLocalImagePixels,
+  bindLocalImageContextBlock,
+  createLocalImageContinuationStore,
+  localImageContinuations,
+} from './local-image-checkpoint.mjs';
 
-export { createImageReadAuthority, resolvePermissionPrincipal, permissionOperationKey, IMAGE_READ_GRANT_TTL_MS } from './project-agent/permission-inheritance.mjs';
+export {
+  createImageReadAuthority,
+  resolvePermissionPrincipal,
+  permissionOperationKey,
+  IMAGE_READ_GRANT_TTL_MS,
+} from './project-agent/permission-inheritance.mjs';
 export { createBotAccessPolicyAuthority } from './project-agent/bot-access-policy.mjs';
 
-export { parseSseDataPayload, createSseAbortError, createSseIdleTimeoutError, throwIfSseReaderAborted, readSseChunk, cancelSseReader } from './provider-adapters/sse-line.mjs';
+export {
+  parseSseDataPayload,
+  createSseAbortError,
+  createSseIdleTimeoutError,
+  throwIfSseReaderAborted,
+  readSseChunk,
+  cancelSseReader,
+} from './provider-adapters/sse-line.mjs';
 export { createLocalGitProvider } from './local-git-provider.mjs';
 export { LOCAL_GIT_TOOL_DEFINITIONS } from './local-git-tools.mjs';
 export { createNodeGitProvider, NODE_GIT_CAPABILITY_MANIFESTS } from './git-provider.ts';
@@ -654,3 +697,7 @@ export * from './project-agent/resource-edit-storage.mjs';
 export { inspectCoordinationFork, recoverCoordinationForkBackup } from './project-agent/coordination-fork-recovery.mjs';
 export { createCoordinationRecoveryService } from './project-agent/coordination-recovery-service.mjs';
 export { executionOwnershipOf } from './project-agent/session-facts.mjs';
+
+export { createWorkingContextProvider } from './project-agent/working-context-provider.mjs';
+export { readWorkingContext } from './project-agent/working-context.mjs';
+export { CONTINUITY_TOOL_SPECS, CONTINUITY_CAPABILITY_IDS, WORKING_CONTEXT_DESCRIPTION } from './project-agent/working-context-specs.mjs';

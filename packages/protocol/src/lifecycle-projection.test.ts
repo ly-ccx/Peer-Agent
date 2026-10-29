@@ -18,6 +18,7 @@ test('an ended delegated failure belongs to the parent without reopening user pa
   assert.equal(deriveSessionFacts({ ...snapshot }).status, 'waiting_agent');
   assert.equal(decideLifecycle({ ...snapshot, delegated: false }).status, 'paused');
   assert.equal(decideLifecycle(snapshot, { phase: 'paused' }).status, 'paused');
+  assert.equal(decideLifecycle(snapshot, { interruptionOrigin: 'user' }).status, 'paused');
   assert.equal(decideLifecycle({ ...snapshot, status: 'cancelled' }).status, 'cancelled');
   assert.equal(decideLifecycle(snapshot, { takeoverPhase: 'awaiting_outcome' }).status, 'awaiting_outcome');
   assert.equal(decideLifecycle(snapshot, { accepted: true }).status, 'accepted');

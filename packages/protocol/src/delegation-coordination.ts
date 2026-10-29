@@ -1,5 +1,5 @@
 /** Coordination authority is issued by the local host, never by model arguments. */
-export type CoordinationAction = 'parallel' | 'augment' | 'revise' | 'query' | 'answer' | 'cancel' | 'replace' | 'handoff';
+export type CoordinationAction = 'parallel' | 'augment' | 'revise' | 'query' | 'answer' | 'cancel' | 'replace' | 'handoff' | 'resume';
 export type CoordinationLifecycle = 'active' | 'paused' | 'cancelled' | 'fulfilled';
 export interface CoordinationMandate {
   schemaVersion: 1;
@@ -47,7 +47,10 @@ export interface TaskTransition {
   replacementSessionId?: string;
   executionEpoch: string;
   phase: TaskTransitionPhase;
-  minimumExecutorVersion: 1;
+  minimumExecutorVersion: 1 | 2;
+  executionAdmission?: 'queued' | 'admitted' | 'rejected';
+  executionEffect?: 'pending' | 'applied' | 'unknown' | 'rejected';
+  executionAttemptRef?: string;
   updatedAt: string;
 }
 export interface CoordinationExecutionBinding {
@@ -59,6 +62,9 @@ export interface CoordinationExecutionBinding {
 
 /** Factual view of a durable operation; completed means disposition applied, not task success. */
 export interface CoordinationSessionFacts {
+  readonly executionAdmission?: TaskTransition['executionAdmission'];
+  readonly executionEffect?: TaskTransition['executionEffect'];
+  readonly executionAttemptRef?: string;
   readonly operationId: string;
   readonly action: CoordinationAction;
   readonly phase: TaskTransitionPhase;

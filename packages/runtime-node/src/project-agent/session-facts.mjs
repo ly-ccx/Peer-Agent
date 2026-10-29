@@ -67,6 +67,7 @@ export function sessionFactsFromPlan(plan) {
       ? 'waiting_parent_agent' : plan?.runner?.blockedReason,
     interrupted: Boolean(plan?.runner?.interruption),
     delegated: Boolean(plan?.delegationOrigin),
+    interruptionOrigin: plan?.runner?.interruption?.origin,
     verificationActive,
     executionOwnership,
   }), verificationActive, executionOwnership };

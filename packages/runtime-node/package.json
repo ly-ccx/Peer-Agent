@@ -10,7 +10,23 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./testing": "./src/testing/scripted-turn-executor.mjs"
+    "./testing": "./src/testing/scripted-turn-executor.mjs",
+    "./storage": {
+      "types": "./dist/storage-public.d.ts",
+      "default": "./dist/storage-public.js"
+    },
+    "./models": {
+      "types": "./dist/models-public.d.ts",
+      "default": "./dist/models-public.js"
+    },
+    "./providers": {
+      "types": "./dist/providers-public.d.ts",
+      "default": "./dist/providers-public.js"
+    },
+    "./project-agent": {
+      "types": "./dist/project-agent-public.d.ts",
+      "default": "./dist/project-agent-public.js"
+    }
   },
   "files": [
     "dist",

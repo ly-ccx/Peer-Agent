@@ -17,6 +17,8 @@ export interface ConversationUsage {
 }
 
 export type ConversationContextSnapshot = ContextAccountingSnapshot;
+export type ImmutableHistoryValue<T> = T extends object
+  ? { readonly [K in keyof T]: ImmutableHistoryValue<T[K]> } : T;
 
 export interface ConversationMeta {
   readonly id: string;
@@ -181,9 +183,12 @@ export interface ConversationStore {
   /** Persisted records before any streaming sidecar target; still requires runtime liveness checks. */
   getPersistedConversationHistory?(id: string): PersistedConversationHistory | null;
   /** Compact presentation cache; does not attest permissions, runtime liveness or acceptance.
-   * immutableInput opts a pure callback into deeply frozen shared input; results remain isolated. */
+   * immutableInput opts a pure callback into deeply frozen shared input.
+   * immutableOutput shares deeply frozen plain derived facts; default results remain isolated copies. */
   createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
-    options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean }): (id: string) => T | null;
+    options: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput: true }): (id: string) => ImmutableHistoryValue<T> | null;
+  createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
+    options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
   /** Current index batch; no cross-file transaction or permission/liveness attestation. */
   getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;

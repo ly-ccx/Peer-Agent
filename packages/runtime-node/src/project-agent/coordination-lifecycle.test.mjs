@@ -8,10 +8,11 @@ import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
 
-function fixture(t) {
+async function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'coordination-effects-'));
-  const options = { rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one' };
+  const options = { rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one', formatVersion: 2, fenceLegacyWrites: true };
   const store = createWorkCoordinationStore(options);
+  await store.prepare();
   store.saveWork({ workId: 'goal', parentConversationId: 'parent', state: 'waiting_children' });
   const release = registerWorkBudget('w', store);
   t.after(() => { release(); rmSync(root, { recursive: true, force: true }); });
@@ -44,7 +45,7 @@ function fixture(t) {
 }
 
 test('parallel work survives a sibling cancellation and cancellation events cannot revive it', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const a = await f.lifecycle.coordinate({ action:'parallel', reason:'A', task:f.task('u1') },f.context('u1','a'));
   const b = await f.lifecycle.coordinate({ action:'parallel', reason:'B', task:f.task('u1') },f.context('u1','b'));
   const profile = id => ({ workspaceId:'w', workId:'goal', coordinationBinding:f.sessions.get(id).origin.coordinationBinding });
@@ -61,7 +62,7 @@ test('parallel work survives a sibling cancellation and cancellation events cann
 });
 
 test('one synchronous coordination decision reads its current parent messages once', async t => {
-  const f = fixture(t); let reads = 0;
+  const f = await fixture(t); let reads = 0;
   const lifecycle = createCoordinationLifecycle({ ...f.ports, readMessages: id => { reads++; return f.ports.readMessages(id); } });
   const result = await lifecycle.coordinate({ action: 'parallel', reason: 'inspect', task: f.task('u1') }, f.context('u1', 'once'));
   assert.equal(result.ok, true); assert.equal(reads, 1);
@@ -69,7 +70,7 @@ test('one synchronous coordination decision reads its current parent messages on
 });
 
 test('query discovers an owned legacy session without a revision, mutation, mandate or execution', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   f.sessions.set('legacy', { sessionId: 'legacy', workspaceId: 'w', status: 'waiting_agent', origin: { parentConversationId: 'parent' } });
   const before = f.store.read();
   const result = await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy', reason: 'discover current state' }, f.context('', 'query', { currentInputAnchors: [] }));
@@ -81,7 +82,7 @@ test('query discovers an owned legacy session without a revision, mutation, mand
 });
 
 test('a wake corrects a string revision and user-only entry point, then hands off under the original mandate', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const started = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
   f.sessions.get(started.sessionId).status = 'waiting_agent';
   const event = { eventId: 'interrupted', sessionId: started.sessionId, kind: 'interrupted' };
@@ -115,7 +116,7 @@ test('a wake corrects a string revision and user-only entry point, then hands of
 });
 
 test('capability failure precedes replacement revision and cancellation of existing work', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const original = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
   const before = f.store.read();
   const diagnostic = { stage: 'delegation_admission', reason: 'delegation_capability_unavailable', missing: ['local.shell.exec'], retryable: false, userActionRequired: false };
@@ -128,7 +129,7 @@ test('capability failure precedes replacement revision and cancellation of exist
 });
 
 test('replacement replay and consecutive corrections follow durable lineage without duplicate tasks', async t => {
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const replace={action:'replace',reason:'correct direction',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')};
   const b=await f.lifecycle.coordinate(replace,f.context('u2','replace'));
   assert.equal(b.phase,'completed'); assert.equal(f.spawns.length,2);
@@ -143,14 +144,14 @@ test('replacement replay and consecutive corrections follow durable lineage with
 });
 
 test('unknown external outcome preserves the old task and does not dispatch a replacement', async t => {
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   f.unknown(); const result=await f.lifecycle.coordinate({action:'replace',reason:'correct',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','replace'));
   assert.equal(result.phase,'awaiting_outcome'); assert.equal(result.error,'execution_outcome_unknown');
   await f.lifecycle.recover('w'); assert.equal(f.spawns.length,1);
 });
 
 test('session projection keeps replacement lineage after an update and a progress query',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const b=await f.lifecycle.coordinate({action:'replace',reason:'correct A',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','replace'));
   await f.lifecycle.coordinate({action:'augment',reason:'extra context',text:'inspect the rounded corners',sessionId:b.sessionId,expectedRevision:2},f.context('u3','update'));
   await f.lifecycle.coordinate({action:'query',reason:'progress',sessionId:b.sessionId,expectedRevision:2},f.context('u3','query'));
@@ -163,7 +164,7 @@ test('session projection keeps replacement lineage after an update and a progres
 });
 
 test('parallel work referencing another session does not claim replacement lineage',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const b=await f.lifecycle.coordinate({action:'parallel',reason:'B alongside A',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','b'));
   const facts=f.lifecycle.forSession('w',b.sessionId);
   assert.equal(facts.action,'parallel');
@@ -172,7 +173,7 @@ test('parallel work referencing another session does not claim replacement linea
 });
 
 test('started-step recovery finishes its receipt without redispatching a persisted task', async t => {
-  const f=fixture(t);
+  const f=await fixture(t);
   f.store.decide({operationId:'crash',workId:'goal',expectedRevision:0,action:'parallel',reason:'A',sourceInputIds:['u1'],sourceEventIds:[],payload:{task:f.task('u1'),context:{workspaceId:'w',parentConversationId:'parent'}}},
     {parentConversationId:'parent',currentInputIds:['u1']});
   f.store.advanceTransition('crash','recorded',{phase:'ready'});
@@ -181,7 +182,7 @@ test('started-step recovery finishes its receipt without redispatching a persist
 });
 
 test('rollback settles registered cancellation without dispatching its replacement or reviving the old task',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const result=f.store.decide({operationId:'replace',workId:'goal',expectedRevision:1,action:'replace',sessionId:a.sessionId,reason:'correct A',sourceInputIds:['u2'],sourceEventIds:[],
     payload:{task:f.task('u2'),context:f.context('u2','replace')}},{parentConversationId:'parent',currentInputIds:['u2']});
   assert.equal(result.ok,true);
@@ -195,7 +196,7 @@ test('rollback settles registered cancellation without dispatching its replaceme
 });
 
 test('legacy adoption requires this turn canonical human input; human approval remains pending',async t=>{
-  const f=fixture(t);
+  const f=await fixture(t);
   f.sessions.set('legacy',{sessionId:'legacy',workspaceId:'w',status:'running',origin:{parentConversationId:'parent'}});
   const input={action:'handoff',reason:'take over',sessionId:'legacy',expectedRevision:0};
   const wake=await f.lifecycle.coordinate(input,f.context('', 'wake',{currentInputAnchors:[],events:[{eventId:'file-instruction',sessionId:'legacy'}]}));
@@ -206,7 +207,7 @@ test('legacy adoption requires this turn canonical human input; human approval r
 });
 
 test('a fulfilled mandate cannot create work from a late event; a fresh human correction preserves the accepted result',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   f.sessions.get(a.sessionId).status='accepted';
   f.store.transfer([{eventId:'done',sessionId:a.sessionId,kind:'result_ready'}]);
   assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'fulfilled');
@@ -218,7 +219,7 @@ test('a fulfilled mandate cannot create work from a late event; a fresh human co
 });
 
 test('session lifecycle queries do not clone execution history or authorize from compact facts', async t => {
-  const f=fixture(t);
+  const f=await fixture(t);
   const a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   f.sessions.get(a.sessionId).status='accepted';
   const original=f.store.read;f.store.read=()=>{throw Error('full-state probe');};

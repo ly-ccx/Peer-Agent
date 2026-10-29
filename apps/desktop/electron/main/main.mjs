@@ -10,7 +10,7 @@ import { createBrowserWindowController } from './browser-window-controller.mjs';
 import { createBrowserWindowIpcRegistrations } from './ipc/register-browser-window-ipc.mjs';
 import { app, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
-import http from 'node:http';
+import { createMcpOAuthCallback } from './mcp-oauth-callback.mjs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -67,7 +67,11 @@ import { createPasswordVaultStore } from './password-vault-store.mjs';
 import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { getApplicationShellTasks, disposeApplicationShellTasks } from './runtime-gateway/application-shell-tasks.mjs';
-import { getApplicationShellSessions, disposeApplicationShellConversation, disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
+import {
+  getApplicationShellSessions,
+  disposeApplicationShellConversation,
+  disposeApplicationShellSessions,
+} from './runtime-gateway/application-shell-sessions.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
@@ -108,23 +112,35 @@ import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs'
 import {
   createAutomationStore,
   createGoalPlanStore,
-  resolveWorkspaceHead,
-  decideIntakeConvergence,
   exportBundle,
   getDataHome,
   goalPlanIsSelfDriven,
   importBundle,
   migrateFromLegacy,
-  removeConversationToolArtifacts,
+  applyStartupApprovalRecovery,
+  createApprovalStore,
+  createHostLease,
+  listBotWorkspaceIds
+} from "@peer-agent/runtime-node/storage";
+import {
+  resolveWorkspaceHead,
+  decideIntakeConvergence,
   isStalledAcceptedGoalRunner,
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
   shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
-  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
-  applyStartupApprovalRecovery, createApprovalStore, createHostLease, listBotWorkspaceIds, createResourceEditStorage, createBotProfileStore, createBotAccessPolicyAuthority,
-} from '@peer-agent/runtime-node';
+  shouldRecoverAcceptedGoalRunnerOnConversationOpen
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  removeConversationToolArtifacts
+} from "@peer-agent/runtime-node/providers";
+import {
+  createResourceEditStorage,
+  createBotProfileStore,
+  createBotAccessPolicyAuthority
+} from "@peer-agent/runtime-node/project-agent";
 import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
@@ -360,61 +376,10 @@ const mcpCredentialResolver = async (auth, server) => {
   }
   return injection;
 };
-const MCP_OAUTH_CALLBACK_PORT = 33418;
-const MCP_OAUTH_CALLBACK_PATH = '/mcp/oauth/callback';
-const MCP_OAUTH_CALLBACK_URL = `http://127.0.0.1:${MCP_OAUTH_CALLBACK_PORT}${MCP_OAUTH_CALLBACK_PATH}`;
-const MCP_OAUTH_CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
-let activeMcpOAuthCallback = null;
-
-function closeMcpOAuthCallback() {
-  if (activeMcpOAuthCallback?.server) {
-    try { activeMcpOAuthCallback.server.close(); } catch {}
-  }
-  if (activeMcpOAuthCallback?.timer) clearTimeout(activeMcpOAuthCallback.timer);
-  activeMcpOAuthCallback = null;
-}
-
-function waitForMcpOAuthCallback(expectedState) {
-  closeMcpOAuthCallback();
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      try {
-        const callbackUrl = new URL(req.url ?? '/', MCP_OAUTH_CALLBACK_URL);
-        if (callbackUrl.pathname !== MCP_OAUTH_CALLBACK_PATH) {
-          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-          res.end('Not found');
-          return;
-        }
-        const state = callbackUrl.searchParams.get('state') ?? '';
-        const code = callbackUrl.searchParams.get('code') ?? '';
-        const error = callbackUrl.searchParams.get('error') ?? '';
-        if (expectedState && state && state !== expectedState) throw new Error('MCP OAuth state mismatch.');
-        if (error) throw new Error(`MCP OAuth failed: ${error}`);
-        if (!code) throw new Error('MCP OAuth callback missing authorization code.');
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权已完成，可以回到 Peer Agent。</p>');
-        resolve(code);
-      } catch (error) {
-        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权失败，请回到 Peer Agent 重试。</p>');
-        reject(error);
-      } finally {
-        closeMcpOAuthCallback();
-      }
-    });
-    server.once('error', (error) => {
-      closeMcpOAuthCallback();
-      reject(error);
-    });
-    server.listen(MCP_OAUTH_CALLBACK_PORT, '127.0.0.1', () => {
-      const timer = setTimeout(() => {
-        closeMcpOAuthCallback();
-        reject(new Error('MCP OAuth authorization timed out.'));
-      }, MCP_OAUTH_CALLBACK_TIMEOUT_MS);
-      activeMcpOAuthCallback = { server, timer };
-    });
-  });
-}
+const mcpOAuthCallback = createMcpOAuthCallback();
+const MCP_OAUTH_CALLBACK_URL = mcpOAuthCallback.url;
+const closeMcpOAuthCallback = mcpOAuthCallback.dispose;
+const waitForMcpOAuthCallback = mcpOAuthCallback.wait;
 
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();

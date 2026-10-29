@@ -1,3 +1,4 @@
+import './settings-section-header.css';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useId } from 'react';
 import { clientApi } from '../../clientApi';

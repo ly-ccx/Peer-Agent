@@ -10,4 +10,4 @@ export {
   goalPlanRequiresApproval,
   normalizeGoalTiming,
   runnerWaitsOnUser,
-} from '@peer-agent/runtime-node';
+} from '@peer-agent/runtime-node/storage';

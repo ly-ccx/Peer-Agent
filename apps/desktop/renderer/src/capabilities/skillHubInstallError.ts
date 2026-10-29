@@ -7,7 +7,7 @@
  */
 
 const ERROR_MESSAGES: Record<string, string> = {
-  workspace_required: '当前没有打开工作区，无法安装到工作区',
+  workspace_required: '当前没有可用机器人，无法安装到机器人',
   skillhub_marketplace_not_available: 'SkillHub 市场服务不可用，请重启应用后重试',
   skillhub_signature_required: '该版本缺少 SkillHub 平台签名，无法验证安装包',
   skillhub_signature_payload_invalid: '签名载荷无效，无法完成安全校验',
