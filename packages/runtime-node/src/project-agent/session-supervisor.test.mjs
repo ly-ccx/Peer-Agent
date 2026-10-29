@@ -2724,6 +2724,8 @@ test('new user turns see unresolved work from the same Bot; wakes and other pare
     assert.match(rows[0].blockedReason, /Verification gate failed/);
     assert.deepEqual(env.supervisor.summaries({ ...scope, kind: 'wake' }), []);
     assert.deepEqual(env.supervisor.summaries({ ...scope, conversationId: 'other-parent' }), []);
+    env.goalPlanStore.revisePlan(plan.planId, hostPassPatch(), { reason: 'host evidence', changedBy: 'test' });
+    env.goalPlanStore.recordEvidenceRefs({ planId: plan.planId, evidenceRefs: ['ev-1'] });
     env.goalPlanStore.revisePlan(plan.planId, { status: 'completed', runner: { status: 'completed' },
       resultAcceptance: { acceptedAt: '2026-10-29T00:00:00Z', acceptedBy: 'policy', verdictRef: 'real' } });
     assert.deepEqual(env.supervisor.summaries(scope), []);

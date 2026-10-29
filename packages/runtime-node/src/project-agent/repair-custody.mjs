@@ -5,6 +5,8 @@ import { workBudgetBinding } from './work-budget.mjs';
 
 /** Reclaim an existing obligation, never create another observer or replay completed tools. */
 export function reconcileRepairCustody({ store, conversationId, sessions }) {
+  let snapshot;
+  const roster = () => snapshot ??= typeof sessions === 'function' ? sessions() : sessions;
   const state = store.readSnapshot?.() ?? store.read();
   const works = Object.values(state.works);
   const candidates = works.filter(work => work.parentConversationId === conversationId
@@ -17,7 +19,7 @@ export function reconcileRepairCustody({ store, conversationId, sessions }) {
     && !historyExecutionHeld(work) && !['delivered','cancelled','coalesced','paused'].includes(work.state))
     .filter(work => !candidates.includes(work)).flatMap(work => work.repairSessionIds?.length ? work.repairSessionIds : work.sessionIds || []));
   for (const work of candidates) {
-    const related = (work.sessionIds || []).map(id => sessions.find(row => row.sessionId === id));
+    const related = (work.sessionIds || []).map(id => roster().find(row => row.sessionId === id));
     if (!related.length || related.some(row => !row)) continue;
     const ownership = repairOwnership(related);
     if (ownership.needsUser || !ownership.repairSessionIds.length || ownership.repairSessionIds.some(id => claimed.has(id))) continue;

@@ -124,7 +124,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
       if (!reportedWaitCurrent(work.reportedWait, roster())) update({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
     }
-    reconcileRepairCustody({store,conversationId,sessions:roster()});
+    reconcileRepairCustody({store,conversationId,sessions:roster});
     decisionSnapshot = undefined;
     return {
       choose(userOnly) {
