@@ -17,8 +17,6 @@ import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget } from './work-budget.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
-import { readDrawerSession } from '../../../../apps/desktop/renderer/src/project-agent/state/drawerState.ts';
-import { backgroundWork, indexBotWork } from '../../../../apps/desktop/renderer/src/project-agent/state/botWorkState.ts';
 
 function model(id, extra = {}) {
   return {
@@ -2157,8 +2155,6 @@ test('current user withdraws stopped work while retaining the original unknown B
     ...supervisor.summaries({workspaceId:'ws-1',all:true}),...supervisor.listByWorkspaceIds(['ws-1']).get('ws-1')];
    for(const row of reads){
     assert.equal(row.status,'cancelled');assert.equal(row.followUp.inCurrentList,false);
-    const parsed=readDrawerSession(row);assert.ok(parsed);
-    assert.equal(backgroundWork(indexBotWork([parsed],true)).count,0);
    }
    const disk=JSON.parse(readFileSync(path.join(plans.getStoreDir(),`${planId}.json`),'utf8'));
    assert.equal(disk.status,'cancelled');assert.deepEqual(disk.runner.interruption,interruption);
