@@ -63,7 +63,9 @@ RC29 强化了持久监督与撤回收口。撤回委托保留历史，也可能
 
 升级前备份完整数据目录。Desktop、CLI/TUI 与 Gateway 按同一版本说明升级，回退按对应发布说明恢复备份。
 
-[正式版 0.0.18](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18) 使用经典工作流。Linux 的 AppImage 依赖和显示服务要求，以发布说明为准。
+Linux x64 选择 `Peer-Agent-<ver>-x64.AppImage`（推荐）或 `.deb`。两者均未签名，应用内更新只支持 AppImage（`latest-linux.yml`）。AppImage 依赖和显示服务要求，以发布说明为准。
+
+[正式版 0.0.18](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18) 使用经典工作流。
 
 ### CLI / TUI
 
@@ -91,6 +93,11 @@ npm 包安装对应平台的二进制及 helper；可用平台与安装包以对
 启动 TUI：
 
     pnpm --filter @peer-agent/tui dev
+
+打包 Linux Desktop x64（AppImage 与 `.deb` 需要 libdbus-1-dev、fakeroot、dpkg）：
+
+    pnpm pack:linux    # 解包目录，用于沙箱与冒烟检查
+    pnpm dist:linux    # AppImage + .deb
 
 ## 本地控制与证据
 

@@ -63,7 +63,9 @@ In the 0.1 preview, the Workspace beside the conversation opens web pages, docum
 
 Back up the complete data directory before upgrading. Upgrade Desktop, CLI/TUI and Gateway according to the same release instructions. Rollback follows the release-specific backup procedure.
 
-The [stable 0.0.18 release](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18) uses classic workflows. On Linux, read the release notes for AppImage dependencies and display-server guidance.
+On Linux x64, choose `Peer-Agent-<ver>-x64.AppImage` (preferred) or `.deb`. Both are unsigned, and in-app updates are AppImage-only (`latest-linux.yml`). Read the release notes for AppImage dependencies and display-server guidance.
+
+The [stable 0.0.18 release](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18) uses classic workflows.
 
 ### CLI / TUI
 
@@ -91,6 +93,11 @@ Use Node.js 25 (the current CI version), pnpm 10.22.0 and a Rust toolchain. Bun 
 For the TUI:
 
     pnpm --filter @peer-agent/tui dev
+
+To package Linux Desktop x64 (the AppImage and `.deb` need libdbus-1-dev, fakeroot and dpkg):
+
+    pnpm pack:linux    # unpacked directory for sandbox and smoke checks
+    pnpm dist:linux    # AppImage + .deb
 
 ## Local control and evidence
 
