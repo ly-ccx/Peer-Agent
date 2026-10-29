@@ -57,7 +57,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
   ...OBJECTIVE_TOOL_SPECS,
   spec('coordinate_work', 'local.delegation.coordinate_work', {
     type: 'object', properties: {
-      action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff'] },
+      action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'] },
       workId: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 },
       expectedRevision: { type: 'integer', minimum: 0 }, reason: { type: 'string', maxLength: 500 },
       text: { type: 'string', maxLength: 4000 }, replyTo: { type: 'string', maxLength: 200 }, task: SPAWN_INPUT_SCHEMA,
@@ -68,6 +68,19 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
       sessionId: { type: 'string', maxLength: 200, description: 'Direct child session for the parent. Workers use their own host identity.' },
       text: { type: 'string', maxLength: 4000 },
       purpose: { type: 'string', enum: ['update', 'question', 'answer'] },
+      delivery: { type: 'string', enum: ['mailbox_only', 'ensure_turn'] },
+      expectedRevision: { type: 'integer', minimum: 0 },
+      expectedExecutionEpoch: { type: 'string', maxLength: 200 },
+      decisionRequest: { type: 'object', properties: {
+        options: { type: 'array', maxItems: 16, items: { type: 'object', properties: {
+          optionId: { type: 'string', maxLength: 100 }, label: { type: 'string', maxLength: 1000 },
+        }, required: ['optionId', 'label'], additionalProperties: false } },
+        multiple: { type: 'boolean' }, allowText: { type: 'boolean' },
+      }, additionalProperties: false },
+      decisionAnswer: { type: 'object', properties: {
+        requestId: { type: 'string', maxLength: 200 }, expectedRequestRevision: { type: 'integer', minimum: 1 },
+        optionIds: { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 100 } }, text: { type: 'string', maxLength: 4000 },
+      }, required: ['requestId', 'expectedRequestRevision'], additionalProperties: false },
       replyTo: { type: 'string', maxLength: 200, description: 'Question messageId being answered. Required to resume a worker waiting for its parent.' },
     }, required: ['text', 'purpose'], additionalProperties: false,
   }),
@@ -168,6 +181,8 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
         properties: {
           options: { type: 'array', items: { type: 'string' }, minItems: 1 },
           expiresAt: { type: 'string', description: 'Optional ISO deadline for this conversational decision; never a permission grant.' },
+          agentRequestId: { type: 'string', maxLength: 200 },
+          expectedRequestRevision: { type: 'integer', minimum: 1 },
         },
         required: ['options'],
         additionalProperties: false,
@@ -196,7 +211,7 @@ export function validateDelegationInput(name, raw) {
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'coordinate_work') {
     if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task'].includes(key))
-      || !['parallel','augment','revise','query','answer','cancel','replace','handoff'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
+      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
     if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200) || input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Malformed task identity or version.');
     if (input.action === 'query' && !text(input.sessionId,200)) return invalid('Select a real session to discover its current facts and goalRevision.');
     if (!['parallel','query'].includes(input.action) && (!text(input.sessionId,200) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Select a real session and its current goalRevision.');
@@ -212,10 +227,12 @@ export function validateDelegationInput(name, raw) {
   }
   if (name === 'send_agent_message') {
     const body = text(input.text, 4000), sessionId = text(input.sessionId, 200);
-    if (Object.keys(input).some(key => !['sessionId', 'text', 'purpose', 'replyTo'].includes(key))
+    if (Object.keys(input).some(key => !['sessionId', 'text', 'purpose', 'replyTo', 'delivery', 'expectedRevision', 'expectedExecutionEpoch', 'decisionRequest', 'decisionAnswer'].includes(key))
       || !body || !['update', 'question', 'answer'].includes(input.purpose)
       || input.sessionId !== undefined && !sessionId || input.replyTo !== undefined && !text(input.replyTo, 200)) return invalid('A bounded message and purpose are required; identity is assigned by the host.');
-    return { ok: true, value: { text: body, purpose: input.purpose, ...(sessionId ? { sessionId } : {}), ...(input.replyTo ? { replyTo: input.replyTo.trim() } : {}) } };
+    const extension = parseAgentMessageExtension(input);
+    if (!extension.ok) return invalid('Invalid Agent decision or delivery contract.');
+    return { ok: true, value: { ...extension.value, text: body, purpose: input.purpose, ...(sessionId ? { sessionId } : {}), ...(input.replyTo ? { replyTo: input.replyTo.trim() } : {}) } };
   }
   if (name === 'spawn_session') return validateSpawn(input);
   if (name === 'control_work') {
@@ -478,7 +495,13 @@ function validateReply(input) {
   if (input.question !== undefined) {
     const options = stringList(input.question?.options, { min: 1, max: 8, itemMax: 200 });
     if (!options) return invalid('question.options must contain 1 to 8 choices.');
-    value.question = { options };
+    const question = input.question;
+    if (Object.keys(question).some(key => !['options', 'expiresAt', 'agentRequestId', 'expectedRequestRevision'].includes(key))
+      || question.expiresAt !== undefined && !Number.isFinite(Date.parse(question.expiresAt))
+      || question.agentRequestId !== undefined && (!text(question.agentRequestId, 200) || !Number.isSafeInteger(question.expectedRequestRevision) || question.expectedRequestRevision < 1)
+      || question.expectedRequestRevision !== undefined && !question.agentRequestId) return invalid('Invalid linked question identity or revision.');
+    value.question = { options, ...(question.expiresAt ? { expiresAt: question.expiresAt } : {}),
+      ...(question.agentRequestId ? { agentRequestId: question.agentRequestId, expectedRequestRevision: question.expectedRequestRevision } : {}) };
   }
   return { ok: true, value };
 }
@@ -609,3 +632,4 @@ function validateMemoryForget(input) {
   if (!reason) return invalid('reason is required and must be at most 500 characters.');
   return { ok: true, value: { id, reason } };
 }
+import { parseAgentMessageExtension } from './agent-message-input.mjs';

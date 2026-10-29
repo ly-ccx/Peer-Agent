@@ -105,14 +105,14 @@ test('custody accepts a lazy roster and does not read it for ineligible work',()
  }finally{f.close();}
 });
 
-test('one recovery decision shares its post-reconciliation work snapshot', () => {
+test('an empty recovery decision reads one authoritative inventory', () => {
  for (const immutable of [false, true]) {
  const f=fixture();let reads=0;const port=immutable?'readSnapshot':'read', original=f.store[port];
  f.store[port]=()=>{reads++;return original();};
  if (immutable) f.store.read=()=>assert.fail('recovery observation must not copy all work');
  else f.store.readSnapshot=undefined;
  const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
- try {assert.equal(c.recoverJob(),null);assert.equal(reads,4,'three preparation readers plus one decision snapshot');}
+ try {assert.equal(c.recoverJob(),null);assert.equal(reads,1,'empty work needs one inventory and no repair scans');}
  finally{f.close();}
  }
 });
@@ -151,7 +151,7 @@ test('one selection prepares once across user, event and background priority', (
  f.store.readSnapshot=()=>{reads++;return original();};f.store.read=()=>{fullReads++;return fullRead();};
  const c=createRunnerCoordination({store:f.store,inbox:{},workspaceId:'w',conversationId:'c',readMessages:()=>[],remember:()=>{},resolveRoster:()=>[]});
  try {
-  assert.deepEqual(c.selectNext(),{job:null});assert.equal(reads,4,'one preparation and one decision even when all three queues are empty');
+  assert.deepEqual(c.selectNext(),{job:null});assert.equal(reads,1,'one inventory serves all empty priority queues');
   assert.equal(fullReads,0,'immutable observations must avoid unrelated payload copies');
   f.seed('background');f.store.transfer([{eventId:'fresh',kind:'needs_user',sessionId:'other'}]);
   assert.equal(c.selectNext().events[0].eventId,'fresh','an unowned event precedes a background continuation');

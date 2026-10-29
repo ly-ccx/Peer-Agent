@@ -1,3 +1,4 @@
+import './automations.css';
 import { MotionDetails } from '../app/components/MotionDetails';
 import type {
   AutomationDefinition,

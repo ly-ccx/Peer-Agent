@@ -1088,6 +1088,7 @@ export interface GoalRunnerState {
    * 中断在计划状态重派生时被误判为完成。
    */
   readonly interruption?: {
+    readonly origin?: import('./agent-supervision.ts').InterruptionOrigin;
     readonly source: string;
     readonly reason: string;
     readonly interruptedAt: string;

@@ -103,3 +103,33 @@ test('independent projections share one strict parsed source per version without
   writeFileSync(file,'{broken');assert.throws(()=>a(meta.id),{code:'BACKGROUND_HISTORY_CORRUPT'});assert.throws(()=>b(meta.id),{code:'BACKGROUND_HISTORY_CORRUPT'});
   rmSync(file);assert.throws(()=>a(meta.id),{code:'BACKGROUND_HISTORY_MISSING'});assert.throws(()=>b(meta.id),{code:'BACKGROUND_HISTORY_MISSING'});
 });
+
+test('explicit immutable output shares frozen derived facts and still invalidates by source version', () => {
+  let version = 1;
+  const read = createHistoryProjectionReader({ immutableInput: true, immutableOutput: true,
+    describe: () => ({ version }), load: () => ({ messages: [{ id: String(version), question: { options: ['A'] } }] }),
+    project: history => history.messages,
+  });
+  const first = read('a');
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first[0].question.options), true);
+  assert.throws(() => first[0].question.options.push('forged'), TypeError);
+  assert.strictEqual(read('a'), first);
+  version++;
+  assert.equal(read('a')[0].id, '2');
+  assert.equal(first[0].id, '1');
+});
+
+test('immutable derived output rejects objects whose methods remain mutable after Object.freeze', () => {
+  for (const value of [new Map(), new Set(), new Date(), () => 'not a fact']) {
+    const read = createHistoryProjectionReader({ immutableOutput: true,
+      describe: () => ({ version: 1 }), load: () => ({}), project: () => ({ nested: value }) });
+    assert.throws(() => read('a'), /require plain data/);
+  }
+});
+
+test('immutable output also freezes children of an already shallow-frozen plain object', () => {
+  const read = createHistoryProjectionReader({ immutableOutput: true,
+    describe: () => ({ version: 1 }), load: () => ({}), project: () => Object.freeze({ nested: [] }) });
+  assert.throws(() => read('a').nested.push('changed'), TypeError);
+});

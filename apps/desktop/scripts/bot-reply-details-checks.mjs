@@ -120,6 +120,7 @@ export async function closeReplyDetails(page) {
   }, replyId);
   await page.locator(BOT_DETAIL_CLOSE).click();
   await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
+  await settleBotLayout(page);
   // Cancelling work in the scrolled tail can unmount the original reply. The
   // existing drawer contract then returns focus to the thread with preventScroll.
   assert.equal(await page.evaluate(mounted => {

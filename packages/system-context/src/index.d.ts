@@ -35,6 +35,8 @@ export interface SystemContextInput extends Readonly<Record<string, unknown>> {
   readonly configInstructions?: readonly unknown[];
   readonly contextExtensions?: readonly unknown[];
   readonly runtimeReminders?: readonly unknown[];
+  readonly workId?: string;
+  readonly workingContext?: Readonly<Record<string, unknown>>;
   readonly continuityContext?: readonly unknown[];
   readonly explorerContext?: unknown;
   readonly verifierContext?: unknown;

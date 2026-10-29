@@ -1,3 +1,4 @@
+import '../../capabilities/capability-workbench.css';
 import { createI18n } from '@peer-agent/i18n';
 import { useMemo } from 'react';
 import { UnsavedChangesProvider } from '../../ui/forms/UnsavedChanges';

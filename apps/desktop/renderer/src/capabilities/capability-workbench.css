@@ -1,3 +1,4 @@
+@reference "tailwindcss";
 @layer components {
   .capability-workbench {
     @apply grid h-full min-h-0 min-w-0 overflow-hidden;

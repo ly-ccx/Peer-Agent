@@ -1,4 +1,8 @@
-import { createNodeRuntimeHostAdapter, createLocalGitProvider } from '@peer-agent/runtime-node';
+import { createWorkingContextProvider } from '@peer-agent/runtime-node/project-agent';
+import {
+  createNodeRuntimeHostAdapter,
+  createLocalGitProvider
+} from "@peer-agent/runtime-node/providers";
 import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
@@ -96,6 +100,7 @@ export function createLocalToolHost({
       goalProvider,
       activeDelegationProvider,
       activeMemoryProvider,
+      createWorkingContextProvider({ supervisor: liveDelegationSupervisor() }),
       interactionProvider,
       automationProposalProvider,
       webProvider,

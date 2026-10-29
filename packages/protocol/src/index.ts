@@ -1,23 +1,64 @@
 export type { AttentionCard, BotDecisionSnapshot, BotAttentionItem, BotAttentionRequest, BotAttentionResult } from './attention.ts';
-export type { ProjectWorkBudgetLimits, ProjectWorkBudgetBoundary, ProjectReplyRecoveryAction, ProjectWorkReceipt, ProjectWorkRecovery, ProjectWorkState, ProjectTurnEnd, ProjectReplyFailureStatus, ProjectAgentSilentWait } from './work-coordination.ts';
-export type { CoordinationAction, CoordinationLifecycle, CoordinationMandate, CoordinationDecision, TaskTransitionPhase, TaskTransition, CoordinationExecutionBinding, CoordinationSessionFacts } from './delegation-coordination.ts';
+export type {
+  ProjectWorkBudgetLimits,
+  ProjectWorkBudgetBoundary,
+  ProjectReplyRecoveryAction,
+  ProjectWorkReceipt,
+  ProjectWorkRecovery,
+  ProjectWorkState,
+  ProjectTurnEnd,
+  ProjectReplyFailureStatus,
+  ProjectAgentSilentWait,
+} from './work-coordination.ts';
+export type {
+  CoordinationAction,
+  CoordinationLifecycle,
+  CoordinationMandate,
+  CoordinationDecision,
+  TaskTransitionPhase,
+  TaskTransition,
+  CoordinationExecutionBinding,
+  CoordinationSessionFacts,
+} from './delegation-coordination.ts';
 export { deriveSessionFacts, type SessionFactSnapshot } from './session-facts.ts';
 export { projectAgentFailureKind, classifyProjectAgentFailure, type ProjectRecoveryFailureKind, type ProviderRequestRecovery, type ProjectAgentTurnRecovery, type ReplyAnchorCandidate } from './project-agent-failure.ts';
 export type { EvidenceSourceDescription, EvidenceDeliveryBinding, EvidenceDelivery, ProjectAgentEvidenceReadRequest, ProjectAgentEvidenceReadResult } from './evidence-inspection.ts';
 export { toolActivityPreview, toolActivitySummary } from './tool-activity-preview.ts';
 export { isModelReasoningEffort, modelReasoningLevels, modelDefaultReasoningEffort, type ModelReasoningEffort } from './model-reasoning.ts';
-export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
+export type {
+  SelectionRange,
+  SelectionReference,
+  SelectionDraft,
+  SelectionOrigin,
+  SelectionChildSession,
+  SelectionChildSummary,
+  SelectionChildrenPage,
+  SelectionChildRead,
+} from './selection-reference.ts';
 
 export { buildModelMenuGroups, modelMenuChannelName, type ModelMenuRow } from './model-menu.ts';
 export { evaluateUiDelivery } from './ui-delivery-verification.ts';
 export { DESKTOP_PREVIEW_PROTOCOL, DESKTOP_PREVIEW_CAPABILITY, DESKTOP_PREVIEW_TOOL } from './desktop-preview.ts';
 export type { DesktopPreviewRequest, DesktopPreviewReply } from './desktop-preview.ts';
-export type { UiDeliveryIdentity, UiDeliveryRequirement, UiDeliveryObservation, UiDeliveryJudgment, UiDeliveryGap } from './ui-delivery-verification.ts';
+export type {
+  UiDeliveryIdentity,
+  UiDeliveryRequirement,
+  UiDeliveryObservation,
+  UiDeliveryJudgment,
+  UiDeliveryGap,
+} from './ui-delivery-verification.ts';
 
 export { REMOTE_PROTOCOL_VERSION, parseRemoteReadRequest, admitRemoteRead } from './remote-access.ts';
 export type { RemoteReadRequest, RemoteReadContext, RemoteReadRejection, RemoteReadAdmission } from './remote-access.ts';
 export { REMOTE_PROJECT_LIMITS, parseRemoteProjectRequest, admitRemoteProject, parseRemoteDelegationProjection } from './remote-access.ts';
-export type { RemoteProjectGrant, RemoteProjectRequest, RemoteProjectContext, RemoteProjectRejection, RemoteProjectAdmission, RemoteDelegationProjection } from './remote-access.ts';
+export type {
+  RemoteProjectGrant,
+  RemoteProjectRequest,
+  RemoteProjectContext,
+  RemoteProjectRejection,
+  RemoteProjectAdmission,
+  RemoteDelegationProjection,
+} from './remote-access.ts';
 
 export type LocalAccessLevel =
   | 'ask_before_local'
@@ -550,7 +591,14 @@ export interface LlmOAuthStatus {
   readonly expiresAt?: string;
 }
 
-export type { AccountUsageSource, AccountUsageScope, AccountUsageBalance, AccountUsageSpend, AccountUsageUnavailable, AccountUsageLocal } from './account-usage.js';
+export type {
+  AccountUsageSource,
+  AccountUsageScope,
+  AccountUsageBalance,
+  AccountUsageSpend,
+  AccountUsageUnavailable,
+  AccountUsageLocal,
+} from './account-usage.js';
 
 /** 订阅额度窗口（session / weekly / model 等）。 */
 export interface LlmSubscriptionQuotaWindow {
@@ -1112,6 +1160,7 @@ export * from './local-image.ts';
 export * from './bot-conversation-read.ts';
 export * from './project-recovery.ts';
 export * from './local-git.ts';
+export * from './agent-supervision.ts';
 export type { CapabilityBlocker, DelegationCapabilityAdmission } from './capability-admission.ts';
 export * from './project-input-recovery.ts';
 
@@ -1125,3 +1174,5 @@ export * from './resource-feedback.js';
 export * from './resource-edit.ts';
 export * from './resource-file-replace.ts';
 export * from './resource-edit-execution.ts';
+
+export { decideFollowUp, type FollowUpOwner, type FollowUpReason, type FollowUpProjection } from './task-overview.ts';

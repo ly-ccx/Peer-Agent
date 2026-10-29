@@ -1,3 +1,5 @@
+import './settings-section-header.css';
+import '../../styles/llm-settings.css';
 import { MotionSurface } from './MotionSurface';
 import { useFallbackVisionSetting } from '../hooks/useFallbackVisionSetting';
 import { useProviderCollection } from '../hooks/useProviderCollection';

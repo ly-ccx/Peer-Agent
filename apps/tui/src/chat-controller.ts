@@ -157,7 +157,7 @@ export interface ChatSystemContextBlock {
 
 export type ChatSupplementalSystemContextInput = Partial<Pick<
   SystemContextInput,
-  'continuityContext' | 'explorerContext' | 'verifierContext' | 'taskAcceptance' | 'role' | 'workspaceId' | 'sessionId' | 'planId' | 'turnContext' | 'projectMemory' | 'workSessionOrigin' | 'runtimeReminders'
+  'continuityContext' | 'explorerContext' | 'verifierContext' | 'taskAcceptance' | 'role' | 'workId' | 'workingContext' | 'workspaceId' | 'sessionId' | 'planId' | 'turnContext' | 'projectMemory' | 'workSessionOrigin' | 'runtimeReminders'
 >>;
 
 function firstPinnedUserText(

@@ -47,18 +47,22 @@ export function SessionDetail({
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
-  const label = session.coordination?.phase === 'stopping' ? formatDrawerSessionStatus(session,i18n) : status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
+  const followUp = session.followUp;
+  const needsYou = followUp ? followUp.owner === 'user' : session.status === 'waiting_user' || session.status === 'result_ready';
+  const label = session.coordination?.phase === 'stopping' ? formatDrawerSessionStatus(session, i18n)
+    : session.status === 'result_ready' && !needsYou ? i18n.t('projectAgent.chat.work.resultSettling')
+    : status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
     : status === 'result_ready' ? i18n.t('projectAgent.chat.work.resultReady')
     : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable');
   const progress = status === 'verifying' && session.verificationProgress
     ? i18n.t('projectAgent.chat.agent.verificationProgress', { count: session.verificationProgress.observationCount })
     : status === 'cancelled' ? label : formatDrawerSessionStatus(session, i18n);
   const stamp = formatDrawerStamp(session.spawnedAt);
-  const hint = session.status === 'waiting_user' || session.status === 'result_ready' ? 'confirm'
+  const hint = needsYou ? 'confirm'
     : session.status === 'failed' || session.status === 'unavailable' ? 'failed'
     : session.status === 'accepted' || session.status === 'cancelled' ? 'ended' : 'working';
-  const question = ['waiting_user', 'result_ready'].includes(session.status) ? context?.question : null;
-  const ended = session.status === 'accepted' || session.status === 'cancelled';
+  const question = needsYou ? context?.question : null;
+  const ended = followUp ? ['settled', 'stop_confirmed', 'superseded'].includes(followUp.reason) : session.status === 'accepted' || session.status === 'cancelled';
   const title = session.title && session.title !== session.sessionId ? session.title : i18n.t('projectAgent.chat.work.related');
   const messageId = context?.messageId || session.anchorMessageId || undefined;
   const updateText = context?.content.replace(/\s+/g, ' ').trim() ?? '';

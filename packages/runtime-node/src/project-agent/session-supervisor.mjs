@@ -1,6 +1,7 @@
+import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
 import { controlProjectWork } from './work-control.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
-import { createSessionTakeover } from './session-takeover.mjs';
+import { createSessionTakeover, takeoverHumanBlocker } from './session-takeover.mjs';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
@@ -58,6 +59,7 @@ const WRITE_CAPABILITIES = new Set(['local.file.write', 'local.file.edit', 'loca
 const WRITE_KINDS = new Set(['file-write', 'shell']);
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'bash']);
 const READ_ONLY_CAPABILITIES = new Set([
+  ...CONTINUITY_CAPABILITY_IDS,
   'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate', 'local.image.read',
   'local.git.query',
   'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
@@ -177,8 +179,8 @@ export function createSessionSupervisor({
     },
     checkTakeover: id => {
       const plan = findBySession(id);
-      return plan?.runner?.status === 'waiting_user' ? 'human_decision_required'
-        : plan?.resultAcceptance?.acceptedAt || ['completed','cancelled'].includes(plan?.status) ? 'session_not_running' : null;
+      return takeoverHumanBlocker(plan)
+        || (plan?.resultAcceptance?.acceptedAt || ['completed','cancelled'].includes(plan?.status) ? 'session_not_running' : null);
     },
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
     spawn: (input, context) => exclusive(() => spawnLocked(input, context)), requestCancel: cancellation.request,
@@ -240,12 +242,13 @@ export function createSessionSupervisor({
       needsUser: facts.needsUser,
       executionOwnership: facts.executionOwnership,
       blockedReason: plan.runner?.blockedReason,
-      agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
+      agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId) || plan.runner?.blockedReason === 'waiting_parent_agent',
       delegated: Boolean(plan.delegationOrigin),
       updatedAt: plan.updatedAt,
       conversationId: plan.conversationId,
       progress: plan.progress,
       interrupted: Boolean(plan.runner?.interruption),
+      interruptionOrigin: plan.runner?.interruption?.origin,
     };
   }
 
@@ -266,11 +269,13 @@ export function createSessionSupervisor({
     const origin = plan.delegationOrigin;
     const coordinationFacts = coordination?.forSession(origin.workspaceId, origin.sessionId);
     const conversation = readConversationFacts(plan.conversationId);
+    const humanGate = humanGateOf(plan);
     const session = projectWorkSession(snapshotOf(plan), {
       sessionId: origin.sessionId,
       workspaceId: origin.workspaceId || '',
       acceptance: 'confirm',
       accepted: Boolean(plan.resultAcceptance?.acceptedAt),
+      resultConfirmationRequired: humanGate,
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
@@ -289,8 +294,7 @@ export function createSessionSupervisor({
     const completionReview = projectCompletionReview(plan, report);
     if (completionReview && !completionReview.confirmed) session.completionReviewRequired = true;
     if (session.status === 'result_ready') {
-      const decision = decideSessionAcceptance(acceptanceFacts(plan));
-      session.resultConfirmationRequired = decision.mode === 'confirm' && decision.closeGatePassed;
+      session.resultConfirmationRequired = humanGate;
     }
     session.sourceRevision = verificationContentHash(plan, (({ status, ...body }) => body)(report));
     session.observationRevision = sessionObservationRevision(plan, session.sourceRevision);
@@ -693,7 +697,7 @@ export function createSessionSupervisor({
         || anchors.has(plan.delegationOrigin.anchorMessageId))).slice(0, 24).map(plan => {
       const origin = plan.delegationOrigin;
       return { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
-        acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), spawnedAt: plan.createdAt || '',
+        acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
         conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}) }),
         metadataRevision: plan.updatedAt || plan.createdAt || '' };
     });
@@ -719,7 +723,12 @@ export function createSessionSupervisor({
       const authority = hostFacts(plan).hostAuthority || {};
       const reviewed = plan.hostVerification?.verdictRef || authority.reviewAttempts?.length
         || ['passed', 'failed', 'not_required'].includes(authority.independentVerifier);
-      return { ...session, report: { ...buildReport(plan, session), ...(reviewed ? {
+      const journal = workBudgetBinding(plan.delegationOrigin.workspaceId)?.store;
+      const agentSupervision = journal?.querySupervision ? {
+        requests: journal.querySupervision('agentRequests', 'sessionId', session.sessionId, { pendingOnly: true, limit: 16 }),
+        receipts: journal.querySupervision('agentCommands', 'sessionId', session.sessionId, { limit: 16 }),
+      } : undefined;
+      return { ...session, report: { ...buildReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
         verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
       } : {}) } };
     }
@@ -783,6 +792,11 @@ export function createSessionSupervisor({
         || (conversationId && record?.conversationId === conversationId))
       .map((record) => record.evidenceRef)
       .filter((ref) => typeof ref === 'string' && ref.trim());
+  }
+
+  function humanGateOf(plan) {
+    const decision = resultCanBeAccepted(plan) ? decideSessionAcceptance(acceptanceFacts(plan)) : null;
+    return decision?.mode === 'confirm' && decision.closeGatePassed === true;
   }
 
   function acceptanceFacts(plan) {
@@ -1070,6 +1084,7 @@ export function createSessionSupervisor({
         && typeof goalRunner?.handoffDelegatedPlan === 'function') await handoff.afterAcceptance(plan);
       if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) await settleLocked(plan.delegationOrigin.sessionId);
     }
+    communication.recover({ includeLegacy: false, recoveringStarted: false });
     await promote();
   }
 
@@ -1083,6 +1098,20 @@ export function createSessionSupervisor({
 
   return {
     executionScheduler,
+    async readWorkHistory(input, context) {
+      const work = workBudgetBinding(context.workspaceId)?.store.readWork(input.workId);
+      if (!work) return { error: 'work_not_found' };
+      const target = input.conversationId || context.conversationId;
+      if (context.role === 'project_agent') {
+        if (work.parentConversationId !== context.conversationId) return { error: 'history_out_of_scope' };
+        if (target !== context.conversationId && !delegatedPlans().some(plan => plan.conversationId === target
+          && plan.delegationOrigin.workId === work.workId)) return { error: 'history_out_of_scope' };
+      } else if (context.role !== 'work_session' || target !== context.conversationId
+        || context.workId !== work.workId || findBySession(context.sessionId)?.conversationId !== target) return { error: 'history_out_of_scope' };
+      if (typeof conversationStore.readInteractionPage !== 'function') return { error: 'history_unavailable' };
+      const page = await conversationStore.readInteractionPage(target, { before: input.before, limit: Math.min(50, input.limit || 20) });
+      return page || { error: 'source_unavailable' };
+    },
     summaries: input => readQuery.run(() => summaries(input)),
     coordinateWork: (input, context) => coordination.coordinate(input, context),
     coordinationFacts: (workspaceId, conversationId, scope) => coordination.facts(workspaceId, conversationId, scope),

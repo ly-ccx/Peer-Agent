@@ -8,13 +8,14 @@ export async function checkBotImageLifecycle({ page, until, report, captureDirec
   await setFixtureBotAccess(page, workspaceId, 'ask_before_local');
   const read = () => JSON.parse(readFileSync(receiptFile, 'utf8'));
   // Virtual rows may remount while Playwright waits for layout stability,
-  // including after the late-decision IPC refresh. Reacquire the same card ID.
+  // including after the late-decision IPC refresh. Reacquire the same card ID
+  // within the original five-second deadline when one stability attempt expires.
   const scrollCard = card => until(async () => {
     try {
       await card.scrollIntoViewIfNeeded({ timeout: 1000 });
       return true;
     } catch (error) {
-      if (!error.message.includes('Element is not attached to the DOM')) throw error;
+      if (!error.message.includes('Element is not attached to the DOM') && error.name !== 'TimeoutError') throw error;
       return false;
     }
   }, Boolean, 5000);

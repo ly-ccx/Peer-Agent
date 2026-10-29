@@ -141,7 +141,7 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
           assertOwner(id, epoch);
           // Version 3 readers must reject the new scoped-admission events before writing.
           const manifestFile = path.join(plan.dir, 'coordination-v2/manifest.json'), manifest = json(manifestFile);
-          durable(manifestFile, { ...manifest, minimumReaderVersion: 4, minimumWriterVersion: 4 });
+          durable(manifestFile, { ...manifest, minimumReaderVersion: Math.max(4, manifest.minimumReaderVersion), minimumWriterVersion: Math.max(4, manifest.minimumWriterVersion) });
           status(id, { phase: 'reconciling' });
           store = createWorkCoordinationStore({ rootDir, workspaceId: id, formatVersion: 2,
             holdsLease: () => holdsLease(id), leaseEpoch: () => leaseEpoch(id) });
