@@ -1,9 +1,17 @@
+import { createWorkingContextProvider, CONTINUITY_TOOL_SPECS, WORKING_CONTEXT_DESCRIPTION } from '@peer-agent/runtime-node/project-agent';
 import { createRuntimeProjection, type CapabilityManifest, type RuntimeToolDefinition } from '@peer-agent/runtime-core';
 import { createRuntimeSdk, type RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 import {
-  DELEGATION_TOOL_SPECS, MEMORY_TOOL_SPECS, projectToolDescription, createDelegationProvider,
-  createMemoryProvider, createPermissionGrant, createFailedClientToolResult,
-} from '@peer-agent/runtime-node';
+  DELEGATION_TOOL_SPECS,
+  MEMORY_TOOL_SPECS,
+  projectToolDescription,
+  createDelegationProvider,
+  createMemoryProvider
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  createPermissionGrant,
+  createFailedClientToolResult
+} from "@peer-agent/runtime-node/providers";
 import type { TuiCapabilityProvider, TuiExecutionContext } from '../tui-host.ts';
 
 /** Shared specs supply an explicit manifest and mode projection before dispatch. */
@@ -19,11 +27,12 @@ export function createProjectToolProvider(options: {
 }): TuiCapabilityProvider & { dispose(): void } {
   const delegation = createDelegationProvider({ ...options, storeDir: `${options.rootDir}/project-runtime` } as never);
   const memory = createMemoryProvider({ rootDir: options.rootDir, enabled: options.memoryEnabled });
-  const specs = [...DELEGATION_TOOL_SPECS, ...MEMORY_TOOL_SPECS];
+  const working = createWorkingContextProvider({ supervisor: options.supervisor });
+  const specs = [...DELEGATION_TOOL_SPECS, ...MEMORY_TOOL_SPECS, ...CONTINUITY_TOOL_SPECS];
   const manifests: CapabilityManifest[] = specs.map(spec => ({
     displayName: spec.name, capabilityId: spec.capabilityId,
-    description: projectToolDescription(spec.name),
-    inputSchema: spec.inputSchema, modeScopes: spec.name === 'send_agent_message' ? ['project_agent', 'goal'] : ['project_agent'],
+    description: CONTINUITY_TOOL_SPECS.some(item => item.capabilityId === spec.capabilityId) ? WORKING_CONTEXT_DESCRIPTION : projectToolDescription(spec.name),
+    inputSchema: spec.inputSchema, modeScopes: spec.name === 'send_agent_message' || CONTINUITY_TOOL_SPECS.some(item => item.capabilityId === spec.capabilityId) ? ['project_agent', 'goal'] : ['project_agent'],
   }));
   const toolDefinitions: RuntimeToolDefinition[] = manifests.map(manifest => ({
     name: manifest.displayName, capabilityId: manifest.capabilityId,
@@ -31,7 +40,7 @@ export function createProjectToolProvider(options: {
   }));
   const projections = new Map(['project_agent', 'goal'].map(mode => [mode, createRuntimeProjection(toolDefinitions, { mode })]));
   const routes = new Map(specs.map(spec => [spec.capabilityId,
-    MEMORY_TOOL_SPECS.includes(spec) ? memory : delegation]));
+    CONTINUITY_TOOL_SPECS.some(item => item.capabilityId === spec.capabilityId) ? working : MEMORY_TOOL_SPECS.some(item => item.capabilityId === spec.capabilityId) ? memory : delegation]));
   const runtime = createRuntimeSdk({ host: {
     executeProvider: (request, context) => {
       const provider = routes.get(request.call.capabilityId);

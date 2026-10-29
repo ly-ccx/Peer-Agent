@@ -48,3 +48,8 @@ const chinese: Record<keyof typeof english,string> = {
 export function projectCopy(locale:TuiLocale,key:keyof typeof english) { return (locale==='en-US'?english:chinese)[key]; }
 export function projectStatus(locale:TuiLocale,value:string) {return value in english ? projectCopy(locale,value as keyof typeof english):value;}
 export function actionLabel(locale:TuiLocale,action:any) {return action.payload?.text || projectStatus(locale,action.id);}
+
+export function projectSessionStatus(locale: TuiLocale, session: { status?: string; followUp?: { owner: string } }) {
+  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return locale === 'en-US' ? 'Reviewing the result' : '正在核对结果';
+  return projectStatus(locale, session.status || '');
+}

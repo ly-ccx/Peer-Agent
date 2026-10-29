@@ -4,20 +4,52 @@ import { createTuiEvidenceReader } from './tui-evidence-reader.ts';
 import { randomUUID } from 'node:crypto';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import {
-  createHostLease, createProjectRegistry, createBotProfileStore, createBotDirectory,
-  createProjectAgentHost, createSessionSupervisor, createExecutionScheduler, createAgentEventPublisher,
-  createProjectInbox, createInputQueue, createApprovalStore, createGoalPlanStore, applyStartupApprovalRecovery,
-  createProjectGoalRunnerHost, createGoalWorktreeAdapter, createGoalTaskBranchAdapter,
-  createAutomationWorktreeAdapter, createObjectiveStore, createObjectiveActions,
-  createObjectiveService, createDesktopObjectiveWatchHost, createSessionVerification,
-  createDesktopProjectFacts, createDesktopReplyComposer, createProjectLifecycleEffects,
-  createBotLifecycle, createMemoryStore, createMemoryCurator, createEpisodeLog,
-  createMemoryMaintenance, createMemoryFileAnchors, runMemoryCuratorTurn,
-  createOneTimeApprovalBook, createCallbackSink, inQuietHours, loadMigratedSettings,
-  isEffectiveMemory, delegationFactsForWorkspace, readProjectInstructionLines,
-  encodeProviderToolResult,
-  shouldPauseForHostHandoff,
-} from '@peer-agent/runtime-node';
+  createHostLease,
+  createApprovalStore,
+  createGoalPlanStore,
+  applyStartupApprovalRecovery
+} from "@peer-agent/runtime-node/storage";
+import {
+  createProjectRegistry,
+  loadMigratedSettings,
+  encodeProviderToolResult
+} from "@peer-agent/runtime-node/providers";
+import {
+  createBotProfileStore,
+  createBotDirectory,
+  createProjectAgentHost,
+  createSessionSupervisor,
+  createExecutionScheduler,
+  createAgentEventPublisher,
+  createProjectInbox,
+  createInputQueue,
+  createProjectGoalRunnerHost,
+  createGoalWorktreeAdapter,
+  createGoalTaskBranchAdapter,
+  createAutomationWorktreeAdapter,
+  createObjectiveStore,
+  createObjectiveActions,
+  createObjectiveService,
+  createDesktopObjectiveWatchHost,
+  createSessionVerification,
+  createDesktopProjectFacts,
+  createDesktopReplyComposer,
+  createProjectLifecycleEffects,
+  createBotLifecycle,
+  createMemoryStore,
+  createMemoryCurator,
+  createEpisodeLog,
+  createMemoryMaintenance,
+  createMemoryFileAnchors,
+  runMemoryCuratorTurn,
+  createOneTimeApprovalBook,
+  createCallbackSink,
+  inQuietHours,
+  isEffectiveMemory,
+  delegationFactsForWorkspace,
+  readProjectInstructionLines,
+  shouldPauseForHostHandoff
+} from "@peer-agent/runtime-node/project-agent";
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import { createProjectToolProvider } from './project-tool-provider.ts';
 import { createTuiTurnExecutor } from './tui-turn-executor.ts';
