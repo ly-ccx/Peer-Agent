@@ -16,24 +16,25 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     await page.setViewportSize({width, height: 780});
     await page.evaluate(theme => {document.documentElement.dataset.theme = theme;}, appearance);
-    const row = page.locator('#bot-msg-rc-message-9981.bot-agent-activity');
+    const row = page.locator('.bot-agent-activity[data-agent-session="rc-work-1"]');
     await scrollToBotMessage(page, row);
-    assert.match(await row.innerText(), /实现检查.*发来问题/s);
+    assert.match(await row.innerText(), /实现检查.*由主 Bot 跟进/s);
+    assert.equal(await row.count(),1,'one current state row per Agent');
     assert.equal(await row.locator('svg').count(), 2);
     const identity = target => target.locator('.bot-agent-marker').evaluate(node => ({
       tone: node.dataset.tone, icon: node.dataset.agentIcon, svg: node.querySelector('svg').innerHTML,
     }));
     const current = await identity(row);
     marker ??= current; assert.deepEqual(marker, current);
-    assert.deepEqual(await identity(page.locator('#bot-msg-rc-message-9980')), current);
-    const otherRow = page.locator('#bot-msg-rc-message-9977');
+    const otherRow = page.locator('.bot-agent-activity[data-agent-session="rc-work-2"]');
     const other = await identity(otherRow);
     assert.equal(await page.locator('#bot-msg-rc-message-9984').count(), 0, 'internal verification progress stays out of the main conversation');
     assert.notEqual(current.icon, other.icon);
     assert.notEqual(current.svg, other.svg);
-    assert.equal(await page.locator('#bot-msg-rc-message-9982').count(), 1);
-    assert.equal(await page.locator('#bot-msg-rc-message-9983').count(), 0);
-    assert.equal(await page.locator('.bot-agent-activity[data-agent-session="rc-work-1"][data-agent-state="reported"]').count(), 1);
+    assert.equal(await page.locator('.bot-agent-activity[data-agent-session="rc-work-1"][data-agent-state="blocked"]').count(), 1);
+    const motion=await otherRow.locator('.bot-agent-marker').evaluate(node=>({animation:getComputedStyle(node).animationName,transform:getComputedStyle(node).transform}));
+    assert.doesNotMatch(motion.animation,/hop|bounce/);
+    assert.equal(motion.transform,'none');
     assert.equal(await row.evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await page.screenshot({path: path.join(captureDirectory, `agent-activity-${width}-${appearance}.png`), animations: 'disabled'});
     await row.focus(); await page.keyboard.press('Enter');
@@ -50,7 +51,7 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
     await detail.waitFor({state: 'hidden'});
     await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
     await page.locator('.pa-overlay-backdrop--drawer').waitFor({state: 'hidden'});
-    cases.push({width, appearance, named: true, svg: true, stableIdentity: true, distinctShapes: true, legacyReportDeduped: true,
+    cases.push({width, appearance, named: true, svg: true, stableIdentity: true, distinctShapes: true, legacyReportDeduped: true, singleAgentRow: true, stationaryMarker: true,
       taskDestination: true, humanWaitDistinct: true, verificationProgress: true, fits: true});
   }
   writeFileSync(commandFile + '.next', JSON.stringify({...initial, seq: command.seq + 1})); renameSync(commandFile + '.next', commandFile);

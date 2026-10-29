@@ -953,8 +953,14 @@
   animation: bot-thinking-hop 1.05s ease-in-out infinite;
 }
 
-.bot-agent-activity[data-agent-running='true'] .bot-agent-marker {
-  animation: bot-thinking-hop 1.05s ease-in-out infinite;
+@supports (mask-image: linear-gradient(100deg, transparent, currentColor)) {
+  .bot-agent-activity[data-agent-running='true'] .bot-agent-marker {
+    mask-image: linear-gradient(100deg, rgb(0 0 0 / .65) 36%, #000 50%, rgb(0 0 0 / .65) 64%);
+    mask-size: 220% 100%;
+    --motion-shimmer-from: 100%;
+    --motion-shimmer-x: -120%;
+    animation: motion-mask-shimmer 1.6s linear infinite;
+  }
 }
 
 .bot-thinking-status-label {
@@ -977,6 +983,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .bot-agent-activity[data-agent-running='true'] .bot-agent-marker {
+    mask-image: none;
+  }
   .bot-thinking-status,
   .bot-thinking-status .bot-avatar,
   .bot-thinking-status .bot-avatar svg,
