@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { groupDrawerSessions, taskGroup } from './drawerState.ts';
+import { groupDrawerSessions, taskGroup, readDrawerSession } from './drawerState.ts';
 import type { DrawerSession } from './drawerState.ts';
 import type { FollowUpProjection } from '@peer-agent/protocol';
 
 function session(sessionId: string, status: string, followUp?: FollowUpProjection): DrawerSession {
   return { sessionId, status, followUp } as unknown as DrawerSession;
 }
+
+test('withdrawn task keeps the host unknown-call facts in history without creating a UI cancellation fact', () => {
+ const raw={sessionId:'s',status:'cancelled',origin:{cancellation:{phase:'completed',disposition:'user_withdrawn',evidenceCalls:['old-bash']}},
+  followUp:{owner:'none',inCurrentList:false,reason:'user_withdrawn'}};
+ const read=readDrawerSession(raw);
+ assert.deepEqual(read?.withdrawalUnknownCallIds,['old-bash']);
+ assert.equal(taskGroup(read!.status,read!.followUp),'done');
+ assert.equal(readDrawerSession({...raw,status:'awaiting_outcome'})?.withdrawalUnknownCallIds,undefined);
+ assert.equal(readDrawerSession({...raw,origin:{cancellation:{phase:'awaiting_outcome',evidenceCalls:['old-bash']}}})?.withdrawalUnknownCallIds,undefined);
+});
 
 test('分组只按宿主跟进责任：技术验收不再进“需要你”', () => {
   assert.equal(taskGroup('result_ready', {

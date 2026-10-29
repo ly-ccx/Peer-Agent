@@ -417,6 +417,7 @@ export type TranslationKey =
   | 'projectAgent.task.coordination.executionObserved'
   | 'projectAgent.task.coordination.pending'
   | 'projectAgent.task.coordination.unknown'
+  | 'projectAgent.task.coordination.withdrawnUnknown'
   | 'projectAgent.task.coordination.blocked'
   | 'projectAgent.task.coordination.handoff'
   | 'projectAgent.chat.sessionState.paused'
@@ -2074,6 +2075,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.coordination.executionObserved': '已收到继续执行的回执，结果以任务进度和核验为准。',
     'projectAgent.task.coordination.pending': '正在调整执行安排，已有工作会保留。',
     'projectAgent.task.coordination.unknown': '停止后有操作尚未确认结果，核实前不会重复执行。',
+    'projectAgent.task.coordination.withdrawnUnknown': '委托已撤回。撤回时仍有 {count} 项历史执行结果未知；记录和成果已保留，核实前不会重复执行。',
     'projectAgent.task.coordination.blocked': '本次调整未能应用，原有记录已保留。',
     'projectAgent.task.coordination.handoff': '正在接手',
     'projectAgent.chat.sessionState.paused': '已暂停',
@@ -3496,6 +3498,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.coordination.executionObserved': 'Continuation was observed. Results follow task progress and verification.',
     'projectAgent.task.coordination.pending': 'Adjusting execution. Existing work is retained.',
     'projectAgent.task.coordination.unknown': 'Some operations have an unconfirmed outcome. They will not be repeated before checking.',
+    'projectAgent.task.coordination.withdrawnUnknown': 'The task was withdrawn with {count} historical execution outcomes still unknown. Records and artifacts are retained; operations will not be repeated before checking.',
     'projectAgent.task.coordination.blocked': 'This adjustment could not be applied. Existing records are retained.',
     'projectAgent.task.coordination.handoff': 'Taking over',
     'projectAgent.chat.sessionState.paused': 'Paused',

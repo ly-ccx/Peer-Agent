@@ -30,7 +30,7 @@ export function admitCoordinationDecision(state, decision, host) {
   if (!inputs.length && (!prior || prior.lifecycle !== 'active')) return reject('mandate_inactive');
   const adopted = !prior && inputs.length && decision.sessionId && host.adoptSessionIds?.includes(decision.sessionId);
   if (!prior && (!inputs.length || decision.action !== 'parallel' && !adopted)) return reject('mandate_required');
-  if (prior?.lifecycle === 'cancelled' || prior?.lifecycle === 'fulfilled') return reject('mandate_inactive');
+  if (prior?.lifecycle === 'fulfilled' || prior?.lifecycle === 'cancelled' && !(decision.action === 'cancel' && inputs.length)) return reject('mandate_inactive');
   if (decision.sessionId && (!(prior?.sessionIds.includes(decision.sessionId) || adopted)
     || host.scopedSessionIds && !host.scopedSessionIds.includes(decision.sessionId))) return reject('out_of_scope');
   if (!inputs.length && events.some(id => (!prior.sessionIds.includes(state.events?.[id]?.event?.sessionId) || prior.revokedSessionIds?.includes(state.events?.[id]?.event?.sessionId)))) return reject('event_out_of_scope');
@@ -47,7 +47,8 @@ export function admitCoordinationDecision(state, decision, host) {
     rootInputIds: prior?.rootInputIds || inputs, revisionInputIds: unique([...(prior?.revisionInputIds || []), ...inputs]),
     goalRevision, allowedActions: prior?.allowedActions || [...COORDINATION_ACTIONS], sessionIds: prior?.sessionIds || (adopted ? [decision.sessionId] : []),
     materialRefs: unique([...(prior?.materialRefs || []), ...materialRefs]), policyRevision: host.policyRevision || 'existing-project-policy',
-    executionBindings, revokedSessionIds: unique([...(prior?.revokedSessionIds || []), ...(decision.sessionId && ['revise', 'cancel', 'replace', 'handoff', 'resume'].includes(decision.action) ? [decision.sessionId] : [])]), lifecycle: 'active' };
+    executionBindings, revokedSessionIds: unique([...(prior?.revokedSessionIds || []), ...(decision.sessionId && ['revise', 'cancel', 'replace', 'handoff', 'resume'].includes(decision.action) ? [decision.sessionId] : [])]),
+    lifecycle: prior?.lifecycle === 'cancelled' ? 'cancelled' : 'active' };
   const transition = { schemaVersion: 1, operationId: decision.operationId, workId: decision.workId,
     mandateId: mandate.mandateId, expectedGoalRevision: goalRevision, sourceInputIds: inputs, sourceEventIds: events,
     initiator: 'project_agent', decisionSource: inputs.length ? 'user_revision' : 'execution_repair',

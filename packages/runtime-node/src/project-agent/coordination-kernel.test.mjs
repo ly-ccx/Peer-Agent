@@ -13,6 +13,19 @@ function world() {
   const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner' };
   return { store: createWorkCoordinationStore(options), reopen: () => createWorkCoordinationStore(options), close: () => rmSync(rootDir, { recursive: true, force: true }) };
 }
+
+test('current cancellation may settle a cancelled mandate without reactivating it or permitting replacement', () => {
+ const w=world();try{
+  w.store.decide(command('one','A','a'),host);w.store.bindSession('A',1,'sa');
+  const before=w.store.read(),state={...before,mandates:{...before.mandates,A:{...before.mandates.A,lifecycle:'cancelled'}}};
+  const cancel={...command('cancel','A','correction','cancel',1),sessionId:'sa'};
+  const result=admitCoordinationDecision(state,cancel,host);
+  assert.equal(result.ok,true);assert.equal(result.entry.mandate.lifecycle,'cancelled');
+  assert.equal(result.entry.mandate.executionBindings.sa,undefined);
+  assert.equal(admitCoordinationDecision(state,{...cancel,action:'replace'},host).error,'mandate_inactive');
+  assert.equal(admitCoordinationDecision(state,{...cancel,sourceInputIds:[],sourceEventIds:['event']},host).error,'mandate_inactive');
+ }finally{w.close();}
+});
 test('each input retains a durable decision; revising A does not revise or pause B', () => {
   const w = world(); try {
     assert.equal(w.store.decide(command('one', 'A', 'a'), host).ok, true);
