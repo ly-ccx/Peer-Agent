@@ -16,17 +16,20 @@ export async function checkBotAgentActivity({page, until, report, captureDirecto
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     await page.setViewportSize({width, height: 780});
     await page.evaluate(theme => {document.documentElement.dataset.theme = theme;}, appearance);
-    const row = page.locator('.bot-agent-activity[data-agent-session="rc-work-1"]');
+    // Each stationary row stays at its Agent's first event; later events update it in place.
+    const row = page.locator('.bot-agent-activity[data-source-message="rc-message-9980"]');
     await scrollToBotMessage(page, row);
+    assert.equal(await row.getAttribute('data-agent-session'), 'rc-work-1');
     assert.match(await row.innerText(), /实现检查.*由主 Bot 跟进/s);
-    assert.equal(await row.count(),1,'one current state row per Agent');
+    assert.equal(await page.locator('.bot-agent-activity[data-agent-session="rc-work-1"]').count(),1,'one current state row per Agent');
     assert.equal(await row.locator('svg').count(), 2);
     const identity = target => target.locator('.bot-agent-marker').evaluate(node => ({
       tone: node.dataset.tone, icon: node.dataset.agentIcon, svg: node.querySelector('svg').innerHTML,
     }));
     const current = await identity(row);
     marker ??= current; assert.deepEqual(marker, current);
-    const otherRow = page.locator('.bot-agent-activity[data-agent-session="rc-work-2"]');
+    const otherRow = page.locator('.bot-agent-activity[data-source-message="rc-message-9977"]');
+    assert.equal(await otherRow.getAttribute('data-agent-session'), 'rc-work-2');
     const other = await identity(otherRow);
     assert.equal(await page.locator('#bot-msg-rc-message-9984').count(), 0, 'internal verification progress stays out of the main conversation');
     assert.notEqual(current.icon, other.icon);
