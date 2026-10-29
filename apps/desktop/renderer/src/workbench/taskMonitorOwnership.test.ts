@@ -26,7 +26,9 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   const expression = chatSurface.match(/className=\{(`chat-surface[^\n]+`)\}/)?.[1];
   assert.ok(expression, 'the monitor belongs to the chat surface');
   for (const showEmptyHome of [false, true]) for (const taskMonitorOpen of [false, true]) for (const showComposer of [false, true]) {
-    const classes = runInNewContext(expression, { showEmptyHome, taskMonitorOpen, showComposer }).split(/\s+/);
+    const className: unknown = runInNewContext(expression, { showEmptyHome, taskMonitorOpen, showComposer });
+    assert.ok(typeof className === 'string');
+    const classes = className.split(/\s+/);
     assert.ok(classes.includes('chat-surface'));
     assert.equal(classes.includes('chat-surface--empty-home'), showEmptyHome);
     assert.equal(classes.includes('chat-surface--with-monitor'), taskMonitorOpen);
