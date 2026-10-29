@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
+import { transitionReconciliation } from './supervision-recovery.mjs';
 import { sessionNeedsCancellation } from './session-cancellation.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
@@ -74,7 +75,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       target = next; scopedSessionIds?.push(next.sessionId);
     }
     if (target && ['handoff', 'revise', 'resume'].includes(input.action)) {
-      const blocked = checkTakeover?.(target.sessionId);
+      const blocked = checkTakeover?.(target.sessionId, input.action);
       if (blocked) return { ok: false, error: blocked };
     }
     if (input.action === 'cancel' && ['result_ready', 'failed'].includes(target?.status) && !current.length) {
@@ -95,10 +96,11 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       const admission = await admitTask(input.task, { workspaceId, parentConversationId });
       if (!admission.ok) return admission;
     }
+    const repair = input.action === 'resume' && (target?.status === 'result_ready' || target?.origin?.takeover?.repair === true);
     const decision = { operationId, workId, expectedRevision: input.expectedRevision ?? (input.action === 'parallel' ? mandate?.goalRevision || 0 : -1),
       action: input.action, sourceInputIds, sourceEventIds: sourceInputIds.length ? [] : eventIds,
       ...(target ? { sessionId: target.sessionId } : {}), reason: input.reason,
-      payload: { requestIdentity: hash(input), ...(input.task ? { task: input.task } : {}), ...(input.text ? { text: input.text } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      payload: { requestIdentity: hash(input), ...(repair ? {repair:true} : {}), ...(input.task ? { task: input.task } : {}), ...(input.text ? { text: input.text } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}),
         context: { workspaceId, parentConversationId, workspacePath: context.workspacePath || '', surface: context.surface,
           anchorMessageIds: anchors, currentInputAnchors: current.map(row => row.id),
           ...(context.manualCriterionAuthorities ? { manualCriterionAuthorities: context.manualCriterionAuthorities } : {}) } } };
@@ -145,7 +147,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
         const admission = await admitTask(payload.task, context);
         if (!admission.ok) { move('blocked', { error: admission.error, diagnostic: admission.diagnostic }); return; }
       }
-      const needsStop = transition.action === 'cancel' ? sessionNeedsCancellation(old) : old && !ended.has(old.status);
+      const needsStop = transition.action === 'cancel' ? sessionNeedsCancellation(old)
+        : old && (!ended.has(old.status) || transition.action === 'resume' && old.status === 'result_ready');
       if (['replace', 'cancel', 'handoff', 'revise', 'resume'].includes(transition.action) && needsStop) {
         move('stopping');
         if (['replace', 'cancel'].includes(transition.action)) {
@@ -198,9 +201,22 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const store = storeFor(workspaceId);
     if (!store || !holdsLease(workspaceId)) return Promise.resolve();
     const promise = Promise.resolve().then(async () => {
-      for (const transition of Object.values(store.read().transitions || {})) {
-        if (['completed', 'blocked', 'awaiting_outcome'].includes(transition.phase)) continue;
-        try { store.assertOwner(); await effect(store, transition); }
+      for (let transition of Object.values(store.read().transitions || {})) {
+        try {
+          if (transition.phase === 'awaiting_outcome') {
+            const newer = Object.values(store.read().transitions || {}).findLast(row => row.oldSessionId === transition.oldSessionId);
+            if (newer?.operationId !== transition.operationId) continue;
+            const work = store.readWork(transition.workId);
+            const patch = transitionReconciliation(transition,work,readSession({sessionId:transition.oldSessionId}));
+            if (patch) {
+              store.enableSupervision(6);
+              store.advanceTransition(transition.operationId,transition.phase,patch);
+              transition = store.read().transitions[transition.operationId];
+            }
+          }
+          if (['completed', 'blocked', 'awaiting_outcome'].includes(transition.phase)) continue;
+          store.assertOwner(); await effect(store, transition);
+        }
         catch (error) {
           if (!holdsLease(workspaceId)) return;
           const current = store.read().transitions[transition.operationId];

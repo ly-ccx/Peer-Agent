@@ -52,6 +52,15 @@ export function reduceAgentSupervision(state, entry) {
     const updated = { ...current, ...patch };
     if (patch.error === null) delete updated.error;
     next.agentCommands[entry.operationId] = updated;
+  } else if (entry.kind === 'agent_execution_completed') {
+    if (typeof entry.attemptRef !== 'string' || !entry.attemptRef || !Array.isArray(entry.messageIds)
+      || !entry.messageIds.length || entry.messageIds.length > 100) supervisionError('agent_execution_unproven');
+    for (const id of entry.messageIds) {
+      const message = next.agentMessages[id], receipt = message && next.agentCommands[message.operationId];
+      if (!message || message.recipientConversationId !== entry.conversationId || receipt?.delivery !== 'observed'
+        || receipt.admission === 'rejected' || !['pending','unknown','applied'].includes(receipt.effect)) supervisionError('agent_execution_unproven');
+      if (receipt.effect !== 'applied') next.agentCommands[message.operationId] = {...receipt,admission:'admitted',effect:'applied',attemptRef:entry.attemptRef,completionRecorded:true,error:undefined};
+    }
   } else if (entry.kind === 'agent_context_observed') {
     for (const id of entry.messageIds || []) {
       const message = next.agentMessages[id];

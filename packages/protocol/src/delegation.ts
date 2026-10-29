@@ -34,7 +34,7 @@ export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
 
 export interface DelegationOrigin {
   readonly capabilityAdmission?: import('./capability-admission.ts').DelegationCapabilityAdmission;
-  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed'; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string };
+  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed'; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string; repair?: boolean };
   readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
   readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean };
   readonly retainedForRecovery?: boolean;

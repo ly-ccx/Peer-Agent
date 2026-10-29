@@ -37,6 +37,7 @@ import { scheduleVisualRepair, hasActiveGoalRepair } from './goal-visual-repair.
 import { planRequiresQualityReview, evaluateUiDelivery } from '@peer-agent/protocol';
 import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 import { canCompleteAfterRecheck } from './project-agent/verification-completion.mjs';
+import { repairExecutionPending } from './project-agent/session-repair.mjs';
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
@@ -1022,7 +1023,8 @@ export function createGoalRunner({
     if (existing) return existing.promise;
 
     const session = { cancelled: false, promise: null,
-      skipCompletionOnce: repairVerification || hasActiveGoalRepair(goalPlanStore.getPlan(planId)), verificationRepairs: 0 };
+      skipCompletionOnce: repairVerification || hasActiveGoalRepair(goalPlanStore.getPlan(planId))
+        || repairExecutionPending(goalPlanStore.getPlan(planId)), verificationRepairs: 0 };
     const promise = pump(planId, session)
       .catch((error) => {
         if (turnOwnerStopped(planId, session)) return getState(planId);

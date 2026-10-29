@@ -67,6 +67,17 @@ test('manual continue reconciles a known verification target and preserves the o
   } finally { env.close(); }
 });
 
+test('a legacy delivered receipt can reconcile an inactive local verification without replaying it',async()=>{
+  const env=fixture({state:'delivered'});
+  try {
+    await env.runner.kick();
+    assert.deepEqual(env.work().budget.uncertainDispatches,[]);
+    assert.equal(env.work().budget.reconciledDispatches[0].outcome,'verification_interrupted');
+    assert.equal(env.calls,0);
+    assert.equal(env.work().budget.toolCalls,61);
+  }finally{env.close();}
+});
+
 for (const variant of [
   { name: 'unconfirmed write', capabilityId: 'local.file.write' },
   { name: 'unavailable host', query: () => { throw Error('unreadable plan'); } },

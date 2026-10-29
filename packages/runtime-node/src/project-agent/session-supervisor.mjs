@@ -1,7 +1,9 @@
 import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
 import { controlProjectWork } from './work-control.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
-import { createSessionTakeover, takeoverHumanBlocker } from './session-takeover.mjs';
+import { createSessionTakeover } from './session-takeover.mjs';
+import { takeoverBlocker } from './session-repair.mjs';
+import { supervisionRecovery } from './supervision-recovery.mjs';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
@@ -170,17 +172,16 @@ export function createSessionSupervisor({
   const cancellation = createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
     abortStream, isolationPlanner, exclusive, project, emit, promote, now });
   const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
-    abortStream, promote, emit, now });
+    abortStream, promote, emit, now, humanGateOf });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
     admitTask: (input, context) => checkDelegationCapabilities(input, context),
     readSessionSummary: input => {
       const plan = findBySession(input.sessionId);
       return plan ? summaries({ workspaceId: plan.delegationOrigin.workspaceId, sessionIds: [input.sessionId] })[0] : null;
     },
-    checkTakeover: id => {
+    checkTakeover: (id, action) => {
       const plan = findBySession(id);
-      return takeoverHumanBlocker(plan)
-        || (plan?.resultAcceptance?.acceptedAt || ['completed','cancelled'].includes(plan?.status) ? 'session_not_running' : null);
+      return takeoverBlocker(plan, action, plan && humanGateOf(plan));
     },
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
     spawn: (input, context) => exclusive(() => spawnLocked(input, context)), requestCancel: cancellation.request,
@@ -728,6 +729,14 @@ export function createSessionSupervisor({
         requests: journal.querySupervision('agentRequests', 'sessionId', session.sessionId, { pendingOnly: true, limit: 16 }),
         receipts: journal.querySupervision('agentCommands', 'sessionId', session.sessionId, { limit: 16 }),
       } : undefined;
+      if (agentSupervision) {
+        const facts = journal.readLifecycleFacts();
+        agentSupervision.recovery = supervisionRecovery({plan,session,
+          work:journal.readWork(plan.delegationOrigin.workId),mandate:facts.mandates?.[plan.delegationOrigin.workId],
+          transitions:Object.values(facts.transitions || {}),receipts:agentSupervision.receipts,requests:agentSupervision.requests,
+          relatedWorks:Object.values(journal.readSnapshot().works).filter(row => row.parentConversationId === plan.delegationOrigin.parentConversationId
+            && row.sessionIds?.includes(session.sessionId) && row.state === 'blocked_system').slice(-8)});
+      }
       return { ...session, report: { ...buildReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
         verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
       } : {}) } };

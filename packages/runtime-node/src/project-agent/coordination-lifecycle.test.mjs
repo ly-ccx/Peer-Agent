@@ -58,6 +58,22 @@ test('a current user can cancel a returned result; an ordinary wake cannot aband
  await f.lifecycle.recover('w');assert.deepEqual(f.cancellations,[opened.sessionId]);
 });
 
+test('a returned legacy session is adopted only from current user input before repair',async t=>{
+  const f=await fixture(t);
+  f.sessions.set('legacy',{sessionId:'legacy',planId:'old-plan',workspaceId:'w',status:'result_ready',origin:{parentConversationId:'parent'}});
+  const lifecycle=createCoordinationLifecycle({...f.ports,takeover:async()=>({ok:true})});
+  const input={action:'resume',sessionId:'legacy',expectedRevision:0,reason:'Correct the missing analysis'};
+  assert.equal((await lifecycle.coordinate(input,f.context('','wake',{currentInputAnchors:[]}))).error,'current_user_required');
+  assert.equal(f.store.read().mandates?.goal,undefined);
+  const receipt=await lifecycle.coordinate(input,f.context('u1','adopt'));
+  assert.equal(receipt.ok,true,JSON.stringify(receipt));
+  assert.equal(receipt.phase,'completed');
+  assert.deepEqual(f.store.read().mandates.goal.sessionIds,['legacy']);
+  assert.deepEqual(f.store.read().mandates.goal.rootInputIds,['u1']);
+  assert.equal(f.store.read().transitions.adopt.minimumExecutorVersion,3);
+  assert.equal(f.spawns.length,0);
+});
+
 test('parallel work survives a sibling cancellation and cancellation events cannot revive it', async t => {
   const f = await fixture(t);
   const a = await f.lifecycle.coordinate({ action:'parallel', reason:'A', task:f.task('u1') },f.context('u1','a'));

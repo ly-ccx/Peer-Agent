@@ -54,13 +54,19 @@ export function createAgentDelivery({ storeFor = id => workBudgetBinding(id)?.st
   }
   function executed(workspaceId, conversationId, messageIds, attemptRef) {
     const journal = store(workspaceId);
+    const completed = [];
+    if (typeof attemptRef !== 'string' || !attemptRef) fail('agent_execution_unproven');
     for (const id of messageIds) {
       const message = journal.readSupervision('agentMessages', id);
       if (!message || message.recipientConversationId !== conversationId) continue;
       const current = receipt(workspaceId, message.operationId);
       if (current?.delivery === 'observed' && ['pending', 'unknown'].includes(current.effect) && current.admission !== 'rejected') {
-        update(message, { admission: 'admitted', effect: 'applied', attemptRef, error: null });
+        completed.push(id);
       }
+    }
+    if (completed.length) {
+      journal.enableSupervision(6);
+      journal.append({kind:'agent_execution_completed',conversationId,messageIds:[...new Set(completed)],attemptRef,at:now()}, {returnState:false});
     }
   }
   function pending(workspaceId, sessionId) {

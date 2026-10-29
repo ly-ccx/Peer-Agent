@@ -5,6 +5,7 @@ export function verificationContentHash(plan, report = '') {
   return createHash('sha256').update(JSON.stringify([
     plan?.planId, plan?.goal, plan?.tasks, plan?.successCriteria, plan?.criterionResults,
     plan?.manualConfirmations, plan?.deliveryBinding, report,
+    ...(plan?.delegationOrigin?.takeover?.repair === true ? [plan.delegationOrigin.takeover.binding?.executionEpoch] : []),
   ])).digest('hex');
 }
 

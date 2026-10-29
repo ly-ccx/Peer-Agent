@@ -9,6 +9,7 @@ import { replyRecoveryAdmission, recoverLegacyBudgetWorks } from './reply-recove
 import { reconcileContinuationCustody } from './continuation-custody.mjs';
 import { reportedWaitFor, reportedWaitCurrent } from './reported-wait.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
+import { reconcileRepairCustody } from './repair-custody.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
 export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
@@ -122,16 +123,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
       if (!reportedWaitCurrent(work.reportedWait, roster())) update({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
     }
-    // Older releases persisted technical blocks as human waits. Only current
-    // owned facts plus an existing protected checkpoint can reclaim custody.
-    for (const work of Object.values(decision().works)) {
-      if (historyExecutionHeld(work) || work.state !== 'waiting_user' || work.reportedWait || work.stopScope === 'work' || !work.checkpointRef
-        || work.parentConversationId !== conversationId) continue;
-      const related = roster().filter(row => work.sessionIds?.includes(row.sessionId));
-      const ownership = repairOwnership(related);
-      if (!ownership.needsUser && ownership.repairSessionIds.length) update({ ...work,
-        state: 'runnable', end: 'yielded', repairSessionIds: ownership.repairSessionIds });
-    }
+    reconcileRepairCustody({store,conversationId,sessions:roster()});
+    decisionSnapshot = undefined;
     return {
       choose(userOnly) {
         const candidates = Object.values(decision().works).filter(work => !historyExecutionHeld(work) && (!userOnly || work.anchorInputIds?.length)

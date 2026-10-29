@@ -34,7 +34,7 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
   function reconcile(workId) {
     if (typeof reconcileVerification !== 'function') return;
     const work = readWork(workId);
-    if (!work || historyExecutionHeld(work) || ['cancelled', 'delivered', 'budget_limited', 'coalesced'].includes(work.state)) return;
+    if (!work || historyExecutionHeld(work) || ['cancelled', 'budget_limited', 'coalesced'].includes(work.state)) return;
     const attempts = work.budget?.attempts || {};
     const unsettled = [...(work.budget?.uncertainDispatches || []), ...Object.entries(attempts).flatMap(([attemptId, attempt]) =>
       activeAttempts()?.has(attemptId) ? [] : (attempt.pendingTools || []).map(row => ({ ...row, attemptId, role: attempt.role })))];
@@ -56,7 +56,7 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
         || typeof receipt.planId !== 'string' || !receipt.planId || typeof receipt.sourceRevision !== 'string' || !receipt.sourceRevision) continue;
       store.assertOwner();
       const current = readWork(workId);
-      if (!current || ['cancelled', 'delivered', 'budget_limited'].includes(current.state) || activeAttempts()?.has(row.attemptId)) continue;
+      if (!current || ['cancelled', 'budget_limited', 'coalesced'].includes(current.state) || activeAttempts()?.has(row.attemptId)) continue;
       const budget = structuredClone(current.budget);
       const present = budget.uncertainDispatches?.find(item => keyOf(item) === keyOf(row))
         || budget.attempts?.[row.attemptId]?.pendingTools?.find(item => item.toolCallId === row.toolCallId);

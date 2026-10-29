@@ -75,6 +75,23 @@ async function world(t) {
   return { rootDir, store, open, epoch, loseLease: () => { held = false; } };
 }
 
+test('one completed attempt settles its observed command batch durably and never settles an unseen command', async t => {
+  const w=await world(t), delivery=createAgentDelivery({storeFor:()=>w.store});
+  for (const id of ['one','two','unseen']) delivery.commit(command(id));
+  delivery.observed('w','parent',['one','two']);
+  delivery.executed('w','parent',['one','two','unseen'],'actual-attempt');
+  const reloaded=w.open();
+  for (const id of ['one','two']) {
+    assert.equal(reloaded.readSupervision('agentCommands',id).effect,'applied');
+    assert.equal(reloaded.readSupervision('agentCommands',id).attemptRef,'actual-attempt');
+  }
+  assert.equal(reloaded.readSupervision('agentCommands','unseen').effect,'pending');
+  const revision=w.store.read().revision;
+  delivery.executed('w','parent',['one','two'],'actual-attempt');
+  assert.equal(w.store.read().revision,revision);
+  assert.equal(JSON.parse(readFileSync(path.join(w.rootDir,'w/coordination-v2/manifest.json'))).minimumWriterVersion,6);
+});
+
 test('indexed outbox survives cache and manifest loss without downgrading the writer fence', async t => {
   const w = await world(t), delivery = createAgentDelivery({ storeFor: () => w.store });
   const message = command(); delivery.commit(message, { request });

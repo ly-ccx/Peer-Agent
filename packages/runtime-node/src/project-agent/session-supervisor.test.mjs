@@ -2363,6 +2363,42 @@ test('actual Supervisor replaces only the corrected task and recovers its durabl
   } finally {release();await env.cleanup();}
 });
 
+test('actual Supervisor repairs a returned unaccepted task in place and delivers its feedback before admission',async()=>{
+  let starts=0;
+  const env=await harness({goalRunner:{async start(){starts++;},pause(){},async waitForIdle(){}}});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'repair-owner',formatVersion:2,fenceLegacyWrites:true});
+  await store.prepare(); store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try {
+    const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+    const opened=await env.supervisor.coordinateWork({action:'parallel',reason:'original goal',task:spawnInput({kind:'research',readOnly:true})},context);
+    const planId=planIdOf(env,opened.sessionId),before=env.goalPlanStore.getPlan(planId);
+    env.goalPlanStore.revisePlan(planId,{tasks:[{taskId:'prior',title:'Existing result',status:'completed',result:'Existing analysis',evidenceRefs:[]}]});
+    env.goalPlanStore.setRunnerState(planId,{status:'completed',intent:'synthesize'});
+    env.goalPlanStore.setPlanStatus(planId,'completed');
+    const receipt=await env.supervisor.coordinateWork({action:'resume',sessionId:opened.sessionId,expectedRevision:1,
+      reason:'Correct the missing section',text:'Preserve existing findings; add the missing failure analysis.'},{...context,deliveryKey:'repair'});
+    assert.equal(receipt.error,undefined,JSON.stringify(receipt));
+    await until(()=>store.read().transitions.repair.phase==='completed');
+    const after=env.goalPlanStore.getPlan(planId);
+    assert.equal(after.planId,before.planId); assert.equal(after.conversationId,before.conversationId);
+    assert.deepEqual(after.successCriteria,before.successCriteria); assert.equal(after.goal,before.goal);
+    assert.equal(after.resultAcceptance?.acceptedAt,undefined);
+    assert.equal(after.delegationOrigin.takeover.repair,true);
+    assert.notEqual(after.delegationOrigin.coordinationBinding.executionEpoch,before.delegationOrigin.coordinationBinding.executionEpoch);
+    const feedback=store.querySupervision('agentMessages','recipientConversationId',after.conversationId,{limit:10});
+    assert.equal(feedback.some(row=>row.text.includes('missing failure analysis')),true);
+    assert.equal(store.read().transitions.repair.executionEffect,'pending');
+    assert.equal(starts,2);
+    assert.equal(env.conversationStore.listChildren(env.parent.id,{role:'work_session'}).length,1);
+    let repairTurns=0;
+    const actualRunner=createGoalRunner({goalPlanStore:env.goalPlanStore,canRunPlan:()=>true,logger:{warn(){}},
+      chatRuntime:{async runGoalTurn(){repairTurns++;return{requestedUserInput:true,blockedReason:'scripted-hold',terminalStatus:'done'};}}});
+    await actualRunner.start(planId,{awaitIdle:true});
+    assert.equal(repairTurns,1,'completed old leaves must not bypass the actual repair turn');
+  }finally{release();await env.cleanup();}
+});
+
 test('actual executor takeover retains GoalPlan, changes epoch, and does not consume a human question',async()=>{
   const env=await harness();
   const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner',formatVersion:2,fenceLegacyWrites:true});
