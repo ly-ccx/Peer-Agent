@@ -39,8 +39,9 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (!session || session.workspaceId !== workspaceId || session.origin?.parentConversationId !== parentConversationId
         || context.scopedSessionIds && !context.scopedSessionIds.includes(session.sessionId)) return { ok: false, error: 'out_of_scope' };
       const mandate = Object.values(state.mandates || {}).find(row => row.parentConversationId === parentConversationId && row.sessionIds.includes(session.sessionId));
-      return { ok: true, session, legacy: !mandate, goalRevision: mandate?.goalRevision ?? null,
-        ...(mandate ? { workId: mandate.workId } : {}), nextAction: mandate ? 'use_current_revision_for_changes' : 'legacy_session_requires_current_user_for_changes' };
+      return { ok: true, legacy: !mandate, goalRevision: mandate?.goalRevision ?? null,
+        ...(mandate ? { workId: mandate.workId } : {}), nextAction: mandate ? 'use_current_revision_for_changes' : 'legacy_session_requires_current_user_for_changes',
+        session };
     }
     if (!canExecute(workspaceId)) return { ok: false, error: 'recovery_pending' };
     if (state.lastRecovery?.quarantinedSessionIds?.includes(input.sessionId)) return { ok: false, error: 'coordination_reconciliation_required' };

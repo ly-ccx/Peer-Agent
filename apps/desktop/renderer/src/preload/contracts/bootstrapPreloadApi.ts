@@ -1531,6 +1531,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     streamId: string;
     conversationId?: string;
     error: string;
+    streamFailure?: import('@peer-agent/protocol').ChatStreamFailure;
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
   }) => void) => () => void;

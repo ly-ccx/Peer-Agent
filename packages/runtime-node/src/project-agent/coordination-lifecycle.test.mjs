@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
+import { createDelegationProvider } from './delegation-provider.mjs';
 
 async function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'coordination-effects-'));
@@ -78,6 +79,40 @@ test('query discovers an owned legacy session without a revision, mutation, mand
   assert.deepEqual(f.store.read(), before); assert.equal(f.spawns.length, 0);
   assert.equal((await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy' }, { ...f.context('', 'q'), conversationId: 'other' })).error, 'out_of_scope');
   assert.equal((await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy' }, f.context('', 'q', { scopedSessionIds: ['unrelated'] }))).error, 'out_of_scope');
+});
+
+test('a wake corrects a string revision and user-only entry point, then hands off under the original mandate', async t => {
+  const f = await fixture(t);
+  const started = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
+  f.sessions.get(started.sessionId).status = 'waiting_agent';
+  const event = { eventId: 'interrupted', sessionId: started.sessionId, kind: 'interrupted' };
+  f.store.transfer([event]);
+  let takeovers = 0;
+  const lifecycle = createCoordinationLifecycle({ ...f.ports, takeover: async () => { takeovers++; return { ok: true }; } });
+  const provider = createDelegationProvider({ supervisor: { get: f.ports.readSession,
+    coordinateWork: (input, context) => lifecycle.coordinate(input, context) } });
+  const context = { mode: 'project_agent', role: 'project_agent', workspaceId: 'w', conversationId: 'parent',
+    turnId: 'wake', currentInputAnchors: [], messages: f.ports.readMessages(),
+    turnProfile: { workId: 'goal', context: { turnKind: 'wake', events: [event] } } };
+  let ordinal = 0;
+  const execute = async (tool, input) => (await provider.executeCapability({ call: {
+    toolCallId: `call-${ordinal}`, capabilityId: `local.delegation.${tool}`, arguments: input,
+  } }, { ...context, toolCallOrdinal: ordinal++ })).result.output;
+  const input = { action: 'handoff', sessionId: started.sessionId, reason: 'recover retained work', expectedRevision: '1.0' };
+  const bad = await execute('coordinate_work', input);
+  assert.equal(bad.error, 'invalid_input'); assert.match(bad.message, /integer, not a string/);
+  assert.equal(takeovers, 0);
+  const direct = await execute('resume_session', { sessionId: started.sessionId, anchorMessageId: 'u1' });
+  assert.equal(direct.error, 'current_user_required');
+  assert.equal(direct.suggestedCall.tool, 'coordinate_work');
+  const query = await execute(direct.suggestedCall.tool, direct.suggestedCall.arguments);
+  assert.equal(query.goalRevision, 1);
+  assert.ok(JSON.stringify(query).indexOf('goalRevision') < JSON.stringify(query).indexOf('session'));
+  const recovered = await execute('coordinate_work', { ...input, expectedRevision: query.goalRevision, workId: query.workId });
+  assert.equal(recovered.ok, true); assert.equal(recovered.phase, 'completed');
+  assert.equal(takeovers, 1); assert.equal(f.spawns.length, 1);
+  const foreign = await execute('coordinate_work', { action: 'query', sessionId: 'unrelated', reason: 'inspect' });
+  assert.equal(foreign.error, 'out_of_scope'); assert.equal(takeovers, 1);
 });
 
 test('capability failure precedes replacement revision and cancellation of existing work', async t => {

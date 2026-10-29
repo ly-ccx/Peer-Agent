@@ -148,7 +148,10 @@ export function createDelegationProvider({
     }
     if (!view.currentInputAnchors.length && ['resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)) {
       return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false,
-        error: 'current_user_required', message: 'Use coordinate_work with an active mandate for autonomous task changes.' } });
+        error: 'current_user_required',
+        message: 'This direct tool requires current user input. For already authorized work, use coordinate_work query, then the matching coordination action with its numeric goalRevision and an active mandate. This entry-point rejection does not establish a need for new user confirmation.',
+        ...(input.sessionId ? { nextAction: 'query_coordination', suggestedCall: { tool: 'coordinate_work',
+          arguments: { action: 'query', sessionId: input.sessionId, reason: 'Read current task facts before autonomous recovery' } } } : {}) } });
     }
     if (item.name === 'set_proactivity' || item.name === 'resume_session') {
       const anchorError = validateAnchors([input.anchorMessageId], view.messages);

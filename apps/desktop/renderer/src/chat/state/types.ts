@@ -209,6 +209,7 @@ export interface ChatMsg {
   // 经既有 replace-messages 开放袋持久化，重启后仍可见。
   // 会话继续后会清掉历史 interrupted，避免旧标记残留。
   interrupted?: boolean;
+  streamFailure?: import('@peer-agent/protocol').ChatStreamFailure | null;
 }
 
 /** 渲染分组：连续正文 / 思考 / 工具调用组。 */

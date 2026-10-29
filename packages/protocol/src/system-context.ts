@@ -1,5 +1,12 @@
 export type AttachmentContextKind = 'image' | 'text' | 'unsupported';
 
+/** Host failure facts retained with an interrupted reply; never execution authority. */
+export interface ChatStreamFailure {
+  readonly code: string;
+  readonly causeCode?: string;
+  readonly precedingCode?: string;
+}
+
 export type AttachmentContextTransport =
   | 'provider_image_part'
   | 'user_text_part'

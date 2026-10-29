@@ -66,6 +66,7 @@ export function sessionFactsFromPlan(plan) {
     blockedReason: plan?.delegationOrigin?.agentWaitMessageId && plan?.runner?.status !== 'waiting_user'
       ? 'waiting_parent_agent' : plan?.runner?.blockedReason,
     interrupted: Boolean(plan?.runner?.interruption),
+    delegated: Boolean(plan?.delegationOrigin),
     interruptionOrigin: plan?.runner?.interruption?.origin,
     verificationActive,
     executionOwnership,

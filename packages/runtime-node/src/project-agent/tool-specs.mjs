@@ -59,7 +59,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     type: 'object', properties: {
       action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'] },
       workId: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 },
-      expectedRevision: { type: 'integer', minimum: 0 }, reason: { type: 'string', maxLength: 500 },
+      expectedRevision: { type: 'integer', minimum: 0, description: 'Use the exact numeric goalRevision returned by coordinate_work query (for example 1, never "1.0"). Query does not require a revision.' }, reason: { type: 'string', maxLength: 500 },
       text: { type: 'string', maxLength: 4000 }, replyTo: { type: 'string', maxLength: 200 }, task: SPAWN_INPUT_SCHEMA,
     }, required: ['action','reason'], additionalProperties: false,
   }),
@@ -212,7 +212,9 @@ export function validateDelegationInput(name, raw) {
   if (name === 'coordinate_work') {
     if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task'].includes(key))
       || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
-    if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200) || input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Malformed task identity or version.');
+    if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200)) return invalid('workId and sessionId must be non-empty strings of at most 200 characters.');
+    if (input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('expectedRevision must be a non-negative integer, not a string. Call coordinate_work query for this session, then use its numeric goalRevision unchanged. No new user confirmation is implied by this input error.');
+
     if (input.action === 'query' && !text(input.sessionId,200)) return invalid('Select a real session to discover its current facts and goalRevision.');
     if (!['parallel','query'].includes(input.action) && (!text(input.sessionId,200) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Select a real session and its current goalRevision.');
     if (['parallel','replace'].includes(input.action) && (!input.task || input.task.supersedes || input.task.objectiveId)) return invalid('A task specification is required; objective and supersession authorities are host-owned.');

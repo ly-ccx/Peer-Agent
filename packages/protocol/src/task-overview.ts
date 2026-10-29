@@ -636,6 +636,7 @@ function decideLifecycleCore(
   const verificationActive = facts.verificationActive === true;
   const blockedReason = facts.blockedReason ?? snapshot.blockedReason;
   const interrupted = facts.interrupted ?? snapshot.interrupted === true;
+  const interruptionOrigin = facts.interruptionOrigin ?? snapshot.interruptionOrigin;
   const delegated = facts.delegated ?? snapshot.delegated === true;
 
   let status: WorkSessionStatus;
@@ -650,6 +651,8 @@ function decideLifecycleCore(
   else if (facts.takeoverPhase === 'stopping') status = 'starting';
   else if (facts.superseded === true && snapshot.status !== 'completed') status = 'superseded';
   else if ((facts.phase === 'paused' || runnerStatus === 'paused') && snapshot.status !== 'completed') status = 'paused';
+  // A failed delegated attempt leaves recovery with the parent, not a human pause.
+  else if (interrupted && interruptionOrigin !== 'user' && delegated && runnerStatus === 'failed' && !needsUserFacts && !liveExecution) status = 'waiting_agent';
   // 未消费中断优先于 completed/结果就绪（decideGoalPlan rule 1 已按此给文案），
   // 但持久化终态（cancelled/failed）和真实验收结论先于它。
   else if (interrupted) status = 'paused';
@@ -769,7 +772,7 @@ function lifecyclePresentation(
       };
     case 'waiting_agent':
       // 技术阻塞是父代理的跟进项，不是人类待办；具体文案（等待答复/系统中断）沿用旧规则。
-      return legacy.actionRight === 'needs_you'
+      return legacy.actionRight === 'needs_you' || (facts.delegated && legacy.actionRight === 'paused')
         ? {
             actionRight: 'peer_advancing',
             nextAction: 'none',
