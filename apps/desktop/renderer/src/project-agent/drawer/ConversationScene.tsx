@@ -59,7 +59,7 @@ export function ConversationSceneDrawer({
     isPageActive={!embedded || !!workspace?.detailsVisible} layoutHost="local">
     <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
       <div className="conversation-chat-drawer__body">
-        <ChatSurface onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
+        <ChatSurface showComposer={false} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
           conversationId={conversationId} conversationTitle={title} systemInstructions={systemInstructions}
           replyLanguage={replyLanguage} gitBranchPrefix={gitBranchPrefix} onOpenSettings={() => {}}
           onProvidersRefresh={async () => { setProviders(await clientApi.llmListProviders()); }}

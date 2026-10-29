@@ -854,6 +854,9 @@ try {
   await page.getByRole('option', { name: '机器人列表', exact: true }).click();
   await page.locator('.settings-nav').getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('.bot-shell').waitFor();
+  // Shell mount precedes its asynchronous visible-list projection after settings.
+  // Keyboard checks must target the complete real rows, not the loading shell.
+  await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });

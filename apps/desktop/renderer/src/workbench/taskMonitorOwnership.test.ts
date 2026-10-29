@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { readFileSync } from 'node:fs';
 
 const chatSurface = readFileSync(new URL('../chat/components/ChatSurface.tsx', import.meta.url), 'utf8');
@@ -22,7 +23,17 @@ function assertIndependentControls(): void {
 
 // 卡片宿主：挂载在 .chat-surface 内部，靠 padding-right 让位；单卡+内部分区形态。
 test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头部不被挤压', () => {
-  assert.match(chatSurface, /className=\{`chat-surface\$\{showEmptyHome[^}]*\}\$\{taskMonitorOpen \? ' chat-surface--with-monitor' : ''\}`\}/);
+  const expression = chatSurface.match(/className=\{(`chat-surface[^\n]+`)\}/)?.[1];
+  assert.ok(expression, 'the monitor belongs to the chat surface');
+  for (const showEmptyHome of [false, true]) for (const taskMonitorOpen of [false, true]) for (const showComposer of [false, true]) {
+    const className: unknown = runInNewContext(expression, { showEmptyHome, taskMonitorOpen, showComposer });
+    assert.ok(typeof className === 'string');
+    const classes = className.split(/\s+/);
+    assert.ok(classes.includes('chat-surface'));
+    assert.equal(classes.includes('chat-surface--empty-home'), showEmptyHome);
+    assert.equal(classes.includes('chat-surface--with-monitor'), taskMonitorOpen);
+    assert.equal(classes.includes('chat-surface--process'), !showComposer);
+  }
   assert.match(chatSurface, /<TaskMonitorRailView[\s\S]{0,1600}onClose=\{\(\) => setTaskMonitorOpen\(false\)\}/);
   // 卡片渲染在 .chat-surface 的 JSX 子树内（同层还有 ChatFindBar/overlays，但不在 chat-workspace 直挂）。
   assert.doesNotMatch(chatSurface, /chat-workspace">\s*<TaskMonitorRailView/);

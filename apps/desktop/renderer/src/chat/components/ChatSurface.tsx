@@ -191,6 +191,7 @@ export function ChatSurface({
   pendingSendText,
   onPendingSendConsumed,
   banner,
+  showComposer = true,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -203,6 +204,8 @@ export function ChatSurface({
   readonly onPendingSendConsumed?: () => void;
   /** Optional strip rendered under the 40px chat header, e.g. a selection child banner. */
   readonly banner?: React.ReactNode;
+  /** 流程查看保留状态与批准入口，不提供输入、编辑或排队发送。 */
+  readonly showComposer?: boolean;
   readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
   readonly automationOrigin?: {
@@ -1945,6 +1948,7 @@ export function ChatSurface({
   // 把暂时的 isStreaming=false 当成真正空闲。Goal Runner 占用会话时同样让路。
   // 每个会话同一时间只投递一条；发送路径明确接受后才移除队首。
   useEffect(() => {
+    if (!showComposer) return;
     if (!canAutoDispatchQueuedMessage({
       loadStatus,
       streamStatus,
@@ -1972,6 +1976,7 @@ export function ChatSurface({
         queuedDispatchInFlightRef.current.delete(conversationId);
       });
   }, [
+    showComposer,
     loadStatus,
     streamStatus,
     isStreaming,
@@ -2299,11 +2304,11 @@ export function ChatSurface({
     <InteractionStreamingContext.Provider value={interactionStreaming}>
     <div className="chat-workspace">
     <div
-      className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}${taskMonitorOpen ? ' chat-surface--with-monitor' : ''}`}
-      onDragEnter={handleSurfaceDragEnter}
-      onDragOver={handleSurfaceDragOver}
-      onDragLeave={handleSurfaceDragLeave}
-      onDrop={handleSurfaceDrop}
+      className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}${taskMonitorOpen ? ' chat-surface--with-monitor' : ''}${!showComposer ? ' chat-surface--process' : ''}`}
+      onDragEnter={showComposer ? handleSurfaceDragEnter : undefined}
+      onDragOver={showComposer ? handleSurfaceDragOver : undefined}
+      onDragLeave={showComposer ? handleSurfaceDragLeave : undefined}
+      onDrop={showComposer ? handleSurfaceDrop : undefined}
     >
       {isFileDropActive ? (
         <div className="chat-file-drop-overlay" aria-hidden="true">
@@ -2396,6 +2401,7 @@ export function ChatSurface({
             isZh={isZh}
             i18n={i18n}
             enabled={virtualizeChatTurns}
+            readOnly={!showComposer}
             scrollRef={threadRef}
             onMeasured={handleVirtualTurnMeasured}
             onMessageAction={stableHandleMessageAction}
@@ -2537,17 +2543,17 @@ export function ChatSurface({
             - goal:批准即冻结目标契约并自动启动 Runner 托管自驱(A1)。
             点击复用与右侧面板同一条 goalPlansApprove 治理链路，状态互相消解。
             实质性追问（request_user_input）仍走对话流，二者正交。 */}
-        <SelectionQuoteAction root={threadRef} conversationId={conversationId} onOpenChild={onOpenSelectionChild} onQuote={(reference) => {
+        {showComposer ? <SelectionQuoteAction root={threadRef} conversationId={conversationId} onOpenChild={onOpenSelectionChild} onQuote={(reference) => {
           if (conversationIdRef.current !== reference.sourceConversationId) return;
           setAttachments((previous) => appendSelectionQuote(previous, reference));
-        }} />
+        }} /> : null}
         <ChatGoalApprovalCard
           conversationId={conversationId}
           isZh={isZh}
           isStreaming={isStreaming}
           enabled={mode === 'plan' || mode === 'goal' || mode === 'chat'}
         />
-        {messageQueue.length > 0 ? (
+        {showComposer && messageQueue.length > 0 ? (
           <MessageQueue
             items={messageQueue}
             isZh={isZh}
@@ -2609,7 +2615,7 @@ export function ChatSurface({
         <div className="composer-chrome-left">
         <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} onActiveGoalRunnerStatusChange={handleActiveGoalRunnerStatusChange} />
         </div>
-        {workspaceIsGit === true ? (
+        {showComposer && workspaceIsGit === true ? (
         <div className="composer-chrome-right">
         {/* 没有 Git 时不渲染执行环境；收起态只说这次写在哪。 */}
         <div
@@ -2625,6 +2631,7 @@ export function ChatSurface({
         </div>
         ) : null}
         </div>
+        {showComposer ? <>
         <ComposerDraftControls
           conversationId={conversationId}
           variant={showEmptyHome ? 'home' : 'conversation'}
@@ -2707,6 +2714,7 @@ export function ChatSurface({
           </div>
           {homeComposerContextControls}
         </div>
+        </> : null}
         </>
         ) : null}
       </div>
