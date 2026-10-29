@@ -11,7 +11,7 @@ Peer is a local work delegation system for people moving code, documents and res
 
 You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, currently **0.1.0-rc.29**. The stable **0.0.18** release uses the classic interface. RC29 includes the recent durable-supervision and withdrawal fixes. Release and npm channel facts were checked on 2026-10-29.
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, currently beta channel **`0.1.0-rc.29`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`), which uses the classic interface. RC29 includes the recent durable-supervision and withdrawal fixes. Release and npm channel facts were checked on 2026-10-29.
 
 ![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 
