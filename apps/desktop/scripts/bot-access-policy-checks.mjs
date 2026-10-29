@@ -71,9 +71,18 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
   const scene = page.locator('.bot-inline-scene');
   await openTaskScene(page, scene);
-  const status = scene.locator('.conversation-access-inherited');
-  await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
-  assert.equal(await scene.locator('.composer-access-dropdown').count(), 0);
+  // Process viewing deliberately has no composer or inherited access control.
+  // Verify inheritance through its real host facts, and the view through its DOM.
+  const assertReadOnlyScene = async () => {
+    await scene.locator('.chat-surface--process').waitFor({ state: 'visible' });
+    assert.equal(await scene.locator('.chat-composer').count(), 0);
+    assert.equal(await scene.locator('.composer-access-dropdown').count(), 0);
+    assert.equal(await scene.locator('.conversation-access-inherited').count(), 0);
+    const policy = await page.evaluate(conversationId => window.peerAgent.projectAgentReadAccessPolicy({ conversationId }), child.id);
+    assert.equal(policy.ok, true); assert.equal(policy.inherited, true);
+    assert.equal(policy.policy.accessLevel, 'full_local');
+  };
+  await assertReadOnlyScene();
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     const previousScene = await scene.elementHandle();
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
@@ -85,11 +94,12 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
     assert.equal(await scene.evaluate((node, previous) => node === previous && previous.isConnected, previousScene), true);
     await previousScene.dispose();
     await scene.waitFor({ state: 'visible' });
-    await until(() => status.innerText(), text => text.includes('继承自主 Bot') && text.includes('完全访问'));
+    await assertReadOnlyScene();
     await page.screenshot({ path: path.join(captureDirectory, `bot-access-child-${width}-${appearance}.png`), animations: 'disabled' });
   }
-  await status.focus(); await page.keyboard.press('Enter');
+  await scene.locator('.bot-inline-scene-heading button').focus(); await page.keyboard.press('Enter');
   await scene.waitFor({ state: 'detached' });
+  await page.locator(BOT_DETAIL_CLOSE).focus(); await page.keyboard.press('Enter');
   await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.ok((await picker.innerText()).includes('完全访问'));
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: command.seq + 1 })); renameSync(commandFile + '.next', commandFile);
