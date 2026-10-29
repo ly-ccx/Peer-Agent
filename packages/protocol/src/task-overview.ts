@@ -643,7 +643,8 @@ function decideLifecycleCore(
   const delegated = facts.delegated ?? snapshot.delegated === true;
 
   let status: WorkSessionStatus;
-  if (snapshot.status === 'cancelled') status = 'cancelled';
+  // A host-confirmed stop wins over stale recovery/takeover fields, never a live owner.
+  if (snapshot.status === 'cancelled' || facts.cancellationPhase === 'completed' && ownership !== 'live') status = 'cancelled';
   else if (snapshot.status === 'failed') status = 'failed';
   else if (accepted === true) status = 'accepted';
   else if (

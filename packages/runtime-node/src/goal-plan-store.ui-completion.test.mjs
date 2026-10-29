@@ -220,3 +220,27 @@ test('interrupted plan is not washed completed by the last leaf', t => {
   assert.equal(after.status, 'interrupted', '最后一片叶子 completed 不得洗掉可恢复中断');
   assert.equal(after.runner.interruption.source, 'stream_error');
 });
+
+for(const activation of ['intake','accepted_goal']){
+ test(`${activation}/cancelled-preserves-historical-interruption-without-revival`,t=>{
+  const f=fixture(t,activation);
+  const interruption={source:'process_recovery',origin:'host_handoff',reason:'process_recovery',
+   interruptedAt:'2026-10-29T02:51:53.227Z',recoverable:true,attempt:1};
+  f.store.setRunnerState(f.id,{status:'paused',interruption});
+  f.store.recordTaskEvidence(f.id,f.store.getPlan(f.id).tasks[0].taskId,{status:'failed',result:'conversation_persistence_failed'});
+  f.store.setPlanStatus(f.id,'cancelled');
+  const closed=()=>{
+   assert.equal(f.disk().status,'cancelled');assert.deepEqual(f.disk().runner.interruption,interruption);
+   assert.equal(f.store.getPlan(f.id).status,'cancelled');
+   const index=readFileSync(path.join(f.root,'index.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
+   assert.equal(index.find(row=>row.planId===f.id).status,'cancelled');
+   assert.equal(f.store.listPlans().length,0);
+   assert.equal(f.store.listPlanDetails().length,0);
+   assert.equal(createGoalPlanStore({storeDir:f.root,readUiDelivery:f.readUiDelivery}).getPlan(f.id).status,'cancelled');
+  };
+  closed();
+  f.store.setRunnerState(f.id,{toolCallCount:4});
+  f.store.recordTaskEvidence(f.id,f.store.getPlan(f.id).tasks[0].taskId,{status:'failed',result:'late failure'});
+  f.store.setRunnerState(f.id,{status:'idle'});closed();
+ });
+}

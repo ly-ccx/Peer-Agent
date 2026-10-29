@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideFollowUp, type LifecycleFacts } from './task-overview.ts';
+import { decideFollowUp, decideLifecycle, type LifecycleFacts } from './task-overview.ts';
 
 function followUp(
   status: string,
@@ -187,4 +187,18 @@ test('交叉事实：停止以回执为准，未知执行体不冒充结束', ()
     inCurrentList: true,
     reason: 'stop_unconfirmed',
   });
+});
+
+// Historical interruption and takeover remain evidence, not a new execution owner.
+test('completed cancellation dominates stale recovery and takeover without hiding live execution', () => {
+ for(const takeoverPhase of ['stopping','awaiting_outcome'] as const){
+  const snapshot={status:'interrupted' as const,runnerStatus:'paused' as const,interrupted:true};
+  const facts:LifecycleFacts={delegated:true,cancellationPhase:'completed',cancellationDisposition:'user_withdrawn',takeoverPhase};
+  for(const executionOwnership of ['ended','unknown'] as const){
+   const row=decideLifecycle(snapshot,{...facts,executionOwnership});
+   assert.equal(row.status,'cancelled');assert.equal(row.followUp.inCurrentList,false);
+   assert.equal(row.followUp.reason,'user_withdrawn');assert.equal(row.cancelable,false);
+  }
+  assert.equal(decideLifecycle(snapshot,{...facts,executionOwnership:'live'}).followUp.inCurrentList,true);
+ }
 });

@@ -17,6 +17,8 @@ import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget } from './work-budget.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
+import { readDrawerSession } from '../../../../apps/desktop/renderer/src/project-agent/state/drawerState.ts';
+import { backgroundWork, indexBotWork } from '../../../../apps/desktop/renderer/src/project-agent/state/botWorkState.ts';
 
 function model(id, extra = {}) {
   return {
@@ -2121,7 +2123,14 @@ test('current user withdraws stopped work while retaining the original unknown B
  try{
   const context=contextOf(env,{workId:'uncertain',currentInputAnchors:['anchor-1']});
   const opened=await env.supervisor.spawn(spawnInput(),context),planId=planIdOf(env,opened.sessionId);
-  env.goalPlanStore.revisePlan(planId,{status:'interrupted',runner:{status:'paused'}});
+  const original=env.goalPlanStore.getPlan(planId);
+  const interruption={source:'process_recovery',origin:'host_handoff',reason:'process_recovery',
+   interruptedAt:'2026-10-29T02:51:53.227Z',recoverable:true,attempt:1};
+  const takeover={operationId:'old-takeover',phase:'stopping',text:'resume after identity error',
+   requestedAt:'2026-10-28T09:07:36.795Z',binding:{workId:'uncertain',goalRevision:1,executionEpoch:'old'}};
+  env.goalPlanStore.revisePlan(planId,{status:'interrupted',runner:{status:'paused',interruption},
+   tasks:original.tasks.map(task=>({...task,status:'failed',result:'conversation_persistence_failed',failureReason:'conversation_persistence_failed'})),
+   delegationOrigin:{...original.delegationOrigin,takeover}});
   const unknown=[{toolCallId:'old-bash',capabilityId:'bash',attemptId:'old-attempt',role:'work_session',planId,sessionId:opened.sessionId}];
   store.saveWork({workId:'uncertain',state:'cancelled',stopScope:'work',budget:{uncertainDispatches:unknown,attempts:{}}});
   const input={sessionId:opened.sessionId,action:'cancel',anchorMessageId:'anchor-1'};
@@ -2143,9 +2152,36 @@ test('current user withdraws stopped work while retaining the original unknown B
   assert.deepEqual(withdrawn.origin.cancellation.evidenceCalls,['old-bash']);
   assert.deepEqual(store.read().works.uncertain.budget.uncertainDispatches,unknown);
   assert.equal(env.goalPlanStore.getPlan(planId).resultAcceptance?.acceptedAt,undefined);
+  function assertClosed(supervisor,plans){
+   const reads=[supervisor.get({sessionId:opened.sessionId}),...supervisor.list({workspaceId:'ws-1'}),
+    ...supervisor.summaries({workspaceId:'ws-1',all:true}),...supervisor.listByWorkspaceIds(['ws-1']).get('ws-1')];
+   for(const row of reads){
+    assert.equal(row.status,'cancelled');assert.equal(row.followUp.inCurrentList,false);
+    const parsed=readDrawerSession(row);assert.ok(parsed);
+    assert.equal(backgroundWork(indexBotWork([parsed],true)).count,0);
+   }
+   const disk=JSON.parse(readFileSync(path.join(plans.getStoreDir(),`${planId}.json`),'utf8'));
+   assert.equal(disk.status,'cancelled');assert.deepEqual(disk.runner.interruption,interruption);
+   assert.equal(disk.delegationOrigin.takeover.phase,'stopping');
+   assert.equal(disk.tasks[0].failureReason,'conversation_persistence_failed');
+   assert.equal(plans.getPlan(planId).status,'cancelled');
+   const index=readFileSync(path.join(plans.getStoreDir(),'index.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
+   assert.equal(index.find(row=>row.planId===planId).status,'cancelled');
+   assert.equal(plans.listPlans().some(row=>row.planId===planId),false);
+   assert.equal(plans.listPlanDetails().some(row=>row.planId===planId),false);
+  }
+  assertClosed(env.supervisor,env.goalPlanStore);
+  env.goalPlanStore.setRunnerState(planId,{toolCallCount:7});
+  env.goalPlanStore.recordTaskEvidence(planId,original.tasks[0].taskId,{status:'failed',result:'conversation_persistence_failed'});
+  assertClosed(env.supervisor,env.goalPlanStore);
+  // Reproduce an already-written legacy record; recovery must use its admitted receipt without a new input.
+  env.goalPlanStore.revisePlan(planId,{status:'interrupted'});
+  const coldStore=createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()});
   const restarted=createSessionSupervisor({conversationStore:env.conversationStore,
-   goalPlanStore:createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()}),goalRunner:env.goalRunner,deferRecovery:true});
+   goalPlanStore:coldStore,goalRunner:env.goalRunner,deferRecovery:true});
   await restarted.recoverCancellations('ws-1');
+  await until(()=>coldStore.getPlan(planId).status==='cancelled' && !coldStore.getPlan(planId).delegationOrigin.cancellation.cleanupPending);
+  assertClosed(restarted,coldStore);
   assert.equal(restarted.get({sessionId:opened.sessionId}).followUp.reason,'user_withdrawn');
   assert.deepEqual(store.read().works.uncertain.budget.uncertainDispatches,unknown);
   assert.equal((await env.supervisor.controlWork(input,context)).replayed,true);
@@ -2597,4 +2633,23 @@ test('related turn summaries never load child transcripts or reports', async () 
     assert.equal(selected[0].report,undefined);
     assert.deepEqual(env.supervisor.summaries({workspaceId:'ws-1',sessionIds:['unrelated']}),[]);
   } finally { await env.cleanup(); }
+});
+
+
+test('cancellation cannot report success if execution reappears during cleanup',async()=>{
+ let endExecution=()=>{},inject=true;
+ const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}},
+  isolationPlanner:{async prepare(plan){return {ok:true,plan};},async cleanup(plan){
+   if(inject){inject=false;endExecution=beginExecutionAttempt(plan.conversationId,'late-owner');}
+  }}});
+ try{
+  const context=contextOf(env,{currentInputAnchors:['anchor-1']});
+  const opened=await env.supervisor.spawn(spawnInput(),context);
+  const result=await env.supervisor.cancel({sessionId:opened.sessionId},context);
+  assert.equal(result.error,'cancellation_not_settled');assert.equal(result.cancellationPending,true);
+  assert.equal(result.followUp.inCurrentList,true);
+  assert.equal(env.events.some(event=>event.kind==='cancelled'),false);
+  endExecution();
+  assert.equal((await env.supervisor.cancel({sessionId:opened.sessionId},context)).followUp.inCurrentList,false);
+ }finally{endExecution();await env.cleanup();}
 });

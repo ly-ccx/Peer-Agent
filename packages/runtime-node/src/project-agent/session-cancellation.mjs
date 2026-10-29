@@ -92,6 +92,10 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
         const cleaned = goalPlanStore.getPlan(plan.planId);
         goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...cleaned.delegationOrigin, cancellation: { ...cleaned.delegationOrigin.cancellation, cleanupPending: false } } },
           { reason: 'cancellation cleanup settled', changedBy: 'session-cancellation' });
+        const settled = project(goalPlanStore.getPlan(plan.planId));
+        if (settled.status !== 'cancelled' || settled.followUp?.inCurrentList !== false) {
+          return { ...settled, error: 'cancellation_not_settled', cancellationPending: true };
+        }
         emit({ kind: 'cancelled', sessionId: registration.sessionId, planId: plan.planId, workspaceId: registration.workspaceId, reason: registration.receipt.reason,
           ...(registration.receipt.reason === 'supersession_expired' ? { surfacing: 'silent', payload: { reason: 'supersession_expired', surfacing: 'silent' } } : {}) });
         if (input.promote !== false) await promote();
