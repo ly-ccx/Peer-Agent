@@ -1,4 +1,5 @@
 .bot-recovery-control { flex: none; align-self: center; box-sizing: border-box; width: var(--bot-column-width); min-width: 0; margin: 12px var(--bot-column-gutter) 0; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--chrome-canvas); color: var(--graphite-soft); font-size: var(--ui-font-control); line-height: 1.5; overflow-wrap: anywhere; }
+.bot-recovery-control[inert] { min-height: 0; overflow: hidden; }
 .bot-recovery-control p { margin: 0; }
 
 .bot-recovery-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; padding: 10px 10px 10px 14px; }
@@ -29,6 +30,7 @@
 
 .bot-recovery-confirm { margin: 0 0 10px; padding: 10px 12px; border-radius: var(--ui-radius-control); background: var(--paper-sheet); }
 .bot-recovery-confirm p { margin-bottom: 8px; font-size: var(--ui-font-meta); }
+.bot-recovery-footer > .bot-recovery-confirm { margin: 0; }
 
 .bot-recovery-footer { display: grid; gap: 8px; padding: 12px 14px; }
 .bot-recovery-list + .bot-recovery-footer { border-top: 1px solid var(--chrome-hairline); }
@@ -37,7 +39,7 @@
 .bot-recovery-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 
 .bot-recovery-button { min-height: 32px; padding: 6px 14px; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); background: var(--paper-sheet); color: var(--graphite-base); font: inherit; cursor: pointer; }
-.bot-recovery-button:hover:not(:disabled) { background: var(--chrome-hover); }
+.bot-recovery-button:hover:not(:disabled), .bot-recovery-button[aria-expanded='true'] { background: var(--chrome-hover); }
 .bot-recovery-button[data-primary='true'] { border-color: transparent; background: var(--graphite-base); color: var(--paper-sheet); }
 .bot-recovery-button[data-primary='true']:hover:not(:disabled) { background: var(--graphite-base); opacity: .9; }
 .bot-recovery-link { min-height: 28px; padding: 4px 8px; border: 0; border-radius: var(--ui-radius-control-compact); background: transparent; color: var(--graphite-soft); font: inherit; font-size: var(--ui-font-meta); cursor: pointer; }

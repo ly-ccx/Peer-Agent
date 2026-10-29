@@ -3,6 +3,7 @@ import type { I18nRuntime, TranslationKey } from '@peer-agent/i18n';
 import type { BotRecoveryStatus, ProjectRecoveryView } from '@peer-agent/protocol';
 import { PeerIcon } from '../../ui/icons';
 import { useBotRecovery } from '../state/useBotRecovery';
+import { useQuestionDismissal } from './useQuestionDismissal';
 import '../styles/bot-recovery-control.css';
 
 const reasons: Record<string, TranslationKey> = {
@@ -25,16 +26,23 @@ function groupByReason(works: readonly Work[]) {
   return [...groups];
 }
 
-export function BotRecoveryControl({ workspaceId, status, i18n, onRetry }: {
-  readonly workspaceId: string; readonly status: BotRecoveryStatus | null; readonly i18n: I18nRuntime; readonly onRetry: () => void;
+/** `settled` comes from host facts; the entry then closes its footprint and returns focus it still owned. */
+export function BotRecoveryControl({ workspaceId, status, settled, i18n, onRetry, onClosed }: {
+  readonly workspaceId: string; readonly status: BotRecoveryStatus | null; readonly settled: boolean; readonly i18n: I18nRuntime;
+  readonly onRetry: () => void; readonly onClosed: () => void;
 }) {
   const recovery = useBotRecovery(workspaceId);
   const bodyId = useId();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState<Target | null>(null);
+  const [confirmAll, setConfirmAll] = useState(false);
+  const dismissal = useQuestionDismissal(settled, onClosed, node =>
+    node.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea:not(:disabled)') ?? null);
   const { view, error, busy } = recovery;
   const held = view?.works.filter(work => work.disposition === 'held') || [];
   const resumable = view?.works.filter(work => work.disposition === 'resume') || [];
+  const pending = view?.canContinue ? held.length + view.sessions.length : 0;
+  const continuable = view && view.phase !== 'occupied' && (!view.canContinue || resumable.length > 0 || !view.runtimeReady);
   const errorKey = error === 'coordination_resume_plan_changed' ? 'recovery.stale'
     : error === 'coordination_recovery_stop_pending' ? 'recovery.stopPending'
     : error === 'RECOVERY_BUSY' ? 'recovery.busy'
@@ -56,14 +64,17 @@ export function BotRecoveryControl({ workspaceId, status, i18n, onRetry }: {
     </div>
   </div> : null;
   const retireButton = (target: Target) => <button type="button" className="bot-recovery-link" aria-label={retireLabel} disabled={busy}
-    aria-expanded={isTarget(target)} onClick={() => setConfirm(isTarget(target) ? null : target)}>{i18n.t('recovery.retireShort')}</button>;
+    aria-expanded={isTarget(target)} onClick={() => { setConfirmAll(false); setConfirm(isTarget(target) ? null : target); }}>{i18n.t('recovery.retireShort')}</button>;
   const label = (text: string) => text === 'Earlier task' ? i18n.t('recovery.earlierTask') : text;
   const toggle = () => {
     const next = !open; setOpen(next);
     if (next) recovery.check();
   };
   const feedback = busy || recovery.handoff || error;
-  return <section className="bot-recovery-control" aria-label={i18n.t('recovery.title')} data-tone={status ? 'blocked' : 'quiet'} data-open={open}>
+  if (!dismissal.present) return null;
+  // Any action may settle the entry; focus moves to the composer only while it stays here.
+  return <section ref={dismissal.ref} className="bot-recovery-control" aria-label={i18n.t('recovery.title')} data-tone={status ? 'blocked' : 'quiet'} data-open={open}
+    inert={settled ? true : undefined} aria-hidden={settled ? true : undefined} onClickCapture={dismissal.captureFocus}>
     <div className="bot-recovery-head">
       <PeerIcon name={status ? 'pause' : 'history'} size={14} className="bot-recovery-mark" />
       <div className="bot-recovery-heading">
@@ -106,15 +117,25 @@ export function BotRecoveryControl({ workspaceId, status, i18n, onRetry }: {
         </div> : null}
         {view?.phase === 'occupied' && view.holder ? <p className="bot-recovery-note">{i18n.t('recovery.holder', {
           surface: view.holder.surface === 'desktop' ? 'Desktop' : 'TUI', version: view.holder.version })}</p> : null}
-        {view && view.phase !== 'occupied' ? <p className="bot-recovery-note">{i18n.t('recovery.backup')}</p> : null}
+        {view && view.phase !== 'occupied' && !view.canContinue ? <p className="bot-recovery-note">{i18n.t('recovery.backup')}</p> : null}
         <div className="bot-recovery-actions">
           {view?.phase === 'occupied' ? <button type="button" className="bot-recovery-button" data-primary="true" disabled={busy || recovery.handoff}
             onClick={() => void recovery.takeover()}>{i18n.t('recovery.takeover')}</button> : null}
-          {view && view.phase !== 'occupied' ? <button type="button" className="bot-recovery-button" data-primary={!view.canContinue}
-            disabled={busy} onClick={() => void recovery.execute('restore')}>{i18n.t('recovery.restore')}</button> : null}
+          {continuable ? <button type="button" className="bot-recovery-button" data-primary="true"
+            disabled={busy} onClick={() => void recovery.execute('restore')}>{i18n.t(view?.canContinue ? 'recovery.continue' : 'recovery.restore')}</button> : null}
+          {pending >= 2 ? <button type="button" className="bot-recovery-button" disabled={busy} aria-expanded={confirmAll}
+            onClick={() => { setConfirm(null); setConfirmAll(!confirmAll); }}>{i18n.t('recovery.retireAll')}</button> : null}
           <button type="button" className="bot-recovery-link" disabled={busy} onClick={recovery.check}>{i18n.t('recovery.review')}</button>
           {status?.retryable ? <button type="button" className="bot-recovery-link" disabled={busy} onClick={onRetry}>{i18n.t('projectAgent.history.retry')}</button> : null}
         </div>
+        {confirmAll && pending >= 2 ? <div className="bot-recovery-confirm" role="group" aria-label={i18n.t('recovery.retireAll')}>
+          <p>{i18n.t('recovery.retireAllHint', { count: pending })}</p>
+          <div className="bot-recovery-actions">
+            <button type="button" className="bot-recovery-button" disabled={busy}
+              onClick={async () => { await recovery.execute('retain_all'); setConfirmAll(false); }}>{i18n.t('recovery.confirmRetireAll', { count: pending })}</button>
+            <button type="button" className="bot-recovery-link" disabled={busy} onClick={() => setConfirmAll(false)}>{i18n.t('recovery.cancel')}</button>
+          </div>
+        </div> : null}
         {error || status || view?.backupLocation ? <details className="bot-recovery-diagnostics">
           <summary><span>{i18n.t('recovery.diagnostics')}</span><PeerIcon name="chevronDown" size={12} /></summary>
           {error || status ? <p><code>{error || status?.code}</code>{status?.phase ? ` · ${status.phase}` : ''}</p> : null}

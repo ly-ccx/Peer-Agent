@@ -36,7 +36,7 @@ export function useBotRecovery(workspaceId: string) {
     return () => { generation.current++; reads.current++; off(); };
   }, [workspaceId, inspect]);
   const check = useCallback(() => { watching.current = true; void inspect(); }, [inspect]);
-  const execute = useCallback(async (action: 'restore' | 'retain', target?: Pick<ProjectRecoveryRequest, 'workId' | 'sessionId'>) => {
+  const execute = useCallback(async (action: Exclude<ProjectRecoveryRequest['action'], 'inspect'>, target?: Pick<ProjectRecoveryRequest, 'workId' | 'sessionId'>) => {
     if (!view?.planToken || mutating.current) return;
     const ticket = generation.current;
     mutating.current = true; watching.current = true; setBusy(true); setError(null);

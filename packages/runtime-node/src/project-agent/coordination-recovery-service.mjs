@@ -41,6 +41,19 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
     if (view) views.set(id, { ...view, ...value });
     onChanged(id);
   }
+  /** Persists what the recovery entry still needs, so conversation reads never rerun inspection. */
+  function remember(id, dir, view) {
+    if (!view.canContinue) return;
+    const file = path.join(dir, 'recovery-action.json'), pending = view.works.length + view.sessions.length;
+    let current = null;
+    try { current = json(file); } catch { /* Missing or unreadable records stay unknown until this write. */ }
+    // A failed or interrupted step may have left the host paused; keep it visible until facts prove otherwise.
+    if (current && current.phase !== 'ready' && (pending || !view.runtimeReady)) return;
+    if (current?.phase === 'ready' && current.pending === pending) return;
+    if (existsSync(file) && lstatSync(file).isSymbolicLink()) fail('coordination_repair_path_invalid');
+    durable(file, { schemaVersion: 1, phase: 'ready', pending, at: new Date().toISOString() });
+    onChanged(id);
+  }
   function checkpointReader(dir, state) {
     return (workId, ref) => {
       if (!/^[a-f0-9]{64}\.json$/.test(ref || '')) fail('invalid_checkpoint');
@@ -134,14 +147,17 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
       if (request.planToken !== plan.token) fail('coordination_resume_plan_changed');
       if (request.action === 'restore') {
         if (!plan.view.canContinue || plan.decisions.length) {
-          status(id, { phase: 'backing_up' }); backupInputs(plan.dir, plan.inspection.sourceFingerprint, plan.inspection);
-          status(id, { phase: 'restoring' });
-          recoverCoordinationForkBackup({ directory: plan.dir, sourceFingerprint: plan.inspection.sourceFingerprint,
-            reviewedPrefixSha256: plan.inspection.baselinePrefix.sha256, assertMaintenanceOwner: () => assertOwner(id, epoch) });
-          assertOwner(id, epoch);
-          // Version 3 readers must reject the new scoped-admission events before writing.
-          const manifestFile = path.join(plan.dir, 'coordination-v2/manifest.json'), manifest = json(manifestFile);
-          durable(manifestFile, { ...manifest, minimumReaderVersion: Math.max(4, manifest.minimumReaderVersion), minimumWriterVersion: Math.max(4, manifest.minimumWriterVersion) });
+          // Sources were preserved and verified before the first admission; a re-check never copies them again.
+          if (!plan.view.canContinue || !plan.view.restored) {
+            status(id, { phase: 'backing_up' }); backupInputs(plan.dir, plan.inspection.sourceFingerprint, plan.inspection);
+            status(id, { phase: 'restoring' });
+            recoverCoordinationForkBackup({ directory: plan.dir, sourceFingerprint: plan.inspection.sourceFingerprint,
+              reviewedPrefixSha256: plan.inspection.baselinePrefix.sha256, assertMaintenanceOwner: () => assertOwner(id, epoch) });
+            assertOwner(id, epoch);
+            // Version 3 readers must reject the new scoped-admission events before writing.
+            const manifestFile = path.join(plan.dir, 'coordination-v2/manifest.json'), manifest = json(manifestFile);
+            durable(manifestFile, { ...manifest, minimumReaderVersion: Math.max(4, manifest.minimumReaderVersion), minimumWriterVersion: Math.max(4, manifest.minimumWriterVersion) });
+          }
           status(id, { phase: 'reconciling' });
           store = createWorkCoordinationStore({ rootDir, workspaceId: id, formatVersion: 2,
             holdsLease: () => holdsLease(id), leaseEpoch: () => leaseEpoch(id) });
@@ -158,6 +174,25 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
               quarantinedEventIds: [...new Set(originals.flatMap(work => [...(work.pendingEventIds || []), ...(work.consumedEventIds || [])]))] });
           }
         }
+      } else if (request.action === 'retain_all') {
+        // The token fixes the reviewed set; resumable or newer work is never included.
+        const works = plan.decisions.filter(row => row.disposition === 'held').map(row => plan.state.works[row.workId]);
+        const heldSessions = plan.view.sessions.map(row => row.sessionId);
+        if (!plan.view.canContinue || !works.length && !heldSessions.length || works.some(work => !historyWorkHeld(work))) fail('coordination_resume_plan_changed');
+        const sessions = [...new Set([...heldSessions, ...works.flatMap(work => work.sessionIds || [])])];
+        if (sessions.length && typeof cancelSessions !== 'function') fail('coordination_recovery_stop_unavailable');
+        if (sessions.length) await cancelSessions(id, sessions);
+        assertOwner(id, epoch);
+        store = createWorkCoordinationStore({ rootDir, workspaceId: id, formatVersion: 2,
+          holdsLease: () => holdsLease(id), leaseEpoch: () => leaseEpoch(id) });
+        await store.prepare(); assertOwner(id, epoch);
+        let state = store.read();
+        if (works.some(work => recoveryHash(state.works[work.workId]) !== recoveryHash(work))) fail('coordination_resume_plan_changed');
+        // Each event is a complete fact on its own; a later failure keeps earlier ones and leaves the rest held.
+        const sourceFingerprint = plan.inspection.sourceFingerprint;
+        for (const sessionId of heldSessions) state = store.append({ kind: 'history_session_retained', sessionId, sourceFingerprint, expectedRevision: state.revision });
+        for (const { workId } of works) state = store.append({ kind: 'history_work_retained', workId,
+          workHash: recoveryHash(state.works[workId]), sourceFingerprint, expectedRevision: state.revision });
       } else {
         const work = plan.state.works[request.workId];
         const heldSession = plan.view.sessions.find(row => row.sessionId === request.sessionId);
@@ -184,18 +219,29 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
       // Reply admission opens only after the durable partition has been published.
       await restart(id); assertOwner(id, epoch);
       const result = await inspectOwned(id, epoch);
+      remember(id, result.dir, result.view);
       return { ok: true, view: result.view };
     } finally { store?.close(); }
   }
   return {
-    available(id) { try { return existsSync(path.join(directory(id), 'coordination-recovery.json')); } catch { return false; } },
+    /** Cheap read for conversation pages: true only while the user still has something to act on. */
+    needsAttention(id) {
+      let dir;
+      try { dir = directory(id); } catch { return false; }
+      if (!existsSync(path.join(dir, 'coordination-recovery.json'))) return false;
+      if (flights.has(id) && flights.get(id).action !== 'inspect') return true;
+      let current = null;
+      try { current = json(path.join(dir, 'recovery-action.json')); } catch { /* Unknown keeps the entry visible. */ }
+      return current?.phase !== 'ready' || !Number.isInteger(current.pending) || current.pending > 0;
+    },
     execute(request = {}) {
       if (!request || typeof request !== 'object' || Array.isArray(request)) return Promise.resolve({ ok: false, code: 'INVALID_INPUT' });
       const id = request.workspaceId;
-      if (!validId(id) || !['inspect', 'restore', 'retain'].includes(request.action)
+      if (!validId(id) || !['inspect', 'restore', 'retain', 'retain_all'].includes(request.action)
         || request.action !== 'inspect' && !/^[a-f0-9]{64}$/.test(request.planToken || '')
         || request.action === 'retain' && (Boolean(request.workId) === Boolean(request.sessionId)
-          || typeof (request.workId || request.sessionId) !== 'string' || (request.workId || request.sessionId).length > 200)) return Promise.resolve({ ok: false, code: 'INVALID_INPUT' });
+          || typeof (request.workId || request.sessionId) !== 'string' || (request.workId || request.sessionId).length > 200)
+        || request.action === 'retain_all' && (request.workId !== undefined || request.sessionId !== undefined)) return Promise.resolve({ ok: false, code: 'INVALID_INPUT' });
       const key = JSON.stringify([request.action, request.planToken, request.workId, request.sessionId]);
       if (flights.has(id)) {
         if (request.action === 'inspect' && views.has(id)) return Promise.resolve({ ok: true, view: views.get(id) });
@@ -209,7 +255,11 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
         }
         const epoch = leaseEpoch(id);
         try {
-          if (request.action === 'inspect') return { ok: true, view: (await inspectOwned(id, epoch)).view };
+          if (request.action === 'inspect') {
+            const result = await inspectOwned(id, epoch);
+            remember(id, result.dir, result.view);
+            return { ok: true, view: result.view };
+          }
           return await mutate(request, epoch);
         } catch (error) {
           const code = /^[A-Za-z0-9_:-]{1,120}$/.test(error?.code || error?.message || '') ? error.code || error.message : 'RECOVERY_FAILED';
@@ -217,7 +267,7 @@ export function createCoordinationRecoveryService({ rootDir, holdsLease, leaseEp
           return { ok: false, code };
         }
       })().finally(() => flights.delete(id));
-      flights.set(id, { key, promise: run }); return run;
+      flights.set(id, { key, action: request.action, promise: run }); return run;
     },
   };
 }
