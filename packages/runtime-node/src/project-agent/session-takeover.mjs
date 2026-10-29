@@ -1,4 +1,10 @@
+import { goalPlanWaitsOnUser } from '../goal-plan-domain.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
+
+export function takeoverHumanBlocker(plan) {
+  if (plan?.delegationOrigin?.phase === 'awaiting_approval' || plan?.status === 'awaiting_approval') return 'plan_approval_required';
+  return plan?.runner?.status === 'waiting_user' || goalPlanWaitsOnUser(plan) ? 'human_decision_required' : null;
+}
 
 /** Change executor at idle while retaining the task and artifacts. Human approval is not consumed. */
 export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
@@ -10,9 +16,15 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
       const plan = findBySession(input.sessionId), transition = store?.read().transitions?.[input.operationId];
       if (!plan || plan.delegationOrigin.workspaceId !== context.workspaceId || plan.delegationOrigin.parentConversationId !== context.parentConversationId
         || !canManageWorkspace(context.workspaceId) || !transition || transition.executionEpoch !== input.binding.executionEpoch
-        || transition.oldSessionId !== input.sessionId || !['handoff', 'revise'].includes(transition.action)) return { error: 'out_of_scope' };
+        || transition.oldSessionId !== input.sessionId || !['handoff', 'revise', 'resume'].includes(transition.action)) return { error: 'out_of_scope' };
       if (plan.resultAcceptance?.acceptedAt || ['completed', 'cancelled'].includes(plan.status) || plan.delegationOrigin.cancellation) return { error: 'session_not_running' };
-      if (plan.runner?.status === 'waiting_user') return { error: 'human_decision_required' };
+      const humanGate = takeoverHumanBlocker(plan);
+      if (humanGate) return { error: humanGate };
+      const userRevision = (store.read().decisions[input.operationId]?.sourceInputIds || []).length > 0;
+      if (['paused', 'superseded'].includes(plan.delegationOrigin.phase)
+        && plan.delegationOrigin.takeover?.operationId !== input.operationId && !userRevision) return { error: 'user_resume_required' };
+      if (plan.runner?.interruption?.origin === 'user' && !userRevision) return { error: 'user_resume_required' };
+      if (plan.runner?.interruption && (!plan.runner.interruption.origin || plan.runner.interruption.origin === 'unknown') && !userRevision) return { error: 'interruption_origin_unknown' };
       if (plan.delegationOrigin.takeover?.phase === 'completed' && plan.delegationOrigin.takeover.operationId === input.operationId) return { replayed: true };
       goalRunner?.pause?.(plan.planId, 'executor takeover');
       executionScheduler.cancelPlan(plan.planId);
@@ -33,7 +45,16 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
           const plan = goalPlanStore.getPlan(registration.planId);
           if (mandate.goalRevision !== input.binding.goalRevision || transition.phase !== 'stopping'
             || plan.delegationOrigin.takeover?.operationId !== input.operationId || plan.delegationOrigin.cancellation) return;
-          const unknown = state.works[input.binding.workId]?.budget?.uncertainDispatches?.some(row => !row.planId || row.planId === plan.planId);
+          const work = state.works[input.binding.workId];
+          const humanGate = takeoverHumanBlocker(plan);
+          if (humanGate || work?.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)) {
+            store.advanceTransition(input.operationId, 'stopping', { phase: 'blocked', error: humanGate || 'work_execution_stopped',
+              executionAdmission: 'rejected', executionEffect: 'rejected' });
+            return;
+          }
+          const budget = work?.budget;
+          const unknown = budget?.uncertainDispatches?.some(row => !row.planId || row.planId === plan.planId)
+            || Object.values(budget?.attempts || {}).some(attempt => attempt.pendingTools?.some(row => !row.planId || row.planId === plan.planId));
           if (unknown) {
             store.advanceTransition(input.operationId, 'stopping', { phase: 'awaiting_outcome', error: 'execution_outcome_unknown' });
             emit({kind:'interrupted',eventId:`coordination-outcome:${input.operationId}`,workspaceId:context.workspaceId,sessionId:input.sessionId,planId:plan.planId,reason:'execution_outcome_unknown'}); return;
@@ -43,7 +64,7 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
           store.advanceTransition(input.operationId, 'stopping', { phase: 'ready' });
           goalPlanStore.revisePlan(plan.planId, { ...(transition.action === 'revise' ? { goal: input.text } : {}),
             delegationOrigin: { ...plan.delegationOrigin, phase: 'queued', workId: binding.workId, coordinationBinding: binding,
-              takeover: { ...plan.delegationOrigin.takeover, phase: 'completed', completedAt: now() } } },
+              takeover: { ...plan.delegationOrigin.takeover, phase: 'completed', completedAt: now(), retainedInterruption: plan.runner?.interruption } } },
           { reason: 'executor takeover settled', changedBy: 'session-takeover' });
           // 换执行体的续接是"接着做剩下的活"：核验结论属于被替换的那个执行体，
           // 重放 verify 会让新执行体第一轮就去核验旧成果，然后原地停滞/等用户（复盘症状）。
@@ -51,7 +72,9 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
           const resumeIntent = transition.action === 'revise'
             ? 'explore'
             : pausedIntent === 'verify' ? 'execute' : pausedIntent;
-          goalPlanStore.setRunnerState(plan.planId, { status: 'paused', intent: resumeIntent });
+          goalPlanStore.setRunnerState(plan.planId, { status: 'paused', intent: resumeIntent, interruption: undefined });
+          goalPlanStore.setPlanStatus(plan.planId, 'paused');
+          store.advanceTransition(input.operationId, 'ready', { executionAdmission: 'queued', executionEffect: 'pending' });
           emit({ kind: 'session_resumed', workspaceId: context.workspaceId, sessionId: input.sessionId, planId: plan.planId,
             reason: 'executor_takeover', payload: { operationId: input.operationId, goalRevision: binding.goalRevision } });
           await promote();

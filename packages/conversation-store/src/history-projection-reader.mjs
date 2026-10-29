@@ -1,5 +1,6 @@
 /** Bounded derived values only; strict history and file versions remain authoritative. */
-export function createHistoryProjectionReader({ describe, load, project, immutableInput = false, maxEntries = 32, maxBytes = 8 * 1024 * 1024 }) {
+import { freezeHistoryValue } from './history-source-reader.mjs';
+export function createHistoryProjectionReader({ describe, load, project, immutableInput = false, immutableOutput = false, maxEntries = 32, maxBytes = 8 * 1024 * 1024 }) {
   const entries = new Map(); let bytes = 0;
   const drop = id => { const row = entries.get(id); if (row) bytes -= row.bytes; entries.delete(id); };
   const attempt = id => {
@@ -10,13 +11,14 @@ export function createHistoryProjectionReader({ describe, load, project, immutab
     const cached = entries.get(id);
     if (cached?.version === description.version) {
       entries.delete(id); entries.set(id, cached);
-      return structuredClone(cached.value);
+      return immutableOutput ? cached.value : structuredClone(cached.value);
     }
     drop(id);
     let value;
     try {
       const input = { ...load(description), createdAt: description.createdAt };
-      value = structuredClone(project(immutableInput ? Object.freeze(input) : input));
+      const projected = project(immutableInput ? Object.freeze(input) : input);
+      value = immutableOutput ? freezeHistoryValue(projected, true) : structuredClone(projected);
     }
     catch (error) {
       if (describe(id)?.version !== description.version) throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED', { cause: error }), { code: 'BACKGROUND_VERSION_CHANGED' });
@@ -28,7 +30,7 @@ export function createHistoryProjectionReader({ describe, load, project, immutab
       entries.set(id, { version: description.version, value, bytes: size }); bytes += size;
       while (entries.size > maxEntries || bytes > maxBytes) drop(entries.keys().next().value);
     }
-    return structuredClone(value);
+    return immutableOutput ? value : structuredClone(value);
   };
   return id => {
     for (let count = 0; ; count++) {

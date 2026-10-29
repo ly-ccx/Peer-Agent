@@ -248,7 +248,7 @@ test('only main Bot and the fixed worker role project agent communication', () =
   for (const profile of [{role: 'project_agent'}, {role: 'work_session', agentKind: 'worker'}])
     assert.deepEqual(agentCommunicationExcludedPrefixes(profile), []);
   for (const profile of [null, {role: 'chat'}, {role: 'goal_runner'}, {role: 'work_session', agentKind: 'explorer'}, {role: 'work_session', agentKind: 'verifier'}])
-    assert.deepEqual(agentCommunicationExcludedPrefixes(profile), ['local.delegation.send_agent_message']);
+    assert.deepEqual(agentCommunicationExcludedPrefixes(profile), ['local.delegation.send_agent_message', 'local.continuity.']);
 });
 
 test('a durable child message wakes the main Bot without a fabricated user input or repeated polling', async t => {

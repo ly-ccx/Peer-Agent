@@ -1,15 +1,36 @@
+
+import {
+  REANCHOR_MIN_INTERVAL,
+  collectLeafTasks,
+  computePlanScopeSnapshot,
+  computeReanchorInterval,
+  createDeterministicExplorePlan,
+  detectPlanDrift,
+  shouldReanchor,
+} from './goal-planning-policy.mjs';
+export {
+  detectPlanDrift,
+  computePlanScopeSnapshot,
+  shouldReanchor,
+  computeReanchorInterval,
+  createDeterministicExplorePlan,
+} from './goal-planning-policy.mjs';
+import {
+  AUTO_VERIFIABLE_CRITERION_KINDS,
+  collectVerificationEvidenceRefs,
+  evaluateVerificationGate,
+  summarizeVerificationGate,
+} from './goal-verification-policy.mjs';
+export { evaluateVerificationGate } from "./goal-verification-policy.mjs";
 import { beginVerificationAttempt } from './project-agent/session-facts.mjs';
 import { criterionSourceRevision, currentModelReview, semanticGateCanRun } from './project-agent/criterion-review.mjs';
-/**
- * Goal Runner skeleton —— 主进程托管编排器。
- *
- * 边界：
- * - Runner 只编排 GoalPlan 生命周期与 chat runtime continuation。
- * - Runner 不直接调用 bash/file/MCP/Plugin 等本地能力。
- * - 工具执行、权限、Evidence 仍由注入的 chatRuntime 及既有能力链路负责。
- */
-
-import { derivePlanStatus, goalPlanIsSelfDriven, goalPlanWaitsOnPreviewReview, goalPlanWaitsOnUser, listPreviewReviewPendingLeaves } from './goal-plan-store.mjs';
+import {
+  derivePlanStatus,
+  goalPlanIsSelfDriven,
+  goalPlanWaitsOnPreviewReview,
+  goalPlanWaitsOnUser,
+  listPreviewReviewPendingLeaves,
+} from './goal-plan-store.mjs';
 import { createGoalVisualVerification } from './goal-visual-verification.mjs';
 import { decideIntakeConvergence } from './goal-intake-convergence.mjs';
 import { scheduleVisualRepair, hasActiveGoalRepair } from './goal-visual-repair.mjs';
@@ -37,8 +58,6 @@ const DEFAULT_VERIFICATION_REPAIR_ATTEMPTS = 2;
 const DEFAULT_BLOCKER_AUDIT_LIMIT = 3;
 /** 连续多少轮「纯文本且无推进」才判定真口头停；前两轮视为纠偏宽限。 */
 const VERBAL_STOP_GRACE_TURNS = 3;
-const INSPECT_EXPLORER_MAX_TOOL_CALLS = 4;
-const INSPECT_EXPLORER_MAX_DURATION_MS = 120000;
 
 const TERMINAL_PLAN_STATUSES = new Set(['completed', 'cancelled', 'failed']);
 const STOPPED_RUNNER_STATUSES = new Set(['paused', 'blocked', 'budget_exhausted', 'completed', 'failed']);
@@ -88,22 +107,6 @@ function normalizeExploreRequests(result) {
       ? [result.explore]
       : [];
   return raw.filter((request) => request && typeof request === 'object');
-}
-
-function collectLeafTasks(plan) {
-  const out = [];
-  const stack = Array.isArray(plan?.tasks) ? [...plan.tasks] : [];
-  while (stack.length > 0) {
-    const task = stack.shift();
-    if (!task || typeof task !== 'object') continue;
-    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    if (subtasks.length > 0) {
-      for (const child of subtasks) stack.push(child);
-      continue;
-    }
-    out.push(task);
-  }
-  return out;
 }
 
 
@@ -200,112 +203,6 @@ function failPlanRun(goalPlanStore, planId, message, {
     emit('goalRunner:failed', { planId, error: reason, failedTaskIds });
   }
   return failedTaskIds;
-}
-
-
-function collectStringSet(values) {
-  const refs = new Set();
-  for (const value of Array.isArray(values) ? values : []) {
-    if (typeof value === 'string' && value.trim()) refs.add(value.trim());
-  }
-  return refs;
-}
-
-function collectKnownInvolvedFiles(plan, leafTasks = collectLeafTasks(plan)) {
-  const files = collectStringSet(plan?.involvedFiles);
-  for (const task of leafTasks) {
-    for (const file of collectStringSet(task?.involvedFiles)) files.add(file);
-  }
-  return Array.from(files);
-}
-
-function hasCompletedExplorerReport(plan) {
-  return (Array.isArray(plan?.runner?.explorers) ? plan.runner.explorers : [])
-    .some((run) => run?.status === 'completed' && run.report);
-}
-
-function collectAutoSuccessCriteria(plan) {
-  return (Array.isArray(plan?.successCriteria) ? plan.successCriteria : [])
-    .filter((criterion) => (
-      criterion &&
-      typeof criterion === 'object' &&
-      typeof criterion.kind === 'string' &&
-      criterion.kind !== 'manual'
-    ));
-}
-
-function firstNonEmptyString(...values) {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
-}
-
-function buildInspectScope(plan, knownFiles) {
-  const include = [];
-  if (typeof plan?.targetWorkspacePath === 'string' && plan.targetWorkspacePath.trim()) {
-    include.push(plan.targetWorkspacePath.trim());
-  }
-  for (const item of collectStringSet(plan?.boundaries?.inScope)) include.push(item);
-  for (const file of knownFiles) include.push(file);
-
-  const exclude = Array.from(collectStringSet(plan?.boundaries?.outOfScope));
-  return {
-    ...(include.length > 0 ? { include: Array.from(new Set(include)).slice(0, 12) } : {}),
-    ...(exclude.length > 0 ? { exclude: Array.from(new Set(exclude)).slice(0, 12) } : {}),
-  };
-}
-
-export function createDeterministicExplorePlan(plan, { generatedAt = new Date().toISOString() } = {}) {
-  const leafTasks = collectLeafTasks(plan);
-  const knownFiles = collectKnownInvolvedFiles(plan, leafTasks);
-  const autoCriteria = collectAutoSuccessCriteria(plan);
-  const hasTargetWorkspace =
-    typeof plan?.targetWorkspacePath === 'string' && plan.targetWorkspacePath.trim().length > 0;
-  const hasCompletedExplorer = hasCompletedExplorerReport(plan);
-  const missingTaskFileScope =
-    leafTasks.length > 0 && leafTasks.some((task) => !Array.isArray(task.involvedFiles) || task.involvedFiles.length === 0);
-  const complexEnoughForDeterministicInspect =
-    hasTargetWorkspace || autoCriteria.length > 0 || leafTasks.length >= 4;
-  const questions = [];
-
-  if (!hasCompletedExplorer && complexEnoughForDeterministicInspect && missingTaskFileScope) {
-    const scope = buildInspectScope(plan, knownFiles);
-    const target = firstNonEmptyString(plan?.targetWorkspacePath, plan?.title, plan?.goal, 'the target workspace');
-    questions.push({
-      question: `Identify the primary files, modules, and existing implementation paths needed before acting on: ${target}`,
-      reason: 'Deterministic inspect requires repository context and task-to-file grounding before act.',
-      ...(Object.keys(scope).length > 0 ? { scope } : {}),
-      budget: {
-        maxToolCalls: INSPECT_EXPLORER_MAX_TOOL_CALLS,
-        maxDurationMs: INSPECT_EXPLORER_MAX_DURATION_MS,
-      },
-    });
-  }
-
-  if (!hasCompletedExplorer && autoCriteria.length > 0 && knownFiles.length === 0) {
-    const scope = buildInspectScope(plan, knownFiles);
-    questions.push({
-      question: 'Identify the read-only verification path for the automatic success criteria before acting.',
-      reason: 'Deterministic inspect requires a verifiable test/check path before act.',
-      ...(Object.keys(scope).length > 0 ? { scope } : {}),
-      budget: {
-        maxToolCalls: INSPECT_EXPLORER_MAX_TOOL_CALLS,
-        maxDurationMs: INSPECT_EXPLORER_MAX_DURATION_MS,
-      },
-    });
-  }
-
-  return {
-    requiredBeforeAct: questions.length > 0,
-    questions,
-    exitCriteria: [
-      'primary modules/files identified or an Explorer report explains why they cannot be identified yet',
-      'automatic verification path identified when automatic success criteria exist',
-      'remaining unknowns are explicit and acceptable before act',
-    ],
-    generatedAt,
-  };
 }
 
 function shouldStopForPlan(plan) {
@@ -456,327 +353,11 @@ function phaseForIntent(intent, fallback = 'act') {
   }
 }
 
-// ── 防偏航系统（见 goal-mode-ultrathink-workflow 设计文档第六、八章）──────────────
-//
-// Goal 模式允许 Agent 自主执行,但不允许自主改目标。以下为纯函数护栏,便于单测:
-// - re-anchor:周期性重申原始目标+成功标准,频率自适应任务规模(设计文档开放问题6拍板)。
-// - drift 检测:范围/文件/任务膨胀超阈值即判定漂移,交由 pump 暂停问人。
-// - verification gate:完成前要求所有叶子任务已完成且带 Evidence,阻断"无证据的口头完成"。
-
-const REANCHOR_MIN_INTERVAL = 2;
-const REANCHOR_MAX_INTERVAL = 6;
-/** 任务/文件相对基线的膨胀比阈值(超过即视为范围漂移)。 */
-const DRIFT_INFLATION_RATIO = 2;
-/** 允许的绝对增量下限(小规模计划避免比值误报:未超过该增量不算漂移)。 */
-const DRIFT_MIN_ABSOLUTE_DELTA = 3;
-
-/**
- * re-anchor 间隔:clamp(ceil(taskCount/3), 2, 6)。
- * 小任务不浪费、大任务防漂移(设计文档开放问题6)。
- */
-export function computeReanchorInterval(taskCount) {
-  const n = Number.isFinite(taskCount) ? Math.max(0, Math.trunc(taskCount)) : 0;
-  const base = Math.ceil(n / 3);
-  return Math.min(REANCHOR_MAX_INTERVAL, Math.max(REANCHOR_MIN_INTERVAL, base || REANCHOR_MIN_INTERVAL));
-}
-
-/**
- * 是否应在本轮 re-anchor。forced=true(如计划修订后、长 Explorer 批次返回后)立即触发;
- * 否则每 interval 轮触发一次(turnNumber 从 1 起)。
- */
-export function shouldReanchor(turnNumber, interval, forced = false) {
-  if (forced) return true;
-  const t = Number.isFinite(turnNumber) ? Math.trunc(turnNumber) : 0;
-  const step = Number.isFinite(interval) && interval > 0 ? Math.trunc(interval) : REANCHOR_MIN_INTERVAL;
-  if (t <= 0) return false;
-  return t % step === 0;
-}
-
-/** 计划范围快照:任务总数(含嵌套)+ 去重后的 involvedFiles 数。用于 drift 基线与比较。 */
-export function computePlanScopeSnapshot(plan) {
-  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
-  const files = new Set();
-  let taskCount = 0;
-  const stack = [...roots];
-  while (stack.length > 0) {
-    const task = stack.pop();
-    if (!task || typeof task !== 'object') continue;
-    taskCount += 1;
-    if (Array.isArray(task.involvedFiles)) {
-      for (const f of task.involvedFiles) if (typeof f === 'string' && f.trim()) files.add(f.trim());
-    }
-    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    for (const child of subtasks) stack.push(child);
-  }
-  return { taskCount, fileCount: files.size };
-}
-
-/**
- * 范围漂移检测:相对基线,任务数或文件数膨胀既超过比值阈值(×DRIFT_INFLATION_RATIO)
- * 又超过绝对增量下限(+DRIFT_MIN_ABSOLUTE_DELTA)时判定漂移。两个条件同时满足才报,
- * 避免小规模计划因比值敏感而误报。
- */
-export function detectPlanDrift(baseline, current) {
-  const reasons = [];
-  if (!baseline || !current) return { drifted: false, reasons };
-  const check = (label, base, cur) => {
-    const b = Number.isFinite(base) ? base : 0;
-    const c = Number.isFinite(cur) ? cur : 0;
-    const delta = c - b;
-    if (delta >= DRIFT_MIN_ABSOLUTE_DELTA && c >= b * DRIFT_INFLATION_RATIO && b >= 1) {
-      reasons.push(`${label} inflated from ${b} to ${c}`);
-    }
-  };
-  check('task count', baseline.taskCount, current.taskCount);
-  check('involved files', baseline.fileCount, current.fileCount);
-  return { drifted: reasons.length > 0, reasons };
-}
-
-// 可自动验证的成功标准类型（与 goal-plan-store 的 AUTO_CRITERION_KINDS 对齐）。
-// 这些 kind 的标准必须有 passed=true 且带 evidenceRef 的验证结果才放行完成；
-// 'manual' 则降级为 pre-finish 人工确认，不在此硬门拦截。
-const AUTO_VERIFIABLE_CRITERION_KINDS = new Set([
-  'command',
-  'test',
-  'file-contains',
-  'file-exists',
-]);
-
-function normalizeEvidenceRefSet(value) {
-  if (!value) return null;
-  const refs = value instanceof Set ? Array.from(value) : value;
-  if (!Array.isArray(refs)) return null;
-  return new Set(
-    refs
-      .filter((ref) => typeof ref === 'string' && ref.trim())
-      .map((ref) => ref.trim()),
-  );
-}
-
-function taskHasIndexedEvidence(task, indexedEvidenceRefs) {
-  if (!indexedEvidenceRefs) return true;
-  const refs = Array.isArray(task?.evidenceRefs) ? task.evidenceRefs : [];
-  return refs.some((ref) => typeof ref === 'string' && indexedEvidenceRefs.has(ref.trim()));
-}
-
-function criterionEvidenceIsIndexed(evidenceRef, indexedEvidenceRefs) {
-  if (!indexedEvidenceRefs) return true;
-  return typeof evidenceRef === 'string' && indexedEvidenceRefs.has(evidenceRef.trim());
-}
-
 function collectManualCriteria(plan) {
   return (Array.isArray(plan?.successCriteria) ? plan.successCriteria : [])
     .filter((criterion) => criterion && typeof criterion === 'object')
     .filter((criterion) => !AUTO_VERIFIABLE_CRITERION_KINDS.has(criterion.kind))
     .filter((criterion) => typeof criterion.id === 'string' && criterion.id.trim());
-}
-
-function latestManualDodConfirmation(plan, manualCriterionIds) {
-  const expected = new Set(manualCriterionIds);
-  if (expected.size === 0) return null;
-  return (Array.isArray(plan?.manualConfirmations) ? plan.manualConfirmations : [])
-    .filter((confirmation) => confirmation?.kind === 'manual_dod')
-    .filter((confirmation) => Array.isArray(confirmation.criterionIds))
-    .filter((confirmation) => {
-      const ids = new Set(
-        confirmation.criterionIds
-          .filter((id) => typeof id === 'string' && id.trim())
-          .map((id) => id.trim()),
-      );
-      for (const id of expected) {
-        if (!ids.has(id)) return false;
-      }
-      return true;
-    })
-    .sort((a, b) => String(b.decidedAt || '').localeCompare(String(a.decidedAt || '')))[0] ?? null;
-}
-
-/**
- * 完成前验证门:遍历所有叶子任务,要求全部 status==='completed' 且 evidenceRefs 非空。
- * 任一叶子未完成或缺 Evidence 即不放行完成,返回 { passed:false, unmet:[...] }。
- * 这是"完成以证据为准、不能仅凭口头声明"的机器化落地。
- *
- * DoD-as-Code 增强（见 goal-mode-ultrathink-workflow 设计文档）：
- * - 若计划声明了 successCriteria，则在叶子证据之外，追加对成功标准的机器化校验：
- *   非 manual 的标准（command/test/file-contains/file-exists）必须有一条 passed=true
- *   且带 evidenceRef 的 CriterionResult，否则计入 unmet（reason=criterion_*）。
- * - manual 标准不在此拦截（由 pre-finish 一次人工确认承接），但会体现在 warnings。
- * - 若成功标准全为 manual（无任何可自动验证项），返回 weakDoD=true 告警，提示 DoD
- *   缺乏可执行验证——不阻断完成（向后兼容纯字符串 DoD），但让上层可感知并提示补强。
- */
-export function evaluateVerificationGate(plan, options = {}) {
-  const indexedEvidenceRefs = normalizeEvidenceRefSet(options.indexedEvidenceRefs);
-  const requireManualConfirmation = options.requireManualConfirmation === true;
-  // Host-resolved state only: never consume observations/judgments from a plan
-  // patch or model arguments. Missing authority for a required review fails closed.
-  const uiDeliveryRequired = options.uiDeliveryRequired === true;
-  const uiDelivery = options.uiDelivery;
-  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
-  const unmet = [];
-  const warnings = [];
-  if (uiDeliveryRequired) {
-    if (!uiDelivery || !Array.isArray(uiDelivery.requirements) || uiDelivery.requirements.length === 0
-      || !Array.isArray(uiDelivery.observations) || !Array.isArray(uiDelivery.judgments)) {
-      unmet.push({ kind: 'ui_delivery', reason: 'ui_delivery_authority_missing' });
-    } else {
-      const review = evaluateUiDelivery(uiDelivery.requirements, uiDelivery.observations,
-        uiDelivery.judgments, indexedEvidenceRefs ?? new Set());
-      for (const gap of review.gaps) {
-        unmet.push({ kind: 'ui_delivery', criterionId: gap.requirementId, reason: gap.reason });
-      }
-    }
-  }
-  let leaves = 0;
-  const stack = [...roots];
-  while (stack.length > 0) {
-    const task = stack.pop();
-    if (!task || typeof task !== 'object') continue;
-    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    if (subtasks.length > 0) {
-      for (const child of subtasks) stack.push(child);
-      continue;
-    }
-    leaves += 1;
-    const done = task.status === 'completed';
-    const hasEvidence = Array.isArray(task.evidenceRefs) && task.evidenceRefs.length > 0;
-    const hasIndexedEvidence = hasEvidence && taskHasIndexedEvidence(task, indexedEvidenceRefs);
-    // 条件叶子（例如“复核不通过才返工”）在前提不成立时会被取消。带已入索引证据的取消是
-    // “有据可查的跳过”，不是未完成；无证据或证据未入索引的取消仍然拦截，避免用取消逃避工作。
-    const documentedSkip = task.status === 'cancelled' && hasIndexedEvidence;
-    if (!done && !documentedSkip) {
-      unmet.push({
-        kind: 'task',
-        taskId: task.taskId ?? null,
-        status: task.status ?? null,
-        reason: task.status !== 'cancelled'
-          ? 'not_completed'
-          : hasEvidence
-            ? 'unindexed_evidence'
-            : 'cancelled_without_evidence',
-      });
-    } else if (!hasEvidence) {
-      unmet.push({ kind: 'task', taskId: task.taskId ?? null, status: task.status ?? null, reason: 'missing_evidence' });
-    } else if (!hasIndexedEvidence) {
-      unmet.push({ kind: 'task', taskId: task.taskId ?? null, status: task.status ?? null, reason: 'unindexed_evidence' });
-    }
-  }
-  // 无叶子任务(空计划)不视为通过——完成需要有可验证的证据基础。
-  if (leaves === 0) return { passed: false, unmet: [], warnings, reason: 'no_leaf_tasks' };
-
-  // DoD-as-Code：成功标准校验（有声明才检查，向后兼容无 successCriteria 的旧计划）。
-  const criteria = Array.isArray(plan?.successCriteria) ? plan.successCriteria : [];
-  if (criteria.length > 0) {
-    const resultById = new Map(
-      (Array.isArray(plan?.criterionResults) ? plan.criterionResults : [])
-        .filter((r) => r && typeof r.criterionId === 'string')
-        .map((r) => [r.criterionId, r]),
-    );
-    let autoCount = 0;
-    const manualCriteria = [];
-    for (const criterion of criteria) {
-      if (!criterion || typeof criterion !== 'object') continue;
-      const kind = typeof criterion.kind === 'string' ? criterion.kind : 'manual';
-      const criterionId = typeof criterion.id === 'string' ? criterion.id : null;
-      if (kind === 'model_review') {
-        autoCount += 1;
-        const review = currentModelReview(plan, criterionId);
-        const refs = review?.evidenceRefs || [];
-        if (review?.passed !== true || !refs.length || refs.some(ref => !criterionEvidenceIsIndexed(ref, indexedEvidenceRefs))) {
-          unmet.push({ criterionId, kind, reason: !review ? 'criterion_unverified' : 'criterion_failed' });
-        }
-      } else if (AUTO_VERIFIABLE_CRITERION_KINDS.has(kind)) {
-        autoCount += 1;
-        const result = criterionId ? resultById.get(criterionId) : null;
-        const passed = result?.passed === true;
-        const hasRef = typeof result?.evidenceRef === 'string' && result.evidenceRef.trim();
-        const hasIndexedRef = hasRef && criterionEvidenceIsIndexed(result.evidenceRef, indexedEvidenceRefs);
-        if (!passed || !hasRef || !hasIndexedRef) {
-          unmet.push({
-            criterionId,
-            kind,
-            reason: !result
-              ? 'criterion_unverified'
-              : !passed
-                ? 'criterion_failed'
-                : !hasRef
-                  ? 'criterion_missing_evidence'
-                  : 'criterion_unindexed_evidence',
-          });
-        }
-      } else {
-        // manual 标准：不硬拦，转 pre-finish 人工确认，记 warning。
-        if (criterionId) manualCriteria.push(criterion);
-        warnings.push({ criterionId, kind, reason: 'manual_confirmation_required' });
-      }
-    }
-    // 全 manual（无任何可自动验证项）：弱 DoD 告警——完成不阻断，但提示补强可执行验证。
-    if (autoCount === 0) {
-      warnings.push({ reason: 'weak_dod_all_manual' });
-    }
-    if (requireManualConfirmation && manualCriteria.length > 0) {
-      const criterionIds = manualCriteria
-        .map((criterion) => criterion.id)
-        .filter((id) => typeof id === 'string' && id.trim());
-      const confirmation = latestManualDodConfirmation(plan, criterionIds);
-      const status = confirmation?.decision === 'approve'
-        ? 'approved'
-        : confirmation?.decision === 'reject'
-          ? 'rejected'
-          : confirmation?.decision === 'revise'
-            ? 'revise'
-            : 'missing';
-      const manualConfirmation = {
-        required: true,
-        status,
-        criterionIds,
-        ...(confirmation?.confirmationId ? { confirmationId: confirmation.confirmationId } : {}),
-      };
-      if (status !== 'approved') {
-        unmet.push({
-          criterionId: criterionIds.join(','),
-          kind: 'manual',
-          reason: status === 'missing'
-            ? 'manual_confirmation_required'
-            : 'manual_confirmation_not_approved',
-          manualConfirmation,
-        });
-      }
-      return { passed: unmet.length === 0, unmet, warnings, manualConfirmation };
-    }
-  }
-
-  return { passed: unmet.length === 0, unmet, warnings };
-}
-
-function collectVerificationEvidenceRefs(plan) {
-  const refs = new Set();
-  const stack = Array.isArray(plan?.tasks) ? [...plan.tasks] : [];
-  while (stack.length > 0) {
-    const task = stack.pop();
-    if (!task || typeof task !== 'object') continue;
-    if (Array.isArray(task.evidenceRefs)) {
-      for (const ref of task.evidenceRefs) {
-        if (typeof ref === 'string' && ref.trim()) refs.add(ref.trim());
-      }
-    }
-    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    for (const child of subtasks) stack.push(child);
-  }
-  for (const result of Array.isArray(plan?.criterionResults) ? plan.criterionResults : []) {
-    if (typeof result?.evidenceRef === 'string' && result.evidenceRef.trim()) {
-      refs.add(result.evidenceRef.trim());
-    }
-  }
-  return [...refs];
-}
-
-function summarizeVerificationGate(gate) {
-  if (gate?.passed) return 'Verification gate passed';
-  if (gate?.reason === 'no_leaf_tasks') return 'Verification gate failed: no verifiable leaf tasks';
-  const summary = Array.isArray(gate?.unmet)
-    ? gate.unmet.map((u) => `${u.taskId ?? u.criterionId ?? '?'}:${u.reason}`).join('; ')
-    : '';
-  return `Verification gate failed${summary ? `: ${summary}` : ''}`;
 }
 
 /**
@@ -866,7 +447,6 @@ export function createGoalRunner({
       return null;
     }
   }
-
 
 
   /**
@@ -978,6 +558,7 @@ export function createGoalRunner({
             phase: runner.phase || 'act',
             interruption: {
               source: 'process_recovery',
+              origin: 'host_handoff',
               reason: 'process_recovery',
               interruptedAt,
               recoverable: true,

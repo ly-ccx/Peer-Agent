@@ -1,3 +1,4 @@
+import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
 import { DELEGATION_CAPABILITY_IDS, MEMORY_CAPABILITY_IDS } from './tool-specs.mjs';
 
 /**
@@ -14,6 +15,7 @@ export const PROJECT_AGENT_ALLOWED_CAPABILITIES = Object.freeze([
   'local.search.aggregate',
   ...DELEGATION_CAPABILITY_IDS,
   ...MEMORY_CAPABILITY_IDS,
+  ...CONTINUITY_CAPABILITY_IDS,
 ]);
 
 const ALLOWED = new Set(PROJECT_AGENT_ALLOWED_CAPABILITIES);

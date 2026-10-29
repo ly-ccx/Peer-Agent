@@ -3,6 +3,48 @@ import assert from 'node:assert/strict';
 import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
 import { createRunnerCoordination } from './runner-coordination.mjs';
 
+test('an empty work inventory avoids repair scans but the next selection sees newly durable work', () => {
+  let reads = 0;
+  const state = { works: {}, deliveries: {} };
+  const checkpoint = { job: { kind: 'user', workId: 'new-work', userInputs: [] }, outcome: {} };
+  const coordination = createRunnerCoordination({ workspaceId: 'ws', conversationId: 'c',
+    store: { readSnapshot() { reads++; return state; }, readCheckpoint: () => checkpoint,
+      coalesceWorks() { assert.fail('there is no duplicate continuation'); },
+      saveWork() { assert.fail('runnable work does not need repair'); } },
+    resolveRoster() { assert.fail('no work needs child facts'); },
+  });
+  assert.equal(coordination.recoverJob(), null);
+  assert.equal(reads, 1, 'an empty inventory needs one authority read, not several empty repair passes');
+  state.works['new-work'] = { workId: 'new-work', state: 'runnable', checkpointRef: 'checkpoint', sessionIds: [] };
+  assert.deepEqual(coordination.recoverJob(), { ...checkpoint.job, continuation: true });
+  assert.ok(reads > 1, 'a later call must see the newly durable work');
+});
+
+test('an empty work inventory still selects pending child events and prepared delivery', () => {
+  const event = { eventId: 'child-result', kind: 'report_available', sessionId: 'child' };
+  const state = { works: {}, deliveries: { reply: { state: 'prepared', message: { id: 'reply' } } } };
+  const coordination = createRunnerCoordination({ workspaceId: 'ws', conversationId: 'c',
+    store: { readSnapshot: () => state, pendingEvents: () => [event] },
+  });
+  assert.deepEqual(coordination.selectNext(), { events: [event] });
+  assert.equal(coordination.hasPendingDelivery(), true);
+});
+
+test('continuation admission shares one current inventory for work and prepared replies', () => {
+  let reads = 0;
+  const state = { works: {}, deliveries: {} };
+  const coordination = createRunnerCoordination({ workspaceId: 'ws', conversationId: 'c',
+    store: { readSnapshot() { reads++; return state; } },
+  });
+  assert.equal(coordination.hasContinuation(), false);
+  assert.equal(reads, 1);
+  state.deliveries.reply = { state: 'prepared', message: { id: 'reply' } };
+  assert.equal(coordination.hasContinuation(), true);
+  assert.equal(reads, 2, 'a new invocation must observe the new prepared delivery');
+  state.lastRecovery = { quarantinedDeliveryIds: ['reply'] };
+  assert.equal(coordination.hasContinuation(), false, 'quarantined replies are still held');
+});
+
 test('verification sweep never clones the full historical ledger for each work', () => {
   const works = Object.fromEntries(Array.from({ length: 200 }, (_, n) => [`w${n}`, {
     workId: `w${n}`, state: 'delivered', budget: { history: 'x'.repeat(8192) },

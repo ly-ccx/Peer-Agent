@@ -173,6 +173,25 @@ test('idle maintenance with no pending input never loads full conversation bodie
   } finally { h.close(); }
 });
 
+test('an idle sync makes one continuation decision, while a kicked turn is rechecked after await', async () => {
+  const h = harness();
+  try {
+    await h.host.sync(['a']);
+    const runner = h.host.runnerFor('a'), original = runner.hasContinuation;
+    let reads = 0;
+    runner.hasContinuation = () => { reads++; return original(); };
+    await h.host.sync(['a']);
+    assert.equal(reads, 1, 'an idle synchronous branch cannot create a new continuation itself');
+    reads = 0;
+    runner.hasContinuation = () => { reads++; return reads === 1; };
+    let kicked = false;
+    runner.kick = async () => { await Promise.resolve(); kicked = true; };
+    await h.host.sync(['a']);
+    assert.equal(kicked, true);
+    assert.equal(reads, 2, 'a turn may change durable facts across await');
+  } finally { h.close(); }
+});
+
 test('pending input acknowledgements use exact reply facts without loading model history', async () => {
   let reads = 0, facts = 0, requests = 0, h;
   h = harness(async () => { requests++; return { text: 'unexpected' }; }, {

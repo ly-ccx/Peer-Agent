@@ -15,7 +15,11 @@ function textOf(value) {
 }
 
 function clip(value, max = 80) {
-  return Array.from(String(value ?? '').replace(/\s+/g, ' ').trim()).slice(0, max).join('');
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  let clipped = '', length = 0;
+  for (const character of text) { if (length++ === max) break; clipped += character; }
+  return clipped;
 }
 
 function normalize(doc) {
@@ -162,7 +166,8 @@ export function createConversationSearchIndex() {
   function sync(source) {
     const next = new Set();
     for (const doc of Array.isArray(source) ? source : []) {
-      if (upsert(doc)) next.add(normalize(doc).id);
+      const normalized = normalize(doc);
+      if (normalized) { docs.set(normalized.id, normalized); next.add(normalized.id); }
     }
     for (const id of [...docs.keys()]) {
       if (!next.has(id)) docs.delete(id);

@@ -37,6 +37,8 @@ const DEFAULT_SOURCE_IDS = [
   'project-memory',
   'work-session-origin',
   'work-session',
+  'agent-communication',
+  'working-context',
   'runtime.continuity',
 ];
 

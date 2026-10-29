@@ -1,11 +1,15 @@
 import { continuationDecision } from './continuation-policy.mjs';
+import { decideFollowUp } from '@peer-agent/protocol';
 
 /** Current child facts determine who still owes work after a public update. */
 export function repairOwnership(sessions) {
+  const rows = sessions.map(row => ({ row, followUp: row.followUp ?? decideFollowUp({ status: row.status }, {
+    interrupted: row.interrupted, interruptionOrigin: row.interruptionOrigin,
+  }, row.executionOwnership) }));
   return {
-    repairSessionIds: sessions.filter(row => row.status === 'waiting_agent').map(row => row.sessionId),
-    waiting: sessions.filter(row => ['queued', 'starting', 'running', 'verifying'].includes(row.status)),
-    needsUser: sessions.some(row => row.status === 'waiting_user'),
+    repairSessionIds: rows.filter(({ followUp }) => followUp.owner === 'bot' && followUp.reason !== 'live_execution').map(({ row }) => row.sessionId),
+    waiting: rows.filter(({ followUp }) => followUp.owner === 'bot' && followUp.reason === 'live_execution').map(({ row }) => row),
+    needsUser: rows.some(({ followUp }) => followUp.owner === 'user'),
   };
 }
 

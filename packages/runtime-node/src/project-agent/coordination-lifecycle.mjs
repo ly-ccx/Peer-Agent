@@ -71,7 +71,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (!next || next.workspaceId !== workspaceId || next.origin?.parentConversationId !== parentConversationId) return { ok: false, error: 'out_of_scope' };
       target = next; scopedSessionIds?.push(next.sessionId);
     }
-    if (target && ['handoff', 'revise'].includes(input.action)) {
+    if (target && ['handoff', 'revise', 'resume'].includes(input.action)) {
       const blocked = checkTakeover?.(target.sessionId);
       if (blocked) return { ok: false, error: blocked };
     }
@@ -101,6 +101,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       && row.action === decision.action && row.sessionId === decision.sessionId && row.reason === decision.reason
       && state.transitions?.[row.operationId]?.phase === 'blocked');
     if (failures.length >= 2) return { ok: false, error: 'coordination_no_progress' };
+    if (['resume', 'handoff', 'revise'].includes(input.action)) store.enableSupervision();
     const admitted = store.decide(decision, { parentConversationId, currentInputIds: sourceInputIds, eventIds, materialRefs,
       ...(!mandate && current.length && target ? { adoptSessionIds: [target.sessionId] } : {}),
       ...(scopedSessionIds ? { scopedSessionIds } : {}) });
@@ -111,7 +112,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
   function receipt(store, operationId, replayed) {
     const state = store.read(), transition = state.transitions[operationId], decision = state.decisions[operationId];
     return { ok: !transition.error, replayed, workId: decision.workId, goalRevision: decision.goalRevision,
-      operationId, phase: transition.phase, sessionId: transition.replacementSessionId || transition.oldSessionId,
+      operationId, phase: transition.phase, executionAdmission: transition.executionAdmission, executionEffect: transition.executionEffect, sessionId: transition.replacementSessionId || transition.oldSessionId,
       ...(decision.action === 'query' ? { session: readSession({sessionId: transition.oldSessionId, detail: 'report'}) } : {}),
       ...(transition.error ? { error: transition.error } : {}), ...(transition.diagnostic ? { diagnostic: transition.diagnostic } : {}) };
   }
@@ -136,7 +137,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
         const admission = await admitTask(payload.task, context);
         if (!admission.ok) { move('blocked', { error: admission.error, diagnostic: admission.diagnostic }); return; }
       }
-      if (['replace', 'cancel', 'handoff', 'revise'].includes(transition.action) && old && !ended.has(old.status)) {
+      if (['replace', 'cancel', 'handoff', 'revise', 'resume'].includes(transition.action) && old && !ended.has(old.status)) {
         move('stopping');
         if (['replace', 'cancel'].includes(transition.action)) {
           const requested = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false });
@@ -146,7 +147,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     }
     let phase = read().phase;
     if (phase === 'stopping') {
-      if (['handoff', 'revise'].includes(transition.action)) {
+      if (['handoff', 'revise', 'resume'].includes(transition.action)) {
         const result = await takeover({ sessionId: old.sessionId, binding, text: payload.text || transition.reason,
           operationId: transition.operationId }, context);
         if (result?.error) { move(result.error === 'execution_outcome_unknown' ? 'awaiting_outcome' : 'blocked', { error: result.error }); return; }
@@ -208,7 +209,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     if (!transition) return undefined;
     const lineage=related.findLast(row=>row.action==='replace' && row.replacementSessionId) || transition;
     return {operationId:transition.operationId,action:transition.action,phase:transition.phase,reason:transition.reason,
-      goalRevision:transition.expectedGoalRevision, ...(lineage.action === 'replace' ? {
+      goalRevision:transition.expectedGoalRevision, executionAdmission:transition.executionAdmission, executionEffect:transition.executionEffect,
+      executionAttemptRef:transition.executionAttemptRef, ...(lineage.action === 'replace' ? {
         priorSessionId:lineage.oldSessionId, replacementSessionId:lineage.replacementSessionId,
         replacementTitle:state.decisions[lineage.operationId].payload?.task?.title} : {})};
   }

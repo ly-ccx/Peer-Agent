@@ -9,8 +9,10 @@ import { journalLines } from './journal-lines.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { encodeWorkUpdate } from './work-delta.mjs';
 import { COORDINATION_WORKER_SOURCE } from './coordination-worker-source.generated.mjs';
+import { withCoordinationRebuild } from './coordination-rebuild-queue.mjs';
+import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
 
-const buckets = ['events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings'];
+const buckets = ['events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', ...SUPERVISION_BUCKETS];
 const empty = () => ({ revision: 0, events: {}, works: {}, deliveries: {} });
 const token = file => { try { const s = statSync(file, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; } catch (e) { if (e.code === 'ENOENT') return 'missing'; throw e; } };
 const fail = code => Object.assign(new Error(code), { code });
@@ -24,8 +26,8 @@ function writeAll(fd, value) {
   }
 }
 function syncPath(file) { const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
-function readHead(file, generation) {
-  let proof; try { proof = JSON.parse(readFileSync(file, 'utf8')); } catch (error) { throw fail(error.code === 'ENOENT' ? 'coordination_head_missing' : 'coordination_head_invalid'); }
+function readHead(file, generation, read = file => JSON.parse(readFileSync(file, 'utf8'))) {
+  let proof; try { proof = read(file); } catch (error) { throw fail(error.code === 'ENOENT' ? 'coordination_head_missing' : 'coordination_head_invalid'); }
   if (!proof || typeof proof.generation !== 'string' || !proof.generation || !Number.isSafeInteger(proof.revision) || proof.revision < 0
     || typeof proof.hash !== 'string' || !/^(?:[a-f0-9]{64})?$/.test(proof.hash)
     || typeof proof.legacyVersion !== 'string' || !proof.legacyVersion) throw fail('coordination_head_invalid');
@@ -45,6 +47,13 @@ function database(file, { derived = false } = {}) {
     + 'CREATE TABLE IF NOT EXISTS meta (id TEXT PRIMARY KEY, value TEXT NOT NULL);'
     + 'CREATE TABLE IF NOT EXISTS observations (workId TEXT, id TEXT, PRIMARY KEY(workId,id));'
     + 'CREATE TABLE IF NOT EXISTS dispatches (workId TEXT, attemptId TEXT, callId TEXT, value TEXT, PRIMARY KEY(workId,attemptId,callId));');
+  db.exec('CREATE TABLE IF NOT EXISTS supervision_index (bucket TEXT NOT NULL,id TEXT NOT NULL,recipientConversationId TEXT,sessionId TEXT,workId TEXT,conversationId TEXT,parentConversationId TEXT,sequence INTEGER NOT NULL,pending INTEGER NOT NULL,PRIMARY KEY(bucket,id))');
+  for (const field of ['recipientConversationId', 'sessionId', 'workId', 'conversationId', 'parentConversationId']) {
+    db.exec(`CREATE INDEX IF NOT EXISTS supervision_${field} ON supervision_index(bucket,${field},sequence DESC,id DESC)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS supervision_pending_${field} ON supervision_index(bucket,${field},sequence DESC,id DESC) WHERE pending=1`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS supervision_work_conversation ON supervision_index(bucket,workId,conversationId,sequence DESC,id DESC)');
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS supervision_open_request ON supervision_index(sessionId) WHERE bucket='agentRequests' AND pending=1");
   return db;
   } catch (error) { db.close(); throw error; }
 }
@@ -78,6 +87,27 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     record = { ...JSON.parse(bytes), revision: envelope.revision, schemaVersion: 1 };
   }
   const before = record.kind.startsWith('history_') ? snapshot(db, true) : empty(); before.revision = getMeta(db, 'revision') || 0;
+  if (record.kind.startsWith('agent_') || record.kind === 'work_note_written' || record.kind === 'context_window_opened') {
+    for (const bucket of SUPERVISION_BUCKETS) before[bucket] = {};
+    const messageIds = [record.message?.messageId, ...(record.messageIds || [])].filter(Boolean);
+    for (const id of messageIds) {
+      const message = get(db, 'agentMessages', id);
+      if (message) {
+        before.agentMessages[id] = message;
+        const receipt = get(db, 'agentCommands', message.operationId);
+        if (receipt) before.agentCommands[message.operationId] = receipt;
+      }
+    }
+    if (record.request?.sessionId) {
+      const open = statement(db, "SELECT id FROM supervision_index WHERE bucket='agentRequests' AND sessionId=? AND pending=1").get(record.request.sessionId);
+      if (open) before.agentRequests[open.id] = get(db, 'agentRequests', open.id);
+    }
+    for (const [bucket, id] of [['agentCommands', record.operationId], ['agentRequests', record.answer?.requestId || record.requestId || record.request?.requestId],
+      ['workNotes', record.note?.noteId], ['contextWindows', record.window?.windowId], ['contextWindows', record.window?.previousWindowId]]) {
+      if (!id) continue;
+      const value = get(db, bucket, id); if (value) before[bucket][id] = value;
+    }
+  }
   if (record.kind === 'journal_recovered') before.lastRecovery = getMeta(db, 'lastRecovery');
   const ids = [record.workId, record.work?.workId, record.owner?.workId, ...(record.retired || []).map(w => w.workId)].filter(Boolean);
   if (!record.kind.startsWith('history_')) for (const id of ids) { const work = head(db, id); if (work) before.works[id] = work; }
@@ -85,12 +115,21 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   if (record.kind.startsWith('reply_')) {
     const id = record.message?.id || record.messageId, value = get(db, 'deliveries', id);
     if (value) before.deliveries[id] = value;
+    const requestId = record.message?.question?.agentRequestId || value?.message?.question?.agentRequestId;
+    if (requestId) {
+      before.agentRequests = {};
+      const request = get(db, 'agentRequests', requestId);
+      if (request) before.agentRequests[requestId] = request;
+    }
   }
   if (record.kind.startsWith('coordination_')) for (const key of ['mandates', 'decisions', 'transitions', 'inputBindings']) before[key] = all(db, key);
   if (record.kind === 'usage_observed' && db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(record.workId, record.observationId)) {
     const work = before.works[record.workId]; if (work?.budget) work.budget.observations = { [record.observationId]: true };
   }
   const next = reduceCoordination(before, record);
+  const supervision = record.kind.startsWith('agent_') || ['work_note_written', 'context_window_opened'].includes(record.kind)
+    || SUPERVISION_BUCKETS.some(bucket => Object.keys(next[bucket] || {}).length);
+  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
     let value = original;
     if (bucket === 'works' && value.budget?.observations) {
@@ -107,7 +146,20 @@ function apply(db, record, { blobs, receiptCache } = {}) {
       for (const call of attempt.pendingTools || []) if (call.toolCallId) db.prepare('INSERT OR IGNORE INTO dispatches VALUES (?,?,?,?)').run(id, attemptId, call.toolCallId,
         JSON.stringify({ turnId: value.attemptId, epoch: record.epoch, at: record.at }));
     }
-    if (JSON.stringify(before[bucket]?.[id]) !== JSON.stringify(value)) db.prepare('INSERT OR REPLACE INTO objects VALUES (?,?,?)').run(bucket, id, JSON.stringify(value));
+    if (JSON.stringify(before[bucket]?.[id]) !== JSON.stringify(value)) {
+      db.prepare('INSERT OR REPLACE INTO objects VALUES (?,?,?)').run(bucket, id, JSON.stringify(value));
+      if (SUPERVISION_BUCKETS.includes(bucket)) db.prepare('INSERT OR REPLACE INTO supervision_index VALUES (?,?,?,?,?,?,?,?,?)').run(bucket, id,
+        value.recipientConversationId ?? null, value.sessionId ?? null, value.workId ?? null,
+        value.conversationId ?? null, value.parentConversationId ?? null, value.sequence ?? record.revision,
+        bucket === 'agentMessages' && value.deliveryIntent === 'ensure_turn'
+          || bucket === 'agentCommands' && (value.admission === 'pending' || ['pending', 'unknown'].includes(value.effect))
+          || bucket === 'agentRequests' && value.status === 'open' ? 1 : 0);
+      if (bucket === 'agentCommands') {
+        const message = get(db, 'agentMessages', value.messageId);
+        statement(db, "UPDATE supervision_index SET pending=? WHERE bucket='agentMessages' AND id=?")
+          .run(message?.deliveryIntent === 'ensure_turn' && value.delivery === 'queued' ? 1 : 0, value.messageId);
+      }
+    }
   }
   putMeta(db, 'revision', next.revision);
   if (envelope.storageVersion === 2) putMeta(db, 'eventHash', envelope.hash);
@@ -185,11 +237,24 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
   const indexDirectory = path.join(directory, '.read-models'), pointerFile = path.join(indexDirectory, 'coordination-current.json');
   const originalLegacyFile = legacyFile;
   let db, dbIdentity, indexFile, manifest, cached, cachedRevision, preparing;
+  const metadata = new Map();
+  function readMetadata(file) {
+    const version = token(file), previous = metadata.get(file);
+    if (previous?.version === version) return previous.value;
+    metadata.delete(file);
+    const text = readFileSync(file, 'utf8'), value = JSON.parse(text);
+    if (token(file) !== version) throw fail('coordination_read_changed');
+    if (Buffer.byteLength(text) <= 64 * 1024) {
+      if (metadata.size >= 8) metadata.delete(metadata.keys().next().value);
+      metadata.set(file, { version, value: freeze(value) });
+    }
+    return value;
+  }
   function load() {
-    if (existsSync(path.join(directory, 'coordination-fence.json')) && JSON.parse(readFileSync(path.join(directory, 'coordination-fence.json'), 'utf8')).status !== 'complete') throw fail('coordination_fence_incomplete');
+    if (existsSync(path.join(directory, 'coordination-fence.json')) && readMetadata(path.join(directory, 'coordination-fence.json')).status !== 'complete') throw fail('coordination_fence_incomplete');
     if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
-    const next = JSON.parse(readFileSync(manifestFile, 'utf8'));
-    if (next.schemaVersion !== 2 || ![2, 3, 4].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    const next = readMetadata(manifestFile);
+    if (next.schemaVersion !== 2 || ![2, 3, 4, 5].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
     if (next.minimumReaderVersion >= 3) {
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
@@ -199,7 +264,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (!existsSync(headFile)) throw fail('coordination_head_missing');
     if (!existsSync(pointerFile)) throw fail('coordination_recovery_pending');
     let pointer;
-    try { pointer = JSON.parse(readFileSync(pointerFile, 'utf8')); } catch { throw fail('coordination_index_corrupt'); }
+    try { pointer = readMetadata(pointerFile); } catch { throw fail('coordination_index_corrupt'); }
     if (pointer.schemaVersion !== 1 || pointer.generation !== manifest.generation || !/^coordination-[a-f0-9-]{36}\.sqlite$/.test(pointer.file || '')) throw fail('coordination_index_corrupt');
     const nextFile = path.join(indexDirectory, pointer.file);
     if (indexFile !== nextFile) { db?.close(); db = undefined; cached = undefined; indexFile = nextFile; }
@@ -232,7 +297,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
     {
-      const expected = readHead(headFile, manifest.generation);
+      const expected = readHead(headFile, manifest.generation, readMetadata);
       if (expected.legacyVersion !== manifest.legacyVersion) throw fail('coordination_legacy_changed');
       if ((getMeta(db, 'revision') || 0) < expected.revision
         || (getMeta(db, 'revision') || 0) === expected.revision && (getMeta(db, 'eventHash') || '') !== expected.hash) throw fail('coordination_journal_missing');
@@ -254,6 +319,8 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         if (!['coordination_recovery_pending', 'coordination_read_changed', 'coordination_partial_tail', 'coordination_legacy_changed'].includes(error.code) && !corruptIndex(error)) throw error;
       }
       const priorHead = existsSync(headFile) ? readHead(headFile) : null;
+      const fenced = existsSync(originalLegacyFile) && lstatSync(originalLegacyFile).isDirectory();
+      if (fenced) legacyFile = path.join(dir, 'baseline.jsonl');
       const generation = existsSync(manifestFile) ? JSON.parse(readFileSync(manifestFile, 'utf8')).generation
         : priorHead?.generation ?? randomUUID();
       const baseline = existsSync(manifestFile) ? JSON.parse(readFileSync(manifestFile, 'utf8')) : priorHead;
@@ -263,13 +330,16 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       const filename = `coordination-${randomUUID()}.sqlite`, published = path.join(indexDirectory, filename);
       const target = `${published}.tmp`;
       const requireHead = existsSync(manifestFile) || existsSync(headFile);
-      const build = () => new Promise((resolve, reject) => {
+      const build = () => withCoordinationRebuild(() => {
+        assertOwner();
+        return new Promise((resolve, reject) => {
         const worker = new Worker(COORDINATION_WORKER_SOURCE, { eval: true, ...(!process.versions.bun ? { resourceLimits: { maxOldGenerationSizeMb: 192 } } : {}), workerData: { coordinationRebuild: { dir, legacy: legacyFile, target, generation, requireHead, legacyIntegrity } } });
         let settled = false;
-        const finish = error => { if (settled) return; settled = true; clearTimeout(timer); if (error) { void worker.terminate(); reject(error); } else resolve(); };
+        const finish = error => { if (settled) return; settled = true; clearTimeout(timer); void worker.terminate().then(() => error ? reject(error) : resolve(), reject); };
         const timer = setTimeout(() => finish(fail('coordination_recovery_timeout')), 300000);
         worker.once('message', result => finish(result.ok ? null : Object.assign(new Error(result.message), result)));
         worker.once('error', finish); worker.once('exit', code => finish(fail(`coordination_worker_exit:${code}`)));
+        });
       });
       try { await build(); }
       catch (error) {
@@ -295,7 +365,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       if (!existsSync(manifestFile)) {
         mkdirSync(path.join(dir, 'segments'), { recursive: true });
         const candidate = database(published);
-        let legacyVersion;
+        let legacyVersion, version;
         try {
           legacyVersion = getMeta(candidate, 'sources')?.[legacyFile] || 'missing';
           if (!priorHead && legacyVersion !== token(legacyFile)) throw fail('coordination_legacy_changed');
@@ -303,10 +373,11 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
           legacyVersion = priorHead?.legacyVersion ?? legacyVersion;
           await prepareLegacyIntegrity({ directory, legacyFile, baseline: { generation, legacyVersion }, assertOwner, onRead });
           assertOwner();
-          durable(headFile, JSON.stringify({ generation, legacyVersion, revision: getMeta(candidate, 'revision') || 0, hash: getMeta(candidate, 'eventHash') || '' }));
+          version = Math.max(priorHead?.minimumWriterVersion || 2, getMeta(candidate, 'minimumFormatVersion') || 2, fenced ? 3 : 2);
+          durable(headFile, JSON.stringify({ generation, legacyVersion, minimumWriterVersion: version, revision: getMeta(candidate, 'revision') || 0, hash: getMeta(candidate, 'eventHash') || '' }));
         }
         finally { candidate.close(); }
-        const value = { schemaVersion: 2, minimumReaderVersion: 2, minimumWriterVersion: 2, generation, legacyFile: path.basename(legacyFile), legacyVersion };
+        const value = { schemaVersion: 2, minimumReaderVersion: version, minimumWriterVersion: version, generation, legacyFile: path.basename(originalLegacyFile), legacyVersion, ...(fenced ? { frozenLegacyFile: 'baseline.jsonl' } : {}) };
         durable(manifestFile, JSON.stringify(value));
         syncPath(directory); syncPath(path.dirname(directory));
       }
@@ -330,7 +401,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     let payload = encoded;
     const encodedBytes = Buffer.from(JSON.stringify(encoded));
     if (encodedBytes.length > 64 * 1024 * 1024) throw fail('coordination_record_too_large');
-    if (encodedBytes.length > 60 * 1024) {
+    if (encoded.kind === 'work_note_written' || encodedBytes.length > 60 * 1024) {
       const hash = createHash('sha256').update(encodedBytes).digest('hex'), blobs = path.join(dir, 'blobs');
       mkdirSync(blobs, { recursive: true });
       const file = path.join(blobs, hash + '.json');
@@ -358,7 +429,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         writeAll(fd, bytes); fsyncSync(fd); persisted = true;
       } finally { closeSync(fd); }
       const directoryFd = openSync(path.dirname(file), 'r'); try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
-      durable(headFile, JSON.stringify({ generation: manifest.generation, legacyVersion: manifest.legacyVersion, revision: record.revision, hash: record.hash }));
+      durable(headFile, JSON.stringify({ generation: manifest.generation, legacyVersion: manifest.legacyVersion, minimumWriterVersion: manifest.minimumWriterVersion, revision: record.revision, hash: record.hash }));
       const sources = getMeta(db, 'sources') || {}; sources[file] = token(file);
       putMeta(db, 'sources', sources); putMeta(db, `offset:${file}`, statSync(file).size);
       putMeta(db, `anchor:${file}`, anchor(file, statSync(file).size)); assertOwner(); db.exec('COMMIT');
@@ -371,6 +442,28 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     }
   }
   return { active, prepare,
+    enableSupervision() {
+      assertOwner(); load();
+      if (manifest.minimumWriterVersion === 5) return;
+      if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
+      const next = { ...manifest, minimumReaderVersion: 5, minimumWriterVersion: 5 };
+      durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: 5 }));
+      durable(manifestFile, JSON.stringify(next)); manifest = next;
+    },
+    readSupervision(bucket, id) {
+      if (!SUPERVISION_BUCKETS.includes(bucket)) throw fail('supervision_query_invalid');
+      load(); return get(db, bucket, id);
+    },
+    querySupervision(bucket, field, value, { limit = 50, after = 0, pendingOnly = false, conversationId, oldestFirst = false } = {}) {
+      if (!SUPERVISION_BUCKETS.includes(bucket) || !['recipientConversationId', 'sessionId', 'workId', 'conversationId', 'parentConversationId'].includes(field)) throw fail('supervision_query_invalid');
+      load();
+      const size = Math.min(100, Math.max(1, Math.trunc(Number(limit) || 50)));
+      const scope = conversationId === undefined ? '' : 'AND i.conversationId=?';
+      const order = oldestFirst ? 'ASC' : 'DESC';
+      const args = [bucket, value, after, ...(conversationId === undefined ? [] : [conversationId]), size];
+      return db.prepare(`SELECT o.value FROM supervision_index i JOIN objects o ON o.bucket=i.bucket AND o.id=i.id WHERE i.bucket=? AND i.${field}=? AND i.sequence>=? ${pendingOnly ? 'AND i.pending=1' : ''} ${scope} ORDER BY i.sequence ${order},i.id ${order} LIMIT ?`)
+        .all(...args).map(row => JSON.parse(row.value));
+    },
     read() { load(); return snapshot(db, true); },
     readSnapshot() { load(); const revision = getMeta(db, 'revision') || 0; if (!cached || cachedRevision !== revision) { cached = freeze(snapshot(db)); cachedRevision = revision; } return cached; },
     readWork(id) { load(); return head(db, id); },
@@ -379,7 +472,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     commitEntry: (entry, _persist, options) => write(entry, options),
     hasObservation(workId, id) { load(); return Boolean(db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(workId, id)); },
     dispatchOrigin(workId, attemptId, callId) { load(); const row = db.prepare('SELECT value FROM dispatches WHERE workId=? AND attemptId=? AND callId=?').get(workId, attemptId, callId); return row ? JSON.parse(row.value) : null; },
-    close() { db?.close(); db = undefined; },
+    close() { db?.close(); db = undefined; metadata.clear(); },
   };
 }
 

@@ -31,7 +31,7 @@ export async function protectCoordinationWriter({ directory, assertOwner, onStep
     if (intent.status === 'complete') return false;
   } else {
     const manifest = JSON.parse(readFileSync(manifestFile));
-    if ([3, 4].includes(manifest.minimumReaderVersion)) return false;
+    if ([3, 4, 5].includes(manifest.minimumReaderVersion)) return false;
     const head = JSON.parse(readFileSync(headFile)), legacy = inside(directory, 'coordination.jsonl');
     if (manifest.minimumReaderVersion !== 2 || manifest.minimumWriterVersion !== 2 || head.generation !== manifest.generation
       || head.legacyVersion !== manifest.legacyVersion || legacyFileToken(legacy) !== manifest.legacyVersion) throw fail('coordination_legacy_changed');
