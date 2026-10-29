@@ -70,23 +70,6 @@ export function BotComposer({
     }
     textareaRef.current?.focus();
   }, [draftRequest?.id, ready]);
-  useLayoutEffect(() => {
-    const node = textareaRef.current;
-    if (!node) return;
-    resizeComposerInput(node);
-  }, [text]);
-  useLayoutEffect(() => {
-    const node = textareaRef.current;
-    if (!node) return;
-    let width = node.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (node.clientWidth === width) return;
-      width = node.clientWidth;
-      resizeComposerInput(node);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
 
   function send() {
     if (!ready || resourceRecipientChanged || !hasContent || tooLong || uploads.isReading() || modelUpdating || permissionSaving || composition.active()) return;
@@ -179,11 +162,4 @@ export function BotComposer({
       </div>
     </form>
   );
-}
-
-function resizeComposerInput(node: HTMLTextAreaElement) {
-  node.style.height = '0px';
-  const height = node.scrollHeight;
-  node.style.height = `${Math.min(200, Math.max(36, height))}px`;
-  node.style.overflowY = height > 200 ? 'auto' : 'hidden';
 }
