@@ -246,6 +246,7 @@ export {
   PROGRESS_THROTTLE_MS,
   delegationEventId,
   mapDelegationEvents,
+  supervisorEventId,
 } from './project-agent/event-mapper.mjs';
 export {
   STALL_WINDOW_MS,
