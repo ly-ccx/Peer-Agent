@@ -44,6 +44,20 @@ async function fixture(t) {
   return { store, ports, lifecycle, context, task, sessions, spawns, cancellations, messages, enabled: value => { enabled=value; }, unknown: () => { unknown=true; }, reopen: () => createWorkCoordinationStore(options) };
 }
 
+test('a current user can cancel a returned result; an ordinary wake cannot abandon it', async t => {
+ const f=await fixture(t);
+ const opened=await f.lifecycle.coordinate({action:'parallel',reason:'original',task:f.task('u1')},f.context('u1','original'));
+ f.sessions.get(opened.sessionId).status='result_ready';
+ const event={eventId:'result',sessionId:opened.sessionId,kind:'result_ready'};f.store.transfer([event]);
+ const cancel={action:'cancel',sessionId:opened.sessionId,expectedRevision:1,reason:'no longer needed'};
+ const wake=await f.lifecycle.coordinate(cancel,f.context('','wake',{currentInputAnchors:[],events:[event]}));
+ assert.equal(wake.error,'current_user_required');assert.deepEqual(f.cancellations,[]);
+ const result=await f.lifecycle.coordinate(cancel,f.context('u2','user-cancel'));
+ assert.equal(result.ok,true);assert.equal(result.phase,'completed');
+ assert.equal(f.sessions.get(opened.sessionId).status,'cancelled');assert.deepEqual(f.cancellations,[opened.sessionId]);
+ await f.lifecycle.recover('w');assert.deepEqual(f.cancellations,[opened.sessionId]);
+});
+
 test('parallel work survives a sibling cancellation and cancellation events cannot revive it', async t => {
   const f = await fixture(t);
   const a = await f.lifecycle.coordinate({ action:'parallel', reason:'A', task:f.task('u1') },f.context('u1','a'));
