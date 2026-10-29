@@ -185,11 +185,12 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal(await explicitQuote.evaluate(node => getComputedStyle(node).borderInlineStartWidth), '0px');
   assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);
   await assertQuoteInsideColumn(explicitQuote);
+  if (captureDirectory) await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'reply-narrow-sent.png') });
+  await page.setViewportSize({ width: 1280, height: 780 });
+  await explicit.scrollIntoViewIfNeeded();
   await openReplyDetails(page, reply);
   await assertQuoteInsideColumn(explicitQuote);
   await closeReplyDetails(page);
-  if (captureDirectory) await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'reply-narrow-sent.png') });
-  await page.setViewportSize({ width: 1280, height: 780 });
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; document.documentElement.dataset.palette = 'frost'; }, theme);
     await explicit.scrollIntoViewIfNeeded();
