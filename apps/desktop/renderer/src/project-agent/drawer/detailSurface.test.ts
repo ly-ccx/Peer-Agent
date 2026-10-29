@@ -25,15 +25,17 @@ test('explicit embedded task scene keeps the child conversation and has no neste
     '../../app/components/deferredPanels': { ChatSurface: 'chat', WorkbenchPanel: 'workbench' }, '../../clientApi': { clientApi: {
       llmListProviders: async () => { calls.push('read-providers'); return []; }, getSettings: async () => { calls.push('read-settings'); return {}; },
     } },  '../../workbench/WorkbenchContext': { WorkbenchProvider: 'workbench-provider' },
-    '../../workbench/ResourceWorkspaceContext': { useResourceWorkspace: () => ({ detailsVisible: true }) },
     '../conversation/BotDocumentPreview': { BotDocumentPreview: 'document-preview' }, '../../ui/icons': { PeerIcon: 'icon' },
   });
   const task = { sessionId: 'work', planId: 'plan' };
-  const tree = scene.ConversationSceneDrawer({ embedded: true, workspaceId: 'A', workspacePath: '/synthetic/project', conversationId: 'child',
+  const tree = scene.ConversationSceneDrawer({ embedded: true, active: false, workspaceId: 'A', workspacePath: '/synthetic/project', conversationId: 'child',
     title: 'Task', i18n: { t: (key: string) => key }, isZh: false, task, onClose() {} });
   assert.equal(find(tree, 'drawer'), undefined); assert.equal(find(tree, 'workbench'), undefined);
   assert.equal(find(tree, 'chat').props.conversationId, 'child');
   assert.equal(find(tree, 'workbench-provider').props.layoutHost, 'local');
+  assert.equal(find(tree, 'workbench-provider').props.isPageActive, false);
+  assert.equal(find(tree, 'chat').props.isPageActive, false);
+  assert.equal(find(tree, 'chat').props.showComposer, false);
   assert.deepEqual(find(tree, 'document-preview').props.task, task);
   const cleanups = effects.map(effect => effect()); await Promise.resolve();
   assert.deepEqual(calls.sort(), ['read-providers', 'read-settings']); cleanups.forEach(fn => fn?.());
@@ -66,7 +68,7 @@ test('task file navigation carries exact structured provenance and does not turn
   assert.deepEqual(opened[0].task, task); assert.equal(opened[1].workspaceId, 'A');
 });
 
-test('detail navigation reveals a hidden area once without stealing in-pane return focus or reopening a closed workspace', () => {
+test('Bot management never reveals resources; explicit reply inspection reveals once and preserves close intent', () => {
   const slots: (readonly unknown[])[] = []; let index = 0, reveals = 0;
   let pane = { ready: true, owner: { workspaceId: 'A' }, open: false, detailActive: false,
     registerDetail() {}, showDetails() { reveals++; pane.open = true; pane.detailActive = true; } };
@@ -82,10 +84,12 @@ test('detail navigation reveals a hidden area once without stealing in-pane retu
     '../../workbench/resourceDetailState': { resourceDetailKey: JSON.stringify },
   });
   const render = (open: boolean, inspect: unknown) => {
-    index = 0; hooks.useBotDetailWorkspace('A', { open }, inspect, 'Detail');
+    index = 0; const result = hooks.useBotDetailWorkspace('A', { open }, inspect, 'Detail');
     effects.splice(0).forEach(effect => effect());
+    return result;
   };
   render(false, null); assert.equal(reveals, 0);
+  assert.equal(render(true, null), null); assert.equal(reveals, 0, 'opening settings does not open resources');
   render(true, { replyId: 'r' }); assert.equal(reveals, 1);
   render(true, { replyId: 'r', evidence: 'e' });
   render(true, { replyId: 'r' }); assert.equal(reveals, 1, 'the reply owns its local return focus');

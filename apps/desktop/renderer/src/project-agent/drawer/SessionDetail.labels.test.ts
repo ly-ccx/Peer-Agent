@@ -15,11 +15,13 @@ const modules: Record<string, unknown> = {
   '@peer-agent/protocol': { WORK_SESSION_STATUSES },
   '../state/drawerState': { formatDrawerSessionStatus, formatDrawerStamp },
   './ConversationScene': { ConversationSceneDrawer: 'scene' },
+  '../../workbench/ResourceWorkspaceContext': { useResourceWorkspace: () => resourcePane },
   '../../app/components/MotionDetails': { MotionDetails: 'details' }, '../../ui/icons': { PeerIcon: 'icon' },
   '../state/TaskCancellation': { TaskCancelButton: 'cancel' }, './CoordinationDetails': { CoordinationDetails: 'coordination' },
   './EvidencePreview': { EvidencePreview: 'evidence' }, './TaskVerification': { TaskVerification: 'verification' },
   '../styles/bot-task-detail.css': {},
 };
+let resourcePane: { ready: boolean; openConversation: (value: any) => void } | null = null;
 runInNewContext(ts.transpileModule(readFileSync(new URL('./SessionDetail.tsx', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 }).outputText, { exports, require(id: string) { if (id in modules) return modules[id]; throw new Error(id); } });
@@ -61,4 +63,19 @@ test('withdrawn history uses the host-ended follow-up copy rather than assigning
   assert.equal(find(tree, 'bot-task-conversation').props.children[0], i18n.t('projectAgent.drawer.task.askEnded', { name: 'Peer' }));
   const pending = render({ status: 'cancelled', followUp: { owner: 'bot', inCurrentList: true, reason: 'stop_unconfirmed' } });
   assert.equal(find(pending, 'bot-task-next').props.children[0].props.children, i18n.t('projectAgent.drawer.task.followUp', { name: 'Peer' }));
+});
+
+test('opening a child scene keeps its task provenance and targets the independent resource pane', () => {
+  const opened: any[] = [];
+  resourcePane = { ready: true, openConversation: value => opened.push(value) };
+  try {
+    const tree = render({ status: 'running', conversationId: 'child', planId: 'plan' });
+    find(tree, 'bot-task-scene').props.onClick();
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].conversationId, 'child');
+    assert.equal(opened[0].workspaceId, 'w');
+    assert.deepEqual({ ...opened[0].task }, { sessionId: 's', planId: 'plan' });
+    resourcePane.ready = false;
+    assert.equal(find(render({ conversationId: 'child' }), 'bot-task-scene').props.disabled, true);
+  } finally { resourcePane = null; }
 });

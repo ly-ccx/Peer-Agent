@@ -15,6 +15,7 @@ import { documentReferenceLocation } from '../chat/components/markdown/documentR
 import { createDocumentTabSession, openDocumentTab, normalizeDocumentComparison, type DocumentComparison } from './documentSessionState';
 import './resource-workspace.css';
 import { useResourceDetails } from './useResourceDetails';
+import { useResourceConversations } from './useResourceConversations';
 import { useMotionAllowed } from '../app/hooks/useMotionAllowed';
 import { useMotionPresence } from '../app/hooks/useMotionPresence';
 import { motionDurationMs } from '../app/state/visualMotion';
@@ -24,11 +25,12 @@ export interface BotResourceOwner {
   readonly conversationId: string | null;
   readonly path: string | null;
 }
-interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails> {
+interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails>, ReturnType<typeof useResourceConversations> {
   readonly owner: BotResourceOwner | null;
   readonly ready: boolean;
   readonly open: boolean;
   readonly navigationCollapsed: boolean;
+  readonly reserveProfileWidth: (width: number) => void;
   readonly searchIntent: { readonly query: string; readonly candidates: readonly string[]; readonly id: number } | null;
   readonly directoryIntent: { readonly path: string; readonly id: number; readonly task?: BotDocumentReference['task']; readonly relativeTo?: string } | null;
   readonly consumeDirectoryIntent: (id: number) => void;
@@ -90,6 +92,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
   const compact = bounds?.compact ?? false;
   const navigationCollapsed = bounds?.navigationCollapsed ?? false;
   const [focusArea, setFocusArea] = useState<'primary' | 'resource'>('primary');
+  const [profileWidth, reserveProfileWidth] = useState(0);
   const [search, setSearch] = useState<{ owner: string; query: string; candidates: readonly string[]; id: number } | null>(null);
   const [directory, setDirectory] = useState<{ owner: string; path: string; id: number; task?: BotDocumentReference['task']; relativeTo?: string } | null>(null);
   const ready = !!owner?.path && !!owner.conversationId && owner.conversationId === workbench.conversationId;
@@ -111,7 +114,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
       // display:none must not erase the preferred width and cause a collapse/expand loop.
       const column = columnElement ? Number.parseFloat(getComputedStyle(columnElement).width) || 0 : 0;
       const gap = Number.parseFloat(getComputedStyle(element).getPropertyValue('--bot-float-gap')) || 0;
-      const next = { ...resourceLayoutBounds(element.clientWidth, column, gap, MAIN_MIN_WIDTH, WORKBENCH_MIN_WIDTH), viewport: element.clientWidth };
+      const next = { ...resourceLayoutBounds(element.clientWidth, column, gap, MAIN_MIN_WIDTH + profileWidth, WORKBENCH_MIN_WIDTH), viewport: element.clientWidth };
       if (next.navigationCollapsed && element.dataset.resourceOpen === 'true' && columnElement?.contains(document.activeElement)) {
         focusAfterIntent.current = true; setFocusRequest(value => value + 1); setFocusArea('primary');
       }
@@ -123,15 +126,20 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     const column = element.querySelector('.bot-column'); if (column) observer?.observe(column);
     window.addEventListener('resize', measure);
     return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
-  }, [layoutElement, active, ready, workbench.open]);
+  }, [layoutElement, active, ready, workbench.open, profileWidth]);
   useLayoutEffect(() => {
     if (!focusAfterIntent.current) return;
     focusAfterIntent.current = false;
     const previous = returnFocus.current;
     // A task action can already have focused its exact message or Composer in
     // a child layout effect. That explicit destination outranks close fallback.
-    if (!workbench.open && root.current?.querySelector('.bot-resource-primary')?.contains(document.activeElement)) return;
-    if (!workbench.open && previous?.isConnected && root.current?.querySelector('.bot-resource-primary')?.contains(previous)) { previous.focus({ preventScroll: true }); return; }
+    if (!workbench.open && root.current?.querySelector('.bot-resource-primary')?.contains(document.activeElement)
+      && !document.activeElement?.closest('[inert],[hidden],[aria-hidden="true"]')) return;
+    if (!workbench.open && previous?.isConnected && root.current?.querySelector('.bot-resource-primary')?.contains(previous)
+      && !previous.closest('[inert],[hidden],[aria-hidden="true"]') && previous.getClientRects().length) {
+      previous.focus({ preventScroll: true });
+      if (document.activeElement === previous) return;
+    }
     const target = root.current?.querySelector<HTMLElement>(focusArea === 'resource'
       ? '.resource-workspace [aria-selected="true"], .resource-workspace button' : '.bot-main textarea, .bot-main button');
     target?.focus({ preventScroll: true });
@@ -144,10 +152,11 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
   };
   const details = useResourceDetails({ workspaceId: owner?.workspaceId ?? null, ready, visible: active && workbench.open,
     activeTab: workbench.activeTab, setTab: workbench.setActiveTab, reveal });
+  const conversations = useResourceConversations({ workspaceId: owner?.workspaceId ?? null, ready, setTab: workbench.setActiveTab, reveal });
   const launch = () => { details.rememberDetailSource(); if (ready) { workbench.setActiveTab('launcher'); reveal(); } };
   const adapter: ResourceWorkspaceAdapter = {
-    ...details,
-    owner, ready, open: ready && active && workbench.open,
+    ...details, ...conversations,
+    owner, ready, reserveProfileWidth, open: ready && active && workbench.open,
     navigationCollapsed: ready && active && workbench.open && navigationCollapsed,
     searchIntent: search?.owner === owner?.conversationId ? search : null,
     directoryIntent: directory?.owner === owner?.conversationId ? directory : null,

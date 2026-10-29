@@ -13,6 +13,7 @@ import { DocumentView } from './views/DocumentView';
 import { useResourceWorkspace } from './ResourceWorkspaceContext';
 import { ResourceWorkspaceHeader } from './ResourceWorkspaceHeader';
 import { ResourceLauncher } from './ResourceLauncher';
+import { ResourceConversationViews } from './ResourceConversationViews';
 import { ScopedResourceNavigator } from './ScopedResourceNavigator';
 import { useResourcePresentation } from './useResourcePresentation';
 import { resourceTabIds } from './ResourceTabStrip';
@@ -151,10 +152,11 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
   const showingDetails = resourceMode && activeTab === 'details';
   const interactiveOpen = requestedOpen && resourceVisible;
   const open = (requestedOpen || resourceExiting) && resourceVisible;
-  const presentation = useResourcePresentation(resourceMode, isZh);
+  const presentation = useResourcePresentation(resourceMode, isZh, resourceMode ? workspace : null);
   useEffect(() => {
-    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes' || activeTab === 'details')) setActiveTab('documents');
-  }, [resourceMode, activeTab, setActiveTab]);
+    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes' || activeTab === 'details' || activeTab === 'conversations')) setActiveTab('documents');
+    if (resourceMode && activeTab === 'conversations' && !workspace?.conversations.length) setActiveTab('launcher');
+  }, [resourceMode, activeTab, setActiveTab, workspace?.conversations.length]);
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -318,6 +320,7 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
         {resourceMode ? <div ref={workspace?.bindDetailTarget} className="workbench-view resource-details-slot"
           data-active={showingDetails} inert={!showingDetails} aria-hidden={!showingDetails}
           role="region" aria-label={workspace?.detail?.title || (isZh ? '详情' : 'Details')} /> : null}
+        {resourceMode ? <ResourceConversationViews isZh={isZh} visible={activeTab === 'conversations'} active={interactiveOpen} /> : null}
         {resourceMode ? <div className="workbench-view" data-active={activeTab === 'launcher'} inert={activeTab !== 'launcher'} aria-hidden={activeTab !== 'launcher'}>
           <ResourceLauncher key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'launcher'} recent={presentation.recent} onChanges={() => setActiveTab('changes')} />
         </div> : null}

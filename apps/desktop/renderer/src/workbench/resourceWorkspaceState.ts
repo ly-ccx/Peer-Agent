@@ -12,7 +12,7 @@ export function resourceLayoutBounds(viewport: number, navigation: number, gap: 
   return { navigationCollapsed, primaryMin, compact: viewport < primaryMin + resourceMin + gap,
     sideMax: Math.max(resourceMin, viewport - primaryMin - gap) };
 }
-export function resourceKey(kind: 'document' | 'browser', id: string): string { return `${kind}:${id}`; }
+export function resourceKey(kind: 'document' | 'browser' | 'conversation', id: string): string { return `${kind}:${id}`; }
 
 export function reconcileResourceOrder(order: readonly string[], available: readonly string[]): readonly string[] {
   const live = new Set(available);

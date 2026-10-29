@@ -18,11 +18,11 @@ function lineCount(relativePath: string): number {
 
 test('关闭抽屉时把焦点还给触发按钮', () => {
   const drawer = source('project-agent/drawer/BotProfileDrawer.tsx');
-  assert.match(drawer, /useFocusScope\(bodyRef[\s\S]*restore: triggerRef/);
+  assert.match(drawer, /useBotDrawerFocus\([\s\S]*bodyRef, triggerRef, close/);
   assert.match(drawer, /restoreFocusRef=\{triggerRef\}/);
+  assert.match(source('project-agent/drawer/useBotDrawerFocus.ts'), /useFocusScope\(body, active, \{ trap: false, restore: trigger/);
   assert.match(source('app/hooks/useFocusScope.ts'), /previous\?\.isConnected[\s\S]*previous\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(drawer, /useInteractionLayer[\s\S]*onClose: close/);
-  assert.match(source('app/hooks/useInteractionLayer.ts'), /event\.key === 'Escape'[\s\S]*latest\.current\.onClose\(\)/);
+  assert.match(source('project-agent/drawer/useBotDrawerFocus.ts'), /body\.current\?\.contains\(event\.target\)[\s\S]*close\.current\(\)/);
   assert.match(drawer, /from '\.\.\/\.\.\/app\/components\/Drawer'/);
 });
 

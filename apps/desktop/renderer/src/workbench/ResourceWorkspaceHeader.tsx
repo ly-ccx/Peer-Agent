@@ -13,7 +13,7 @@ export function ResourceWorkspaceHeader({ isZh, presentation, idPrefix, navigati
   const workbench = useWorkbench();
   const workspace = useResourceWorkspace();
   const items = presentation.resources.map(item => ({ id: item.key, label: item.label, title: item.title,
-    controls: `${idPrefix}-content`, icon: <PeerIcon name={item.kind === 'browser' ? 'globe' : 'fileText'} size={14} /> }));
+    controls: `${idPrefix}-content`, icon: <PeerIcon name={item.kind === 'browser' ? 'globe' : item.kind === 'conversation' ? 'terminal' : 'fileText'} size={14} /> }));
   if (workbench.activeTab === 'launcher' || items.length === 0) items.push({ id: LAUNCHER_TAB,
     label: isZh ? '新标签页' : 'New tab', title: isZh ? '新标签页' : 'New tab', controls: `${idPrefix}-content`, icon: <PeerIcon name="plus" size={14} /> });
   return <header className="resource-workspace-header">

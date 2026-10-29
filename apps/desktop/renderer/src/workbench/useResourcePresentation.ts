@@ -5,13 +5,14 @@ import { activateBrowserTab, closeBrowserTab, createBrowserTabSession } from './
 import { activateDocumentTab, closeDocumentTab, documentComparisonLabel } from './documentSessionState';
 import { documentFileLabel } from './documentRevisionState';
 import { LAUNCHER_TAB, normalizeResourcePreferences, reconcileResourceOrder, resourceKey, resourceNeighbor } from './resourceWorkspaceState';
+import type { useResourceConversations } from './useResourceConversations';
 
 function read(owner: string | null) {
   try { return normalizeResourcePreferences(owner ? JSON.parse(localStorage.getItem(`peer.resource-workspace.v1:${owner}`) ?? '{}') : null); }
   catch { return normalizeResourcePreferences(null); }
 }
 
-export function useResourcePresentation(enabled = true, isZh = false) {
+export function useResourcePresentation(enabled = true, isZh = false, scenes?: ReturnType<typeof useResourceConversations> | null) {
   const workbench = useWorkbench();
   const { conversationId: owner, browserSession, documentSession, activeTab } = workbench;
   const [stored, setStored] = useState(() => ({ owner, value: read(enabled ? owner : null) }));
@@ -30,7 +31,9 @@ export function useResourcePresentation(enabled = true, isZh = false) {
       kind: 'browser' as const, id: tab.id, label: tab.title || tab.url, title: tab.url })),
     ...(activeTab === 'changes' || preferences.order.includes('comparison:workspace')
       ? [{ key: 'comparison:workspace', kind: 'comparison' as const, id: 'workspace', label: 'Diff', title: 'Diff' }] : []),
-  ], [documentSession.tabs, browserSession.tabs, browserSession.activeTabId, activeTab, preferences.order, isZh]);
+    ...(scenes?.conversations ?? []).map(tab => ({ key: resourceKey('conversation', tab.conversationId),
+      kind: 'conversation' as const, id: tab.conversationId, label: tab.title, title: tab.title })),
+  ], [documentSession.tabs, browserSession.tabs, browserSession.activeTabId, activeTab, preferences.order, isZh, scenes?.conversations]);
   const order = reconcileResourceOrder(preferences.order, resources.map(item => item.key));
   const ordered = order.flatMap(key => { const item = resources.find(item => item.key === key);
     if (!item) return [];
@@ -38,7 +41,9 @@ export function useResourcePresentation(enabled = true, isZh = false) {
       ? `${item.label} · ${item.title}` : item.label }];
   });
   const active = activeTab === 'documents' ? resourceKey('document', documentSession.activeTabId ?? '')
-    : activeTab === 'browser' ? resourceKey('browser', browserSession.activeTabId) : activeTab === 'changes' ? 'comparison:workspace' : activeTab === 'launcher' ? LAUNCHER_TAB : null;
+    : activeTab === 'browser' ? resourceKey('browser', browserSession.activeTabId)
+    : activeTab === 'conversations' ? resourceKey('conversation', scenes?.activeConversationId ?? '')
+    : activeTab === 'changes' ? 'comparison:workspace' : activeTab === 'launcher' ? LAUNCHER_TAB : null;
 
   useEffect(() => {
     if (!enabled || !owner || stored.owner !== owner) return;
@@ -77,7 +82,8 @@ export function useResourcePresentation(enabled = true, isZh = false) {
       workbench.setDocumentSession(current => activateDocumentTab(current, item.id)); workbench.setActiveTab('documents');
     } else if (item.kind === 'browser') {
       workbench.setBrowserSession(current => activateBrowserTab(current, item.id)); workbench.setActiveTab('browser');
-    } else workbench.setActiveTab('changes');
+    } else if (item.kind === 'conversation') scenes?.activateConversation(item.id);
+    else workbench.setActiveTab('changes');
     remember(key);
   };
   const latest = useRef({ owner, active, order, activate }); latest.current = { owner, active, order, activate };
@@ -94,6 +100,7 @@ export function useResourcePresentation(enabled = true, isZh = false) {
       const next = resourceNeighbor(latest.current.owner === owner ? latest.current.order : order, key);
       if (item.kind === 'document') workbench.setDocumentSession(current => closeDocumentTab(current, item.id));
       else if (item.kind === 'browser') workbench.setBrowserSession(current => closeBrowserTab(current, item.id, createBrowserTabSession()));
+      else if (item.kind === 'conversation') scenes?.closeConversation(item.id);
       else setStored(current => ({ ...current, value: { ...current.value, order: current.value.order.filter(value => value !== key) } }));
       if (latest.current.owner === owner && latest.current.active === key) latest.current.activate(next);
     } finally { closing.current.delete(closeKey); }
