@@ -470,6 +470,7 @@ export interface LifecycleFacts {
   readonly verificationActive?: boolean;
   readonly blockedReason?: string;
   readonly cancellationPhase?: string;
+  readonly cancellationDisposition?: 'user_withdrawn';
   readonly takeoverPhase?: string;
   readonly coordinationPhase?: string;
 }
@@ -493,6 +494,7 @@ export type FollowUpReason =
   | 'settled'
   | 'superseded'
   | 'stop_confirmed'
+  | 'user_withdrawn'
   | 'stop_unconfirmed'
   | 'human_request'
   | 'awaiting_human_gate'
@@ -545,6 +547,7 @@ export function decideFollowUp(
   }
   if (live) return followUpOf('bot', 'live_execution');
   if (stopPending) return followUpOf('bot', 'stop_unconfirmed');
+  if (stopStatus && facts.cancellationDisposition === 'user_withdrawn') return followUpOf('none', 'user_withdrawn');
 
   // 2) 退出当前待办：只有上面三类事实都不成立时，承接 / 失败 / 签收 / 已确认停止才生效。
   //    退出只影响“当前列表归属”，不改写原验收、原核验与未完成事实。
@@ -640,7 +643,8 @@ function decideLifecycleCore(
   const delegated = facts.delegated ?? snapshot.delegated === true;
 
   let status: WorkSessionStatus;
-  if (snapshot.status === 'cancelled') status = 'cancelled';
+  // A host-confirmed stop wins over stale recovery/takeover fields, never a live owner.
+  if (snapshot.status === 'cancelled' || facts.cancellationPhase === 'completed' && ownership !== 'live') status = 'cancelled';
   else if (snapshot.status === 'failed') status = 'failed';
   else if (accepted === true) status = 'accepted';
   else if (
@@ -727,6 +731,13 @@ function lifecyclePresentation(
   },
 ): ProjectionDecision {
   switch (status) {
+    case 'cancelled':
+      return {
+        actionRight: 'terminal',
+        nextAction: 'none',
+        statusLabel: '已取消',
+        actionLabel: '查看 →',
+      };
     case 'waiting_user':
       // completed 只说明计划已落库完成，不等于没有待你消费的决策：旧规则表把
       // completed 放在最前（rule 16），会把预算门/待确认门吞成「已完成 / terminal」。

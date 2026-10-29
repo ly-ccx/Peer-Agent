@@ -682,7 +682,8 @@ export function createGoalPlanStore({
     const verificationBlocked = normalized.runner?.status === 'blocked'
       && normalized.runner?.intent === 'verify';
     const repairOpen = hasActiveGoalRepair(normalized);
-    const keepLiveInterruption = hasUnconsumedInterruption
+    // Cancellation ends the mandate; old interruption evidence remains historical.
+    const keepLiveInterruption = derivedStatus !== 'cancelled' && hasUnconsumedInterruption
       && (derivedStatus !== TERMINAL_OK || prevStatus === 'interrupted');
     const candidateStatus = (verificationBlocked || repairOpen) && derivedStatus === TERMINAL_OK
       ? 'executing'

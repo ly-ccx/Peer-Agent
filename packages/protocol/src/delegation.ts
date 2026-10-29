@@ -36,7 +36,10 @@ export interface DelegationOrigin {
   readonly capabilityAdmission?: import('./capability-admission.ts').DelegationCapabilityAdmission;
   readonly takeover?: { operationId: string; phase: 'stopping' | 'completed'; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string };
   readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
-  readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean };
+  readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean;
+    readonly disposition?: 'user_withdrawn';
+    readonly withdrawal?: { readonly workspaceId: string; readonly parentConversationId: string; readonly sessionId: string; readonly planId: string; readonly anchorMessageId: string; readonly inputId: string; readonly admittedAt: string };
+  };
   readonly retainedForRecovery?: boolean;
   readonly workId?: string;
   readonly anchorMessageId: string;
@@ -505,6 +508,7 @@ export function projectWorkSession(
     ...(conversationMeta.origin.cancellation?.phase
       ? { cancellationPhase: conversationMeta.origin.cancellation.phase }
       : {}),
+    ...(conversationMeta.origin.cancellation?.disposition ? { cancellationDisposition: conversationMeta.origin.cancellation.disposition } : {}),
     ...(conversationMeta.coordination?.phase === 'awaiting_outcome'
       ? { takeoverPhase: 'awaiting_outcome' }
       : conversationMeta.origin.takeover?.phase

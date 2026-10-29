@@ -113,8 +113,7 @@ export async function checkHistoryRecovery({ page, until, report, captureDirecto
     assert.ok(state.lastRecovery.retainedSessionIds.includes(historical.child.sessionId));
     const child = createGoalPlanStore({ storeDir: historical.child.storeDir }).getPlan(historical.child.planId);
     assert.equal(child.status, 'cancelled', 'structured cancellation settles a child stopped on an unconsumed interruption');
-    assert.equal(child.runner.interruption, undefined);
-    assert.equal(child.delegationOrigin.cancellation.retainedInterruption.reason, 'work_budget_limited');
+    assert.equal(child.runner.interruption.reason, 'work_budget_limited', 'the interruption stays as history');
     assert.equal(child.delegationOrigin.retainedForRecovery, true);
     assert.equal(createHash('sha256').update(readFileSync(path.join(historical.directory, intent.archive, 'original/coordination.jsonl'))).digest('hex'), historical.sourceHash);
     assert.equal(heldFits && confirmFits, true);

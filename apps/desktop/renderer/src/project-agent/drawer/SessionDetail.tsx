@@ -62,7 +62,7 @@ export function SessionDetail({
     : session.status === 'failed' || session.status === 'unavailable' ? 'failed'
     : session.status === 'accepted' || session.status === 'cancelled' ? 'ended' : 'working';
   const question = needsYou ? context?.question : null;
-  const ended = followUp ? ['settled', 'stop_confirmed', 'superseded'].includes(followUp.reason) : session.status === 'accepted' || session.status === 'cancelled';
+  const ended = followUp ? followUp.owner === 'none' : session.status === 'accepted' || session.status === 'cancelled';
   const title = session.title && session.title !== session.sessionId ? session.title : i18n.t('projectAgent.chat.work.related');
   const messageId = context?.messageId || session.anchorMessageId || undefined;
   const updateText = context?.content.replace(/\s+/g, ' ').trim() ?? '';

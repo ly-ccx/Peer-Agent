@@ -84,7 +84,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const mandate = state.mandates?.[workId];
     if (!current.length && mandate && lifecycleOf(state,mandate) !== 'active') return {ok:false,error:'mandate_inactive'};
     const work = state.works[workId];
-    if (!work || work.parentConversationId !== parentConversationId || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)) return { ok: false, error: 'work_execution_stopped' };
+    if (!work || work.parentConversationId !== parentConversationId || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)
+      && !(input.action === 'cancel' && current.length)) return { ok: false, error: 'work_execution_stopped' };
     const eventIds = events.filter(row => mandate?.sessionIds.includes(row.sessionId) && state.events[row.eventId] && !state.events[row.eventId].handled).map(row => row.eventId);
     const materialRefs = current.flatMap(row => [...(row.attachmentRefs || []), ...(row.attachments || []).map(item => item.path || item.ref || item.id).filter(Boolean)]);
     const anchors = [...new Set([...current.map(row => row.id), ...messages
@@ -149,7 +150,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (['replace', 'cancel', 'handoff', 'revise', 'resume'].includes(transition.action) && needsStop) {
         move('stopping');
         if (['replace', 'cancel'].includes(transition.action)) {
-          const requested = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false });
+          const requested = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false },
+            transition.action === 'cancel' ? context : undefined);
           if (requested?.error) { move('blocked', { error: requested.error }); return; }
         }
       } else move('ready');
@@ -166,7 +168,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       const fresh = readSession({ sessionId: old.sessionId, detail: 'report' });
       if (fresh?.origin?.cancellation?.phase === 'awaiting_outcome') { move('awaiting_outcome', { error: 'execution_outcome_unknown' }); return; }
       if (transition.action === 'cancel' ? sessionNeedsCancellation(fresh) : fresh?.status !== 'cancelled' && !ended.has(fresh?.status)) {
-        const result = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false });
+        const result = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false },
+          transition.action === 'cancel' ? context : undefined);
         if (result?.error) move('blocked', { error: result.error });
         return;
       }

@@ -46,6 +46,7 @@ export interface DrawerSession {
   readonly verification?: SessionVerificationDetail;
   readonly verificationProgress?: VerificationProgress;
   readonly coordination?: CoordinationSessionFacts;
+  readonly withdrawalUnknownCallIds?: readonly string[];
   readonly sessionId: string;
   readonly title: string;
   readonly status: string;
@@ -239,6 +240,10 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
   const origin = record.origin && typeof record.origin === 'object'
     ? record.origin as Record<string, unknown>
     : {};
+  const cancellation = origin.cancellation && typeof origin.cancellation === 'object'
+    ? origin.cancellation as Record<string, unknown> : {};
+  const withdrawalUnknownCallIds = record.status === 'cancelled' && cancellation.phase === 'completed'
+    && cancellation.disposition === 'user_withdrawn' ? readStringList(cancellation.evidenceCalls) : [];
   const report = record.report && typeof record.report === 'object'
     ? record.report as Record<string, unknown>
     : {};
@@ -257,6 +262,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     ...(validProgress ? { verificationProgress: progress } : {}),
     ...(readFollowUpProjection(record.followUp) ? { followUp: readFollowUpProjection(record.followUp) } : {}),
     ...(readCoordination(record.coordination) ? {coordination:readCoordination(record.coordination)} : {}),
+    ...(withdrawalUnknownCallIds.length ? { withdrawalUnknownCallIds } : {}),
     title: readString(record.title) || sessionId,
     status: readString(record.status),
     statusLabel: readString(record.statusLabel),
