@@ -2,6 +2,22 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.29 - 2026-10-29
+
+### 修复与优化
+
+- 主 Bot 持续承接子任务的问题、技术中断、核验与返修；未签收结果可在原任务内返修，未回答的问题不因上下文变长而丢失。
+- 可取消已交回未签收的旧任务；撤回委托后不再占用当前任务，历史未知结果如实保留。
+- 中断任务保留恢复责任与真实失败原因；修复超长事件编号卡住历史恢复，恢复入口按需显示并支持确认后全部结束旧执行。
+- 子 Agent 活动行原位更新、引用预览分两层、任务流程只读查看、授权卡终态回执与按需加载；官网、使用文档与双语 README 围绕项目 Bot 重写。
+
+### Improvements (English)
+
+- Keep child questions, interruptions, verification and repair with the main Bot; repair unaccepted results within the original task and keep unanswered questions as context grows.
+- Cancel returned but unaccepted tasks; withdrawn delegations leave Current Tasks while unknown historical outcomes remain recorded.
+- Preserve recovery ownership and real failure causes; fix oversized event IDs blocking history recovery, show recovery only when needed and end all earlier executions after confirmation.
+- Update child Agent rows in place, add two-line quote previews, read-only task-flow viewing, terminal authorization receipts and on-demand loading; rewrite the website, user docs and bilingual READMEs around project Bots.
+
 ## 0.1.0-rc.28 - 2026-10-28
 
 ### 修复与优化

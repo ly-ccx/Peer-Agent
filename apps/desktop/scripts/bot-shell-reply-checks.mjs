@@ -4,6 +4,22 @@ import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-r
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
+async function assertQuoteInsideColumn(quote) {
+  const fit = await quote.evaluate(node => {
+    const column = node.closest('.bot-thread-row')?.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    const excerpt = node.querySelector('.bot-reply-bar-excerpt');
+    const excerptBox = excerpt?.getBoundingClientRect();
+    const style = excerpt ? getComputedStyle(excerpt) : null;
+    return {
+      inside: Boolean(column) && box.left >= column.left - 1 && box.right <= column.right + 1,
+      excerptInside: Boolean(excerptBox) && excerptBox.left >= box.left - 1 && excerptBox.right <= box.right + 1,
+      ellipsis: style?.whiteSpace === 'nowrap' && style.textOverflow === 'ellipsis' && (style.overflowX === 'hidden' || style.overflowX === 'clip'),
+    };
+  });
+  assert.deepEqual(fit, { inside: true, excerptInside: true, ellipsis: true });
+}
+
 /** Production reply rendering and callbacks; no model, tool or Evidence claims. */
 export async function checkBotShellReply({ page, until, report, captureDirectory }) {
   const checks = report.replyInteraction = [];
@@ -18,6 +34,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal((await quote.locator('.bot-reply-bar-action').textContent()).trim(), '查看原文');
   assert.ok(Number.isFinite(Date.parse(await quote.locator('.bot-reply-bar-source time').getAttribute('datetime'))));
   assert.equal(await quote.locator('.bot-reply-bar-label').textContent(), '你');
+  await assertQuoteInsideColumn(quote);
   assert.ok((await quote.getAttribute('aria-label')).startsWith('查看原消息: 你'));
   assert.ok((await quote.getAttribute('title')).endsWith('原文结束标记'));
   assert.equal(await reply.getByRole('button', { name: /通知方式/ }).count(), 0);
@@ -167,13 +184,19 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.notEqual(await explicitQuote.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(0, 0, 0, 0)');
   assert.equal(await explicitQuote.evaluate(node => getComputedStyle(node).borderInlineStartWidth), '0px');
   assert.equal(await page.locator('.bot-convo').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  await assertQuoteInsideColumn(explicitQuote);
   if (captureDirectory) await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'reply-narrow-sent.png') });
   await page.setViewportSize({ width: 1280, height: 780 });
+  await explicit.scrollIntoViewIfNeeded();
+  await openReplyDetails(page, reply);
+  await assertQuoteInsideColumn(explicitQuote);
+  await closeReplyDetails(page);
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; document.documentElement.dataset.palette = 'frost'; }, theme);
     await explicit.scrollIntoViewIfNeeded();
     await explicit.evaluate(async node => { await Promise.race([Promise.all(node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))), new Promise(resolve => setTimeout(resolve, 500))]); });
     assert.equal(await explicit.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await assertQuoteInsideColumn(explicitQuote);
     if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `quote-sent-1280-${theme}.png`), animations: 'disabled' });
   }
   await page.evaluate(original => {
