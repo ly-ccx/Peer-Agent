@@ -45,6 +45,15 @@ export function createAgentDelivery({ storeFor = id => workBudgetBinding(id)?.st
   function openRequest(workspaceId, sessionId) {
     return store(workspaceId).querySupervision('agentRequests', 'sessionId', sessionId, { pendingOnly: true, limit: 1 })[0];
   }
+  function unansweredQuestions(workspaceId, parentConversationId) {
+    const journal = store(workspaceId);
+    return journal.querySupervision('agentRequests','parentConversationId',parentConversationId,{pendingOnly:true,oldestFirst:true,limit:100})
+      .filter(request => request.responder === 'parent' && request.status === 'open').slice(0,8)
+      .flatMap(request => {
+        const message = journal.readSupervision('agentMessages',request.requestId);
+        return message ? [{...message,decisionRequest:request}] : [];
+      });
+  }
   function observed(workspaceId, conversationId, messageIds, attemptRef) {
     const journal = store(workspaceId);
     const messages = messageIds.map(id => journal.readSupervision('agentMessages', id)).filter(Boolean);
@@ -75,7 +84,7 @@ export function createAgentDelivery({ storeFor = id => workBudgetBinding(id)?.st
       .filter(row => row.admission === 'pending' || row.effect === 'pending' || row.effect === 'unknown')
       .map(row => journal.readSupervision('agentMessages', row.messageId)).filter(Boolean);
   }
-  return { commit, update, read, receipt, request, openRequest, observed, executed, pending,
+  return { commit, update, read, receipt, request, openRequest, unansweredQuestions, observed, executed, pending,
     available: workspaceId => Boolean(storeFor(workspaceId)?.readSupervision) };
 }
 
