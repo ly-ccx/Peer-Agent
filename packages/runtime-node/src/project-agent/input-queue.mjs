@@ -256,6 +256,12 @@ export function createInputQueue({
     if (typeof resolveConversationId !== 'function' || typeof hasMessage !== 'function' || typeof appendMessage !== 'function') {
       throw new TypeError('input queue consumer requires conversation writers');
     }
+    // Empty polling is read-only. A real batch still acquires the lock and
+    // re-reads its current contents below; a later submission gets a new wake.
+    if (!pendingAfter(dirName).length) {
+      const conversationId = resolveConversationId(dirName);
+      return { consumed: [], skipped: typeof conversationId === 'string' && conversationId.trim() ? null : 'no-conversation' };
+    }
     const outcome = withLock(dirName, () => {
       const conversationId = resolveConversationId(dirName);
       if (typeof conversationId !== 'string' || !conversationId.trim()) {

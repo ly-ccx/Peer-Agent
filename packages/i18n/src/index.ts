@@ -413,6 +413,8 @@ export type TranslationKey =
   | 'projectAgent.task.coordination.replacement'
   | 'projectAgent.task.coordination.prior'
   | 'projectAgent.task.coordination.applied'
+  | 'projectAgent.task.coordination.executionQueued'
+  | 'projectAgent.task.coordination.executionObserved'
   | 'projectAgent.task.coordination.pending'
   | 'projectAgent.task.coordination.unknown'
   | 'projectAgent.task.coordination.blocked'
@@ -426,6 +428,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.unavailable'
   | 'projectAgent.chat.work.unavailableHint'
   | 'projectAgent.chat.work.waiting'
+  | 'projectAgent.chat.work.resultSettling'
   | 'projectAgent.chat.work.resultReady'
   | 'projectAgent.chat.work.handoff'
   | 'projectAgent.chat.work.verifyingHint'
@@ -2067,6 +2070,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.coordination.replacement': '后续任务：{title}',
     'projectAgent.task.coordination.prior': '查看之前的任务',
     'projectAgent.task.coordination.applied': '调整已应用，任务进度以当前状态为准。',
+    'projectAgent.task.coordination.executionQueued': '已安排继续，正在等待实际执行回执。',
+    'projectAgent.task.coordination.executionObserved': '已收到继续执行的回执，结果以任务进度和核验为准。',
     'projectAgent.task.coordination.pending': '正在调整执行安排，已有工作会保留。',
     'projectAgent.task.coordination.unknown': '停止后有操作尚未确认结果，核实前不会重复执行。',
     'projectAgent.task.coordination.blocked': '本次调整未能应用，原有记录已保留。',
@@ -2080,6 +2085,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailable': '状态暂不可用',
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
     'projectAgent.chat.work.waiting': '等待跟进',
+    'projectAgent.chat.work.resultSettling': '正在核对结果',
     'projectAgent.chat.work.resultReady': '结果待确认',
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
     'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
@@ -3486,6 +3492,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.coordination.replacement': 'Follow-up task: {title}',
     'projectAgent.task.coordination.prior': 'View previous task',
     'projectAgent.task.coordination.applied': 'Adjustment applied. Task progress is shown in its current status.',
+    'projectAgent.task.coordination.executionQueued': 'Continuation is scheduled; awaiting an execution receipt.',
+    'projectAgent.task.coordination.executionObserved': 'Continuation was observed. Results follow task progress and verification.',
     'projectAgent.task.coordination.pending': 'Adjusting execution. Existing work is retained.',
     'projectAgent.task.coordination.unknown': 'Some operations have an unconfirmed outcome. They will not be repeated before checking.',
     'projectAgent.task.coordination.blocked': 'This adjustment could not be applied. Existing records are retained.',
@@ -3499,6 +3507,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailable': 'Status unavailable',
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
     'projectAgent.chat.work.waiting': 'Awaiting follow-up',
+    'projectAgent.chat.work.resultSettling': 'Reviewing the result',
     'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
     'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',

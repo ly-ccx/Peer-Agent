@@ -1,6 +1,10 @@
 import { syncApprovalConversation } from './approval-conversation.mjs';
-import { shouldPauseForHostHandoff } from '@peer-agent/runtime-node';
-import { createProjectAgentHost as createPortableProjectAgentHost } from '@peer-agent/runtime-node';
+import {
+  shouldPauseForHostHandoff
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  createProjectAgentHost as createPortableProjectAgentHost
+} from "@peer-agent/runtime-node/project-agent";
 import {createDesktopObjectiveWatchHost} from './objective-watch-host.mjs';
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
@@ -8,12 +12,15 @@ import { projectConversationHistory } from '@peer-agent/runtime-core';
 
 import {
   createApprovalStore,
-  applyStartupApprovalRecovery,
+  applyStartupApprovalRecovery
+} from "@peer-agent/runtime-node/storage";
+import {
   createObjectiveStore,
   createObjectiveActions,
   createObjectiveService,
   createBotDirectory,
   createBotSummaryHistory,
+  createBotSearchHistory,
   createBotConversationHistory,
   createBotLifecycle,
   createBotProfileStore,
@@ -32,14 +39,18 @@ import {
   createAgentEventPublisher,
   createWatchPublisher,
   normalizeProjectAgentSettings,
-  createProjectRegistry,
   createSessionSupervisor,
   createExecutionScheduler,
   createProjectDiagnostics,
   createCircuitBreaker,
-  createProjectRecovery,
-  resolveRoleRoute,
-} from '@peer-agent/runtime-node';
+  createProjectRecovery
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  createProjectRegistry
+} from "@peer-agent/runtime-node/providers";
+import {
+  resolveRoleRoute
+} from "@peer-agent/runtime-node/models";
 import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createDelegationFactsReader } from './delegation-facts-reader.mjs';
@@ -296,6 +307,7 @@ export function registerDesktopProjectAgent({
     onWrote: memoryChanged,
   });
   const summaryHistory = createBotSummaryHistory(conversationStore);
+  const searchHistory = createBotSearchHistory(conversationStore);
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -555,16 +567,13 @@ export function registerDesktopProjectAgent({
     readSearchCorpus(catalog) {
       const bots = Array.isArray(catalog) ? catalog : (typeof directory.list === 'function' ? directory.list() : []);
       const messages = [];
-      let histories = null;
-      try { histories = conversationStore.getPersistedConversationHistories?.(bots.map(bot => bot.profile?.agentConversationId).filter(Boolean)); }
-      catch { /* Per-conversation fallback below preserves optional corpus recovery. */ }
       for (const bot of bots) {
         const workspaceId = bot.workspaceId;
         const conversationId = bot.profile?.agentConversationId;
         if (!conversationId) continue;
         let history = [];
         try {
-          history = (histories instanceof Map ? histories.get(conversationId) : conversationStore.getPersistedConversationHistory(conversationId))?.messages || [];
+          history = searchHistory(conversationId) || [];
         } catch {
           history = [];
         }

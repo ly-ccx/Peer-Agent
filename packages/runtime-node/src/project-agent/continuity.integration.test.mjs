@@ -340,12 +340,13 @@ test('explicit retry transfers the persisted legacy wake batch before acknowledg
   } finally { env.close(); }
 });
 
+// These report slices have already been accepted by the host; result_ready now retains Bot settlement responsibility.
 test('a later result preserves the earlier report slice until both batches settle', async () => {
   let requests = 0;
   const env = world(async () => ++requests === 1
     ? { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'result_ready' } }], providerCheckpoint: { messages: [] } }
     : { toolCalls: [{ name: 'post_reply', input: { text: '核对好了。', replyTo: [] }, result: { ok: true } }] },
-  { resolveRoster: () => [{ sessionId: 's', status: 'result_ready', sourceRevision: 'r1' }] });
+  { resolveRoster: () => [{ sessionId: 's', status: 'accepted', sourceRevision: 'r1' }] });
   try {
     env.inbox.append('w', [event('readable', 'report_available')]); await env.runner.kick();
     const initial = Object.values(env.store.read().works)[0];
@@ -390,7 +391,7 @@ test('new result batches never overwrite a yielded result checkpoint; each survi
     seen.push([id, Boolean(checkpoint)]);
     if (!checkpoint) return { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: id }, result: { status: 'result_ready', report: id } }], providerCheckpoint: { result: id } };
     return { toolCalls: [{ name: 'post_reply', input: { text: `${id} 已核对并交付。`, replyTo: [] }, result: { ok: true } }] };
-  }, { resolveRoster: () => [{ sessionId: 'B', status: 'result_ready' }, { sessionId: 'C', status: 'result_ready' }] });
+  }, { resolveRoster: () => [{ sessionId: 'B', status: 'accepted' }, { sessionId: 'C', status: 'accepted' }] });
   try {
     env.inbox.append('w', [event('done-B', 'result_ready', 'B')]);
     await env.runner.kick();

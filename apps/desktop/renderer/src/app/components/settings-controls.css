@@ -1,0 +1,122 @@
+.settings-panel__header,
+.settings-actions,
+.settings-actions--wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.settings-panel__header h2,
+.settings-card h3 {
+  margin: 0;
+  color: var(--pa-text-primary);
+}
+
+.settings-panel__header p,
+.settings-card p,
+.settings-empty,
+.settings-status,
+.settings-warning {
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--ui-radius-panel);
+  background: var(--pa-surface-card);
+}
+
+.settings-grid--two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--pa-text-secondary);
+  font-size: 0.78rem;
+}
+
+.settings-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.settings-readonly-field {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings-readonly-field input {
+  flex: 1 1 auto;
+  color: var(--pa-text-secondary);
+}
+
+.settings-readonly-field button {
+  flex: 0 0 auto;
+}
+
+.settings-grid input,
+.settings-grid select {
+  min-width: 0;
+}
+
+.settings-status,
+.settings-warning {
+  margin: 0;
+}
+
+.settings-warning {
+  color: var(--state-warning);
+}
+
+.settings-actions--wrap {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.settings-actions button,
+.settings-actions--wrap button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--za-line-strong);
+  border-radius: var(--ui-radius-control);
+  background: var(--pa-surface-card);
+  color: var(--pa-text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--za-shadow-1, 0 1px 2px rgba(15, 18, 22, 0.06));
+}
+
+.settings-actions button:hover:not(:disabled),
+.settings-actions--wrap button:hover:not(:disabled) {
+  border-color: var(--za-line-strong);
+  background: var(--pa-surface-hover);
+}
+
+.settings-actions button:disabled,
+.settings-actions--wrap button:disabled {
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .settings-grid--two {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,5 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { openSync, closeSync, fsyncSync, writeSync, readSync, fstatSync, readFileSync, mkdirSync, renameSync, existsSync, copyFileSync, truncateSync, statSync } from 'node:fs';
+import {
+  openSync,
+  closeSync,
+  fsyncSync,
+  writeSync,
+  readSync,
+  fstatSync,
+  readFileSync,
+  mkdirSync,
+  renameSync,
+  existsSync,
+  copyFileSync,
+  truncateSync,
+  statSync,
+} from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
@@ -28,7 +42,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   const read = reader.read;
   function recover() {
     assertOwner();
-    if (useV2()) { reader.readSnapshot(); return; }
+    if (useV2()) return reader.readSnapshot();
     // Most kicks see a complete append-only journal. Do not read its entire
     // body merely to inspect its last separator; the reader validates changes.
     let fd;
@@ -82,6 +96,9 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
       if (fenceLegacyWrites && await protectCoordinationWriter({ directory: dir, assertOwner })) await storage.prepare();
     }, close: storage.close,
     journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
+    enableSupervision() { assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending'); storage.enableSupervision(); },
+    readSupervision: (bucket, id) => useV2() ? storage.readSupervision(bucket, id) : undefined,
+    querySupervision: (bucket, field, value, options) => useV2() ? storage.querySupervision(bucket, field, value, options) : [],
     observeUsage(workId, observationId, usage) {
       assertOwner();
       if (useV2() && storage.hasObservation(workId, observationId)) return false;
@@ -119,7 +136,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     bindSession(workId, goalRevision, sessionId, binding) { return append({ kind: 'coordination_binding', workId, goalRevision, sessionId, binding }); },
     advanceTransition(operationId, expectedPhase, patch) {
       assertOwner();
-      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff'].includes(key))) throw new Error('invalid_transition_patch');
+      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff', 'executionAdmission', 'executionEffect', 'executionAttemptRef'].includes(key))) throw new Error('invalid_transition_patch');
       return append({ kind: 'coordination_transition', operationId, expectedPhase, patch: { ...patch, updatedAt: now() } });
     },
     checkpoint(workId, checkpoint) {

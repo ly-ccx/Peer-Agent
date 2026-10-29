@@ -9,4 +9,4 @@ export {
   shouldAutoStartAcceptedGoalRunnerFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
-} from '@peer-agent/runtime-node';
+} from '@peer-agent/runtime-node/project-agent';

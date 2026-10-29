@@ -1,3 +1,4 @@
+import '../styles/goal-panel.css';
 import { motionDurationMs, watchVisualMotion } from '../../app/state/visualMotion';
 import { PeerIcon } from '../../ui/icons';
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';

@@ -39,3 +39,12 @@ test('only the current question carries bounded public context; older large repl
   assert.ok(summary.at(-1).questionContext.endsWith('Concrete decision at the end'));
   assert.ok(JSON.stringify(summary).length < 250000);
 });
+
+test('short and long Unicode previews preserve ordinary code point and whitespace semantics', () => {
+  for (const text of ['short  text', '中文 '.repeat(120), '😀'.repeat(100), ' '.repeat(20) + 'A\nB\tC', 'x'.repeat(80) + ' y']) {
+    for (const limit of [80, 0, -3, 80.5, NaN]) {
+      const expected = Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, limit).join('');
+      assert.equal(projectBotListMessage({ role: 'assistant', content: text }, limit).text, expected);
+    }
+  }
+});

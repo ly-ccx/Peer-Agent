@@ -17,6 +17,11 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
   const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : readSnapshot().works[id];
   const rows = () => { const roster = resolveRoster?.(); return Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []; };
+  const eventObserved = event => {
+    const message = event?.kind === 'agent_message' && event.payload?.agentMessage;
+    if (!message?.operationId) return true;
+    return store.readSupervision?.('agentCommands', message.operationId)?.delivery === 'observed';
+  };
   const delivery = createReplyDelivery({ store, readMessages, appendMessage: remember, accept: onReplied,
     validate: message => (message.meta?.sessionStates || []).every(source => {
       const current = rows().find(row => row.sessionId === source.sessionId);
@@ -28,8 +33,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const work = readWork(message.meta?.workId);
       if (!work || !['runnable', 'retry_wait'].includes(work.state) || work.attemptId && work.attemptId !== message.turnId) return;
       const related = rows().filter(row => work.sessionIds?.includes(row.sessionId));
-      store.saveWork({ ...work, state: stateAfterReply(related), repairSessionIds: repairOwnership(related).repairSessionIds }, { returnState: false });
-      store.handled(work.pendingEventIds || []);
+      const events = (work.pendingEventIds || []).map(id => readSnapshot().events[id]?.event).filter(Boolean);
+      const unseen = events.filter(event => !eventObserved(event));
+      store.saveWork({ ...work, state: unseen.length ? 'runnable' : stateAfterReply(related), repairSessionIds: repairOwnership(related).repairSessionIds }, { returnState: false });
+      store.handled(events.filter(eventObserved).map(event => event.eventId));
     },
     onInvalidated: message => {
       const work = readWork(message.meta?.workId);
@@ -93,6 +100,15 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   // A synchronous selection shares preparation only until control returns to its
   // caller. All writes invalidate the decision; no snapshot crosses an await.
   function recoverySelection() {
+    const inventory = readSnapshot();
+    // These repair passes only transform existing work. An empty authoritative
+    // inventory needs no repair; events and prepared deliveries keep their own
+    // admission paths. This snapshot never survives a later selection call.
+    if (!Object.keys(inventory.works).length) return {
+      choose: () => null,
+      pending: () => pendingFrom(inventory),
+      deliveryPending: () => delivery.pending(inventory),
+    };
     dispatchRecovery.reconcileAll();
     expireReservations();
     let snapshot, decisionSnapshot;
@@ -144,6 +160,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
           ...(work.state === 'retry_wait' ? { recoveryReservationId: work.recovery.reservationId, recoveryRevision: work.revision } : {}) };
       },
       pending: () => pendingFrom(decision()),
+      deliveryPending: () => delivery.pending(decision()),
     };
   }
   return {
@@ -188,6 +205,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     recoverUserJob() { return this.recoverJob({ userOnly: true }); },
     recoverJob({ userOnly = false } = {}) { return recoverySelection().choose(userOnly); },
+    hasContinuation() {
+      const selection = recoverySelection();
+      return Boolean(selection.choose(false) || selection.deliveryPending());
+    },
     selectNext() {
       const selection = recoverySelection();
       const user = selection.choose(true);
@@ -278,6 +299,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (outcome.deliveryPending) state = 'retry_wait';
       const reportedWait = reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] });
       if (reportedWait) state = reportedWait.waitingUser ? 'waiting_user' : 'waiting_children';
+      const observedEvents = (job.events || []).filter(eventObserved);
+      const unseenEvents = (job.events || []).filter(event => !eventObserved(event));
+      if (unseenEvents.length && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending
+        && !['blocked_system', 'waiting_user'].includes(state)) state = 'runnable';
       const end = state === 'runnable' ? 'yielded' : state === 'waiting_children' ? 'awaiting_children' : state === 'waiting_user' ? 'awaiting_user'
         : state === 'budget_limited' ? 'budget_limited' : outcome.reason === 'agent_no_progress' ? 'no_progress'
         : outcome.stopped ? 'user_stopped' : outcome.failed ? recovery?.retryable ? 'provider_retryable' : 'fatal'
@@ -288,8 +313,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       store.saveWork({ ...previous, ...decision, state, end, sessionIds, checkpointRef, recovery, reportedWait, repairSessionIds: ownership.repairSessionIds,
         waitFor: [...(reportedWait ? reportedWait.sessionStates : waiting).map(row => ({ kind: 'session', id: row.sessionId })),
           ...(state === 'retry_wait' && recovery?.reservationId ? [{ kind: 'retry_timer', id: recovery.reservationId }] : [])],
-        consumedEventIds: [...new Set([...previous.consumedEventIds, ...(job.events || []).map(row => row.eventId)])].slice(-64) }, { returnState: false });
-      if (!outcome.failed && !outcome.yielded && !outcome.deliveryPending) store.handled((job.events || []).map(row => row.eventId));
+        consumedEventIds: [...new Set([...previous.consumedEventIds, ...observedEvents.map(row => row.eventId)])].slice(-64) }, { returnState: false });
+      if (!outcome.failed && !outcome.yielded && !outcome.deliveryPending) store.handled(observedEvents.map(row => row.eventId));
       return { ...decision, state };
     },
     dispatchRecoveryFacts: dispatchRecovery.facts,

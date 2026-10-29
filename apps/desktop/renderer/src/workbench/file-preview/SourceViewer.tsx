@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { boundedPresentation, presentationLimitLabel } from './presentationBudget';
+import { useHighlightLanguages } from '../../chat/components/markdown/useHighlightLanguages';
 
 import { highlightSourceLines } from './sourceHighlight.ts';
 
@@ -13,9 +14,10 @@ interface SourceViewerProps {
 
 export function SourceViewer({ content, emptyLabel, language, className, isZh = false }: SourceViewerProps) {
   const bounded = useMemo(() => boundedPresentation(content), [content]);
+  const languageRevision = useHighlightLanguages();
   const highlighted = useMemo(
     () => highlightSourceLines(bounded.text, language),
-    [bounded.text, language],
+    [bounded.text, language, languageRevision],
   );
 
   if (content === '') {

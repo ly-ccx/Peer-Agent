@@ -137,13 +137,13 @@ export function createProjectAgentHost({
       await coordinationStore.prepare();
       if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
       if (holdsLease(workspaceId) !== true) { coordinationStore.close(); throw new Error('coordination_lease_lost'); }
-      coordinationStore.recover();
-      const restored = coordinationStore.readSnapshot().lastRecovery;
+      const recoveredState = coordinationStore.recover();
+      const restored = recoveredState.lastRecovery;
       recoverySessions.set(workspaceId, new Set(restored?.quarantinedSessionIds || []));
       if (restored?.executionBlocked === true) {
         throw Object.assign(new Error('coordination_reconciliation_required'), { code: 'coordination_reconciliation_required' });
       }
-      if (continuityVersion !== 1 && Object.values(coordinationStore.read().works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
+      if (continuityVersion !== 1 && Object.values(recoveredState.works).some(work => !['cancelled', 'delivered'].includes(work.state))) throw new Error('continuity_upgrade_required');
     } catch (error) { coordinationStore.close(); throw error; }
     const unregisterBudget = registerWorkBudget(workspaceId, coordinationStore, readSettings?.()?.projectAgent?.executionBudget);
     const runner = createProjectAgentRunner({
@@ -261,11 +261,15 @@ export function createProjectAgentHost({
           const pending = pendingInputs(workspaceId, conversationId, consumed);
           const due = armDigest(runner, workspaceId);
           publishWatch(workspaceId);
-          if (pending.length) await runner.enqueueUserInputs(pending);
+          let advanced = false;
+          if (pending.length) { await runner.enqueueUserInputs(pending); advanced = true; }
           else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) {
             await runner.kick();
+            advanced = true;
           }
-          if (runner.hasContinuation()) scheduleSweepSoon();
+          // Recheck after a turn crossed await. The entirely idle branch has
+          // already decided there is no continuation and changed no work.
+          if (advanced && runner.hasContinuation()) scheduleSweepSoon();
           return { workspaceId, ok: true };
         } catch (error) { drop(workspaceId); try { recovery.fail(workspaceId, error); } catch { /* Returned failure still identifies the project. */ } return { workspaceId, ok: false, error: error?.message || String(error) }; }
       })();

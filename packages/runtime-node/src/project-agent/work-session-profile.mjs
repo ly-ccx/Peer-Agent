@@ -120,5 +120,5 @@ export function resolveWorkSessionProfile({ plan, kind = 'worker', fallback = nu
 /** The same role policy gates model projections and the local Provider. */
 export function agentCommunicationExcludedPrefixes(profile) {
   return profile?.role === 'project_agent' || profile?.role === 'work_session' && (profile?.agentKind ?? profile?.turnContext?.agentKind) === 'worker'
-    ? [] : ['local.delegation.send_agent_message'];
+    ? [] : ['local.delegation.send_agent_message', 'local.continuity.'];
 }

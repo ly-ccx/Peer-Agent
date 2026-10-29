@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 
 /** Only disposable fixture history is written; production readers and continuation remain real. */
-export function seedHistoryFixtures({ home }) {
+export function seedHistoryFixtures({ home, now = new Date() }) {
   assert.equal(JSON.parse(readFileSync(path.join(home, 'rc-fixture.json'), 'utf8')).fixture, true);
   const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const titles = ['提交引用改动', '本机公证试包', '诊断继续按钮反复失败', '调整模型与推理强度',
@@ -15,14 +15,23 @@ export function seedHistoryFixtures({ home }) {
     const meta = store.createConversation({ title: titles[index] ?? `历史讨论 ${index + 1}`, mode: 'chat' });
     store.appendMessage(meta.id, { id: `history-user-${index}`, role: 'user', content: '请保留之前的讨论，继续完善交互细节。' });
     store.appendMessage(meta.id, { id: `history-assistant-${index}`, role: 'assistant', content: '**下一步**\n\n先核对原有交互，再根据实机表现调整。这是隔离测试的历史预览。' });
-    const date = new Date(); date.setDate(date.getDate() - (index < 2 ? 0 : index < 4 ? 1 : index < 12 ? 3 : 10)); date.setHours(14, 58 - index, 0, 0);
-    return { ...meta, updatedAt: date.toISOString() };
+    return meta;
+  });
+  return refreshHistoryFixtureDates({ home, rows, now });
+}
+
+/** Calendar groups are relative to scenario entry, even if the full run crossed midnight. */
+export function refreshHistoryFixtureDates({ home, rows, now = new Date() }) {
+  assert.equal(JSON.parse(readFileSync(path.join(home, 'rc-fixture.json'), 'utf8')).fixture, true);
+  const dated = rows.map((row, index) => {
+    const date = new Date(now); date.setDate(date.getDate() - (index < 2 ? 0 : index < 4 ? 1 : index < 12 ? 3 : 10)); date.setHours(14, 58 - index, 0, 0);
+    return { ...row, updatedAt: date.toISOString() };
   });
   const file = path.join(home, 'conversations', 'index.jsonl');
-  const fixtures = new Map(rows.map(row => [row.id, row]));
+  const fixtures = new Map(dated.map(row => [row.id, row]));
   const index = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   writeFileSync(file, index.map(row => JSON.stringify({ ...row, ...(fixtures.has(row.id) ? { updatedAt: fixtures.get(row.id).updatedAt } : {}) })).join('\n') + '\n');
-  return rows;
+  return dated;
 }
 
 export function instrumentHistoryReads(source) {
@@ -55,6 +64,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     await page.locator('.bot-history-sheet .bot-sheet-close').click();
     await page.locator('.bot-history-sheet').waitFor({ state: 'detached' });
   };
+  refreshHistoryFixtureDates({ home, rows: fixtureRows });
   await changeHistory('normal'); await openHistory();
   const sheet = page.locator('.bot-history-sheet'); const search = sheet.getByRole('searchbox');
   await until(() => sheet.locator('.bot-history-row').count(), count => count === 40);

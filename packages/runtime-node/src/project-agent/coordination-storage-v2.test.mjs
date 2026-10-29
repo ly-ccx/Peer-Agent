@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, statSync, readdirSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, statSync, readdirSync, appendFileSync, writeFileSync, utimesSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
@@ -13,6 +13,29 @@ function world() {
   return { rootDir, options, store(extra = {}) { const s = createWorkCoordinationStore({ ...options, ...extra }); stores.push(s); return s; },
     close() { stores.forEach(s => s.close()); rmSync(rootDir, { recursive: true, force: true }); } };
 }
+
+test('warm metadata reads reject external same-size schema changes, replacement pointers and incomplete fences', async () => {
+  const w = world();
+  try {
+    const store = w.store({ formatVersion: 2, fenceLegacyWrites: true }); await store.prepare();
+    const base = path.join(w.rootDir, 'w'), manifestFile = path.join(base, 'coordination-v2/manifest.json');
+    const original = readFileSync(manifestFile, 'utf8'), before = statSync(manifestFile);
+    assert.equal(store.readSnapshot().revision, 0);
+    const future = JSON.parse(original); future.minimumReaderVersion = 9; future.minimumWriterVersion = 9;
+    writeFileSync(manifestFile, JSON.stringify(future)); utimesSync(manifestFile, before.atime, before.mtime);
+    assert.throws(() => store.readSnapshot(), /coordination_schema_unsupported/);
+    assert.throws(() => store.saveWork({ workId: 'forbidden', state: 'runnable' }), /coordination_schema_unsupported/);
+    writeFileSync(manifestFile, original); assert.equal(store.readSnapshot().revision, 0);
+    const pointer = path.join(base, '.read-models/coordination-current.json'), saved = readFileSync(pointer);
+    writeFileSync(pointer + '.replacement', '{}'); renameSync(pointer + '.replacement', pointer);
+    assert.throws(() => store.readSnapshot(), /coordination_index_corrupt/);
+    writeFileSync(pointer, saved); assert.equal(store.readSnapshot().revision, 0);
+    const fence = path.join(base, 'coordination-fence.json'), savedFence = readFileSync(fence);
+    writeFileSync(fence, JSON.stringify({ status: 'pending' }));
+    assert.throws(() => store.readSnapshot(), /coordination_fence_incomplete/);
+    writeFileSync(fence, savedFence); assert.equal(store.readSnapshot().revision, 0);
+  } finally { w.close(); }
+});
 
 test('legacy import retains identities, exact usage and unknown dispatches without changing original bytes', async () => {
   const w = world();
@@ -200,4 +223,16 @@ test('a partial active v2 tail is backed up and repaired without releasing a pen
   const backup=readdirSync(dir).find(f=>f.includes('.damaged-'));assert.deepEqual(readFileSync(path.join(dir,backup)),original);
   assert.ok(restored.read().lastRecovery.backup.includes('.damaged-'));
  }finally{w.close();}
+});
+
+test('v2 recovery returns its current immutable inventory while retaining the owner check', async () => {
+  const w = world(); let owned = true;
+  try {
+    const store = w.store({ formatVersion: 2, holdsLease: () => owned }); await store.prepare();
+    const first = store.recover(); assert.equal(Object.isFrozen(first), true); assert.equal(first.revision, 0);
+    store.saveWork({ workId: 'arrived', state: 'runnable' }, { returnState: false });
+    assert.equal(store.recover().works.arrived.state, 'runnable');
+    assert.equal(first.works.arrived, undefined);
+    owned = false; assert.throws(() => store.recover(), /coordination_lease_lost/);
+  } finally { w.close(); }
 });

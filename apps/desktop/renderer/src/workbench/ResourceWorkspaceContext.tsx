@@ -8,7 +8,7 @@ import { normalizeDeliveryBinding } from './deliveryBindingState';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
 import { MAIN_MIN_WIDTH, WORKBENCH_MIN_WIDTH, useWorkbench } from './WorkbenchContext';
-import { WorkbenchPanel } from './WorkbenchPanel';
+import { WorkbenchPanel } from '../app/components/deferredPanels';
 import { addBrowserTab, createBrowserTabSession } from './browserSessionState';
 import { resourceLayoutBounds, resourceWebUrl } from './resourceWorkspaceState';
 import { documentReferenceLocation } from '../chat/components/markdown/documentReference';

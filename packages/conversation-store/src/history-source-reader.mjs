@@ -1,10 +1,16 @@
 const changed = () => Object.assign(new Error('BACKGROUND_VERSION_CHANGED'), { code: 'BACKGROUND_VERSION_CHANGED' });
 
-function freeze(value) {
+export function freezeHistoryValue(value, plainOnly = false) {
   const pending = [value];
+  const visited = plainOnly ? new WeakSet() : null;
   while (pending.length) {
     const next = pending.pop();
-    if (!next || typeof next !== 'object' || Object.isFrozen(next)) continue;
+    if (!next || typeof next !== 'object' && typeof next !== 'function') continue;
+    if (plainOnly && !Array.isArray(next) && ![Object.prototype, null].includes(Object.getPrototypeOf(next))) {
+      throw new TypeError('Immutable history projections require plain data');
+    }
+    if (typeof next !== 'object' || (visited ? visited.has(next) : Object.isFrozen(next))) continue;
+    visited?.add(next);
     Object.freeze(next);
     for (const child of Object.values(next)) pending.push(child);
   }
@@ -29,7 +35,7 @@ export function createHistorySourceReader({ load, maxEntries = 8, maxBytes = 64 
       drop(id);
       try { value = load(description); }
       catch (error) { if (!isCurrent()) throw changed(); throw error; }
-      freeze(value);
+      freezeHistoryValue(value);
       const size = Buffer.byteLength(JSON.stringify(value) ?? 'null');
       if (!isCurrent()) throw changed();
       if (maxEntries > 0 && size <= maxBytes) {

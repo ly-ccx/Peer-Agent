@@ -33,7 +33,7 @@ describe('skillHubInstallError', () => {
     );
     assert.match(
       describeSkillHubInstallErrorCode('workspace_required'),
-      /工作区/,
+      /机器人/,
     );
     assert.match(
       describeSkillHubInstallErrorCode('skillhub_signature_publisher_mismatch'),

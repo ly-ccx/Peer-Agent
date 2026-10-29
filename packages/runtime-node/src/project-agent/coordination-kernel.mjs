@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const COORDINATION_ACTIONS = Object.freeze(['parallel', 'augment', 'revise', 'query', 'answer', 'cancel', 'replace', 'handoff']);
+export const COORDINATION_ACTIONS = Object.freeze(['parallel', 'augment', 'revise', 'query', 'answer', 'cancel', 'replace', 'handoff', 'resume']);
 const revisions = new Set(['revise', 'cancel', 'replace']);
 const phases = { recorded: ['stopping', 'ready', 'completed', 'blocked'], stopping: ['awaiting_outcome', 'ready', 'completed', 'blocked'],
   awaiting_outcome: ['ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready'], completed: [] };
@@ -34,26 +34,26 @@ export function admitCoordinationDecision(state, decision, host) {
   if (decision.sessionId && (!(prior?.sessionIds.includes(decision.sessionId) || adopted)
     || host.scopedSessionIds && !host.scopedSessionIds.includes(decision.sessionId))) return reject('out_of_scope');
   if (!inputs.length && events.some(id => (!prior.sessionIds.includes(state.events?.[id]?.event?.sessionId) || prior.revokedSessionIds?.includes(state.events?.[id]?.event?.sessionId)))) return reject('event_out_of_scope');
-  if (prior && !prior.allowedActions.includes(decision.action)) return reject('coordination_action_denied');
+  if (prior && !prior.allowedActions.includes(decision.action) && !(decision.action === 'resume' && prior.allowedActions.includes('handoff'))) return reject('coordination_action_denied');
   // Quote-scoped human corrections cannot bind an unrelated goal merely because it is recent.
   if (host.scopedSessionIds && prior && !prior.sessionIds.some(id => host.scopedSessionIds.includes(id))) return reject('out_of_scope');
   const materialRefs = unique(host.materialRefs);
   if (!inputs.length && materialRefs.some(ref => !prior.materialRefs.includes(ref))) return reject('material_out_of_scope');
   const goalRevision = prior ? prior.goalRevision + (revisions.has(decision.action) ? 1 : 0) : 1;
   const executionBindings = { ...prior?.executionBindings };
-  if (decision.sessionId && ['revise', 'cancel', 'replace', 'handoff'].includes(decision.action)) delete executionBindings[decision.sessionId];
+  if (decision.sessionId && ['revise', 'cancel', 'replace', 'handoff', 'resume'].includes(decision.action)) delete executionBindings[decision.sessionId];
   const mandate = { schemaVersion: 1, mandateId: prior?.mandateId || `mandate-${fingerprint([host.workspaceId, decision.workId])}`,
     workId: decision.workId, workspaceId: host.workspaceId, parentConversationId: host.parentConversationId,
     rootInputIds: prior?.rootInputIds || inputs, revisionInputIds: unique([...(prior?.revisionInputIds || []), ...inputs]),
     goalRevision, allowedActions: prior?.allowedActions || [...COORDINATION_ACTIONS], sessionIds: prior?.sessionIds || (adopted ? [decision.sessionId] : []),
     materialRefs: unique([...(prior?.materialRefs || []), ...materialRefs]), policyRevision: host.policyRevision || 'existing-project-policy',
-    executionBindings, revokedSessionIds: unique([...(prior?.revokedSessionIds || []), ...(decision.sessionId && ['revise', 'cancel', 'replace', 'handoff'].includes(decision.action) ? [decision.sessionId] : [])]), lifecycle: 'active' };
+    executionBindings, revokedSessionIds: unique([...(prior?.revokedSessionIds || []), ...(decision.sessionId && ['revise', 'cancel', 'replace', 'handoff', 'resume'].includes(decision.action) ? [decision.sessionId] : [])]), lifecycle: 'active' };
   const transition = { schemaVersion: 1, operationId: decision.operationId, workId: decision.workId,
     mandateId: mandate.mandateId, expectedGoalRevision: goalRevision, sourceInputIds: inputs, sourceEventIds: events,
     initiator: 'project_agent', decisionSource: inputs.length ? 'user_revision' : 'execution_repair',
     action: decision.action, reason: decision.reason, ...(decision.sessionId ? { oldSessionId: decision.sessionId } : {}),
     executionEpoch: `execution-${fingerprint([decision.workId, goalRevision, decision.operationId])}`,
-    phase: 'recorded', minimumExecutorVersion: 1, updatedAt: host.now };
+    phase: 'recorded', minimumExecutorVersion: decision.action === 'resume' ? 2 : 1, updatedAt: host.now };
   const receipt = { ...decision, digest, goalRevision, mandateId: mandate.mandateId };
   return { ok: true, entry: { kind: 'coordination_decision', mandate, receipt, transition }, receipt };
 }
@@ -89,8 +89,15 @@ export function reduceCoordinationDecision(state, entry) {
   } else {
     const transition = next.transitions[entry.operationId];
     if (!transition || transition.phase !== entry.expectedPhase) throw new Error('transition_phase_conflict');
-    if (!phases[transition.phase]?.includes(entry.patch.phase)) throw new Error('invalid_transition_phase');
-    next.transitions[entry.operationId] = { ...transition, ...structuredClone(entry.patch) };
+    if (entry.patch.phase !== undefined && entry.patch.phase !== transition.phase
+      && !phases[transition.phase]?.includes(entry.patch.phase)) throw new Error('invalid_transition_phase');
+    if (entry.patch.executionAdmission !== undefined && !['queued', 'admitted', 'rejected'].includes(entry.patch.executionAdmission)
+      || entry.patch.executionEffect !== undefined && !['pending', 'applied', 'unknown', 'rejected'].includes(entry.patch.executionEffect)) throw new Error('invalid_execution_receipt');
+    if (entry.patch.executionEffect === 'applied' && (!entry.patch.executionAttemptRef
+      || (entry.patch.executionAdmission || transition.executionAdmission) !== 'admitted')) throw new Error('execution_receipt_unproven');
+    const patch = structuredClone(entry.patch);
+    if (transition.executionEffect === 'applied') { delete patch.executionEffect; delete patch.executionAdmission; }
+    next.transitions[entry.operationId] = { ...transition, ...patch };
   }
   return next;
 }

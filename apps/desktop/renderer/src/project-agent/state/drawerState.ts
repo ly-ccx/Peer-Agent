@@ -39,6 +39,7 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly followUp?: import('@peer-agent/protocol').FollowUpProjection;
   readonly planId?: string;
   readonly sourceRevision?: string;
   readonly observationRevision?: string;
@@ -182,7 +183,21 @@ export function writeDrawerMemory(workspaceId: string, memory: DrawerMemory, sto
   }));
 }
 
-export function taskGroup(status: string): TaskGroup {
+export function taskGroup(
+  status: string,
+  followUp?: import('@peer-agent/protocol').FollowUpProjection,
+): TaskGroup {
+  // 宿主唯一判定优先（ADR 110）：分组不再按 status 各自过滤。
+  // 只有真实人工门槛进「需要你」；技术跟进/核验/停止回执未决留在「进行中」；
+  // 已签收与已确认停止进「已完成」；暂停、被完成替换承接仍单列，不用完成态遮盖承接关系。
+  if (followUp) {
+    if (followUp.inCurrentList) {
+      if (followUp.owner === 'user') return 'needsYou';
+      return QUEUED.has(status) ? 'queued' : 'running';
+    }
+    return followUp.reason === 'paused' || followUp.reason === 'superseded' ? 'paused' : 'done';
+  }
+  // 旧记录（宿主未下发 followUp）：保持既有状态表兜底，不新造终态。
   if (NEEDS_YOU.has(status)) return 'needsYou';
   if (RUNNING.has(status)) return 'running';
   if (QUEUED.has(status)) return 'queued';
@@ -198,11 +213,12 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
     paused: [],
     done: [],
   };
-  for (const session of sessions) groups[taskGroup(session.status)].push(session);
+  for (const session of sessions) groups[taskGroup(session.status, session.followUp)].push(session);
   return groups;
 }
 
 export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
+  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return i18n.t('projectAgent.chat.work.resultSettling');
   if (['stopping','awaiting_outcome'].includes(session.status)) return i18n.t(`projectAgent.chat.sessionState.${session.status}` as 'projectAgent.chat.sessionState.stopping' | 'projectAgent.chat.sessionState.awaiting_outcome');
   if (session.coordination?.action === 'handoff' && session.coordination.phase === 'stopping') return i18n.t('projectAgent.task.coordination.handoff');
   if (session.queueReason === 'dependency_missing') return i18n.t('projectAgent.drawer.dependencyMissing');
@@ -239,6 +255,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     observationRevision: readString(record.observationRevision),
     ...(verification ? { verification } : {}),
     ...(validProgress ? { verificationProgress: progress } : {}),
+    ...(readFollowUpProjection(record.followUp) ? { followUp: readFollowUpProjection(record.followUp) } : {}),
     ...(readCoordination(record.coordination) ? {coordination:readCoordination(record.coordination)} : {}),
     title: readString(record.title) || sessionId,
     status: readString(record.status),
@@ -369,10 +386,33 @@ function readVerification(value: unknown, sessionId: string): SessionVerificatio
 function readCoordination(value: unknown): CoordinationSessionFacts | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const row=value as Record<string,unknown>;
-  const action=['parallel','augment','revise','query','answer','cancel','replace','handoff'].find(item=>item===row.action);
+  const action=['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'].find(item=>item===row.action);
   const phase=['recorded','stopping','awaiting_outcome','ready','started','completed','blocked'].find(item=>item===row.phase);
   if (!action || !phase || !readString(row.operationId) || !Number.isSafeInteger(row.goalRevision)) return undefined;
   return {operationId:readString(row.operationId), action:action as CoordinationSessionFacts['action'], phase:phase as CoordinationSessionFacts['phase'],
+    executionAdmission: ['queued', 'admitted', 'rejected'].includes(String(row.executionAdmission)) ? row.executionAdmission as CoordinationSessionFacts['executionAdmission'] : undefined,
+    executionEffect: ['pending', 'applied', 'unknown', 'rejected'].includes(String(row.executionEffect)) ? row.executionEffect as CoordinationSessionFacts['executionEffect'] : undefined,
+    executionAttemptRef: readString(row.executionAttemptRef),
     goalRevision:row.goalRevision as number, reason:readString(row.reason), priorSessionId:readString(row.priorSessionId),
     replacementSessionId:readString(row.replacementSessionId), replacementTitle:readString(row.replacementTitle)};
+}
+
+
+
+/**
+ * 宿主下发的跟进责任（ADR 110）。`inCurrentList` 是宿主派生事实：与 `owner` 不一致时按
+ * `owner` 纠正，renderer 不能据此伪造“退出列表”或“留在列表”。字段残缺返回 undefined，
+ * 由消费端 fail closed。`reason` 只作诊断。
+ */
+function readFollowUpProjection(value: unknown): import('@peer-agent/protocol').FollowUpProjection | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const owner = record.owner;
+  const reason = readString(record.reason);
+  if ((owner !== 'bot' && owner !== 'user' && owner !== 'none') || !reason) return undefined;
+  return {
+    owner,
+    inCurrentList: owner !== 'none',
+    reason: reason as import('@peer-agent/protocol').FollowUpProjection['reason'],
+  };
 }

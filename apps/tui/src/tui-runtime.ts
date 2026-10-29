@@ -3,20 +3,29 @@ import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/pr
 import {
   createChatGptResponsesProvider,
   createOpenAICompatibleProvider,
-  effectiveFastMode,
   refreshChatGptOAuthTokens,
   type ModelProviderRequest,
-  createGoalPlanStore,
   resolveOpenCodeGoBaseUrl,
-  GROK_SUBSCRIPTION_HEADERS,
-} from '@peer-agent/runtime-node';
+  GROK_SUBSCRIPTION_HEADERS
+} from "@peer-agent/runtime-node/models";
+import {
+  effectiveFastMode
+} from "@peer-agent/runtime-node/providers";
+import {
+  createGoalPlanStore
+} from "@peer-agent/runtime-node/storage";
 
 import {
   missingModelConfigurationMessage,
   resolveTuiModelConfig,
   type TuiModelConfig,
 } from './model-config.ts';
-import { createTuiContextSelectionControl, createTuiModelSelectionControl, type TuiContextSelectionControl, type TuiModelSelectionControl } from './tui-model-selection.ts';
+import {
+  createTuiContextSelectionControl,
+  createTuiModelSelectionControl,
+  type TuiContextSelectionControl,
+  type TuiModelSelectionControl,
+} from './tui-model-selection.ts';
 import {
   createProviderChatModel,
   createUnavailableChatModel,
@@ -35,7 +44,8 @@ import {
 import { denyInteractiveTools, restrictTuiHostTools } from './cli-host-filter.ts';
 import { createTuiHost, type TuiHost, type TuiCapabilityProvider } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
-import { buildTuiSystemPrompt, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
+import { buildTuiSystemContext, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
+import { agentMessagesForContext, readWorkingContext, recordAgentContextAdmission } from '@peer-agent/runtime-node/project-agent';
 import { createTuiThemeStore, type TuiThemeStore } from './tui-theme.ts';
 import type { ChatModelPort } from './chat-controller.ts';
 
@@ -298,10 +308,13 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     const providerMetadata = modelConfig.sharedProviders?.find(
       (item) => item.credentialId === selection.providerId,
     );
-    return buildTuiSystemPrompt(
+    const assembled = buildTuiSystemContext(
       languageStore.getPromptSettings(),
       {
         ...(context.systemContextInput ?? {}),
+        ...(context.systemContextInput?.role === 'project_agent' ? { agentMessages: agentMessagesForContext(((context.systemContextInput?.turnContext as any)?.events || []).filter((event: any) => event.kind === 'agent_message').map((event: any) => ({ kind: 'agent_message', agentMessage: event.payload?.agentMessage })), context.conversationId, context.systemContextInput?.workspaceId) } : {}),
+        workingContext: readWorkingContext({ workspaceId: context.systemContextInput?.workspaceId,
+          workId: context.systemContextInput?.workId, conversationId: context.conversationId }),
         workspacePath: workspaceRoot,
         provider: providerMetadata?.channelId ?? selection.providerId,
         model: selection.modelId,
@@ -322,6 +335,8 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         ],
       },
     );
+    recordAgentContextAdmission(context.systemContextInput?.workspaceId, context.conversationId, assembled);
+    return assembled.rendered;
   };
   const model = provider
     ? createProviderChatModel({

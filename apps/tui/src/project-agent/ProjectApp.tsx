@@ -16,7 +16,7 @@ import {BotConversationView} from './BotConversationView.tsx';
 import {CardLine} from './CardLine.tsx';
 import {cardAction,createCardNumbers,parseProjectCommand,terminalText} from './commands.ts';
 import {runProjectCardAction} from './card-actions.ts';
-import {projectCopy,projectStatus} from './project-copy.ts';
+import {projectCopy,projectStatus,projectSessionStatus} from './project-copy.ts';
 import {isRecoveryCard} from './card-presentation.ts';
 import {isEnterKeyName} from '../runtime-controls.ts';
 
@@ -151,11 +151,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const recordReader=useMemo(()=>createProjectReadState(),[snapshot.workspaceId]);
   const records=view==='objectives'?recordReader.read<any>('objectives',()=>host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any)
     :view==='memory'?recordReader.read<any>('memory',()=>host.memory.list({workspaceId:snapshot.workspaceId})):null;
-  const rows:string[]=view==='tasks'?snapshot.sessions.map((row,index)=>`${index+1}. ${terminalText(row.title)} · ${projectStatus(locale,row.status)} · /task ${index+1}`)
+  const rows:string[]=view==='tasks'?snapshot.sessions.map((row,index)=>`${index+1}. ${terminalText(row.title)} · ${projectSessionStatus(locale,row)} · /task ${index+1}`)
     :view==='diagnostics'?snapshot.messages.flatMap(message=>(message.cards??[]).filter(isRecoveryCard).map((card:any)=>`${terminalText(card.cardId)}\n${terminalText(card.content)}`))
     :view==='memory'?(records?.rows??[]).map((row:any)=>`${projectStatus(locale,row.kind)} · ${projectStatus(locale,row.trust)} · ${projectStatus(locale,row.status)}\n${terminalText(row.text)}`)
     :view==='objectives'?(records?.rows??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.outcome??row.description??row.brief??'')}`)
-    :view==='task'?[terminalText(detail?.title),projectStatus(locale,detail?.status??''),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).map(terminalText)]:[];
+    :view==='task'?[terminalText(detail?.title),projectSessionStatus(locale,detail || {}),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).map(terminalText)]:[];
   const currentCard=cards[Math.min(cardIndex,cards.length-1)];
   return <box flexDirection="column" height={terminal.height} width={terminal.width} backgroundColor={COLOR.background} padding={1}>
     <box flexDirection="row" justifyContent="space-between" marginBottom={1}>

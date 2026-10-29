@@ -1,3 +1,4 @@
+import { agentDelivery, recordCoordinatedExecution } from './agent-delivery.mjs';
 import { agentMessagesForContext } from './agent-communication.mjs';
 import path from 'node:path';
 import { createDelegatedPlanCatalog } from './delegated-plan-catalog.mjs';
@@ -453,9 +454,10 @@ export function createProjectGoalRunnerHost({
           },
         };
         const delegated = resolveDelegatedTurn(plan, 'worker');
+        const agentMessages = delegated ? agentMessagesForContext(conversation.messages, plan.conversationId, plan.delegationOrigin?.workspaceId) : [];
         const outcome = await agentTurnExecutor.runTurn({
           turnProfile: delegated ? { ...delegated.turnProfile, context: {
-            ...delegated.turnProfile.context, agentMessages: agentMessagesForContext(conversation.messages, plan.conversationId),
+            ...delegated.turnProfile.context, agentMessages,
           } } : { role: 'goal_runner', planId: plan.planId },
           sink: createSink(),
           plan,
@@ -473,7 +475,13 @@ export function createProjectGoalRunnerHost({
           runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
           agentProgress,
         });
-        const waiting = goalPlanStore.getPlan(plan.planId)?.delegationOrigin?.agentWaitMessageId;
+        if (delegated && outcome?.terminalStatus && !['error', 'aborted'].includes(outcome.terminalStatus) && agentDelivery.available(plan.delegationOrigin?.workspaceId)) {
+          recordCoordinatedExecution(plan, streamId);
+          agentDelivery.executed(plan.delegationOrigin.workspaceId, plan.conversationId, agentMessages.map(message => message.messageId), streamId);
+        }
+        const waiting = goalPlanStore.getPlan(plan.planId)?.delegationOrigin?.agentWaitMessageId
+          || delegated && agentDelivery.available(plan.delegationOrigin.workspaceId)
+            && agentDelivery.openRequest(plan.delegationOrigin.workspaceId, plan.delegationOrigin.sessionId)?.status === 'open';
         if (waiting && !outcome?.requestedUserInput && outcome?.terminalStatus !== 'error' && outcome?.terminalStatus !== 'aborted') {
           return { awaitingParentAgent: true, terminalStatus: outcome?.terminalStatus, toolCallCount: outcome?.toolCallCount ?? 0 };
         }

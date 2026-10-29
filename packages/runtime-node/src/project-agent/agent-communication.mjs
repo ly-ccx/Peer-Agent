@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { goalPlanWaitsOnUser } from '../goal-plan-store.mjs';
+import { agentDelivery } from './agent-delivery.mjs';
+import { createSupervisedCommunication } from './agent-supervision-communication.mjs';
+import { parseAgentMessageExtension } from './agent-message-input.mjs';
 
 const STOPPED = new Set(['completed', 'failed', 'cancelled']);
 const CLOSED_PHASES = new Set(['paused', 'superseded', 'completed', 'failed', 'cancelled']);
@@ -7,17 +10,27 @@ const PURPOSES = new Set(['update', 'question', 'answer']);
 const fail = error => ({ ok: false, error });
 
 /** Bounded factual context. Internal records must never enter ordinary chat history. */
-export function agentMessagesForContext(messages, conversationId) {
+export function agentMessagesForContext(messages, conversationId, workspaceId) {
   let remaining = 12_000;
-  return (Array.isArray(messages) ? messages : []).filter(row => row?.kind === 'agent_message'
-    && row.agentMessage?.recipientConversationId === conversationId).slice(-8).flatMap(row => {
-    const message = row.agentMessage;
+  const legacy = (Array.isArray(messages) ? messages : []).filter(row => !row?.supervisionRef);
+  const canonical = workspaceId && agentDelivery.available(workspaceId)
+    ? [...agentDelivery.read(workspaceId, conversationId, { limit: 50 }),
+      ...agentDelivery.read(workspaceId, conversationId, { limit: 8, pendingOnly: true, oldestFirst: true })]
+      .map(message => ({ kind: 'agent_message', agentMessage: message })) : [];
+  const merged = [...new Map([...legacy, ...canonical].filter(row => row?.kind === 'agent_message'
+    && row.agentMessage?.recipientConversationId === conversationId).map(row => [row.agentMessage.messageId, row.agentMessage])).values()]
+    .map(message => ({ ...message, ...(message.operationId && agentDelivery.available(workspaceId)
+      ? { deliveryReceipt: agentDelivery.receipt(workspaceId, message.operationId) } : {}) }));
+  const queued = merged.filter(message => message.deliveryIntent === 'ensure_turn' && message.deliveryReceipt?.delivery === 'queued');
+  const selected = queued.length ? queued.sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).slice(0, 8) : merged.slice(-8);
+  const projected = (queued.length ? selected : selected.reverse()).flatMap(message => {
     if (!message || !PURPOSES.has(message.purpose) || typeof message.text !== 'string'
       || typeof message.messageId !== 'string' || !['parent_to_child', 'child_to_parent'].includes(message.direction)) return [];
     const text = message.text.slice(0, Math.min(4000, remaining));
     remaining -= text.length;
     return text ? [{ ...message, text }] : [];
   });
+  return queued.length ? projected : projected.reverse();
 }
 
 /**
@@ -29,6 +42,7 @@ export function createAgentCommunication({ conversationStore, goalPlanStore, goa
   canManageWorkspace = () => false, emitEvent, now = () => new Date().toISOString() }) {
   const resumes = new Map();
   const pendingWakes = new Set();
+  const supervised = createSupervisedCommunication({ publish, patchOrigin, resume, conversationStore, now, canManageWorkspace });
   function history(id) {
     const value = conversationStore.getPersistedConversationHistory(id);
     return value && Array.isArray(value.messages) ? value : null;
@@ -69,17 +83,29 @@ export function createAgentCommunication({ conversationStore, goalPlanStore, goa
       if (!origin?.agentResumePending || !canManageWorkspace(origin.workspaceId) || origin.phase !== 'running'
         || STOPPED.has(plan.status)
         || typeof goalRunner?.resume !== 'function') return;
-      const answer = history(plan.conversationId)?.messages.find(row => row.id === origin.agentResumePending)?.agentMessage;
-      if (!answer || answer.direction !== 'parent_to_child' || answer.purpose !== 'answer'
+      const answer = supervised.readMessage(plan, origin.agentResumePending)
+        || history(plan.conversationId)?.messages.find(row => row.id === origin.agentResumePending)?.agentMessage;
+      const blocked = answer?.operationId ? supervised.validateResume(plan, answer) : null;
+      if (blocked) {
+        if (!['agent_command_settled', 'agent_outcome_unknown'].includes(blocked)) agentDelivery.update(answer, { admission: 'rejected', effect: 'rejected', error: blocked });
+        return;
+      }
+      if (!answer || answer.direction !== 'parent_to_child' || (!answer.operationId && answer.purpose !== 'answer')
         || answer.senderConversationId !== origin.parentConversationId
         || origin.agentWaitMessageId && answer.replyTo !== origin.agentWaitMessageId) return;
       if (plan.runner?.status === 'waiting_user' || goalPlanWaitsOnUser(plan)) {
+        if (answer.operationId) agentDelivery.update(answer, { admission: 'rejected', effect: 'rejected', error: 'human_wait' });
         patchOrigin(plan, { agentWaitMessageId: null, agentResumePending: null });
         return;
       }
       patchOrigin(plan, { agentWaitMessageId: null });
       try {
+        // Once dispatched, a crash cannot make the effect safely retryable.
+        if (answer.operationId) agentDelivery.update(answer, { effect: 'unknown', error: 'resume_dispatching' });
         const result = await goalRunner.resume(planId, { awaitIdle: false, intent: 'execute', phase: 'act', parentAgentAnswer: true });
+        if (answer.operationId) agentDelivery.update(answer, result?.resumeAdmission === 'admitted'
+          ? { admission: 'admitted', effect: 'pending', error: null }
+          : { admission: 'rejected', effect: result?.resumeAdmission === 'human_wait' ? 'rejected' : 'unknown', error: result?.resumeAdmission || 'resume_not_confirmed' });
         const fresh = goalPlanStore.getPlan(planId);
         // A human wait or cancellation that arrived at the safe boundary keeps ownership.
         if (!fresh || !canManageWorkspace(origin.workspaceId) || fresh.delegationOrigin?.phase !== 'running') return;
@@ -95,6 +121,9 @@ export function createAgentCommunication({ conversationStore, goalPlanStore, goa
           patchOrigin(fresh, { agentWaitMessageId: answer.replyTo });
         }
       } catch {
+        if (answer.operationId) {
+          try { agentDelivery.update(answer, { admission: 'pending', effect: 'unknown', error: 'resume_outcome_unknown' }); } catch { /* Recover the canonical operation before retrying. */ }
+        }
         const fresh = goalPlanStore.getPlan(planId);
         if (fresh && fresh.delegationOrigin?.phase === 'running' && !STOPPED.has(fresh.status)
           && fresh.delegationOrigin.agentResumePending === answer.messageId
@@ -111,6 +140,9 @@ export function createAgentCommunication({ conversationStore, goalPlanStore, goa
     pending.catch(() => {});
   }
   function send(input, context) {
+    const extension = parseAgentMessageExtension(input);
+    if (!extension.ok) return fail('invalid_input');
+    input = { ...input, ...extension.value };
     const role = context?.role;
     if (!['project_agent', 'work_session'].includes(role)
       || role === 'work_session' && context.agentKind !== 'worker') return fail('agent_identity_required');
@@ -128,6 +160,11 @@ export function createAgentCommunication({ conversationStore, goalPlanStore, goa
     const recipientConversationId = role === 'work_session' ? origin.parentConversationId : plan.conversationId;
     const receiver = history(recipientConversationId);
     if (!receiver || !history(context.conversationId)) return fail('agent_conversation_unavailable');
+    if (supervised.binding(plan)) {
+      try { return supervised.send(input, context, plan); }
+      catch (error) { return { ok: false, error: error.code || error.message, ...(error.operationId ? { operationId: error.operationId } : {}) }; }
+    }
+    if (input.delivery || input.decisionRequest || input.decisionAnswer) return fail('agent_coordination_binding_required');
     const messageId = `agent-msg:${createHash('sha256').update(JSON.stringify([
       context.deliveryKey, context.conversationId, recipientConversationId, sessionId, input.purpose, input.text, input.replyTo ?? null,
     ])).digest('hex')}`;
@@ -157,16 +194,18 @@ export function createAgentCommunication({ conversationStore, goalPlanStore, goa
     return { ok: true, messageId, sessionId, delivery: 'queued',
       ...(direction === 'child_to_parent' && input.purpose === 'question' ? { waitingForParent: true } : {}) };
   }
-  function recover() {
+  function recover({ includeLegacy = true, recoveringStarted = true, workspaceId } = {}) {
     const parents = new Set();
     let repaired = 0;
     for (const plan of listSessions()) {
       const origin = plan.delegationOrigin;
+      if (workspaceId && origin?.workspaceId !== workspaceId) continue;
+      if (origin && canManageWorkspace(origin.workspaceId)) supervised.recover(plan, { recoveringStarted });
       if (origin?.agentResumePending && canManageWorkspace(origin.workspaceId)) resume(plan.planId);
-      if (!origin || !canManageWorkspace(origin.workspaceId) || parents.has(origin.parentConversationId)) continue;
+      if (!includeLegacy || !origin || !canManageWorkspace(origin.workspaceId) || parents.has(origin.parentConversationId)) continue;
       parents.add(origin.parentConversationId);
       for (const row of history(origin.parentConversationId)?.messages || []) {
-        const message = row.kind === 'agent_message' ? row.agentMessage : null;
+        const message = row.kind === 'agent_message' && !row.supervisionRef ? row.agentMessage : null;
         const owner = message && findSession(message.sessionId);
         if (!owner || message.direction !== 'child_to_parent' || owner.conversationId !== message.senderConversationId
           || owner.delegationOrigin.workspaceId !== message.workspaceId

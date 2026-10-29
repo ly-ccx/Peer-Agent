@@ -1,13 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import {
-  createBotAccessPolicyAuthority, resolveRoleRoute, readSnapshots, createExecutionScheduler, createWorkBudgetGuard,
-  runBoundedVerification, isVerificationTurn, verificationExecutionBudget,
-  createFailedClientToolResult,
-  createGoalPlanStore,
-  evaluateWorkSessionWrite,
+  createBotAccessPolicyAuthority,
+  readSnapshots,
+  createExecutionScheduler,
+  createWorkBudgetGuard,
+  runBoundedVerification,
+  isVerificationTurn,
+  verificationExecutionBudget,
+  evaluateWorkSessionWrite
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  resolveRoleRoute,
   loadSharedModelMetadataList,
-  type ModelMessage,
-} from '@peer-agent/runtime-node';
+  type ModelMessage
+} from "@peer-agent/runtime-node/models";
+import {
+  createFailedClientToolResult
+} from "@peer-agent/runtime-node/providers";
+import {
+  createGoalPlanStore
+} from "@peer-agent/runtime-node/storage";
 import { createRuntimePipeline, type RuntimeSdkProviderExecution, type RuntimePipelineToolExecution } from '@peer-agent/runtime-sdk';
 import { collectToolEvidenceRefs, projectConversationHistory } from '@peer-agent/runtime-core';
 import type { ChatModelInput, ChatModelState, ChatModelToolCall } from '../chat-controller.ts';
@@ -185,7 +197,7 @@ export function createTuiTurnExecutor(options: {
           maxTurns: 2, maxToolCalls: input.hardRemainingToolCalls, sliceToolCalls: Math.min(4, input.remainingToolCalls ?? input.limits?.maxToolCalls ?? 4),
           yieldAtTurnLimit: true, shouldYield: input.shouldYield, maxToolBatchCalls: 32,
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
-          systemContextInput: { role: profile.role, workspaceId, sessionId: profile.sessionId, planId: profile.planId,
+          systemContextInput: { role: profile.role, workspaceId, workId: profile.workId, sessionId: profile.sessionId, planId: profile.planId,
             turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
             ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase, goalRevision: input.plan?.delegationOrigin?.coordinationBinding?.goalRevision, takeover: input.plan?.delegationOrigin?.takeover?.text }, workSessionOrigin: { ...profile.context?.workSessionOrigin,

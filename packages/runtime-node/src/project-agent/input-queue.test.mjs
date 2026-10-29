@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +44,20 @@ function harness(root, { holdsLease = () => true } = {}) {
   });
   return { queue, messages, committed, writes: () => writes };
 }
+
+test('an empty queue stays read-only and the next consume delivers newly submitted input exactly once', () => {
+  const root = tempRoot();
+  try {
+    const { queue, messages, committed } = harness(root);
+    assert.deepEqual(queue.consume('ws-1'), { consumed: [], skipped: null });
+    assert.deepEqual(readdirSync(root), [], 'idle consumption must not create lock-owner files or directories');
+    assert.deepEqual(queue.consume('missing'), { consumed: [], skipped: 'no-conversation' });
+    const id = randomUUID(); queue.submitInput(input(id, 'arrived after the empty read'));
+    assert.equal(queue.consume('ws-1').consumed[0].inputId, id);
+    assert.deepEqual(queue.consume('ws-1'), { consumed: [], skipped: null });
+    assert.equal(messages.length, 1); assert.equal(committed.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('同一 inputId 再次提交返回第一次的结果', () => {
   const root = tempRoot();

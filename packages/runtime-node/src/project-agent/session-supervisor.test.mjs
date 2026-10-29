@@ -2259,7 +2259,8 @@ async function until(predicate) {
 
 test('actual Supervisor replaces only the corrected task and recovers its durable operation once', async () => {
   const env=await harness();
-  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner',formatVersion:2,fenceLegacyWrites:true});
+  await store.prepare();
   store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
   const release=registerWorkBudget('ws-1',store);
   try {
@@ -2288,7 +2289,8 @@ test('actual Supervisor replaces only the corrected task and recovers its durabl
 
 test('actual executor takeover retains GoalPlan, changes epoch, and does not consume a human question',async()=>{
   const env=await harness();
-  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner',formatVersion:2,fenceLegacyWrites:true});
+  await store.prepare();
   store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
   const release=registerWorkBudget('ws-1',store);
   try{
@@ -2314,7 +2316,8 @@ test('a correction handoff resumes the remaining work instead of replaying the o
   const starts=[];
   let env;
   env=await harness({goalRunner:{async start(planId){starts.push({planId,intent:env.goalPlanStore.getPlan(planId)?.runner?.intent});},async resume(){}}});
-  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner',formatVersion:2,fenceLegacyWrites:true});
+  await store.prepare();
   store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
   const release=registerWorkBudget('ws-1',store);
   try{
@@ -2339,7 +2342,8 @@ test('a correction handoff resumes the remaining work instead of replaying the o
 
 test('cancellation publishes an unknown outcome and keeps its replacement fenced after recovery',async()=>{
   const env=await harness();
-  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner',formatVersion:2,fenceLegacyWrites:true});
+  await store.prepare();
   store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
   const release=registerWorkBudget('ws-1',store);
   try {
@@ -2365,7 +2369,8 @@ test('cancellation publishes an unknown outcome and keeps its replacement fenced
 test('rollback does not promote an already queued replacement and never revives its cancelled predecessor',async()=>{
   let enabled=true;
   const env=await harness({autonomousCoordinationEnabled:()=>enabled,goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
-  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'test-owner',formatVersion:2,fenceLegacyWrites:true});
+  await store.prepare();
   store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
   const release=registerWorkBudget('ws-1',store);
   try {

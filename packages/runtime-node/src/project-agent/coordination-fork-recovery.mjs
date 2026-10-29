@@ -1,3 +1,4 @@
+import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { openSync, closeSync, fstatSync, readSync, readFileSync, writeFileSync, fsyncSync, mkdirSync, readdirSync, lstatSync, realpathSync, existsSync, renameSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
@@ -11,7 +12,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const stable = value => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v)
   ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
 const blank = () => ({ revision: 0, events: {}, works: {}, deliveries: {} });
-const buckets = ['works', 'events', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings'];
+const buckets = ['works', 'events', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', ...SUPERVISION_BUCKETS];
 const stamp = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
 function containedTree(root, relative) {
   let current = root;
@@ -155,7 +156,7 @@ export function readRecoveredCoordination(directory, generation, { includeProof 
   const proof = () => Object.fromEntries(files.map(file => [file, hashFile(containedTree(directory, file))]));
   const before = proof(), manifest = JSON.parse(readFileSync(manifestFile)), head = JSON.parse(readFileSync(headFile));
   const fence = containedTree(directory, 'coordination.jsonl');
-  if (manifest.schemaVersion !== 2 || ![3, 4].includes(manifest.minimumReaderVersion)
+  if (manifest.schemaVersion !== 2 || ![3, 4, 5].includes(manifest.minimumReaderVersion)
     || manifest.minimumWriterVersion !== manifest.minimumReaderVersion || manifest.frozenLegacyFile !== 'baseline.jsonl'
     || manifest.generation !== generation || head.generation !== generation || manifest.legacyVersion !== head.legacyVersion
     || !lstatSync(fence).isDirectory()) throw failure('coordination_repair_plan_changed');
@@ -217,8 +218,9 @@ export function recoverCoordinationForkBackup({ directory, sourceFingerprint, re
       stateHash: digest(stable(plan.state)), at: new Date().toISOString() };
     durable(path.join(candidate, 'baseline.jsonl'), JSON.stringify(entry) + '\n');
     const s = lstatSync(path.join(candidate, 'baseline.jsonl'), { bigint: true }), legacyVersion = stamp(s);
-    durable(path.join(candidate, 'head.json'), JSON.stringify({ generation, legacyVersion, revision: 1, hash: '' }));
-    durable(path.join(candidate, 'manifest.json'), JSON.stringify({ schemaVersion: 2, minimumReaderVersion: 3, minimumWriterVersion: 3,
+    const minimumVersion = SUPERVISION_BUCKETS.some(bucket => Object.keys(plan.state[bucket] || {}).length) ? 5 : 3;
+    durable(path.join(candidate, 'head.json'), JSON.stringify({ generation, legacyVersion, revision: 1, hash: '', minimumWriterVersion: minimumVersion }));
+    durable(path.join(candidate, 'manifest.json'), JSON.stringify({ schemaVersion: 2, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion,
       generation, legacyFile: 'coordination.jsonl', frozenLegacyFile: 'baseline.jsonl', legacyVersion }));
     durable(path.join(root, 'inspection.json'), JSON.stringify(plan));
     offline(directory);

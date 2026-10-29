@@ -1,3 +1,5 @@
+import './settings-controls.css';
+import './mcp-settings.css';
 import { createI18n } from '@peer-agent/i18n';
 import { useProviderFormGuard } from '../hooks/useProviderFormGuard';
 import { useResourceRead } from '../../ui/resources/useResourceState';

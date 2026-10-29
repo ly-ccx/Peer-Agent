@@ -39,6 +39,11 @@ export function createProjectInbox({
   const retainMs = Number.isFinite(archiveAfterMs) && archiveAfterMs >= 0
     ? archiveAfterMs
     : DEFAULT_ARCHIVE_AFTER_MS;
+  const emptyBatches = new Map();
+  const fileVersion = file => {
+    try { const s = statSync(file, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; }
+    catch { return null; }
+  };
 
   function root() {
     return rootDir || pathOf('projectRuntime');
@@ -56,7 +61,7 @@ export function createProjectInbox({
     return path.join(dirFor(workspaceId), 'inbox-cursor.json');
   }
 
-  function readEvents(workspaceId) {
+  function readEvents(workspaceId, onRead = () => {}) {
     const file = inboxFile(workspaceId);
     if (!existsSync(file)) return [];
     let text = '';
@@ -65,6 +70,7 @@ export function createProjectInbox({
     } catch {
       return [];
     }
+    onRead();
     const events = [];
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
@@ -207,8 +213,18 @@ export function createProjectInbox({
 
   function takeBatch(workspaceId) {
     const cursor = readCursor(workspaceId).seq;
-    const pending = readEvents(workspaceId).filter((event) => event.seq > cursor);
-    if (pending.length === 0) return { events: [], throughSeq: cursor };
+    const file = inboxFile(workspaceId), version = fileVersion(file), previous = emptyBatches.get(file);
+    if (version !== null && previous?.version === version && previous.cursor === cursor) return { events: [], throughSeq: cursor };
+    emptyBatches.delete(file);
+    let read = false;
+    const pending = readEvents(workspaceId, () => { read = true; }).filter((event) => event.seq > cursor);
+    if (pending.length === 0) {
+      if (read && version !== null && fileVersion(file) === version) {
+        if (emptyBatches.size >= 256) emptyBatches.delete(emptyBatches.keys().next().value);
+        emptyBatches.set(file, { version, cursor });
+      }
+      return { events: [], throughSeq: cursor };
+    }
     const start = Date.parse(pending[0].at || '');
     const events = [];
     for (const event of pending) {
