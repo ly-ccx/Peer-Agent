@@ -48,7 +48,8 @@ import {
   isEffectiveMemory,
   delegationFactsForWorkspace,
   readProjectInstructionLines,
-  shouldPauseForHostHandoff
+  shouldPauseForHostHandoff,
+  supervisorEventId
 } from "@peer-agent/runtime-node/project-agent";
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import { createProjectToolProvider } from './project-tool-provider.ts';
@@ -145,7 +146,7 @@ export function createTuiProjectHost(options: {
     readSessionFacts: (plan: any) => ({autoHandoffOnPolicyAccept: profiles.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true,
       hostAuthority: verification.facts(plan.delegationOrigin.sessionId)}),
     readPlanApproval: (id: string) => profiles.read(id)?.planApproval,
-    emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: event.eventId || `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.reason || ''}`}]); changed();},
+    emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: event.eventId || supervisorEventId(event)}]); changed();},
   } as never);
   const resolveConversationId = (id: string) => profiles.read(id)?.agentConversationId ?? '';
   objectives = createObjectiveService({store: objectivesStore, actions: objectiveActions, canManageWorkspace: holds, resolveConversationId,

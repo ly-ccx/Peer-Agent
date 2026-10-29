@@ -111,6 +111,11 @@ export function BotConversation({
     }
   }, [taskRequest]);
 
+  const recoveryNeeded = conversation.status === 'ready' && Boolean(conversation.runtimeRecovery || conversation.recoveryAttention);
+  const [recoveryShown, setRecoveryShown] = useState(recoveryNeeded);
+  // Facts open the entry; it stays mounted while its exit closes the footprint.
+  if (recoveryNeeded && !recoveryShown) setRecoveryShown(true);
+
   const background = useMemo(() => backgroundWork(workIndex), [workIndex]);
   const detailsRow = useMemo(() => replyDetailsRow(replyDetailsId, conversation.rows, conversation.messages),
     [replyDetailsId, conversation.rows, conversation.messages]);
@@ -141,8 +146,8 @@ export function BotConversation({
         disclosure={detailsDisclosure}
         relatedTurns={relatedTurns} onOpenRelatedReply={id => onInspect?.({ replyId: id, evidence: null, rounds: null })}
         onOpenEvidence={openEvidence} onOpenWork={onLocateSession} />, replyDetailsTarget) : null}
-      {conversation.status === 'ready' && (conversation.runtimeRecovery || conversation.recoveryAvailable) ?
-        <BotRecoveryControl key={workspaceId} workspaceId={workspaceId} status={conversation.runtimeRecovery} i18n={i18n} onRetry={conversation.reload} /> : null}
+      {recoveryShown ? <BotRecoveryControl key={workspaceId} workspaceId={workspaceId} status={conversation.runtimeRecovery} settled={!recoveryNeeded}
+        i18n={i18n} onRetry={conversation.reload} onClosed={() => setRecoveryShown(false)} /> : null}
       {conversation.status === 'ready' && (conversation.cardsError && !conversation.runtimeRecovery || conversation.refreshError || conversation.catchUpRequired) ? <div className="bot-thread-feedback" role="status">
         <div>
           {conversation.catchUpRequired ? <p>{i18n.t('resources.catchUp')}</p> : null}

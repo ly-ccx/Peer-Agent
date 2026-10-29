@@ -28,6 +28,15 @@ test('admission partitions work without changing completed results, receipts, ch
   assert.ok(next.lastRecovery.quarantinedSessionIds.includes('orphan-child'));
 });
 
+test('admission quarantines historical event ids the inbox accepted, even past 200 characters', () => {
+  const longEvent = `supervisor:cancelled:session:${'已合入主工作区'.repeat(30)}`;
+  const before = state({ one: held('one') });
+  const next = admitHistoryResumption(before, { ...admission(before), quarantinedEventIds: [longEvent] });
+  assert.deepEqual(next.lastRecovery.quarantinedEventIds, [longEvent]);
+  assert.throws(() => admitHistoryResumption(before, { ...admission(before), quarantinedEventIds: [''] }), /coordination_resume_plan_changed/);
+  assert.throws(() => admitHistoryResumption(before, { ...admission(before), quarantinedInputIds: ['x'.repeat(201)] }), /coordination_resume_plan_changed/);
+});
+
 test('unpaired tools, missing native tails, changed job identity and conflicting input owners cannot resume', () => {
   const before = state({ a: held('a'), b: held('b', { anchorInputIds: ['a'] }),
     missing: held('missing', { budget: { toolCalls: 1 } }), wrong: held('wrong'), uncertain: held('uncertain', { budget: { uncertainDispatches: [{}] } }) });

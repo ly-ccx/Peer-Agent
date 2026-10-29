@@ -67,7 +67,7 @@ export const DATA_STORE_ENTRIES = {
   // 项目运行时事实（待批准、后续宿主租约）。设备本地，不随设置导出。
   // Includes coordination.jsonl, coordination-snapshot.json and protected checkpoints/<id>.json;
   // coordination-fence.json and .coordination-fence/ hold lease-owned writer-fence publication intents and unchanged old files.
-  // recovery-action.json retains the local maintenance phase; v4 journal admission retains per-work/session holds.
+  // recovery-action.json retains the local maintenance phase and pending hold count; v4 journal admission retains per-work/session holds.
   // coordination-recovery.json and .coordination-recovery/ retain device-local repair intents, original journals and reviewed fork receipts.
   // coordination-v2/baseline.jsonl plus the coordination.jsonl directory barrier fence repaired history from old binary writers.
   // coordination-v2/ retains immutable increment segments and the version fence; .read-models/ is rebuildable device-local indexing.

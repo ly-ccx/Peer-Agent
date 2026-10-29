@@ -71,7 +71,7 @@ export function useBotConversation(workspaceId: string) {
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
   const [cardsError, setCardsError] = useState(false);
-  const [recoveryAvailable, setRecoveryAvailable] = useState(false);
+  const [recoveryAttention, setRecoveryAttention] = useState(false);
   const [runtimeRecovery, setRuntimeRecovery] = useState<import('@peer-agent/protocol').BotRecoveryStatus | null>(null);
   const [refreshError, setRefreshError] = useState(false);
   const [catchUpRequired, setCatchUpRequired] = useState(false);
@@ -104,7 +104,7 @@ export function useBotConversation(workspaceId: string) {
     setHasOlder(false);
     setOlderError(false);
     setStatus('loading');
-    setRuntimeRecovery(null); setRecoveryAvailable(false);
+    setRuntimeRecovery(null); setRecoveryAttention(false);
     setCards([]); setCardsError(false); setRefreshError(false); setCatchUpRequired(false);
     setActivity(null); setStopping(false); setStopError(false);
     replyIdentitiesRef.current = new Map();
@@ -112,7 +112,7 @@ export function useBotConversation(workspaceId: string) {
       read: async params => {
         const revision = activityEventRef.current;
         const result = await clientApi.projectAgentReadConversation({ workspaceId, ...params, presentationOnly: true, view: 'interactions' });
-        if (generationRef.current === ticket) { setRuntimeRecovery(result.recovery ?? null); setRecoveryAvailable(result.recoveryAvailable === true); }
+        if (generationRef.current === ticket) { setRuntimeRecovery(result.recovery ?? null); setRecoveryAttention(result.recoveryAttention === true); }
         // Carry the read fence to publication; never clear live state before its messages.
         return { ...result, activityRevision: revision };
       },
@@ -133,7 +133,7 @@ export function useBotConversation(workspaceId: string) {
       try {
         const result = await clientApi.projectAgentReadConversation({ workspaceId, view: 'cards' });
         if (generationRef.current !== ticket) return;
-        setRecoveryAvailable(result.recoveryAvailable === true);
+        setRecoveryAttention(result.recoveryAttention === true);
         setRuntimeRecovery(result.recovery ?? (!result.ok && result.code?.startsWith('coordination_') ? projectBotRecoveryStatus(result.code) : null));
         if (!result.ok) { setCardsError(true); return; }
         setCards(result.cards ?? []); setCardsError(false);
@@ -255,7 +255,7 @@ export function useBotConversation(workspaceId: string) {
     status,
     recovery,
     reload: () => refreshRef.current?.(),
-    runtimeRecovery, recoveryAvailable, cardsError, refreshError, catchUpRequired,
+    runtimeRecovery, recoveryAttention, cardsError, refreshError, catchUpRequired,
     messages: shown,
     rows,
     viewRows: recoveryConversationRows(viewRows, runtimeRecovery),

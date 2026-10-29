@@ -819,6 +819,30 @@ test('waiting task cancellation persists across reload and preserves its history
   } finally { await env.cleanup(); }
 });
 
+test('cancelling a stopped interrupted task settles once and keeps the interruption as history', async () => {
+  const env = await harness({ goalRunner: { start: async () => {}, pause() {} } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ readOnly: true, title: 'interrupted task' }), contextOf(env));
+    const planId = planIdOf(env, opened.sessionId);
+    const interruption = { source: 'stream_error', origin: 'provider', reason: 'work_budget_limited',
+      interruptedAt: '2026-10-18T04:10:11.123Z', recoverable: false, attempt: 1 };
+    env.goalPlanStore.setRunnerState(planId, { enabled: true, status: 'paused', intent: 'block', phase: 'blocked', interruption });
+    env.goalPlanStore.setPlanStatus(planId, 'interrupted');
+    assert.equal(env.goalPlanStore.getPlan(planId).status, 'interrupted');
+    const result = await env.supervisor.cancel({ sessionId: opened.sessionId, reason: 'recovery_retained', preserveArtifacts: true, promote: false });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 'cancelled');
+    const reloaded = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() }).getPlan(planId);
+    assert.equal(reloaded.status, 'cancelled');
+    assert.deepEqual(reloaded.runner.interruption, interruption);
+    assert.equal(reloaded.delegationOrigin.cancellation.preserveArtifacts, true);
+    await env.supervisor.recoverCancellations('ws-1');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(env.goalPlanStore.getPlan(planId).version, reloaded.version);
+    assert.equal(env.events.filter(event => event.kind === 'cancelled' && event.sessionId === opened.sessionId).length, 1);
+  } finally { await env.cleanup(); }
+});
+
 function hostPassPatch() {
   return {
     tasks: [{ taskId: 'leaf', status: 'completed', evidenceRefs: ['ev-1'] }],
