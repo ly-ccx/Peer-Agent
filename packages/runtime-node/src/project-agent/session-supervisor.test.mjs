@@ -40,6 +40,25 @@ test('a task without a real review has progress and a report but no invented ver
   } finally { await env.cleanup(); }
 });
 
+test('a legacy lifecycle task without workId remains readable with an active coordination-v2 journal', async () => {
+  const env = await harness({ goalRunner: { async start() {}, pause() {}, async waitForIdle() {} } });
+  const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1',
+    holdsLease: () => true, leaseEpoch: () => 'lifecycle-owner', formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare();
+  const release = registerWorkBudget('ws-1', store);
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ kind: 'research', readOnly: true }), contextOf(env));
+    const plan = env.goalPlanStore.getPlan(planIdOf(env, opened.sessionId));
+    assert.equal(plan.delegationOrigin.workId, undefined);
+    env.conversationStore.appendMessage(plan.conversationId, { id: 'lifecycle-report', role: 'assistant', content: 'Read-only report' });
+    const detail = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' });
+    assert.equal(detail.report.summary, 'Read-only report');
+    assert.ok(detail.report.agentSupervision.recovery);
+    assert.equal(env.goalPlanStore.getPlan(plan.planId).delegationOrigin.workId, undefined);
+    assert.deepEqual(Object.keys(store.readLifecycleFacts().mandates || {}), []);
+  } finally { release(); await env.cleanup(); }
+});
+
 test('verification reads canonical report content without reentering acceptance projection', async () => {
   let authorityReads = 0;
   const env = await harness({readPlanApproval:()=> 'always',readSessionFacts:()=>{

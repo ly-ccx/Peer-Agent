@@ -239,7 +239,16 @@ export function createDelegationProvider({
       });
     }
 
-    const dispatched = await dispatch(item.name, input, { ...view, deliveryKey: key });
+    let dispatched;
+    try {
+      dispatched = await dispatch(item.name, input, { ...view, deliveryKey: key });
+    } catch (error) {
+      // A returned query exception is a failed observation, not an unknown
+      // mutation. Control/write exceptions retain the normal recovery path.
+      if (!readOnly) throw error;
+      dispatched = { ok: false, output: { ok: false, error: 'supervision_query_failed',
+        message: String(error?.message || error).slice(0, OUTPUT_LIMIT) } };
+    }
     if (!dispatched.ok) {
       return finish({
         call,

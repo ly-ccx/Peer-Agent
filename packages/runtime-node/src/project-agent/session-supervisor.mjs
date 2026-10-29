@@ -731,8 +731,9 @@ export function createSessionSupervisor({
       } : undefined;
       if (agentSupervision) {
         const facts = journal.readLifecycleFacts();
+        const workId = text(plan.delegationOrigin.workId);
         agentSupervision.recovery = supervisionRecovery({plan,session,
-          work:journal.readWork(plan.delegationOrigin.workId),mandate:facts.mandates?.[plan.delegationOrigin.workId],
+          work:workId ? journal.readWork(workId) : null,mandate:workId ? facts.mandates?.[workId] : undefined,
           transitions:Object.values(facts.transitions || {}),receipts:agentSupervision.receipts,requests:agentSupervision.requests,
           relatedWorks:Object.values(journal.readSnapshot().works).filter(row => row.parentConversationId === plan.delegationOrigin.parentConversationId
             && row.sessionIds?.includes(session.sessionId) && row.state === 'blocked_system').slice(-8)});
