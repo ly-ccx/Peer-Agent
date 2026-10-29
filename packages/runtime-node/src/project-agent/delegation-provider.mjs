@@ -310,7 +310,7 @@ export function createDelegationProvider({
     if (name === 'resume_session') return sessionOrMissing(await callPort(supervisor?.resume, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'reprioritize_session') return sessionOrMissing(await callPort(supervisor?.reprioritize, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
-    if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable'));
+    if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable', view));
     if (name === 'get_verification_detail') return readVerification(input);
     if (name === 'verify_session') return verifySession(input, view);

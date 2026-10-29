@@ -470,6 +470,7 @@ export interface LifecycleFacts {
   readonly verificationActive?: boolean;
   readonly blockedReason?: string;
   readonly cancellationPhase?: string;
+  readonly cancellationDisposition?: 'user_withdrawn';
   readonly takeoverPhase?: string;
   readonly coordinationPhase?: string;
 }
@@ -493,6 +494,7 @@ export type FollowUpReason =
   | 'settled'
   | 'superseded'
   | 'stop_confirmed'
+  | 'user_withdrawn'
   | 'stop_unconfirmed'
   | 'human_request'
   | 'awaiting_human_gate'
@@ -545,6 +547,7 @@ export function decideFollowUp(
   }
   if (live) return followUpOf('bot', 'live_execution');
   if (stopPending) return followUpOf('bot', 'stop_unconfirmed');
+  if (stopStatus && facts.cancellationDisposition === 'user_withdrawn') return followUpOf('none', 'user_withdrawn');
 
   // 2) 退出当前待办：只有上面三类事实都不成立时，承接 / 失败 / 签收 / 已确认停止才生效。
   //    退出只影响“当前列表归属”，不改写原验收、原核验与未完成事实。

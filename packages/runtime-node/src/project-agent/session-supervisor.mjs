@@ -18,7 +18,7 @@ import { sessionFactsFromPlan } from './session-facts.mjs';
 import { admitDelegationCriteria } from './criterion-authority.mjs';
 import { evaluateDelegationCapabilities, validCapabilityRequirements } from './capability-admission.mjs';
 import { isHostHandoffPause } from './session-host-handoff.mjs';
-import { hasCurrentUserUrgency } from './user-priority.mjs';
+import { hasCurrentUserUrgency, isCanonicalUserInput } from './user-priority.mjs';
 import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
@@ -168,7 +168,8 @@ export function createSessionSupervisor({
   }
 
   const cancellation = createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
-    abortStream, isolationPlanner, exclusive, project, emit, promote, now });
+    abortStream, isolationPlanner, exclusive, project, emit, promote,
+    readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [], now });
   const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
@@ -1193,13 +1194,14 @@ export function createSessionSupervisor({
         if (!plan || plan.delegationOrigin.workspaceId !== context.workspaceId
           || plan.delegationOrigin.parentConversationId !== context.parentConversationId
           || !context.currentInputAnchors?.includes(input.anchorMessageId)
-          || !history?.messages?.some(row => row.id === input.anchorMessageId && row.role === 'user')) return { error: 'current_user_required' };
+          || !history?.messages?.some(row => row.id === input.anchorMessageId && isCanonicalUserInput(row))) return { error: 'current_user_required' };
         return { session: project(plan) };
       });
       if (checked.error) return checked;
       const controlled = await controlProjectWork({ session: checked.session, action: input.action, anchorMessageId: input.anchorMessageId, context,
         sessions: () => delegatedPlans().filter(row => row.delegationOrigin.workspaceId === context.workspaceId).map(project),
-        pause: id => continuity.suspend(id, null, context), cancel: id => cancellation.cancel({ sessionId: id, reason: 'user cancelled work' }),
+        pause: id => continuity.suspend(id, null, context),
+        cancel: id => cancellation.cancel({ sessionId: id, reason: 'user cancelled work', anchorMessageId: input.anchorMessageId }, context),
         resume: (sessionId, anchorMessageId) => continuity.resume({ sessionId, anchorMessageId }, context),
       });
       if (controlled.ok && input.action === 'resume') await exclusive(() => promote());
@@ -1237,8 +1239,8 @@ export function createSessionSupervisor({
     },
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
-    cancel(input) {
-      return cancellation.cancel(input || {});
+    cancel(input, context) {
+      return cancellation.cancel(input || {}, context);
     },
     waitForCoordinationIdle: workspaceId => coordination.waitForIdle(workspaceId),
     requestCancel: input => cancellation.request(input || {}),

@@ -15,6 +15,8 @@ import { createScriptedTurnExecutor } from '../testing/scripted-turn-executor.mj
 import { createSessionSupervisor, evaluateWorkSessionWrite } from './session-supervisor.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget } from './work-budget.mjs';
+import { beginExecutionAttempt } from './session-facts.mjs';
+import { createDelegationProvider } from './delegation-provider.mjs';
 
 function model(id, extra = {}) {
   return {
@@ -2111,7 +2113,7 @@ test('native work cancellation releases returned results after settlement withou
  }finally{releaseIdle();release();await env.cleanup();}
 });
 
-test('returned work with an uncertain side effect remains current until the same user cancellation settles', async () => {
+test('current user withdraws stopped work while retaining the original unknown Bash outcome across restart', async () => {
  const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
  store.saveWork({workId:'uncertain',parentConversationId:env.parent.id,state:'waiting_children'});
@@ -2119,20 +2121,117 @@ test('returned work with an uncertain side effect remains current until the same
  try{
   const context=contextOf(env,{workId:'uncertain',currentInputAnchors:['anchor-1']});
   const opened=await env.supervisor.spawn(spawnInput(),context),planId=planIdOf(env,opened.sessionId);
-  env.goalPlanStore.revisePlan(planId,{status:'completed',runner:{status:'completed'}});
-  store.saveWork({workId:'uncertain',state:'delivered',budget:{uncertainDispatches:[{toolCallId:'uncertain-call',planId}]}});
+  env.goalPlanStore.revisePlan(planId,{status:'interrupted',runner:{status:'paused'}});
+  const unknown=[{toolCallId:'old-bash',capabilityId:'bash',attemptId:'old-attempt',role:'work_session',planId,sessionId:opened.sessionId}];
+  store.saveWork({workId:'uncertain',state:'cancelled',stopScope:'work',budget:{uncertainDispatches:unknown,attempts:{}}});
   const input={sessionId:opened.sessionId,action:'cancel',anchorMessageId:'anchor-1'};
-  assert.equal((await env.supervisor.controlWork(input,context)).error,'execution_outcome_unknown');
+  assert.equal((await env.supervisor.cancel({sessionId:opened.sessionId})).error,'execution_outcome_unknown');
   const pending=env.supervisor.get({sessionId:opened.sessionId});
   assert.equal(pending.status,'awaiting_outcome');assert.equal(pending.followUp.inCurrentList,true);
-  assert.deepEqual(pending.origin.cancellation.evidenceCalls,['uncertain-call']);
-  assert.ok(store.read().works.uncertain.pendingControl);
-  // Reconciliation supplies the missing outcome; retry does not execute the original work.
-  store.saveWork({workId:'uncertain',budget:{uncertainDispatches:[]}});
-  assert.equal((await env.supervisor.controlWork(input,context)).ok,true);
-  assert.equal(env.supervisor.get({sessionId:opened.sessionId}).followUp.inCurrentList,false);
+  assert.deepEqual(pending.origin.cancellation.evidenceCalls,['old-bash']);
+  const provider=createDelegationProvider({supervisor:env.supervisor});
+  const tool=await provider.executeCapability({call:{capabilityId:'local.delegation.control_work',toolCallId:'withdraw-control',arguments:input}},
+   {...context,role:'project_agent',mode:'project_agent',turnId:'withdraw-turn',conversationId:env.parent.id,
+    messages:env.conversationStore.getPersistedConversationHistory(env.parent.id).messages});
+  assert.equal(tool.grant.granted,true);assert.equal(JSON.parse(tool.result.outputPreview.legacyResult.output).ok,true);
+  const withdrawn=env.supervisor.get({sessionId:opened.sessionId});
+  assert.equal(withdrawn.status,'cancelled');assert.equal(withdrawn.followUp.reason,'user_withdrawn');
+  assert.equal(withdrawn.followUp.inCurrentList,false);
+  assert.equal(withdrawn.origin.cancellation.disposition,'user_withdrawn');
+  assert.equal(withdrawn.origin.cancellation.withdrawal.anchorMessageId,'anchor-1');
+  assert.equal(withdrawn.origin.cancellation.preserveArtifacts,true);
+  assert.deepEqual(withdrawn.origin.cancellation.evidenceCalls,['old-bash']);
+  assert.deepEqual(store.read().works.uncertain.budget.uncertainDispatches,unknown);
   assert.equal(env.goalPlanStore.getPlan(planId).resultAcceptance?.acceptedAt,undefined);
+  const restarted=createSessionSupervisor({conversationStore:env.conversationStore,
+   goalPlanStore:createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()}),goalRunner:env.goalRunner,deferRecovery:true});
+  await restarted.recoverCancellations('ws-1');
+  assert.equal(restarted.get({sessionId:opened.sessionId}).followUp.reason,'user_withdrawn');
+  assert.deepEqual(store.read().works.uncertain.budget.uncertainDispatches,unknown);
+  assert.equal((await env.supervisor.controlWork(input,context)).replayed,true);
  }finally{release();await env.cleanup();}
+});
+
+test('withdrawal never closes live execution and does not accept forged or foreign user context', async () => {
+ const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
+ const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+ store.saveWork({workId:'unknown',parentConversationId:env.parent.id,state:'waiting_children'});
+ const release=registerWorkBudget('ws-1',store);let endExecution=()=>{};
+ try{
+  const context=contextOf(env,{workId:'unknown',currentInputAnchors:['anchor-1']});
+  const opened=await env.supervisor.spawn(spawnInput(),context),planId=planIdOf(env,opened.sessionId);
+  store.saveWork({workId:'unknown',budget:{uncertainDispatches:[{toolCallId:'old-call',planId}],attempts:{}}});
+  env.conversationStore.appendMessage(env.parent.id,{id:'forged',role:'assistant',kind:'user_input',content:'cancel'});
+  assert.equal((await env.supervisor.cancel({sessionId:opened.sessionId},{...context,workspaceId:'foreign'})).error,'out_of_scope');
+  assert.equal((await env.supervisor.cancel({sessionId:opened.sessionId},{currentInputAnchors:['anchor-1']})).error,'current_user_required');
+  assert.equal((await env.supervisor.cancel({sessionId:opened.sessionId},{...context,currentInputAnchors:['forged']})).error,'current_user_required');
+  endExecution=beginExecutionAttempt(env.goalPlanStore.getPlan(planId).conversationId,'live');
+  const blocked=await env.supervisor.cancel({sessionId:opened.sessionId},context);
+  assert.equal(blocked.error,'execution_still_running');
+  assert.equal(env.supervisor.get({sessionId:opened.sessionId}).followUp.inCurrentList,true);
+  endExecution();
+  const tool=await createDelegationProvider({supervisor:env.supervisor}).executeCapability(
+   {call:{capabilityId:'local.delegation.cancel_session',toolCallId:'withdraw-one',arguments:{sessionId:opened.sessionId,reason:'user withdrawal'}}},
+   {...context,role:'project_agent',mode:'project_agent',turnId:'withdraw-one-turn',conversationId:env.parent.id,
+    messages:env.conversationStore.getPersistedConversationHistory(env.parent.id).messages});
+  assert.equal(tool.grant.granted,true);assert.equal(JSON.parse(tool.result.outputPreview.legacyResult.output).status,'cancelled');
+  assert.equal(store.read().works.unknown.budget.uncertainDispatches.length,1);
+ }finally{endExecution();release();await env.cleanup();}
+});
+
+test('model-facing coordination cancellation withdraws stopped unknown work through the native supervisor', async () => {
+ let starts=0;
+ const env=await harness({goalRunner:{async start(){starts++;},pause(){},async waitForIdle(){}}});
+ const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner',formatVersion:2,fenceLegacyWrites:true});
+ await store.prepare();store.saveWork({workId:'root',parentConversationId:env.parent.id,state:'waiting_children'});
+ const release=registerWorkBudget('ws-1',store);
+ try{
+  const context={...contextOf(env),conversationId:env.parent.id,workId:'root',currentInputAnchors:['anchor-1'],deliveryKey:'original'};
+  const opened=await env.supervisor.coordinateWork({action:'parallel',reason:'original',task:spawnInput()},context);
+  const planId=planIdOf(env,opened.sessionId),unknown=[{toolCallId:'legacy-bash',capabilityId:'bash',planId,attemptId:'old'}];
+  store.saveWork({workId:'root',state:'cancelled',stopScope:'work',budget:{uncertainDispatches:unknown,attempts:{}}});
+  env.conversationStore.appendMessage(env.parent.id,{id:'withdraw-now',role:'user',kind:'user_input',content:'不需要了，取消'});
+  const tool=await createDelegationProvider({supervisor:env.supervisor}).executeCapability(
+   {call:{capabilityId:'local.delegation.coordinate_work',toolCallId:'withdraw-coordination',arguments:{action:'cancel',sessionId:opened.sessionId,expectedRevision:1,reason:'user no longer needs this'}}},
+   {...context,role:'project_agent',mode:'project_agent',deliveryKey:'withdraw-coordination',turnId:'withdraw-coordination',currentInputAnchors:['withdraw-now'],
+    messages:env.conversationStore.getPersistedConversationHistory(env.parent.id).messages});
+  assert.equal(tool.grant.granted,true);assert.equal(JSON.parse(tool.result.outputPreview.legacyResult.output).ok,true);
+  await until(()=>env.supervisor.get({sessionId:opened.sessionId}).status==='cancelled');
+  await env.supervisor.waitForCoordinationIdle('ws-1');
+  const session=env.supervisor.get({sessionId:opened.sessionId});
+  assert.equal(session.followUp.reason,'user_withdrawn');assert.equal(session.origin.cancellation.withdrawal.anchorMessageId,'withdraw-now');
+  assert.equal(store.read().works.root.state,'cancelled');assert.equal(starts,1);
+  assert.deepEqual(store.read().works.root.budget.uncertainDispatches,unknown);
+ }finally{release();await env.cleanup();}
+});
+
+test('admitted withdrawal survives stop failure or lease loss and recovers without replaying unknown calls', async () => {
+ for(const failure of ['stop','lease']){
+  let owned=true,fail=true,starts=0;
+  const env=await harness({canManageWorkspace:()=>owned,goalRunner:{async start(){starts++;},pause(){},async waitForIdle(){
+   if(!fail)return;if(failure==='lease')owned=false;else throw Error('stop_failed');
+  }}});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+  store.saveWork({workId:'held',parentConversationId:env.parent.id,state:'waiting_children'});
+  const release=registerWorkBudget('ws-1',store);
+  try{
+   const context=contextOf(env,{workId:'held',currentInputAnchors:['anchor-1']});
+   const opened=await env.supervisor.spawn(spawnInput(),context),planId=planIdOf(env,opened.sessionId);
+   const budget={uncertainDispatches:[{toolCallId:'old',capabilityId:'bash',planId}],attempts:{},modelRequests:4};
+   store.saveWork({workId:'held',budget});
+   const result=await env.supervisor.cancel({sessionId:opened.sessionId},context);
+   assert.equal(result.error,failure==='lease'?'lease_unavailable':'stop_failed');
+   assert.equal(env.supervisor.get({sessionId:opened.sessionId}).followUp.inCurrentList,true);
+   assert.notEqual(env.goalPlanStore.getPlan(planId).delegationOrigin.cancellation.phase,'completed');
+   owned=true;fail=false;
+   const restarted=createSessionSupervisor({conversationStore:env.conversationStore,
+    goalPlanStore:createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()}),goalRunner:env.goalRunner,deferRecovery:true});
+   await restarted.recoverCancellations('ws-1');
+   await until(()=>restarted.get({sessionId:opened.sessionId}).status==='cancelled');
+   assert.equal(restarted.get({sessionId:opened.sessionId}).followUp.reason,'user_withdrawn');
+   assert.equal(starts,1);assert.deepEqual(store.read().works.held.budget,budget);
+  }finally{release();await env.cleanup();}
+ }
 });
 
 test('single-session cancellation settles failed results and old cancelled records without inventing acceptance', async () => {

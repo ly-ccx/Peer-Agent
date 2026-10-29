@@ -10,6 +10,14 @@ function followUp(
   return decideFollowUp({ status: status as never }, facts, ownership);
 }
 
+test('user withdrawal ends task responsibility without claiming an unknown historical outcome', () => {
+ assert.deepEqual(followUp('cancelled',{cancellationPhase:'completed',cancellationDisposition:'user_withdrawn'},'unknown'),{
+  owner:'none',inCurrentList:false,reason:'user_withdrawn',
+ });
+ assert.equal(followUp('cancelled',{cancellationPhase:'completed',cancellationDisposition:'user_withdrawn'},'live').inCurrentList,true);
+ assert.equal(followUp('awaiting_outcome',{cancellationPhase:'awaiting_outcome',cancellationDisposition:'user_withdrawn'},'unknown').inCurrentList,true);
+});
+
 test('普通结果（技术门槛）仍由主 Bot 跟进，不显示需要用户确认', () => {
   assert.deepEqual(followUp('result_ready', { delegated: true, acceptance: 'auto' }), {
     owner: 'bot',
