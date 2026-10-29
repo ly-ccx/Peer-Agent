@@ -74,6 +74,18 @@ test('a returned legacy session is adopted only from current user input before r
   assert.equal(f.spawns.length,0);
 });
 
+test('current user can finish cancellation on stopped work without reopening admission', async t => {
+ const f=await fixture(t);
+ const opened=await f.lifecycle.coordinate({action:'parallel',reason:'original',task:f.task('u1')},f.context('u1','original'));
+ f.store.saveWork({workId:'goal',state:'cancelled',stopScope:'work'});
+ const cancelled=await f.lifecycle.coordinate({action:'cancel',sessionId:opened.sessionId,expectedRevision:1,reason:'withdraw'},f.context('u2','cancel-stopped'));
+ assert.equal(cancelled.ok,true);assert.equal(cancelled.phase,'completed');
+ assert.equal(f.store.read().works.goal.stopScope,'work');assert.equal(f.store.read().works.goal.state,'cancelled');
+ const repeated=await f.lifecycle.coordinate({action:'cancel',sessionId:opened.sessionId,expectedRevision:2,reason:'already withdrawn'},f.context('u3','cancel-again'));
+ assert.equal(repeated.ok,true);assert.deepEqual(f.cancellations,[opened.sessionId]);
+  assert.equal((await f.lifecycle.coordinate({action:'replace',sessionId:opened.sessionId,expectedRevision:3,reason:'revive',task:f.task('u3')},f.context('u3','replace-stopped'))).error,'work_execution_stopped');
+});
+
 test('parallel work survives a sibling cancellation and cancellation events cannot revive it', async t => {
   const f = await fixture(t);
   const a = await f.lifecycle.coordinate({ action:'parallel', reason:'A', task:f.task('u1') },f.context('u1','a'));

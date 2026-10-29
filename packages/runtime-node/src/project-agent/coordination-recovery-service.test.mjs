@@ -108,6 +108,88 @@ test('a failed structured stop leaves held work and evidence intact; retaining l
   assert.equal(calls, 0);
 });
 
+test('an admitted re-check never copies sources again and the entry follows pending holds', async t => {
+  const f = await fixture(t), first = await f.inspect();
+  assert.equal(f.service.needsAttention('w'), false);
+  await f.restore(first.view.planToken);
+  const intent = JSON.parse(readFileSync(path.join(f.directory, 'coordination-recovery.json')));
+  const copies = () => readdirSync(path.join(f.directory, intent.archive)).filter(name => name.startsWith('received-inputs-')).length;
+  assert.equal(copies(), 1); assert.equal(f.service.needsAttention('w'), true);
+  const again = await f.restore((await f.inspect()).view.planToken);
+  assert.equal(again.ok, true); assert.equal(again.view.canContinue, true);
+  assert.equal(copies(), 1, 'a re-check never copies received inputs again');
+  assert.equal(f.snapshot().works.conflict.state, 'blocked_system');
+  assert.equal(f.service.needsAttention('w'), true);
+});
+
+test('one batch retires every held work and child task under one stop and restart, then the entry settles', async t => {
+  const cancelled = [];
+  const f = await fixture(t, { cancelSessions: async (_id, ids) => { cancelled.push(...ids); } });
+  await f.restore((await f.inspect()).view.planToken);
+  const view = (await f.inspect()).view, stops = f.stops, restarts = f.restarts;
+  assert.deepEqual(view.works.map(row => [row.workId, row.disposition]), [['conflict', 'held']]);
+  assert.deepEqual(view.sessions.map(row => row.sessionId), ['orphan-child']);
+  assert.equal((await f.service.execute({ workspaceId: 'w', action: 'retain_all', planToken: view.planToken, workId: 'conflict' })).code, 'INVALID_INPUT');
+  const result = await f.service.execute({ workspaceId: 'w', action: 'retain_all', planToken: view.planToken });
+  assert.equal(result.ok, true); assert.deepEqual(cancelled, ['orphan-child']);
+  assert.equal(f.stops - stops, 1); assert.equal(f.restarts - restarts, 1);
+  const state = f.snapshot();
+  assert.equal(state.works.conflict.state, 'cancelled'); assert.equal(state.works.safe.state, 'runnable');
+  assert.ok(state.lastRecovery.retainedSessionIds.includes('orphan-child'));
+  assert.ok(state.lastRecovery.quarantinedInputIds.includes('legacy-input'));
+  assert.deepEqual([result.view.works.length, result.view.sessions.length], [0, 0]);
+  assert.equal(f.service.needsAttention('w'), false);
+});
+
+test('a failed batch keeps every hold and the entry visible until a later step succeeds', async t => {
+  let refuse = true;
+  const f = await fixture(t, { cancelSessions: async () => { if (refuse) throw new Error('coordination_recovery_stop_failed'); } });
+  await f.restore((await f.inspect()).view.planToken);
+  let view = (await f.inspect()).view;
+  assert.equal((await f.service.execute({ workspaceId: 'w', action: 'retain_all', planToken: view.planToken })).code, 'coordination_recovery_stop_failed');
+  assert.equal(f.snapshot().works.conflict.state, 'blocked_system');
+  assert.equal(f.snapshot().lastRecovery.retainedSessionIds?.includes('orphan-child') ?? false, false);
+  view = (await f.inspect()).view;
+  assert.equal(f.service.needsAttention('w'), true, 'an inspection cannot clear a failed step while holds remain');
+  refuse = false;
+  assert.equal((await f.service.execute({ workspaceId: 'w', action: 'retain_all', planToken: view.planToken })).ok, true);
+  assert.equal(f.service.needsAttention('w'), false);
+});
+
+test('a failed step returns its re-check, so the next step starts from current facts instead of the failed token', async t => {
+  const ended = new Set();
+  let refuse = true;
+  const f = await fixture(t, {
+    sessionInventory: () => ['orphan-child', 'stuck-child'].map(sessionId => ({ sessionId, title: sessionId, terminal: ended.has(sessionId) })),
+    cancelSessions: async (_, ids) => {
+      for (const sessionId of ids) {
+        if (sessionId === 'stuck-child' && refuse) throw new Error('coordination_recovery_stop_failed');
+        ended.add(sessionId);
+      }
+    } });
+  await f.restore((await f.inspect()).view.planToken);
+  const before = (await f.inspect()).view, restarts = f.restarts;
+  assert.deepEqual(before.sessions.map(row => row.sessionId), ['orphan-child', 'stuck-child']);
+  const failed = await f.service.execute({ workspaceId: 'w', action: 'retain_all', planToken: before.planToken });
+  assert.equal(failed.code, 'coordination_recovery_stop_failed');
+  assert.equal(failed.view.phase, 'failed');
+  assert.deepEqual(failed.view.sessions.map(row => row.sessionId), ['stuck-child'], 'the child stopped before the failure is no longer listed');
+  assert.notEqual(failed.view.planToken, before.planToken);
+  assert.equal(f.restarts, restarts, 'a failed step leaves the host paused');
+  assert.equal(f.service.needsAttention('w'), true);
+  refuse = false;
+  const stale = await f.service.execute({ workspaceId: 'w', action: 'retain_all', planToken: before.planToken });
+  assert.equal(stale.code, 'coordination_resume_plan_changed', 'the failed token stays refused');
+  assert.equal(stale.view.planToken, failed.view.planToken, 'a paused host re-checks to the same plan');
+  const retried = await f.service.execute({ workspaceId: 'w', action: 'retain_all', planToken: failed.view.planToken });
+  assert.equal(retried.ok, true);
+  assert.deepEqual(retried.view.sessions, []);
+  assert.equal(retried.view.works.filter(row => row.disposition === 'held').length, 0);
+  assert.equal(f.snapshot().lastRecovery.retainedSessionIds.includes('stuck-child'), true);
+  assert.equal(f.restarts, restarts + 1);
+  assert.equal(f.service.needsAttention('w'), false);
+});
+
 test('inspection of a torn recovery tail is read-only; explicit re-entry preserves isolation and archives damage', async t => {
   const f = await fixture(t), first = await f.inspect(); await f.restore(first.view.planToken);
   const segments = path.join(f.directory, 'coordination-v2/segments');

@@ -7,6 +7,7 @@ import {
   PROGRESS_THROTTLE_MS,
   delegationEventId,
   mapDelegationEvents,
+  supervisorEventId,
 } from './event-mapper.mjs';
 
 const SESSION = {
@@ -51,6 +52,17 @@ test('eventId 由会话、种类和版本或批准号决定，重复映射得到
   assert.equal(once[1].payload.need, 'approval');
   assert.equal(once[2].payload.outcome, 'passed');
   assert.deepEqual(once[2].payload.evidenceRefs, ['evidence-1']);
+});
+
+test('监督器 id 短时保持原样，自由文本原因过长时摘要到 200 字以内', () => {
+  const sessionId = 'c5ba3391-7ca3-4d92-aac0-9d70e7bfcafd';
+  assert.equal(supervisorEventId({ kind: 'cancelled', sessionId, reason: 'user_request' }), `supervisor:cancelled:${sessionId}:user_request`);
+  assert.equal(supervisorEventId({ kind: 'accepted', sessionId, verdictRef: 'v1', reason: 'ignored' }), `supervisor:accepted:${sessionId}:v1`);
+  const long = { kind: 'cancelled', sessionId, reason: '该执行已产出完整交付'.repeat(20) };
+  const id = supervisorEventId(long);
+  assert.ok(id.length <= 200);
+  assert.equal(supervisorEventId(long), id);
+  assert.notEqual(supervisorEventId({ ...long, reason: long.reason + '。' }), id);
 });
 
 test('进度只在叶子新完成时发出，30 秒内再完成也先压住', () => {

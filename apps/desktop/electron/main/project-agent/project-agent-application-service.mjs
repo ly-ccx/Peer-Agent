@@ -350,7 +350,7 @@ export function createProjectAgentApplicationService({
       : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
         ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
     const decorate = page => {
-      page = { ...page, recoveryAvailable: recoveryControl?.available?.(payload.workspaceId) === true };
+      page = { ...page, recoveryAttention: recoveryControl?.needsAttention?.(payload.workspaceId) === true };
       const status = readRecovery(payload.workspaceId);
       const recovery = status?.status === 'failed' ? projectBotRecoveryStatus(status.error, status.phase)
         : !page?.ok && page?.code?.startsWith('coordination_') ? projectBotRecoveryStatus(page.code) : null;

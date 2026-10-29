@@ -1,7 +1,8 @@
 /** Local maintenance controls. These commands never accept an execution verdict or a filesystem path. */
 export interface ProjectRecoveryRequest {
   readonly workspaceId: string;
-  readonly action: 'inspect' | 'restore' | 'retain';
+  /** `retain_all` ends every held work and child task in the plan bound by `planToken`; it never accepts ids. */
+  readonly action: 'inspect' | 'restore' | 'retain' | 'retain_all';
   readonly planToken?: string;
   readonly workId?: string;
   readonly sessionId?: string;

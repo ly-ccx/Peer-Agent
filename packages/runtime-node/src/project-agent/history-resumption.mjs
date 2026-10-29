@@ -94,7 +94,9 @@ export function admitHistoryResumption(previous, entry) {
   const quarantinedDeliveryIds = [...new Set([...(previous.lastRecovery.quarantinedDeliveryIds || []),
     ...Object.values(previous.deliveries || {}).filter(row => (initialAdmission || holding.has(row.message?.meta?.workId))
       && row.state === 'prepared').map(row => row.message.id)])];
-  if ([...quarantinedInputIds, ...quarantinedEventIds].some(id => typeof id !== 'string' || !id || id.length > 200)) fail();
+  if (quarantinedInputIds.some(id => typeof id !== 'string' || !id || id.length > 200)) fail();
+  // Quarantine must name every id the inbox accepted; older supervisor ids embedded free text past 200.
+  if (quarantinedEventIds.some(id => typeof id !== 'string' || !id)) fail();
   if ([...quarantinedSessionIds].some(id => typeof id !== 'string' || !id || id.length > 200)) fail();
   for (const row of entry.decisions) {
     const work = works[row.workId];

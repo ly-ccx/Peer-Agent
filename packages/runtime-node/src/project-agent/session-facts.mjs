@@ -59,6 +59,7 @@ export function sessionFactsFromPlan(plan) {
   return { ...deriveSessionFacts({ status: plan?.status, runnerStatus: plan?.runner?.status,
     phase: plan?.delegationOrigin?.phase, superseded: Boolean(plan?.delegationOrigin?.supersededBy),
     cancellationPhase: plan?.delegationOrigin?.cancellation?.phase, takeoverPhase: plan?.delegationOrigin?.takeover?.phase,
+    cancellationDisposition: plan?.delegationOrigin?.cancellation?.disposition,
     accepted: Boolean(plan?.resultAcceptance?.acceptedAt),
     needsUser: plan?.delegationOrigin?.phase === 'awaiting_approval' || plan?.status === 'awaiting_approval'
       || plan?.runner?.waitingOnUser === true && plan?.runner?.status !== 'paused' && !plan?.delegationOrigin?.supersededBy

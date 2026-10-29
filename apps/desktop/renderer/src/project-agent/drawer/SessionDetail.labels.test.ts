@@ -53,3 +53,12 @@ test('a Bot-owned result does not manufacture user acceptance in its header', ()
   assert.equal(label, createI18n('zh-CN').t('projectAgent.chat.work.resultSettling'));
   assert.notEqual(label, '结果待确认');
 });
+
+test('withdrawn history uses the host-ended follow-up copy rather than assigning work back to the Bot', () => {
+  const i18n = createI18n('zh-CN');
+  const tree = render({ status: 'cancelled', followUp: { owner: 'none', inCurrentList: false, reason: 'user_withdrawn' } });
+  assert.equal(find(tree, 'bot-task-next').props.children[0].props.children, i18n.t('projectAgent.drawer.task.followUpEnded'));
+  assert.equal(find(tree, 'bot-task-conversation').props.children[0], i18n.t('projectAgent.drawer.task.askEnded', { name: 'Peer' }));
+  const pending = render({ status: 'cancelled', followUp: { owner: 'bot', inCurrentList: true, reason: 'stop_unconfirmed' } });
+  assert.equal(find(pending, 'bot-task-next').props.children[0].props.children, i18n.t('projectAgent.drawer.task.followUp', { name: 'Peer' }));
+});

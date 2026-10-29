@@ -32,6 +32,7 @@ export function deriveSessionFacts(input: {
   interruptionOrigin?: LifecycleFacts['interruptionOrigin'];
   delegated?: boolean;
   cancellationPhase?: string;
+  cancellationDisposition?: LifecycleFacts['cancellationDisposition'];
   takeoverPhase?: string;
   executionOwnership?: ExecutionOwnership;
 }): SessionFactSnapshot {
@@ -54,6 +55,7 @@ export function deriveSessionFacts(input: {
     ...(input.interruptionOrigin ? { interruptionOrigin: input.interruptionOrigin } : {}),
     ...(input.delegated !== undefined ? { delegated: input.delegated } : {}),
     ...(input.cancellationPhase ? { cancellationPhase: input.cancellationPhase } : {}),
+    ...(input.cancellationDisposition ? { cancellationDisposition: input.cancellationDisposition } : {}),
     ...(input.takeoverPhase ? { takeoverPhase: input.takeoverPhase } : {}),
   });
   return {
