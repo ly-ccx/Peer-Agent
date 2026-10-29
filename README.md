@@ -1,269 +1,122 @@
-<p align="center">
-  <img src="docs/logo.png" alt="Peer Agent" width="120" />
-</p>
+<p align="center"><img src="docs/logo.png" alt="Peer" width="96"></p>
 
 <h1 align="center">Peer Agent</h1>
 
-<p align="center">
-  <strong>A fully open-source, local-first Task Flow Agent — work moves through task handoff, continuity, and follow-up questions; authorized, planned, and proven on your machine.</strong>
-</p>
+<p align="center"><strong>Hand over the work. Keep the decisions.</strong></p>
+<p align="center">A project Bot that coordinates Agents, follows the work and brings back results with evidence.</p>
+<p align="center">Open source under MIT · Local execution and authorization · Desktop and CLI</p>
+<p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="https://ly-ccx.github.io/Peer-Agent/">Website</a> · <a href="https://ly-ccx.github.io/Peer-Agent/docs.html">Documentation</a> · <a href="https://github.com/ly-ccx/Peer-Agent/releases">Downloads</a></p>
 
-<p align="center">
-  Fully open source (MIT) · Local-first · Permission-gated · Evidence-backed · Task flow by default
-</p>
+Peer is a local work delegation system for people moving code, documents and research across projects. Give the project Bot a goal and boundaries. It reads the project, arranges scoped execution, coordinates additions and questions, and checks the returned work.
 
-<p align="center">
-  <strong>English</strong> ·
-  <a href="README.zh-CN.md">简体中文</a>
-</p>
+You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-<p align="center">
-  <a href="https://github.com/ly-ccx/Peer-Agent/stargazers"><img src="https://img.shields.io/github/stars/ly-ccx/Peer-Agent?style=for-the-badge&logo=github&label=Stars" alt="GitHub Stars" /></a>
-  <a href="https://www.npmjs.com/package/@peer-agent/cli"><img src="https://img.shields.io/npm/v/@peer-agent/cli?style=for-the-badge&logo=npm&label=npm%20%40peer-agent%2Fcli" alt="npm version" /></a>
-  <a href="https://github.com/ly-ccx/Peer-Agent/releases"><img src="https://img.shields.io/github/v/release/ly-ccx/Peer-Agent?include_prereleases&style=for-the-badge&label=Release" alt="Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License" /></a>
-</p>
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, currently **0.1.0-rc.28**. The stable **0.0.18** release uses the classic interface. Recent durable-supervision and withdrawal fixes are on the development line; merging a PR does not publish a new RC. Release and npm channel facts were checked on 2026-10-29.
 
-<p align="center">
-  <a href="#-quick-start">Quick Start</a> ·
-  <a href="#-why-peer-agent">Why</a> ·
-  <a href="#-design-philosophy">Philosophy</a> ·
-  <a href="#-task-flow-handoff-continuity-follow-up">Task Flow</a> ·
-  <a href="#-what-you-can-do">Features</a> ·
-  <a href="#-architecture-at-a-glance">Architecture</a> ·
-  <a href="#-product-vision">Vision</a> ·
-  <a href="#-roadmap">Roadmap</a>
-</p>
+![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 
----
+The screenshot is from the actual 0.1 Desktop renderer, using fictional project data and a scripted conversation. It illustrates the interface; it is not a real-model execution or installed-release acceptance record.
 
-Many coding agents already run tools on your machine. That alone is no longer a differentiator.
+## Why Peer
 
-**Peer Agent is fully open source (MIT)** — not an "open shell around a closed core": Desktop, TUI, CLI, the runtime, the protocol, and every capability manifest ship under the same [LICENSE](LICENSE). Audit every line of permission code, fork your own branch, or embed the runtime in your own host.
+- **A project relationship that lasts.** The folder, goals, memory and history remain available as the work continues.
+- **One point of contact.** The main Bot coordinates work Agents and sends additions to the responsible work.
+- **Results with a basis.** The returned explanation distinguishes changes, checks actually performed and outstanding gaps.
+- **Authority stays local.** Tools run through local capability and permission contracts. A model reply cannot create a permission grant or evidence.
+- **An open foundation.** Desktop, CLI, runtime, protocol and capability manifests share the MIT license.
 
-**Peer Agent is about what happens after local execution:** goals are accepted with boundaries, ambiguity is clarified instead of guessed, work is planned by complexity, and completion is proven with Evidence — under one permissioned capability chain across Desktop, TUI, and CLI.
+<a id="-task-flow-handoff-continuity-follow-up"></a>
 
-Desktop, TUI and CLI share the same core runtime:
+## Working together
 
-| Surface | What it is |
+1. **Set a goal and boundary.** For example: “Investigate this latency. Explain the cause before changing the public API.”
+2. **Let the project Bot organize execution.** Work Agents receive scoped goals and success criteria; independent work can move in parallel.
+3. **Keep talking while work progresses.** Add context, correct direction or ask to stop in the project conversation.
+4. **Return for decisions that need you.** Permissions, meaningful scope choices and genuine user questions remain yours.
+5. **Inspect the result and its basis.** The Bot explains what changed, what was checked and what remains uncertain. Reports, diffs and evidence stay available.
+
+Ordinary work questions should return to the main Bot for coordination. Technical interruptions, a paused task and an unknown tool outcome remain different facts. Recovery preserves context and existing work; unknown operations are not blindly replayed.
+
+Development-line improvements strengthen durable supervision and withdrawal settlement. Withdrawing a delegation preserves its history and may retain an unknown historical outcome; it does not prove that an external effect was rolled back. Consult the release notes for what your installed build contains.
+
+## What you can delegate
+
+| Work | Example goal | What to inspect on return |
+| --- | --- | --- |
+| Investigation and repair | Find why a request is slow and fix the cause | Cause, diff and checks actually performed |
+| Engineering changes | Update a feature across the project while keeping compatibility | Related changes, verification findings and remaining gaps |
+| Research and documentation | Compare approaches and write a recommendation | Conclusions, source references and open questions |
+
+In the 0.1 preview, the Workspace beside the conversation opens web pages, documents, code, directories and diffs. Reading a result, authorizing a write, accepting work and integrating Git changes are distinct actions.
+
+<a id="-quick-start"></a>
+
+## Get started
+
+### Project Bot Desktop preview
+
+1. Open the [0.1.0-rc.28 release](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.28), choose an available platform asset and read its upgrade notes.
+2. Add a model service in Settings and select a model suited to the work.
+3. Bind a folder or create a managed project Bot.
+4. Give it a goal and boundaries. Start with a read-only project question if you want to understand the folder first.
+5. Use the main conversation for additions and decisions; open task details or the Workspace for supporting material.
+
+Back up the complete data directory before upgrading. Upgrade Desktop, CLI/TUI and Gateway according to the same release instructions. Rollback follows the release-specific backup procedure.
+
+The [stable 0.0.18 release](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18) uses classic workflows. On Linux, read the release notes for AppImage dependencies and display-server guidance.
+
+### CLI / TUI
+
+Preview channel:
+
+    npm install -g @peer-agent/cli@rc
+    peer --version
+    peer
+
+Stable channel:
+
+    npm install -g @peer-agent/cli
+
+The npm package installs the platform binary and its helper. Available platforms and artifacts are listed on the corresponding release page. The npm beta tag is an older beta channel, not the current RC. See the [CLI reference](https://ly-ccx.github.io/Peer-Agent/docs.html#cli) for modes and scripted usage.
+
+### Run the 0.1 source
+
+Use Node.js 25 (the current CI version), pnpm 10.22.0 and a Rust toolchain. Bun is needed for the TUI. Native credential storage requires the appropriate OS build dependencies.
+
+    git clone --branch PeerAgent/dev/0.1.0 https://github.com/ly-ccx/Peer-Agent.git
+    cd Peer-Agent
+    pnpm install --frozen-lockfile
+    pnpm dev
+
+For the TUI:
+
+    pnpm --filter @peer-agent/tui dev
+
+## Local control and evidence
+
+Models provide cognition and may run with a cloud provider. Peer controls local capability execution, permission decisions and evidence. What a model receives depends on the configured provider and admitted context; local-first is not a claim that no content can leave the computer.
+
+The project Bot remains a reader and coordinator. Work Agents execute under the local capability chain and granted scope. The main Bot does not approve permissions for you.
+
+A completed reply is not a completed delegation. Verification, acceptance and integration follow structured host facts and the applicable policy. A continuity summary is context, not a substitute for tool results or evidence.
+
+## Extensions
+
+| Capability | Entry |
 | --- | --- |
-| **Desktop** | Project bots, conversation, scoped tasks, review cards, memory, objectives and a classic interface |
-| **TUI** | Full terminal agent (`peer`) with the same runtime |
-| **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
+| Model providers and routing | [Connect a model](https://ly-ccx.github.io/Peer-Agent/docs.html#model) |
+| External tool servers | [MCP](https://ly-ccx.github.io/Peer-Agent/docs.html#mcp) |
+| Reusable instruction packages | [Skills](https://ly-ccx.github.io/Peer-Agent/docs.html#skill) |
+| Capability packages and local adapters | [Plugins](https://ly-ccx.github.io/Peer-Agent/docs.html#plugin) |
+| Embed the governed runtime | [Runtime SDK](packages/runtime-sdk/README.md) |
+| Terminal and scripted access | [CLI](packages/npm-cli/README.md) |
 
-> [!NOTE]
-> Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
->
-> Release target: beta channel **`0.1.0-rc.28`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. The bot stays read only; isolated tasks can work in parallel, and objectives support report/propose/act. Settings → General switches back to the classic screen. Older conversations are under Bot settings → Tasks → History.
+Extensions follow the same capability, projection, permission and evidence boundaries. They do not create a separate execution path.
 
-### The 0.1.0 candidate
+<a id="-architecture-at-a-glance"></a>
 
-Fixed bot model and channel choices are preserved. Execution and independent review can use the same model in separate contexts; failed reviews should explain the recorded error or missing evidence.
+## Architecture at a glance
 
-Bind a folder or create a managed bot, choose its avatar color, then give it a request. The bot handles read-only understanding and delegates writes to tasks with success criteria. The main bot coordinates independent goals concurrently, sends additions to the responsible Agent, and can cancel incorrect work and arrange its replacement. Child Agents ask it questions and return results for verification and delivery within existing authorization; their named activity appears in the conversation. Receipt, verification, acceptance and worktree integration remain visible as separate steps.
-
-With full local access selected, the main Bot, its tasks and verification can read consecutive images without per-image prompts; authorization remains local. In ask mode, out-of-project images display a permission card in the main conversation, and approval continues the original read. Reject or cancel directly, or stop the reply; an approval wait expires after five minutes. Permission for this round covers only the current Bot and its tasks, the exact file and 30 minutes. Productive verification continues in saved slices without a default lifetime cap; explicit budgets, per-call timeouts, denial and cancellation remain enforced.
-
-Bot settings opens the bot's configuration, with project history, memory and objectives in adjacent tabs. Replies use complete message bubbles in the bot's identity color, with supporting records and process available through Reply details below the left edge of each bubble. Waiting, streamed text and the final answer share one continuous reply. Verification verdicts stay in task details; the main Bot explains the outcome. On macOS, Appearance switches glass/solid window materials with neutral floating panels in both themes. Keyboard navigation, reduced motion, locale parity and diagnostics are part of the candidate checks. [Candidate release notes](release-notes/v0.1.0-rc.28.md) cover features, upgrade instructions and limits. Upgrade Desktop, CLI/TUI and Gateway together. Back up the complete data root before upgrading; rollback requires that pre-upgrade backup because older writers do not support the RC25 coordination format. Publishing a release does not restart your app; wait for active execution to finish before installing. Retained legacy journals are evidence, not the latest state after activation.
-
-If startup recovery is blocked, open **Check recovery** above the conversation. Request a safe handoff, preserve history and continue only verified work, or keep results and end an uncertain earlier execution. Historical inputs and completed operations are not replayed; reports and worktrees remain available. New admission uses minimum reader/writer version 4, so rollback requires the complete pre-upgrade backup.
-
-The conversation’s Workspace button opens web pages, documents/code, directories and diffs in side-by-side tabs. Inspect actual Git revisions, keep reading while a file changes, prepare selection feedback, and save local document drafts. Applying a fixed draft follows local authorization and checks the file version again; conflicts keep your input and unknown outcomes are reconciled without replay. Separate windows return to the same source; browser windows use explicit address copies.
-
-Stable publication follows comprehensive owner testing and seven days of daily use. Remote input is text only; approvals stay on the computer. Remote device identity currently requires macOS Keychain.
-
-![Project bots and conversation](docs/screenshots/project-bots-rc.png)
-
-![Bot profile and avatar colors](docs/screenshots/bot-profile-rc.png)
-
-Source UI screenshots use three synthetic projects and an illustrative conversation. They show the interface; release validation is recorded separately.
-
----
-
-## ✨ Why Peer Agent
-
-| | |
-| --- | --- |
-| 📜 **Fully open source (MIT)** | The entire chain — Desktop, TUI, CLI, runtime, protocol, capability manifests — ships under one MIT license. Auditable, forkable, embeddable; no "open shell around a closed core". |
-| 🎯 **Task flow, not tool chat** | Goals are accepted with boundaries, clarified when needed, planned by complexity, and closed against explicit success criteria. |
-| ✅ **Definition of Done as code** | `successCriteria`, `criterionResults`, and `evidenceRefs` turn “done” into a verifiable gate — not an assistant claim. |
-| 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Cognition can come from any model provider — capability power stays local and auditable. |
-| 🔐 **OS-backed encrypted secrets** | The OS keychain stores the vault master key; Provider API keys and OAuth tokens stay in a local AES-256-GCM encrypted vault, never in plain settings files. |
-| 🌐 **Bring any model** | Use official APIs, OAuth/subscription channels, Coding Plans, or a custom OpenAI / Anthropic-compatible endpoint with your own `baseUrl`, model ID, and capability metadata. |
-| 🧑‍🏫 **Main + fallback model routing** | Keep your preferred model in charge; if it cannot read images, an optional fallback vision model interprets them and silently hands text back to the main model. |
-| 🧾 **Evidence is a first-class result** | Artifacts, logs, metadata, denial, timeout, and failure remain structured facts that UI and automation can inspect. |
-| 🧩 **One governed capability chain** | Shell, files, browser, MCP, plugins, and skills all flow through Manifest → Projection → Permission → Evidence. No hidden side doors. |
-| 🔌 **Embeddable Open Runtime** | Public, host-neutral `protocol`, `runtime-core`, and `runtime-sdk` packages let another Node host embed the same governed runtime without Electron. |
-| 🔁 **Long-task continuity** | Goal state, pause/resume, `waiting_user`, compact summaries, context checksums, and continuity sources let work survive interruptions without treating a summary as proof. |
-| 🖥️ **One core, multiple surfaces** | Desktop, TUI, and the `peer` CLI share runtime, System Context, and data under `~/.peer-agent`; the interfaces do not fork the execution truth. |
-
----
-
-## 🧭 Design Philosophy
-
-Peer Agent is built around a simple split of responsibility:
-
-| Role | Owns |
-| --- | --- |
-| **Model** | Cognition — understanding, planning, deciding what to try next. A *role* supplied by your chosen model provider. |
-| **Local runtime** | Capability — discovery, permission, execution, and Evidence on your machine. |
-| **Interface** | Expression — Desktop / TUI / CLI present work; they do not hold permission truth. |
-| **Contract** | Boundaries — protocol types, Runtime Projection, and hard bans between layers. |
-| **Evidence** | Governance — what actually happened, inspectable after the fact. |
-
-Product principles we try not to violate:
-
-- **Elegance first** — Prefer one clear concept over two overlapping ones; refuse “good enough” seams that will rot.
-- **Task over chat** — Multi-step work is accepted as a goal with boundaries and success criteria, not freelanced mid-conversation.
-- **Ask when blocked** — Material ambiguity and high-risk trade-offs interrupt; silent guessing does not.
-- **Prove completion** — Done means tool results and Evidence, not assertive prose.
-- **One capability chain** — Shell, files, browser, MCP, plugins, and skills all pass through the same permission + Evidence path.
-
-These ideas shape both the product surface (Agent / Plan / Goal) and the engineering baseline in the companion knowledge base.
-
----
-
-## 🧠 Task Flow: Handoff, Continuity, Follow-up
-
-Peer Agent treats multi-step work as a **task**, not a free-form chat turn. Tasks are first-class citizens — each with its own objective, boundaries, success criteria, and lifecycle.
-
-### Handoff — a task has a lifecycle
-
-From acceptance to closure, a task walks an explicit chain:
-
-```text
-Accept (objective + boundaries + success criteria) → Clarify → Plan (L0–L3 depth) → Execute → Verify → Acceptance & close
-```
-
-- **Planning depth scales with complexity**: L0 answers directly; L1 runs a short plan before acting; L2 drives a self-directed GoalPlan with trackable subtasks; L3 high-risk / irreversible work goes through an explicit **Plan** review before any side effect.
-- **Agent is the default**; **Plan** is the brake when you want review first.
-- **Dispatch–acceptance loop**: tasks can be dispatched (e.g. cloud-scheduled execution) — but only after you approve or reject the dispatch. The dispatched run walks an explicit `dispatching → acked → running → result_received` state chain; results pass a quality self-check, then wait for **your acceptance** before they count as delivered — not "the model says it's done".
-- Subtasks and success criteria close only with real tool results and Evidence — not "done" prose.
-
-### Continuity — interruption is not the end
-
-Real work gets interrupted: contexts fill up, processes restart, you step away for lunch. Peer Agent treats these as first-class scenarios:
-
-- **Persistent Goal state**: the plan graph, subtask status, success criteria, and Evidence are all persisted — tasks survive across sessions.
-- **Pause / resume / `waiting_user`**: a task can park on "waiting for your reply" and continue from the breakpoint when you return, without losing context.
-- **Compact summaries + context checksums**: long-task context is compacted into a continuity summary to keep going — but a summary is **continuity context, not proof**. Closing a task always requires real tool results.
-- Read-only Explorer workers may investigate in parallel, while the lead task flow retains scope, budget, and completion ownership.
-
-### Follow-up — ask when stuck, never guess
-
-When material information is missing, Peer Agent's rule is **ask, don't guess**:
-
-- **Structured follow-up**: the `request_user_input` tool asks with clickable options — you pick instead of typing a paragraph. Your reply is recorded as a persistent state transition.
-- **Ask at the right moment**: only critical ambiguity, risky trade-offs, or missing permissions interrupt you; routine execution stays quiet.
-- **Answers belong to the task**: follow-up replies attach to the task itself — on the next resume or the next dispatch, the answer is still there.
-
-Task flow and the capability chain each govern their own half: task flow decides *what work is accepted and when it's finished*; local execution always goes through one chain:
-
-```text
-Capability Provider → Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence
-```
-
-The capability chain decides *how* local power is authorized and proven.
-
----
-
-## 🚀 What You Can Do
-
-### 📡 Multi-channel access — any entry point, same machine
-
-It doesn't matter where work enters — config, permissions, and Evidence are always the same:
-
-| Channel | What it covers |
-| --- | --- |
-| **Surface channels** | 🖥️ Desktop (task threads, review cards, Workbench + embedded Browser) · ⌨️ TUI / `peer` CLI · ⚡ Quick Chat lightweight global chat |
-| **Model channels** | Official APIs · OAuth / subscription sign-in · Coding Plan templates · custom OpenAI / Anthropic-compatible endpoints — freely mixed; model IDs, headers, reasoning, vision, cache, and pricing metadata are all configurable |
-| **Integration channels** | ⏰ Automation scheduled / recurring runs · 🔌 MCP servers (stdio / HTTP / SSE) · 🌐 web fetch and browser interaction |
-
-> “Shared across surfaces” means the same user and data home on one machine. Peer does not claim cloud synchronization of secrets across devices.
-
-### 🧩 Rich pluggability — capabilities snap into one contract
-
-- 🔌 **MCP as a first-class citizen** — external MCP servers plug straight in and go through the same permission + Evidence pipeline as built-ins; no side door
-- 🏪 **Plugin & skill marketplace** — Marketplace-style install, enable/disable, and updates; skills trigger workflows on demand
-- 🧱 **Declarative capability manifests** — every capability is described by a manifest (permissions, entry points, parameters) and projected uniformly into model-visible tools
-- 🔌 **Open Runtime SDK** — `@peer-agent/protocol` / `runtime-core` / `runtime-sdk` let any Node host embed the same governed capability pipeline; host-neutral, not tied to Electron
-- 📎 **Governed context admission** — attachments, files, and web content enter context through explicit admission paths, not free-form prompt injection
-
-### 📋 Task dispatch & acceptance — work can be delegated, the accountability chain cannot
-
-- ✅ **Dispatch needs your consent** — dispatching a task (e.g. cloud-scheduled execution) requires your approve/reject first; nothing ships out silently
-- 🔗 **Explicit state chain** — `dispatching → acked → running → result_received`, every step observable
-- 🧪 **Quality self-check + user acceptance** — results pass a quality self-check, then wait in a pending-acceptance state; it counts as delivered only after you accept
-- 🌿 **Isolated runs** — repository jobs can run in a dedicated Git worktree and return commit / diff artifact refs and a receipt, never silently mutating your active checkout
-- 🗣️ **Roundtable** — multi-participant sessions under a governance mode; interject into the current roundtable at any time
-
-### 🔐 Own your model stack & credentials
-
-- 🔐 **One secure credential vault** — macOS Keychain, Windows Credential Manager, or Linux Secret Service protects a random 32-byte master key; Provider secrets are encrypted locally with AES-256-GCM
-- 🧑‍🏫 **Main + fallback vision** — Choose any main model for reasoning and optionally pair it with a vision-capable fallback; image recognition stays a supporting role and the main model continues the task
-
-### 🛡️ Control the machine (safely)
-
-- 📁 Files · 💻 Shell · 🔍 Search · 🧰 Local tooling — always via Runtime Projection + PermissionGrant + Evidence
-
----
-
-## 🏁 Quick Start
-
-### Option A — Desktop (recommended for most users)
-
-1. Download a release from **[GitHub Releases](https://github.com/ly-ccx/Peer-Agent/releases)**
-
-   | Platform | First-class artifact | Notes |
-   | --- | --- | --- |
-   | macOS arm64 | `Peer-Agent-<ver>-arm64.dmg` | Developer ID signed and notarized. In-app auto-update (`latest-mac.yml` + zip) starts from 0.0.18; 0.0.17 and earlier must install 0.0.18 manually once. |
-   | Windows x64 / arm64 | `Peer-Agent-Setup-<ver>.exe` | |
-   | Linux x64 | `Peer-Agent-<ver>-x64.AppImage` (preferred) or `.deb` | Unsigned (stage-1). In-app auto-update is AppImage-only (`latest-linux.yml`). Ubuntu 22+/24+ AppImage users may need `libfuse2`. linux-arm64 Desktop is not a Release asset yet. |
-
-2. Install and open Peer Agent
-3. Add a model provider / API key in settings
-4. Start a conversation — or hand it a real goal and let **Agent** mode drive
-
-On Linux Wayland, if the window fails to appear, try X11 or `ELECTRON_OZONE_PLATFORM_HINT=auto`.
-
-### Option B — CLI / TUI via npm
-
-```bash
-npm install -g @peer-agent/cli
-peer --version
-peer
-peer exec "summarize this repo"
-```
-
-The npm package downloads the platform `peer` binary from GitHub Releases on install. macOS arm64 (`peer-darwin-arm64.tar.gz`) and Linux x64 (`peer-linux-x64.tar.gz`) are first-class today; other platforms fail clearly in postinstall until their Release assets ship.
-
-### Option C — Build from source
-
-```bash
-# Prerequisites: Node.js 20+, pnpm, Rust toolchain (for native pieces)
-
-git clone https://github.com/ly-ccx/Peer-Agent.git
-cd Peer-Agent
-pnpm install
-
-# Desktop (Electron)
-pnpm --filter @peer-agent/desktop dev
-
-# Linux Desktop unpacked dir (sandbox / smoke)
-pnpm pack:linux
-
-# Linux Desktop distributables (AppImage + .deb; needs libdbus-1-dev, fakeroot, dpkg)
-pnpm dist:linux
-
-# Terminal agent (TUI)
-pnpm --filter @peer-agent/tui dev
-```
-
-Workspace packages live under `apps/` (product shells) and `packages/` (runtime, protocol, CLI publish package `@peer-agent/cli`).
-
----
-
-## 🏗️ Architecture at a Glance
 
 The architecture starts from a single point: the **agent runtime**. Everything else is a layer peeled off it.
 
@@ -283,7 +136,7 @@ Capability Provider → Manifest → Runtime Projection → Tool Call → Permis
 
 The runtime executes capabilities, but the model first needs *context*. `@peer-agent/system-context` is the canonical assembler for System Context: prompt-source registration, layering, checksums, and snapshots. Project instructions, mode reminders, tool prompts, and compact summaries enter through explicit Context Sources — not scattered string concatenation. Tool output and file content are factual context and are never promoted into system instructions.
 
-### Layer 3: The task-flow kernel — how work moves
+### Layer 3: The execution lifecycle behind delegated work
 
 Above capability and context sits the machinery of tasks: `@peer-agent/chat-kernel` (reducer-driven conversation state machine) and `@peer-agent/task-thread` (task-thread event model) carry handoff, continuity, and follow-up; the goal contract defines GoalPlans, subtasks, and success criteria; `@peer-agent/conversation-store` persists it all so tasks survive across sessions.
 
@@ -332,85 +185,24 @@ peer_agent/
 
 ---
 
-## 🔭 Product Vision
+## Status and direction
 
-Peer Agent aims to be a **cross-platform agent OS for real work** — not another chat window that can shell out.
-
-The long-term product spine:
-
-| Pillar | Meaning |
+| Stage | What it means |
 | --- | --- |
-| **Cross-platform** | Same product truth on macOS, Windows, and Linux Desktop x64 today, then broader coverage (arm64 Desktop, signing) without forking the core model. |
-| **Unified core flow** | Desktop, TUI, CLI, Automation, MCP, plugins, and skills share one runtime chain: projection → permission → execution → Evidence. |
-| **Task flow** | Work is accepted, clarified, planned, executed, and closed as a governed task — not freelanced chat. |
-| **Self-closed loop** | Explore → plan → act → verify → adjust, with success criteria and Evidence as the completion gate. |
-| **Self-evolution** | Improve playbooks, skills, and workflows from prior Evidence — reviewable iteration, never silent rewrite of trust boundaries. |
-| **Multi-agent collaboration** | Specialist roles under one task (explore / implement / review) with explicit handoffs and shared Evidence. |
-| **Agent swarm** | Optional larger parallel fan-out for exploration and verification — still budgeted, owned by a lead task flow, not an unconstrained crowd. |
-| **Canvas creation system** | A spatial surface for plans, diagrams, and intermediate artifacts — thinking and creation you can see and edit next to the conversation. |
-| **Memory system** | Durable, permission-aware memory beyond a single thread: preferences, project facts, and retrieval that stay local. |
+| Stable 0.0.18 | Classic Desktop and terminal workflows on the shared local runtime |
+| Preview 0.1.0-rc.28 | Project Bots, delegated work, memory, goals and the side-by-side workspace |
+| Development line | Recent supervision, continuity and withdrawal-settlement improvements; not an installer release claim |
 
-Philosophy stays fixed while the surface grows: **cognition is pluggable; authorization and Evidence stay local.**
+Current work focuses on dependable personal project delegation: clear ownership, bounded execution, recoverable interruptions and evidence-backed delivery. Future collaboration or automation ideas are not a promise that those capabilities are available in the stable release.
 
----
+See [Releases](https://github.com/ly-ccx/Peer-Agent/releases), [release notes](https://ly-ccx.github.io/Peer-Agent/changelog.html) and the [documentation](https://ly-ccx.github.io/Peer-Agent/docs.html) for version-specific facts.
 
-## 🗺️ Roadmap
+## Contributing
 
-### Available now
+Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) before changing code. Follow the local capability chain and keep permission, execution, evidence and presentation separate.
 
-| Area | Status |
-| --- | --- |
-| Local capability runtime + Evidence | ✅ Available |
-| Desktop · TUI · CLI shells | ✅ Available |
-| Agent / Plan / Goal task flow | ✅ Available |
-| Unified core capability chain | ✅ Available |
-| Secure shared Provider/model configuration | ✅ Available |
-| Main model + fallback vision routing | ✅ Available |
-| MCP · Plugins · Skills | ✅ Available |
-| Automation (scheduled agents) | ✅ Available |
-| Task dispatch & acceptance (cloud scheduling + user acceptance) | ✅ Available |
+Architecture and durable design knowledge are maintained in the companion [Peer-Knowledge](https://github.com/ly-ccx/Peer-Knowledge) repository. Software version releases follow the repository release gate; a website update does not certify an installer or publish a new software version.
 
-### In progress
+## License
 
-| Area | Status |
-| --- | --- |
-| Broader marketplace ecosystem | 🚧 Growing |
-| Cross-platform hardening / packaging | 🚧 Ongoing — Linux Desktop x64 (AppImage / `.deb`) is first-class; linux-arm64 Desktop and Linux signing remain follow-ups |
-
-### Planned — not implemented yet
-
-These are **direction, not shipping claims**. They are **not** available in the current release.
-
-| Area | Intent |
-| --- | --- |
-| **Memory system** | Durable, governed memory beyond a single thread — preferences, project facts, and retrieval that stays local and permission-aware. |
-| **Stronger self-closed loops** | Tighter verify/adjust cycles, richer success criteria, and resume continuity across longer goals. |
-| **Self-evolution / self-iteration** | Safe loops where the agent improves workflows, skills, and playbooks from Evidence — always reviewable. |
-| **Multi-agent collaboration** | Coordinated specialist agents under one task flow (explore / implement / review), with shared Evidence and clear handoffs. |
-| **Agent swarm** | Budgeted parallel exploration / verification workers under a lead task — not unconstrained swarms. |
-| **Canvas creation system** | Spatial canvas for plans, diagrams, and intermediate artifacts alongside the conversation. |
-
----
-
-## 🤝 Contributing
-
-Issues, discussions, and PRs are welcome.
-
-1. Fork and create a branch
-2. Keep changes scoped; prefer protocol/runtime seams over one-off branches
-3. Add or update tests when you touch contracts, permissions, or tool execution
-4. Open a PR with a clear problem statement and verification notes
-
-Please do **not** expand renderer direct `fs` / `child_process` access, bypass Runtime Projection, or replace Evidence with free-form assistant text.
-
----
-
-## 📄 License
-
-[MIT](LICENSE) © 2026 梁音
-
----
-
-<p align="center">
-  <sub>Built for people who want AI that can act — with authorization, task flow, and Evidence.</sub>
-</p>
+Peer Agent is fully open source under the [MIT License](LICENSE).
