@@ -86,6 +86,13 @@ body:has(.quick-chat-shell) {
   cursor: progress;
 }
 
+.quick-chat-bar > .bot-draft-status {
+  margin: 10px 16px 0;
+  color: var(--graphite-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .quick-chat-meta-row {
   position: relative;
   z-index: 3;

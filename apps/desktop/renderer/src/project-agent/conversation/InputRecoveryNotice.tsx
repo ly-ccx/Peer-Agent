@@ -6,7 +6,7 @@ export function InputRecoveryNotice({ state, session, i18n, pending = false }: {
   readonly session: ProjectInputRecovery; readonly i18n: I18nRuntime; readonly pending?: boolean;
 }) {
   return <>
-    {!state.ready && !state.error ? <p role="status">{i18n.t('projectAgent.chat.draftLoading')}</p> : null}
+    {!state.ready && !state.error ? <p className="bot-draft-status" role="status"><span className="bot-thinking-status-label">{i18n.t('projectAgent.chat.draftLoading')}</span></p> : null}
     {state.error ? <div role="alert" className="bot-thread-error">
       <p>{i18n.t(state.error === 'DRAFT_CONFLICT' ? 'projectAgent.chat.draftConflict' : 'projectAgent.chat.draftSaveFailed')}</p>
       <button type="button" onClick={() => void (state.ready ? session.flush() : session.load())}>{i18n.t('projectAgent.history.retry')}</button>

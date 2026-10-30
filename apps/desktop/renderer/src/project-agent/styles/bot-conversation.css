@@ -833,6 +833,20 @@
   align-self: center;
 }
 
+.bot-convo > .bot-draft-status {
+  align-self: center;
+  box-sizing: border-box;
+  width: var(--bot-column-width);
+  margin: 8px var(--bot-column-gutter) 0;
+  color: var(--graphite-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bot-convo > .bot-draft-status + .bot-composer {
+  margin-top: 6px;
+}
+
 .bot-composer {
   display: flex;
   flex-direction: column;

@@ -11,6 +11,8 @@
 .bot-reply-related-turns > button:hover { color: var(--graphite-base); }
 .bot-reply-related-turns > button:focus-visible { outline: 1px solid var(--azure-seal); outline-offset: 2px; }
 .bot-continuous-reply > .bot-reply-context { gap: 8px; flex-wrap: wrap; }
+.bot-continuous-reply > .bot-reply-context[data-quotable="true"] { flex-wrap: nowrap; }
+.bot-continuous-reply > .bot-reply-context[data-quotable="true"] > button:last-child { margin-inline-start: auto; min-width: 0; }
 .bot-reply-context > button:disabled { cursor: default; pointer-events: none; }
 /* Rotate the glyph inside its stable SVG viewport; its layout edge stays on the text column. */
 .bot-reply-loading-icon > * { animation: motion-spin 1s linear infinite; transform-box: view-box; transform-origin: center; }

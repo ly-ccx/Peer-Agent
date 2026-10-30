@@ -217,6 +217,7 @@ export type TranslationKey =
   | 'projectAgent.list.backToBots'
   | 'projectAgent.list.close'
   | 'projectAgent.chat.empty'
+  | 'projectAgent.chat.loading'
   | 'projectAgent.chat.loadFailed'
   | 'projectAgent.chat.cardsUnavailable'
   | 'projectAgent.chat.recoveryDiagnostics'
@@ -1876,6 +1877,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.backToBots': '返回机器人',
     'projectAgent.list.close': '关闭',
     'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
+    'projectAgent.chat.loading': '正在读取对话',
     'projectAgent.chat.loadFailed': '对话没有加载出来',
     'projectAgent.chat.cardsUnavailable': '任务状态暂不可用，已有对话仍可阅读。',
     'projectAgent.chat.recoveryDiagnostics': '诊断详情',
@@ -3300,6 +3302,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.backToBots': 'Back to bots',
     'projectAgent.list.close': 'Close',
     'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
+    'projectAgent.chat.loading': 'Reading the conversation',
     'projectAgent.chat.loadFailed': 'The conversation did not load',
     'projectAgent.chat.cardsUnavailable': 'Task status is unavailable. Your conversation is still readable.',
     'projectAgent.chat.recoveryDiagnostics': 'Diagnostic details',

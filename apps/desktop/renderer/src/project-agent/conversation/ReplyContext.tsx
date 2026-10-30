@@ -31,21 +31,22 @@ export function ReplyContext({ i18n, onOpenDetails, onQuote, activity, statusLab
   const ref = useReplyFooterBounds();
   const label = statusLabel === undefined ? replyActivityLabel(activity, i18n) : statusLabel;
   const thinking = busy || statusLabel === undefined && Boolean(label) && activity?.phase !== 'awaiting_permission';
-  return <div ref={ref} className="bot-reply-context" data-running={Boolean(label)} data-quotable={Boolean(onQuote)}>
+  const live = Boolean(label) || replying;
+  return <div ref={ref} className="bot-reply-context" data-running={live} data-quotable={Boolean(onQuote) && !live}>
     <button type="button" disabled={!onOpenDetails} aria-label={label ? `${label} · ${i18n.t('projectAgent.chat.context.details')}` : i18n.t('projectAgent.chat.context.details')} title={i18n.t('projectAgent.chat.context.details')} onClick={event => {
       event.currentTarget.focus({ preventScroll: true });
       onOpenDetails?.();
     }}>{replying ? <PeerIcon name="ellipsis" size={20} className={`bot-reply-typing-dots${busy ? ' is-active' : ''}`} /> : thinking && avatar && workspaceId && botLabel
       ? <BotAvatar avatar={avatar} label={botLabel} workspaceId={workspaceId} mood="thinking" animate />
-      : <PeerIcon name={label ? busy ? 'loader' : 'info' : 'panelRight'} size={14} className={busy ? 'bot-reply-loading-icon' : undefined} />}{label
+      : label ? <PeerIcon name={busy ? 'loader' : 'info'} size={14} className={busy ? 'bot-reply-loading-icon' : undefined} /> : null}{label
       ? <span className={thinking && !replying ? 'bot-context-running bot-thinking-status-label' : 'bot-context-running'} role="status">{label}</span>
-      : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
-    {onRefresh ? <button type="button" onClick={onRefresh}>{i18n.t('projectAgent.chat.reply.refresh')}</button> : null}
-    {onQuote ? <button type="button" onClick={event => {
+      : replying ? null : <span>{i18n.t('projectAgent.chat.context.details')}</span>}</button>
+    {onRefresh && !live ? <button type="button" onClick={onRefresh}>{i18n.t('projectAgent.chat.reply.refresh')}</button> : null}
+    {onQuote && !live ? <button type="button" onClick={event => {
       onQuote();
       window.getSelection()?.removeAllRanges();
       event.currentTarget.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea')?.focus({ preventScroll: true });
-    }}><PeerIcon name="back" size={14} />{i18n.t('projectAgent.chat.quote')}</button> : null}
+    }}><span>{i18n.t('projectAgent.chat.quote')}</span></button> : null}
   </div>;
 }
 
