@@ -69,7 +69,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
-  const scene = page.locator('.resource-conversation-view[data-active="true"] .bot-inline-scene');
+  const scene = page.locator('.resource-workspace.workbench-panel--open:not([inert]) .resource-conversation-view[data-active="true"] .bot-inline-scene');
   await openTaskScene(page, scene);
   // Process viewing deliberately has no composer or inherited access control.
   // Verify inheritance through its real host facts, and the view through its DOM.

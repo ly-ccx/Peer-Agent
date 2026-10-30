@@ -129,7 +129,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await page.keyboard.press('Enter'); assert.equal(await information.getAttribute('open'), null);
   await information.locator(':scope > summary').click();
   await detail.locator('.bot-task-scene').click();
-  const nestedScene = page.locator('.resource-conversation-view[data-active="true"] .bot-inline-scene');
+  const nestedScene = page.locator('.resource-workspace.workbench-panel--open:not([inert]) .resource-conversation-view[data-active="true"] .bot-inline-scene');
   await nestedScene.waitFor();
   const sceneIdentity = await nestedScene.elementHandle();
   assert.equal(await nestedScene.getAttribute('role'), null, 'the task scene is part of the nonmodal reading area');
@@ -137,7 +137,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     'child conversation is in the independent fourth pane, outside Bot settings');
   await nestedScene.locator('.bot-inline-scene-heading').getByRole('button', { name: '关闭', exact: true }).click();
   await nestedScene.waitFor({ state: 'detached' });
-  assert.equal(await sceneIdentity.evaluate(node => node.isConnected && node.closest('.resource-conversation-view').inert), true,
+  assert.equal(await sceneIdentity.evaluate(node => node.isConnected && Boolean(node.closest('[inert]'))), true,
     'collapsing the fourth pane preserves its mounted conversation');
   assert.equal(await detail.isVisible(), true, 'closing the fourth pane preserves the task detail');
   await detail.locator('.bot-task-scene').click();
