@@ -77,9 +77,9 @@ export async function openReplyDetails(page, message) {
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
   await page.locator('.bot-composer textarea').focus();
   await page.mouse.move(1, 1);
-  const running = await message.locator('.bot-reply-context').getAttribute('data-running') === 'true';
+  const running = await message.locator('.bot-reply-context').evaluate(node => node.dataset.running === 'true' || node.dataset.quotable === 'true');
   await page.waitForFunction(({ node, running }) => getComputedStyle(node).opacity === (running ? '1' : '0'), { node: await button.elementHandle(), running });
-  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live activity remains visible; completed details wait for hover or focus');
+  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live or quotable replies keep their actions visible; other details wait for hover or focus');
   // A pushed drawer's body can disappear before its width transition finishes.
   // Let the actual finite layout animations finish before choosing a pointer position.
   await page.waitForFunction(() => {
