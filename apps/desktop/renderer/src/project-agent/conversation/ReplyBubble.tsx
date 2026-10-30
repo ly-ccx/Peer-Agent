@@ -50,7 +50,8 @@ export function ReplyBubble({
       </div>
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />
-      <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} />
+      <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails}
+        onQuote={message.content.trim() ? () => onQuote(message.content) : undefined} />
     </article>
   );
 }

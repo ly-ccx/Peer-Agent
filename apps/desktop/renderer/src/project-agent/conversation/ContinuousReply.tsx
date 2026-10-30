@@ -41,6 +41,7 @@ export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, hig
     </div>
     <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
     {message?.kind === 'agent_reply' ? <BotSelectionQuote root={body} label={i18n.t('projectAgent.chat.quote')} onQuote={excerpt => onQuote(message.id, excerpt)} /> : null}
-    <ReplyPresence reply={reply} i18n={i18n} onReload={onReload} onOpenDetails={openDetails} />
+    <ReplyPresence reply={reply} i18n={i18n} onReload={onReload} onOpenDetails={openDetails}
+      onQuote={message?.kind === 'agent_reply' && message.content.trim() ? () => onQuote(message.id, message.content) : undefined} />
   </article>;
 }

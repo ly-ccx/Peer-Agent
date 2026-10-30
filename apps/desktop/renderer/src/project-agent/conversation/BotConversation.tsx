@@ -1,5 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
+import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel, type InputDraftValue } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { BotInspect } from '../drawer/agentProcess';
@@ -8,16 +8,12 @@ import { replyRowContains, replyRowMood, replyRowRunning } from '../state/botRep
 import { quoteRefsFor } from '../state/botConversationState';
 import { replyDetailsRow } from '../state/botActivityState';
 import { useReplyDetailsRow } from '../state/useReplyDetailsRow';
-import { replyAnchorsForMessages } from '../state/replyReferenceState';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
-import { BotModelControls } from '../BotModelControls';
-import { BotAccessControl } from '../BotAccessControl';
 import type { BotModelsControlState } from '../state/useBotModels';
 import { DelegatedWork } from './DelegatedWork';
 import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
-import { BotComposer } from './BotComposer';
-import { InputRecoveryNotice } from './InputRecoveryNotice';
+import { BotConversationComposer } from './BotConversationComposer';
 import { BotMessageList } from './BotMessageList';
 import { BotRecoveryControl } from './BotRecoveryControl';
 import { botAvatarDisplayColor } from '../BotAvatar';
@@ -88,12 +84,7 @@ export function BotConversation({
   useEffect(() => {
     if (focusMessageId) { setHighlightedId(focusMessageId); setHighlightRequestId(value => value + 1); }
   }, [focusMessageId, focusRequestId]);
-  const quote = conversation.recovery.state.draft.quote;
-  const setQuote = (quote: typeof conversation.recovery.state.draft.quote) => conversation.recovery.session.edit({ quote });
-  const quotedMessage = quote ? conversation.messages.find(message => message.id === quote.messageId) : undefined;
-  const quoteSource = quotedMessage ? replyAnchorsForMessages([quotedMessage], {
-    user: i18n.t('projectAgent.chat.you'), bot: label,
-  }).get(quotedMessage.id)?.author : null;
+  const setQuote = (quote: InputDraftValue['quote']) => conversation.recovery.session.edit({ quote });
   const context = useMemo(() => taskConversationContext(workspaceId, contextSessionId, conversation.messages, workIndex),
     [workspaceId, contextSessionId, conversation.messages, workIndex]);
   const publishedContext = useRef<string | undefined>(undefined);
@@ -179,7 +170,10 @@ export function BotConversation({
           focusTaskRequest={taskRequest?.draft ? null : taskRequest}
           i18n={i18n}
           onJump={(messageId) => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }}
-          onQuote={(messageId, excerpt) => setQuote({ messageId, text: excerpt })}
+          onQuote={(messageId, excerpt) => {
+            const [sourceId, text] = quoteRefsFor(messageId, excerpt);
+            if (sourceId && text) setQuote({ messageId: sourceId, text });
+          }}
           onRetry={(inputId) => {
             void conversation.retry(inputId);
           }}
@@ -201,39 +195,9 @@ export function BotConversation({
         </summary>
         <DelegatedWork rows={background.rows} botName={label} i18n={i18n} onOpen={onLocateSession} />
       </details> : null}
-      <InputRecoveryNotice state={conversation.recovery.state} session={conversation.recovery.session} i18n={i18n} />
-      <BotComposer
-        draft={conversation.recovery.state.draft}
-        onDraftChange={conversation.recovery.session.edit}
-        ready={conversation.recovery.state.ready}
-        key={`composer:${workspaceId}`}
-        i18n={i18n}
-        botName={label}
-        resourceRecipientConversationId={profile.agentConversationId}
-        permissionControls={onSavingChange => <BotAccessControl key={workspaceId} workspaceId={workspaceId} i18n={i18n} onSavingChange={onSavingChange} />}
-        modelUpdating={modelControls.busy}
-        draftRequest={taskRequest?.draft ? { id: taskRequest.id, text: taskRequest.draft } : null}
-        onDraftPrepared={id => {
-          if (taskRequest?.id === id && taskRequest.messageId && taskRequest.taskTitle) {
-            setQuote({ messageId: taskRequest.messageId, text: taskRequest.taskTitle });
-          }
-        }}
-        modelControls={<div className="bot-model-toolbar" aria-busy={!modelControls.loaded && modelControls.reading}><BotModelControls role="project_agent" compact
-          policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
-          activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
-          feedback={modelControls} i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
-        quote={quote?.text ?? ''}
-        quoteSource={quoteSource}
-        onQuoteLocate={quote ? () => { setHighlightedId(quote.messageId); setHighlightRequestId(value => value + 1); } : undefined}
-        generating={conversation.generating}
-        stopping={conversation.stopping}
-        onStop={() => void conversation.stop()}
-        onQuoteRemove={() => setQuote(null)}
-        onSend={() => {
-          const refs = quote ? quoteRefsFor(quote.messageId, quote.text) : [];
-          void conversation.send(undefined, refs);
-        }}
-      />
+      <BotConversationComposer key={`composer:${workspaceId}`} workspaceId={workspaceId}
+        conversation={conversation} profile={profile} modelControls={modelControls} label={label} i18n={i18n} taskRequest={taskRequest}
+        onJump={messageId => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }} />
     </div>
     </BotInputContext.Provider>
   );

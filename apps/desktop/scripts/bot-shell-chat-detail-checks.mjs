@@ -49,9 +49,9 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
         && Number.isFinite(animation.effect?.getComputedTiming().endTime)
         && animation.effect?.target?.checkVisibility()).length), count => count === 0, 5000);
     await composer.focus(); await page.mouse.move(1, 1);
-    const button = firstReply.locator('.bot-reply-context > button');
-    await page.waitForFunction(node => getComputedStyle(node).opacity === '0', await button.elementHandle());
-    assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), '0');
+    const button = firstReply.getByRole('button', { name: '回复详情', exact: true });
+    await page.waitForFunction(node => getComputedStyle(node).opacity === '1', await button.elementHandle());
+    assert.equal(await firstReply.getByRole('button', { name: '引用', exact: true }).isVisible(), true);
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `reply-entry-idle-${theme}.png`) });
     await firstReply.evaluate(async node => {
       const animations = node.closest('.bot-shell').getAnimations({ subtree: true }).filter(animation =>
@@ -81,7 +81,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     const afterCapture = await firstReply.evaluate(node => ({ hovered: node.matches(':hover'),
       opacity: getComputedStyle(node.querySelector('.bot-reply-context > button')).opacity,
       bounds: node.getBoundingClientRect().toJSON(), top: node.closest('.bot-thread').scrollTop }));
-    entryChecks.push({ theme, hiddenUntilHover: true, pointer, beforeCapture, afterCapture, capture });
+    entryChecks.push({ theme, visibleAtRest: true, pointer, beforeCapture, afterCapture, capture });
     assert.equal(afterCapture.hovered, true, 'real pointer remains over the reply during capture');
     assert.equal(afterCapture.opacity, '1', `details remain visible in captured hover state: ${JSON.stringify(entryChecks.at(-1))}`);
     assert.deepEqual(afterCapture.bounds, beforeCapture.bounds, 'hover capture preserves reply geometry');
@@ -215,7 +215,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
-  const quoteAction = page.getByRole('button', { name: '引用', exact: true });
+  const quoteAction = page.locator('.bot-selection-quote');
   await quoteAction.waitFor({ state: 'visible' });
   await until(() => quoteAction.getAttribute('data-surface-settled'), value => value === 'true');
   await page.keyboard.press('Tab');

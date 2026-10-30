@@ -2,6 +2,22 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.30 - 2026-10-30
+
+### 修复与优化
+
+- 网页、文件、变更与子 Agent 会话进入独立第四栏，机器人资料和设置独立开关。
+- Bot 回复提供直接引用入口并保留原草稿；隔离逐键草稿更新，移除同步高度测量。
+- 修复暂停期空任务 ID 的 SQLite 异常及恢复分段后未释放的试运行标记；下载进度圈保持正圆。
+- 更新双语 README、使用说明与网站更新日志。
+
+### Improvements (English)
+
+- Separate the fourth pane for web pages, files, diffs and child conversations from Bot settings.
+- Add direct reply quoting with draft preservation and isolate draft updates from conversation rendering.
+- Fix missing-ID SQLite failures during cooldown and stuck recovery admission after yielded progress; keep the download ring circular.
+- Update bilingual READMEs, usage documentation and the website changelog.
+
 ## 0.1.0-rc.29 - 2026-10-29
 
 ### 修复与优化

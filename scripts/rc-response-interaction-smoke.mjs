@@ -502,7 +502,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.waitForTimeout(180);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'conversation-complete.png') });
   assert.equal(await completed.locator('.bot-turn-process').count(), 0);
-  assert.equal(await completed.locator('.bot-reply-context > button').innerText(), '回复详情');
+  assert.equal(await completed.getByRole('button', { name: '回复详情', exact: true }).innerText(), '回复详情');
+  assert.equal(await completed.getByRole('button', { name: '引用', exact: true }).isVisible(), true);
   const finalBubble = await completed.locator('.bot-continuous-paragraphs > .bot-reply-body').last().evaluate(node => ({ background: getComputedStyle(node).backgroundColor, padding: getComputedStyle(node).padding, text: node.innerText }));
   assert.notEqual(finalBubble.background, 'rgba(0, 0, 0, 0)');
   assert.match(finalBubble.text, /界面展示结果，本地负责执行能力/);

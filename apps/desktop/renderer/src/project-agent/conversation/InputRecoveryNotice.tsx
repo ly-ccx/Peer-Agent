@@ -2,7 +2,8 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { InputRecoveryView, ProjectInputRecovery } from '@peer-agent/runtime-core';
 /** Recovery feedback is separate from permission, execution and result facts. */
 export function InputRecoveryNotice({ state, session, i18n, pending = false }: {
-  readonly state: InputRecoveryView; readonly session: ProjectInputRecovery; readonly i18n: I18nRuntime; readonly pending?: boolean;
+  readonly state: Pick<InputRecoveryView, 'ready' | 'error' | 'pending' | 'sending'>;
+  readonly session: ProjectInputRecovery; readonly i18n: I18nRuntime; readonly pending?: boolean;
 }) {
   return <>
     {!state.ready && !state.error ? <p role="status">{i18n.t('projectAgent.chat.draftLoading')}</p> : null}

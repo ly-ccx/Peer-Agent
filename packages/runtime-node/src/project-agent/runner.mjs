@@ -350,7 +350,12 @@ export function createProjectAgentRunner({
         message.meta = { workId: job.workId, diagnosticTiming: diagnosticTiming('yielded') };
         remember(message);
         activity.finish('done');
-        if (decision.end !== 'no_progress') { setStatus('idle'); return 'yielded'; }
+        if (decision.end !== 'no_progress') {
+          // A persisted, progressing slice proves the request path recovered.
+          // Keeping its half-open trial would reject the next continuation forever.
+          circuitBreaker?.success();
+          setStatus('idle'); return 'yielded';
+        }
         outcome.failed = true; outcome.reason = 'agent_no_progress'; job.explicitRetryOnly = true;
       }
       const learned = await takePendingLearned();
@@ -442,6 +447,7 @@ export function createProjectAgentRunner({
       if (!outcome.silentWait && (job.kind === 'user' || job.kind === 'wake')) scheduleCurator(job);
       return 'ok';
     } finally {
+      circuitBreaker?.abandonTrial();
       endExecution();
       if (abortController === controller) { abortController = null; activeWorkId = null; activeContinuation = false; }
       turnKind = null; acceptingStop = false;

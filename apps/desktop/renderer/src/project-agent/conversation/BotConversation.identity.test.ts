@@ -9,7 +9,7 @@ import ts from 'typescript';
 test('conversation siblings keep distinct identities while loading, recovering and changing bots', () => {
   const conversation = {
     status: 'loading', viewRows: [], rows: [], messages: [],
-    recovery: { state: { draft: { text: '', attachments: [], quote: null } }, session: { edit() {} } },
+    recovery: { state: { ready: true, pending: [], received: [], sending: [] }, session: { edit() {} } },
   };
   const components = new Map<string, () => null>();
   const component = (name: string) => {
@@ -51,7 +51,7 @@ test('conversation siblings keep distinct identities while loading, recovering a
     assert.equal(new Set(keys).size, keys.length, 'React cannot reconcile siblings with duplicate keys');
     return {
       thread: children.find(child => child.type === component('BotMessageList'))?.key,
-      composer: children.find(child => child.type === component('BotComposer'))?.key,
+      composer: children.find(child => child.type === component('BotConversationComposer'))?.key,
     };
   };
 
