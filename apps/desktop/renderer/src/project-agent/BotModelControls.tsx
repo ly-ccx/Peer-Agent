@@ -61,12 +61,14 @@ function botPanelGroups(
   ];
 }
 
-export function BotModelControls({ role, policy, models, view, busy, compact = false, activeSelection, feedback, i18n, onChange }: {
+export function BotModelControls({ role, policy, models, view, busy, replying = false, compact = false, activeSelection, feedback, i18n, onChange }: {
   readonly role: ModelRole;
   readonly policy?: ProjectModelPolicy | null;
   readonly models: readonly ModelRoutingMenuOption[];
   readonly view?: BotRoleModelView;
   readonly busy: boolean;
+  /** The current reply is still running, so this control cannot open or change the model. */
+  readonly replying?: boolean;
   readonly compact?: boolean;
   readonly activeSelection?: ProjectAgentActivity['modelSelection'];
   readonly feedback?: BotModelsControlState;
@@ -117,9 +119,10 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
       : feedback?.loaded && !feedback.models.length ? 'forms.noModels' : null;
   const runningModel = activeSelection
     ? models.find(item => item.id === activeSelection.modelProviderId)?.label ?? i18n.t('projectAgent.model.unavailable') : null;
+  const replyLock = replying ? i18n.t('projectAgent.model.replyLock') : null;
   const modelTitle = [label, source, model && !model.reasoningEffortLevels?.length ? i18n.t('projectAgent.model.noEffort') : null,
     runningModel ? `${i18n.t('projectAgent.model.runningReply')}: ${runningModel}` : null,
-    i18n.t('projectAgent.model.nextReply')].filter(Boolean).join(' · ');
+    replyLock ?? i18n.t('projectAgent.model.nextReply')].filter(Boolean).join(' · ');
   return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={updating}>
     <div className="bot-model-control-row">
       <AnchoredModelSelectionMenu
@@ -129,8 +132,8 @@ export function BotModelControls({ role, policy, models, view, busy, compact = f
         effort={effortLevel}
         fastMode={fastMode}
         isZh={isZh}
-        disabled={!feedback && (busy || !view)}
-        selectionDisabled={busy || !view}
+        disabled={replying || (!feedback && (busy || !view))}
+        selectionDisabled={replying || busy || !view}
         busy={updating}
         statusLabel={feedbackKey ? i18n.t(feedbackKey) : updating ? i18n.t(saving ? 'forms.saving' : 'forms.loading') : undefined}
         feedback={feedback && (pendingRole || feedback.readError || !feedback.loaded || !feedback.models.length)

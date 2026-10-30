@@ -516,6 +516,7 @@ export type TranslationKey =
   | 'projectAgent.model.defaults'
   | 'projectAgent.model.botOnly'
   | 'projectAgent.model.nextReply'
+  | 'projectAgent.model.replyLock'
   | 'projectAgent.model.runningReply'
   | 'projectAgent.model.unavailable'
   | 'projectAgent.model.select'
@@ -2175,6 +2176,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.defaults': '默认与档位',
     'projectAgent.model.botOnly': '本机器人',
     'projectAgent.model.nextReply': '修改用于后续回复或新任务',
+    'projectAgent.model.replyLock': '回复进行中，暂不能切换模型',
     'projectAgent.model.runningReply': '本轮正在使用的模型',
     'projectAgent.model.unavailable': '选择模型',
     'projectAgent.model.select': '选择机器人模型',
@@ -3599,6 +3601,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.defaults': 'Defaults and tiers',
     'projectAgent.model.botOnly': 'This bot',
     'projectAgent.model.nextReply': 'Applies to future replies or new tasks',
+    'projectAgent.model.replyLock': 'Can\'t switch models while a reply is in progress',
     'projectAgent.model.runningReply': 'Model used by the current reply',
     'projectAgent.model.unavailable': 'Choose model',
     'projectAgent.model.select': 'Choose bot model',
