@@ -1245,3 +1245,9 @@ html[data-vibrancy='true'] .bot-drawer-dock.is-open {
   border-color: var(--chrome-hairline);
   box-shadow: var(--glass-edge-highlight), var(--shadow-card);
 }
+
+/* A zero CSS width still reserves the border box's minimum width. Fully
+ * collapse the retained dock so resources share the normal panel gap. */
+.bot-drawer-dock-frame > .bot-drawer-dock:not(.is-open) {
+  border-inline-width: 0;
+}
