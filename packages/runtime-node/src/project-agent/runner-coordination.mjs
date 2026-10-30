@@ -230,6 +230,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     previousOutcome(job) { return readProtectedWork(readWork(job.workId))?.outcome; },
     blockReservation(job) {
+      // Fresh input has no work identity until admission; it owns no retry reservation.
+      if (!job.workId) return;
       const work = readWork(job.workId);
       if (!work || work.state !== 'retry_wait') return;
       store.saveWork({ ...work, state: 'blocked_system', recovery: work.recovery ? { ...work.recovery, retryAt: undefined, reservationId: undefined } : undefined,
