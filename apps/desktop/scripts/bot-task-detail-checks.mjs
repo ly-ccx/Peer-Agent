@@ -129,12 +129,25 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await page.keyboard.press('Enter'); assert.equal(await information.getAttribute('open'), null);
   await information.locator(':scope > summary').click();
   await detail.locator('.bot-task-scene').click();
-  const nestedScene = page.locator('.bot-inline-scene');
+  const nestedScene = page.locator('.resource-conversation-view[data-active="true"] .bot-inline-scene');
   await nestedScene.waitFor();
+  const sceneIdentity = await nestedScene.elementHandle();
   assert.equal(await nestedScene.getAttribute('role'), null, 'the task scene is part of the nonmodal reading area');
-  await nestedScene.locator('.bot-inline-scene-heading').getByRole('button', { name: '返回详情', exact: true }).click();
+  assert.equal(await nestedScene.evaluate(node => Boolean(node.closest('.resource-workspace')) && !node.closest('.bot-drawer-dock')), true,
+    'child conversation is in the independent fourth pane, outside Bot settings');
+  await nestedScene.locator('.bot-inline-scene-heading').getByRole('button', { name: '关闭', exact: true }).click();
   await nestedScene.waitFor({ state: 'detached' });
-  assert.equal(await detail.isVisible(), true, 'returning from the inline scene preserves the task detail');
+  assert.equal(await sceneIdentity.evaluate(node => node.isConnected && node.closest('.resource-conversation-view').inert), true,
+    'collapsing the fourth pane preserves its mounted conversation');
+  assert.equal(await detail.isVisible(), true, 'closing the fourth pane preserves the task detail');
+  await detail.locator('.bot-task-scene').click();
+  await nestedScene.waitFor();
+  assert.equal(await nestedScene.evaluate((node, previous) => node === previous, sceneIdentity), true);
+  assert.equal(await page.locator('.resource-tabs').getByRole('tab', { name: task.title, exact: true }).count(), 1,
+    'opening the same child reuses its tab');
+  await nestedScene.locator('.bot-inline-scene-heading button').click();
+  await nestedScene.waitFor({ state: 'detached' });
+  await sceneIdentity.dispose();
   await information.locator(':scope > summary').click();
   task.title = '逐条核对本项目跨月份的历史 AI 任务、交付结果与验证依据，并整理可追溯的完成情况';
   change('waiting_user'); await until(() => detail.locator('h2').innerText(), title => title === task.title);
