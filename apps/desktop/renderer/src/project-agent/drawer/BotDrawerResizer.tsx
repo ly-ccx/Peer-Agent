@@ -94,6 +94,7 @@ export function BotDrawerResizer({ width, isZh, onResize, enabled = true }: BotD
     <div
       ref={elRef}
       className="bot-drawer-resizer"
+      hidden={!enabled}
       role="separator"
       aria-orientation="vertical"
       aria-label={isZh ? '拖拽调整设置区宽度' : 'Resize settings panel'}
