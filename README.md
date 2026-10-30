@@ -11,7 +11,7 @@ Peer is a local work delegation system for people moving code, documents and res
 
 You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, currently beta channel **`0.1.0-rc.29`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`), which uses the classic interface. RC29 includes the recent durable-supervision and withdrawal fixes. Release and npm channel facts were checked on 2026-10-29.
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.30`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
 
 ![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 
@@ -47,7 +47,7 @@ RC29 strengthens durable supervision and withdrawal settlement. Withdrawing a de
 | Engineering changes | Update a feature across the project while keeping compatibility | Related changes, verification findings and remaining gaps |
 | Research and documentation | Compare approaches and write a recommendation | Conclusions, source references and open questions |
 
-In the 0.1 preview, the Workspace beside the conversation opens web pages, documents, code, directories and diffs. Reading a result, authorizing a write, accepting work and integrating Git changes are distinct actions.
+In the 0.1 preview, the Workspace beside the conversation opens web pages, documents, code, directories and diffs. From RC30, an independent fourth pane also holds read-only child Agent conversations, separate from Bot settings. Use Quote under a saved Bot reply to follow up on that message while keeping your draft. Reading a result, authorizing a write, accepting work and integrating Git changes are distinct actions.
 
 <a id="-quick-start"></a>
 
@@ -55,7 +55,7 @@ In the 0.1 preview, the Workspace beside the conversation opens web pages, docum
 
 ### Project Bot Desktop preview
 
-1. Open the [0.1.0-rc.29 release](https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.29), choose an available platform asset and read its upgrade notes.
+1. Open the [preview releases](https://github.com/ly-ccx/Peer-Agent/releases), choose an available platform asset and read its upgrade notes.
 2. Add a model service in Settings and select a model suited to the work.
 3. Bind a folder or create a managed project Bot.
 4. Give it a goal and boundaries. Start with a read-only project question if you want to understand the folder first.
@@ -197,7 +197,7 @@ peer_agent/
 | Stage | What it means |
 | --- | --- |
 | Stable 0.0.18 | Classic Desktop and terminal workflows on the shared local runtime |
-| Preview 0.1.0-rc.29 | Project Bots, delegated work, memory, goals and the side-by-side workspace |
+| Preview 0.1 | Project Bots, delegated work, memory, goals and the side-by-side workspace |
 | Development line | Changes merged after the latest preview; not an installer release claim |
 
 Current work focuses on dependable personal project delegation: clear ownership, bounded execution, recoverable interruptions and evidence-backed delivery. Future collaboration or automation ideas are not a promise that those capabilities are available in the stable release.

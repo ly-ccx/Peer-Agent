@@ -87,7 +87,7 @@ export const copy = {
   'copy': ['Copy', '复制'],
   'copied': ['Copied', '已复制'],
   'copy.failed': ['Copy unavailable. Select the command to copy it.', '无法自动复制，请选中命令复制。'],
-  'release.status': ['Release facts checked on 2026-10-29: stable 0.0.18; preview 0.1.0-rc.29, which includes the recent supervision and withdrawal fixes.', '版本事实核对于 2026-10-29：正式版 0.0.18，预览版 0.1.0-rc.29，已包含近期监督与撤回收口补正。'],
+  'release.status': ['Stable 0.0.18 uses the classic interface. Follow published releases for the current 0.1 preview, platform assets and compatibility notes.', '正式版 0.0.18 使用经典界面。当前 0.1 预览版、平台安装包与兼容性说明以已发布版本为准。'],
   'release.all': ['All releases and current assets', '查看全部发布与当前安装包'],
   'footer.copy': ['Peer · open source under MIT', 'Peer · MIT 完全开源'],
   'footer.notes': ['Release notes', '更新日志'],
