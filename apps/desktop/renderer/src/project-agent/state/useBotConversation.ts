@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import { useInputRecovery } from './useInputRecovery';
+import { useInputRecoverySession, useInputRecoveryState } from './useInputRecovery';
+import { conversationInputKeys } from './inputRecoveryProjection';
 import { projectBotRecoveryStatus, projectInputWasReceived, type ProjectAgentSubmitInputResult } from '@peer-agent/protocol';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity, activityFromConversationSnapshot } from './botActivityState';
@@ -66,7 +67,8 @@ function familiarizeMessage(offer: FamiliarizeOffer, createdAt: string): BotChat
 export function useBotConversation(workspaceId: string) {
   const [messages, setMessages] = useState<readonly BotChatMessage[]>([]);
   const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
-  const recovery = useInputRecovery(workspaceId);
+  const session = useInputRecoverySession(workspaceId);
+  const recovery = { session, state: useInputRecoveryState(session, conversationInputKeys) };
   const pending = useMemo<readonly PendingBotInput[]>(() => [...recovery.state.pending.map(item => ({ ...item, state: recovery.state.sending.includes(item.inputId) ? 'sending' as const : 'unknown' as const })), ...recovery.state.received.map(item => ({ ...item, state: 'received' as const }))], [recovery.state.pending, recovery.state.received, recovery.state.sending]);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
