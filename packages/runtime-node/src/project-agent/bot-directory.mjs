@@ -363,6 +363,11 @@ export function createBotDirectory({
 
   return {
     list,
+    /** Identity-only lookup for local intent; never project history or task state. */
+    hasActiveBot(workspaceId) {
+      const profile = profiles.read(workspaceId);
+      return Boolean(profile && profile.status !== 'archived');
+    },
     attention: workspaceId => {
       if (workspaceId) {
         const profile = profiles.read(workspaceId);

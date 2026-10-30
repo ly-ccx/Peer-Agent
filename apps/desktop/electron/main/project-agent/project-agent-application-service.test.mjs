@@ -905,10 +905,11 @@ test('desktop forwards uploads on the existing input queue seam, including attac
 });
 
 
-test('draft persistence is gated by the existing bot directory and never submits or broadcasts execution', async () => {
+test('draft persistence checks active identity without projecting history, tasks or execution', async () => {
   const calls = [];
   const service = createProjectAgentApplicationService({ enabled: () => true,
-    directory: { list: () => [], get: id => ({ ok: id === 'local' }) }, schedule: () => 1,
+    directory: { list: () => [], hasActiveBot: id => id === 'local',
+      get() { assert.fail('draft keystrokes must not project the bot overview'); } }, schedule: () => 1,
     inputDrafts: { read: request => { calls.push(['read', request]); return { ok: true, snapshot: { revision: 0 } }; },
       write: request => { calls.push(['write', request]); return { ok: true, revision: 1 }; } },
     inputQueue: { submitInput() { assert.fail('draft writes never submit'); } },
@@ -917,6 +918,7 @@ test('draft persistence is gated by the existing bot directory and never submits
   for (const surface of ['desktop', 'quick_chat', 'tui']) assert.equal(service.readInputDraft({ workspaceId: 'local', surface }).ok, true);
   assert.equal(service.writeInputDraft({ workspaceId: 'local', surface: 'desktop', revision: 0 }).ok, true);
   assert.equal(service.readInputDraft({ workspaceId: 'foreign', surface: 'desktop' }).ok, false);
+  assert.equal(service.writeInputDraft({ workspaceId: 'foreign', surface: 'desktop' }).ok, false);
   assert.equal(service.writeInputDraft({ workspaceId: 'local', surface: 'remote' }).ok, false);
   assert.equal(calls.length, 4);
 });
