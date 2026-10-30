@@ -37,8 +37,16 @@ test('fresh inputs during a SQLite-backed circuit cooldown neither execute nor e
       assert.deepEqual(env.breaker.state(), before);
     }
     assert.equal(requests, 0);
-    assert.deepEqual(env.store.readSnapshot().works, {});
+    const queued = Object.values(env.store.readSnapshot().works);
+    assert.deepEqual(queued.map(work => work.anchorInputIds), [['why-stopped'], ['question']]);
+    assert.ok(queued.every(work => work.state === 'runnable' && !work.attemptId));
     assert.equal(env.messages.some(row => row.id?.startsWith('failed-')), false);
+    env.advance(8 * 60_000);
+    await env.runner.kick();
+    assert.equal(requests, 2);
+    assert.ok(Object.values(env.store.readSnapshot().works).every(work => work.state === 'delivered'));
+    await env.runner.kick();
+    assert.equal(requests, 2, 'received input must not execute twice');
   } finally { env.close(); }
 });
 

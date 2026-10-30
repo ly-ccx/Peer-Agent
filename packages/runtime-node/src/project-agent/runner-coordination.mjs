@@ -51,6 +51,28 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         content: '结果有更新，我再核对一下。', meta: { workId: work.workId } });
     },
   });
+  function start(job) {
+    const inputs = (job.userInputs || []).map(input => input.inputId);
+    const events = job.events || [];
+    const missing = events.filter(event => !readSnapshot().events[event.eventId]);
+    if (missing.length) store.transfer(missing);
+    // A fresh batch must not replace an unfinished slice's protected checkpoint.
+    const linked = Object.values(readSnapshot().works).find(work => !['runnable', 'retry_wait', 'coalesced', 'paused', 'cancelled'].includes(work.state)
+      && events.some(event => work.sessionIds?.includes(event.sessionId)));
+    job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
+    dispatchRecovery.reconcile(job.workId);
+    const existing = readWork(job.workId);
+    if (existing?.recovery?.dispatchesReconciled) job.continuation = true;
+    const checkpointRef = existing?.checkpointRef || store.checkpoint(job.workId, { job: { ...job, continuation: true }, outcome: { rounds: [] } });
+    const recovery = job.manualRecovery ? manualRecovery(existing?.recovery, now())
+      : existing?.recovery ? { ...existing.recovery, retryAt: undefined, reservationId: undefined,
+        autoAttempts: existing.recovery.autoAttempts + (job.recoveryReservationId ? 1 : 0) } : undefined;
+    store.saveWork({ checkpointRef, schemaVersion: 1, workspaceId, parentConversationId: conversationId,
+      anchorInputIds: inputs, sessionIds: [], waitFor: [], consumedEventIds: [], pendingResultRefs: [], stopScope: 'reply',
+      ...existing, workId: job.workId, attemptId: job.attemptId, pendingEventIds: events.map(event => event.eventId), state: 'runnable', recovery,
+      waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
+  }
+
   function transfer() {
     store.recover();
     const batch = inbox.takeBatch(workspaceId);
@@ -230,8 +252,12 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     previousOutcome(job) { return readProtectedWork(readWork(job.workId))?.outcome; },
     blockReservation(job) {
-      // Fresh input has no work identity until admission; it owns no retry reservation.
-      if (!job.workId) return;
+      // Keep fresh, already received input as runnable intent, without an execution attempt.
+      // Otherwise cooldown rejection removes it from this process's queue permanently.
+      if (!job.workId) {
+        if (job.userInputs?.length) start(job);
+        return;
+      }
       const work = readWork(job.workId);
       if (!work || work.state !== 'retry_wait') return;
       store.saveWork({ ...work, state: 'blocked_system', recovery: work.recovery ? { ...work.recovery, retryAt: undefined, reservationId: undefined } : undefined,
@@ -247,27 +273,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (existing.state === 'coalesced' || !job.manualRecovery && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(existing.state)) return false;
       return true;
     },
-    start(job) {
-      const inputs = (job.userInputs || []).map(input => input.inputId);
-      const events = job.events || [];
-      const missing = events.filter(event => !readSnapshot().events[event.eventId]);
-      if (missing.length) store.transfer(missing);
-      // A fresh batch must not replace an unfinished slice's protected checkpoint.
-      const linked = Object.values(readSnapshot().works).find(work => !['runnable', 'retry_wait', 'coalesced', 'paused', 'cancelled'].includes(work.state)
-        && events.some(event => work.sessionIds?.includes(event.sessionId)));
-      job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
-      dispatchRecovery.reconcile(job.workId);
-      const existing = readWork(job.workId);
-      if (existing?.recovery?.dispatchesReconciled) job.continuation = true;
-      const checkpointRef = existing?.checkpointRef || store.checkpoint(job.workId, { job: { ...job, continuation: true }, outcome: { rounds: [] } });
-      const recovery = job.manualRecovery ? manualRecovery(existing?.recovery, now())
-        : existing?.recovery ? { ...existing.recovery, retryAt: undefined, reservationId: undefined,
-          autoAttempts: existing.recovery.autoAttempts + (job.recoveryReservationId ? 1 : 0) } : undefined;
-      store.saveWork({ checkpointRef, schemaVersion: 1, workspaceId, parentConversationId: conversationId,
-        anchorInputIds: inputs, sessionIds: [], waitFor: [], consumedEventIds: [], pendingResultRefs: [], stopScope: 'reply',
-        ...existing, workId: job.workId, attemptId: job.attemptId, pendingEventIds: events.map(event => event.eventId), state: 'runnable', recovery,
-        waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
-    },
+    start,
     stalls(job, outcome, roster) {
       if (reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] })) return false;
       const previous = readWork(job.workId);
