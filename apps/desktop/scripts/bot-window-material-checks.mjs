@@ -86,9 +86,10 @@ export async function checkBotWindowMaterial({ page, until, report, captureDirec
           return { background: getComputedStyle(canvas).backgroundColor, expected, transparencyReduced,
             resourceHost: canvas !== shell, innerBackground: getComputedStyle(shell).backgroundColor,
             sidebar: getComputedStyle(column).backgroundColor, divider: getComputedStyle(column).borderRightWidth, radius: parseFloat(getComputedStyle(main).borderRadius),
-            gap: m.left - c.right, top: m.top - s.top, fits: shell.scrollWidth <= shell.clientWidth };
+            gap: m.left - c.right, top: m.top - s.top, shellWidth: shell.clientWidth, scrollWidth: shell.scrollWidth,
+            fits: shell.scrollWidth <= shell.clientWidth };
         }, material);
-        assert.ok(actual.fits);
+        assert.ok(actual.fits, JSON.stringify({ width, theme, material, ...actual }));
         if (nativeGlass) {
           assert.equal(actual.background, actual.expected, 'one theme-derived tint covers sidebar and all panel gutters');
           if (actual.resourceHost) assert.equal(actual.innerBackground, 'rgba(0, 0, 0, 0)', 'the inner conversation shell does not apply the resource canvas tint twice');

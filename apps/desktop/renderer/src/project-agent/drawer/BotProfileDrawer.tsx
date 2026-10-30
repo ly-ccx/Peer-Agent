@@ -6,10 +6,9 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, useRef, type RefObject } from 'react';
 import { collectFocusable } from '../../app/hooks/focusScope';
-import { useFocusScope } from '../../app/hooks/useFocusScope';
+import { useBotDrawerFocus } from './useBotDrawerFocus';
 import { Drawer } from '../../app/components/Drawer';
-import { InteractionLayerContext, useInteractionLayer } from '../../app/hooks/useInteractionLayer';
-import { interactionLayers } from '../../app/components/interactionLayers';
+import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
 import { useMotionAllowed } from '../../app/hooks/useMotionAllowed';
 import { watchVisualMotion } from '../../app/state/visualMotion';
 import { clientApi } from '../../clientApi';
@@ -99,6 +98,8 @@ export function BotProfileDrawer({
 }) {
   const detailTitle = inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName;
   const workspace = useBotDetailWorkspace(workspaceId, memory, inspect, detailTitle);
+  const resources = useResourceWorkspace();
+  const independent = !!resources && !inspect;
   const embedded = !!workspace;
   const visible = memory.open && (!embedded || workspace.detailsVisible);
   const motionEnabled = useMotionAllowed();
@@ -114,6 +115,11 @@ export function BotProfileDrawer({
   const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
   useEffect(() => { setClassicScene(null); }, [memory.tab, memory.sessionId, inspect?.replyId, inspect?.evidence?.evidenceRef]);
   const layout = drawerLayout(width);
+  const reserveProfileWidth = resources?.reserveProfileWidth;
+  useEffect(() => {
+    reserveProfileWidth?.(independent && memory.open && layout === 'push' ? (memory.width ?? 414) : 0);
+    return () => reserveProfileWidth?.(0);
+  }, [reserveProfileWidth, independent, memory.open, memory.width, layout]);
   const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(!memory.open ? 'off' : replayEntrance ? 'in' : 'on');
   const bodyRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLElement>(null), paneRef = useRef<HTMLDivElement>(null);
@@ -161,10 +167,7 @@ export function BotProfileDrawer({
     }
     onMemory({ ...memory, open: false });
   };
-  const layer = useInteractionLayer(!embedded && layout === 'push' && memory.open && dockPhase !== 'off', { roots: [bodyRef], trigger: triggerRef, restoreFocus: false, onClose: close });
-  useFocusScope(bodyRef, !embedded && layout === 'push' && memory.open && dockPhase !== 'off', {
-    restore: triggerRef, ownsScope: () => Boolean(layer.current) && interactionLayers.topInteractive() === layer.current,
-  });
+  useBotDrawerFocus(!embedded && (independent || layout === 'push') && memory.open, bodyRef, triggerRef, close);
   const selected = sessions.find((session) => session.sessionId === memory.sessionId) ?? null;
   const reportRead = useTaskReport(workspaceId, memory.sessionId, visible, selected?.status, sessionsAvailable,
     `${selected?.sourceRevision || ''}:${selected?.observationRevision || ''}`);
@@ -177,7 +180,7 @@ export function BotProfileDrawer({
   }, []);
 
   useEffect(() => {
-    if (embedded || layout !== 'push') return undefined;
+    if (embedded || !independent && layout !== 'push') return undefined;
     if (memory.open) {
       if (!motionEnabled) {
         setDockPhase('on');
@@ -199,7 +202,7 @@ export function BotProfileDrawer({
     }
     setDockPhase((current) => (current === 'off' ? 'off' : 'out'));
     return undefined;
-  }, [embedded, layout, memory.open, motionEnabled]);
+  }, [embedded, independent, layout, memory.open, motionEnabled]);
 
   useEffect(() => {
     if (dockPhase !== 'out') return undefined;
@@ -251,7 +254,7 @@ export function BotProfileDrawer({
     };
   }, [memory.open, path, workspaceId]);
 
-  if (!embedded && (layout === 'cover' ? !memory.open : dockPhase === 'off')) return null;
+  if (!embedded && !independent && (layout === 'cover' ? !memory.open : dockPhase === 'off')) return null;
 
   const body = (requestClose = close) => (
     <div className="bot-drawer-body" ref={bodyRef}>
@@ -261,9 +264,11 @@ export function BotProfileDrawer({
           <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
           <button
             type="button"
+            className="ui-button bot-drawer-close"
+            aria-label={i18n.t('projectAgent.drawer.close')}
             onClick={requestClose}
           >
-            {i18n.t('projectAgent.drawer.close')}
+            <PeerIcon name="close" size={16} />
           </button>
         </header> : null}
         {inspect && (inspect.evidence || !inspect.replyId) ? <button className="bot-inspect-back" type="button" onClick={onCloseInspect}>{i18n.t(inspect.replyId ? 'projectAgent.chat.context.back' : 'projectAgent.drawer.inspectBack')}</button> : !inspect ? <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
@@ -309,6 +314,11 @@ export function BotProfileDrawer({
           onOpenHistory={setHistoryId}
           onOpenClassic={(goal) => {
             if (!goal.conversationId) return;
+            if (resources) {
+              resources.openConversation({ workspaceId, workspacePath: path, conversationId: goal.conversationId, title: goal.title,
+                onOpenBot: () => onTaskConversation({}) });
+              return;
+            }
             onOpenConversation?.(goal.conversationId);
             setClassicScene({ conversationId: goal.conversationId, title: goal.title });
           }}
@@ -380,7 +390,7 @@ export function BotProfileDrawer({
     <BotDocumentPreview workspaceId={workspaceId} i18n={i18n}>{body()}</BotDocumentPreview>, workspace.detailTarget,
   ) : null;
 
-  if (layout === 'cover') {
+  if (!independent && layout === 'cover') {
     return (
       <Drawer
         onClose={close}
@@ -394,9 +404,10 @@ export function BotProfileDrawer({
   }
 
   return (
-    <div className={`bot-drawer-dock-frame${dockPhase === 'on' ? ' is-open' : ''}`} inert={!memory.open}>
+    <div className={`bot-drawer-dock-frame${dockPhase === 'on' ? ' is-open' : ''}`} inert={!memory.open}
+      aria-hidden={!memory.open} data-drawer-cover={independent && layout === 'cover'}>
       <BotDrawerResizer
-        enabled={memory.open && dockPhase === 'on'}
+        enabled={memory.open && dockPhase === 'on' && layout === 'push'}
         width={memory.width}
         isZh={isZh}
         onResize={(next) => onMemory(resizeDrawer(memory, next))}
@@ -408,7 +419,7 @@ export function BotProfileDrawer({
         inert={!memory.open}
         aria-hidden={!memory.open}
       >
-        <InteractionLayerContext.Provider value={layer}>{body()}</InteractionLayerContext.Provider>
+        <BotDocumentPreview workspaceId={workspaceId} i18n={i18n}>{body()}</BotDocumentPreview>
       </aside>
     </div>
   );

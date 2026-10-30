@@ -414,7 +414,9 @@ globalThis.rcBotShellService={
   },abort(){}
 };
 ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'scripts/rc-response-interaction-smoke.mjs')).href)});
-globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole});` : ''}
+// The UI deliberately holds each stream phase while capturing multiple layouts.
+// Keep that fixture wait bounded separately from real interaction timing budgets.
+globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole,phaseTimeoutMs:300_000});` : ''}
 const {withImagePermissionFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/image-permission-fixture.mjs')).href)});
 globalThis.rcBotShellService=await withImagePermissionFixture(globalThis.rcBotShellService,{mainRoot:${JSON.stringify(path.dirname(main))},imageRoot:${JSON.stringify(path.join(root,'image-lifecycle'))},receiptFile:${JSON.stringify(imageReceipt)}});
 const fixtureSend=globalThis.rcBotShellService.sendMessage.bind(globalThis.rcBotShellService);
@@ -466,7 +468,7 @@ const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse',
   sourceDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: source, encoding: 'utf8' }).trim()),
   synthetic: true, scale: fixture.scale, platform: process.platform, startedAt: new Date().toISOString(),
   checks: [], pageErrors: [], receiptSamples: [], scope: 'Real source Electron main/preload/renderer and durable input; scripted cognition only; not installed or real-model timing' };
-if (process.argv.includes('--streaming')) report.fixtureRoleIsolation = true;
+if (process.argv.includes('--streaming')) { report.fixtureRoleIsolation = true; report.controlledStreamPhaseTimeoutMs = 300_000; }
 let app, handle, page, tracing = false; const logs = [];
 const interaction = async phase => {
   report.interactionBefore = await page.evaluate(phase => ({ phase, frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus() }), phase);
@@ -526,7 +528,9 @@ try {
     const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
     await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
       failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
-  } else if (process.argv.includes('--window-material-only')) {
+  } else if (process.argv.includes('--window-material-only') || process.argv.includes('--flat-window-material-only')) {
+    // Exercise the non-vibrancy layout on macOS without claiming native Linux coverage.
+    if (process.argv.includes('--flat-window-material-only')) await page.evaluate(() => { document.documentElement.dataset.vibrancy = 'false'; });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotWindowMaterial({ page, until, report, captureDirectory: root });

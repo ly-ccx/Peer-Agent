@@ -4,6 +4,7 @@ import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import { useState } from 'react';
+import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
 import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
 import { PeerIcon } from '../../ui/icons';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
@@ -46,6 +47,7 @@ export function SessionDetail({
   readonly onSelect?: (sessionId:string)=>void;
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
+  const resources = useResourceWorkspace();
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
   const followUp = session.followUp;
   const needsYou = followUp ? followUp.owner === 'user' : session.status === 'waiting_user' || session.status === 'result_ready';
@@ -124,7 +126,13 @@ export function SessionDetail({
             <dd><EvidencePreview refs={session.evidenceRefs} i18n={i18n} inline={embedded} workspaceId={workspaceId}
               task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined} /></dd></div>}
         </dl>
-        {session.conversationId && <button type="button" className="bot-task-scene" onClick={() => setSceneOpen(true)}>
+        {session.conversationId && <button type="button" className="bot-task-scene" disabled={!!resources && !resources.ready} onClick={() => {
+          if (resources) {
+            resources.openConversation({ workspaceId, workspacePath, conversationId: session.conversationId, title,
+              task: session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined,
+              onOpenBot: () => onConversation({}) });
+          } else setSceneOpen(true);
+        }}>
           <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}
         </button>}
       </MotionDetails>

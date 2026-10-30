@@ -55,6 +55,9 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     await action.focus(); await action.press('Enter');
     const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail'); await detail.waitFor();
     assert.match(await detail.innerText(), /入口样式收尾/);
+    assert.equal(await detail.evaluate(node => Boolean(node.closest('.bot-drawer-dock'))), true);
+    await until(() => page.locator('.bot-drawer-dock:not([inert])').evaluate(node => node.contains(document.activeElement)), Boolean);
+    if (width === 760) assert.equal(await page.locator('.bot-resource-layout').getAttribute('data-resource-focus'), 'primary');
     await page.locator(BOT_DETAIL_CLOSE).click();
     await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
     await openReplyDetails(page, reply);

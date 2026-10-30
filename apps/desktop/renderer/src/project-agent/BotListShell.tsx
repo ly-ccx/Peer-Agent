@@ -101,6 +101,7 @@ export function BotListShell({
   const list = useBotList(activePage !== 'settings');
   const resources = useResourceWorkspace();
   const showDetails = resources?.showDetails;
+  const revealPrimary = resources?.revealPrimary;
   const resizeGesture = usePointerResize();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -132,7 +133,7 @@ export function BotListShell({
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
   useBotResourceOwner(opened?.workspaceId ?? null, onResourceOwnerChange, opened?.profile.agentConversationId);
   const currentDrawerMemory = drawerLoadedFor === opened?.workspaceId ? drawerMemory : closeDrawer(drawerMemory);
-  const detailsVisible = resources ? resources.detailsVisible : currentDrawerMemory.open;
+  const detailsVisible = inspect && resources ? resources.detailsVisible : currentDrawerMemory.open;
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
     const mood = botAvatarMood(item.state, replyFlash === item.workspaceId);
     return [item.workspaceId, replyFlash !== item.workspaceId && mood !== 'needs_you' && (mood !== 'error' || replyPresence?.mood !== 'idle') && item.workspaceId === opened?.workspaceId
@@ -197,16 +198,14 @@ export function BotListShell({
     setInspect(null);
     list.openBot(workspaceId);
     if (notificationFocus?.sessionId) {
-      showDetails?.();
       setLocateSessionId(notificationFocus.sessionId);
       setDrawerMemory((current) => locateDrawerSession(current, notificationFocus.sessionId || ''));
       return;
     }
     if (notificationFocus?.drawerTab) {
-      showDetails?.();
       setDrawerMemory((current) => openDrawer(current, notificationFocus.drawerTab || 'overview'));
     }
-  }, [list.openBot, notificationFocus, showDetails]);
+  }, [list.openBot, notificationFocus]);
 
   useEffect(() => window.peerAgent?.onResourceWindowReturn?.(request => {
     if (!request?.context || !Number.isFinite(request.expiresAt) || request.expiresAt <= Date.now()) return;
@@ -234,10 +233,11 @@ export function BotListShell({
 
   useEffect(() => {
     if (!locateSessionId) return;
+    revealPrimary?.();
     setInspect(null);
     setDrawerMemory((current) => locateDrawerSession(current, locateSessionId));
     setLocateSessionId(null);
-  }, [locateSessionId]);
+  }, [locateSessionId, revealPrimary]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -270,11 +270,11 @@ export function BotListShell({
         return;
       }
       if (shortcut?.action === 'toggle-profile') {
+        revealPrimary?.();
         setInspect(null);
         if (!opened?.workspaceId) return;
         event.preventDefault();
         event.stopPropagation();
-        if (!detailsVisible) showDetails?.(); else resources?.close();
         setDrawerMemory((current) => (current.open && detailsVisible ? closeDrawer(current) : openDrawer(current)));
         return;
       }
@@ -306,7 +306,7 @@ export function BotListShell({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [list, opened?.workspaceId, pageOverride, detailsVisible, showDetails, resources?.close]);
+  }, [list, opened?.workspaceId, pageOverride, detailsVisible, revealPrimary]);
 
   const emptyLabel = list.status === 'loading'
     ? i18n.t('projectAgent.list.loading')
@@ -478,12 +478,10 @@ export function BotListShell({
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
                 data-session-id={locateSessionId ?? currentDrawerMemory.sessionId ?? undefined}
-                aria-expanded={currentDrawerMemory.open && !inspect && detailsVisible && (!resources || resources.detail?.target.kind === 'bot')}
+                aria-expanded={currentDrawerMemory.open && !inspect}
                 onClick={() => {
                   drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
-                  if (currentDrawerMemory.open && currentDrawerMemory.tab === 'settings' && !inspect && detailsVisible) resources?.close();
-                  else showDetails?.();
                   setDrawerMemory((current) => (
                     current.open && current.tab === 'settings' && !inspect && detailsVisible
                       ? closeDrawer(current) : openDrawer(current, 'settings')
@@ -507,7 +505,7 @@ export function BotListShell({
               i18n={i18n}
               onReplyArrived={announceReply}
               onReplyPresenceChange={updateReplyPresence}
-              onLocateSession={sessionId => { showDetails?.(); setLocateSessionId(sessionId); }}
+              onLocateSession={sessionId => setLocateSessionId(sessionId)}
               contextSessionId={currentDrawerMemory.open && currentDrawerMemory.tab === 'tasks' ? currentDrawerMemory.sessionId : null}
               onTaskContext={setTaskContext}
               taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}
@@ -581,18 +579,21 @@ export function BotListShell({
           sessionsAvailable={work.available}
           taskContext={taskContext?.workspaceId === opened.workspaceId ? taskContext : null}
           onTaskConversation={request => {
+            revealPrimary?.();
             setInspect(null);
-            resources?.close();
             setDrawerMemory(current => closeDrawer(current));
             setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
           }}
           onRefreshSessions={work.reload}
-          onCloseInspect={() => setInspect(current => current?.evidence && current.replyId
-            ? { replyId: current.replyId, evidence: null, rounds: null } : null)}
+          onCloseInspect={() => {
+            if (!inspect?.evidence || !inspect.replyId) revealPrimary?.();
+            setInspect(current => current?.evidence && current.replyId
+              ? { replyId: current.replyId, evidence: null, rounds: null } : null);
+          }}
           triggerRef={drawerTriggerRef}
           i18n={i18n}
           isZh={isZh}
-          onMemory={next => { if (next.open) setInspect(null); else resources?.close(); setDrawerMemory(next); }}
+          onMemory={next => { if (next.open) { revealPrimary?.(); setInspect(null); } else if (inspect) resources?.close(); setDrawerMemory(next); }}
           onProfile={list.updateProfile}
           onOpenConversation={onOpenConversation}
           onOpenAutomations={onOpenAutomations}

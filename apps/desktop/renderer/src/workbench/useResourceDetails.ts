@@ -28,6 +28,10 @@ export function useResourceDetails(ports: {
     if (!latest.current.ready) return;
     setOrigin(null); latest.current.setTab('details'); latest.current.reveal();
   }, []);
+  const clearDetail = useCallback(() => {
+    setDetail(null); setOrigin(null);
+    if (latest.current.activeTab === 'details') latest.current.setTab(lastResource.current);
+  }, []);
   const rememberDetailSource = useCallback(() => {
     if (latest.current.visible && latest.current.activeTab === 'details' && currentRef.current) setOrigin(currentRef.current.target);
   }, []);
@@ -38,7 +42,7 @@ export function useResourceDetails(ports: {
   }, []);
   const canReturn = !!current && sameResourceDetail(origin, current.target) && origin?.workspaceId === ports.workspaceId;
   return { detailTarget: target, bindDetailTarget, detail: current, detailActive,
-    detailsVisible: ports.ready && ports.visible && detailActive, registerDetail, showDetails, rememberDetailSource, returnToResources,
+    detailsVisible: ports.ready && ports.visible && detailActive, registerDetail, clearDetail, showDetails, rememberDetailSource, returnToResources,
     returnDetail: canReturn ? origin : null,
     returnToDetail: showDetails };
 }

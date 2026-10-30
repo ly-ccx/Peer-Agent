@@ -69,7 +69,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   await page.getByRole('tab', { name: '任务', exact: true }).click();
   if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
   await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
-  const scene = page.locator('.bot-inline-scene');
+  const scene = page.locator('.resource-workspace.workbench-panel--open:not([inert]) .resource-conversation-view[data-active="true"] .bot-inline-scene');
   await openTaskScene(page, scene);
   // Process viewing deliberately has no composer or inherited access control.
   // Verify inheritance through its real host facts, and the view through its DOM.
@@ -88,7 +88,7 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
     // One side workspace retains the exact scene while its width changes.
     // It does not remount a second push/cover drawer at the breakpoint.
-    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'visible' });
+    await page.locator('.resource-workspace.workbench-panel--open:not([inert])').waitFor({ state: 'visible' });
     await page.waitForFunction(() => !document.getAnimations().some(animation => animation.playState === 'running'
       && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility()));
     assert.equal(await scene.evaluate((node, previous) => node === previous && previous.isConnected, previousScene), true);

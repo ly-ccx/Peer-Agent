@@ -2,7 +2,12 @@
 /* This is a viewport, not a scroll owner. Native focus must scroll the inner
    list/page rather than silently displacing the entire retained Bot shell. */
 .bot-resource-primary { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: clip; }
-.bot-resource-primary > .bot-shell { height: 100%; }
+.bot-resource-primary > .bot-shell { position: relative; height: 100%; }
+/* Narrow management stays inside its own host; resource navigation remains a separate surface. */
+.bot-resource-primary .bot-drawer-dock-frame[data-drawer-cover='true'] { position: absolute; inset-block: 0; inset-inline-end: 0; z-index: 3; max-width: 100%; }
+.bot-resource-primary .bot-drawer-dock-frame[data-drawer-cover='true'] .bot-drawer-dock { max-width: 100%; }
+.bot-resource-primary .bot-drawer-dock-frame[data-drawer-cover='true'] .bot-drawer-body { min-width: 0; width: 100%; box-sizing: border-box; }
+.bot-drawer-head .bot-drawer-close { display: grid; place-items: center; flex: none; width: var(--space-8); height: var(--space-8); padding: 0; }
 .bot-resource-pane { position: relative; display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; max-width: calc(100% - var(--resource-primary-min, 480px)); }
 /* The handle belongs to the gap, outside the rounded paper's overflow clip. */
 .bot-resource-pane > .resource-workspace-resizer { top: 0; bottom: 0; left: -3px; height: auto; touch-action: none; }
@@ -142,6 +147,9 @@ html[data-vibrancy='true'] .bot-resource-layout > .bot-resource-pane[data-resour
 .bot-inline-scene-heading > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bot-inline-scene > .conversation-chat-drawer-shell { flex: 1; min-height: 320px; width: 100%; }
 .bot-inline-scene .conversation-chat-drawer__body { min-width: 0; width: 100%; }
+.resource-conversation-view { padding: var(--space-3); box-sizing: border-box; }
+.resource-conversation-view .bot-inline-scene > .conversation-chat-drawer-shell { min-height: 0; }
+.resource-conversation-view .bot-inline-scene-heading { padding: 0 var(--space-1); }
 .resource-details-slot .bot-drawer-chrome[hidden] { display: none; }
 
 .resource-adapter-notice { color: var(--graphite-secondary); font-size: var(--ui-font-meta); line-height: var(--ui-line-body); overflow-wrap: anywhere; }

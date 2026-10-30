@@ -6,7 +6,6 @@ import { ChatSurface } from '../../app/components/deferredPanels';
 import { clientApi } from '../../clientApi';
 import { WorkbenchPanel } from '../../app/components/deferredPanels';
 import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
-import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
 import { BotDocumentPreview } from '../conversation/BotDocumentPreview';
 import { PeerIcon } from '../../ui/icons';
 
@@ -20,9 +19,11 @@ export function ConversationSceneDrawer({
   onClose,
   onOpenBot,
   embedded = false,
+  active = true,
   task,
 }: {
   readonly embedded?: boolean;
+  readonly active?: boolean;
   readonly task?: { readonly sessionId: string; readonly planId: string };
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -33,7 +34,6 @@ export function ConversationSceneDrawer({
   readonly onClose: () => void;
   readonly onOpenBot?: () => void;
 }) {
-  const workspace = useResourceWorkspace();
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [systemInstructions, setSystemInstructions] = useState('');
   const [replyLanguage, setReplyLanguage] = useState('');
@@ -56,7 +56,7 @@ export function ConversationSceneDrawer({
   }, [conversationId]);
 
   const content = (requestClose: () => void) => <WorkbenchProvider conversationId={conversationId}
-    isPageActive={!embedded || !!workspace?.detailsVisible} layoutHost="local">
+    isPageActive={active} layoutHost="local">
     <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
       <div className="conversation-chat-drawer__body">
         <ChatSurface showComposer={false} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
@@ -64,14 +64,14 @@ export function ConversationSceneDrawer({
           replyLanguage={replyLanguage} gitBranchPrefix={gitBranchPrefix} onOpenSettings={() => {}}
           onProvidersRefresh={async () => { setProviders(await clientApi.llmListProviders()); }}
           workspacePath={workspacePath} workspaces={workspacePath ? [{ path: workspacePath, name: title }] : []}
-          isPageActive={!embedded || !!workspace?.detailsVisible} onClose={requestClose} />
+          isPageActive={active} onClose={requestClose} />
       </div>
       {!embedded ? <WorkbenchPanel isZh={isZh} workspacePath={workspacePath} /> : null}
     </div>
   </WorkbenchProvider>;
   if (embedded) return <section className="bot-inline-scene" aria-label={i18n.t('projectAgent.drawer.scene')}>
     <header className="bot-inline-scene-heading"><button type="button" className="ui-button" onClick={onClose}>
-      <PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.sceneBack')}</button><span>{title}</span></header>
+      <PeerIcon name="close" size={14} />{i18n.t('projectAgent.drawer.close')}</button><span>{title}</span></header>
     <BotDocumentPreview workspaceId={workspaceId} i18n={i18n} task={task}>{content(onClose)}</BotDocumentPreview>
   </section>;
   return <Drawer onClose={onClose} ariaLabel={i18n.t('projectAgent.drawer.scene')}

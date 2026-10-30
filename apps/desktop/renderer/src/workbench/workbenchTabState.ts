@@ -1,8 +1,8 @@
-export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents' | 'launcher' | 'changes' | 'details';
+export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents' | 'launcher' | 'changes' | 'details' | 'conversations';
 
 function isWorkbenchTab(value: unknown): value is WorkbenchTabId {
   return (
-    value === 'plan' || value === 'launcher' || value === 'changes' || value === 'details' ||
+    value === 'plan' || value === 'launcher' || value === 'changes' || value === 'details' || value === 'conversations' ||
     value === 'browser' ||
     value === 'files' ||
     value === 'documents'
@@ -25,7 +25,7 @@ export function normalizeWorkbenchTabMap(raw: unknown): Record<string, Workbench
   const out: Record<string, WorkbenchTabId> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const tab = normalizeWorkbenchTab(value);
-    if (tab) out[key] = tab === 'details' ? 'launcher' : tab;
+    if (tab) out[key] = tab === 'details' || tab === 'conversations' ? 'launcher' : tab;
   }
   return out;
 }

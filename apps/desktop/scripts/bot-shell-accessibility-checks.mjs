@@ -54,7 +54,8 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'settings entry navigates from another drawer tab');
   await page.keyboard.press('Escape');
   await until(() => focused(trigger), Boolean);
-  assert.equal(await page.locator(BOT_DETAIL_SURFACE).count(), 0);
+  assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.locator('.bot-drawer-dock:not([inert]), .pa-overlay-panel.bot-drawer-panel').count(), 0);
   checks.push('docked drawer enters selected tab, roves with arrows/endpoints, closes with focus returned; hidden dock is inert');
 
   await page.setViewportSize({ width: 900, height: 780 });

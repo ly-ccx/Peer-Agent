@@ -50,3 +50,12 @@ test('unready or hidden presentation cannot reopen another source or capture an 
   ui = h.render(); ui.showDetails(); h.setVisible(false); ui = h.render(); assert.equal(ui.detailsVisible, false);
   ui.rememberDetailSource(); h.setTab('documents'); assert.equal(h.render().returnDetail, null);
 });
+
+test('returning to Bot settings clears only inspection and restores the retained resource without reopening it', () => {
+  const h = harness(); let ui = h.render();
+  ui.registerDetail({ target: { workspaceId: 'A', kind: 'reply', replyId: 'r' }, title: 'Reply' });
+  ui = h.render(); ui.showDetails(); ui = h.render();
+  const count = h.reveals(); ui.clearDetail(); ui = h.render();
+  assert.equal(ui.detail, null); assert.equal(ui.returnDetail, null);
+  assert.equal(h.getTab(), 'documents'); assert.equal(h.reveals(), count);
+});
