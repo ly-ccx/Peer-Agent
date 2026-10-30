@@ -76,6 +76,7 @@ test('a changed version keeps the accepted body and limits adoption feedback to 
     '../chat/components/markdown/DocumentPreviewContext': { DocumentPreviewContext: { Provider: 'provider' } },
     './file-preview/MarkdownDocument': { MarkdownDocument: 'markdown' }, './file-preview/SourceViewer': { SourceViewer: 'source' }, './file-preview/DiffViewer': { DiffViewer: 'diff' },
     './file-preview/RasterImageView': { RasterImageView: 'raster' }, './file-preview/documentAdapterState': adapterState,
+    './file-preview/ExternalDocumentActions': { ExternalDocumentActions: 'external-open' },
     './file-preview/fileTypes': fileTypes, './ResourceWorkspaceContext': { useResourceWorkspace: () => ({}) },
     './useDocumentReadingPosition': { useDocumentReadingPosition: () => ({ ref: {}, onScroll() {}, restore() {} }) },
   };

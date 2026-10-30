@@ -4,7 +4,8 @@ import { documentReadError } from './documentReadError';
 export { documentReadError } from './documentReadError';
 import { OpenResourceWindowButton } from './OpenResourceWindowButton';
 import { RasterImageView } from './file-preview/RasterImageView';
-import { adapterModeUnavailable, documentAdapterNotice } from './file-preview/documentAdapterState';
+import { adapterModeUnavailable, documentAdapterNotice, isPackagedDocument } from './file-preview/documentAdapterState';
+import { ExternalDocumentActions } from './file-preview/ExternalDocumentActions';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { LocalDocumentObservation } from '@peer-agent/protocol';
 import { useObservedDocument } from './useObservedDocument';
@@ -93,12 +94,20 @@ export function ScopedDocumentPage({ tab, active, workspaceId, isZh, onModeChang
       digestText={tab.mode === 'diff' && diff.value?.ok ? diff.value.diffText : undefined}
       sourceContent={tab.mode === 'source' && loaded?.media === 'text' ? loaded.content : undefined} />
     <p className="resource-source-label">{path}</p>
-    {tab.mode !== 'diff' && documentAdapterNotice(path, isZh) ? <p className="resource-adapter-notice" role="status">{documentAdapterNotice(path, isZh)}</p> : null}
+    {tab.mode !== 'diff' && !isPackagedDocument(path) && documentAdapterNotice(path, isZh) ? <p className="resource-adapter-notice" role="status">{documentAdapterNotice(path, isZh)}</p> : null}
     {loaded?.ok && loaded.media === 'text' && tab.mode === 'preview' && kind === 'json' && formattedJson === null ? <p className="resource-adapter-notice" role="status">{isZh ? '未应用 JSON 排版，按原始文本显示。' : 'JSON formatting was not applied. Original source text is shown.'}</p> : null}
     <DocumentHistoryTools reference={reference} path={path} confirmed={loaded?.revision} isZh={isZh} hidden={tab.mode === 'diff'} />
     {tab.delivery ? <DocumentDeliveryTools binding={tab.delivery} reference={reference} active={active} isZh={isZh} /> : null}
     {tab.mode !== 'diff' && failure ? <div className="resource-source-label" role={loaded || failure.status === 'version_changed' ? 'status' : 'alert'}>
-      {failure.status === 'not_file' && reference.revision ? (isZh ? '此提交中的路径是目录，暂不支持历史目录浏览。' : 'This path is a directory in this commit. Historical directory browsing is unavailable.')
+      {failure.status === 'binary' && isPackagedDocument(failure.resolvedPath || path) ? <>
+        <span>{isZh ? '此格式不能在这里预览正文。' : 'This format cannot be previewed here.'}</span>
+        {failure.resolvedPath ? <ExternalDocumentActions path={failure.resolvedPath} workspaceRoot={failure.resolvedFrom} isZh={isZh} /> : null}
+      </> : failure.status === 'not_found' && !reference.revision ? <>
+        <span>{failure.attemptedRoot
+          ? (isZh ? `未能按此引用定位文件。已在这个项目根查找：${failure.attemptedRoot}` : `The reference could not locate the file. Looked in this project root: ${failure.attemptedRoot}`)
+          : documentReadError('not_found', isZh)}</span>
+        <button type="button" className="ui-button is-compact" onClick={() => workspace?.locate(reference.path)}>{isZh ? '查找文件位置' : 'Find file location'}</button>
+      </> : failure.status === 'not_file' && reference.revision ? (isZh ? '此提交中的路径是目录，暂不支持历史目录浏览。' : 'This path is a directory in this commit. Historical directory browsing is unavailable.')
         : failure.status === 'version_unavailable' && reference.revision ? (isZh ? '本机 Git 或读取服务不支持安全的历史版本读取，请检查更新后重试。' : 'The local Git or reader cannot safely read historical versions. Check for updates and retry.')
         : failure.status === 'not_found' && reference.revision ? (isZh ? '此提交中不存在这个路径，未使用当前文件替代。' : 'This path does not exist in this commit. The current file was not substituted.')
         : failure.status === 'version_changed' && loaded ? (isZh ? '文件已更新，仍保留当前阅读内容。' : 'The file changed. Your current reading is preserved.') : documentReadError(failure.status, isZh)}

@@ -4,7 +4,7 @@ import { checkedHistoricalDocumentPath, historicalAliasTarget, isGitDocumentRevi
 
 const KNOWLEDGE = new Set(['peer-knowledge']);
 const inside = (root, target) => { const rel = path.relative(root, target); return rel === '' || rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel); };
-const failure = status => ({ ok: false, status, content: '', error: status });
+const failure = (status, extra) => ({ ok: false, status, content: '', error: status, ...extra });
 const permission = error => ['EACCES', 'EPERM'].includes(error?.code);
 const identity = remote => /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)ly-ccx\/peer-knowledge(?:\.git)?\/?$/i.test(String(remote).trim());
 
@@ -110,7 +110,8 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
       seen.add(match.target); candidates.push({ path: match.target, root: scope });
       if (candidates.length === 16) break;
     }
-    return candidates.length ? { ...failure('relative_base_required'), candidates } : failure(denied ? 'permission_denied' : 'not_found');
+    return candidates.length ? { ...failure('relative_base_required'), candidates }
+      : failure(denied ? 'permission_denied' : 'not_found', denied ? undefined : { attemptedRoot: root });
   }
 
   return async function resolve(reference) {
@@ -176,7 +177,7 @@ export function createBotDocumentResolver({ getWorkspace, getKnownRoots = () => 
       // Keep a qualified reference inside its own root, including its lexical traversal.
       const checked = checkedTarget(target, scope, reference);
       if (checked.status === 'not_found' && bareRelative && reference.kind !== 'directory' && reference.revision === undefined) return await otherRelativeLocations(raw, root, known);
-      if (!checked.ok) return checked;
+      if (!checked.ok) return checked.status === 'not_found' ? { ...checked, attemptedRoot: scope ?? root } : checked;
       // Keep identity stable while retaining the originally checked scope as a ceiling.
       const physicalScope = known.filter(base => inside(scope, base) && inside(base, checked.target))
         .sort((a, b) => b.length - a.length)[0] ?? scope;

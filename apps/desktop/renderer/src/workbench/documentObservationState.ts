@@ -22,6 +22,8 @@ export interface ObservedDocumentRead {
   readonly dataUrl?: string;
   readonly media?: 'text' | 'image';
   readonly candidates?: readonly { readonly path: string; readonly root: string }[];
+  readonly attemptedRoot?: string;
+  readonly resolvedFrom?: string;
 }
 
 /** An accepted in-memory reading is distinct from an observation that newer bytes exist. */
