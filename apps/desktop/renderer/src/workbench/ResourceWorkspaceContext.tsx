@@ -31,6 +31,7 @@ interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails>
   readonly open: boolean;
   readonly navigationCollapsed: boolean;
   readonly reserveProfileWidth: (width: number) => void;
+  readonly revealPrimary: () => void;
   readonly searchIntent: { readonly query: string; readonly candidates: readonly string[]; readonly id: number } | null;
   readonly directoryIntent: { readonly path: string; readonly id: number; readonly task?: BotDocumentReference['task']; readonly relativeTo?: string } | null;
   readonly consumeDirectoryIntent: (id: number) => void;
@@ -92,6 +93,11 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
   const compact = bounds?.compact ?? false;
   const navigationCollapsed = bounds?.navigationCollapsed ?? false;
   const [focusArea, setFocusArea] = useState<'primary' | 'resource'>('primary');
+  const { setMaximized } = workbench;
+  const revealPrimary = useCallback(() => {
+    setMaximized(false);
+    setFocusArea('primary');
+  }, [setMaximized]);
   const [profileWidth, reserveProfileWidth] = useState(0);
   const [search, setSearch] = useState<{ owner: string; query: string; candidates: readonly string[]; id: number } | null>(null);
   const [directory, setDirectory] = useState<{ owner: string; path: string; id: number; task?: BotDocumentReference['task']; relativeTo?: string } | null>(null);
@@ -156,7 +162,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
   const launch = () => { details.rememberDetailSource(); if (ready) { workbench.setActiveTab('launcher'); reveal(); } };
   const adapter: ResourceWorkspaceAdapter = {
     ...details, ...conversations,
-    owner, ready, reserveProfileWidth, open: ready && active && workbench.open,
+    owner, ready, reserveProfileWidth, revealPrimary, open: ready && active && workbench.open,
     navigationCollapsed: ready && active && workbench.open && navigationCollapsed,
     searchIntent: search?.owner === owner?.conversationId ? search : null,
     directoryIntent: directory?.owner === owner?.conversationId ? directory : null,

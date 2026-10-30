@@ -101,6 +101,7 @@ export function BotListShell({
   const list = useBotList(activePage !== 'settings');
   const resources = useResourceWorkspace();
   const showDetails = resources?.showDetails;
+  const revealPrimary = resources?.revealPrimary;
   const resizeGesture = usePointerResize();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -232,10 +233,11 @@ export function BotListShell({
 
   useEffect(() => {
     if (!locateSessionId) return;
+    revealPrimary?.();
     setInspect(null);
     setDrawerMemory((current) => locateDrawerSession(current, locateSessionId));
     setLocateSessionId(null);
-  }, [locateSessionId]);
+  }, [locateSessionId, revealPrimary]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -268,6 +270,7 @@ export function BotListShell({
         return;
       }
       if (shortcut?.action === 'toggle-profile') {
+        revealPrimary?.();
         setInspect(null);
         if (!opened?.workspaceId) return;
         event.preventDefault();
@@ -303,7 +306,7 @@ export function BotListShell({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [list, opened?.workspaceId, pageOverride, detailsVisible]);
+  }, [list, opened?.workspaceId, pageOverride, detailsVisible, revealPrimary]);
 
   const emptyLabel = list.status === 'loading'
     ? i18n.t('projectAgent.list.loading')
@@ -576,17 +579,21 @@ export function BotListShell({
           sessionsAvailable={work.available}
           taskContext={taskContext?.workspaceId === opened.workspaceId ? taskContext : null}
           onTaskConversation={request => {
+            revealPrimary?.();
             setInspect(null);
             setDrawerMemory(current => closeDrawer(current));
             setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
           }}
           onRefreshSessions={work.reload}
-          onCloseInspect={() => setInspect(current => current?.evidence && current.replyId
-            ? { replyId: current.replyId, evidence: null, rounds: null } : null)}
+          onCloseInspect={() => {
+            if (!inspect?.evidence || !inspect.replyId) revealPrimary?.();
+            setInspect(current => current?.evidence && current.replyId
+              ? { replyId: current.replyId, evidence: null, rounds: null } : null);
+          }}
           triggerRef={drawerTriggerRef}
           i18n={i18n}
           isZh={isZh}
-          onMemory={next => { if (next.open) setInspect(null); else if (inspect) resources?.close(); setDrawerMemory(next); }}
+          onMemory={next => { if (next.open) { revealPrimary?.(); setInspect(null); } else if (inspect) resources?.close(); setDrawerMemory(next); }}
           onProfile={list.updateProfile}
           onOpenConversation={onOpenConversation}
           onOpenAutomations={onOpenAutomations}
