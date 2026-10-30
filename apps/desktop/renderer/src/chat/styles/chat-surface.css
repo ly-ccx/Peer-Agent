@@ -4424,8 +4424,8 @@ button.chat-header-cap-item:focus-visible {
   opacity: 0.6;
 }
 
-.pa-cascading-trigger:hover:not(:disabled),
-.pa-cascading-trigger.open {
+.pa-cascading-trigger:hover:not(:disabled, [aria-disabled=true]),
+.pa-cascading-trigger.open:not([aria-disabled=true]) {
   background: var(--composer-addon-hover-bg);
   border-color: var(--chrome-hairline);
   color: var(--graphite-soft);

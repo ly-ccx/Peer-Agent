@@ -20,7 +20,7 @@
 .bot-model-settings-row > span { padding-top: 9px; }
 .bot-model-toolbar { display: flex; min-width: 0; max-width: 100%; align-items: center; }
 .bot-model-toolbar .bot-model-picker > button { padding: 5px 6px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-soft); }
-.bot-model-toolbar .bot-model-picker > button:hover { background: var(--composer-addon-hover-bg); color: var(--graphite-base); }
+.bot-model-toolbar .bot-model-picker > button:hover:not([aria-disabled=true]) { background: var(--composer-addon-hover-bg); color: var(--graphite-base); }
 .bot-model-toolbar .bot-model-control-row { gap: 3px; }
 .bot-model-error { margin: 4px 0; color: var(--graphite-soft); font-size: var(--ui-font-control); }
 .bot-composer-actions .bot-model-toolbar { flex: 0 1 auto; min-width: 0; }
@@ -47,7 +47,7 @@
 .bot-model-captions .bot-model-source:last-child:not(:first-child) { text-align: center; }
 
 .bot-composer-bar .bot-model-picker > button { min-height: var(--ui-control-height-compact); height: auto; padding: 6px; border-radius: var(--ui-radius-control); }
-.bot-composer-bar .bot-model-picker > button:is(:hover, .open):not(:disabled) { background: var(--control-fill); }
+.bot-composer-bar .bot-model-picker > button:is(:hover, .open):not(:disabled, [aria-disabled=true]) { background: var(--control-fill); }
 .bot-composer-bar :is(.bot-model-picker > button, .reasoning-effort-trigger):disabled { background: transparent; box-shadow: none; }
 .bot-composer-bar .reasoning-effort-trigger { min-height: var(--ui-control-height-compact); height: auto; padding: 0; border-radius: var(--ui-radius-control); }
 .bot-composer-bar .reasoning-effort-trigger:is(:hover, .open):not(:disabled) { background: transparent; }
