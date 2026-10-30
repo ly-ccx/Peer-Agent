@@ -48,6 +48,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await until(() => work.innerText(), text => text.includes('逐条核对历史记录'));
   assert.match(await work.innerText(), /逐条核对历史记录/);
   assert.doesNotMatch(await reply.locator('.bot-reply-bar').innerText(), /rc-message-/);
+  await waitForWorkDisclosure(work, until);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-running.png') });
   checks.push('named running work scans visibly and expands by keyboard to its actual progress');
 
@@ -293,6 +294,18 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   checks.push('classified reply and delegated work fit a 760px viewport in both themes');
 }
 
+async function waitForWorkDisclosure(work, until) {
+  // Native details exposes its text before its clipping height has settled.
+  await until(() => work.evaluate(node => {
+    const style = getComputedStyle(node, '::details-content');
+    const detail = node.querySelector('.bot-work-detail').getBoundingClientRect();
+    const moving = node.getAnimations({ subtree: true }).some(animation =>
+      Number.isFinite(animation.effect?.getComputedTiming().endTime)
+      && (animation.playState === 'running' || animation.pending));
+    return !moving && style.opacity === '1' && detail.bottom <= node.getBoundingClientRect().bottom + 1;
+  }), Boolean);
+}
+
 async function checkParallelTaskRows({ page, until, report, captureDirectory, change, initial }) {
   const background = page.locator('.bot-background-work');
   const group = background.locator(':scope > summary');
@@ -320,6 +333,7 @@ async function checkParallelTaskRows({ page, until, report, captureDirectory, ch
     for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
       await page.setViewportSize({ width, height: 860 });
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+      await waitForWorkDisclosure(rows.nth(0), until);
       await rows.nth(1).scrollIntoViewIfNeeded();
       const bounds = await rows.evaluateAll(nodes => nodes.map(node => ({ left: node.getBoundingClientRect().left,
         right: node.getBoundingClientRect().right, parent: node.parentElement.className })));

@@ -69,6 +69,11 @@ export function continuousReplyPresencePassed(presence) {
     && (!quietStates.includes(state) || sample.quiet === true)));
 }
 
+export function completedReplyActionsPassed(entry) {
+  return ['dark', 'light'].every(theme => entry?.themes?.some(item =>
+    item.theme === theme && item.visibleAtRest === true));
+}
+
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
   if (!machine.historyRecovery?.passed || machine.historyRecovery.cases?.length !== 2) throw new Error('History recovery interaction failed');
   if (!['budget','question'].every(key => [[1280,'dark'],[760,'light']].every(([width,appearance]) =>
@@ -143,7 +148,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.userReceipt?.cases?.some(sample => sample.width === width && sample.appearance === appearance && sample.fits && sample.singleReceipt && sample.sourcesRetained && sample.keyboard))
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.leftAligned || !machine.replyDetailsEntry?.unifiedActivity || !machine.replyDetailsEntry?.collapsedHeight
     || !continuousReplyPresencePassed(machine.replyPresence)
-    || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
+    || !completedReplyActionsPassed(machine.replyDetailsEntry)
     || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
     || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp || !machine.verificationPresentation?.technicalOwnedByBot
