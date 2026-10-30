@@ -215,7 +215,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
-  const quoteAction = page.getByRole('button', { name: '引用', exact: true });
+  const quoteAction = page.locator('.bot-selection-quote');
   await quoteAction.waitFor({ state: 'visible' });
   await until(() => quoteAction.getAttribute('data-surface-settled'), value => value === 'true');
   await page.keyboard.press('Tab');
