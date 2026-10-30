@@ -612,6 +612,11 @@ try {
   } else if (process.argv.includes('--reply-quote-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+    // This isolated scenario has not paged history like the full smoke. Each
+    // navigation reads at most four pages; continue through its recovery UI.
+    for (let batch = 0; batch < 2; batch++) {
+      await page.locator('.bot-thread-feedback button').click();
+    }
     await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
     await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
     await checkBotShellReply({ page, until, report, captureDirectory: root });
