@@ -20,14 +20,19 @@ export async function checkReplyPresence({ page, reply, report, until, state, qu
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
     if (!bubble) return null;
     const body = bubble.getBoundingClientRect(), style = getComputedStyle(bubble), footerNode = node.querySelector('.bot-reply-context');
-    const footer = footerNode.getBoundingClientRect(), icon = footerNode.querySelector('button svg').getBoundingClientRect();
-    const button = footerNode.querySelector('button').getBoundingClientRect(), column = node.getBoundingClientRect();
+    const buttonNode = footerNode.querySelector('button');
+    if (!buttonNode) return null;
+    const footer = footerNode.getBoundingClientRect(), button = buttonNode.getBoundingClientRect(), column = node.getBoundingClientRect();
+    const anchor = (buttonNode.querySelector('svg') ?? buttonNode.querySelector('span') ?? buttonNode).getBoundingClientRect();
     const textLeft = body.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth);
-    return { bodyRight: body.right, bodyLeft: body.left, textLeft, footerLeft: footer.left, actionLeft: button.left,
-      columnRight: column.right, fits: button.left >= column.left && button.right <= column.right,
-      aligned: Math.abs(textLeft - footer.left) <= 1 && Math.abs(textLeft - icon.left) <= 1,
+    const textRight = body.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
+    const quote = [...footerNode.querySelectorAll(':scope > button')].find(item => item !== buttonNode && item.textContent.trim() === '引用');
+    const quoteRight = quote ? quote.getBoundingClientRect().right : null;
+    return { bodyRight: body.right, bodyLeft: body.left, textLeft, textRight, footerLeft: footer.left, actionLeft: button.left,
+      columnRight: column.right, fits: button.left >= column.left && button.right <= column.right && (quoteRight === null || quoteRight <= column.right + 1),
+      aligned: Math.abs(textLeft - footer.left) <= 1 && Math.abs(textLeft - anchor.left) <= 1 && (quoteRight === null || Math.abs(quoteRight - textRight) <= 2),
       unifiedActivity: !footerNode.querySelector('.bot-context-running') || footerNode.querySelector('button .bot-context-running') !== null,
-      stableHeight: footer.height >= 32 && button.height >= 32, singleAction: footerNode.querySelectorAll(':scope > button:not(:disabled)').length >= 1 };
+      stableHeight: footer.height >= 28 && button.height >= 28, singleAction: footerNode.querySelectorAll(':scope > button:not(:disabled)').length >= 1 };
   }), value => value?.aligned);
   assert.ok(bounds.fits, `${state}: footer remains inside the conversation`);
   assert.ok(bounds.unifiedActivity && bounds.stableHeight && bounds.singleAction, 'one stable, accessible activity/details action');

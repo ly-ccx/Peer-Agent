@@ -77,9 +77,9 @@ export async function openReplyDetails(page, message) {
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
   await page.locator('.bot-composer textarea').focus();
   await page.mouse.move(1, 1);
-  const running = await message.locator('.bot-reply-context').evaluate(node => node.dataset.running === 'true' || node.dataset.quotable === 'true');
+  const running = await message.locator('.bot-reply-context').evaluate(node => node.dataset.running === 'true');
   await page.waitForFunction(({ node, running }) => getComputedStyle(node).opacity === (running ? '1' : '0'), { node: await button.elementHandle(), running });
-  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live or quotable replies keep their actions visible; other details wait for hover or focus');
+  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live replies keep their status visible; details and quote wait for hover or focus');
   // A pushed drawer's body can disappear before its width transition finishes.
   // Let the actual finite layout animations finish before choosing a pointer position.
   await page.waitForFunction(() => {
@@ -97,10 +97,10 @@ export async function openReplyDetails(page, message) {
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
     const style = bubble ? getComputedStyle(bubble) : null;
     const textLeft = bubble ? bubble.getBoundingClientRect().left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) : null;
-    const icon = node.querySelector('svg').getBoundingClientRect();
-    return { left: Math.abs(icon.left - footer.left), bubbleLeft: textLeft === null ? null : Math.abs(icon.left - textLeft), height: action.height };
+    const anchor = (node.querySelector('svg') ?? node.querySelector('span') ?? node).getBoundingClientRect();
+    return { left: Math.abs(anchor.left - footer.left), bubbleLeft: textLeft === null ? null : Math.abs(anchor.left - textLeft), height: action.height };
   });
-  assert.ok(placement.left <= 2 && placement.height >= 32, 'details icon aligns left with its footer and keeps a usable hit target');
+  assert.ok(placement.left <= 2 && placement.height >= 28, 'details text aligns left with its footer');
   if (placement.bubbleLeft !== null) assert.ok(placement.bubbleLeft <= 2, 'details starts on the current bubble text column');
   await hoverBotReply(page, message, button);
   await page.mouse.move(1, 1);

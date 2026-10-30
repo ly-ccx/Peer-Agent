@@ -71,7 +71,7 @@ export function continuousReplyPresencePassed(presence) {
 
 export function completedReplyActionsPassed(entry) {
   return ['dark', 'light'].every(theme => entry?.themes?.some(item =>
-    item.theme === theme && item.visibleAtRest === true));
+    item.theme === theme && item.visibleAtRest === false && item.afterCapture?.opacity === '1'));
 }
 
 export function createReviewPacket({ root, output, artifactRoot, machine }) {

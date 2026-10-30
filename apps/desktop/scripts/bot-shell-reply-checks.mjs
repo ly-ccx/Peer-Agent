@@ -1,6 +1,6 @@
 import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import { BOT_DETAIL_TITLE } from './bot-detail-surface-selectors.mjs';
-import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage, hoverBotReply } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
@@ -142,6 +142,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   // The explicit reply action quotes this reply without selecting text or losing a draft.
   const directComposer = page.locator('.bot-composer textarea');
   await directComposer.fill('直接引用时保留草稿');
+  await hoverBotReply(page, reply);
   await reply.getByRole('button', { name: '引用', exact: true }).click();
   const directQuote = page.locator('.bot-quote-chip');
   await directQuote.waitFor();
