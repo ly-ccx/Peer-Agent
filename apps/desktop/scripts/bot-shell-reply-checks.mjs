@@ -139,6 +139,20 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await closeReplyDetails(page);
   checks.push('memory disclosure retrieves the canonical memory and collapses without a nested status pill');
 
+  // The explicit reply action quotes this reply without selecting text or losing a draft.
+  const directComposer = page.locator('.bot-composer textarea');
+  await directComposer.fill('直接引用时保留草稿');
+  await reply.getByRole('button', { name: '引用', exact: true }).click();
+  const directQuote = page.locator('.bot-quote-chip');
+  await directQuote.waitFor();
+  assert.equal(await directComposer.inputValue(), '直接引用时保留草稿');
+  assert.equal(await directComposer.evaluate(node => node === document.activeElement), true);
+  assert.equal(await directQuote.locator('.bot-reply-bar-label').textContent(), 'project-000');
+  assert.ok((await directQuote.locator('.bot-reply-bar-excerpt').textContent()).trim().length > 0);
+  await directQuote.getByRole('button', { name: '取消引用', exact: true }).click();
+  await directComposer.fill('');
+  checks.push('direct reply quote keeps the current draft, identifies the bot and focuses the composer');
+
   // Select an actual rendered range then exercise the product mouse-up handler.
   const selected = await reply.locator('.bot-reply-text').evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
@@ -146,7 +160,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     return selection.toString().replace(/\s+/g, ' ').trim();
   });
-  await page.getByRole('button', { name: '引用', exact: true }).click();
+  await page.locator('.bot-selection-quote').click();
   const composerQuote = page.locator('.bot-quote-chip');
   assert.equal(selected.includes('原文结束标记'), false, 'selecting the new reply must not capture its quoted source');
   assert.equal(await composerQuote.locator('.bot-reply-bar-excerpt').textContent(), selected);
@@ -173,7 +187,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
-  await page.getByRole('button', { name: '引用', exact: true }).click();
+  await page.locator('.bot-selection-quote').click();
   await composer.fill('针对这段原文补充说明'); await composer.press('Enter');
   await composerQuote.waitFor({ state: 'detached' });
   const explicit = page.locator('.bot-user').filter({ has: page.locator('.bot-user-text', { hasText: '针对这段原文补充说明' }) });
