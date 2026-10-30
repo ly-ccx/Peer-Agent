@@ -215,20 +215,25 @@
 
 .bot-upgrade.is-progress,
 .bot-upgrade.is-progress:hover {
+  /*
+    下载进度圈：30px 盒子里画 27px 正圆——1.5px 透明边框把绘制面收进 padding-box，
+    按圆角内缩规则 15px − 1.5px = 13.5px，即半径 27/2。布局盒、点击范围与相邻控件位置不变。
+    常态不再 transform 缩放：0.9 缩放会把 3.5px 环压成半像素台阶，内外边缘形状对不上。
+    --peer-corner 抵消全局 superellipse(1.4)（同 .peer-switch 的局部例外），让外轮廓与
+    radial-gradient 内孔同为真圆；不支持 corner-shape 时该变量不生效，行为不变。
+  */
+  --peer-corner: round;
   color: var(--graphite-base);
   background:
-    radial-gradient(circle at center, var(--chrome-raised) 0 11px, transparent 11.5px),
+    radial-gradient(circle at center, var(--chrome-raised) 0 9.9px, transparent 10.4px),
     conic-gradient(from -90deg, var(--azure-seal) var(--progress, 0%), color-mix(in srgb, var(--graphite-base) 16%, var(--chrome-raised)) 0);
-  border-color: transparent;
-  transform: scale(0.9);
-}
-
-.bot-upgrade.is-progress:active {
-  transform: scale(0.84);
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
 }
 
 .bot-upgrade-value {
-  font-size: 11px;
+  /* 去掉常态 0.9 缩放后，字号按 11px × 0.9 校准回原观感，不因取消缩放而变大。 */
+  font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -236,7 +241,8 @@
 }
 
 .bot-upgrade-value[data-digits='3'] {
-  font-size: 8px;
+  /* 三位数（100%）沿用 8px × 0.9 ≈ 7px，仍在约 20.8px 的内孔里单行居中。 */
+  font-size: 7px;
 }
 
 .bot-upgrade.is-install,
