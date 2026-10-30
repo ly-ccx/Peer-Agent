@@ -11,10 +11,11 @@ export function useBotDrawerFocus(active: boolean, body: RefObject<HTMLElement |
     if (!active) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isImeKey(event) || interactionLayers.topInteractive()) return;
-      if (!(event.target instanceof Node) || !body.current?.contains(event.target)) return;
+      if (!(event.target instanceof Node)
+        || !body.current?.contains(event.target) && !trigger.current?.contains(event.target)) return;
       event.preventDefault(); close.current();
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [active, body]);
+  }, [active, body, trigger]);
 }
