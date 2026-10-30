@@ -278,7 +278,7 @@ export function createProjectAgentApplicationService({
 
   function draftRequest(payload, operation) {
     if (!open()) return disabled();
-    if (!['desktop', 'quick_chat', 'tui'].includes(payload?.surface) || !directory.get(payload?.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
+    if (!['desktop', 'quick_chat', 'tui'].includes(payload?.surface) || !directory.hasActiveBot(payload?.workspaceId)) return { ok: false, code: 'NOT_FOUND' };
     return inputDrafts[operation](payload);
   }
 
