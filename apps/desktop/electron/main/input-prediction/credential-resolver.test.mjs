@@ -10,7 +10,7 @@ test('credential lookup is off the main thread, abortable and never grants a too
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-prediction-credentials-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const helper = path.join(root, 'helper.cjs');
-  writeFileSync(helper, '#!/usr/bin/env node\nlet raw="";process.stdin.on("data",x=>raw+=x);process.stdin.on("end",()=>{const r=JSON.parse(raw);setTimeout(()=>process.stdout.write(JSON.stringify({version:1,ok:true,data:{secret:"worker-test-secret"}})),300);});', { mode: 0o700 });
+  writeFileSync(helper, '#!/usr/bin/env node\nlet raw="";process.stdin.on("data",x=>raw+=x);process.stdin.on("end",()=>{const r=JSON.parse(raw);setTimeout(()=>process.stdout.write(JSON.stringify({version:1,ok:true,data:{secret:"worker-test-secret"}})),50);});', { mode: 0o700 });
   const original = process.env.PEER_CREDENTIAL_HELPER_PATH;
   process.env.PEER_CREDENTIAL_HELPER_PATH = helper;
   t.after(() => { if (original === undefined) delete process.env.PEER_CREDENTIAL_HELPER_PATH; else process.env.PEER_CREDENTIAL_HELPER_PATH = original; });
