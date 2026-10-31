@@ -1,7 +1,8 @@
 import { DraftDocumentPage } from '../editing/DraftDocumentPage';
 import { resourceEditRegistry } from '../editing/resourceEditRegistry';
 import { RasterImageView } from '../file-preview/RasterImageView';
-import { adapterModeUnavailable, documentAdapterNotice } from '../file-preview/documentAdapterState';
+import { adapterModeUnavailable, documentAdapterNotice, isPackagedDocument } from '../file-preview/documentAdapterState';
+import { ExternalDocumentActions } from '../file-preview/ExternalDocumentActions';
 import { useClassicDocumentNavigation } from '../file-preview/useClassicDocumentNavigation';
 import { DocumentPreviewContext } from '../../chat/components/markdown/DocumentPreviewContext';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
@@ -327,17 +328,22 @@ function DocumentPage({ idPrefix, isZh, tab: fileTarget, active, onModeChange }:
     void content.reload();
   };
 
-  const renderContentError = (result: FileReadResult) => (
+  const renderContentError = (result: FileReadResult) => {
+    const packaged = result.status === 'binary' && isPackagedDocument(result.resolvedPath || fileTarget.absPath);
+    const openTarget = result.resolvedPath || fileTarget.absPath;
+    return (
     <div className="workbench-empty-hint workbench-diff-status">
-      <div>{contentErrorLabel(result.status, result.size, isZh)}</div>
+      <div>{packaged ? (isZh ? '此格式不能在这里预览正文。' : 'This format cannot be previewed here.') : contentErrorLabel(result.status, result.size, isZh)}</div>
       <div className="workbench-diff-path">{fileTarget.absPath}</div>
-      {result.status === 'too_large' || result.status === 'binary' ? (
+      {packaged && openTarget ? <ExternalDocumentActions path={openTarget} workspaceRoot={result.resolvedFrom || fileTarget.workspaceRoot} isZh={isZh} className="workbench-diff-btn" /> : null}
+      {!packaged && (result.status === 'too_large' || result.status === 'binary') ? (
         <button type="button" className="workbench-diff-btn" onClick={openInEditor}>
           {isZh ? '在编辑器中打开' : 'Open in editor'}
         </button>
       ) : null}
     </div>
-  );
+    );
+  };
 
   const renderImagePreview = () => {
     if (image.loading && !image.loaded) {

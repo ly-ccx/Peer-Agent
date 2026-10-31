@@ -592,6 +592,7 @@ test('text reads preserve not-found, file-only, size, binary, and UTF-8 guards',
       ['/large.txt', { kind: 'file', buffer: Buffer.from('x'), size: (2 * 1024 * 1024) + 1 }],
       ['/binary.bin', file(binary)],
       ['/text.txt', file('hello')],
+      ['/report.pdf', file('%PDF-1.4 text-looking body')],
     ],
     settings: { workspaces: [], activeWorkspace: null },
   });
@@ -624,6 +625,14 @@ test('text reads preserve not-found, file-only, size, binary, and UTF-8 guards',
     size: 3,
     resolvedFrom: undefined,
     error: 'binary_file',
+  });
+  assert.deepEqual(await harness.service.readFile({ absPath: '/report.pdf' }), {
+    ok: false,
+    status: 'binary',
+    content: '',
+    size: Buffer.byteLength('%PDF-1.4 text-looking body'),
+    resolvedFrom: undefined,
+    error: 'packaged_document',
   });
   assert.deepEqual(await harness.service.readFile({ absPath: '/text.txt' }), {
     ok: true,

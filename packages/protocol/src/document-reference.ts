@@ -55,6 +55,8 @@ export interface LocalDocumentReadResult {
   readonly revision?: ConfirmedGitDocumentRevision;
   /** Confirmed locations for an explicit human choice; never an authorization ticket. */
   readonly candidates?: readonly { readonly path: string; readonly root: string }[];
+  /** Bot project root used when a file citation was not found. Not an authorization root. */
+  readonly attemptedRoot?: string;
   readonly error?: string;
 }
 
