@@ -15,14 +15,15 @@ export function sourceFingerprint(root) {
 export function verifyPredictionPacket(directory, sourceRoot) {
   const machineFile = path.join(directory, 'machine.json'), raw = readFileSync(machineFile);
   const machine = JSON.parse(raw), review = JSON.parse(readFileSync(path.join(directory, 'review.json')));
-  assert.equal(machine.passed, true); assert.ok(machine.cases.length >= 16);
+  assert.equal(machine.passed, true); assert.ok(machine.cases.length >= 19);
   assert.equal(machine.sourceFingerprint.sha256, sourceFingerprint(sourceRoot).sha256, 'source changed after capture');
   assert.equal(review.machineSha256, sha256(raw), 'review belongs to another capture');
   assert.equal(review.independent, false, 'implementer self-review must be identified');
   assert.equal(review.accepted, true); assert.ok(review.limitations?.length > 0);
+  assert.ok(machine.screenshots.length >= 8);
   assert.equal(review.screenshots.length, machine.screenshots.length);
   for (const screenshot of machine.screenshots) {
-    assert.equal(screenshot.sha256, sha256(readFileSync(screenshot.file)), `changed screenshot: ${screenshot.name}`);
+    assert.equal(screenshot.sha256, sha256(readFileSync(path.isAbsolute(screenshot.file) ? screenshot.file : path.join(directory, screenshot.file))), `changed screenshot: ${screenshot.name}`);
     const inspected = review.screenshots.find(row => row.name === screenshot.name);
     assert.equal(inspected?.passed, true); assert.ok(inspected.observations?.length > 20);
   }

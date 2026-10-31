@@ -27,7 +27,7 @@ export function useInputPrediction(options: Options) {
   const preferences = useSyncExternalStore(inputPredictionPreferences.subscribe, inputPredictionPreferences.getSnapshot);
   const preferenceRef = useRef(preferences); preferenceRef.current = preferences;
   const presented = useRef(false), pendingSelection = useRef<ComposerEditValue | null>(null);
-  const knownText = useRef(options.text);
+  const knownText = useRef(options.text), acceptanceFocus = useRef(false);
   const [view, setView] = useState<PredictionView>({ status: 'idle', candidate: null });
   const [isPresented, setPresented] = useState(false);
   const read = (node: HTMLTextAreaElement): ComposerEditValue => ({ text: node.value, start: node.selectionStart, end: node.selectionEnd });
@@ -67,8 +67,7 @@ export function useInputPrediction(options: Options) {
         if (!editor || editor.value !== input.text || composition.current) return;
         const next = { text, start: text.length, end: text.length };
         history.current.record(read(editor), next, 'prediction');
-        const button = document.activeElement?.closest('[data-prediction-accept]');
-        const restoreFocus = button?.getAttribute('data-prediction-instance') === instance.composerInstanceId;
+        const restoreFocus = acceptanceFocus.current;
         apply(next);
         if (restoreFocus) editor.focus({ preventScroll: true });
       },
@@ -90,6 +89,7 @@ export function useInputPrediction(options: Options) {
     };
     const focus = () => { void inputPredictionPreferences.refresh(); sync(); };
     const blur = () => { queueMicrotask(sync); };
+    document.addEventListener('focusin', blur); document.addEventListener('focusout', blur);
     node.addEventListener('beforeinput', beforeInput); node.addEventListener('compositionstart', start);
     node.addEventListener('compositionend', end); node.addEventListener('select', sync);
     node.addEventListener('focus', focus); node.addEventListener('blur', blur);
@@ -101,6 +101,7 @@ export function useInputPrediction(options: Options) {
       node.removeEventListener('beforeinput', beforeInput); node.removeEventListener('compositionstart', start);
       node.removeEventListener('compositionend', end); node.removeEventListener('select', sync);
       node.removeEventListener('focus', focus); node.removeEventListener('blur', blur);
+      document.removeEventListener('focusin', blur); document.removeEventListener('focusout', blur);
       document.removeEventListener('selectionchange', sync); document.removeEventListener('visibilitychange', sync);
       window.removeEventListener('focus', focus); window.removeEventListener('blur', sync);
     };
@@ -138,7 +139,12 @@ export function useInputPrediction(options: Options) {
       if (node) history.current.record(read(node), next, 'edit');
       apply(next);
     },
-    accept() { if (presented.current) void controller.current?.accept(); },
+    accept() {
+      const instance = controller.current;
+      if (!presented.current || !instance || view.status !== 'visible') return;
+      acceptanceFocus.current = document.activeElement?.closest('[data-prediction-accept]')?.getAttribute('data-prediction-instance') === instance.composerInstanceId;
+      void instance.accept().finally(() => { acceptanceFocus.current = false; });
+    },
     invalidate() { controller.current?.invalidate(); },
   };
 }

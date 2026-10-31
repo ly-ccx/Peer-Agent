@@ -96,7 +96,7 @@ const until = async (read, predicate, timeout = 15000) => {
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 50)); }
   throw Error(`Timed out: ${String(read).slice(0, 180)}`);
 };
-async function check(name, run) { console.log(`START ${name}`); await run(); report.cases.push({ name, passed: true }); console.log(`PASS ${name}`); }
+async function check(name, run) { if (process.argv.includes('--submission-only') && name !== 'accepted draft is submitted exactly once through the original Bot input chain' || process.argv.includes('--acceptance-only') && name !== 'pointer and accessible keyboard acceptance only edit the draft and preserve focus') return; console.log(`START ${name}`); await run(); report.cases.push({ name, passed: true }); console.log(`PASS ${name}`); }
 async function capture(name) { const file = path.join(root, `${name}.png`); await page.screenshot({ path: file }); report.screenshots.push({ name, file, sha256: sha256(readFileSync(file)) }); }
 async function settleRate() { await new Promise(resolve => setTimeout(resolve, 5200)); }
 async function suggestion() { await page.locator('.input-prediction-accept').waitFor({ state: 'visible', timeout: 12000 }); }
@@ -304,6 +304,24 @@ try {
     assert.equal(logs.join('').includes('CONTROLLED_PRIVATE_ECHO'), false);
     await editor.press('Escape'); assert.equal(await editor.inputValue(), '持久草稿');
     serverState.insertion = null;
+  });
+  await check('accepted draft is submitted exactly once through the original Bot input chain', async () => {
+    if (await page.locator('.app-sidebar').isVisible()) {
+      await page.locator('.app-sidebar').getByRole('button', { name: '设置', exact: true }).click();
+      await page.getByRole('button', { name: '界面', exact: true }).click();
+      await page.getByRole('option', { name: '机器人列表', exact: true }).click();
+      await page.locator('.settings-nav').getByRole('button', { name: '设置', exact: true }).click();
+      await page.locator('.bot-row').filter({ hasText: 'project-000' }).first().click();
+    }
+    const editor = await newDraft('提交前缀'); await suggestion(); await editor.press('Tab');
+    await until(() => editor.inputValue(), value => value === '提交前缀检查一下过渡。');
+    const before = conversations.getPersistedConversationHistory(bot.conversationId).messages.filter(row => row.kind === 'user_input').length;
+    await editor.press('Enter');
+    await until(() => conversations.getPersistedConversationHistory(bot.conversationId).messages.filter(row => row.kind === 'user_input'),
+      rows => rows.some(row => row.content === '提交前缀检查一下过渡。'));
+    const rows = conversations.getPersistedConversationHistory(bot.conversationId).messages.filter(row => row.kind === 'user_input');
+    assert.equal(rows.length, before + 1); assert.equal(rows.at(-1).content, '提交前缀检查一下过渡。');
+    await until(() => editor.inputValue(), value => value === '');
   });
   assert.equal(report.pageErrors.length, 0, 'no renderer exceptions');
   assert.equal(serverState.calls.some(row => row.body.tools?.length), false, 'prediction never exposes tools');

@@ -56,7 +56,7 @@ export function ComposerInputSuggestion({ prediction, text, i18n }: {
     {fits ? <>
       <button type="button" className="input-prediction-accept" data-prediction-accept="true" data-prediction-instance={candidate.composerInstanceId}
         aria-label={`${i18n.t('inputPrediction.accept')}: ${candidate.insertionText}`}
-        disabled={prediction.view.status === 'accepting'}
+        aria-disabled={prediction.view.status === 'accepting'}
         onPointerDown={event => event.preventDefault()} onClick={prediction.accept}>
         <kbd>Tab</kbd><span>{i18n.t('inputPrediction.accept')}</span>
       </button>
