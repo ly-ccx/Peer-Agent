@@ -139,7 +139,7 @@ export function BotMessageList({
       role="log"
       tabIndex={0}
       aria-live="polite"
-      aria-busy={loadingOlder}
+      aria-busy={loadingOlder || !ready}
       onWheel={scroll.onWheel} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}
       onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown}
       onScroll={(event) => {
@@ -157,9 +157,9 @@ export function BotMessageList({
       ) : null}
       <div className="bot-thread-origin" ref={scroll.originRef} />
       {rows.length === 0 ? (
-        <div className="bot-thread-empty">
+        <div className="bot-thread-empty" role="status" aria-busy={!ready || undefined}>
           <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} />
-          <p>{i18n.t('projectAgent.chat.empty')}</p>
+          <p className={ready ? undefined : 'bot-thinking-status-label'}>{i18n.t(ready ? 'projectAgent.chat.empty' : 'projectAgent.chat.loading')}</p>
         </div>
       ) : null}
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}

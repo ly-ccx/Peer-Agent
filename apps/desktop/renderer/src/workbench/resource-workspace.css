@@ -21,8 +21,10 @@ html[data-vibrancy='true'] .bot-resource-pane > .resource-workspace-resizer { to
 .resource-workspace[data-resource-exiting='true'] { width: var(--resource-retained-width) !important; min-width: var(--resource-retained-width); flex-shrink: 0; transition: none; }
 .bot-resource-layout[data-resource-navigation-collapsed='true'] .bot-column { display: none; }
 .bot-resource-layout[data-resource-navigation-collapsed='true'] .bot-main { margin-inline-start: 0; }
-/* Keep native macOS window controls clear when their usual navigation host is hidden. */
-:root[data-os='darwin'] .bot-resource-layout[data-resource-navigation-collapsed='true'][data-resource-full='false'] .bot-main-head { padding-top: var(--space-10); }
+/* 列表收起后对话贴到窗口左缘。交通灯仍在左上，标题行只右移，不增加高度。 */
+:root[data-os='darwin'] .bot-resource-layout[data-resource-navigation-collapsed='true']:not([data-resource-full='true']) .bot-main-head {
+  padding-left: 78px;
+}
 .bot-resource-layout[data-resource-maximized='true'] .workbench-resizer { display: none; }
 .bot-resource-layout[data-resource-maximized='true']:not([data-resource-compact='true']) > .bot-resource-primary { position: absolute; visibility: hidden; pointer-events: none; width: 0; height: 0; overflow: hidden; }
 .bot-resource-layout[data-resource-maximized='true'] > .bot-resource-pane { flex: 1; width: 100%; max-width: 100%; }

@@ -1,22 +1,22 @@
 .bot-reply-context, .bot-delegated-work { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.6; }
-.bot-reply-context { display: flex; align-items: center; min-height: 28px; margin-top: 2px; max-width: calc(100% - var(--bot-reply-inset, 14px) - 14px); box-sizing: border-box; font-size: 12px; }
+.bot-reply-context { display: flex; align-items: center; align-self: flex-start; min-width: 0; min-height: 28px; margin-top: 0; max-width: min(680px, 100%); box-sizing: border-box; font-size: 12px; }
 .bot-delegated-work summary, .bot-background-work > summary { list-style: none; cursor: pointer; }
 .bot-delegated-work summary::-webkit-details-marker, .bot-background-work > summary::-webkit-details-marker { display: none; }
-.bot-reply-context > button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; margin-inline-start: -8px; padding: 6px 8px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 140ms ease, background 140ms ease, color 140ms ease; }
+.bot-reply-context > button { display: inline-flex; align-items: center; gap: 4px; min-width: 0; min-height: 28px; padding: 2px 0; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-mute); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity var(--za-motion-fast) var(--za-ease-standard), color var(--za-motion-fast) var(--za-ease-standard); }
 .bot-reply-context > button > svg { flex-shrink: 0; }
 .bot-reply-context[data-running="true"] > button,
-.bot-reply-context[data-quotable="true"] > button,
 .bot-reply:is(:hover, :focus-within) > .bot-reply-context > button,
 .bot-system:is(:hover, :focus-within) > .bot-reply-context > button { opacity: 1; pointer-events: auto; }
-.bot-reply-context[data-quotable="true"] { gap: var(--space-2); flex-wrap: wrap; }
+.bot-reply-context[data-quotable="true"] { gap: 14px; flex-wrap: nowrap; }
+.bot-reply-context[data-quotable="true"] > button:last-child { margin-inline-start: auto; min-width: 0; }
 @media (hover: none) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 @media (forced-colors: active) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 .bot-reply-context > button .bot-avatar { width: 18px; height: 18px; flex-basis: 18px; }
 .bot-context-running { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--graphite-soft); }
 .bot-reply-context[data-running="true"] .bot-context-running { color: var(--graphite-base); }
-.bot-reply-context > button { flex-shrink: 1; max-width: calc(100% + 8px); }
-.bot-reply-context > button:hover { background: var(--paper-hover); }
+.bot-reply-context > button { flex-shrink: 1; max-width: 100%; }
 .bot-reply-context > button:hover, .bot-work-row > summary:hover { color: var(--graphite-base); }
+.bot-reply-context > button:hover > span:not(.bot-context-running) { text-decoration: underline; text-underline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { .bot-reply-context > button { transition: none; } }
 .bot-work-row > summary > svg:last-child { transition: transform 160ms ease; }
 .bot-work-row[open] > summary > svg:last-child { transform: rotate(180deg); }
