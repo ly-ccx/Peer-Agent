@@ -67,7 +67,10 @@ export function useInputPrediction(options: Options) {
         if (!editor || editor.value !== input.text || composition.current) return;
         const next = { text, start: text.length, end: text.length };
         history.current.record(read(editor), next, 'prediction');
+        const button = document.activeElement?.closest('[data-prediction-accept]');
+        const restoreFocus = button?.getAttribute('data-prediction-instance') === instance.composerInstanceId;
         apply(next);
+        if (restoreFocus) editor.focus({ preventScroll: true });
       },
     });
     controller.current = instance;

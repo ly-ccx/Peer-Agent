@@ -178,11 +178,16 @@ try {
     assert.equal(await field.inputValue(), '请核对');
     assert.equal(await field.evaluate(node => document.activeElement === node), false);
   });
-  await check('clicking the accessible acceptance control only edits the draft', async () => {
+  await check('pointer and accessible keyboard acceptance only edit the draft and preserve focus', async () => {
     await newDraft('重新'); await suggestion();
     await page.getByRole('button', { name: '采纳建议: 检查一下过渡。', exact: true }).click();
     await until(() => field.inputValue(), value => value === '重新检查一下过渡。');
     assert.equal(await page.locator('.input-prediction-accept').count(), 0);
+    await newDraft('键盘操作'); await suggestion();
+    const accessible = page.getByRole('button', { name: '采纳建议: 检查一下过渡。', exact: true });
+    await accessible.focus(); await accessible.press('Enter');
+    await until(() => field.inputValue(), value => value === '键盘操作检查一下过渡。');
+    assert.equal(await field.evaluate(node => document.activeElement === node), true, 'keyboard activation restores the same input focus');
   });
   await check('an unsent attachment suspends prediction and keeps the real draft', async () => {
     await settleRate(); await field.fill('带附件的真实草稿');
