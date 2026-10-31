@@ -32,11 +32,9 @@ export function useReplyFooterBounds() {
       footer.style.paddingInlineStart = '0';
       footer.style.paddingInlineEnd = '0';
       if (!bounds) {
-        footer.style.marginInlineStart = '0px';
-        footer.style.width = '100%';
-        footer.style.maxWidth = '100%';
-        footer.style.paddingInlineStart = `${padStart}px`;
-        footer.style.paddingInlineEnd = `${padEnd}px`;
+        footer.style.marginInlineStart = `${padStart}px`;
+        footer.style.width = `calc(100% - ${padStart + padEnd}px)`;
+        footer.style.maxWidth = `calc(100% - ${padStart + padEnd}px)`;
       } else {
         const inner = Math.max(0, bounds.width - padStart - padEnd);
         footer.style.marginInlineStart = `${Math.max(0, bounds.left - parent.left + padStart)}px`;
