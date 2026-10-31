@@ -11,7 +11,7 @@ Peer 是面向代码、文档与研究工作的本地工作委托系统。把目
 
 你保留重要判断和授权。任务、计划与成功标准在项目对话背后组织执行。
 
-> **先选择对应版本。** 项目 Bot 体验属于 **0.1 预览版**，本源码准备发布到 beta 通道 **`0.1.0-rc.30`**（npm `rc`）；当前正式版：**`0.0.18`**（npm `latest`）使用经典界面。可下载版本及升级说明以[已发布版本](https://github.com/ly-ccx/Peer-Agent/releases)为准，源码版本号不表示安装包已经发布。
+> **先选择对应版本。** 项目 Bot 体验属于 **0.1 预览版**，本源码准备发布到 beta 通道 **`0.1.0-rc.31`**（npm `rc`）；当前正式版：**`0.0.18`**（npm `latest`）使用经典界面。可下载版本及升级说明以[已发布版本](https://github.com/ly-ccx/Peer-Agent/releases)为准，源码版本号不表示安装包已经发布。
 
 ![真实项目 Bot 界面，使用虚构的官网、文档与研究项目](docs/screenshots/project-bot-showcase-light.jpg)
 
