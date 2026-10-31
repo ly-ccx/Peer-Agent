@@ -1,8 +1,12 @@
+import { createI18n } from '@peer-agent/i18n';
+import { useInputPrediction } from '../hooks/useInputPrediction';
+import { inputPredictionPreferences } from '../state/inputPredictionPreferences';
+import { ComposerInputSuggestion } from './ComposerInputSuggestion';
 import { MotionSurface } from '../../app/components/MotionSurface';
 import { useCompositionGuard } from '../../app/hooks/useCompositionGuard';
 import { PeerIcon } from '../../ui/icons';
 import type React from 'react';
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
 import { loadComposerEntry, saveComposerEntry, shouldDeferEmptyComposerSave } from '../state/composerPersistence';
 import { conversationStore } from '../state/conversationStore';
@@ -457,7 +461,25 @@ const ComposerDraftField = memo(function ComposerDraftField({
     });
   }, [conversationId, draft, messageQueue]);
 
-  const setDraft = (value: string) => conversationStore.setDraft(conversationId, value);
+  const writeDraft = (value: string) => conversationStore.setDraft(conversationId, value);
+  const predictionI18n = useMemo(() => createI18n(isZh ? 'zh-CN' : 'en-US'), [isZh]);
+  const predictionSource = useMemo(() => {
+    const read = () => {
+      const state = conversationStore.getSnapshot(conversationId);
+      return `${state.loadStatus}:${state.messages.at(-1)?.id ?? ''}`;
+    };
+    return { read, subscribe: (listener: () => void) => conversationStore.subscribeSelector(conversationId,
+      state => `${state.loadStatus}:${state.messages.at(-1)?.id ?? ''}`, listener) };
+  }, [conversationId]);
+  const predictionVersion = useSyncExternalStore(predictionSource.subscribe, predictionSource.read);
+  const prediction = useInputPrediction({ textareaRef, text: draft, setText: writeDraft, surface: 'desktop_classic',
+    workspaceId: inputPredictionPreferences.workspaceIdFor(workspacePath), conversationId: conversationId ?? '',
+    contextVersion: predictionVersion,
+    eligible: hasProvider && !isBusy && !isStreaming && !hasAttachments && !editingMessage
+      && !draft.startsWith('/') && !showSlashCommands && !showContextMentions && messageQueue.length === 0 && predictionVersion.startsWith('ready:'),
+    quoteMessageId: quotes[0]?.selectionReference?.sourceMessageId });
+  const setDraft = prediction.editText;
+
 
   const applySlashCommand = (command: SlashCommand) => {
     setDraft(command.value);
@@ -626,11 +648,12 @@ const ComposerDraftField = memo(function ComposerDraftField({
           ))}
         </div>
       ) : null}
+      <ComposerInputSuggestion prediction={prediction} text={draft} i18n={predictionI18n} />
       <textarea
         ref={textareaRef}
         value={draft}
         disabled={!hasProvider}
-        placeholder={hasProvider
+        placeholder={prediction.isPresented ? '' : hasProvider
           ? isBusy
             ? (isZh ? '随心输入' : 'Type freely')
             : variant === 'home'
@@ -640,7 +663,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
         rows={1}
         style={quotes.length && quoteFlow ? { textIndent: `${quoteFlow.indent}px` } : undefined}
         onPaste={onPaste}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={prediction.onChange}
         onCompositionStart={event => composition.start(event.currentTarget)}
         onCompositionEnd={event => composition.end(event.currentTarget)}
         onKeyUp={event => composition.keyUp(event.nativeEvent)}
@@ -720,6 +743,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
               return;
             }
           }
+          if (prediction.onKeyDown(event)) return;
           if (event.key === 'Escape' && editingMessage) {
             event.preventDefault();
             onCancelEdit?.();

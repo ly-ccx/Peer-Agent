@@ -69,7 +69,11 @@ export function createUsageRequestLog({
       groupId: resolveGroupId(entry),
       model: optionalText(entry.model),
       providerName: optionalText(entry.providerName),
-      usageScope: 'runtime_turn',
+      usageScope: entry.requestPurpose === 'input_prediction' ? 'provider_request' : 'runtime_turn',
+      ...(entry.requestPurpose === 'input_prediction' ? {
+        requestPurpose: 'input_prediction', accountingState: entry.accountingState === 'settled' ? 'settled' : 'reserved',
+        usageIsEstimate: entry.usageIsEstimate !== false,
+      } : {}),
       providerRequestCount: Math.max(
         1,
         Math.floor(finiteNumber(entry.providerRequestCount || usage.providerRequestCount) || 1),
@@ -101,13 +105,23 @@ export function createUsageRequestLog({
         // skip corrupt line
       }
     }
-    return rows;
+    return foldPredictionUsage(rows);
+  }
+
+  function readForBudget(sinceMs) {
+    if (!existsSync(logFile)) return { complete: true, rows: [] };
+    const lines = readUsageTail(logFile, 50_000);
+    const parsed = lines.map(line => { try { return JSON.parse(line); } catch { return null; } });
+    // Missing/corrupt records cannot be interpreted as zero spend.
+    const complete = parsed.every(Boolean) && (lines.complete || parsed.some(row => Date.parse(row?.at) < sinceMs));
+    return { complete, rows: foldPredictionUsage(parsed.filter(Boolean)).filter(row => Date.parse(row.at) >= sinceMs) };
   }
 
   return {
     logFile,
     append,
     readAll,
+    readForBudget,
   };
 }
 
@@ -133,6 +147,14 @@ function readUsageTail(file, limit) {
     }
     const lines = Buffer.concat(chunks).toString('utf8').split('\n');
     if (position > 0) lines.shift(); // Discard the incomplete first record.
-    return lines.filter(Boolean);
+    const result = lines.filter(Boolean);
+    result.complete = position === 0;
+    return result;
   } finally { closeSync(fd); }
+}
+
+function foldPredictionUsage(rows) {
+  const latest = new Map();
+  for (const row of rows) if (row.requestPurpose === 'input_prediction') latest.set(row.id, row);
+  return rows.filter(row => row.requestPurpose !== 'input_prediction' || latest.get(row.id) === row);
 }

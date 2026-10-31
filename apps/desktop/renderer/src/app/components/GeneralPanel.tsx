@@ -1,3 +1,4 @@
+import { InputPredictionPanel } from './settings/InputPredictionPanel';
 import { useEditableResource } from '../../ui/forms/useEditableResource';
 import { useSettingsAction } from '../../ui/forms/useSettingsAction';
 import { FormFeedback } from '../../ui/forms/FormFeedback';
@@ -223,6 +224,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
               onChange={value => { void saveBots({ digestTime: value }); }} />
           </div>
       </SettingsGroup>
+      <InputPredictionPanel i18n={i18n} />
       <FormFeedback i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
       <FormFeedback i18n={i18n} saving={localeAction.busy} saveError={localeAction.error} onRetry={localeAction.retry} />
     </div>

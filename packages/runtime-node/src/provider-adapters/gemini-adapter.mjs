@@ -1,3 +1,4 @@
+import { emitProviderEvent } from './event-sink.mjs';
 import { encodeGeminiGenerateContentRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
@@ -44,7 +45,7 @@ function consumeGeminiPayload(parsed, state, webContents, streamId, trace = null
     for (const part of parts) {
       if (typeof part.text === 'string' && part.text) {
         state.content += part.text;
-        webContents.send('chat:stream:delta', { streamId, content: part.text });
+        emitProviderEvent(webContents, 'chat:stream:delta', { streamId, content: part.text });
       }
       if (part.functionCall?.name) {
         const toolCall = {
@@ -66,7 +67,7 @@ function consumeGeminiPayload(parsed, state, webContents, streamId, trace = null
   const usage = normalizeGeminiUsage(payload?.usageMetadata);
   if (usage) {
     state.usage = usage;
-    webContents.send('chat:stream:usage', { streamId, usage });
+    emitProviderEvent(webContents, 'chat:stream:usage', { streamId, usage });
   }
   if (candidates.length && candidates.every(candidate => candidate.finishReason && candidate.finishReason !== 'FINISH_REASON_UNSPECIFIED')) state.done = true;
 }
@@ -147,6 +148,8 @@ export async function sendGeminiStream({
   sessionId,
   signal,
   webContents,
+  eventSink = null,
+  tracePrivacy = 'default',
   streamId,
   fetchImpl,
 }) {
@@ -172,6 +175,7 @@ export async function sendGeminiStream({
     supportsReasoning,
     streamId,
     requestBody: body,
+    privacy: tracePrivacy,
   });
 
   const res = await fetchImpl(url, {
@@ -204,7 +208,7 @@ export async function sendGeminiStream({
     };
   }
 
-  const streamResult = await consumeGeminiStream(res, webContents, streamId, trace, signal);
+  const streamResult = await consumeGeminiStream(res, eventSink ?? webContents, streamId, trace, signal);
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({

@@ -61,6 +61,10 @@ function allowedWindowRolesFor(channel, rendererToMain) {
 }
 
 const INVOKE_CHANNELS = Object.freeze([
+  'input-prediction:request',
+  'input-prediction:cancel',
+  'input-prediction:validate',
+  'input-prediction:status',
   'resource-edit:open',
   'resource-edit:resume',
   'resource-edit:cancel-open',

@@ -9,7 +9,7 @@ const MODEL_ROUTING_ROLES = [
   'visual_verifier',
   'memory_curator',
   'objective_probe',
-  'compactor',
+  'compactor', 'input_predictor',
 ];
 
 function assertFunction(value, label) {

@@ -14,6 +14,7 @@
 // 与本地能力执行结果（PermissionGrant -> Evidence）接管。
 
 import { readReplyTextPreview } from './reply-text-preview.mjs';
+import { emitProviderEvent } from './event-sink.mjs';
 const TOOL_ARG_PROGRESS_INTERVAL_MS = 50;
 
 // 从增量累积的 JSON 片段中尽早解析 path。
@@ -62,7 +63,7 @@ export function emitToolArgProgress(progress, ctx) {
   }
   progress.lastProgressAt = now;
 
-  webContents.send('chat:stream:tool-progress', {
+  emitProviderEvent(webContents, 'chat:stream:tool-progress', {
     streamId,
     toolCallId,
     tool: toolName,
