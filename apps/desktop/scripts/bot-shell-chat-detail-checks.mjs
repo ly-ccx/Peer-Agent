@@ -51,7 +51,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     await composer.focus(); await page.mouse.move(1, 1);
     const button = firstReply.getByRole('button', { name: '回复详情', exact: true });
     await page.waitForFunction(node => getComputedStyle(node).opacity === '0', await button.elementHandle());
-    assert.equal(await firstReply.getByRole('button', { name: '引用', exact: true }).isVisible(), false);
+    assert.equal(await firstReply.getByRole('button', { name: '引用', exact: true }).evaluate(node => getComputedStyle(node).opacity), '0');
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `reply-entry-idle-${theme}.png`) });
     await firstReply.evaluate(async node => {
       const animations = node.closest('.bot-shell').getAnimations({ subtree: true }).filter(animation =>
