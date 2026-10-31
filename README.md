@@ -11,7 +11,7 @@ Peer is a local work delegation system for people moving code, documents and res
 
 You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.30`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.31`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
 
 ![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 

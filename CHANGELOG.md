@@ -2,6 +2,20 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.31 - 2026-10-31
+
+### 修复与优化
+
+- 回复详情和引用在悬停或焦点时出现，并与气泡正文对齐；生成中只保留状态。读取对话和恢复草稿使用同一套弱化状态字。
+- 回复进行中锁定模型选择。保存草稿不再投影整份机器人历史。
+- 打不开的引用标明项目根；PDF 与 Office 用系统应用打开。收起机器人列表时标题避开红绿灯。
+
+### Improvements (English)
+
+- Show reply details and quote on hover or focus, aligned with the bubble text, and keep only live status while a reply is generating. Use the same quiet status for loading a conversation and restoring a draft.
+- Lock model selection during a reply. Stop projecting full bot history on each draft save.
+- Name the project root when a citation cannot be opened, open PDF and Office files in the system app, and shift the title clear of the traffic lights when the bot list is hidden.
+
 ## 0.1.0-rc.30 - 2026-10-30
 
 ### 修复与优化
