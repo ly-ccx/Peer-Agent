@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
@@ -105,7 +105,8 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
       else { explicitFocus.current = true; setChoices(current => ({ ...current, [wide ? 'wide' : 'compact']: true })); }
     }}><PeerIcon name="blocks" size={16} />{needsYou ? <span className="bot-work-panel-notice" aria-hidden="true" /> : null}
   </button>;
-  return <div ref={root} className="bot-work-layout" data-work-panel-open={open} data-work-panel-wide={wide}>
+  return <div ref={root} className="bot-work-layout" data-work-panel-open={open} data-work-panel-wide={wide}
+    style={{ '--bot-work-panel-min-width': `${BOT_WORK_PANEL_MIN_WIDTH / 16}rem` } as CSSProperties}>
     {headerTarget ? createPortal(toggle, headerTarget) : <div className="bot-work-panel-local-trigger">{toggle}</div>}
     <div className="bot-work-primary">{children}</div>
     <div className="bot-work-panel-space motion-inline-space" aria-hidden="true" />

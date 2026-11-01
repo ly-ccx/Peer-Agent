@@ -8,7 +8,13 @@
   background: var(--paper-base);
 }
 .bot-work-primary { display: flex; flex: 1; min-width: 0; min-height: 0; }
-.bot-work-panel-space { flex: none; inline-size: 0; }
+.bot-work-panel-space {
+  flex: none;
+  inline-size: 0;
+  /* Clamp the animated reservation against the current width immediately,
+     before the responsive observer switches from the wide to compact layout. */
+  max-inline-size: max(0px, calc(100% - var(--bot-work-panel-min-width) + var(--bot-work-panel-width) + var(--space-4)));
+}
 .bot-work-layout[data-work-panel-wide="true"][data-work-panel-open="true"] > .bot-work-panel-space {
   inline-size: calc(var(--bot-work-panel-width) + var(--space-4));
 }
