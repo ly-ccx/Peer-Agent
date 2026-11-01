@@ -1,3 +1,5 @@
+import { createDesktopInputPrediction } from './input-prediction/desktop-service.mjs';
+import { createInputPredictionIpcRegistrations } from './ipc/register-input-prediction-ipc.mjs';
 import { createResourceEditApplicationService } from './resource-edit-application-service.mjs';
 import { createResourceEditSources } from './resource-edit-sources.mjs';
 import { createResourceEditSubmissionHost } from './resource-edit-submission-host.mjs';
@@ -8,7 +10,7 @@ import { createResourceFeedbackPreparation } from './resource-feedback-preparati
 import { createResourceFeedbackIpcRegistrations } from './ipc/register-resource-feedback-ipc.mjs';
 import { createBrowserWindowController } from './browser-window-controller.mjs';
 import { createBrowserWindowIpcRegistrations } from './ipc/register-browser-window-ipc.mjs';
-import { app, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
+import { app, net, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { createMcpOAuthCallback } from './mcp-oauth-callback.mjs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
@@ -18,10 +20,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
-
 /** 内嵌 Browser 持久分区（与 renderer BrowserView 一致）。 */
 const PEER_BROWSER_PARTITION = 'persist:peer-browser';
-
 const execFileAsync = promisify(execFile);
 import { createAgentTurnExecutor } from './agent-host/agent-turn-executor.mjs';
 import { buildGoalRunnerMessage, createDesktopGoalRunnerHost } from './agent-host/goal-runner-host.mjs';
@@ -255,7 +255,6 @@ import {
   quitAndInstall,
   openReleasePage,
 } from './auto-updater.mjs';
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const trustedWindowRegistry = createTrustedWindowRegistry({
   openExternal: (url) => shell.openExternal(url),
@@ -264,7 +263,6 @@ const ipcMain = createCatalogIpcMain({
   ipcMain: electronIpcMain,
   authorize: trustedWindowRegistry.authorize,
 });
-
 function findWorkspaceRoot(startDir) {
   let current = startDir;
   while (current !== path.dirname(current)) {
@@ -275,7 +273,6 @@ function findWorkspaceRoot(startDir) {
   }
   return path.resolve(__dirname, '../../..');
 }
-
 const isPackaged = app.isPackaged;
 // Only the private managed child entry opts out of daily-host integrations.
 const isManagedPreview = !isPackaged && Boolean(process.send && process.env.PEER_PREVIEW_INSTANCE)
@@ -297,11 +294,9 @@ const {
   light: macDockIconPath,
   dark: macDarkDockIconPath,
 } = resolveDockIconPaths({ isPackaged, workspaceRoot, resourcesRoot });
-
 function getDesktopIconPath() {
   return desktopIconPath && existsSync(desktopIconPath) ? desktopIconPath : undefined;
 }
-
 function applyNativeThemeSource(appearance = settingsStore.getAll().appearance) {
   // Keep Electron/nativeTheme (and thus vibrancy materials) aligned with app appearance.
   // Without this, Quick Chat vibrancy can stay system-light while renderer is dark (or vice versa).
@@ -1906,12 +1901,17 @@ const goalApplicationService = createGoalApplicationService({
 });
 
 function registerDesktopIpcHost() {
+  const inputPrediction = createDesktopInputPrediction({ getSettings: () => settingsStore.getAll(),
+    listModels: llmConfigStore.listProviders, llmConfigStore, conversationStore,
+    getProjectAgent: () => projectAgentDirectory, trustedWindows: trustedWindowRegistry,
+    isBusy: id => llmChatService.listActiveConversationIds().includes(id), fetchImpl: (...args) => net.fetch(...args) });
   const productLinkService = createProductLinkService({
     openExternal: (url) => shell.openExternal(url),
   });
   return registerIpcOwners({
   ipc: ipcMain,
   registrations: [
+    ...createInputPredictionIpcRegistrations({ prediction: inputPrediction }),
     ...createDesktopIpcRegistrations({
     about: {
       openLink: (kind) => productLinkService.open(kind),
@@ -2031,8 +2031,8 @@ function registerDesktopIpcHost() {
     }),
     ...createChatIpcRegistrations({
       chat: {
-        send: handleChatSend,
-        startTask: handleChatStartTask,
+        send: (...args) => { inputPrediction.preempt(); return handleChatSend(...args); },
+        startTask: (...args) => { inputPrediction.preempt(); return handleChatStartTask(...args); },
         abort: (payload) => chatStreamApplicationService.abort(payload),
         reattach: (payload) => chatStreamApplicationService.reattach(payload),
         listActive: () => chatStreamApplicationService.listActive(),

@@ -1,4 +1,4 @@
-import { isModelReasoningEffort, modelReasoningLevels, modelSupportsFastMode, projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import { normalizeInputPredictionSettings, isModelReasoningEffort, modelReasoningLevels, modelSupportsFastMode, projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import {
   isRoutableProvider,
   normalizeProjectAgentSettings,
@@ -80,6 +80,16 @@ export function createSettingsApplicationService({
 
   function update(partial) {
     const before = read();
+    if (isRecord(partial) && Object.prototype.hasOwnProperty.call(partial, 'inputPrediction')) {
+      const value = partial.inputPrediction;
+      if (!isRecord(value) || value.schemaVersion !== 1
+        || typeof value.enabled !== 'boolean' || typeof value.continuationEnabled !== 'boolean'
+        || !Array.isArray(value.disabledWorkspaceIds) || value.disabledWorkspaceIds.some(id => typeof id !== 'string' || !id || id.length > 200)
+        || ['dailyRequestLimit', 'dailyTokenLimit'].some(key => !Number.isSafeInteger(value[key]) || value[key] < 0)) {
+        throw new Error('INVALID_INPUT_PREDICTION_SETTINGS');
+      }
+      partial = { ...partial, inputPrediction: normalizeInputPredictionSettings(value) };
+    }
     const request = projectAgentPartial(before, partial);
     const next = merge(request);
     if (isRecord(partial) && Object.prototype.hasOwnProperty.call(partial, 'appearance')) {
@@ -220,7 +230,7 @@ export function createSettingsApplicationService({
       'visual_verifier',
       'memory_curator',
       'objective_probe',
-      'compactor',
+      'compactor', 'input_predictor',
     ].map((role) => {
       const resolved = resolveRoleRoute({
         role,

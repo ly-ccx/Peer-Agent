@@ -181,7 +181,14 @@ export function createProviderStreamTrace({
   supportsReasoning,
   streamId,
   requestBody,
+  privacy = 'default',
 }) {
+  // Input assistance must never persist drafts, candidate deltas or echoed errors,
+  // including when the user's global provider tracing flag is enabled.
+  if (privacy === 'metadata_only') return {
+    recordResponse() {}, recordSsePayload() {}, recordIgnoredLine() {},
+    recordDoneMarker() {}, recordParseError() {}, async finish() { return null; },
+  };
   const startedAt = nowIso();
   const record = {
     schemaVersion: 1,
