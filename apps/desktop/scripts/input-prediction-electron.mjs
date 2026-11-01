@@ -228,8 +228,11 @@ try {
     await page.getByRole('heading', { name: '智能输入建议', exact: true }).waitFor();
     await page.getByRole('heading', { name: '智能输入建议', exact: true }).scrollIntoViewIfNeeded();
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
-    await capture('settings-input-prediction-light');
     const section = page.locator('.input-prediction-settings');
+    await section.scrollIntoViewIfNeeded();
+    await until(() => section.getByRole('switch').isEnabled(), Boolean);
+    await until(() => section.locator('.model-selection-trigger-label').innerText(), text => text.includes('Prediction fixture'));
+    await capture('settings-input-prediction-light');
     assert.equal(await section.getByRole('switch').count(), 1);
     const enabled = section.getByRole('switch', { name: '开启智能输入建议', exact: true });
     await enabled.click();
