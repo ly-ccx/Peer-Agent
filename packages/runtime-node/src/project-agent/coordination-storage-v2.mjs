@@ -500,7 +500,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: minimumVersion }));
       durable(manifestFile, JSON.stringify(next)); manifest = next;
     },
-    readSessionControl(sessionId) { load(); const head = get(db, 'sessionControlHeads', sessionId); return head ? get(db, 'sessionControls', head.operationId) : undefined; },
+    readSessionControl(sessionId) { if (typeof sessionId !== 'string' || !sessionId) return undefined; load(); const head = get(db, 'sessionControlHeads', sessionId); return head ? get(db, 'sessionControls', head.operationId) : undefined; },
     readSupervision(bucket, id) {
       if (!SUPERVISION_BUCKETS.includes(bucket)) throw fail('supervision_query_invalid');
       load(); return get(db, bucket, id);

@@ -21,16 +21,17 @@ export async function readWithdrawnTaskSnapshots() {
     const parent = conversationStore.createConversation({ title: 'Parent', role: 'project_agent', workspaceId: 'consumer-test', workspacePath: root });
     conversationStore.appendMessage(parent.id, { id: 'withdraw-now', role: 'user', kind: 'user_input', content: 'Withdraw this task; keep history' });
     const child = conversationStore.createConversation({ title: 'Old task', role: 'work_session', parentConversationId: parent.id, workspaceId: 'consumer-test', workspacePath: root });
-    const plan = goalPlanStore.createGoalContract({ conversationId: child.id, goal: 'Old task', tasks: [{ taskId: 'old-leaf', title: 'Old leaf' }] });
+    const plan = goalPlanStore.createGoalContract({ conversationId: child.id, targetWorkspacePath: root, goal: 'Old task', tasks: [{ taskId: 'old-leaf', title: 'Old leaf' }] });
     const selected = { providerId: 'local', modelId: 'unused', modelProviderId: 'unused', family: 'test' };
     goalPlanStore.revisePlan(plan.planId, { status: 'interrupted',
       tasks: plan.tasks.map(task => ({ ...task, status: 'failed', failureReason: 'conversation_persistence_failed' })),
-      runner: { status: 'paused', interruption: { source: 'process_recovery', origin: 'host_handoff', reason: 'process_recovery', interruptedAt: '2026-10-29T02:51:53.227Z', recoverable: true, attempt: 1 } },
+      runner: { status: 'completed', interruption: { source: 'process_recovery', origin: 'host_handoff', reason: 'process_recovery', interruptedAt: '2026-10-29T02:51:53.227Z', recoverable: true, attempt: 1 } },
       delegationOrigin: { workspaceId: 'consumer-test', parentConversationId: parent.id, sessionId: 'old-session', workId: 'old-work',
         anchorMessageId: 'withdraw-now', inputId: 'withdraw-now', phase: 'paused', surface: 'desktop', depth: 1,
         modelSelection: { worker: selected, explorer: selected, verifier: selected, resolvedAt: '2026-10-29T02:00:00.000Z' },
         takeover: { operationId: 'old-takeover', phase: 'stopping', requestedAt: '2026-10-28T09:07:36.795Z' } } });
-    const store = createWorkCoordinationStore({ rootDir: root, workspaceId: 'consumer-test', holdsLease: () => true, leaseEpoch: () => 'fixture' });
+    const store = createWorkCoordinationStore({ rootDir: root, workspaceId: 'consumer-test', holdsLease: () => true, leaseEpoch: () => 'fixture', formatVersion: 2, fenceLegacyWrites: true });
+    await store.prepare();
     const unknown = [{ toolCallId: 'unknown-bash', capabilityId: 'bash', planId: plan.planId, sessionId: 'old-session', attemptId: 'old-attempt' }];
     store.saveWork({ workId: 'old-work', parentConversationId: parent.id, state: 'cancelled', stopScope: 'work', budget: { uncertainDispatches: unknown, attempts: {} } });
     release = registerWorkBudget('consumer-test', store);

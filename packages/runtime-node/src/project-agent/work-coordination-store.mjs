@@ -99,6 +99,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
     writerEpoch() { assertOwner(); return epoch; },
     readSessionControl(sessionId) {
+      if (typeof sessionId !== 'string' || !sessionId) return undefined;
       if (useV2()) return storage.readSessionControl(sessionId);
       const state = reader.readSnapshot(), head = state.sessionControlHeads?.[sessionId];
       return head ? structuredClone(state.sessionControls?.[head.operationId]) : undefined;

@@ -12,6 +12,8 @@ test('control receipts survive a new reader and retain the combined version-nine
   let store = createWorkCoordinationStore(options);
   try {
     await store.prepare();
+    assert.equal(store.readSessionControl(undefined), undefined);
+    assert.equal(store.readSessionControl(''), undefined);
     const operation = { operationId: 'cancel', kind: 'cancel', authorityRef: 'actual-input', revision: 1,
       workspaceId: 'workspace', parentConversationId: 'parent', sessionId: 'session', planId: 'plan',
       expectedExecution: { planId: 'plan', sessionId: 'session', executionEpoch: 'epoch' }, phase: 'recorded', updatedAt: '2026-11-01T00:00:00.000Z' };

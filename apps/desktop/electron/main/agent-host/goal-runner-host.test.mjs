@@ -105,7 +105,8 @@ test('delegated startup does not rebuild a vanished worktree outside the isolati
     agentTurnExecutor: { runTurn: async () => { turns++; return { requestedUserInput: true }; } },
     hostLeases: { holds: () => true }, llmChatService: {}, broadcast() {}, resolveConversationModelProviderId: () => 'm',
     toDesktopProviderMessages: messages => messages, desktopContinuityContextFromProjection: () => [], getMainWindows: () => [] });
-  await assert.rejects(host.goalRunner.start(plan.planId, { awaitIdle: true }), /worktree is unavailable/);
+  // Resource admission now refuses the vanished worktree before isolation preparation.
+  await host.goalRunner.start(plan.planId, { awaitIdle: true });
   assert.equal(rebuilds, 0); assert.equal(turns, 0);
 });
 
@@ -646,6 +647,7 @@ test('ordinary plans still run, and task plans run only while this desktop holds
       conversationId: 'conv-task',
       title: 'Task',
       goal: 'Task plans follow the host lease',
+      targetWorkspacePath: root,
       successCriteria: ['The task plan reaches the turn only with a lease'],
       tasks: [{ taskId: 't1', order: 0, title: 'Task', status: 'pending', evidenceRefs: [] }],
       delegationOrigin: {
@@ -653,7 +655,7 @@ test('ordinary plans still run, and task plans run only while this desktop holds
         inputId: 'input-1',
         surface: 'desktop',
         workspaceId: 'ws-task',
-        sessionId: 'task-session', phase: 'running',
+        sessionId: 'task-session', phase: 'running', readOnly: true,
         depth: 1,
         modelSelection: {
           worker: selection,

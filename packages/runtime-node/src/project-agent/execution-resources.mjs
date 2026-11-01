@@ -12,7 +12,7 @@ const ended = new Set(['completed', 'failed', 'cancelled']);
 export function unsettledExecution(plan) {
   const origin = plan?.delegationOrigin;
   const binding = workBudgetBinding(origin?.workspaceId);
-  const work = binding?.store.readWork?.(origin?.workId);
+  const work = typeof origin?.workId === 'string' && origin.workId ? binding?.store.readWork?.(origin.workId) : undefined;
   const relevant = row => !row.planId || row.planId === plan.planId;
   const rows = [...(work?.budget?.uncertainDispatches || []).filter(relevant),
     ...Object.values(work?.budget?.attempts || {}).filter(relevant).flatMap(attempt => attempt.pendingTools || [])];

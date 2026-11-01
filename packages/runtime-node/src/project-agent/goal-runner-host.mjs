@@ -347,6 +347,7 @@ export function createProjectGoalRunnerHost({
       (workspaceId) => hostLeases?.holds?.(workspaceId) === true,
     );
     if (allowed !== null) {
+      if (!allowed) return false;
       executionScheduler.reconcile(currentPlans());
       // Completed leaves release a work slot. Final verification still runs
       // through the model lease queue, rather than abandoning its bookkeeping.
