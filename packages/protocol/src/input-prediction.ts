@@ -20,13 +20,17 @@ export const INPUT_PREDICTION_LIMITS = Object.freeze({
 
 export function normalizeInputPredictionSettings(value: unknown): InputPredictionSettings {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  const input = raw.schemaVersion === undefined || raw.schemaVersion === 1 ? raw : {};
+  const supported = (value == null || value === raw)
+    && (raw.schemaVersion === undefined || raw.schemaVersion === 1);
+  const input = supported ? raw : {};
+  const enabled = supported && (input.enabled === undefined || input.enabled === true);
   const limit = (value: unknown, fallback: number) => typeof value === 'number'
     && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
   return {
     schemaVersion: 1,
-    enabled: input.enabled === true,
-    continuationEnabled: input.continuationEnabled === true,
+    enabled,
+    // Preserve an existing explicit refusal until the user enables or selects a model again.
+    continuationEnabled: enabled && (input.continuationEnabled === undefined || input.continuationEnabled === true),
     disabledWorkspaceIds: Array.isArray(input.disabledWorkspaceIds)
       ? [...new Set(input.disabledWorkspaceIds.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 200))] : [],
     dailyRequestLimit: limit(input.dailyRequestLimit, 100),

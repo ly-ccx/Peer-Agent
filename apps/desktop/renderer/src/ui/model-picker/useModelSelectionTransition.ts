@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
-import { animateVisual, motionDurationMs } from '../../../app/state/visualMotion';
+import { animateVisual, motionDurationMs } from '../../app/state/visualMotion';
 
 /** Keep one live panel and its controls; only provider changes fade the inner content. */
 export function useModelSelectionTransition(

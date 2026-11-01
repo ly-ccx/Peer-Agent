@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotRoleModelView, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy, ProjectAgentActivity } from '@peer-agent/protocol';
-import { AnchoredModelSelectionMenu } from '../chat/components/thread/ModelSelectionPanel';
+import { ModelPicker } from '../ui/model-picker/ModelPicker';
 import { isEffortLevel, type EffortLevel } from '../chat/state/preferences';
-import type { SelectionProviderGroup } from '../chat/components/thread/modelSelection';
+import type { SelectionProviderGroup } from '../ui/model-picker/modelSelection';
 import { botConfiguredModelSelection, botFixedModelPolicy, botInheritModelPolicy, botModelMenuGroups } from './state/botModelControls';
 import type { BotModelsControlState } from './state/useBotModels';
 import { botModelPolicyKey } from './state/botModelState';
@@ -125,7 +125,7 @@ export function BotModelControls({ role, policy, models, view, busy, replying = 
     replyLock ?? i18n.t('projectAgent.model.nextReply')].filter(Boolean).join(' · ');
   return <div className={`bot-model-control${compact ? ' is-compact' : ''}`} data-model-id={model?.id ?? ''} data-effort={effort ?? ''} aria-busy={updating}>
     <div className="bot-model-control-row">
-      <AnchoredModelSelectionMenu
+      <ModelPicker
         className="bot-model-picker"
         groups={groups}
         selectedModelId={selectedId}

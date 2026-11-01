@@ -37,9 +37,9 @@ export async function checkQuickChatBots({ app, quick, native, fixture, until, r
     // window and its current selection, rather than clicking the previous frame.
     await until(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(win =>
       new URL(win.webContents.getURL()).searchParams.get('window') === 'quick-chat-popover' && win.isVisible())), Boolean);
-    await until(() => pop.locator('.quick-chat-popover-option.is-selected strong').textContent(), value => value === selected);
+    await until(() => pop.locator('.model-selection-model[aria-selected=true] .model-selection-model-label').textContent(), value => value === selected);
     await pop.bringToFront();
-    await pop.getByRole('button', { name: label, exact: true }).click();
+    await pop.getByRole('option').filter({ has: pop.getByText(label, { exact: true }) }).click();
     await until(() => pop.locator('.quick-chat-popover-shell').count(), count => count === 0);
     await focusQuick();
     await until(() => model.isEnabled(), Boolean);

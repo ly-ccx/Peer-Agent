@@ -970,6 +970,7 @@ export type TranslationKey =
   | 'inputPrediction.nextDisclosure'
   | 'inputPrediction.model'
   | 'inputPrediction.modelHelp'
+  | 'inputPrediction.noModels'
   | 'inputPrediction.chooseModel'
   | 'inputPrediction.routing'
   | 'inputPrediction.continuation'
@@ -1724,10 +1725,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'inputPrediction.estimated': '包含保守估算',
     'inputPrediction.title': '智能输入建议',
     'inputPrediction.description': '根据当前对话准备一句表达，按 Tab 或右方向键填入草稿。',
-    'inputPrediction.enabled': '预测下一句',
-    'inputPrediction.nextDisclosure': '将当前项目的公开对话上下文交给下方所选模型。建议不会自动发送。',
+    'inputPrediction.enabled': '开启智能输入建议',
+    'inputPrediction.nextDisclosure': '预测下一句，也补全正在输入的内容。建议不会自动发送。',
     'inputPrediction.model': '输入建议模型',
-    'inputPrediction.modelHelp': '建议选择响应快的模型；独立计入用量，并遵守项目的模型范围。',
+    'inputPrediction.modelHelp': '当前对话和未发送的草稿会交给所选模型。建议选择响应快的模型。',
+    'inputPrediction.noModels': '先在「服务商」中添加模型，再选择用于输入建议的模型。',
     'inputPrediction.chooseModel': '请选择输入建议模型',
     'inputPrediction.routing': '使用模型分工中的配置',
     'inputPrediction.continuation': '续写未发送的草稿',
@@ -3180,10 +3182,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'inputPrediction.estimated': 'includes conservative estimates',
     'inputPrediction.title': 'Smart input suggestions',
     'inputPrediction.description': 'Suggest a message from the conversation. Press Tab or Right Arrow to add it to your draft.',
-    'inputPrediction.enabled': 'Suggest the next message',
-    'inputPrediction.nextDisclosure': 'Shares public conversation context from this project with the selected model. Suggestions are never sent automatically.',
+    'inputPrediction.enabled': 'Enable smart input suggestions',
+    'inputPrediction.nextDisclosure': 'Suggest the next message and complete what you are typing. Suggestions are never sent automatically.',
     'inputPrediction.model': 'Suggestion model',
-    'inputPrediction.modelHelp': 'Choose a responsive model. Usage is counted separately and project model restrictions apply.',
+    'inputPrediction.modelHelp': 'Your current conversation and unsent draft will be shared with this model. Choose a responsive model.',
+    'inputPrediction.noModels': 'Add a model in Providers, then choose it for input suggestions.',
     'inputPrediction.chooseModel': 'Choose a suggestion model',
     'inputPrediction.routing': 'Use the configured model role',
     'inputPrediction.continuation': 'Complete unsent drafts',

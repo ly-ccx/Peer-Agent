@@ -82,11 +82,11 @@ export async function checkBotComposerLayout({ page, until, report, captureDirec
   await page.keyboard.press('Tab');
   assert.equal(await composer.locator('.bot-access-picker > button').evaluate(node => node === document.activeElement), true);
   await page.keyboard.press('Tab');
-  assert.equal(await composer.locator('.bot-model-picker > button').evaluate(node => node === document.activeElement), true);
+  assert.equal(await composer.locator('.bot-model-picker > .model-selection-trigger').evaluate(node => node === document.activeElement), true);
   await page.keyboard.press('Enter');
   await page.locator('.model-selection-panel').waitFor();
   await page.keyboard.press('Escape');
-  assert.equal(await composer.locator('.bot-model-picker > button').evaluate(node => node === document.activeElement), true);
+  assert.equal(await composer.locator('.bot-model-picker > .model-selection-trigger').evaluate(node => node === document.activeElement), true);
   await input.fill(originalText);
   await page.setViewportSize(viewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);

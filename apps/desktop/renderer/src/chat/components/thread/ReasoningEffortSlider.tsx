@@ -1,8 +1,9 @@
+import '../../../ui/model-picker/model-selection.css';
 import { MotionSurface } from '../../../app/components/MotionSurface';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { effortLabel, type EffortLevel } from '../../state/preferences';
-import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from './effortSlider';
+import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from '../../../ui/model-picker/effortSlider';
 
 export function ReasoningEffortSlider({
   effort,
