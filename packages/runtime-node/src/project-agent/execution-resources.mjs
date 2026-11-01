@@ -28,7 +28,8 @@ export function executionProtection(plan) {
     if (control.phase !== 'settled') return control.phase === 'reconciling' ? 'reconciling' : 'draining';
     if (control.stopReceipt) return unsettledExecution(plan).length ? 'reconciling' : 'released';
   }
-  if (origin.cancellation?.phase === 'completed') return unsettledExecution(plan).length ? 'reconciling' : 'released';
+  if (origin.cancellation?.phase === 'completed') return unsettledExecution(plan).length
+    || sessionFactsFromPlan(plan).executionOwnership !== 'ended' ? 'reconciling' : 'released';
   if (origin.cancellation) return origin.cancellation.phase === 'awaiting_outcome' ? 'reconciling' : 'draining';
   if (origin.takeover?.phase === 'stopping') return 'draining';
   if (origin.executionControl && origin.executionControl.phase !== 'settled') return 'draining';

@@ -193,7 +193,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
         // the barrier to confirm this process and import its identity; never infer tool success.
         const factsDigest = recoveryFacts(plan);
         if (current?.phase === 'reconciling' && current.recoveryFactsDigest === factsDigest) continue;
-        if (origin.takeover?.phase !== 'stopping' && (!current || current.phase === 'settled'
+        if (origin.takeover?.phase !== 'stopping' && (!current && sessionFactsFromPlan(plan).executionOwnership !== 'unknown' || current?.phase === 'settled'
           && JSON.stringify(current.stopReceipt?.unknownCalls || []) === JSON.stringify(unsettledExecution(plan)))) continue;
         try {
           const operation = begin(plan, { kind: 'cancel', operationId: `recover:${origin.cancellation.operationId}:${controlDigest(unsettledExecution(plan))}`,
