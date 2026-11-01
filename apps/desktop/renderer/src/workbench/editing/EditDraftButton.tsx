@@ -5,9 +5,10 @@ import { PeerIcon } from '../../ui/icons';
 import { resourceEditRegistry } from './resourceEditRegistry';
 import { resourceEditMessage } from './resourceEditMessages';
 import type { ResourceEditSession } from './resourceEditSession';
-export function EditDraftButton({ source, text, active, isZh, onOpen }: {
+export function EditDraftButton({ source, text, active, isZh, onOpen, iconOnly = false }: {
   readonly source: ResourceEditSource | null; readonly text?: string; readonly active: boolean; readonly isZh: boolean;
   readonly onOpen: (session: ResourceEditSession) => void;
+  readonly iconOnly?: boolean;
 }) {
   const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
@@ -15,7 +16,9 @@ export function EditDraftButton({ source, text, active, isZh, onOpen }: {
   const alive = useRef(true); useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const registry = resourceEditRegistry();
   if (!source || !registry || !validResourceEditText(text)) return null;
-  return <><button type="button" className="ui-button is-compact resource-window-open" disabled={!active} aria-disabled={pending || !active} aria-busy={pending} onClick={async event => {
+  const label = pending ? (isZh ? '打开草稿中…' : 'Opening draft…') : (isZh ? '编辑草稿' : 'Edit draft');
+  return <><button type="button" className={`ui-button is-compact resource-window-open${iconOnly ? ' is-icon' : ''}`} aria-label={iconOnly ? label : undefined} title={iconOnly ? label : undefined}
+    disabled={!active} aria-disabled={pending || !active} aria-busy={pending} onClick={async event => {
     if (busy.current) return; busy.current = true; setPending(true); setError(null);
     // Disabling the focused button would blur it and falsely look like a new user intent.
     const fingerprint = JSON.stringify(source), button = event.currentTarget;
@@ -29,6 +32,6 @@ export function EditDraftButton({ source, text, active, isZh, onOpen }: {
     if (document.activeElement !== button) { if (!registry.list().some(entry => entry.session === session && entry.uses > 0)) void session.close(); return; }
     latest.current.onOpen(session);
     void session.claim(false);
-  }}><PeerIcon name="fileText" size={14} />{pending ? (isZh ? '打开草稿中…' : 'Opening draft…') : (isZh ? '编辑草稿' : 'Edit draft')}</button>
+  }}><PeerIcon name="fileText" size={14} />{iconOnly ? null : label}</button>
   {error ? <span className="resource-source-label" role="alert">{error}</span> : null}</>;
 }

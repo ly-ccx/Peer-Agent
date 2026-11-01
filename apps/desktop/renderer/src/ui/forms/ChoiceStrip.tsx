@@ -5,7 +5,7 @@ import { isImeKey } from '../../chat/state/compositionGuard';
 /** Tabs browse on focus and activate explicitly; local radio choices follow arrow selection. */
 export function ChoiceStrip<T extends string>({ value, options, onChange, kind = 'tabs', label, idPrefix, panelId, className, itemClassName = '' }: {
   readonly value: T;
-  readonly options: readonly { value: T; label: ReactNode; disabled?: boolean }[];
+  readonly options: readonly { value: T; label: ReactNode; disabled?: boolean; title?: string }[];
   readonly onChange: (value: T) => void;
   readonly kind?: 'tabs' | 'radio';
   readonly label: string;
@@ -19,7 +19,7 @@ export function ChoiceStrip<T extends string>({ value, options, onChange, kind =
   const focusValue = enabled(focused) ? focused : enabled(value) ? value : options.find(option => !option.disabled)?.value;
   return <div className={`ui-choice-strip${className ? ` ${className}` : ''}`} role={kind === 'tabs' ? 'tablist' : 'radiogroup'} aria-label={label} aria-orientation="horizontal"
     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(null); }}>
-    {options.map((option, index) => <button key={option.value} type="button" disabled={option.disabled}
+    {options.map((option, index) => <button key={option.value} type="button" disabled={option.disabled} title={option.title}
       role={kind === 'tabs' ? 'tab' : 'radio'}
       id={idPrefix ? `${idPrefix}-tab-${option.value}` : undefined}
       aria-controls={kind === 'tabs' ? panelId : undefined}

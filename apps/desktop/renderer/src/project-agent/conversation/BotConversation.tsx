@@ -11,15 +11,14 @@ import { useReplyDetailsRow } from '../state/useReplyDetailsRow';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
 import type { BotModelsControlState } from '../state/useBotModels';
-import { DelegatedWork } from './DelegatedWork';
-import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
+import type { BotWorkIndex } from '../state/botWorkState';
+import { BotWorkPanel } from './BotWorkPanel';
 import { BotConversationComposer } from './BotConversationComposer';
 import { BotMessageList } from './BotMessageList';
 import { BotRecoveryControl } from './BotRecoveryControl';
 import { botAvatarDisplayColor } from '../BotAvatar';
 import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
-import { PeerIcon } from '../../ui/icons';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
 
 export function BotConversation({
@@ -42,6 +41,8 @@ export function BotConversation({
   taskRequest = null,
   replyDetailsId = null,
   replyDetailsTarget = null,
+  workPanelTarget = null,
+  onRefreshWork,
 }: {
   readonly workspaceId: string;
   readonly workIndex: BotWorkIndex;
@@ -62,6 +63,8 @@ export function BotConversation({
   readonly taskRequest?: TaskConversationRequest | null;
   readonly replyDetailsId?: string | null;
   readonly replyDetailsTarget?: HTMLElement | null;
+  readonly workPanelTarget?: HTMLElement | null;
+  readonly onRefreshWork: () => Promise<void>;
 }) {
   const conversation = useBotConversation(workspaceId);
   const activeReply = [...conversation.viewRows].reverse().find(row => row.type === 'reply' && replyRowRunning(row));
@@ -107,7 +110,6 @@ export function BotConversation({
   // Facts open the entry; it stays mounted while its exit closes the footprint.
   if (recoveryNeeded && !recoveryShown) setRecoveryShown(true);
 
-  const background = useMemo(() => backgroundWork(workIndex), [workIndex]);
   const detailsRow = useMemo(() => replyDetailsRow(replyDetailsId, conversation.rows, conversation.messages),
     [replyDetailsId, conversation.rows, conversation.messages]);
   const details = useReplyDetailsRow(workspaceId, replyDetailsId, detailsRow);
@@ -129,6 +131,9 @@ export function BotConversation({
 
   return (
     <BotInputContext.Provider value={conversation.answer}>
+    <BotWorkPanel workspaceId={workspaceId} workIndex={workIndex} rows={conversation.rows} messages={conversation.messages}
+      recovering={Boolean(conversation.runtimeRecovery)} headerTarget={workPanelTarget} i18n={i18n}
+      onOpenTask={onLocateSession} onInspect={onInspect} onRefreshWork={onRefreshWork}>
     <div className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
     } as CSSProperties}>
@@ -188,17 +193,11 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
-      {background.count ? <details className="bot-background-work">
-        <summary>
-          <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span>
-          <PeerIcon name="chevronDown" size={12} />
-        </summary>
-        <DelegatedWork rows={background.rows} botName={label} i18n={i18n} onOpen={onLocateSession} />
-      </details> : null}
       <BotConversationComposer key={`composer:${workspaceId}`} workspaceId={workspaceId}
         conversation={conversation} profile={profile} modelControls={modelControls} label={label} i18n={i18n} taskRequest={taskRequest}
         onJump={messageId => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }} />
     </div>
+    </BotWorkPanel>
     </BotInputContext.Provider>
   );
 }

@@ -1,3 +1,4 @@
+import { openWorkPanel } from './bot-work-panel-checks.mjs';
 import { BOT_DETAIL_CLOSE, BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
@@ -26,42 +27,40 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
     update({ [key]: [...(current[key] ?? []), sequence] }, false);
   };
   update({ sessions: [first, other], cancelMode: 'fail', cancelCalls: [], cancelHandshake: true, cancelRelease: [], cancelFinalize: [] });
-  const background = page.locator('.bot-background-work');
-  // The preceding scenario may leave the outer disclosure closed. Wait for
-  // current session facts in the DOM before checking visible actions below.
-  await until(() => background.locator('.bot-work-title').allTextContents(),
-    titles => titles.includes(first.title) && titles.includes(other.title));
-  if (await background.getAttribute('open') === null) await background.locator(':scope > summary').click();
-  const waiting = background.locator('.bot-work-row[data-status=waiting_user]');
-  await waiting.waitFor({ state: 'attached' });
-  if (await waiting.getAttribute('open') === null) await waiting.locator(':scope > summary').click();
-  await waiting.getByRole('button', { name: `取消任务 ${first.title}`, exact: true }).waitFor({ state: 'visible' });
-  assert.equal(await waiting.getByRole('button', { name: `取消任务 ${first.title}`, exact: true }).count(), 1,
-    'waiting work must offer a direct cancellation action');
+  const panelTasks = page.locator('.bot-work-panel .bot-work-panel-session.is-task');
+  await until(() => panelTasks.locator('strong').allTextContents(), titles => titles.includes(first.title) && titles.includes(other.title));
+  await openWorkPanel(page);
+  await panelTasks.filter({ has: page.getByText(first.title, { exact: true }) }).click();
+  const waiting = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
+  await waiting.waitFor();
+  assert.equal(await waiting.getByRole('button', { name: `取消任务 ${first.title}`, exact: true }).count(), 1);
+  const cancelFromTask = waiting.locator('.bot-task-cancel button');
+  await cancelFromTask.focus(); await page.keyboard.press('Enter');
+  await until(() => cancelFromTask.isDisabled(), Boolean);
+  await page.locator(BOT_DETAIL_CLOSE).click();
   const reply = page.locator('#bot-msg-rc-message-9999');
   await scrollToBotMessage(page, reply);
   await openReplyDetails(page, reply);
   const historical = page.locator('.bot-reply-details .bot-work-row');
   if (await historical.getAttribute('open') === null) await historical.locator(':scope > summary').click();
-  const cancel = waiting.locator('.bot-task-cancel button');
-  await cancel.focus(); await page.keyboard.press('Enter');
+  const cancel = historical.locator('.bot-task-cancel button');
   await until(() => cancel.isDisabled(), Boolean);
   await release(1);
   await until(() => historical.locator('[role=alert]').innerText(), text => text.includes('取消未完成'));
-  assert.equal(await waiting.getAttribute('data-status'), 'waiting_user');
+  assert.equal(await historical.getAttribute('data-status'), 'waiting_user');
   assert.equal(await cancel.isEnabled(), true);
   await page.screenshot({ path: path.join(captureDirectory, 'task-cancel-failed-dark.png'), animations: 'disabled' });
   update({ cancelMode: 'success' });
   await cancel.click();
-  await until(() => waiting.locator('.bot-task-cancel button').isDisabled(), Boolean);
+  await until(() => cancel.isDisabled(), Boolean);
   assert.equal(await cancel.isDisabled(), true, 'both copies share pending state');
   await cancel.evaluate(button => { button.click(); button.click(); });
   await release(2);
   await until(() => historical.getAttribute('data-status'), value => value === 'cancelled');
   assert.match(await historical.innerText(), /已取消/);
   assert.doesNotMatch(await historical.innerText(), /等待你的选择|等待跟进|主对话中跟进/);
-  assert.equal(await background.locator('.bot-work-row').count(), 1);
-  assert.match(await background.innerText(), /另一件正在进行的工作/);
+  assert.equal(await panelTasks.count(), 1);
+  assert.match((await panelTasks.allTextContents()).join(' '), /另一件正在进行的工作/);
   assert.equal(await historical.locator('.bot-task-cancel button').count(), 0);
   const receipts = JSON.parse(readFileSync(commandFile, 'utf8')).cancelCalls;
   assert.equal(receipts.length, 2, 'failed attempt and one successful retry, no duplicate cancellation');
@@ -71,10 +70,9 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   // A successful stop receipt may precede the final host fact/React commit.
   // Keep the production button mounted in stopping state across several frames.
   update({ sessions: [first, other], cancelMode: 'deferred-status' });
-  await until(() => background.locator('.bot-work-row[data-status=waiting_user]').count(), count => count === 1);
-  const restored = background.locator('.bot-work-row[data-status=waiting_user]');
-  if (await restored.getAttribute('open') === null) await restored.locator(':scope > summary').click();
-  await restored.getByRole('button', { name: '查看任务详情', exact: true }).click();
+  await until(() => panelTasks.count(), count => count === 2);
+  await openWorkPanel(page);
+  await panelTasks.filter({ has: page.getByText(first.title, { exact: true }) }).click();
   const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
   await detail.waitFor();
   await page.setViewportSize({ width: 760, height: 860 });
@@ -108,8 +106,8 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   await page.setViewportSize(originalViewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
   update({ ...initial, cancelMode: undefined, cancelCalls: undefined, cancelHandshake: undefined, cancelRelease: undefined, cancelFinalize: undefined });
-  await until(() => background.locator('.bot-work-row[data-status=running]').count(), count => count === 1);
-  report.taskCancellation = { directWaitingAction: true, keyboard: true, detailAction: true, sharedPending: true,
+  await until(() => panelTasks.count(), count => count === 1);
+  report.taskCancellation = { panelTaskAction: true, keyboard: true, detailAction: true, sharedPending: true,
     failureRetry: true, latestReceipt: true, noDuplicate: true, unrelatedPreserved: true, narrowFits: true,
     deferredStopReceipt: true, focusReturned: true, focusPreserved: true };
 }

@@ -28,7 +28,7 @@ export function DocumentHistoryTools({ reference, path, confirmed, isZh, hidden 
       ...(reference.relativeTo ? { relativeTo: reference.relativeTo } : {}), revision: requested,
     }); }}>
       <label className="resource-source-label">{isZh ? '完整提交 SHA' : 'Full commit SHA'}
-        <input value={commit} onChange={event => setCommit(event.target.value)} maxLength={128}
+        <input className="ui-input" value={commit} onChange={event => setCommit(event.target.value)} maxLength={128}
           aria-label={isZh ? '完整提交 SHA' : 'Full commit SHA'} autoComplete="off" spellCheck={false}
           onKeyDown={event => { if (event.key === 'Enter' && isImeKey(event.nativeEvent)) event.preventDefault(); }} />
       </label>

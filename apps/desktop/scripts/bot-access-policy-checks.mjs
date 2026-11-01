@@ -46,6 +46,10 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     await page.setViewportSize({ width, height: 860 });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+    // The work panel and navigation can still be resizing after the viewport
+    // event. Measure the final composer layout after visible finite motion ends.
+    await page.waitForFunction(() => !document.getAnimations().some(animation => animation.playState === 'running'
+      && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility()), null, { timeout: 5000 });
     assert.equal(await page.locator('.bot-composer').evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await page.locator('.bot-composer').screenshot({ path: path.join(captureDirectory, `bot-access-${width}-${appearance}.png`) });
   }
