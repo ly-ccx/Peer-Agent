@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -242,4 +242,15 @@ test('file provider allows absolute and relative paths outside the workspace roo
   );
   assert.equal(writeOutside.status, 'completed');
   assert.equal(await readFile(path.join(outsideRoot, 'new.txt'), 'utf8'), 'allowed-outside');
+});
+
+
+test('resource denial prevents parent directory creation before a file write', async t => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-file-resource-denial-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const provider = createNodeFileProvider({ workspaceRoot, requestApproval: () => ({ granted: true }) });
+  const result = await provider.execute(request('local.file.write', { path: 'new/nested/note.txt', content: 'not admitted' }),
+    { ...context(), metadata: { executionGate: () => 'execution_resource_owner_changed' } });
+  assert.notEqual(result.status, 'completed');
+  assert.deepEqual(await readdir(workspaceRoot), []);
 });
