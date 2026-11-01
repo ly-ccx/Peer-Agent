@@ -18,6 +18,7 @@ import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { admitCoordinationDecision } from './coordination-kernel.mjs';
+import { admitIntentAssessment, admitIntentClosure, INTENT_FORMAT_VERSION } from './intent-coordination-kernel.mjs';
 import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
 import { createRecoveryCheckpointView, createContinuationCheckpointView } from './recovery-checkpoint-view.mjs';
 import { createCoordinationStorageV2 } from './coordination-storage-v2.mjs';
@@ -136,6 +137,24 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
           storage.enableSupervision(6);
         }
         append(admitted.entry);
+      }
+      return admitted;
+    },
+    assessIntent(assessment, host) {
+      assertOwner();
+      const admitted = admitIntentAssessment(read(), assessment, { ...host, workspaceId, holdsLease: true, now: now() });
+      if (admitted.ok && !admitted.replayed) {
+        if (!useV2()) throw new Error('coordination_recovery_pending');
+        storage.enableSupervision(INTENT_FORMAT_VERSION); append(admitted.entry);
+      }
+      return admitted;
+    },
+    closeIntent(request, host) {
+      assertOwner();
+      const admitted = admitIntentClosure(read(), request, { ...host, workspaceId, holdsLease: true, now: now() });
+      if (admitted.ok && !admitted.replayed) {
+        if (!useV2()) throw new Error('coordination_recovery_pending');
+        storage.enableSupervision(INTENT_FORMAT_VERSION); append(admitted.entry);
       }
       return admitted;
     },
