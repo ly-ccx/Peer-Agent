@@ -315,6 +315,8 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
             });
           }
           if (context.signal?.aborted) return cancelledResult(call, clock);
+          const scopeDenial = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerFileScopes(targetPath)) : null;
+          if (scopeDenial) throw new Error(scopeDenial);
           await mkdir(dirname(targetPath), { recursive: true });
           if (typeof approval.validate === 'function' && !approval.validate()) throw new Error('permission_policy_changed');
           const reason = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerFileScopes(targetPath)) : null;
